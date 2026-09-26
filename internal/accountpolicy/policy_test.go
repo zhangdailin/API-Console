@@ -306,6 +306,27 @@ func TestClassifyInferenceCapPreservesStatedCooldown(t *testing.T) {
 	}
 }
 
+func TestClassifyQoderDailyCountHoldsUntilReset(t *testing.T) {
+	acc := &store.Account{ID: 16, AccountType: "qoder", Enabled: true,
+		QoderQuota: store.QoderQuotaSnapshot{ResetAt: time.Now().Add(8 * time.Hour)}}
+	v := Classify(acc, errors.New("qoder upstream rejected the credential: Billing daily count exceeded"), "efficient")
+	if v.Scope != ScopeAccount || v.Status != "429" || !v.Retryable || !v.SwitchAccount || v.Cooldown < time.Hour {
+		t.Fatalf("daily count verdict = %+v", v)
+	}
+	v.Apply(acc)
+	if !AccountHeld(acc, time.Now().Add(time.Hour)) {
+		t.Fatal("daily limit must not be released after an ordinary 30s throttle")
+	}
+}
+
+func TestClassifyQoderEntitlementOnlyBlocksCurrentModel(t *testing.T) {
+	acc := &store.Account{ID: 18, AccountType: "qoder", Enabled: true}
+	v := Classify(acc, errors.New("qoder account has no usable plan or allowance; the model requires a subscription (upstream code=112)"), "efficient")
+	if v.Scope != ScopeModel || v.Model != "efficient" || v.Status != "" || !v.Retryable || !v.SwitchAccount || v.Cooldown <= 0 {
+		t.Fatalf("entitlement verdict = %+v", v)
+	}
+}
+
 type retryAfterTestError struct{ wait time.Duration }
 
 func (e retryAfterTestError) Error() string             { return "cline inference cap reached" }

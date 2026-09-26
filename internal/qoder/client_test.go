@@ -774,23 +774,16 @@ func TestEntitlementRefusalKeepsTheAccountUsable(t *testing.T) {
 	}
 }
 
-// TestEntitlementRefusalIsTerminal pins the retry verdict. Four attempts were
-// spent on a live account before this: the shared classifier buckets an
-// unrecognised error as retryable, so a missing subscription was retried until
-// the budget ran out even though no retry can change a plan.
-func TestEntitlementRefusalIsTerminal(t *testing.T) {
+// A subscription refusal is terminal for this account/model pair, but another
+// account may have a different plan. Do not retry on the same account or mark
+// its credential bad; the handler switches once and records a model cooldown.
+func TestEntitlementRefusalSwitchesAccounts(t *testing.T) {
 	t.Parallel()
 
 	err := entitlementError(`{"code":"112","message":"{\"pricingUrl\":\"https://qoder.com/pricing?client=qoder\"}"}`)
 	class := apperrors.ClassifyUpstreamError(err.Error())
-	if class.Category != "client" {
-		t.Fatalf("category = %q, want client", class.Category)
-	}
-	if class.Retryable {
-		t.Fatal("an entitlement refusal must not be retried")
-	}
-	if class.SwitchAccount {
-		t.Fatal("an entitlement refusal must not switch accounts: every account on the pool would fail the same way")
+	if class.Category != "model_unavailable" || !class.Retryable || !class.SwitchAccount {
+		t.Fatalf("classification = %+v, want switchable model_unavailable", class)
 	}
 	if status := apperrors.ClassifyAccountStatus(err.Error()); status != "" {
 		t.Fatalf("account status = %q, want \"\"", status)

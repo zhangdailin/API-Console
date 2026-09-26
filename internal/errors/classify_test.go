@@ -48,6 +48,20 @@ func TestClassifyUpstreamError(t *testing.T) {
 			wantSwitch:   true,
 		},
 		{
+			name:         "qoder daily count switches accounts",
+			errStr:       "qoder upstream rejected the credential: Billing daily count exceeded",
+			wantCategory: "quota_exhausted",
+			wantRetry:    true,
+			wantSwitch:   true,
+		},
+		{
+			name:         "qoder entitlement switches to another eligible account",
+			errStr:       `qoder account has no usable plan or allowance; the model requires a subscription (upstream code=112: {"pricingUrl":"https://qoder.com/pricing?client=qoder"})`,
+			wantCategory: "model_unavailable",
+			wantRetry:    true,
+			wantSwitch:   true,
+		},
+		{
 			name:         "context window is client error",
 			errStr:       "upstream stream finished with context_window_exceeded: input is too long",
 			wantCategory: "client",

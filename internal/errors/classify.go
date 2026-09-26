@@ -191,6 +191,14 @@ func ClassifyUpstreamError(errStr string) UpstreamErrorClass {
 		return UpstreamErrorClass{Category: "protocol"}
 	case strings.Contains(lower, "pacing registry capacity reached"):
 		return UpstreamErrorClass{Category: "local_overload", Retryable: true}
+	// A valid Qoder credential may have exhausted its daily request count even
+	// while its credit snapshot still shows a positive balance.
+	case strings.Contains(lower, "billing daily count exceeded"):
+		return UpstreamErrorClass{Category: "quota_exhausted", Retryable: true, SwitchAccount: true}
+	// Business code 112 is a refusal of this account's allowance/plan for the
+	// requested model, not a malformed client request. Another account may work.
+	case strings.Contains(lower, "no usable plan or allowance"):
+		return UpstreamErrorClass{Category: "model_unavailable", Retryable: true, SwitchAccount: true}
 	case strings.Contains(lower, "model is not found") ||
 		strings.Contains(lower, "model not found") ||
 		strings.Contains(lower, "model is not supported") ||
@@ -198,11 +206,6 @@ func ClassifyUpstreamError(errStr string) UpstreamErrorClass {
 		strings.Contains(lower, "no_implementation_available") ||
 		strings.Contains(lower, "context_window_exceeded") ||
 		strings.Contains(lower, "max_token_limit") ||
-		// A Qoder account the upstream authenticated but refused for lacking a
-		// plan or allowance. No retry and no account switch can change a
-		// subscription, so this is a client-side outcome rather than a transient
-		// upstream fault. The phrase is the sentinel the Qoder channel emits.
-		strings.Contains(lower, "no usable plan or allowance") ||
 		strings.Contains(lower, "duplicate request"):
 		return UpstreamErrorClass{Category: "client"}
 	case HasExplicitHTTPStatus(lower, "401") ||

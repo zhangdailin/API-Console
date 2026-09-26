@@ -161,6 +161,27 @@ func Classify(acc *store.Account, err error, model string) Verdict {
 	lower := strings.ToLower(message)
 	now := time.Now()
 
+	// The Qoder daily *request count* can run out while the credit meter still
+	// reports a positive balance. It is not an ordinary 30-second throttle:
+	// keep this credential out of rotation until the next known reset, or use
+	// a bounded day-long fallback when the upstream supplied no reset.
+	if strings.EqualFold(accountType(acc), "qoder") && strings.Contains(lower, "billing daily count exceeded") {
+		cooldown := CooldownPayment
+		if acc != nil && !acc.QoderQuota.ResetAt.IsZero() && acc.QoderQuota.ResetAt.After(now) {
+			cooldown = acc.QoderQuota.ResetAt.Sub(now)
+		}
+		return Verdict{Status: "429", Message: message, Scope: ScopeAccount,
+			Retryable: true, SwitchAccount: true, Cooldown: cooldown, At: now}
+	}
+
+	// A plan/allowance refusal is about this account and this model, not the
+	// caller's input or the credential itself. Cool down only this pairing and
+	// allow the request to try another account with the required entitlement.
+	if strings.EqualFold(accountType(acc), "qoder") && strings.Contains(lower, "no usable plan or allowance") {
+		return Verdict{Scope: ScopeModel, Message: message, Model: model,
+			Retryable: true, SwitchAccount: true, Cooldown: CooldownPayment, At: now}
+	}
+
 	// A queue/service refusal that names the whole upstream rather than this
 	// account has to be decided before the retryAfter hint below. Qoder reports
 	// 10605 as {"isQueued":true,"serviceAvailable":false,"retryAfterSeconds":30},
@@ -440,7 +461,8 @@ func AccountHeld(acc *store.Account, now time.Time) bool {
 			// hours), not an ordinary throttle. Preserve the upstream deadline;
 			// the generic 30m ceiling only guards billing-cycle timestamps that
 			// accidentally leak into normal rate-limit state.
-			if strings.Contains(strings.ToLower(acc.StatusMessage), "cline inference cap reached") {
+			if strings.Contains(strings.ToLower(acc.StatusMessage), "cline inference cap reached") ||
+				(strings.EqualFold(acc.AccountType, "qoder") && strings.Contains(strings.ToLower(acc.StatusMessage), "billing daily count exceeded")) {
 				until = acc.QuotaResetAt
 			} else if ceiling := acc.LastAttempt.Add(CooldownRateLimitMax); ceiling.Before(acc.QuotaResetAt) {
 				until = ceiling
