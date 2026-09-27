@@ -13,6 +13,11 @@ type UpstreamRequest struct {
 	ParallelToolCalls *bool
 	NoTools           bool
 	Attempt           int
+	// Optional generation controls retain explicit zero values; nil means omitted.
+	MaxTokens   *int
+	Temperature *float64
+	TopP        *float64
+	Stop        []string
 	// ReasoningEffort is the OpenAI-style effort hint the client asked for
 	// (reasoning_effort, or the Anthropic thinking/output_config dialect mapped
 	// onto the same coarse levels). Providers whose wire contract exposes an

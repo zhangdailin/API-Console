@@ -47,8 +47,7 @@ func (h *Handler) HandleCountTokens(w http.ResponseWriter, r *http.Request) {
 	// number. Channel names are compared case-insensitively everywhere else; the
 	// stored value is whatever the operator's catalog spells, so normalize it.
 	channel := strings.ToLower(h.ModelChannel(r, req.Model))
-	builtPrompt := strings.TrimSpace(extractUserText(req.Messages))
-	breakdown := estimateInputTokenBreakdown(builtPrompt, req.Tools)
+	breakdown := estimateRequestTokenBreakdown(req)
 	profile := channel
 
 	w.Header().Set("Content-Type", "application/json")

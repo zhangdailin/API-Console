@@ -117,24 +117,19 @@ func TestConsumeStreamRequiresTerminator(t *testing.T) {
 	}
 }
 
-// TestConsumeStreamAcceptsBareDone covers the alternative terminator.
-func TestConsumeStreamAcceptsBareDone(t *testing.T) {
+// A done marker without Qoder's final event must not hide a truncated tail.
+func TestConsumeStreamBareDoneRequiresFinish(t *testing.T) {
 	t.Parallel()
-
 	body := envelope(`{"id":"1","choices":[{"index":0,"delta":{"content":"ok"}}]}`) + "data: [DONE]\n\n"
-	if _, _, err := collectStream(t, body); err != nil {
-		t.Fatalf("consumeStream() error = %v, want success for a bare [DONE]", err)
+	if _, _, err := collectStream(t, body); !errors.Is(err, ErrStreamTruncated) {
+		t.Fatalf("error = %v, want ErrStreamTruncated", err)
 	}
 }
 
-// TestConsumeStreamAcceptsDoneInsideEnvelope covers a terminator nested in the
-// wrapper, which is how some gateway builds signal completion.
-func TestConsumeStreamAcceptsDoneInsideEnvelope(t *testing.T) {
+func TestConsumeStreamEnvelopeDoneRequiresFinish(t *testing.T) {
 	t.Parallel()
-
-	body := envelope(`[DONE]`)
-	if _, _, err := collectStream(t, body); err != nil {
-		t.Fatalf("consumeStream() error = %v, want success for an enveloped [DONE]", err)
+	if _, _, err := collectStream(t, envelope(`[DONE]`)); !errors.Is(err, ErrStreamTruncated) {
+		t.Fatalf("error = %v, want ErrStreamTruncated", err)
 	}
 }
 

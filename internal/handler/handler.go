@@ -88,16 +88,22 @@ type UpstreamClient interface {
 }
 
 type ClaudeRequest struct {
-	Model             string                 `json:"model"`
-	Messages          []prompt.Message       `json:"messages"`
-	System            SystemItems            `json:"system"`
-	Tools             []interface{}          `json:"tools"`
-	ToolChoice        interface{}            `json:"tool_choice,omitempty"`
-	ParallelToolCalls *bool                  `json:"parallel_tool_calls,omitempty"`
-	Stream            bool                   `json:"stream"`
-	ConversationID    string                 `json:"conversation_id"`
-	ConversationIDAlt string                 `json:"conversationId"`
-	Metadata          map[string]interface{} `json:"metadata"`
+	MaxTokens           *int                   `json:"max_tokens,omitempty"`
+	MaxCompletionTokens *int                   `json:"max_completion_tokens,omitempty"`
+	Temperature         *float64               `json:"temperature,omitempty"`
+	TopP                *float64               `json:"top_p,omitempty"`
+	Stop                StopSequences          `json:"stop,omitempty"`
+	StopSequences       []string               `json:"stop_sequences,omitempty"`
+	Model               string                 `json:"model"`
+	Messages            []prompt.Message       `json:"messages"`
+	System              SystemItems            `json:"system"`
+	Tools               []interface{}          `json:"tools"`
+	ToolChoice          interface{}            `json:"tool_choice,omitempty"`
+	ParallelToolCalls   *bool                  `json:"parallel_tool_calls,omitempty"`
+	Stream              bool                   `json:"stream"`
+	ConversationID      string                 `json:"conversation_id"`
+	ConversationIDAlt   string                 `json:"conversationId"`
+	Metadata            map[string]interface{} `json:"metadata"`
 	// ReasoningEffort is the OpenAI-style effort hint. A catalog publishes models
 	// as "<family>-<effort>", so a client that asks for the family name plus an
 	// effort must have it resolved onto the catalog entry.
@@ -886,6 +892,10 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		payloadSystem := req.System
 
 		upstreamReq := upstream.UpstreamRequest{
+			MaxTokens:         req.outputTokenLimit(),
+			Temperature:       req.Temperature,
+			TopP:              req.TopP,
+			Stop:              req.stopSequences(),
 			Prompt:            builtPrompt,
 			Model:             mappedModel,
 			Messages:          payloadMessages,
@@ -1114,12 +1124,10 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 				retryDelayForAttempt = hinted
 			}
 			if retryDelayForAttempt > 0 && isSharedUpstreamRefusalClass(errClass) {
-				// The hint is the queue's worst case, not its actual clearing time,
-				// and paying it in full on the first retry made every request wait
-				// out the whole window. Probe early instead, then converge on the
-				// upstream's own figure, so a queue that clears in seconds is served
-				// in seconds. Jitter then keeps the probes from waking together.
-				retryDelayForAttempt = sharedRefusalWait(retryDelayForAttempt, attempt+1)
+				// Qoder preserves the provider-normalized hint. Other channels
+				// keep their existing early-probe policy; positive jitter never
+				// moves a retry before the chosen wait.
+				retryDelayForAttempt = sharedRefusalWaitForChannel(retryDelayForAttempt, attempt+1, targetChannel)
 				retryDelayForAttempt += sharedRefusalJitter(retryDelayForAttempt)
 			}
 			if retryDelayForAttempt > 0 && !util.SleepWithContext(r.Context(), retryDelayForAttempt) {

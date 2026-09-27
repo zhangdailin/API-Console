@@ -80,20 +80,25 @@ func EnsureInstallSalt(ctx context.Context, s SettingsStore) string {
 	if s == nil {
 		return ""
 	}
-	if stored, err := s.GetSetting(ctx, InstallSaltSettingKey); err == nil {
-		if stored = strings.TrimSpace(stored); stored != "" {
-			SetInstallSalt(stored)
-			return stored
-		}
+	stored, err := s.GetSetting(ctx, InstallSaltSettingKey)
+	if err != nil {
+		// A failed read is not proof that no salt exists. Never overwrite an
+		// identity that may already be persisted with newly generated material.
+		return ""
+	}
+	if stored = strings.TrimSpace(stored); stored != "" {
+		SetInstallSalt(stored)
+		return stored
 	}
 	generated, err := newInstallSalt()
 	if err != nil {
 		return ""
 	}
-	SetInstallSalt(generated)
 	if err := s.SetSetting(ctx, InstallSaltSettingKey, generated); err != nil {
-		return generated
+		return ""
 	}
+	// Only durable material may become this process's device identity.
+	SetInstallSalt(generated)
 	return generated
 }
 

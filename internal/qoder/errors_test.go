@@ -169,7 +169,7 @@ func TestRunChatRetriesATransientFaultLocally(t *testing.T) {
 
 	client := newRetryTestClient(t, server.URL)
 	var got []upstream.SSEMessage
-	err := client.runChat(context.Background(), chatURL(server.URL), []byte(`{}`), modelEntry{Key: "k"},
+	err := client.runChat(context.Background(), chatURL(server.URL), EncodeBody([]byte(`{}`)), modelEntry{Key: "k"},
 		"req-1", RuntimeFields{Key: "k"}, false, func(m upstream.SSEMessage) { got = append(got, m) })
 	if err != nil {
 		t.Fatalf("runChat() error = %v, want the retry to succeed", err)
@@ -195,7 +195,7 @@ func TestRunChatDoesNotReplayAContentRefusal(t *testing.T) {
 	defer server.Close()
 
 	client := newRetryTestClient(t, server.URL)
-	err := client.runChat(context.Background(), chatURL(server.URL), []byte(`{}`), modelEntry{Key: "k"},
+	err := client.runChat(context.Background(), chatURL(server.URL), EncodeBody([]byte(`{}`)), modelEntry{Key: "k"},
 		"req-1", RuntimeFields{Key: "k"}, false, func(upstream.SSEMessage) {})
 	if !isContentPolicyError(err) {
 		t.Fatalf("error = %v, want the content-policy sentinel", err)
@@ -218,7 +218,7 @@ func TestRunChatReportsAnEmptyStream(t *testing.T) {
 	defer server.Close()
 
 	client := newRetryTestClient(t, server.URL)
-	err := client.runChat(context.Background(), chatURL(server.URL), []byte(`{}`), modelEntry{Key: "k"},
+	err := client.runChat(context.Background(), chatURL(server.URL), EncodeBody([]byte(`{}`)), modelEntry{Key: "k"},
 		"req-1", RuntimeFields{Key: "k"}, false, func(upstream.SSEMessage) {})
 	if !isEmptyStreamError(err) {
 		t.Fatalf("error = %v, want the empty-stream sentinel", err)
@@ -241,7 +241,7 @@ func TestRunChatStopsAtABusyVerdict(t *testing.T) {
 	defer server.Close()
 
 	client := newRetryTestClient(t, server.URL, withRetryTestCredential("token"))
-	err := client.runChat(context.Background(), chatURL(server.URL), []byte(`{}`), modelEntry{Key: "k"},
+	err := client.runChat(context.Background(), chatURL(server.URL), EncodeBody([]byte(`{}`)), modelEntry{Key: "k"},
 		"req-1", RuntimeFields{Key: "k"}, false, func(upstream.SSEMessage) {})
 	if !errors.Is(err, ErrBusy) {
 		t.Fatalf("error = %v, want the busy verdict", err)

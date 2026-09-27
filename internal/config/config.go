@@ -69,9 +69,12 @@ type Config struct {
 	//   QoderOAuthBaseURL   browser authorization page   (default https://qoder.com)
 	//   QoderOpenAPIBaseURL device token + profile API   (default https://openapi.qoder.sh)
 	//   QoderInferenceURL   chat completion endpoint     (default https://api1.qoder.sh)
-	QoderOAuthBaseURL   string `json:"qoder_oauth_base_url,omitempty"`
-	QoderOpenAPIBaseURL string `json:"qoder_openapi_base_url,omitempty"`
-	QoderInferenceURL   string `json:"qoder_inference_base_url,omitempty"`
+	// QoderProtocolProfile selects a complete wire dialect: reference (default)
+	// or skill-cli (explicit opt-in). Endpoint/client overrides still win.
+	QoderProtocolProfile string `json:"qoder_protocol_profile,omitempty"`
+	QoderOAuthBaseURL    string `json:"qoder_oauth_base_url,omitempty"`
+	QoderOpenAPIBaseURL  string `json:"qoder_openapi_base_url,omitempty"`
+	QoderInferenceURL    string `json:"qoder_inference_base_url,omitempty"`
 	// QoderClientID is the public OAuth client id of the Qoder CLI. It is not a
 	// secret, and it is configurable so a future CLI build can be followed
 	// without a code change.

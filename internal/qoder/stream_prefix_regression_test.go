@@ -56,7 +56,7 @@ func TestStreamPrefixSharedFinishFrame(t *testing.T) {
 					}
 					body := envelope(`{"choices":[{"delta":{"content":"The"` + tool + `},"finish_reason":"length"}]}`)
 					if terminated {
-						body += "data: [DONE]\n\n"
+						body += "data: [DONE]\n\nevent:finish\n\n"
 					}
 					var events []upstream.SSEMessage
 					result, err := consumeStreamWithTools(strings.NewReader(body), toolsEnabled, func(e upstream.SSEMessage) { events = append(events, e) })

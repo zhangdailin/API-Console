@@ -44,6 +44,11 @@ type modelEntry struct {
 	PriceFactor    *float64 `json:"price_factor,omitempty"`
 	MaxInputTokens int      `json:"max_input_tokens"`
 	OrgTags        []string `json:"organization_tags"`
+	// Preserve opaque upstream tier data, including fields we cannot interpret.
+	ContextConfig json.RawMessage `json:"context_config,omitempty"`
+	// Snapshot-only sidecar: additional distinct context_config values observed
+	// on duplicate enabled rows. Never replaces the canonical input budget.
+	ContextConfigVariants []json.RawMessage `json:"context_config_variants,omitempty"`
 }
 
 // enabled reports whether the gateway currently serves this row. A missing flag
@@ -87,11 +92,13 @@ func FreeModelIDs(ids []string) map[string]struct{} {
 	}
 	out := make(map[string]struct{})
 	for _, entry := range catalog.entries {
-		if entry.PriceFactor == nil || *entry.PriceFactor != 0 {
-			continue
-		}
 		for _, value := range []string{entry.Key, entry.Name, entry.DisplayName} {
-			if value = strings.ToLower(strings.TrimSpace(value)); value != "" {
+			value = strings.ToLower(strings.TrimSpace(value))
+			if value == "" {
+				continue
+			}
+			resolved, err := catalog.Resolve(value)
+			if err == nil && resolved.PriceFactor != nil && *resolved.PriceFactor == 0 {
 				out[value] = struct{}{}
 			}
 		}
@@ -129,20 +136,14 @@ func (c *Catalog) Resolve(requested string) (modelEntry, error) {
 		}
 		return entry, nil
 	}
+	// Indexes use the same normalization as public metadata. Keys always win
+	// over aliases, including when the caller changes the spelling's case.
+	name = strings.ToLower(name)
 	if entry, ok := c.byKey[name]; ok {
 		return entry, nil
 	}
 	if entry, ok := c.byName[name]; ok {
 		return entry, nil
-	}
-	// Case-insensitive fallback: model names are matched case-insensitively by
-	// the upstream, and a client that lowercased a display name should not be
-	// told the model does not exist.
-	lowered := strings.ToLower(name)
-	for _, entry := range c.entries {
-		if strings.ToLower(entry.Key) == lowered || strings.ToLower(entry.Name) == lowered {
-			return entry, nil
-		}
 	}
 	return modelEntry{}, fmt.Errorf("unsupported qoder model %q; available: %s", requested, c.SupportedList())
 }
@@ -186,15 +187,26 @@ func newCatalog(entries []modelEntry) *Catalog {
 		byKey:  make(map[string]modelEntry, len(entries)),
 		byName: make(map[string]modelEntry, len(entries)),
 	}
+	positions := make(map[string]int, len(entries))
 	for _, entry := range entries {
 		if !entry.enabled() {
 			continue
 		}
 		key := strings.TrimSpace(entry.Key)
-		if key == "" || key == "auto" {
+		if key == "" || strings.EqualFold(key, "auto") {
 			// `auto` is a routing directive, not a runnable model.
 			continue
 		}
+		// Keep the first enabled observation's budget/capabilities. Duplicate
+		// keys contribute their opaque context tiers, never a larger input budget.
+		normalizedKey := strings.ToLower(key)
+		if position, exists := positions[normalizedKey]; exists {
+			mergeContextConfigs(&catalog.entries[position], entry)
+			continue
+		}
+		entry.Key = key
+		entry.Name = strings.TrimSpace(entry.Name)
+		entry.DisplayName = strings.TrimSpace(entry.DisplayName)
 		// The wire uses display_name; the stored snapshot and the in-process
 		// form use name. Either may be absent, so the key is the last resort.
 		if strings.TrimSpace(entry.Name) == "" {
@@ -209,10 +221,20 @@ func newCatalog(entries []modelEntry) *Catalog {
 		if entry.Source == "" {
 			entry.Source = "system"
 		}
+		positions[normalizedKey] = len(catalog.entries)
 		catalog.entries = append(catalog.entries, entry)
-		catalog.byKey[key] = entry
-		if _, taken := catalog.byName[entry.Name]; !taken {
-			catalog.byName[entry.Name] = entry
+	}
+	// Build indexes after merging so key and every alias see the same tiers.
+	for _, entry := range catalog.entries {
+		catalog.byKey[strings.ToLower(entry.Key)] = entry
+		for _, alias := range []string{entry.Name, entry.DisplayName} {
+			alias = strings.ToLower(alias)
+			if alias == "" {
+				continue
+			}
+			if _, taken := catalog.byName[alias]; !taken {
+				catalog.byName[alias] = entry
+			}
 		}
 	}
 	return catalog
@@ -275,15 +297,10 @@ func catalogToIDs(catalog *Catalog) []string {
 	return ids
 }
 
-// CatalogContextWindows projects a stored catalog snapshot onto the input-token
-// window of every name that snapshot resolves.
-//
-// The gateway declares the window per model (max_input_tokens) and the request
-// path already forwards it. This is the same observation made readable to the
-// public model list, so a client budgeting its context learns the real number
-// instead of falling back to its own default. An entry that carries no window is
-// skipped rather than reported as zero, because "unknown" must not read as
-// "cannot hold anything".
+// CatalogContextWindows is the legacy default INPUT-budget projection, not a
+// model's total context limit. Use CatalogContextWindowDetails for separately
+// declared default/largest context tiers; unknown tiers never inherit this budget.
+// Every alias reports the budget of the row it actually resolves to.
 func CatalogContextWindows(ids []string) map[string]int {
 	catalog := catalogFromIDs(ids)
 	if catalog == nil || catalog.Len() == 0 {
@@ -291,16 +308,16 @@ func CatalogContextWindows(ids []string) map[string]int {
 	}
 	out := make(map[string]int, catalog.Len()*3)
 	for _, entry := range catalog.entries {
-		if entry.MaxInputTokens <= 0 {
-			continue
-		}
 		for _, name := range []string{entry.Key, entry.Name, entry.DisplayName} {
 			name = strings.ToLower(strings.TrimSpace(name))
 			if name == "" {
 				continue
 			}
-			if existing, ok := out[name]; !ok || entry.MaxInputTokens > existing {
-				out[name] = entry.MaxInputTokens
+			// An ambiguous display name must advertise the row that actually
+			// resolves, not the largest budget among unrelated products.
+			resolved, err := catalog.Resolve(name)
+			if err == nil && resolved.MaxInputTokens > 0 {
+				out[name] = resolved.MaxInputTokens
 			}
 		}
 	}

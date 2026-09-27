@@ -192,17 +192,38 @@ func buildChatBodyVersion(req upstream.UpstreamRequest, model modelEntry, sessio
 // sorts traffic by it, and an empty value is not a class it recognises, so a
 // request that omits it is not queued with the account's real peers.
 func buildChatBodyScoped(req upstream.UpstreamRequest, model modelEntry, sessionID, requestID, clientVersion, aliyunUserType string) ([]byte, error) {
+	return buildChatBodyProfile(req, model, sessionID, requestID, clientVersion, aliyunUserType, sceneBusinessProduct)
+}
+
+func buildChatBodyProfile(req upstream.UpstreamRequest, model modelEntry, sessionID, requestID, clientVersion, aliyunUserType, businessProduct string) ([]byte, error) {
 	messages, systemText, err := buildMessages(req)
 	if err != nil {
 		return nil, err
 	}
 
-	// The reference template sets a 32768 output-token budget. The shared
-	// UpstreamRequest currently carries no client output cap, so this is the
-	// reference default rather than a forwarded max_tokens value.
+	// Preserve explicit client controls; use the reference output budget only
+	// when the caller omitted it.
 	parameters := map[string]interface{}{"max_tokens": 32768}
-	if model.MaxInputTokens > 0 {
-		parameters["context_length"] = model.MaxInputTokens
+	if req.MaxTokens != nil {
+		parameters["max_tokens"] = *req.MaxTokens
+	}
+	if req.Temperature != nil {
+		parameters["temperature"] = *req.Temperature
+	}
+	if req.TopP != nil {
+		parameters["top_p"] = *req.TopP
+	}
+	if req.Stop != nil {
+		parameters["stop"] = append([]string{}, req.Stop...)
+	}
+	// The catalog's default tier is distinct from its input budget and largest
+	// offered tier. Never opt into the largest tier implicitly.
+	contextLength := model.ContextWindowInfo().DefaultContextTokens
+	if contextLength <= 0 {
+		contextLength = model.MaxInputTokens
+	}
+	if contextLength > 0 {
+		parameters["context_length"] = contextLength
 	}
 	// The reference gateway leaves reasoning off by default even for a catalog
 	// row marked is_reasoning=true; it enables model_config.is_reasoning only
@@ -220,7 +241,7 @@ func buildChatBodyScoped(req upstream.UpstreamRequest, model modelEntry, session
 
 	body := chatBody{
 		Business: businessInfo{
-			Product: sceneBusinessProduct,
+			Product: businessProduct,
 			Version: "1.1.3",
 			Type:    sceneBusinessType,
 			ID:      requestID,
@@ -239,7 +260,7 @@ func buildChatBodyScoped(req upstream.UpstreamRequest, model modelEntry, session
 		CodeLanguage:      "",
 		ChatPrompt:        "",
 		IsReply:           true,
-		IsRetry:           false,
+		IsRetry:           req.Attempt > 1,
 		Source:            sourceValue,
 		Version:           "3",
 		AgentID:           agentID,
@@ -702,7 +723,7 @@ func (c *Client) applyAuthHeaders(req *http.Request, creds Credentials, fields R
 	req.Header.Set("Cache-Control", "no-cache")
 	req.Header.Set("Connection", "keep-alive")
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Cosy-Business-Product", sceneBusinessProduct)
+	req.Header.Set("Cosy-Business-Product", c.businessProduct())
 	req.Header.Set("Cosy-Business-Type", sceneBusinessType)
 	req.Header.Set("Cosy-ClientType", sceneClientID)
 	req.Header.Set("Cosy-Data-Policy", dataPolicyHeader(c.dataPolicyAgreed()))
@@ -815,19 +836,25 @@ func classifyStatus(status int, retryAfter string, raw []byte) error {
 	if DetectNoEntitlement(detail, string(raw)) {
 		return &attemptStreamError{err: entitlementError(string(raw))}
 	}
-	switch status {
-	case http.StatusUnauthorized, http.StatusForbidden:
-		return &attemptStreamError{err: fmt.Errorf("%w: %v", errUpstreamUnauthorized, wrapped), unauth: true}
-	case http.StatusRequestTimeout, http.StatusTooManyRequests:
-		return &attemptStreamError{err: wrapped, retryable: true, wait: retryAfterDelay(retryAfter)}
+	// Business verdicts take precedence over HTTP authentication statuses,
+	// just as they do inside an SSE envelope.
+	if isDuplicateRequest(detail, string(raw)) {
+		return fmt.Errorf("qoder duplicate request")
 	}
-	// A safety refusal or a rejected parameter set is a verdict about the
-	// request, not about the account: it fails fast instead of walking the pool.
+	if hasAgentLimitReset(detail, string(raw)) {
+		return &agentLimitError{resetAt: agentLimitResetAt(detail, string(raw))}
+	}
 	if IsContentPolicy(string(raw)) {
 		return &attemptStreamError{err: contentPolicyError(wrapped.Error())}
 	}
 	if IsClientFault(string(raw)) {
 		return &attemptStreamError{err: fmt.Errorf("%w: %v", ErrClientFault, wrapped)}
+	}
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return &attemptStreamError{err: fmt.Errorf("%w: %v", errUpstreamUnauthorized, wrapped), unauth: true}
+	case http.StatusRequestTimeout, http.StatusTooManyRequests:
+		return &attemptStreamError{err: wrapped, retryable: true, wait: retryAfterDelay(retryAfter)}
 	}
 	// A provider-side hiccup wearing any status is worth one bounded retry on
 	// the account that already holds the request.

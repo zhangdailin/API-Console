@@ -24,9 +24,8 @@ import (
 // produces an empty answer, so the two layers are unwrapped explicitly.
 //
 // Termination is also not the OpenAI one. The stream ends with `event:finish`;
-// a `[DONE]` marker may appear only inside an envelope body. An EOF without
-// either marker is a truncation and must be reported as an error — treating it
-// as success would hand the client a silently cut-off answer.
+// a `[DONE]` marker may appear before final usage. Only event:finish terminates
+// the stream; EOF before it is a truncation, not a successful completion.
 
 // streamEnvelope is the outer SSE frame.
 type streamEnvelope struct {
@@ -331,8 +330,8 @@ func consumeStreamWithTools(body io.Reader, toolsEnabled bool, onMessage func(up
 			return true
 		}
 		if payload == "[DONE]" {
-			sawFinish = true
-			return false
+			// Qoder may send usage or an error after this marker.
+			return true
 		}
 
 		var envelope streamEnvelope
@@ -399,8 +398,7 @@ func consumeStreamWithTools(body io.Reader, toolsEnabled bool, onMessage func(up
 			return true
 		}
 		if strings.TrimSpace(envelope.Body) == "[DONE]" {
-			sawFinish = true
-			return false
+			return true
 		}
 
 		var chunk streamChunk

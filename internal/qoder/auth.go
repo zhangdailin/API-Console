@@ -154,7 +154,7 @@ func resolveEndpoints(cfg *config.Config) endpoints {
 	out := endpoints{
 		oauth:     DefaultOAuthBaseURL,
 		openAPI:   DefaultOpenAPIBaseURL,
-		inference: DefaultInferenceURL,
+		inference: resolveProtocolProfile(cfg).inference,
 	}
 	if cfg == nil {
 		return out
@@ -171,7 +171,7 @@ func resolveClientID(cfg *config.Config) string {
 			return id
 		}
 	}
-	return DefaultClientID
+	return resolveProtocolProfile(cfg).clientID
 }
 
 func resolveClientVersion(cfg *config.Config) string {

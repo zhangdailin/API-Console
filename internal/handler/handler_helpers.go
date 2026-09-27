@@ -701,22 +701,20 @@ func isSharedUpstreamRefusalClass(class apperrors.UpstreamErrorClass) bool {
 	return class.Category == "rate_limit" && !class.SwitchAccount
 }
 
-// sharedRefusalWait ramps the wait for a shared queue window across the retry
-// budget.
-//
-// An upstream Retry-After on a queue refusal states the window's worst case, not
-// the instant the queue actually clears, and Qoder's is 30 seconds. Paying it in
-// full on the first retry made every affected request take about 38 seconds even
-// when the queue was already moving again. Probing early costs one cheap refusal
-// (a couple of hundred milliseconds) and lets a queue that clears quickly be
-// served quickly, while the later steps still converge on the upstream's own
-// figure rather than guessing below it.
-//
-// Fractions of the hint by retry number: a sixteenth, a quarter, then three
-// quarters. They sum to slightly over one so the retry budget as a whole still
-// covers the window the upstream named, while the first probe stays cheap. Past
-// the listed steps the hint is honoured as given. The floor stops the first probe
-// from hammering the queue, and no step exceeds the hint.
+// sharedRefusalWaitForChannel preserves Qoder's provider-normalized hint
+// without shortening it further. Other channels retain their early-probe policy.
+func sharedRefusalWaitForChannel(hint time.Duration, retry int, channel string) time.Duration {
+	if strings.EqualFold(strings.TrimSpace(channel), "qoder") {
+		if hint < 0 {
+			return 0
+		}
+		return hint
+	}
+	return sharedRefusalWait(hint, retry)
+}
+
+// sharedRefusalWait is the legacy early-probe policy for non-Qoder channels.
+// It is not appropriate for Qoder's server-declared minimum RetryAfter.
 func sharedRefusalWait(hint time.Duration, retry int) time.Duration {
 	if hint <= 0 {
 		return 0

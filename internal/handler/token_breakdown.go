@@ -3,6 +3,9 @@ package handler
 import (
 	"strings"
 
+	"github.com/goccy/go-json"
+	"orchids-api/internal/prompt"
+
 	"orchids-api/internal/tiktoken"
 )
 
@@ -33,6 +36,54 @@ func estimateInputTokenBreakdown(promptText string, tools []interface{}) inputTo
 
 	bd.Total = bd.BasePromptTokens + bd.SystemContextTokens + bd.HistoryTokens + bd.ToolsTokens
 	return bd
+}
+
+// estimateRequestTokenBreakdown covers the complete conversational input rather
+// than only the latest user text. Images use a coarse fixed budget: base64 bytes
+// are not language tokens and must not inflate the estimate by megabytes.
+func estimateRequestTokenBreakdown(req ClaudeRequest) inputTokenBreakdown {
+	var bd inputTokenBreakdown
+	for _, item := range req.System {
+		bd.SystemContextTokens += tiktoken.EstimateTextTokens(item.Text)
+	}
+	for i, msg := range req.Messages {
+		tokens := estimateMessageContentTokens(msg.Content) + tiktoken.EstimateTextTokens(msg.ReasoningContent) + 4
+		if msg.Role == "system" || msg.Role == "developer" {
+			bd.SystemContextTokens += tokens
+		} else if i == len(req.Messages)-1 {
+			bd.BasePromptTokens += tokens
+		} else {
+			bd.HistoryTokens += tokens
+		}
+	}
+	bd.ToolsTokens = estimateToolsTokens(req.Tools)
+	bd.Total = bd.BasePromptTokens + bd.SystemContextTokens + bd.HistoryTokens + bd.ToolsTokens
+	return bd
+}
+
+func estimateMessageContentTokens(content prompt.MessageContent) int {
+	if content.IsString() {
+		return tiktoken.EstimateTextTokens(content.GetText())
+	}
+	total := 0
+	for _, block := range content.GetBlocks() {
+		switch block.Type {
+		case "image", "image_url":
+			total += 1024
+		case "text":
+			total += tiktoken.EstimateTextTokens(block.Text)
+		case "thinking":
+			total += tiktoken.EstimateTextTokens(block.Thinking)
+		default:
+			// Preserve structured tool inputs/results and unfamiliar block metadata in
+			// the estimate instead of silently dropping whole sections of the request.
+			raw, err := json.Marshal(block)
+			if err == nil {
+				total += tiktoken.EstimateTextTokens(string(raw))
+			}
+		}
+	}
+	return total
 }
 
 func extractTaggedContent(text string, tag string) string {
