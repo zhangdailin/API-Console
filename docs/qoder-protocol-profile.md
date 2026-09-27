@@ -38,7 +38,7 @@
 
 已观测真实结果：两套 profile 都能读取目录；同账号直接推理也都曾返回 10605/p3、retryAfterSeconds=30；启用 skill-cli 后标准 Messages 请求曾 200 返回 OK，count_tokens 200 且包含 system 计数。再次请求发生等待超时，故不能宣称上游排队问题已经消失。
 
-独立协议矩阵另外验证了 Messages 流式 200 且收到 message_stop 后正常 EOF、Chat Completions 200、强制工具调用 200 且产生一个 tool_use，以及工具结果回传后续回答 200。Responses 首次及一次独立复测均在客户端 95 秒期限内未完成，不能记为通过；同时段服务日志存在 10605 队列拒绝，但仅凭此不能证明 Responses 的所有延迟都来自队列。临时 API key 均已删除。
+独立协议矩阵另外验证了 Messages 流式 200 且收到 message_stop 后正常 EOF、Chat Completions 200、强制工具调用 200 且产生一个 tool_use，以及工具结果回传后续回答 200。Responses 最初两次在客户端 95 秒期限内未完成。后续核对生产 max_retries=3：三次 30 秒退避加正向 jitter 与请求耗时可以超过 95 秒，客户端提前断开时服务才记录取消后的 503。将测试客户端期限设为 180 秒（未修改生产重试/超时配置）后，非流式 Responses 200、status=completed、文本 OK，耗时 69.666 秒；流式 Responses 200、response.completed 后正常 EOF，耗时 2.156 秒且无 error 事件。队列仍可能使其他请求耗尽预算，成功样本不等于稳定性保证。临时 API key 均已删除。
 
 API 冒烟不等于真实桌面 Claude Code/Codex 验收；新 OAuth 登录和客户端交互仍需单独执行。上游也可能不严格执行 max_tokens，代理透传不能保证上游服从。
 

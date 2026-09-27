@@ -1,0 +1,85 @@
+package grok
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestResponsesBridgeStreamCompletesAndCloses(t *testing.T) {
+	bridge := ResponsesBridgeHandler(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"id\":\"chatcmpl-test\",\"model\":\"qwen3.8-flash\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	}, ResponsesBridgeOptions{})
+	server := httptest.NewServer(bridge)
+	defer server.Close()
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Post(server.URL+"/qoder/v1/responses", "application/json", strings.NewReader(`{"model":"qwen3.8-flash","input":"hi","stream":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("stream did not terminate cleanly: %v", err)
+	}
+	if resp.StatusCode != 200 || strings.Count(string(body), "event: response.completed") != 1 || !strings.Contains(string(body), "response.output_text.delta") {
+		t.Fatalf("incomplete stream: %s", body)
+	}
+}
+
+// Queue refusal must remain a retryable HTTP response, not become a malformed
+// successful Responses object or a stream that never closes.
+func TestResponsesBridgePreservesQueueRefusal(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprint(stream), func(t *testing.T) {
+			bridge := ResponsesBridgeHandler(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Retry-After", "30")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"error":{"type":"rate_limit_error","message":"upstream queue busy"}}`))
+			}, ResponsesBridgeOptions{})
+			req := httptest.NewRequest(http.MethodPost, "/qoder/v1/responses", strings.NewReader(fmt.Sprintf(`{"model":"qwen3.8-flash","input":"hi","stream":%v}`, stream)))
+			rec := httptest.NewRecorder()
+			bridge(rec, req)
+			if rec.Code != 429 || rec.Header().Get("Retry-After") != "30" || !strings.Contains(rec.Body.String(), "rate_limit_error") {
+				t.Fatalf("queue response lost: status=%d header=%v body=%s", rec.Code, rec.Header(), rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestResponsesBridgePropagatesQueueCancellation(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprint(stream), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			started := make(chan struct{})
+			finished := make(chan struct{})
+			bridge := ResponsesBridgeHandler(func(w http.ResponseWriter, r *http.Request) {
+				close(started)
+				<-r.Context().Done()
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte(`{"error":{"message":"request canceled"}}`))
+			}, ResponsesBridgeOptions{})
+			req := httptest.NewRequest(http.MethodPost, "/qoder/v1/responses", strings.NewReader(fmt.Sprintf(`{"model":"qwen3.8-flash","input":"hi","stream":%v}`, stream))).WithContext(ctx)
+			go func() { defer close(finished); bridge(httptest.NewRecorder(), req) }()
+			select {
+			case <-started:
+			case <-time.After(time.Second):
+				t.Fatal("inner handler never started")
+			}
+			cancel()
+			select {
+			case <-finished:
+			case <-time.After(time.Second):
+				t.Fatal("bridge did not return after cancellation")
+			}
+		})
+	}
+}
