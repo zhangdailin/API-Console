@@ -35,9 +35,8 @@ type grokPoolAnswer struct {
 // classifyGrokPoolFailure turns "no account could take this request" into the
 // answer the client gets, logging the pool's own note either way.
 //
-// The Grok handlers select their own sessions (openCLIAccountSession,
-// openConsoleAccountSession, …) rather than going through the generic session
-// handler, so they used to answer a pool failure with 503 and — in several
+// The Grok handlers select their own Build sessions instead of going through
+// the generic session handler, so they used to answer a pool failure with 503 and — in several
 // handlers — the pool's error text. A cooling pool, a rate-limited pool and a
 // spent allowance are all retryable capacity conditions and are answered 429 by
 // the shared classification, the same answer every other entrance gives; a model

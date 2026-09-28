@@ -20,37 +20,14 @@ function normalizeSidebarStatusCode(statusCode) {
   return String(statusCode).trim();
 }
 
-function getSidebarAccountToken(acc) {
-  if (!acc) return "";
-  const type = normalizeSidebarAccountType(acc);
-  if (type === "workbuddy") {
-    // The durable refresh token never leaves the server; the access token is
-    // the visible proof that a credential is configured.
-    return acc.workbuddy_access_token || "";
-  }
-  if (type === "qoder") {
-    // Same contract as WorkBuddy: only the derived access token is exposed, and
-    // only so the table can show that a credential exists.
-    return acc.qoder_access_token || "";
-  }
-  if (type === "cline") {
-    // Same contract as Qoder: the refresh token is server-side only.
-    return acc.cline_access_token || "";
-  }
-  return acc.client_cookie || acc.token || "";
-}
-
-// OAuth secrets are deliberately redacted from /api/accounts responses. A
-// Grok Build OAuth account therefore must be treated as credentialed from its
-// explicit mode, rather than from the (intentionally absent) token fields.
+// Identify Grok Build OAuth for its channel-specific quota display.
 function isSidebarGrokOAuthAccount(acc) {
   return normalizeSidebarAccountType(acc) === "grok" &&
     String(acc?.credential_type || "").trim().toLowerCase() === "oauth";
 }
 
 function hasSidebarAccountCredential(acc) {
-  if (typeof acc?.has_credential === "boolean") return acc.has_credential;
-  return isSidebarGrokOAuthAccount(acc) || Boolean(getSidebarAccountToken(acc));
+  return acc?.has_credential === true;
 }
 
 function getSidebarQuotaStats(acc) {
@@ -159,25 +136,7 @@ function isSidebarAccountAbnormal(acc) {
     return true;
   }
 
-  // has_credential is published by the server for every account, so it is the
-  // authoritative answer. The provider-registry allowlist below is only the
-  // fallback for an older server: it used to decide which channels were asked
-  // for a credential at all, and an empty registry (script order, cached bundle)
-  // silently reclassified every channel that stores no session columns.
-  if (typeof acc.has_credential === "boolean") {
-    if (!acc.has_credential) return true;
-    return false;
-  }
-
-  const type = normalizeSidebarAccountType(acc);
-  const credentialChannels = new Set(window.OrchidsProviderRegistry?.keys || []);
-  if (credentialChannels.has(type)) {
-    if (!hasSidebarAccountCredential(acc)) return true;
-  } else if (!acc.session_id && !acc.session_cookie) {
-    return true;
-  }
-
-  return false;
+  return !hasSidebarAccountCredential(acc);
 }
 
 function computeSidebarAccountStats(accounts) {

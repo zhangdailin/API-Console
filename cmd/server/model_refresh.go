@@ -393,18 +393,6 @@ func discoverModelsForChannelReport(ctx context.Context, cfg *config.Config, s *
 	}
 }
 
-// discoverQoderModels publishes the Qoder channel catalog read from the signed
-// upstream control plane.
-//
-// There is no local fallback. This channel previously published a compiled-in
-// catalog because the model-list read was rejected; a built-in list is not an
-// observation of what the account may run, so the refresh now reports the read
-// failure instead of restating a compiled-in default as discovered state.
-func discoverQoderModels(ctx context.Context, cfg *config.Config, s *store.Store) ([]discoveredModel, string, error) {
-	report, err := discoverAccountCatalogModels(ctx, cfg, s, "Qoder", defaultModelRefreshConcurrency)
-	return report.Candidates, report.Source, err
-}
-
 // qoderCatalogToDiscovered maps the account catalog onto the channel's public
 // model records.
 //
@@ -457,17 +445,6 @@ func persistQoderCatalogSnapshot(ctx context.Context, s *store.Store, acc *store
 	if err := s.UpdateAccount(ctx, acc); err != nil {
 		slog.Warn("failed to persist qoder model snapshot", "account_id", acc.ID, "error", err)
 	}
-}
-
-// discoverClineModels publishes the Cline channel catalog read from the
-// upstream recommended-models feed.
-//
-// There is no local fallback. A compiled-in list is not an observation of what
-// the account may run, so the refresh reports the read failure instead of
-// restating a default as discovered state.
-func discoverClineModels(ctx context.Context, cfg *config.Config, s *store.Store) ([]discoveredModel, string, error) {
-	report, err := discoverAccountCatalogModels(ctx, cfg, s, "Cline", defaultModelRefreshConcurrency)
-	return report.Candidates, report.Source, err
 }
 
 func discoverAccountCatalogModels(ctx context.Context, cfg *config.Config, s *store.Store, channel string, concurrency int) (accountModelDiscoveryReport, error) {
@@ -726,20 +703,6 @@ type grokBuildModelDiscovery struct {
 	err     error
 }
 
-// discoverGrokModelsConcurrent makes the Build OAuth /v1/models catalog the
-// primary source of Grok text-model discovery.  The upstream response is
-// account scoped, so every successful response is persisted on that account;
-// only models with a locally implemented Build route are published globally.
-//
-// A failed control-plane read publishes nothing. The historical catalog is not
-// a fallback: the rows already in the store are last known state, not a new
-// observation, and re-publishing them would report a stale catalog as freshly
-// discovered.
-func discoverGrokModelsConcurrent(ctx context.Context, cfg *config.Config, s *store.Store, concurrency int) ([]discoveredModel, string, error) {
-	report, err := discoverGrokModelsReport(ctx, cfg, s, concurrency)
-	return report.Candidates, report.Source, err
-}
-
 func discoverGrokModelsReport(ctx context.Context, cfg *config.Config, s *store.Store, concurrency int) (accountModelDiscoveryReport, error) {
 	report := accountModelDiscoveryReport{}
 	accounts, err := grokBuildModelDiscoveryAccounts(ctx, s)
@@ -880,10 +843,6 @@ func enabledAccountsByType(ctx context.Context, s *store.Store, accountType stri
 		}
 	}
 	return out, nil
-}
-
-func applyModelRefresh(ctx context.Context, s *store.Store, channel string, source string, candidates []discoveredModel) (*modelRefreshResult, error) {
-	return applyModelRefreshWithPrune(ctx, s, channel, source, candidates, true)
 }
 
 func applyModelRefreshWithPrune(ctx context.Context, s *store.Store, channel string, source string, candidates []discoveredModel, allowPrune bool) (*modelRefreshResult, error) {

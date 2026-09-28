@@ -327,11 +327,8 @@ type credentialMaterial struct {
 	sessionID    string
 	clientCookie string
 	refreshToken string
-	deviceID     string
-	requestID    string
 	sessionCk    string
 	clientUAT    string
-	projectID    string
 	token        string
 	oauthAccess  string
 	oauthRefresh string
@@ -360,7 +357,6 @@ type credentialMaterial struct {
 	agentMode    string
 	grokProvider string
 	credType     string
-	upstreamMode string
 	enabled      bool
 	weight       int
 }
@@ -374,11 +370,8 @@ func materialOf(acc *store.Account) credentialMaterial {
 		sessionID:    acc.SessionID,
 		clientCookie: acc.ClientCookie,
 		refreshToken: acc.RefreshToken,
-		deviceID:     acc.DeviceID,
-		requestID:    acc.RequestID,
 		sessionCk:    acc.SessionCookie,
 		clientUAT:    acc.ClientUat,
-		projectID:    acc.ProjectID,
 		token:        acc.Token,
 		oauthAccess:  acc.OAuthAccessToken,
 		oauthRefresh: acc.OAuthRefreshToken,
@@ -407,7 +400,6 @@ func materialOf(acc *store.Account) credentialMaterial {
 		agentMode:    acc.AgentMode,
 		grokProvider: acc.GrokProvider,
 		credType:     acc.CredentialType,
-		upstreamMode: acc.UpstreamMode,
 		enabled:      acc.Enabled,
 		weight:       acc.Weight,
 	}

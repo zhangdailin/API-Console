@@ -7,8 +7,8 @@ import (
 
 // Byte classes for the ASCII scanner. The classifier is a 256-entry table rather
 // than a chain of comparisons because Add runs once per streamed frame for the
-// whole life of an answer: the previous isASCIIWordByte + whitespace-check
-// sequence cost seven branches per byte, and a table costs one load and one
+// whole life of an answer: the previous byte-by-byte word and whitespace
+// checks cost seven branches per byte, and a table costs one load and one
 // compare.
 const (
 	classWord     uint8 = iota // [A-Za-z0-9]: opens or continues a word run
@@ -34,10 +34,6 @@ var asciiClass = func() (table [256]uint8) {
 	}
 	return table
 }()
-
-func isASCIIWordByte(b byte) bool {
-	return asciiClass[b] == classWord
-}
 
 type Estimator struct {
 	tokens float64

@@ -25,7 +25,6 @@ type Config struct {
 	AdminPass          string   `json:"admin_pass"`
 	AdminPath          string   `json:"admin_path"`
 	AdminToken         string   `json:"admin_token"`
-	InferenceAuth      *bool    `json:"inference_auth_enabled,omitempty"`
 	CredentialKeyFile  string   `json:"credential_encryption_key_file,omitempty"`
 	ResponseStoreTTL   int      `json:"response_store_ttl_hours,omitempty"`
 	TrustedProxies     []string `json:"trusted_proxies,omitempty"`
@@ -47,9 +46,8 @@ type Config struct {
 	TokenCacheStrategy string   `json:"token_cache_strategy"`
 
 	// ── Hardcoded fields (set unconditionally by ApplyHardcoded) ──
-	DebugLogSSE      bool   `json:"-"`
-	SuppressThinking bool   `json:"-"`
-	UpstreamMode     string `json:"-"`
+	DebugLogSSE      bool `json:"-"`
+	SuppressThinking bool `json:"-"`
 	// AnonymousAllowIPs names the sources that may call the inference routes
 	// without a managed key. Empty (the default) requires a key from everyone, as
 	// grok2api does; an operator that cannot update a client yet lists its address
@@ -102,16 +100,15 @@ type Config struct {
 	// ── Grok Build CLI (cli-chat-proxy.grok.com) OAuth upstream ──
 	// These fields are configurable via config.json / Redis and are deliberately
 	// NOT written into ApplyHardcoded, so they survive a persistConfig round trip.
-	GrokCLIBaseURL          string   `json:"grok_cli_base_url,omitempty"`
-	GrokCLIUserAgent        string   `json:"grok_cli_user_agent,omitempty"`
-	GrokCLIClientVersion    string   `json:"grok_cli_client_version,omitempty"`
-	GrokCLIClientIdentifier string   `json:"grok_cli_client_identifier,omitempty"`
-	GrokCLIOAuthClientID    string   `json:"grok_cli_oauth_client_id,omitempty"`
-	GrokCLIOAuthDeviceURL   string   `json:"grok_cli_oauth_device_url,omitempty"`
-	GrokCLIOAuthTokenURL    string   `json:"grok_cli_oauth_token_url,omitempty"`
-	GrokCLIModelIDs         []string `json:"grok_cli_model_ids,omitempty"`
-	GrokBuildRPS            float64  `json:"grok_build_rps,omitempty"`
-	GrokBuildTimeout        int      `json:"grok_build_timeout_seconds,omitempty"`
+	GrokCLIBaseURL          string  `json:"grok_cli_base_url,omitempty"`
+	GrokCLIUserAgent        string  `json:"grok_cli_user_agent,omitempty"`
+	GrokCLIClientVersion    string  `json:"grok_cli_client_version,omitempty"`
+	GrokCLIClientIdentifier string  `json:"grok_cli_client_identifier,omitempty"`
+	GrokCLIOAuthClientID    string  `json:"grok_cli_oauth_client_id,omitempty"`
+	GrokCLIOAuthDeviceURL   string  `json:"grok_cli_oauth_device_url,omitempty"`
+	GrokCLIOAuthTokenURL    string  `json:"grok_cli_oauth_token_url,omitempty"`
+	GrokBuildRPS            float64 `json:"grok_build_rps,omitempty"`
+	GrokBuildTimeout        int     `json:"grok_build_timeout_seconds,omitempty"`
 	// GrokStreamIdleSeconds is the legacy all-channel fallback. The channel
 	// Build-specific field below takes precedence when set.
 	GrokStreamIdleSeconds      int `json:"grok_stream_idle_seconds,omitempty"`
@@ -130,13 +127,10 @@ type Config struct {
 	// the only reader was the account client-cache key — so a deployment that
 	// lowered them to save context got no saving and no warning. They are gone
 	// rather than documented, because an inert knob is a trap.
-	Stream              *bool `json:"-"`
-	ImageNSFW           *bool `json:"-"`
-	ImageFinalMinBytes  int   `json:"-"`
-	ImageMediumMinBytes int   `json:"-"`
-	MaxRetries          int   `json:"max_retries,omitempty"`
-	RetryDelay          int   `json:"retry_delay,omitempty"`
-	AccountSwitchCount  int   `json:"account_switch_count,omitempty"`
+	Stream             *bool `json:"-"`
+	MaxRetries         int   `json:"max_retries,omitempty"`
+	RetryDelay         int   `json:"retry_delay,omitempty"`
+	AccountSwitchCount int   `json:"account_switch_count,omitempty"`
 	// Quality-hold policy. The gateway withholds a degraded reasoning turn
 	// instead of streaming it, then retries it on another account. Holding is on
 	// by default and fails open once the retry budget is spent.
@@ -164,8 +158,6 @@ type Config struct {
 	ProxyUser            string   `json:"proxy_user"`
 	ProxyPass            string   `json:"proxy_pass"`
 	ProxyBypass          []string `json:"proxy_bypass"`
-	PublicKey            string   `json:"-"`
-	PublicEnabled        *bool    `json:"-"`
 }
 
 // EgressNodeConfig describes one egress exit node for the Grok proxy pool.
@@ -187,12 +179,8 @@ func (c *Config) Clone() *Config {
 	}
 
 	clone := *c
-	clone.InferenceAuth = cloneBool(c.InferenceAuth)
 	clone.Stream = cloneBool(c.Stream)
-	clone.ImageNSFW = cloneBool(c.ImageNSFW)
-	clone.PublicEnabled = cloneBool(c.PublicEnabled)
 	clone.TrustedProxies = append([]string(nil), c.TrustedProxies...)
-	clone.GrokCLIModelIDs = append([]string(nil), c.GrokCLIModelIDs...)
 	clone.GrokEgressNodes = append([]EgressNodeConfig(nil), c.GrokEgressNodes...)
 	clone.ProxyBypass = append([]string(nil), c.ProxyBypass...)
 	return &clone
@@ -322,17 +310,8 @@ func ApplyDefaults(cfg *Config) {
 // retry/deadline settings. Configured runtime values survive file/Redis/API
 // round trips; protocol constants remain non-configurable.
 func ApplyHardcoded(cfg *Config) {
-	// inference_auth_enabled is deliberately NOT hardcoded: the field is read for
-	// display and migration only, because InferenceAuthEnabled() now always
-	// answers true (grok2api has no switch on /v1). Hardcoding it here would
-	// rewrite the operator's stored value on every file/Redis/API round trip.
-	cfg.UpstreamMode = "ws"
 	vTrue := true
 	cfg.Stream = &vTrue
-	cfg.ImageNSFW = &vTrue
-	cfg.PublicEnabled = &vTrue
-	cfg.ImageFinalMinBytes = 100000
-	cfg.ImageMediumMinBytes = 30000
 	cfg.MaxRetries = boundedDefault(cfg.MaxRetries, 3, 20)
 	cfg.RetryDelay = boundedDefault(cfg.RetryDelay, 1000, 60000)
 	// How many accounts one request may rotate through before it gives up.
@@ -426,62 +405,6 @@ func (c *Config) GrokCLIClientIdentifierOrDefault() string {
 		return strings.TrimSpace(c.GrokCLIClientIdentifier)
 	}
 	return "grok-shell"
-}
-
-// GrokModelIsCLI reports whether the given model ID is routed to the Build CLI
-// upstream via the GrokCLIModelIDs list.
-func (c *Config) GrokModelIsCLI(modelID string) bool {
-	if c == nil {
-		return false
-	}
-	target := strings.ToLower(strings.TrimSpace(modelID))
-	for _, id := range c.GrokCLIModelIDs {
-		if strings.ToLower(strings.TrimSpace(id)) == target {
-			return true
-		}
-	}
-	return false
-}
-
-func (c *Config) PublicImagineNSFW() bool {
-	return c == nil || c.ImageNSFW == nil || *c.ImageNSFW
-}
-
-func (c *Config) PublicImagineFinalMinBytes() int {
-	if c == nil || c.ImageFinalMinBytes <= 0 {
-		return 100000
-	}
-	return c.ImageFinalMinBytes
-}
-
-func (c *Config) PublicImagineMediumMinBytes() int {
-	if c == nil || c.ImageMediumMinBytes <= 0 {
-		return 30000
-	}
-	return c.ImageMediumMinBytes
-}
-
-func (c *Config) PublicAPIKey() string {
-	if c == nil {
-		return ""
-	}
-	return strings.TrimSpace(c.PublicKey)
-}
-
-func (c *Config) PublicAPIEnabled() bool {
-	return c != nil && c.PublicEnabled != nil && *c.PublicEnabled
-}
-
-// InferenceAuthEnabled reports whether model and inference endpoints require a
-// managed API key.
-//
-// It is always true: grok2api mounts its client auth middleware on the whole /v1
-// group with no switch, and a single config flag that turns the unified entry
-// point into an anonymous proxy is a security boundary the two gateways must not
-// differ on. `inference_auth_enabled: false` is therefore ignored, and callers
-// that only need to ask "is a key available" use PublicAPIKey instead.
-func (c *Config) InferenceAuthEnabled() bool {
-	return true
 }
 
 func generateRandomPassword(length int) (string, error) {

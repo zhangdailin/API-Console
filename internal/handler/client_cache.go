@@ -407,15 +407,11 @@ func accountClientFingerprint(acc *store.Account, cfg *config.Config) string {
 	writeInt64(acc.ID)
 	writeString(acc.Name)
 	writeString(acc.AccountType)
-	writeBool(acc.NSFWEnabled)
 	writeString(acc.SessionID)
 	writeString(acc.ClientCookie)
 	writeString(acc.RefreshToken)
-	writeString(acc.DeviceID)
-	writeString(acc.RequestID)
 	writeString(acc.SessionCookie)
 	writeString(acc.ClientUat)
-	writeString(acc.ProjectID)
 	writeString(acc.UserID)
 	writeString(acc.AgentMode)
 	writeString(acc.Email)
@@ -450,7 +446,6 @@ func accountClientFingerprint(acc *store.Account, cfg *config.Config) string {
 	// fingerprint would force unnecessary client rebuilds and drop keep-alive pools.
 
 	if cfg != nil {
-		writeString(cfg.UpstreamMode)
 		writeString(cfg.WorkBuddyBaseURL)
 		writeString(cfg.QoderProtocolProfile)
 		writeString(cfg.QoderOAuthBaseURL)

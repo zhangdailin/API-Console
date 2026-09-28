@@ -2,20 +2,13 @@ package grok
 
 import (
 	"bytes"
-	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
-	"net/url"
-	"path"
-	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/goccy/go-json"
 
@@ -23,89 +16,8 @@ import (
 )
 
 var (
-	grokJSONEmptyObjectBytes  = []byte("{}")
-	reToolUsageCardBlock      = regexp.MustCompile(`(?is)<?xai:tool_usage_card[^>]*>.*?</xai:tool_usage_card>`)
-	reToolUsageCardIncomplete = regexp.MustCompile(`(?is)<?xai:tool_usage_card.*?(?:</xai:tool_usage_card>|\z)`)
-	reGrokRenderBlock         = regexp.MustCompile(`(?is)<?grok:render.*?</grok:render>`)
-
-	rateLimitFamilies = []rateLimitFieldFamily{
-		{
-			unit: "tokens",
-			limitKeys: []string{
-				"limit_tokens",
-				"limittokens",
-				"max_tokens",
-				"maxtokens",
-				"token_limit",
-				"tokenlimit",
-				"tokens_limit",
-				"tokenslimit",
-				"total_tokens",
-				"totaltokens",
-			},
-			remainingKeys: []string{
-				"remaining_tokens",
-				"remainingtokens",
-				"tokens_remaining",
-				"tokensremaining",
-			},
-		},
-		{
-			unit: "requests",
-			limitKeys: []string{
-				"max_queries",
-				"maxqueries",
-				"query_limit",
-				"querylimit",
-				"queries_limit",
-				"querieslimit",
-				"total_queries",
-				"totalqueries",
-				"request_limit",
-				"requestlimit",
-				"requests_limit",
-				"requestslimit",
-			},
-			remainingKeys: []string{
-				"remaining_queries",
-				"remainingqueries",
-				"queries_remaining",
-				"queriesremaining",
-				"remaining_requests",
-				"remainingrequests",
-			},
-		},
-		{
-			unit: "",
-			limitKeys: []string{
-				"limit",
-				"quota",
-				"quota_limit",
-				"quotalimit",
-			},
-			remainingKeys: []string{
-				"remaining",
-				"quota_remaining",
-				"quotaremaining",
-			},
-		},
-	}
-	rateLimitNumericKeys = buildRateLimitNumericKeySet(rateLimitFamilies)
-	rateLimitResetKeys   = map[string]struct{}{
-		"reset":           {},
-		"reset_at":        {},
-		"resetat":         {},
-		"reset_at_ms":     {},
-		"resetatms":       {},
-		"reset_time":      {},
-		"resettime":       {},
-		"reset_timestamp": {},
-		"resettimestamp":  {},
-		"next_reset":      {},
-		"nextreset":       {},
-	}
-	renderableImageExtensions = []string{".png", ".jpg", ".jpeg", ".webp", ".gif"}
-	allowedMessageRoles       = map[string]struct{}{
+	grokJSONEmptyObjectBytes = []byte("{}")
+	allowedMessageRoles      = map[string]struct{}{
 		"developer": {},
 		"system":    {},
 		"user":      {},
@@ -124,20 +36,6 @@ var (
 		"input_text":  {},
 		"input_image": {},
 		"input_file":  {},
-	}
-	videoAspectRatioMap = map[string]string{
-		"1280x720":  "16:9",
-		"720x1280":  "9:16",
-		"1792x1024": "3:2",
-		"1024x1792": "2:3",
-		"1024x1024": "1:1",
-		"16:9":      "16:9",
-		"9:16":      "9:16",
-		"3:2":       "3:2",
-		"2:3":       "2:3",
-		"4:3":       "4:3",
-		"3:4":       "3:4",
-		"1:1":       "1:1",
 	}
 )
 
@@ -270,14 +168,6 @@ func encodeJSONBytes(v interface{}) []byte {
 	return raw
 }
 
-func dataURIFromBytes(mime string, data []byte) string {
-	mime = strings.TrimSpace(mime)
-	if mime == "" {
-		mime = "application/octet-stream"
-	}
-	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)
-}
-
 func parseDataURI(input string) (fileName, contentBase64, mime string, err error) {
 	s := strings.TrimSpace(input)
 	if !strings.HasPrefix(strings.ToLower(s), "data:") {
@@ -301,74 +191,6 @@ func parseDataURI(input string) (fileName, contentBase64, mime string, err error
 		ext = strings.TrimSpace(mime[slash+1:])
 	}
 	return "file." + ext, payload, mime, nil
-}
-
-func fetchRemoteAsDataURI(rawURL string, timeout time.Duration, proxyFunc func(*http.Request) (*url.URL, error)) (string, error) {
-	u := strings.TrimSpace(rawURL)
-	if u == "" {
-		return "", fmt.Errorf("empty url")
-	}
-	if timeout <= 0 {
-		timeout = 30 * time.Second
-	}
-	// The URL comes from the caller's message payload, so it is untrusted: the
-	// target must resolve to a public address before the gateway dials it.
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	target, err := checkRemoteFetchTarget(ctx, u, proxyFunc != nil)
-	if err != nil {
-		return "", err
-	}
-	client := newRemoteFetchClient(timeout, proxyFunc)
-	req, err := http.NewRequest(http.MethodGet, target.String(), nil)
-	if err != nil {
-		return "", err
-	}
-	req = req.WithContext(ctx)
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return "", fmt.Errorf("fetch url status=%d body=%s", resp.StatusCode, string(body))
-	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 60*1024*1024))
-	if err != nil {
-		return "", err
-	}
-	mime := strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0])
-	if mime == "" {
-		mime = mimeFromFilename(u)
-	}
-	return dataURIFromBytes(mime, data), nil
-}
-
-func mimeFromFilename(name string) string {
-	ext := strings.ToLower(path.Ext(strings.TrimSpace(name)))
-	switch ext {
-	case ".jpg", ".jpeg":
-		return "image/jpeg"
-	case ".png":
-		return "image/png"
-	case ".webp":
-		return "image/webp"
-	case ".gif":
-		return "image/gif"
-	case ".pdf":
-		return "application/pdf"
-	case ".txt":
-		return "text/plain"
-	case ".md":
-		return "text/markdown"
-	case ".mp3":
-		return "audio/mpeg"
-	case ".wav":
-		return "audio/wav"
-	default:
-		return "application/octet-stream"
-	}
 }
 
 func uniqueStrings(input []string) []string {

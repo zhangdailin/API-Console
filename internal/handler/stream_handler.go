@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -27,8 +26,6 @@ import (
 	"orchids-api/internal/toolname"
 	"orchids-api/internal/upstream"
 )
-
-var gitCPathRegex = regexp.MustCompile(`(?i)git\s+-C\s+((?:"[^"]+"|'[^']+'|[^\s;&|]+))\s+`)
 
 const (
 	sseEventPrefix                 = "event: "
@@ -60,9 +57,6 @@ var (
 	ssePrefixContentBlockStart = []byte(sseEventPrefix + "content_block_start" + sseDataJoin)
 	ssePrefixContentBlockDelta = []byte(sseEventPrefix + "content_block_delta" + sseDataJoin)
 	ssePrefixContentBlockStop  = []byte(sseEventPrefix + "content_block_stop" + sseDataJoin)
-	quotedPathRegex            = regexp.MustCompile(`"([^"\n\r]+)"`)
-	windowsDrivePathRegex      = regexp.MustCompile(`(?i)\b[a-z]:[\\/]`)
-	tmpAgentPathRegex          = regexp.MustCompile("(^|[\\s(=;&|])(/tmp/cc-agent/[^\\s\"';|&)]+)")
 )
 
 // sseFramePrefix returns the complete header bytes for a known wire event, or nil

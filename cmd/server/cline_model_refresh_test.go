@@ -59,12 +59,12 @@ func TestApplyModelRefreshWritesTheClineRouteMetadata(t *testing.T) {
 	ctx := context.Background()
 	clearModelsForChannel(t, ctx, s, "Cline")
 
-	result, err := applyModelRefresh(ctx, s, "Cline", "cline_recommended_models", clineCatalogToDiscovered([]cline.Model{
+	result, err := applyModelRefreshWithPrune(ctx, s, "Cline", "cline_recommended_models", clineCatalogToDiscovered([]cline.Model{
 		{ID: "cline-free/deepseek-v4.1-flash", Name: "Deepseek-v4.1-Flash", Provider: "cline-free"},
 		{ID: "z-ai/glm-5.3-flash", Name: "glm-5.3-flash", Provider: "z-ai"},
-	}))
+	}), true)
 	if err != nil {
-		t.Fatalf("applyModelRefresh() error = %v", err)
+		t.Fatalf("applyModelRefreshWithPrune() error = %v", err)
 	}
 	if result.Added != 2 {
 		t.Fatalf("Added=%d want 2", result.Added)
@@ -118,11 +118,11 @@ func TestApplyModelRefreshFillsInARowThatPredatesTheMetadata(t *testing.T) {
 		t.Fatalf("CreateModel() error = %v", err)
 	}
 
-	if _, err := applyModelRefresh(ctx, s, "Cline", "cline_recommended_models", clineCatalogToDiscovered([]cline.Model{
+	if _, err := applyModelRefreshWithPrune(ctx, s, "Cline", "cline_recommended_models", clineCatalogToDiscovered([]cline.Model{
 		{ID: "cline-free/deepseek-v4.1-flash", Name: "Deepseek-v4.1-Flash", Provider: "cline-free"},
 		{ID: "z-ai/glm-5.3-flash", Name: "glm-5.3-flash", Provider: "z-ai"},
-	})); err != nil {
-		t.Fatalf("applyModelRefresh() error = %v", err)
+	}), true); err != nil {
+		t.Fatalf("applyModelRefreshWithPrune() error = %v", err)
 	}
 
 	completed, err := s.GetModelByChannelAndModelID(ctx, "Cline", "cline-free/deepseek-v4.1-flash")
@@ -158,9 +158,9 @@ func TestDiscoverClineModelsReportsNoAccount(t *testing.T) {
 	s, cleanup := setupModelRefreshStore(t)
 	defer cleanup()
 
-	_, _, err := discoverClineModels(context.Background(), &config.Config{}, s)
+	_, err := discoverAccountCatalogModels(context.Background(), &config.Config{}, s, "Cline", defaultModelRefreshConcurrency)
 	if err == nil {
-		t.Fatal("discoverClineModels() error = nil, want no active accounts")
+		t.Fatal("discoverAccountCatalogModels() error = nil, want no active accounts")
 	}
 	var noAccount *noActiveAccountsError
 	if !errorsAs(err, &noAccount) {

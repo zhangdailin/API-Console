@@ -31,7 +31,7 @@ var accountRefreshers = map[string]func(*API, context.Context, *store.Account) (
 func refreshGrokAccountState(a *API, ctx context.Context, acc *store.Account) (string, int, error) {
 	if verifyErr := verifyGrokAccount(ctx, acc, a.config.Load(), a.store); verifyErr != nil {
 		message := strings.ToLower(verifyErr.Error())
-		if strings.Contains(message, "missing sso token") || strings.Contains(message, "missing oauth token") {
+		if strings.Contains(message, "missing oauth token") {
 			return "", http.StatusBadRequest, fmt.Errorf("failed to verify grok account: %w", verifyErr)
 		}
 		status := apperrors.ClassifyAccountStatus(verifyErr.Error())

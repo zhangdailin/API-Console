@@ -12,7 +12,7 @@ import (
 )
 
 // Chat completions. The only Grok upstream this gateway speaks here is the Build
-// (OAuth CLI) plane; the legacy website and retired developer plane planes were removed,
+// (OAuth CLI) plane; the legacy website and developer planes were removed,
 // so every conversation model is served by the native Responses bridge.
 
 func (h *Handler) defaultChatStream() bool {

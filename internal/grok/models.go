@@ -22,8 +22,6 @@ type ModelSpec struct {
 	ID            string
 	Name          string
 	UpstreamModel string
-	Tier          int
-	PreferBest    bool
 	// Upstream explicitly routes the model; UpstreamAuto derives from fields.
 	Upstream UpstreamKind
 	// AliasReasoningEffort is populated only while resolving an effort-suffixed
@@ -31,20 +29,13 @@ type ModelSpec struct {
 	AliasReasoningEffort string
 }
 
-const (
-	grokTierBasic = iota
-	grokTierLite
-	grokTierSuper
-	grokTierHeavy
-)
-
 // SupportedModels is the deliberately small public compatibility table. Build
 // OAuth capability snapshots remain authoritative; this table only describes the
 // routes this gateway serves itself.
 var SupportedModels = []ModelSpec{
-	{ID: "grok-composer-2.5-fast", Name: "Grok Composer 2.5 Fast", UpstreamModel: "grok-composer-2.5-fast", Tier: grokTierSuper, Upstream: UpstreamCLI},
-	{ID: "grok-4.5", Name: "Grok 4.5", UpstreamModel: "grok-4.5", Tier: grokTierSuper, Upstream: UpstreamCLI},
-	{ID: "grok-4.6", Name: "Grok 4.6", UpstreamModel: "grok-4.6", Tier: grokTierSuper, Upstream: UpstreamCLI},
+	{ID: "grok-composer-2.5-fast", Name: "Grok Composer 2.5 Fast", UpstreamModel: "grok-composer-2.5-fast", Upstream: UpstreamCLI},
+	{ID: "grok-4.5", Name: "Grok 4.5", UpstreamModel: "grok-4.5", Upstream: UpstreamCLI},
+	{ID: "grok-4.6", Name: "Grok 4.6", UpstreamModel: "grok-4.6", Upstream: UpstreamCLI},
 }
 
 var modelByID = func() map[string]ModelSpec {
@@ -136,11 +127,9 @@ func ResolveModel(modelID string) (ModelSpec, bool) {
 	return m, ok
 }
 
-// modelRoutedToCLI reports whether a model should be served via the Build CLI
-// upstream (explicit marker or config list).
-func modelRoutedToCLI(spec ModelSpec, cfg *config.Config) bool {
-	if spec.Upstream != UpstreamAuto {
-		return spec.Upstream == UpstreamCLI
-	}
-	return cfg != nil && cfg.GrokModelIsCLI(spec.ID)
+// modelRoutedToCLI reports whether a resolved model uses Build CLI. The
+// configured model table and dynamically discovered Build models explicitly
+// carry UpstreamCLI; legacy config model lists no longer affect routing.
+func modelRoutedToCLI(spec ModelSpec, _ *config.Config) bool {
+	return spec.Upstream == UpstreamCLI
 }

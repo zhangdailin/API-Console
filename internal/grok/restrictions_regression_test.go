@@ -15,40 +15,11 @@ import (
 	"orchids-api/internal/store"
 )
 
-func TestRestrictionsToolsAreProviderScoped(t *testing.T) {
-	tools := make([]ToolDef, 129)
-	for index := range tools {
-		tools[index] = ToolDef{Type: "function", Function: map[string]interface{}{"name": fmt.Sprintf("tool_%d", index)}}
-	}
-	tools[0].Function["name"] = strings.Repeat("Long", 30)
-	tools[0].Function["description"] = strings.Repeat("d", maxToolDescriptionBytes+1)
-	req := ChatCompletionsRequest{Model: "grok-4.6", Messages: []ChatMessage{{Role: "user", Content: "hi"}}, Tools: tools}
-	if err := req.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	if err := validateWebToolDefinitions(tools); err == nil {
-		t.Fatal("Web count/length guard must remain")
-	}
-	spec, _ := ResolveModel("grok-4.6")
-	payload, err := (&Handler{}).responsesPayloadFromChat(spec, &req, true)
-	if err != nil || len(interfaceMaps(payload["tools"])) != 129 {
-		t.Fatalf("native tools rejected: %v", err)
-	}
-	for _, test := range []ToolDef{tools[0], {Type: "function", Function: map[string]interface{}{"name": "short", "description": strings.Repeat("d", maxToolDescriptionBytes+1)}}} {
-		if err := validateWebToolDefinitions([]ToolDef{test}); err == nil {
-			t.Fatal("Web individual limits lost")
-		}
-	}
-}
-
 func TestRestrictionsToolNamesRemainCaseSensitiveAndRoundTrip(t *testing.T) {
 	tools := []ToolDef{{Type: "function", Function: map[string]interface{}{"name": "ReadFile"}}, {Type: "function", Function: map[string]interface{}{"name": "readfile"}}}
 	req := ChatCompletionsRequest{Model: "grok-4.6", Messages: []ChatMessage{{Role: "user", Content: "hi"}}, Tools: tools,
 		ToolChoice: map[string]interface{}{"type": "function", "function": map[string]interface{}{"name": "ReadFile"}}}
 	if err := req.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	if err := validateWebToolDefinitions(tools); err != nil {
 		t.Fatal(err)
 	}
 	req.ToolChoice.(map[string]interface{})["function"].(map[string]interface{})["name"] = "READFILE"
@@ -138,17 +109,6 @@ func TestRestrictionsEmptyAndImageToolOutputs(t *testing.T) {
 	}
 	if err := validateChatMessages([]ChatMessage{{Role: "tool", Content: ""}}); err == nil {
 		t.Fatal("missing call ID accepted")
-	}
-	image := map[string]interface{}{"type": "image_url", "image_url": map[string]interface{}{"url": "https://example.com/tool.png"}}
-	for _, role := range []string{"tool", "assistant"} {
-		message := ChatMessage{Role: role, ToolCallID: "call_a", Content: []interface{}{image}}
-		if role == "assistant" {
-			message.ToolCalls = []ToolCall{{ID: "call_a", Function: map[string]interface{}{"name": "read", "arguments": "{}"}}}
-		}
-		_, attachments, err := extractMessageAndAttachmentsWithTools([]ChatMessage{message}, false, []ToolDef{{Type: "function", Function: map[string]interface{}{"name": "read"}}}, nil, true)
-		if err != nil || len(attachments) != 1 || attachments[0].Data != "https://example.com/tool.png" {
-			t.Fatalf("Web %s image history lost: %v %v", role, attachments, err)
-		}
 	}
 }
 

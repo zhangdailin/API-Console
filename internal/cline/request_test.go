@@ -2,6 +2,7 @@ package cline
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -350,18 +351,28 @@ func TestClassifyStatusTurnsTheCapIntoAKnownWindow(t *testing.T) {
 	}
 }
 
-// TestClassifyStatusRefusesToRetryForever pins the retry boundary: a 401 is
-// unauthorized (one refresh, then stop) and a 400 is final, so a broken request
-// does not burn the account's credential.
-func TestClassifyStatusRefusesToRetryForever(t *testing.T) {
-	if err := classifyStatus(401, []byte(`{"error":"unauthorized"}`)); !isUnauthorized(err) {
-		t.Errorf("classifyStatus(401) = %v, want unauthorized", err)
+// TestClassifyStatusPreservesFailures checks the one local recovery path (401)
+// and the status details handed back to callers for non-auth failures.
+func TestClassifyStatusPreservesFailures(t *testing.T) {
+	if err := classifyStatus(401, []byte(`{"error":"unauthorized"}`)); !isUnauthorized(err) || !errors.Is(err, ErrCredentialMissing) {
+		t.Errorf("classifyStatus(401) = %v, want unauthorized credential error", err)
 	}
-	if err := classifyStatus(400, []byte(`{"error":"bad"}`)); isRetryable(err) {
-		t.Errorf("classifyStatus(400) = %v, want final", err)
-	}
-	if err := classifyStatus(503, []byte(`{}`)); !isRetryable(err) {
-		t.Errorf("classifyStatus(503) = %v, want retryable", err)
+	for _, tc := range []struct {
+		status int
+		body   string
+	}{
+		{400, `{"error":"bad"}`},
+		{408, `{"error":"timeout"}`},
+		{429, `{"error":"busy"}`},
+		{503, `{"error":"unavailable"}`},
+	} {
+		err := classifyStatus(tc.status, []byte(tc.body))
+		if isUnauthorized(err) || errors.Is(err, ErrCredentialMissing) {
+			t.Errorf("classifyStatus(%d) = %v, must not trigger credential refresh", tc.status, err)
+		}
+		if !strings.Contains(err.Error(), fmt.Sprintf("status=%d", tc.status)) || !strings.Contains(err.Error(), tc.body) {
+			t.Errorf("classifyStatus(%d) = %v, want status and upstream body", tc.status, err)
+		}
 	}
 }
 

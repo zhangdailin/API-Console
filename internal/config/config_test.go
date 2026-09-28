@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"testing"
 )
@@ -11,21 +12,6 @@ func TestConfigDefaults(t *testing.T) {
 
 	if got := cfg.ChatDefaultStream(); got != true {
 		t.Fatalf("ChatDefaultStream()=%v want=true", got)
-	}
-	if got := cfg.PublicImagineNSFW(); got != true {
-		t.Fatalf("PublicImagineNSFW()=%v want=true", got)
-	}
-	if got := cfg.PublicImagineFinalMinBytes(); got != 100000 {
-		t.Fatalf("PublicImagineFinalMinBytes()=%d want=100000", got)
-	}
-	if got := cfg.PublicImagineMediumMinBytes(); got != 30000 {
-		t.Fatalf("PublicImagineMediumMinBytes()=%d want=30000", got)
-	}
-	if got := cfg.PublicAPIEnabled(); got != true {
-		t.Fatalf("PublicAPIEnabled()=%v want=true", got)
-	}
-	if got := cfg.PublicAPIKey(); got != "" {
-		t.Fatalf("PublicAPIKey()=%q want empty", got)
 	}
 	if cfg.ResponseStoreTTL != 720 {
 		t.Fatalf("ResponseStoreTTL=%d want=720", cfg.ResponseStoreTTL)
@@ -71,24 +57,18 @@ func TestConfigKeepsExplicitContextSettingsWithinBounds(t *testing.T) {
 }
 
 func TestCloneDeepCopiesReferenceFields(t *testing.T) {
-	on := true
 	original := &Config{
-		InferenceAuth:   &on,
 		TrustedProxies:  []string{"10.0.0.1"},
-		GrokCLIModelIDs: []string{"grok-test"},
 		GrokEgressNodes: []EgressNodeConfig{{Name: "primary", URL: "http://proxy"}},
 		ProxyBypass:     []string{"localhost"},
 	}
 
 	clone := original.Clone()
-	*clone.InferenceAuth = false
 	clone.TrustedProxies[0] = "10.0.0.2"
-	clone.GrokCLIModelIDs[0] = "changed"
 	clone.GrokEgressNodes[0].Name = "changed"
 	clone.ProxyBypass[0] = "example.com"
 
-	if !*original.InferenceAuth || original.TrustedProxies[0] != "10.0.0.1" ||
-		original.GrokCLIModelIDs[0] != "grok-test" || original.GrokEgressNodes[0].Name != "primary" ||
+	if original.TrustedProxies[0] != "10.0.0.1" || original.GrokEgressNodes[0].Name != "primary" ||
 		original.ProxyBypass[0] != "localhost" {
 		t.Fatalf("Clone shares mutable fields with original: %#v", original)
 	}
@@ -132,9 +112,6 @@ func TestApplyHardcodedOverridesValues(t *testing.T) {
 	if cfg.ConcurrencyTimeout != cfg.RequestTimeout {
 		t.Fatalf("ConcurrencyTimeout=%d want RequestTimeout=%d", cfg.ConcurrencyTimeout, cfg.RequestTimeout)
 	}
-	if cfg.UpstreamMode != "ws" {
-		t.Fatalf("UpstreamMode=%q want=ws", cfg.UpstreamMode)
-	}
 }
 
 func TestApplyDefaultsPreservesConfigurableFields(t *testing.T) {
@@ -172,29 +149,15 @@ func TestApplyDefaultsPreservesConfigurableFields(t *testing.T) {
 	}
 }
 
-// TestInferenceAuthOptOutSurvivesApplyDefaults pins the revert that restored
-// legacy API key authentication: an explicit inference_auth_enabled=false is a
-// deliberate operator choice and must not be overwritten by the hardcoded
-// defaults applied on every file/Redis/API round trip. An absent field keeps
-// the historical default of "enabled".
-func TestInferenceAuthOptOutSurvivesApplyDefaults(t *testing.T) {
-	disabled := false
-	cfg := Config{InferenceAuth: &disabled}
+// Legacy inference_auth_enabled values must not disable managed-key checks.
+// Unknown JSON config keys are ignored, including this removed switch.
+func TestLegacyInferenceAuthOptOutIsIgnored(t *testing.T) {
+	var cfg Config
+	if err := json.Unmarshal([]byte(`{"inference_auth_enabled":false}`), &cfg); err != nil {
+		t.Fatal(err)
+	}
 	ApplyDefaults(&cfg)
-
-	if cfg.InferenceAuth == nil {
-		t.Fatal("ApplyDefaults dropped inference_auth_enabled")
-	}
-	if *cfg.InferenceAuth {
-		t.Fatal("ApplyDefaults forced inference_auth_enabled back to true")
-	}
-	if !cfg.InferenceAuthEnabled() {
-		t.Fatal("auth must stay required even when inference_auth_enabled=false")
-	}
-
-	var unset Config
-	ApplyDefaults(&unset)
-	if !unset.InferenceAuthEnabled() {
-		t.Fatal("InferenceAuthEnabled()=false want=true when inference_auth_enabled is absent")
+	if cfg.AnonymousAllowIPs != nil {
+		t.Fatal("legacy opt-out must not introduce an anonymous allowlist")
 	}
 }

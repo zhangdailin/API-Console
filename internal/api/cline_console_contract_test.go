@@ -51,25 +51,23 @@ func TestAccountsJSListClineInTheChannelStrip(t *testing.T) {
 	if calls := strings.Count(source, "stopClineLogin();"); calls < 2 {
 		t.Errorf("stopClineLogin is called %d times, want at least 2 (open + close)", calls)
 	}
-	// A bare submit has no credential to send: it must be refused like Qoder's.
-	if !strings.Contains(source, `type === "cline" && !id`) {
-		t.Error("accounts.js lets a Cline account be submitted without the official login")
+	// All supported channels use official login for creation; only existing
+	// accounts may submit their settings through this form.
+	if !strings.Contains(source, `if (!id) {`) || !strings.Contains(source, `官方网页登录`) {
+		t.Error("accounts.js lets a new account be submitted without official login")
 	}
 }
 
-// TestCommonJSExposesTheClineCredentialLikeTheOtherOAuthChannels pins the read
-// contract: the refresh token stays server-side and the visible token is the
-// access token, which is what makes the account row show a credential at all.
-func TestCommonJSExposesTheClineCredentialLikeTheOtherOAuthChannels(t *testing.T) {
+// TestCommonJSUsesTheServerCredentialVerdict pins the current account read
+// contract: OAuth secrets stay server-side, while has_credential tells the UI
+// whether the account can be used.
+func TestCommonJSUsesTheServerCredentialVerdict(t *testing.T) {
 	source, err := readConsoleScript("common.js")
 	if err != nil {
 		t.Fatalf("read common.js: %v", err)
 	}
-	if !strings.Contains(source, `type === "cline"`) {
-		t.Error("common.js has no cline branch")
-	}
-	if !strings.Contains(source, `acc.cline_access_token`) {
-		t.Error("common.js does not expose the cline access token")
+	if !strings.Contains(source, `acc?.has_credential === true`) {
+		t.Error("common.js does not use the server's explicit credential verdict")
 	}
 }
 
@@ -88,13 +86,8 @@ func TestModelsJSListClineInTheChannelStrip(t *testing.T) {
 	}
 }
 
-// TestAccountsJSRendersTheClineRowCells pins the four columns that were empty.
-//
-// Each of them has a channel-specific branch, and a channel absent from every
-// branch falls through to a generic default that renders a dash — or worse,
-// reads the channel's empty session columns as "no credential" and calls a
-// healthy account 待补全. Cline writes no session columns at all, so it needs
-// its own branch in each renderer.
+// TestAccountsJSRendersTheClineRowCells protects the plan, quota, and
+// credential-verdict rendering used on the Cline account page.
 func TestAccountsJSRendersTheClineRowCells(t *testing.T) {
 	source, err := readConsoleScript("accounts.js")
 	if err != nil {
@@ -121,14 +114,13 @@ func TestAccountsJSRendersTheClineRowCells(t *testing.T) {
 	}
 	// 状态: the credential verdict must come from has_credential, not from the
 	// session columns this channel never writes.
-	if !strings.Contains(source, `type === 'cline'`) {
-		t.Error("evaluateAccountStatus has no Cline branch")
+	if !strings.Contains(source, `cline: '缺少 Cline WorkOS 凭据`) || !strings.Contains(source, `hasSidebarAccountCredential(acc)`) {
+		t.Error("evaluateAccountStatus does not use the server credential verdict for Cline")
 	}
 }
 
 // TestCommonJSCountsTheClineCredentialPresence pins the verdict behind the whole
-// row: without has_credential the status cell falls back to the session columns
-// that Cline never writes, and a healthy account reads 待补全.
+// row: without has_credential the status cell cannot know if Cline is authorized.
 func TestCommonJSCountsTheClineCredentialPresence(t *testing.T) {
 	source, err := readConsoleScript("common.js")
 	if err != nil {

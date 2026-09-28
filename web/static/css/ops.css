@@ -84,7 +84,6 @@
    -------------------------------------------------------------------------- */
 .ops-top {
   display: grid;
-  grid-template-columns: minmax(320px, 1fr) minmax(0, 2fr);
   gap: var(--space-4);
   margin-bottom: var(--space-4);
   align-items: stretch;
@@ -96,8 +95,6 @@
   background: var(--surface-1);
   padding: var(--space-4) var(--space-5) var(--space-5);
 }
-
-.ops-card-wide { grid-column: span 1; }
 
 /* The hero card is the tallest element of the top row, so it stretches. */
 .ops-hero { min-height: 220px; }
@@ -267,7 +264,6 @@
    -------------------------------------------------------------------------- */
 .ops-resources {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: var(--space-3);
   margin-bottom: var(--space-4);
 }
@@ -760,27 +756,14 @@ button.ops-error-row { width: 100%; border: 0; background: none; text-align: lef
 /* -----------------------------------------------------------------------------
    11. Responsive
    -------------------------------------------------------------------------- */
-@media (max-width: 1400px) {
-  .ops-resources { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
-
-@media (max-width: 1200px) {
-  .ops-top { grid-template-columns: minmax(0, 1fr); }
-  .ops-kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .ops-grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-
 @media (max-width: 900px) {
   .ops-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .ops-grid-3 { grid-template-columns: minmax(0, 1fr); }
   .ops-hero-body { grid-template-columns: minmax(0, 1fr); }
   .ops-head-filters { margin-left: 0; width: 100%; }
-  .ops-resources { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 640px) {
-  .ops-kpi-grid,
-  .ops-resources { grid-template-columns: minmax(0, 1fr); }
+  .ops-kpi-grid { grid-template-columns: minmax(0, 1fr); }
   .logs-filters { grid-template-columns: 1fr; }
   .ops-live-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

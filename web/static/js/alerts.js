@@ -100,14 +100,13 @@
         input = document.createElement('input');
         input.type = 'number';
         input.className = 'form-input';
+        input.step = '1';
         if (field.kind === 'ratio') {
           // Percent in the form, fraction on the wire.
-          input.step = '1';
           input.min = '0';
           input.max = '100';
           input.value = rules[field.key] === undefined ? '' : ratioToPercent(rules[field.key]);
         } else {
-          input.step = '1';
           input.min = String(field.min || 0);
           input.value = String(rules[field.key] === undefined ? '' : rules[field.key]);
         }
@@ -278,6 +277,16 @@
     setState('已填入默认值，尚未保存');
   }
 
+  function eventMessage(body, message) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 5;
+    td.className = 'table-empty-cell';
+    td.textContent = message;
+    tr.appendChild(td);
+    body.appendChild(tr);
+  }
+
   async function loadEvents() {
     const table = el('alertsEvents');
     if (!table) return;
@@ -293,13 +302,7 @@
         return action === 'alert_fired' || action === 'alert_recovered';
       });
       if (!rows.length) {
-        const tr = document.createElement('tr');
-        const td = document.createElement('td');
-        td.colSpan = 5;
-        td.className = 'table-empty-cell';
-        td.textContent = '保留窗口内没有触发记录。';
-        tr.appendChild(td);
-        body.appendChild(tr);
+        eventMessage(body, '保留窗口内没有触发记录。');
         return;
       }
       rows.forEach((record) => {
@@ -320,13 +323,7 @@
         body.appendChild(tr);
       });
     } catch (error) {
-      const tr = document.createElement('tr');
-      const td = document.createElement('td');
-      td.colSpan = 5;
-      td.className = 'table-empty-cell';
-      td.textContent = '读取触发记录失败：' + (error.message || error);
-      tr.appendChild(td);
-      body.appendChild(tr);
+      eventMessage(body, '读取触发记录失败：' + (error.message || error));
     }
   }
 

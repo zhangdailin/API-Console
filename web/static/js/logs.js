@@ -267,13 +267,24 @@
     return { ...meta, raw: String(event.status || '') };
   }
 
-  function statusBadge(status) {
-    const meta = statusMeta(status);
+  function badge(meta, title) {
     const span = document.createElement('span');
     span.className = 'logs-badge ' + meta.tone;
     span.textContent = meta.label;
-    span.title = text(status, '—');
+    span.title = title;
     return span;
+  }
+
+  function resultBadge(record) {
+    const outcome = outcomeMeta(record);
+    if (outcome) return badge(outcome, outcome.raw ? outcome.label + '（上游返回 ' + outcome.raw + '）' : outcome.label);
+    const status = (record.event || {}).status;
+    return badge(statusMeta(status), text(status, '—'));
+  }
+
+  function attemptFailed(attempt) {
+    const status = String(attempt.status || '').toLowerCase();
+    return status !== 'success' && status !== 'ok';
   }
 
   function filters() {
@@ -442,19 +453,7 @@
 
       const status = document.createElement('td');
       status.className = 'logs-cell-status';
-      const outcome = outcomeMeta(record);
-      if (outcome) {
-        const span = document.createElement('span');
-        span.className = 'logs-badge ' + outcome.tone;
-        span.textContent = outcome.label;
-        // The upstream's own word for the finish is still available: a stream that
-        // died reads as 流中断 above and 正常结束 in the tooltip, which is the honest
-        // pair of statements.
-        span.title = outcome.raw ? outcome.label + '（上游返回 ' + outcome.raw + '）' : outcome.label;
-        status.appendChild(span);
-      } else {
-        status.appendChild(statusBadge(event.status));
-      }
+      status.appendChild(resultBadge(record));
       tr.appendChild(status);
 
       const duration = document.createElement('td');
@@ -557,14 +556,7 @@
     // --- outcome first: a failing request is the usual reason this panel is open ---
     const outcomeRow = document.createElement('div');
     outcomeRow.className = 'logs-detail-outcome';
-    const badge = outcome ? (() => {
-      const span = document.createElement('span');
-      span.className = 'logs-badge ' + outcome.tone;
-      span.textContent = outcome.label;
-      span.title = outcome.raw ? outcome.label + '（上游返回 ' + outcome.raw + '）' : outcome.label;
-      return span;
-    })() : statusBadge(event.status);
-    outcomeRow.appendChild(badge);
+    outcomeRow.appendChild(resultBadge(record));
     // The journal's own status is worth printing when it says something the class
     // does not (an upstream finish reason like "length"). For records written with
     // the class in that field it would just repeat the badge in another language,
@@ -687,18 +679,17 @@
 
     const attempts = record.attempts || [];
     if (attempts.length) {
-      const failures = attempts.filter((attempt) => String(attempt.status || '').toLowerCase() !== 'success' && String(attempt.status || '').toLowerCase() !== 'ok').length;
+      const failures = attempts.filter(attemptFailed).length;
       panel.appendChild(sectionTitle(`上游尝试（${attempts.length} 次${failures ? '，其中失败 ' + failures + ' 次' : ''}）`));
       const ul = document.createElement('ul');
       ul.className = 'logs-attempts';
       attempts.forEach((attempt) => {
         const li = document.createElement('li');
         li.className = 'logs-attempt';
-        const failed = String(attempt.status || '').toLowerCase() !== 'success' && String(attempt.status || '').toLowerCase() !== 'ok';
-        if (failed) li.classList.add('is-failed');
+        if (attemptFailed(attempt)) li.classList.add('is-failed');
         const head = document.createElement('div');
         head.textContent = `第 ${text(attempt.attempt, '?')} 次 · ${text(attempt.provider, '—')} · ${attempt.duration_ms || 0} ms`;
-        head.appendChild(statusBadge(attempt.status));
+        head.appendChild(badge(statusMeta(attempt.status), text(attempt.status, '—')));
         li.appendChild(head);
         const meta = document.createElement('div');
         meta.className = 'ops-empty';
@@ -994,6 +985,16 @@
     }
   }
 
+  function clearFilters() {
+    FILTER_INPUTS.forEach((entry) => {
+      const node = el(entry.id);
+      if (node) node.value = '';
+    });
+    state.cursor = '';
+    syncUrl();
+    load(false);
+  }
+
   function bind() {
     const applied = readUrlScope();
     // A drill-down arrives with filters in force: show the form open so the scope
@@ -1023,29 +1024,9 @@
     const reload = el('logsReload');
     if (reload) reload.addEventListener('click', () => { state.cursor = ''; load(false); });
     const clear = el('logsClear');
-    if (clear) {
-      clear.addEventListener('click', () => {
-        FILTER_INPUTS.forEach((entry) => {
-          const node = el(entry.id);
-          if (node) node.value = '';
-        });
-        state.cursor = '';
-        syncUrl();
-        load(false);
-      });
-    }
+    if (clear) clear.addEventListener('click', clearFilters);
     const scopeClear = el('logsScopeClear');
-    if (scopeClear) {
-      scopeClear.addEventListener('click', () => {
-        FILTER_INPUTS.forEach((entry) => {
-          const node = el(entry.id);
-          if (node) node.value = '';
-        });
-        state.cursor = '';
-        syncUrl();
-        load(false);
-      });
-    }
+    if (scopeClear) scopeClear.addEventListener('click', clearFilters);
     const scopeBack = el('logsScopeBack');
     if (scopeBack) {
       scopeBack.addEventListener('click', () => {

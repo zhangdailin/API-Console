@@ -36,9 +36,6 @@ type Result struct {
 	CostInUSDTicks int64
 }
 
-// officialTTSCharacterTicks is xAI's $15 per 1M characters, per character.
-const officialTTSCharacterTicks int64 = 150_000
-
 // tokenPrice is one row of the official text table. The *Ticks values are
 // integer USD ticks per token; LongContextTokens is the input size above which
 // the long-context column applies.
@@ -295,11 +292,6 @@ func scanReservationJSON(body []byte) (model string, inputTokens, outputTokens i
 // / EstimateOfficialVideoCost. The image and video planes are billed per produced
 // asset rather than per token, so they get their own estimators instead of a
 // token table.
-
-const (
-	officialImageEditInputTicks int64 = 100_000_000
-	officialLiteImageInputTicks int64 = 20_000_000
-)
 
 // ── Cost reconstruction (PricingBreakdown) ────────────────────────────────────
 //

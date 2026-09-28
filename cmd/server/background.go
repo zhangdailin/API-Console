@@ -18,29 +18,6 @@ import (
 	"orchids-api/internal/workbuddy"
 )
 
-func preserveLatestAccountStatus(ctx context.Context, s *store.Store, acc *store.Account) {
-	if s == nil || acc == nil || acc.ID == 0 {
-		return
-	}
-	latest, err := s.GetAccount(ctx, acc.ID)
-	if err != nil || latest == nil {
-		return
-	}
-
-	latestStatus := strings.TrimSpace(latest.StatusCode)
-	if latestStatus == "" {
-		return
-	}
-
-	// Auto refresh works on a snapshot loaded at loop start. Preserve newer
-	// request-path status markers so a successful token/quota sync does not
-	// accidentally clear a recent blocked/cooldown state in Redis.
-	if strings.TrimSpace(acc.StatusCode) == "" {
-		acc.StatusCode = latestStatus
-		acc.LastAttempt = latest.LastAttempt
-	}
-}
-
 const providerHealthRefreshInterval = 30 * time.Minute
 
 // grokRefreshHub is shared by the admin check path and the refresh scheduler.
@@ -310,9 +287,8 @@ func startTokenRefreshLoop(ctx context.Context, configSnapshot func() *config.Co
 			slog.Error("Auto refresh token: list accounts failed", "error", err)
 			return
 		}
-		// SSO accounts that carry no verdict at all. buildGrokRefreshCandidates
-		// skips credentials the upstream already rejected, so these are collected
-		// separately and always verified, newest first.
+		// Refresh enabled accounts by provider; each provider checks its own
+		// catalog, quota, or credential cadence before contacting upstream.
 		for _, acc := range accounts {
 			if strings.EqualFold(acc.AccountType, "qoder") {
 				refreshQoderCatalog(refreshCtx, cfg, s, acc)

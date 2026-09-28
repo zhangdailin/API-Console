@@ -216,15 +216,6 @@ func apiKeyToken(r *http.Request) string {
 	return strings.TrimSpace(r.Header.Get("x-api-key"))
 }
 
-func writeBearerUnauthorized(w http.ResponseWriter, message string) {
-	w.Header().Set("WWW-Authenticate", "Bearer")
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusUnauthorized)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"detail": message,
-	})
-}
-
 func SessionAuthDynamic(credentials func() (adminPass, adminToken string), next http.HandlerFunc) http.HandlerFunc {
 	// Every admin entrance — browser session, static token, basic auth — passes
 	// through here, which makes it the one place that can journal administrative
@@ -250,22 +241,6 @@ func SessionAuthDynamic(credentials func() (adminPass, adminToken string), next 
 			}
 		}
 
-		queryKeys := []string{
-			strings.TrimSpace(r.URL.Query().Get("app_key")),
-			strings.TrimSpace(r.URL.Query().Get("public_key")),
-		}
-		for _, queryKey := range queryKeys {
-			if queryKey == "" {
-				continue
-			}
-			for _, secret := range secrets {
-				if secret != "" && util.SecureCompare(queryKey, secret) {
-					audited(w, r)
-					return
-				}
-			}
-		}
-
 		_, pass, ok := r.BasicAuth()
 		if ok && util.SecureCompare(pass, adminPass) {
 			audited(w, r)
@@ -273,59 +248,5 @@ func SessionAuthDynamic(credentials func() (adminPass, adminToken string), next 
 		}
 
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-	}
-}
-
-func PublicKeyAuth(publicKey string, next http.HandlerFunc) http.HandlerFunc {
-	key := strings.TrimSpace(publicKey)
-	return func(w http.ResponseWriter, r *http.Request) {
-		if key == "" {
-			// Project override: empty public_key means no auth on public APIs.
-			next(w, r)
-			return
-		}
-
-		token := bearerToken(r)
-		if token == "" {
-			writeBearerUnauthorized(w, "Missing authentication token")
-			return
-		}
-		if !util.SecureCompare(token, key) {
-			writeBearerUnauthorized(w, "Invalid authentication token")
-			return
-		}
-		next(w, r)
-	}
-}
-
-func PublicImagineStreamAuth(publicKey string, next http.HandlerFunc) http.HandlerFunc {
-	key := strings.TrimSpace(publicKey)
-	return func(w http.ResponseWriter, r *http.Request) {
-		taskID := strings.TrimSpace(r.URL.Query().Get("task_id"))
-		if taskID != "" {
-			next(w, r)
-			return
-		}
-
-		if key == "" {
-			// Project override: empty public_key means no auth on public APIs.
-			next(w, r)
-			return
-		}
-
-		queryKey := strings.TrimSpace(r.URL.Query().Get("public_key"))
-		if queryKey == "" {
-			if token := bearerToken(r); util.SecureCompare(token, key) {
-				next(w, r)
-				return
-			}
-			writeBearerUnauthorized(w, "Missing authentication token")
-			return
-		}
-		if !util.SecureCompare(queryKey, key) {
-			writeBearerUnauthorized(w, "Invalid authentication token")
-			return
-		}
-		next(w, r)
 	}
 }

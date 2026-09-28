@@ -418,9 +418,38 @@ async function loadApiKeys() {
   }
 }
 
+// Both table rows and mobile cards use the same delegated key actions.
+function bindApiKeyActions(container) {
+  container.onclick = (event) => {
+    const actionEl = event.target.closest("[data-action]");
+    if (!actionEl || !container.contains(actionEl)) return;
+    const id = decodeData(actionEl.dataset.id || "");
+    if (!id) return;
+    switch (actionEl.dataset.action) {
+      case "edit-key":
+        openEditKeyModal(id);
+        break;
+      case "rotate-key":
+        rotateApiKey(id);
+        break;
+      case "delete-key":
+        openDeleteKeyModal(id, actionEl.dataset.label ? decodeURIComponent(actionEl.dataset.label) : "");
+        break;
+    }
+  };
+
+  container.onchange = (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement) || target.dataset.action !== "toggle-key") return;
+    const id = decodeData(target.dataset.id || "");
+    if (id) toggleKeyStatus(id, target.checked);
+  };
+}
+
 // Render API Keys table
 function renderApiKeys() {
   const container = document.getElementById("keysList");
+  bindApiKeyActions(container);
   if (apiKeys.length === 0) {
     container.innerHTML = "";
     const empty = document.createElement("div");
@@ -576,34 +605,6 @@ function renderApiKeys() {
   tip.appendChild(tipRow);
   container.appendChild(tip);
 
-  container.onclick = (e) => {
-    // The masked token is deliberately not copyable: the server keeps only the
-    // hash, so the string shown here is not a key and copying it produced a
-    // client that could never authenticate.
-    const actionEl = e.target.closest("[data-action]");
-    if (!actionEl || !container.contains(actionEl)) return;
-    const action = actionEl.dataset.action;
-    if (action === "edit-key") {
-      const id = decodeData(actionEl.dataset.id || "");
-      if (id) openEditKeyModal(id);
-    } else if (action === "rotate-key") {
-      const id = decodeData(actionEl.dataset.id || "");
-      if (id) rotateApiKey(id);
-    } else if (action === "delete-key") {
-      const id = decodeData(actionEl.dataset.id || "");
-      const label = actionEl.dataset.label ? decodeURIComponent(actionEl.dataset.label) : "";
-      if (id) openDeleteKeyModal(id, label);
-    }
-  };
-
-  container.onchange = (e) => {
-    const target = e.target;
-    if (!(target instanceof HTMLInputElement)) return;
-    if (target.dataset.action !== "toggle-key") return;
-    const id = decodeData(target.dataset.id || "");
-    if (!id) return;
-    toggleKeyStatus(id, target.checked);
-  };
 }
 
 function renderApiKeysMobile(container) {
@@ -652,32 +653,6 @@ function renderApiKeysMobile(container) {
   `;
   container.appendChild(tip);
 
-  container.onclick = (e) => {
-    // The masked token is deliberately not copyable here either: only its hash
-    // is stored, so the displayed string is not a key.
-    const actionEl = e.target.closest("[data-action]");
-    if (!actionEl || !container.contains(actionEl)) return;
-    if (actionEl.dataset.action === "edit-key") {
-      const id = decodeData(actionEl.dataset.id || "");
-      if (id) openEditKeyModal(id);
-    } else if (actionEl.dataset.action === "rotate-key") {
-      const id = decodeData(actionEl.dataset.id || "");
-      if (id) rotateApiKey(id);
-    } else if (actionEl.dataset.action === "delete-key") {
-      const id = decodeData(actionEl.dataset.id || "");
-      const label = actionEl.dataset.label ? decodeURIComponent(actionEl.dataset.label) : "";
-      if (id) openDeleteKeyModal(id, label);
-    }
-  };
-
-  container.onchange = (e) => {
-    const target = e.target;
-    if (!(target instanceof HTMLInputElement)) return;
-    if (target.dataset.action !== "toggle-key") return;
-    const id = decodeData(target.dataset.id || "");
-    if (!id) return;
-    toggleKeyStatus(id, target.checked);
-  };
 }
 
 function parseAllowedModels(value) {

@@ -23,8 +23,6 @@ import (
 	apperrors "orchids-api/internal/errors"
 )
 
-const maxEditImageBytes = 50 * 1024 * 1024
-
 var cacheBaseDir = filepath.Join("data", "tmp")
 
 const grokModelValidationCacheTTL = 3 * time.Second
@@ -62,15 +60,6 @@ type chatAccountSession struct {
 	token          string
 	poolCandidates []string
 	release        func()
-}
-
-type imageEditUploadInput struct {
-	mime string
-	data []byte
-}
-
-type imageEditReference struct {
-	fileID string
 }
 
 func NewHandler(cfg *config.Config, lb *loadbalancer.LoadBalancer) *Handler {
@@ -384,7 +373,7 @@ func (h *Handler) resolveConversationModel(ctx context.Context, modelID string) 
 		}
 		for _, candidate := range acc.GrokModels {
 			if strings.EqualFold(strings.TrimSpace(candidate), id) {
-				spec := ModelSpec{ID: id, Name: id, UpstreamModel: strings.TrimSpace(candidate), Tier: grokTierSuper, Upstream: UpstreamCLI}
+				spec := ModelSpec{ID: id, Name: id, UpstreamModel: strings.TrimSpace(candidate), Upstream: UpstreamCLI}
 				return h.applyPersistedRoute(ctx, spec), true
 			}
 		}
@@ -653,8 +642,6 @@ func (s *chatAccountSession) Close() {
 	s.release = nil
 }
 
-type grokAccountStatusPolicy func(error) bool
-
 func markAllGrokAccountStatuses(err error) bool {
 	if err == nil {
 		return false
@@ -672,13 +659,6 @@ func markAllGrokAccountStatuses(err error) bool {
 		return false
 	}
 	return true
-}
-
-func skipExternalAttachmentFetchGrokAccountStatus(err error) bool {
-	if err == nil {
-		return false
-	}
-	return !strings.Contains(strings.ToLower(err.Error()), "fetch url status=")
 }
 
 func shouldSwitchGrokAccount(err error) bool {

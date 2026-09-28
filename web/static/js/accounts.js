@@ -11,14 +11,12 @@ const domCache = {
     accountsList: null,
     paginationInfo: null,
     paginationControls: null,
-    accountImportStatus: null,
 };
 
 function initDOMCache() {
     domCache.accountsList = document.getElementById("accountsList");
     domCache.paginationInfo = document.getElementById("paginationInfo");
     domCache.paginationControls = document.getElementById("paginationControls");
-    domCache.accountImportStatus = document.getElementById("accountImportStatus");
 }
 
 // Load accounts from API
@@ -142,54 +140,29 @@ function getQuotaStats(acc) {
       modelCount: Array.isArray(acc.cline_model_ids) ? acc.cline_model_ids.length : 0,
     };
   }
-  if (type === "workbuddy") {
+  if (type === "workbuddy" || type === "qoder") {
+    // Both channels use quota_* snapshots rather than generic usage columns.
+    // WorkBuddy derives spent credits from the meter; Qoder reports quota_used.
     const base = getSidebarQuotaStats(acc);
-    if (!base) {
-      return { supported: false, unknown: true, limit: 0, remaining: 0, used: 0, pctRemaining: 0 };
-    }
+    if (!base) return { supported: false, unknown: true, limit: 0, remaining: 0, used: 0, pctRemaining: 0 };
     const limit = Math.max(0, base.limit || 0);
     const remaining = Math.max(0, base.remaining || 0);
-    const used = Math.max(0, limit - remaining);
-    const pctRemaining = limit > 0 ? Math.min(100, Math.round((remaining / limit) * 100)) : 0;
+    const qoder = type === "qoder";
     return {
       ...base,
       limit,
       remaining,
-      used,
-      pctRemaining,
-      workbuddy: true,
+      used: qoder ? Math.max(0, Number(acc.quota_used || 0)) : Math.max(0, limit - remaining),
+      pctRemaining: limit > 0 ? Math.min(100, Math.round((remaining / limit) * 100)) : 0,
+      ...(qoder ? {
+        qoder: true,
+        // Gateway exhaustion is authoritative even before counters refresh.
+        exhausted: acc.quota_exhausted === true,
+        plan: base.plan || "",
+        upgradeUrl: String(acc.quota_upgrade_url || "").trim(),
+      } : { workbuddy: true, packageRemaining: base.packageRemaining || 0 }),
       unit: base.unit || "credits",
       resetAt: base.resetAt || "",
-      packageRemaining: base.packageRemaining || 0,
-    };
-  }
-  if (type === "qoder") {
-    // The channel reads the credit window and the plan tier from the gateway's
-    // own quota endpoints. Both are reported as quota_* fields; the generic
-    // usage columns are 0 for this channel, so reading them would show a fake
-    // empty balance for an account that has credits.
-    const base = getSidebarQuotaStats(acc);
-    if (!base) {
-      return { supported: false, unknown: true, limit: 0, remaining: 0, used: 0, pctRemaining: 0 };
-    }
-    const limit = Math.max(0, base.limit || 0);
-    const remaining = Math.max(0, base.remaining || 0);
-    const used = Math.max(0, Number(acc.quota_used || 0));
-    const pctRemaining = limit > 0 ? Math.min(100, Math.round((remaining / limit) * 100)) : 0;
-    return {
-      ...base,
-      limit,
-      remaining,
-      used,
-      pctRemaining,
-      qoder: true,
-      // An exhausted window has nothing left even when the counters have not
-      // refreshed yet, because the gateway's verdict is authoritative.
-      exhausted: acc.quota_exhausted === true,
-      plan: base.plan || "",
-      unit: base.unit || "credits",
-      resetAt: base.resetAt || "",
-      upgradeUrl: String(acc.quota_upgrade_url || "").trim(),
     };
   }
   // Build billing and response throttling are different xAI products. Never
@@ -214,47 +187,27 @@ function getQuotaStats(acc) {
     // provenance in the tooltip) so it can never be read as an official balance.
     const provenance = quotaProvenance(acc);
     const estimatedLimit = Math.max(0, Number(acc.quota_limit || 0));
-    if (provenance.confidence === "estimated" && estimatedLimit > 0) {
+    const estimated = provenance.confidence === "estimated";
+    const confirmedFree = provenance.confidence === "confirmed" && provenance.source === "upstreamExhaustion";
+    if (estimatedLimit > 0 && (estimated || confirmedFree)) {
+      // Confirmed Free is an upstream-reported balance, never labelled "≈".
       const used = Math.max(0, Math.min(estimatedLimit, Number(acc.quota_used || 0)));
       const remaining = Math.max(0, estimatedLimit - used);
       return {
         supported: true,
-        estimated: true,
+        ...(estimated ? { estimated: true } : { confirmedFree: true }),
         limit: estimatedLimit,
         used,
         remaining,
-        pctRemaining: estimatedLimit > 0 ? Math.max(0, Math.min(100, Math.round((remaining / estimatedLimit) * 100))) : 0,
+        pctRemaining: Math.max(0, Math.min(100, Math.round((remaining / estimatedLimit) * 100))),
         unit: acc.quota_unit || "tokens",
         windowHours: provenance.windowHours || 24,
         source: provenance.source,
         confidence: provenance.confidence,
-        limitKnown: provenance.limitKnown,
+        limitKnown: confirmedFree || provenance.limitKnown,
         observed: provenance.observed,
         note: provenance.note,
-        resetAt: "",
-      };
-    }
-    // The upstream confirmed the Free window by refusing a request for spending it.
-    // That pair is a real balance, so it is rendered without "≈" — but it is still
-    // labelled as a Free window rather than a paid plan's allowance.
-    if (provenance.confidence === "confirmed" && provenance.source === "upstreamExhaustion" && estimatedLimit > 0) {
-      const used = Math.max(0, Math.min(estimatedLimit, Number(acc.quota_used || 0)));
-      const remaining = Math.max(0, estimatedLimit - used);
-      return {
-        supported: true,
-        confirmedFree: true,
-        limit: estimatedLimit,
-        used,
-        remaining,
-        pctRemaining: estimatedLimit > 0 ? Math.max(0, Math.min(100, Math.round((remaining / estimatedLimit) * 100))) : 0,
-        unit: acc.quota_unit || "tokens",
-        windowHours: provenance.windowHours || 24,
-        source: provenance.source,
-        confidence: provenance.confidence,
-        limitKnown: true,
-        observed: provenance.observed,
-        note: provenance.note,
-        resetAt: acc.quota_reset_at || "",
+        resetAt: confirmedFree ? acc.quota_reset_at || "" : "",
       };
     }
     return { supported: false, limit: 0, remaining: 0, used: 0, pctRemaining: 0, quotaUnavailable: true };
@@ -267,10 +220,6 @@ function getQuotaStats(acc) {
   const used = Math.max(0, limit - remaining);
   const pctRemaining = limit > 0 ? Math.min(100, Math.round((remaining / limit) * 100)) : 0;
   return { ...base, limit, remaining, used, pctRemaining };
-}
-
-function getAccountToken(acc) {
-  return getSidebarAccountToken(acc);
 }
 
 function normalizeAccountSubscription(acc) {
@@ -434,9 +383,6 @@ function buildSubscriptionMarkup(acc) {
 
 function applyTokenLabels(type) {
   const normalized = String(type || "").trim().toLowerCase();
-  const label = document.getElementById("tokenLabel");
-  const input = document.getElementById("clientCookie");
-  const hint = document.getElementById("tokenHint");
   const accountId = String(document.getElementById("accountId")?.value || "");
   // WorkBuddy login stays available while editing so an expired authorization can
   // be renewed by signing in again instead of deleting the account.
@@ -461,37 +407,6 @@ function applyTokenLabels(type) {
     saveButton.hidden = loginOnlyChannel && !accountId;
   }
   applyCredentialModeUI(normalized);
-  if (!label || !input || !hint) return;
-  if (!input.required) input.value = "";
-  if (normalized === 'workbuddy') {
-    // OAuth-only channel: no manual credential field is exposed.
-    input.value = "";
-    input.required = false;
-    label.textContent = "WorkBuddy 凭证";
-    input.placeholder = "";
-    hint.textContent = "该渠道只支持官方登录";
-  } else if (normalized === 'qoder') {
-    // OAuth-only channel: there is deliberately no PAT field to fill in.
-    input.value = "";
-    input.required = false;
-    label.textContent = "Qoder 凭证";
-    input.placeholder = "";
-    hint.textContent = "该渠道只支持官方设备授权登录";
-  } else if (normalized === 'grok') {
-    input.value = "";
-    input.required = false;
-    label.textContent = "Grok Build OAuth";
-    input.placeholder = "";
-    hint.textContent = "Grok 仅支持 xAI 官方设备授权登录";
-  } else {
-    label.textContent = "Cookie / __client / __session";
-    input.placeholder = "支持原始 __client、完整 Cookie Header 或 Cookie JSON";
-    hint.textContent = accountId
-      ? "支持直接粘贴 "
-      : "支持原始 __client、完整 Cookie Header 或 Cookie JSON；推荐同时带上 __client_uat 以提高补全成功率";
-    input.required = true;
-  }
-  if (accountId) input.required = false;
 }
 
 // Grok exposes a server-owned device-auth protocol. The lifecycle is shared
@@ -610,110 +525,9 @@ function resetGrokDeviceLoginStatus() { grokDeviceLogin.reset(); }
 function stopGrokDeviceLogin(cancel = false) { grokDeviceLogin.stop(cancel); }
 function startGrokDeviceLogin() { return grokDeviceLogin.start(); }
 
-// Grok is Build OAuth-only. Other channels retain their existing generic
-// manual credential or official-login behavior.
 function applyCredentialModeUI(type) {
-  const normalizedType = String(type || "").trim().toLowerCase();
-  const loginOnlyChannel = ["grok", "workbuddy", "qoder", "cline"].includes(normalizedType);
-  const credentialGroup = document.getElementById("ssoCredentialGroup");
-  if (credentialGroup) credentialGroup.hidden = loginOnlyChannel;
-  ["oauthCredentialGroup", "oauthRefreshGroup", "oauthExpiresGroup"].forEach((id) => {
-    const group = document.getElementById(id);
-    if (group) group.hidden = true;
-  });
   const grokDeviceLoginGroup = document.getElementById("grokDeviceLoginGroup");
-  if (grokDeviceLoginGroup) grokDeviceLoginGroup.hidden = normalizedType !== "grok";
-  const clientCookie = document.getElementById("clientCookie");
-  if (clientCookie) clientCookie.required = !loginOnlyChannel;
-}
-
-function splitBatchCredentialInput(raw) {
-  const text = String(raw || "").trim();
-  if (!text) return [];
-  if (/^[\[{]/.test(text)) {
-    return [text];
-  }
-  const lines = text
-    .split(/\r?\n/)
-    .map(line => line.trim())
-    .filter(Boolean);
-  if (lines.length > 1) {
-    return lines;
-  }
-  return [text];
-}
-
-function normalizeCredentialForType(type, credential) {
-  const normalizedType = String(type || "").trim().toLowerCase();
-  const raw = String(credential || "").trim();
-  if (!raw) return "";
-
-  return raw;
-}
-
-function buildCredentialFingerprint(type, credential) {
-  const normalizedType = String(type || "").trim().toLowerCase();
-  const normalizedCredential = normalizeCredentialForType(normalizedType, credential);
-  if (!normalizedType || !normalizedCredential) return "";
-  return `${normalizedType}:${normalizedCredential}`;
-}
-
-function collectExistingCredentialFingerprints(type, excludeId = "") {
-  const normalizedType = String(type || "").trim().toLowerCase();
-  const excluded = String(excludeId || "").trim();
-  const seen = new Set();
-  (Array.isArray(accounts) ? accounts : []).forEach((acc) => {
-    if (!acc) return;
-    if (String(acc.id || "") === excluded) return;
-    if (normalizeAccountType(acc) !== normalizedType) return;
-    const token = getAccountToken(acc);
-    const key = buildCredentialFingerprint(normalizedType, token);
-    if (key) seen.add(key);
-  });
-  return seen;
-}
-
-function dedupeCredentialInputs(type, credentials) {
-  const unique = [];
-  const duplicates = [];
-  const seen = new Set();
-
-  (Array.isArray(credentials) ? credentials : []).forEach((credential) => {
-    const trimmed = String(credential || "").trim();
-    if (!trimmed) return;
-    const key = buildCredentialFingerprint(type, trimmed) || `raw:${trimmed}`;
-    if (seen.has(key)) {
-      duplicates.push(trimmed);
-      return;
-    }
-    seen.add(key);
-    unique.push(trimmed);
-  });
-
-  return { unique, duplicates };
-}
-
-function filterExistingCredentialConflicts(type, credentials, excludeId = "") {
-  const existing = collectExistingCredentialFingerprints(type, excludeId);
-  const accepted = [];
-  const conflicts = [];
-
-  (Array.isArray(credentials) ? credentials : []).forEach((credential) => {
-    const trimmed = String(credential || "").trim();
-    if (!trimmed) return;
-    const key = buildCredentialFingerprint(type, trimmed);
-    if (key && existing.has(key)) {
-      conflicts.push(trimmed);
-      return;
-    }
-    accepted.push(trimmed);
-  });
-
-  return { accepted, conflicts };
-}
-
-function getAccountImportStatusNode() {
-  return domCache.accountImportStatus || document.getElementById("accountImportStatus");
+  if (grokDeviceLoginGroup) grokDeviceLoginGroup.hidden = String(type || "").trim().toLowerCase() !== "grok";
 }
 
 function escapeImportStatusText(text) {
@@ -721,53 +535,6 @@ function escapeImportStatusText(text) {
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
-}
-
-function clearAccountImportStatus() {
-  const node = getAccountImportStatusNode();
-  if (!node) return;
-  node.hidden = true;
-  node.classList.remove("is-active", "is-error");
-  node.innerHTML = "";
-}
-
-function renderAccountImportStatus(message, type = "info", details = []) {
-  const node = getAccountImportStatusNode();
-  if (!node) return;
-
-  const safeMessage = escapeImportStatusText(message);
-  const rows = Array.isArray(details) ? details.filter(Boolean).slice(0, 8) : [];
-  const detailHTML = rows.length > 0
-    ? `<div style="margin-top:8px">${rows.map((item) => `<div><code>${escapeImportStatusText(item)}</code></div>`).join("")}</div>`
-    : "";
-
-  node.hidden = false;
-  node.classList.toggle("is-active", type === "info");
-  node.classList.toggle("is-error", type === "error");
-  node.innerHTML = `<strong>${safeMessage}</strong>${detailHTML}`;
-}
-
-function buildAccountPayload(type, baseData, credential) {
-  const payload = { ...baseData };
-  if (type === "grok" && String(baseData.credential_type || "").toLowerCase() === "oauth") {
-    // OAuth fields already carried in baseData; do not write a client_cookie.
-    delete payload.client_cookie;
-    return payload;
-  }
-  if (type === "qoder") {
-    // Qoder is OAuth-only: the credential belongs to the browser device flow
-    // and there is no manual field, so the form only carries settings.
-    delete payload.refresh_token;
-    delete payload.client_cookie;
-  } else if (type === "cline") {
-    // Cline is OAuth-only for the same reason: the WorkOS device grant is the
-    // only source of the credential.
-    delete payload.refresh_token;
-    delete payload.client_cookie;
-  } else {
-    payload.client_cookie = credential;
-  }
-  return payload;
 }
 
 function accountTypeLabel(type) {
@@ -817,10 +584,7 @@ function setAccountModalType(type) {
   applyTokenLabels(normalized);
 }
 
-// extractAdminErrorDetail turns an admin API error body into the sentence an
-// operator should read. Create/update endpoints answer with the standard
-// {"error":{"type":...,"message":...}} envelope, and showing that JSON verbatim
-// hides the actionable part ("upstream rejected this credential") behind braces.
+// extractAdminErrorDetail keeps update failures readable without exposing raw JSON.
 function extractAdminErrorDetail(raw) {
   const text = String(raw == null ? "" : raw).trim();
   if (!text) return "";
@@ -835,69 +599,6 @@ function extractAdminErrorDetail(raw) {
     /* a plain-text error body is already the detail */
   }
   return text;
-}
-
-async function createAccount(payload) {
-  const res = await fetch("/api/accounts", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Account-Sync": "async",
-    },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    throw new Error(extractAdminErrorDetail(await res.text()));
-  }
-  return res.json();
-}
-
-function summarizeAccountCreateError(err) {
-  const message = String(err && err.message ? err.message : err || "").trim();
-  if (!message) return "未知错误";
-  const compact = message.replace(/\s+/g, " ");
-  return compact.length > 160 ? `${compact.slice(0, 157)}...` : compact;
-}
-
-async function runAccountCreatePool(payloads, concurrency = 6, onProgress = null) {
-  let nextIndex = 0;
-  let success = 0;
-  let failed = 0;
-  let completed = 0;
-  const failures = [];
-  const size = Math.max(1, Math.min(concurrency, payloads.length || 1));
-
-  async function worker() {
-    while (nextIndex < payloads.length) {
-      const currentIndex = nextIndex;
-      nextIndex += 1;
-      const payload = payloads[currentIndex];
-      try {
-        await createAccount(payload);
-        success += 1;
-      } catch (err) {
-        failed += 1;
-        failures.push(`#${currentIndex + 1} ${summarizeAccountCreateError(err)}`);
-        console.error("Failed to create account:", err);
-      } finally {
-        completed += 1;
-        if (typeof onProgress === "function") {
-          onProgress({
-            total: payloads.length,
-            completed,
-            success,
-            failed,
-            currentIndex,
-            payload,
-            failures,
-          });
-        }
-      }
-    }
-  }
-
-  await Promise.all(Array.from({ length: size }, () => worker()));
-  return { success, failed, failures };
 }
 
 // The console's channel strip, shared with 模型管理: the same channels, in the same
@@ -1024,33 +725,21 @@ function evaluateAccountStatus(acc) {
     }
   }
 
-  const type = normalizeAccountType(acc);
-  if (type === 'grok') {
-    // OAuth secrets are redacted by the account list API. credential_type is
-    // the safe indicator that the server holds a Build OAuth credential.
-    if (!hasSidebarAccountCredential(acc)) {
-      return { normal: false, text: '待登录', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.16)', tip: '缺少 Build OAuth 授权' };
-    }
-  } else if (type === 'workbuddy') {
-    if (!hasSidebarAccountCredential(acc)) {
-      return { normal: false, text: '待补全', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.16)', tip: '缺少 WorkBuddy 凭证（refreshToken / accessToken）' };
-    }
-  } else if (type === 'qoder') {
-    // Qoder is OAuth-only too, and the device credential never leaves the
-    // server: has_credential is the indicator the API provides. Falling through
-    // to the generic branch read its empty session columns as "no credential",
-    // so a working account was shown as 待补全 (缺少会话信息).
-    if (!hasSidebarAccountCredential(acc)) {
-      return { normal: false, text: '待补全', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.16)', tip: '缺少 Qoder 设备凭据，请重新使用官方网页登录' };
-    }
-  } else if (type === 'cline') {
-    // Same trap as Qoder: a Cline account writes no session columns at all, so
-    // the generic branch below would call a healthy account 待补全.
-    if (!hasSidebarAccountCredential(acc)) {
-      return { normal: false, text: '待补全', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.16)', tip: '缺少 Cline WorkOS 凭据，请重新使用官方网页登录' };
-    }
-  } else if (!acc.session_id && !acc.session_cookie) {
-    return { normal: false, text: '待补全', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.16)', tip: '缺少会话信息' };
+  if (!hasSidebarAccountCredential(acc)) {
+    const type = normalizeAccountType(acc);
+    const tips = {
+      grok: '缺少 Build OAuth 授权',
+      workbuddy: '缺少 WorkBuddy 凭证（refreshToken / accessToken）',
+      qoder: '缺少 Qoder 设备凭据，请重新使用官方网页登录',
+      cline: '缺少 Cline WorkOS 凭据，请重新使用官方网页登录',
+    };
+    return {
+      normal: false,
+      text: type === 'grok' ? '待登录' : '待补全',
+      color: '#f59e0b',
+      bg: 'rgba(245, 158, 11, 0.16)',
+      tip: tips[type] || '缺少账号凭据',
+    };
   }
 
   const quota = getQuotaStats(acc);
@@ -1432,29 +1121,7 @@ function renderAccounts() {
   renderPagination(currentPage, totalPages);
   updateSelectedCount();
 
-  container.onclick = (e) => {
-    const actionEl = e.target.closest("[data-action]");
-    if (!actionEl || !container.contains(actionEl)) return;
-    const action = actionEl.dataset.action;
-    const idRaw = actionEl.dataset.id || "";
-    const id = parseDataId(idRaw);
-    if (action === "edit") editAccount(id);
-    if (action === "refresh") refreshToken(id);
-    if (action === "delete") deleteAccount(id);
-  };
-
-  container.onchange = (e) => {
-    const target = e.target;
-    if (!(target instanceof HTMLInputElement)) return;
-    const action = target.dataset.action;
-    if (action === "row-select") {
-      updateSelectedCount();
-      return;
-    }
-    if (action === "select-all") {
-      toggleSelectAll(target.checked);
-    }
-  };
+  bindAccountActions(container);
 }
 
 // formatCredit renders meter values that the upstream reports with fractions.
@@ -1760,22 +1427,25 @@ function renderAccountsMobile(container, pageItems, total, totalPages) {
   renderPagination(currentPage, totalPages);
   updateSelectedCount();
 
+  bindAccountActions(container);
+}
+
+// Desktop rows and mobile cards carry the same delegated actions. The mobile
+// view has no select-all checkbox, but its row selection uses this same handler.
+function bindAccountActions(container) {
   container.onclick = (e) => {
     const actionEl = e.target.closest("[data-action]");
     if (!actionEl || !container.contains(actionEl)) return;
-    const action = actionEl.dataset.action;
     const id = parseDataId(actionEl.dataset.id || "");
-    if (action === "edit") editAccount(id);
-    if (action === "refresh") refreshToken(id);
-    if (action === "delete") deleteAccount(id);
+    if (actionEl.dataset.action === "edit") editAccount(id);
+    if (actionEl.dataset.action === "refresh") refreshToken(id);
+    if (actionEl.dataset.action === "delete") deleteAccount(id);
   };
-
   container.onchange = (e) => {
     const target = e.target;
     if (!(target instanceof HTMLInputElement)) return;
-    if (target.dataset.action === "row-select") {
-      updateSelectedCount();
-    }
+    if (target.dataset.action === "row-select") updateSelectedCount();
+    if (target.dataset.action === "select-all") toggleSelectAll(target.checked);
   };
 }
 
@@ -1923,7 +1593,6 @@ function openModal(account = null) {
   const typeEl = document.getElementById("accountType");
   stopGrokDeviceLogin(true);
   resetGrokDeviceLoginStatus();
-  clearAccountImportStatus();
 
   const finalizeModal = () => {
     applyTokenLabels(typeEl ? typeEl.value : getActiveAccountType());
@@ -1942,7 +1611,6 @@ function openModal(account = null) {
       document.getElementById("accountId").value = account.id;
       modalType = normalizeAccountType(account);
       setAccountModalType(modalType);
-      document.getElementById("clientCookie").value = "";
       document.getElementById("enabled").checked = account.enabled;
     } else {
       title.textContent = "添加账号";
@@ -1953,7 +1621,6 @@ function openModal(account = null) {
       modalType = selectedPlatformAccountType(typeEl);
       setAccountModalType(modalType);
       document.getElementById("enabled").checked = true;
-      document.getElementById("clientCookie").value = "";
     }
     // The switch above is assigned, not clicked: without this its paint would depend on
     // the stylesheet's :has() fallback, which browsers without :has() ignore.
@@ -1968,63 +1635,24 @@ function openModal(account = null) {
 // WorkBuddy official login lifecycle. The login only ever starts from an
 // explicit click on "使用 WorkBuddy 官方网页登录" (workbuddy-auth.js owns the
 // popup); opening the modal must never navigate the operator anywhere.
-function stopWorkBuddyLogin() {
-  const login = globalThis.WorkBuddyLogin;
-  if (login && typeof login.stop === "function") {
-    login.stop();
-  }
-  const statusNode = document.getElementById("workbuddyLoginStatus");
+function stopOfficialLogin(provider, statusId, linkId = "") {
+  const login = globalThis[provider];
+  if (login && typeof login.stop === "function") login.stop();
+  const statusNode = document.getElementById(statusId);
   if (statusNode) {
     statusNode.hidden = true;
     statusNode.textContent = "";
-    if (statusNode.classList) {
-      statusNode.classList.remove("is-active", "is-error");
-    }
+    if (statusNode.classList) statusNode.classList.remove("is-active", "is-error");
+  }
+  if (linkId) {
+    const linkNode = document.getElementById(linkId);
+    if (linkNode) linkNode.hidden = true;
   }
 }
 
-// Qoder official login lifecycle. Like WorkBuddy, the flow only starts from an
-// explicit click; opening the modal never navigates the operator anywhere.
-function stopQoderLogin() {
-  const login = globalThis.QoderLogin;
-  if (login && typeof login.stop === "function") {
-    login.stop();
-  }
-  const statusNode = document.getElementById("qoderLoginStatus");
-  if (statusNode) {
-    statusNode.hidden = true;
-    statusNode.textContent = "";
-    if (statusNode.classList) {
-      statusNode.classList.remove("is-active", "is-error");
-    }
-  }
-  const linkNode = document.getElementById("qoderLoginLink");
-  if (linkNode) {
-    linkNode.hidden = true;
-  }
-}
-
-// Cline official login lifecycle. Like WorkBuddy and Qoder, the flow only starts
-// from an explicit click; opening the modal never navigates the operator anywhere,
-// and closing it must cancel any transaction still being polled.
-function stopClineLogin() {
-  const login = globalThis.ClineLogin;
-  if (login && typeof login.stop === "function") {
-    login.stop();
-  }
-  const statusNode = document.getElementById("clineLoginStatus");
-  if (statusNode) {
-    statusNode.hidden = true;
-    statusNode.textContent = "";
-    if (statusNode.classList) {
-      statusNode.classList.remove("is-active", "is-error");
-    }
-  }
-  const linkNode = document.getElementById("clineLoginLink");
-  if (linkNode) {
-    linkNode.hidden = true;
-  }
-}
+function stopWorkBuddyLogin() { stopOfficialLogin("WorkBuddyLogin", "workbuddyLoginStatus"); }
+function stopQoderLogin() { stopOfficialLogin("QoderLogin", "qoderLoginStatus", "qoderLoginLink"); }
+function stopClineLogin() { stopOfficialLogin("ClineLogin", "clineLoginStatus", "clineLoginLink"); }
 
 // Close modal
 function closeModal() {
@@ -2036,46 +1664,19 @@ function closeModal() {
   const modal = document.getElementById("accountModal");
   modal.classList.remove("active");
   modal.style.display = "none";
-  clearAccountImportStatus();
 }
 
-// Save account
+// Save settings for an existing account. New accounts use official login only.
 async function saveAccount(e) {
   e.preventDefault();
   const id = document.getElementById("accountId").value;
   const type = document.getElementById("accountType").value;
-  // WorkBuddy is OAuth-only: the official login flow creates and re-authorizes
-  // the account, so the form must never submit a manually typed credential.
-  if (type === "workbuddy" && !id) {
-    showToast("请使用「使用 WorkBuddy 官方网页登录」添加账号", "error");
+  if (!id) {
+    const label = accountTypeLabel(type);
+    showToast(`请使用「使用 ${label} 官方网页登录」添加账号`, "error");
     return;
   }
-  // Qoder is OAuth-only as well: the official device login creates and
-  // re-authorizes the account, and there is no PAT field to submit.
-  if (type === "qoder" && !id) {
-    showToast("请使用「使用 Qoder 官方网页登录」添加账号", "error");
-    return;
-  }
-  // Cline is OAuth-only as well: the WorkOS device login creates and
-  // re-authorizes the account, and there is no manual field to submit.
-  if (type === "cline" && !id) {
-    showToast("请使用「使用 Cline 官方网页登录」添加账号", "error");
-    return;
-  }
-  const token = document.getElementById("clientCookie").value;
-  const isOAuth = type === "grok";
-  // Build CLI OAuth has no manual inputs: it is created and renewed by the
-  // official device login, which saves the account server-side. Submitting the
-  // mode without the login would only produce an account without credentials.
-  if (isOAuth && !id) {
-    showToast("请使用「使用 Grok 官方网页登录」添加 Build CLI OAuth 账号", "error");
-    return;
-  }
-
-  const splitCredentials = splitBatchCredentialInput(token);
-  const { unique: dedupedCredentials, duplicates: duplicateInputs } = dedupeCredentialInputs(type, splitCredentials);
-  const { accepted: credentials, conflicts: existingConflicts } = filterExistingCredentialConflicts(type, dedupedCredentials, id);
-  const existing = id ? accounts.find((a) => String(a.id) === String(id)) : null;
+  const existing = accounts.find((account) => String(account.id) === String(id));
   const data = {
     account_type: type,
     weight: existing ? (parseInt(existing.weight, 10) || 1) : 1,
@@ -2085,75 +1686,13 @@ async function saveAccount(e) {
     data.credential_type = "oauth";
     data.grok_provider = "build";
   }
-
-  // A WorkBuddy edit may legitimately keep the stored credential: the refresh
-  // token is never returned to the browser, so an empty field means "unchanged".
-  const keepStoredCredential = Boolean(id) && existing && normalizeAccountType(existing) === type && splitCredentials.length === 0;
-  if (!isOAuth && credentials.length === 0 && !keepStoredCredential) {
-    if (duplicateInputs.length > 0 || existingConflicts.length > 0) {
-      const details = []
-        .concat(duplicateInputs.slice(0, 4).map((item) => `输入重复: ${item}`))
-        .concat(existingConflicts.slice(0, 4).map((item) => `已存在: ${item}`));
-      renderAccountImportStatus("没有可添加的新凭证，重复项已全部过滤", "error", details);
-      showToast("没有可添加的新凭证，重复项已全部过滤", "error");
-    } else {
-      showToast("请填写至少一个账号凭证", "error");
-    }
-    return;
-  }
   try {
-    clearAccountImportStatus();
-    if (duplicateInputs.length > 0 || existingConflicts.length > 0) {
-      const details = []
-        .concat(duplicateInputs.slice(0, 4).map((item) => `输入重复: ${item}`))
-        .concat(existingConflicts.slice(0, 4).map((item) => `账号已存在: ${item}`));
-      renderAccountImportStatus(
-        `已过滤重复凭证：输入重复 ${duplicateInputs.length}，库内重复 ${existingConflicts.length}`,
-        "info",
-        details,
-      );
-    }
-    if (id) {
-      const payload = buildAccountPayload(type, data, credentials[0]);
-      const res = await fetch(`/api/accounts/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error(extractAdminErrorDetail(await res.text()));
-      closeModal();
-      loadAccounts();
-      showToast("保存成功");
-      return;
-    }
-
-    if (credentials.length > 1) {
-      const payloads = credentials.map((item) => buildAccountPayload(type, data, item));
-      renderAccountImportStatus(`正在批量添加账号 0/${payloads.length}`, "info");
-      const { success, failed, failures } = await runAccountCreatePool(payloads, 6, (progress) => {
-        renderAccountImportStatus(
-          `正在批量添加账号 ${progress.completed}/${progress.total}，成功 ${progress.success}，失败 ${progress.failed}`,
-          progress.failed > 0 ? "error" : "info",
-          progress.failures,
-        );
-      });
-      if (failed > 0) {
-        renderAccountImportStatus(`批量添加完成：成功 ${success}，失败 ${failed}`, "error", failures);
-      } else {
-        renderAccountImportStatus(`批量添加完成：成功 ${success}，失败 ${failed}`, "info");
-      }
-      loadAccounts();
-      if (failed === 0) {
-        closeModal();
-      }
-      showToast(
-        failed > 0 ? `批量添加完成：成功 ${success}，失败 ${failed}` : `批量添加完成：成功 ${success}`,
-        failed > 0 ? "error" : "success",
-      );
-      return;
-    }
-
-    await createAccount(buildAccountPayload(type, data, credentials[0]));
+    const res = await fetch(`/api/accounts/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(extractAdminErrorDetail(await res.text()));
     closeModal();
     loadAccounts();
     showToast("保存成功");

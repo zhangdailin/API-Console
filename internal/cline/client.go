@@ -394,7 +394,7 @@ func (c *Client) attemptChat(ctx context.Context, url string, body []byte, model
 
 	resp, err := c.stream.Do(req)
 	if err != nil {
-		return streamResult{}, &attemptStreamError{err: fmt.Errorf("send cline request: %w", err), retryable: true}
+		return streamResult{}, &attemptStreamError{err: fmt.Errorf("send cline request: %w", err)}
 	}
 	defer resp.Body.Close()
 

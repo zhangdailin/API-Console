@@ -69,14 +69,6 @@ func CLIModelsNeedSync(acc *store.Account, now time.Time) bool {
 	return !now.Before(acc.GrokModelsSyncedAt.Add(modelSnapshotTTL))
 }
 
-func ApplyCLIModels(acc *store.Account, models []string, now time.Time) bool {
-	profiles := make([]modelcatalog.Profile, 0, len(models))
-	for _, model := range models {
-		profiles = append(profiles, modelcatalog.Profile{ModelID: model})
-	}
-	return ApplyCLIModelCatalog(acc, profiles, now)
-}
-
 // ApplyCLIModelCatalog atomically projects one successful upstream catalog onto
 // the account's identifier compatibility field and durable profile field.
 func ApplyCLIModelCatalog(acc *store.Account, catalog []modelcatalog.Profile, now time.Time) bool {

@@ -15,20 +15,38 @@ function loadConfig(fetchImpl){
   console,Date,Math,Number,String,Array,Object,JSON,isNaN,parseInt,parseFloat,
   setTimeout(){},setInterval(){},fetch:fetchImpl||(()=>Promise.resolve({ok:true,headers:{get:()=>"application/json"},json:()=>({})})),
   window:{matchMedia:()=>({matches:false}),addEventListener(){},location:{href:''}},
+  HTMLInputElement:class HTMLInputElement {},
   document:{readyState:'loading',addEventListener(){},getElementById:node,createElement:()=>({}),querySelectorAll:()=>[]},
-  encodeData:v=>String(v),showToast(){},
+  encodeData:v=>String(v),decodeData:v=>String(v),showToast(){},
  });
  // config.js declares its helpers at top level, so the harness only appends an
  // export for the pure functions it wants to assert on.
  let src=fs.readFileSync(path.join(__dirname,'static/js/config.js'),'utf8');
- src+='\nglobalThis.probe={parseAnonymousAllowIPs,ticksToUSD,usdToTicks,formatUSD,periodSuffix,applyConfigurationPayload,loadConfiguration};\n';
+ src+='\nglobalThis.probe={parseAnonymousAllowIPs,ticksToUSD,usdToTicks,formatUSD,periodSuffix,applyConfigurationPayload,loadConfiguration,bindApiKeyActions,Input:HTMLInputElement};\n';
  vm.runInContext(src,context);
- return {api:context.probe,node};
+ return {api:context.probe,node,context};
 }
 
 // Arrays built inside the vm belong to that realm, so a strict deep comparison
 // would fail on the prototype rather than on the value.
 const plain=v=>Array.from(v);
+
+test('API key actions delegate equally for desktop and mobile, without exposing masked keys',()=>{
+ const {api,context}=loadConfig();
+ const calls=[];
+ context.openEditKeyModal=id=>calls.push(['edit',id]);
+ context.rotateApiKey=id=>calls.push(['rotate',id]);
+ context.openDeleteKeyModal=(id,label)=>calls.push(['delete',id,label]);
+ context.toggleKeyStatus=(id,checked)=>calls.push(['toggle',id,checked]);
+ const container={contains:()=>true};
+ api.bindApiKeyActions(container);
+ const click=(action,id,label)=>container.onclick({target:{closest:()=>({dataset:{action,id,label}})}});
+ click('edit-key','a');
+ click('rotate-key','b');
+ click('delete-key','c',encodeURIComponent('masked…suffix'));
+ container.onchange({target:Object.assign(new api.Input(),{dataset:{action:'toggle-key',id:'d'},checked:true})});
+ assert.deepStrictEqual(calls,[['edit','a'],['rotate','b'],['delete','c','masked…suffix'],['toggle','d',true]]);
+});
 
 test('anonymous_allow_ips is parsed into a trimmed list, and an empty box means nobody',()=>{
  const {api,node}=loadConfig();

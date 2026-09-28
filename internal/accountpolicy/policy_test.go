@@ -27,8 +27,8 @@ func TestClassify_RefusedCredentialNeedsLogin(t *testing.T) {
 	if !v.NeedsLogin || (v.Scope != ScopeAccount && v.Scope != ScopeCredential) {
 		t.Fatalf("verdict must require a login and hold the account: %+v", v)
 	}
-	if v.Status != "401" || v.Message == "" {
-		t.Fatalf("verdict must carry status+reason: %+v", v)
+	if v.Status != "401" || !strings.Contains(v.Message, "Build OAuth") || strings.Contains(v.Message, "Cookie") {
+		t.Fatalf("verdict must identify the Build OAuth re-login without a retired cookie hint: %+v", v)
 	}
 	if v.Cooldown != CredentialReverify {
 		t.Fatalf("cooldown = %v, want %v", v.Cooldown, CredentialReverify)
@@ -343,7 +343,7 @@ func TestClassifyCline403EntitlementIsModelScoped(t *testing.T) {
 // TestCredentialMessageIsProviderAware keeps the operator instruction concrete.
 func TestCredentialMessageIsProviderAware(t *testing.T) {
 	grokVerdict := Classify(grokBuildAccount(), errors.New("401: unauthenticated"), "")
-	if !strings.Contains(grokVerdict.Message, "重新登录") {
+	if !strings.Contains(grokVerdict.Message, "重新完成官方登录") || !strings.Contains(grokVerdict.Message, "Build OAuth") {
 		t.Fatalf("grok reason = %q", grokVerdict.Message)
 	}
 	other := Classify(&store.Account{AccountType: "workbuddy"}, errors.New("401: expired"), "")

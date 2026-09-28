@@ -62,10 +62,6 @@ func inferSubscriptionFromRateLimitInfo(info *RateLimitInfo) string {
 	}
 }
 
-// subscriptionRank orders the pools from least to most privileged. Lite is an
-// explicit local tier (set by the admin API), never inferred from a window.
-var subscriptionRank = map[string]int{"basic": 0, "lite": 1, "super": 2, "heavy": 3}
-
 func ApplyQuotaInfo(acc *store.Account, info *RateLimitInfo) bool {
 	return applyQuotaInfo(acc, info, true)
 }

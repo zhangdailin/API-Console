@@ -304,11 +304,10 @@ func normalizeToolChoice(choice interface{}) interface{} {
 	return choice
 }
 
-// attemptStreamError carries the retry decision an attempt reached.
+// attemptStreamError marks a rejected credential for the one refresh attempt.
 type attemptStreamError struct {
-	err       error
-	retryable bool
-	unauth    bool
+	err    error
+	unauth bool
 }
 
 func (e *attemptStreamError) Error() string { return e.err.Error() }
@@ -317,11 +316,6 @@ func (e *attemptStreamError) Unwrap() error { return e.err }
 func isUnauthorized(err error) bool {
 	var target *attemptStreamError
 	return asAttemptError(err, &target) && target.unauth
-}
-
-func isRetryable(err error) bool {
-	var target *attemptStreamError
-	return asAttemptError(err, &target) && target.retryable
 }
 
 func asAttemptError(err error, target **attemptStreamError) bool {
@@ -343,11 +337,8 @@ func asAttemptError(err error, target **attemptStreamError) bool {
 	return false
 }
 
-// classifyStatus turns an HTTP failure into a retry decision.
-//
-// The inference cap is the one verdict with a known recovery window: the wait is
-// stated in the body, and reading it turns a blind retry into a cooldown the
-// scheduler can honour.
+// classifyStatus preserves the upstream status error, identifying only a 401 as
+// eligible for a credential refresh. A known inference cap carries its cooldown.
 func classifyStatus(status int, raw []byte) error {
 	detail := strings.TrimSpace(string(raw))
 	wrapped := apiError(http.MethodPost, "/chat/completions", status, raw)
@@ -374,12 +365,6 @@ func classifyStatus(status int, raw []byte) error {
 			strings.Contains(detail, "Try again in") {
 			return capErr
 		}
-		return &attemptStreamError{err: wrapped, retryable: true}
-	case http.StatusRequestTimeout:
-		return &attemptStreamError{err: wrapped, retryable: true}
-	}
-	if status >= 500 {
-		return &attemptStreamError{err: wrapped, retryable: true}
 	}
 	return &attemptStreamError{err: wrapped}
 }

@@ -19,7 +19,6 @@
     // tick and multiplying server aggregation plus SVG rendering work.
     loading: false,
     overview: null,
-    series: [],
     // outcome selects which cohort the latency cards describe: every request, the
     // ones that ended in a failure, or the ones where an upstream attempt failed
     // before a retry rescued them.
@@ -127,15 +126,9 @@
     return pagePath() + '?' + params.toString();
   }
 
-  // syncUrl keeps the address bar in step with the filters, so a refresh (and the
-  // return trip from the log centre) restores the same scope.
+  // Keep bookmarks and the log-centre return link on the same scope.
   function syncUrl() {
-    if (!window.history || !window.history.replaceState) return;
-    const params = new URLSearchParams({ tab: 'ops', window: String(state.window) });
-    if (state.channel) params.set('channel', state.channel);
-    if (state.model) params.set('model', state.model);
-    if (state.outcome !== 'all') params.set('outcome', state.outcome);
-    window.history.replaceState(null, '', pagePath() + '?' + params.toString());
+    if (window.history && window.history.replaceState) window.history.replaceState(null, '', currentOpsQuery());
   }
 
   function readUrlState() {
@@ -635,7 +628,7 @@
     const serverTime = Date.parse(state.overview.until || '');
     const until = Number.isFinite(serverTime) ? serverTime : Date.now();
     const lastMinute = Math.floor(until / 60000) * 60000;
-    const byMinute = new Map(state.series.map(point => [Date.parse(point.minute), point]));
+    const byMinute = new Map((state.overview.series || []).map(point => [Date.parse(point.minute), point]));
     return Array.from({ length: minutes }, (_, index) => {
       const minute = lastMinute - (minutes - 1 - index) * 60000;
       return { minute: new Date(minute).toISOString(), requests: 0, input_tokens: 0, output_tokens: 0,
@@ -657,7 +650,6 @@
   function renderHero(payload) {
     const totals = payload.totals || {};
     state.overview = payload;
-    state.series = (payload.series || []).slice();
     const buckets = liveBuckets(state.liveWindow);
     const qpsPoints = buckets.map(point => ({ label: fmtMinute(point.minute), value: point.requests / point.seconds }));
     const tpsPoints = buckets.map(point => ({ label: fmtMinute(point.minute), value: ((point.input_tokens || 0) + (point.output_tokens || 0)) / point.seconds }));

@@ -310,19 +310,12 @@
    -------------------------------------------------------------------------- */
 #keysList { overflow-x: auto; }
 
-/* main.css pins .key-toggle absolutely; inside the mobile key row the eye button
-   belongs in the token row's own flow. */
 .config-key-token {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
-}
-
-.config-key-token .key-toggle {
-  position: static;
-  flex: none;
 }
 
 .config-key-token .key-display { min-width: 0; }

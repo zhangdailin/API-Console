@@ -79,20 +79,6 @@ func TestBuildPayloadForResponsesBridge_AdvertisesHostedSearchTools(t *testing.T
 	}
 }
 
-// A hosted tool carries no `function` object. The Web plane emulates tools in
-// the prompt, so it cannot run one server-side, but its validator used to index
-// the missing declaration and take the request down with a nil-map panic.
-func TestValidateWebToolDefinitions_ToleratesHostedTools(t *testing.T) {
-	tools := []ToolDef{
-		{Type: "web_search", Raw: map[string]interface{}{"type": "web_search"}},
-		{Type: "x_search", Raw: map[string]interface{}{"type": "x_search"}},
-		{Type: "function", Function: map[string]interface{}{"name": "lookup", "parameters": map[string]interface{}{"type": "object"}}},
-	}
-	if err := validateWebToolDefinitions(tools); err != nil {
-		t.Fatalf("validateWebToolDefinitions() error = %v", err)
-	}
-}
-
 func TestNormalizeBuildResponsesPayloadCompletesWebSearchRoute(t *testing.T) {
 	payload := map[string]interface{}{
 		"model": "grok-4.7",

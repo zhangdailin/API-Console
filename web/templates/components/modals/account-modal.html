@@ -12,11 +12,6 @@
         <input type="hidden" id="accountType" value="" />
         <input class="form-input" id="accountTypeDisplay" value="加载渠道…" readonly />
       </div>
-       <div class="form-group" id="ssoCredentialGroup">
-         <label class="form-label" id="tokenLabel">__session</label>
-         <textarea class="form-input account-token-input" id="clientCookie" rows="8" wrap="off" spellcheck="false" required placeholder="每行一个 __session"></textarea>
-         <small id="tokenHint" class="helper-text">按账号类型填写对应凭证</small>
-       </div>
        <div class="form-group" id="workbuddyLoginGroup" hidden>
          <label class="form-label">官方 WorkBuddy 登录（国际版）</label>
          <button class="btn btn-secondary" id="workbuddyLoginButton" type="button" onclick="WorkBuddyLogin.start()">使用 WorkBuddy 官方网页登录</button>
@@ -47,20 +42,6 @@
          <small class="helper-text">浏览器将在 xAI 官方页面完成授权；本服务只保存 OAuth access/refresh token（且不回显），不读取本地文件、Cookie 或密码，也不保存 id_token。授权完成会自动保存账号。</small>
          <div class="account-import-status" id="grokDeviceLoginStatus" hidden></div>
        </div>
-       <!-- Manual OAuth token inputs are intentionally not shown: the device login
-            owns these credentials and the server redacts them on read. -->
-       <div class="form-group" id="oauthCredentialGroup" hidden>
-        <label class="form-label">OAuth Access Token</label>
-        <input class="form-input" id="oauthAccessToken" type="text" spellcheck="false" placeholder="access_token" />
-      </div>
-      <div class="form-group" id="oauthRefreshGroup" hidden>
-        <label class="form-label">OAuth Refresh Token</label>
-        <input class="form-input" id="oauthRefreshToken" type="text" spellcheck="false" placeholder="refresh_token" />
-      </div>
-      <div class="form-group" id="oauthExpiresGroup" hidden>
-        <label class="form-label">过期时间（可选，RFC3339）</label>
-        <input class="form-input" id="oauthExpiresAt" type="text" spellcheck="false" placeholder="2026-08-21T00:00:00Z" />
-      </div>
       <div class="form-group">
         <label class="form-label">
           <label class="toggle">
@@ -70,7 +51,6 @@
           &nbsp;&nbsp;启用账号
         </label>
       </div>
-      <div class="account-import-status" id="accountImportStatus" hidden></div>
       <button type="submit" class="btn btn-primary modal-submit">
         保存
       </button>

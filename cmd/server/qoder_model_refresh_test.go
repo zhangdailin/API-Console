@@ -37,9 +37,10 @@ func TestDiscoverQoderModelsRequiresAnActiveAccount(t *testing.T) {
 	s, cleanup := setupModelRefreshStore(t)
 	defer cleanup()
 
-	items, source, err := discoverQoderModels(context.Background(), &config.Config{}, s)
+	report, err := discoverAccountCatalogModels(context.Background(), &config.Config{}, s, "Qoder", defaultModelRefreshConcurrency)
+	items, source := report.Candidates, report.Source
 	if err == nil {
-		t.Fatalf("discoverQoderModels() items=%+v source=%q want error", items, source)
+		t.Fatalf("discoverAccountCatalogModels() items=%+v source=%q want error", items, source)
 	}
 	if !isNoActiveAccounts(err) {
 		t.Fatalf("error=%v want a no-active-account report", err)
@@ -70,9 +71,10 @@ func TestDiscoverQoderModelsWithoutAnUpstreamCatalogPublishesNothing(t *testing.
 		QoderOpenAPIBaseURL: dead,
 		QoderInferenceURL:   dead,
 	}
-	items, source, err := discoverQoderModels(ctx, cfg, s)
+	report, err := discoverAccountCatalogModels(ctx, cfg, s, "Qoder", defaultModelRefreshConcurrency)
+	items, source := report.Candidates, report.Source
 	if err == nil {
-		t.Fatalf("discoverQoderModels() items=%+v source=%q want error", items, source)
+		t.Fatalf("discoverAccountCatalogModels() items=%+v source=%q want error", items, source)
 	}
 	if source != "" {
 		t.Fatalf("source=%q want no source for a failed read", source)
@@ -151,9 +153,10 @@ func TestDiscoverQoderModelsPublishesTheObservedCatalog(t *testing.T) {
 		t.Fatalf("CreateAccount() error = %v", err)
 	}
 
-	items, source, err := discoverQoderModels(ctx, &config.Config{QoderInferenceURL: stub.URL}, s)
+	report, err := discoverAccountCatalogModels(ctx, &config.Config{QoderInferenceURL: stub.URL}, s, "Qoder", defaultModelRefreshConcurrency)
+	items, source := report.Candidates, report.Source
 	if err != nil {
-		t.Fatalf("discoverQoderModels() error = %v", err)
+		t.Fatalf("discoverAccountCatalogModels() error = %v", err)
 	}
 	if source != "qoder_upstream_models" {
 		t.Fatalf("source=%q want qoder_upstream_models", source)
@@ -200,9 +203,10 @@ func TestDiscoverQoderModelsReportsTheReadFailure(t *testing.T) {
 		t.Fatalf("CreateAccount() error = %v", err)
 	}
 
-	items, source, err := discoverQoderModels(ctx, &config.Config{QoderInferenceURL: stub.URL}, s)
+	report, err := discoverAccountCatalogModels(ctx, &config.Config{QoderInferenceURL: stub.URL}, s, "Qoder", defaultModelRefreshConcurrency)
+	items, source := report.Candidates, report.Source
 	if err == nil {
-		t.Fatalf("discoverQoderModels() items=%+v source=%q want error", items, source)
+		t.Fatalf("discoverAccountCatalogModels() items=%+v source=%q want error", items, source)
 	}
 	if !strings.Contains(err.Error(), "status=403") {
 		t.Fatalf("error=%v does not carry the upstream cause", err)

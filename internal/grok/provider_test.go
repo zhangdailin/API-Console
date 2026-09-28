@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"orchids-api/internal/modelcatalog"
 	"orchids-api/internal/store"
 )
 
@@ -43,25 +44,17 @@ func TestAccountSupportsModelUsesObservedBuildCatalog(t *testing.T) {
 	if !AccountSupportsModel(acc, "grok-4.6") {
 		t.Fatal("unsynced account should remain eligible until its catalog is read")
 	}
-	ApplyCLIModels(acc, []string{"grok-4.5"}, time.Now())
+	ApplyCLIModelCatalog(acc, []modelcatalog.Profile{{ModelID: "grok-4.5"}}, time.Now())
 	if AccountSupportsModel(acc, "grok-4.6") || !AccountSupportsModel(acc, "grok-4.5") {
 		t.Fatalf("observed catalog not enforced: %#v", acc.GrokModels)
 	}
 }
 
-// TestApplyCLIModelsRecordsExactlyTheCatalog proves the capability snapshot is
-// the upstream catalog and nothing else.
-//
-// It used to be padded with a synthetic composer entry, a 4.5 alias whenever 4.6
-// was advertised, and a tier-gated video entry. Those are locally invented
-// capabilities: republishing them would advertise models the account never
-// reported, which is exactly what model management must not do.
-func TestApplyCLIModelsRestoresGrok2APICatalogCompletion(t *testing.T) {
-	// grok2api derives three entries from the account rather than the catalog: a
-	// Build account advertising 4.6 can serve 4.5, an OAuth Build account can
-	// serve Composer, and a Super account gets the tier-gated video entry.
+// TestApplyCLIModelCatalogRestoresGrok2APICatalogCompletion checks observed
+// models and supported Build-derived entries.
+func TestApplyCLIModelCatalogRestoresGrok2APICatalogCompletion(t *testing.T) {
 	acc := &store.Account{AccountType: "grok", CredentialType: "oauth", GrokProvider: ProviderBuild, Subscription: "super"}
-	ApplyCLIModels(acc, []string{"grok-4.6", "grok-imagine-video-1.5", "grok-4.6"}, time.Now())
+	ApplyCLIModelCatalog(acc, []modelcatalog.Profile{{ModelID: "grok-4.6"}, {ModelID: "grok-imagine-video-1.5"}, {ModelID: "grok-4.6"}}, time.Now())
 
 	want := []string{"grok-4.6", "grok-imagine-video-1.5", "grok-4.5", "grok-composer-2.5-fast"}
 	if len(acc.GrokModels) != len(want) {

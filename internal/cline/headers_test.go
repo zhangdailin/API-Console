@@ -171,8 +171,8 @@ func TestClassifyStatusKeepsAForbiddenOutOfTheCredentialPath(t *testing.T) {
 	if isUnauthorized(forbidden) {
 		t.Error("403 must not be treated as unauthorized: a refresh cannot repair it")
 	}
-	if isRetryable(forbidden) {
-		t.Error("403 must not be retried blindly")
+	if !strings.Contains(forbidden.Error(), "status=403") || !strings.Contains(forbidden.Error(), "cline-free/x") {
+		t.Errorf("403 must preserve its entitlement refusal: %v", forbidden)
 	}
 
 	unauthorized := classifyStatus(http.StatusUnauthorized, []byte(`{"error":{"message":"token expired"}}`))

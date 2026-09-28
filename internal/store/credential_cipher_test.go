@@ -83,6 +83,40 @@ func TestAccountCredentialsEncryptedAndLegacyMigratesOnWrite(t *testing.T) {
 	}
 }
 
+// Retired account metadata is intentionally dropped even when an old Redis row
+// still carries it; only the live provider credentials survive a rewrite.
+func TestRetiredAccountFieldsAreDroppedOnRewrite(t *testing.T) {
+	mini := miniredis.RunT(t)
+	s, err := New(Options{RedisAddr: mini.Addr(), RedisPrefix: "retired-fields:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	ctx := context.Background()
+	mini.Set("retired-fields:accounts:id:1", `{"id":1,"name":"legacy","account_type":"workbuddy","enabled":true,"nsfw_enabled":true,"device_id":"old-device","request_id":"old-request","project_id":"old-project","upstream_mode":"old-mode","workbuddy_refresh_token":"live-refresh"}`)
+	mini.SAdd("retired-fields:accounts:ids", "1")
+	acc, err := s.GetAccount(ctx, 1)
+	if err != nil || acc.WorkBuddyRefreshToken != "live-refresh" {
+		t.Fatalf("GetAccount() = %+v, %v", acc, err)
+	}
+	acc.Name = "rewritten"
+	if err := s.UpdateAccount(ctx, acc); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := mini.Get("retired-fields:accounts:id:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"nsfw_enabled", "device_id", "request_id", "project_id", "upstream_mode"} {
+		if strings.Contains(raw, `"`+field+`"`) {
+			t.Errorf("retired field %q survived rewrite: %s", field, raw)
+		}
+	}
+	if !strings.Contains(raw, `"workbuddy_refresh_token":"live-refresh"`) {
+		t.Errorf("live WorkBuddy refresh token lost: %s", raw)
+	}
+}
+
 func TestEncryptedAccountRejectsWrongKey(t *testing.T) {
 	cipherA, _ := newCredentialCipher(bytes.Repeat([]byte{1}, 32))
 	cipherB, _ := newCredentialCipher(bytes.Repeat([]byte{2}, 32))

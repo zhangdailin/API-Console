@@ -221,9 +221,10 @@ func TestDiscoverGrokModelsWithoutActiveAccountReportsNoAccount(t *testing.T) {
 	s, cleanup := setupModelRefreshStore(t)
 	defer cleanup()
 
-	items, source, err := discoverGrokModelsConcurrent(context.Background(), &config.Config{}, s, 4)
+	report, err := discoverGrokModelsReport(context.Background(), &config.Config{}, s, 4)
+	items, source := report.Candidates, report.Source
 	if err == nil {
-		t.Fatalf("discoverGrokModelsConcurrent() items=%+v source=%q want error", items, source)
+		t.Fatalf("discoverGrokModelsReport() items=%+v source=%q want error", items, source)
 	}
 	if !isNoActiveAccounts(err) {
 		t.Fatalf("error=%v want a no-active-account report", err)
@@ -260,9 +261,10 @@ func TestDiscoverGrokModelsUsesOfficialBuildCatalogAndPersistsPerAccountSnapshot
 		return []modelcatalog.Profile{{ModelID: "grok-4.6"}, {ModelID: "grok-4.6"}, {ModelID: "future-private-model"}, {ModelID: "grok-4.5"}}, nil
 	}
 
-	items, source, err := discoverGrokModelsConcurrent(ctx, &config.Config{}, s, 4)
+	report, err := discoverGrokModelsReport(ctx, &config.Config{}, s, 4)
+	items, source := report.Candidates, report.Source
 	if err != nil {
-		t.Fatalf("discoverGrokModelsConcurrent() error = %v", err)
+		t.Fatalf("discoverGrokModelsReport() error = %v", err)
 	}
 	if calls != 1 {
 		t.Fatalf("official catalog calls=%d want 1", calls)
@@ -308,9 +310,10 @@ func TestDiscoverGrokModelsWithoutUpstreamCatalogPublishesNothing(t *testing.T) 
 		return nil, errors.New("control plane unavailable")
 	}
 
-	items, source, err := discoverGrokModelsConcurrent(ctx, &config.Config{}, s, 1)
+	report, err := discoverGrokModelsReport(ctx, &config.Config{}, s, 1)
+	items, source := report.Candidates, report.Source
 	if err == nil {
-		t.Fatalf("discoverGrokModelsConcurrent() items=%+v source=%q want error", items, source)
+		t.Fatalf("discoverGrokModelsReport() items=%+v source=%q want error", items, source)
 	}
 	if source != "" {
 		t.Fatalf("source=%q want no source for a failed read", source)
@@ -348,9 +351,9 @@ func TestApplyModelRefresh_RefusesNonUpstreamSources(t *testing.T) {
 				t.Fatalf("CreateModel() error = %v", err)
 			}
 
-			result, err := applyModelRefresh(ctx, s, "WorkBuddy", source, []discoveredModel{{ID: "injected", Name: "injected", Verified: true}})
+			result, err := applyModelRefreshWithPrune(ctx, s, "WorkBuddy", source, []discoveredModel{{ID: "injected", Name: "injected", Verified: true}}, true)
 			if err == nil {
-				t.Fatalf("applyModelRefresh() result=%+v want a refusal for source %q", result, source)
+				t.Fatalf("applyModelRefreshWithPrune() result=%+v want a refusal for source %q", result, source)
 			}
 			if _, getErr := s.GetModelByChannelAndModelID(ctx, "WorkBuddy", "injected"); getErr == nil {
 				t.Fatal("a non-upstream source published a model")
@@ -399,12 +402,12 @@ func TestApplyModelRefresh_CountsVerifiedSeparately(t *testing.T) {
 	ctx := context.Background()
 	clearModelsForChannel(t, ctx, s, "WorkBuddy")
 
-	result, err := applyModelRefresh(ctx, s, "WorkBuddy", "workbuddy_cli_models", []discoveredModel{
+	result, err := applyModelRefreshWithPrune(ctx, s, "WorkBuddy", "workbuddy_cli_models", []discoveredModel{
 		{ID: "probed", Name: "probed", Verified: true},
 		{ID: "listed-only", Name: "listed-only"},
-	})
+	}, true)
 	if err != nil {
-		t.Fatalf("applyModelRefresh() error = %v", err)
+		t.Fatalf("applyModelRefreshWithPrune() error = %v", err)
 	}
 	if result.Discovered != 2 {
 		t.Fatalf("Discovered=%d want 2", result.Discovered)
@@ -443,12 +446,12 @@ func TestApplyModelRefresh_DeletesMissingClineModels(t *testing.T) {
 		}
 	}
 
-	result, err := applyModelRefresh(ctx, s, "Cline", "cline_recommended_models", []discoveredModel{
+	result, err := applyModelRefreshWithPrune(ctx, s, "Cline", "cline_recommended_models", []discoveredModel{
 		{ID: "cline/free/auto", Name: "Auto", SortOrder: 0},
 		{ID: "cline/free/sonnet", Name: "Sonnet", SortOrder: 1},
-	})
+	}, true)
 	if err != nil {
-		t.Fatalf("applyModelRefresh() error = %v", err)
+		t.Fatalf("applyModelRefreshWithPrune() error = %v", err)
 	}
 	if result.Deleted != 1 {
 		t.Fatalf("Deleted=%d want 1", result.Deleted)
@@ -485,9 +488,9 @@ func TestApplyModelRefresh_PreservesExistingModelSettings(t *testing.T) {
 	}
 
 	candidates := []discoveredModel{{ID: "cline/free/sonnet", Name: "Cline Sonnet", SortOrder: 0}}
-	result, err := applyModelRefresh(ctx, s, "Cline", "cline_recommended_models", candidates)
+	result, err := applyModelRefreshWithPrune(ctx, s, "Cline", "cline_recommended_models", candidates, true)
 	if err != nil {
-		t.Fatalf("applyModelRefresh() error = %v", err)
+		t.Fatalf("applyModelRefreshWithPrune() error = %v", err)
 	}
 	if result.Deleted != 0 {
 		t.Fatalf("Deleted=%d want 0", result.Deleted)
@@ -789,11 +792,11 @@ func TestApplyModelRefresh_MarksObservedExistingRowsVerified(t *testing.T) {
 		t.Fatalf("CreateModel() error = %v", err)
 	}
 
-	result, err := applyModelRefresh(ctx, s, "Grok", "grok_build_models", []discoveredModel{
+	result, err := applyModelRefreshWithPrune(ctx, s, "Grok", "grok_build_models", []discoveredModel{
 		{ID: "grok-4.6", Name: "Grok 4.6", Verified: true},
-	})
+	}, true)
 	if err != nil {
-		t.Fatalf("applyModelRefresh() error = %v", err)
+		t.Fatalf("applyModelRefreshWithPrune() error = %v", err)
 	}
 	if result.Updated != 1 {
 		t.Fatalf("Updated=%d want 1 for the promoted row", result.Updated)

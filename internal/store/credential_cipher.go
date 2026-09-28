@@ -78,7 +78,6 @@ func accountCredentialFields(acc *Account) []*string {
 		&acc.SessionID,
 		&acc.ClientCookie,
 		&acc.RefreshToken,
-		&acc.DeviceID,
 		&acc.SessionCookie,
 		&acc.ClientUat,
 		&acc.Token,
@@ -177,7 +176,7 @@ func hasLegacyCredential(data []byte) (bool, error) {
 		return false, err
 	}
 	for _, name := range []string{
-		"session_id", "client_cookie", "refresh_token", "device_id",
+		"session_id", "client_cookie", "refresh_token",
 		"session_cookie", "client_uat", "token", "oauth_access_token", "oauth_refresh_token",
 		"workbuddy_access_token", "workbuddy_refresh_token",
 		"qoder_access_token", "qoder_refresh_token", "qoder_runtime_info", "qoder_runtime_key",

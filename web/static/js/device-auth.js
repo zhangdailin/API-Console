@@ -1,14 +1,13 @@
 // Shared driver for the browser device-authorization flows exposed by the admin
-// console (WorkBuddy, Qoder).
+// console (WorkBuddy, Qoder, Cline).
 //
 // The server owns the whole transaction: it starts the authorization, keeps the
 // private verifier, polls the upstream and persists the resulting credential.
 // This module only opens the official page in a popup, watches the server-side
 // transaction and reports progress. Passwords and tokens never pass through it.
 //
-// The flow is mirrored from WorkBuddyLogin and kept parameterized so the two
-// channels cannot drift apart in their polling, resume-after-refresh or error
-// handling behaviour.
+// The channel-specific wrappers share polling, resume-after-refresh and error
+// handling so their browser flows cannot drift apart.
 globalThis.DeviceAuthLogin = (() => {
   const TERMINAL_MESSAGES = {
     complete: '授权完成，账号已保存',
@@ -39,14 +38,35 @@ globalThis.DeviceAuthLogin = (() => {
       popupBlockedMessage = '登录弹窗被拦截，请允许本站弹窗后重试。',
       insecureMessage = '请使用 HTTPS（本地可用 localhost）打开管理页面后再登录。',
       timeoutMessage = '授权已超时，请重新发起登录。',
+      terminalMessages = TERMINAL_MESSAGES,
     } = options;
 
     let active = null;
 
     const statusNode = () => document.getElementById(statusId);
     const buttonNode = () => document.getElementById(buttonId);
-    const linkNode = () => document.getElementById(linkId);
-    const linkTextNode = () => document.getElementById(linkTextId);
+    function linkNode(createIfMissing = false) {
+      if (!linkId) return null;
+      let anchor = document.getElementById(linkId);
+      if (!anchor && createIfMissing) {
+        // Older channel modals have no link markup; add the same fallback
+        // without requiring changes to their shared modal template.
+        const statusElement = statusNode();
+        if (!statusElement?.parentNode) return null;
+        anchor = document.createElement('div');
+        anchor.id = linkId;
+        anchor.className = 'account-import-status';
+        anchor.hidden = true;
+        const text = document.createElement('a');
+        text.id = linkTextId;
+        text.target = '_blank';
+        text.rel = 'noopener noreferrer';
+        anchor.appendChild(text);
+        statusElement.insertAdjacentElement('afterend', anchor);
+      }
+      return anchor;
+    }
+    const linkTextNode = () => linkTextId ? document.getElementById(linkTextId) : null;
 
     function status(text, kind = 'info') {
       const node = statusNode();
@@ -65,17 +85,21 @@ globalThis.DeviceAuthLogin = (() => {
     // The authorization URL is shown next to the popup: a popup blocker, a
     // headless browser or a remote session must not make the flow impossible.
     function setLink(url) {
-      const anchor = linkNode();
-      if (!anchor) return;
       const value = String(url || '').trim();
+      const anchor = linkNode(Boolean(value));
+      if (!anchor) return;
       anchor.hidden = !value;
+      const text = linkTextNode();
       if (!value) {
         anchor.removeAttribute('href');
+        if (text) text.removeAttribute('href');
         return;
       }
       anchor.href = value;
-      const text = linkTextNode();
-      if (text) text.textContent = value;
+      if (text) {
+        text.href = value;
+        text.textContent = value;
+      }
     }
 
     function clearStoredLogin() {
@@ -174,15 +198,15 @@ globalThis.DeviceAuthLogin = (() => {
         if (active !== login) return;
         const state = String(result.status || '');
         if (state === 'complete') {
-          finish(result.message || TERMINAL_MESSAGES.complete);
+          finish(result.message || terminalMessages.complete);
           return;
         }
         if (state === 'failed') {
-          fail(result.message || TERMINAL_MESSAGES.failed);
+          fail(result.message || terminalMessages.failed);
           return;
         }
         if (state === 'expired') {
-          fail(result.message || TERMINAL_MESSAGES.expired);
+          fail(result.message || terminalMessages.expired);
           return;
         }
         if (login.popup && login.popup.closed && !login.resumed) {

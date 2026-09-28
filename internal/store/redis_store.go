@@ -612,19 +612,15 @@ func (s *redisStore) UpdateAccount(ctx context.Context, acc *Account) error {
 		} else {
 			updated.AccountType = acc.AccountType
 		}
-		updated.NSFWEnabled = acc.NSFWEnabled
 		updated.SessionID = acc.SessionID
 		updated.ClientCookie = acc.ClientCookie
 		updated.RefreshToken = acc.RefreshToken
-		updated.DeviceID = acc.DeviceID
-		updated.RequestID = acc.RequestID
 		if acc.SessionCookie == "" {
 			updated.SessionCookie = existing.SessionCookie
 		} else {
 			updated.SessionCookie = acc.SessionCookie
 		}
 		updated.ClientUat = acc.ClientUat
-		updated.ProjectID = acc.ProjectID
 		updated.UserID = acc.UserID
 		updated.AgentMode = acc.AgentMode
 		updated.Email = acc.Email
@@ -688,11 +684,6 @@ func (s *redisStore) UpdateAccount(ctx context.Context, acc *Account) error {
 			updated.TeamID = existing.TeamID
 		} else {
 			updated.TeamID = acc.TeamID
-		}
-		if strings.TrimSpace(acc.UpstreamMode) == "" {
-			updated.UpstreamMode = existing.UpstreamMode
-		} else {
-			updated.UpstreamMode = acc.UpstreamMode
 		}
 		if strings.TrimSpace(acc.GrokProvider) == "" {
 			updated.GrokProvider = existing.GrokProvider

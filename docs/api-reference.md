@@ -1,6 +1,6 @@
 # API 速查
 
-接口以 [`cmd/server/routes.go`](../cmd/server/routes.go) 为准。管理端先添加账号并创建 API Key；以下模型/推理接口需要 `Authorization: Bearer <API_KEY>`，Anthropic 客户端也可使用 `x-api-key`。只有 `anonymous_allow_ips` 显式允许的来源可免 Key；`inference_auth_enabled=false` 不会关闭鉴权。
+接口以 [`cmd/server/routes.go`](../cmd/server/routes.go) 为准。管理端先添加账号并创建 API Key；以下模型/推理接口需要 `Authorization: Bearer <API_KEY>`，Anthropic 客户端也可使用 `x-api-key`。只有 `anonymous_allow_ips` 显式允许的来源可免 Key；已废弃的 `inference_auth_enabled` 配置会被忽略。
 
 ## 推理与模型
 

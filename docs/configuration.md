@@ -17,7 +17,7 @@
 | `deployment_replicas`、`deployment_instance_id`、`deployment_cluster_id` | 多副本标识，同集群共享 Redis |
 | `proxy_http`、`proxy_https` | 出站代理 |
 
-模型与推理接口默认始终要求管理端创建的 API Key；`inference_auth_enabled` 是兼容/展示字段，**设为 `false` 不会放开接口**。需要免 Key 的受控来源必须显式配置 `anonymous_allow_ips`。
+模型与推理接口默认始终要求管理端创建的 API Key；需要免 Key 的受控来源必须显式配置 `anonymous_allow_ips`。历史配置中的 `inference_auth_enabled` 已废弃并会被忽略。Build 模型经显式路由或 OAuth 账号动态能力发现，不使用历史 `grok_cli_model_ids` 列表。
 
 ## 生效顺序与备份
 

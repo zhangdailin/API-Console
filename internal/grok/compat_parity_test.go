@@ -94,6 +94,19 @@ func TestGrok45RoutesToBuildCLI(t *testing.T) {
 	}
 }
 
+func TestLegacyCLIModelListCannotRouteImplicitModel(t *testing.T) {
+	var cfg config.Config
+	if err := json.Unmarshal([]byte(`{"grok_cli_model_ids":["implicit-model"]}`), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if modelRoutedToCLI(ModelSpec{ID: "implicit-model"}, &cfg) {
+		t.Fatal("legacy model list must not route models without explicit Build capability")
+	}
+	if !modelRoutedToCLI(ModelSpec{ID: "dynamic-build", Upstream: UpstreamCLI}, &cfg) {
+		t.Fatal("dynamically discovered Build models must stay routed to CLI")
+	}
+}
+
 func TestResolveModel_Grok420BetaHyphenAliasRejected(t *testing.T) {
 	if _, ok := ResolveModel("grok-4-20-beta"); ok {
 		t.Fatalf("ResolveModel(grok-4-20-beta) should fail")

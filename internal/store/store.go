@@ -26,15 +26,11 @@ type Account struct {
 	ID            int64   `json:"id"`
 	Name          string  `json:"name"`
 	AccountType   string  `json:"account_type"`
-	NSFWEnabled   bool    `json:"nsfw_enabled"`
 	SessionID     string  `json:"session_id"`
 	ClientCookie  string  `json:"client_cookie"`
 	RefreshToken  string  `json:"refresh_token,omitempty"`
-	DeviceID      string  `json:"device_id,omitempty"`
-	RequestID     string  `json:"request_id,omitempty"`
 	SessionCookie string  `json:"session_cookie"`
 	ClientUat     string  `json:"client_uat"`
-	ProjectID     string  `json:"project_id"`
 	UserID        string  `json:"user_id"`
 	AgentMode     string  `json:"agent_mode"`
 	Email         string  `json:"email"`
@@ -98,8 +94,6 @@ type Account struct {
 	OAuthRefreshToken string    `json:"oauth_refresh_token,omitempty"`
 	OAuthExpiresAt    time.Time `json:"oauth_expires_at,omitempty"`
 	TeamID            string    `json:"team_id,omitempty"`
-	// UpstreamMode is retained for non-Grok channel compatibility.
-	UpstreamMode string `json:"upstream_mode,omitempty"`
 	// GrokProvider identifies the supported xAI product boundary: Build OAuth.
 	GrokProvider string `json:"grok_provider,omitempty"`
 	// GrokModels is the last successful account-specific upstream /v1/models

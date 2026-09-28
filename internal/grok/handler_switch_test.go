@@ -80,22 +80,3 @@ func TestMarkAllGrokAccountStatuses(t *testing.T) {
 		})
 	}
 }
-
-func TestSkipExternalAttachmentFetchGrokAccountStatus(t *testing.T) {
-	tests := []struct {
-		name     string
-		err      error
-		wantMark bool
-	}{
-		{name: "nil", err: nil, wantMark: false},
-		{name: "grok upstream forbidden", err: errors.New("grok upstream status=403 body=forbidden"), wantMark: true},
-		{name: "upload network", err: errors.New("grok upload failed: read: connection reset by peer"), wantMark: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := skipExternalAttachmentFetchGrokAccountStatus(tt.err); got != tt.wantMark {
-				t.Fatalf("skipExternalAttachmentFetchGrokAccountStatus()=%v want mark=%v", got, tt.wantMark)
-			}
-		})
-	}
-}

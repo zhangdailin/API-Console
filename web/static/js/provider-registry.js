@@ -5,7 +5,7 @@
     Object.freeze({"key":"workbuddy","label":"WorkBuddy","apiPrefix":"/workbuddy/v1","generic":true,"default":true,"theme":"orange","accountCreate":"browser"}),
     Object.freeze({"key":"qoder","label":"Qoder","apiPrefix":"/qoder/v1","generic":true,"theme":"green","accountCreate":"browser"}),
     Object.freeze({"key":"cline","label":"Cline","apiPrefix":"/cline/v1","generic":true,"theme":"blue","accountCreate":"browser"}),
-    Object.freeze({"key":"grok","label":"Grok","apiPrefix":"/grok/v1","generic":false,"theme":"red","accountCreate":"hybrid"}),
+    Object.freeze({"key":"grok","label":"Grok","apiPrefix":"/grok/v1","generic":false,"theme":"red","accountCreate":"browser"}),
   ]);
   const byKey = Object.freeze(Object.fromEntries(providers.map((item) => [item.key, item])));
   window.OrchidsProviderRegistry = Object.freeze({

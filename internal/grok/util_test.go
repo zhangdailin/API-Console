@@ -27,32 +27,6 @@ func TestParseDataURI(t *testing.T) {
 	}
 }
 
-func TestExtractMessageAndAttachments(t *testing.T) {
-	messages := []ChatMessage{
-		{
-			Role: "user",
-			Content: []interface{}{
-				map[string]interface{}{"type": "text", "text": "hello"},
-				map[string]interface{}{"type": "image_url", "image_url": map[string]interface{}{"url": "https://a/b.png"}},
-			},
-		},
-	}
-
-	text, attachments, err := extractMessageAndAttachmentsWithTools(messages, false, nil, nil, true)
-	if err != nil {
-		t.Fatalf("extractMessageAndAttachments error: %v", err)
-	}
-	if text != "hello" {
-		t.Fatalf("text=%q want=hello", text)
-	}
-	if len(attachments) != 1 {
-		t.Fatalf("attachments=%d want=1", len(attachments))
-	}
-	if attachments[0].Data != "https://a/b.png" {
-		t.Fatalf("attachment=%q want=https://a/b.png", attachments[0].Data)
-	}
-}
-
 func TestValidateChatMessages_AcceptsCaseInsensitiveRoleAndType(t *testing.T) {
 	messages := []ChatMessage{
 		{
@@ -72,28 +46,6 @@ func TestValidateChatMessages_AcceptsCaseInsensitiveRoleAndType(t *testing.T) {
 
 	if err := validateChatMessages(messages); err != nil {
 		t.Fatalf("validateChatMessages() error = %v", err)
-	}
-}
-
-func TestExtractLastUserText(t *testing.T) {
-	messages := []ChatMessage{
-		{Role: "system", Content: "sys"},
-		{Role: "user", Content: "第一轮问题"},
-		{Role: "assistant", Content: "第一轮回答"},
-		{
-			Role: "user",
-			Content: []interface{}{
-				map[string]interface{}{"type": "text", "text": "不要图片"},
-				map[string]interface{}{"type": "text", "text": "只回答文字"},
-				map[string]interface{}{"type": "image_url", "image_url": map[string]interface{}{"url": "https://a/b.png"}},
-			},
-		},
-	}
-
-	got := extractLastUserText(messages)
-	want := "不要图片\n只回答文字"
-	if got != want {
-		t.Fatalf("extractLastUserText()=%q want=%q", got, want)
 	}
 }
 
@@ -160,29 +112,6 @@ func TestParseUpstreamLines_RejectsUpstreamEventErrorEnvelope(t *testing.T) {
 	}
 }
 
-func TestParseRateLimitPayload_AcceptsQueriesFields(t *testing.T) {
-	payload := map[string]interface{}{
-		"maxQueries":       140,
-		"remainingQueries": 23,
-	}
-	info := parseRateLimitPayload(payload)
-	if info == nil {
-		t.Fatalf("parseRateLimitPayload returned nil")
-	}
-	if info.Limit != 140 {
-		t.Fatalf("limit=%d want=140", info.Limit)
-	}
-	if info.Remaining != 23 {
-		t.Fatalf("remaining=%d want=23", info.Remaining)
-	}
-	if !info.HasLimit || !info.HasRemaining {
-		t.Fatalf("expected complete quota pair, got %#v", info)
-	}
-	if info.Unit != "requests" {
-		t.Fatalf("unit=%q want=requests", info.Unit)
-	}
-}
-
 func TestApplyQuotaInfo_InfersLiteSubscription(t *testing.T) {
 	acc := &store.Account{Subscription: "basic"}
 	changed := ApplyQuotaInfo(acc, &RateLimitInfo{
@@ -220,146 +149,6 @@ func TestApplyQuotaInfo_InfersBasicFromFreeAutoWindow(t *testing.T) {
 	}
 	if acc.UsageLimit != 7 || acc.UsageCurrent != 7 {
 		t.Fatalf("unexpected quota: limit=%v current=%v", acc.UsageLimit, acc.UsageCurrent)
-	}
-}
-
-func TestParseRateLimitPayload_SkipsNonNumericMatchedField(t *testing.T) {
-	payload := map[string]interface{}{
-		"quota": map[string]interface{}{
-			"kind": "daily",
-		},
-		"limits": map[string]interface{}{
-			"maxQueries":       140,
-			"remainingQueries": 23,
-		},
-	}
-
-	for i := 0; i < 200; i++ {
-		info := parseRateLimitPayload(payload)
-		if info == nil {
-			t.Fatalf("parseRateLimitPayload returned nil at iter=%d", i)
-		}
-		if info.Limit != 140 {
-			t.Fatalf("limit=%d want=140 iter=%d", info.Limit, i)
-		}
-		if info.Remaining != 23 {
-			t.Fatalf("remaining=%d want=23 iter=%d", info.Remaining, i)
-		}
-	}
-}
-
-func TestParseRateLimitPayload_CollectsNestedResetAndNumbers(t *testing.T) {
-	rawReset := "2026-03-05T19:00:00Z"
-	wantReset, _ := time.Parse(time.RFC3339, rawReset)
-	payload := map[string]interface{}{
-		"quota_limit": "not-a-number",
-		"meta": map[string]interface{}{
-			"limits": map[string]interface{}{
-				"maxQueries":       140,
-				"remainingQueries": "23",
-			},
-			"resetAt": rawReset,
-		},
-	}
-
-	info := parseRateLimitPayload(payload)
-	if info == nil {
-		t.Fatalf("parseRateLimitPayload returned nil")
-	}
-	if info.Limit != 140 {
-		t.Fatalf("limit=%d want=140", info.Limit)
-	}
-	if info.Remaining != 23 {
-		t.Fatalf("remaining=%d want=23", info.Remaining)
-	}
-	if !info.ResetAt.Equal(wantReset) {
-		t.Fatalf("reset=%v want=%v", info.ResetAt, wantReset)
-	}
-}
-
-func TestParseRateLimitPayload_PrefersTokenPairOverRequestPair(t *testing.T) {
-	payload := map[string]interface{}{
-		"limits": map[string]interface{}{
-			"maxTokens":        500000,
-			"remainingTokens":  499000,
-			"maxQueries":       140,
-			"remainingQueries": 23,
-		},
-	}
-
-	info := parseRateLimitPayload(payload)
-	if info == nil {
-		t.Fatalf("parseRateLimitPayload returned nil")
-	}
-	if info.Limit != 500000 || info.Remaining != 499000 {
-		t.Fatalf("unexpected info: %#v", info)
-	}
-	if info.Unit != "tokens" {
-		t.Fatalf("unit=%q want=tokens", info.Unit)
-	}
-}
-
-func TestParseRateLimitPayload_PrefersTokensWhenQueriesAreZero(t *testing.T) {
-	payload := map[string]interface{}{
-		"windowSizeSeconds": 72000,
-		"remainingQueries":  0,
-		"totalQueries":      0,
-		"remainingTokens":   80,
-		"totalTokens":       80,
-		"lowEffortRateLimits": map[string]interface{}{
-			"cost":             1,
-			"remainingQueries": 80,
-		},
-	}
-
-	info := parseRateLimitPayload(payload)
-	if info == nil {
-		t.Fatalf("parseRateLimitPayload returned nil")
-	}
-	if info.Limit != 80 || info.Remaining != 80 {
-		t.Fatalf("unexpected info: %#v", info)
-	}
-	if info.Unit != "tokens" {
-		t.Fatalf("unit=%q want=tokens", info.Unit)
-	}
-}
-
-func TestParseRateLimitPayload_IncompletePairKeepsPresenceFlags(t *testing.T) {
-	payload := map[string]interface{}{
-		"maxQueries": 80,
-	}
-
-	info := parseRateLimitPayload(payload)
-	if info == nil {
-		t.Fatalf("parseRateLimitPayload returned nil")
-	}
-	if !info.HasLimit || info.HasRemaining {
-		t.Fatalf("expected incomplete info with limit only, got %#v", info)
-	}
-	if info.Limit != 80 || info.Remaining != 0 {
-		t.Fatalf("unexpected values: %#v", info)
-	}
-	if info.Unit != "requests" {
-		t.Fatalf("unit=%q want=requests", info.Unit)
-	}
-}
-
-func TestParseRateLimitPayload_SkipsInvalidResetAndFindsNested(t *testing.T) {
-	const resetMS int64 = 1730000000000
-	wantReset := time.UnixMilli(resetMS)
-	payload := map[string]interface{}{
-		"reset": "invalid-time",
-		"meta": map[string]interface{}{
-			"reset_at_ms": resetMS,
-		},
-	}
-
-	info := parseRateLimitPayload(payload)
-	if info == nil {
-		t.Fatalf("parseRateLimitPayload returned nil")
-	}
-	if !info.ResetAt.Equal(wantReset) {
-		t.Fatalf("reset=%v want=%v", info.ResetAt, wantReset)
 	}
 }
 

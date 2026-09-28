@@ -403,7 +403,7 @@ func isModelScopedFailure(lower string) bool {
 func credentialMessage(acc *store.Account, fallback string) string {
 	switch {
 	case isGrok(acc):
-		return "上游拒绝该 SSO Cookie（会话已失效，或被同账号的另一次登录替换），请重新登录该 xAI 账号并抓取新的 Cookie"
+		return "上游拒绝该 Grok Build OAuth 授权，请在账号管理中重新完成官方登录"
 	case acc != nil && strings.EqualFold(strings.TrimSpace(acc.AccountType), "workbuddy"):
 		return "上游拒绝该 WorkBuddy 授权，请在账号管理中重新完成 OAuth 登录"
 	case acc != nil && strings.EqualFold(strings.TrimSpace(acc.AccountType), "cline"):

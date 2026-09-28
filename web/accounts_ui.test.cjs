@@ -95,6 +95,7 @@ function workBuddyAccount(overrides = {}) {
     id: 11,
     account_type: 'workbuddy',
     workbuddy_access_token: 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1aWQifQ.sig',
+    has_credential: true,
     workbuddy_uid: '07ab88c8-5596-4257-8d21-e9fcbe3a3810',
     enabled: true,
     weight: 1,
@@ -150,51 +151,39 @@ test('the visibly highlighted provider wins if in-memory state is stale', () => 
   assert.equal(node('accountTypeDisplay').value, 'Cline');
 });
 
-test('every channel owns its credential copy: switching type never leaves another channel text behind', () => {
-  const { context, node } = loadUI();
-  node('accountId').value = '';
-  // Open Grok first: its copy must not survive into the channels that follow.
-  context.applyTokenLabels('grok');
-  assert.equal(node('tokenLabel').textContent, 'Grok Build OAuth');
-  assert.match(node('tokenHint').textContent, /Grok/);
-
-  context.applyTokenLabels('cline');
-  assert.equal(node('tokenLabel').textContent, 'Cookie / __client / __session');
-  assert.equal(node('tokenHint').textContent.includes('Grok'), false, 'Cline must not inherit Grok hint text');
-
-  context.applyTokenLabels('workbuddy');
-  assert.equal(node('tokenLabel').textContent, 'WorkBuddy 凭证');
-  assert.equal(node('tokenHint').textContent.includes('__client'), false, 'WorkBuddy must not inherit the generic cookie hint');
-
-  context.applyTokenLabels('grok');
-  assert.equal(node('tokenLabel').textContent, 'Grok Build OAuth');
-  assert.equal(node('tokenHint').textContent.includes('WorkBuddy'), false);
+test('the account modal has no manual credential or batch import inputs', () => {
+  const template = fs.readFileSync(path.join(__dirname, 'templates/components/modals/account-modal.html'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, 'static/js/accounts.js'), 'utf8');
+  for (const id of ['clientCookie', 'ssoCredentialGroup', 'accountImportStatus', 'tokenLabel', 'tokenHint']) {
+    assert.doesNotMatch(template, new RegExp(`id="${id}"`));
+    assert.doesNotMatch(source, new RegExp(`getElementById\\("${id}"\\)`));
+  }
+  assert.doesNotMatch(source, /runAccountCreatePool|splitBatchCredentialInput|buildAccountPayload/);
 });
 
-test('openModal after a tab click renders that tab form, not the previously opened one', () => {
+test('openModal after a tab click renders only that channel official login', () => {
   const { context, node } = loadUI();
   vm.runInContext('globalThis.WorkBuddyLogin = { start() {}, stop() {} };', context);
   node('accountModal').classList = { add() {}, remove() {}, contains() { return true; } };
   node('enabled').checked = true;
   context.renderPlatformTabs();
 
-  const expectations = {
-    grok: { label: 'Grok Build OAuth', hint: /Grok/, sso: true },
-    cline: { label: 'Cookie / __client / __session', hint: /Cookie/, sso: true },
-    workbuddy: { label: 'WorkBuddy 凭证', hint: /官方登录/, sso: true },
-  };
+  const groups = { grok: 'grokDeviceLoginGroup', cline: 'clineLoginGroup', workbuddy: 'workbuddyLoginGroup', qoder: 'qoderLoginGroup' };
   const tabs = node('platformFilters').children;
-  for (const platform of ['grok', 'cline', 'workbuddy']) {
+  for (const platform of Object.keys(groups)) {
     const tab = tabs.find((candidate) => decodeURIComponent(candidate.dataset.platform || '') === platform);
     assert.ok(tab, `no ${platform} tab`);
     tab.click();
     node('accountId').value = '';
     context.openModal();
-    const expected = expectations[platform];
     assert.equal(node('accountType').value, platform, `${platform}: modal type`);
-    assert.equal(node('tokenLabel').textContent, expected.label, `${platform}: credential label`);
-    assert.match(node('tokenHint').textContent, expected.hint, `${platform}: credential hint`);
-    assert.equal(node('ssoCredentialGroup').hidden, expected.sso, `${platform}: credential field visibility`);
+    for (const [channel, group] of Object.entries(groups)) {
+      assert.equal(node(group).hidden, channel !== platform, `${platform}: ${group} visibility`);
+    }
+    assert.equal(node('#accountForm button[type="submit"]').hidden, true);
+    node('accountId').value = '7';
+    context.applyTokenLabels(platform);
+    assert.equal(node('#accountForm button[type="submit"]').hidden, false, `${platform}: settings editing`);
   }
 });
 
@@ -210,38 +199,25 @@ test('Grok Build CLI OAuth cannot be created from the form', async () => {
   assert.match(notices[0], /官方网页登录/);
 });
 
-test('Cline exposes only official login and preserves settings editing', () => {
+test('Cline exposes official login and preserves settings editing', () => {
   const { context, node } = loadUI();
   context.applyTokenLabels('grok');
-  node('clientCookie').value = 'old-input';
   context.applyTokenLabels('cline');
-  for (const id of ['ssoCredentialGroup', 'oauthCredentialGroup', 'oauthRefreshGroup', 'oauthExpiresGroup', 'grokDeviceLoginGroup']) {
-    assert.equal(node(id).hidden, true, id);
-  }
-  assert.equal(node('clineLoginGroup').hidden, false, 'the Cline login must be presented');
-  assert.equal(node('clientCookie').value, '');
+  assert.equal(node('grokDeviceLoginGroup').hidden, true);
+  assert.equal(node('clineLoginGroup').hidden, false);
   assert.equal(node('#accountForm button[type="submit"]').hidden, true);
   node('accountId').value = '1';
   context.applyTokenLabels('cline');
   assert.equal(node('#accountForm button[type="submit"]').hidden, false);
-  const payload = context.buildAccountPayload('cline', { account_type: 'cline', enabled: true }, 'unused-secret');
-  assert.equal(payload.refresh_token, undefined);
-  assert.equal(payload.client_cookie, undefined);
-  assert.equal(payload.enabled, true);
-  // Switching away must show the next channel's login and drop the Cline one.
-  context.applyTokenLabels('workbuddy');
   node('accountId').value = '';
   context.applyTokenLabels('workbuddy');
   assert.equal(node('workbuddyLoginGroup').hidden, false);
   assert.equal(node('clineLoginGroup').hidden, true);
-  assert.equal(node('ssoCredentialGroup').hidden, true, 'workbuddy is OAuth-only too');
-  assert.equal(node('clientCookie').value, '', 'the hidden credential field must carry no value');
 });
 
 test('Cline save cannot submit a manual creation request', async () => {
   const { context, node } = loadUI();
   node('accountType').value = 'cline';
-  node('clientCookie').value = 'manual-secret';
   const notices = [];
   context.showToast = (message) => notices.push(message);
   context.fetch = () => { throw new Error('manual Cline creation must not send a request'); };
@@ -272,7 +248,6 @@ test('Cline settings save succeeds without submitting credentials', async () => 
   vm.runInContext('accounts = [{ id: 7, account_type: "cline", weight: 2, has_credential: true }]', context);
   let sent;
   context.fetch = async (url, options) => { sent = { url, options }; return { ok: true }; };
-  context.clearAccountImportStatus = () => {};
   context.closeModal = () => {};
   context.loadAccounts = () => {};
   context.showToast = () => {};
@@ -282,34 +257,15 @@ test('Cline settings save succeeds without submitting credentials', async () => 
   assert.deepEqual(JSON.parse(sent.options.body), { account_type: 'cline', weight: 2, enabled: true });
 });
 
-test('WorkBuddy is OAuth-only in the modal: no manual credential field', () => {
+test('WorkBuddy uses official login, while edits can save settings', () => {
   const { context, node } = loadUI();
   node('accountId').value = '';
   context.applyTokenLabels('workbuddy');
-  assert.equal(node('workbuddyLoginGroup').hidden, false, 'official login must be presented');
-  assert.equal(node('ssoCredentialGroup').hidden, true, 'the manual credential field must be gone');
-  assert.equal(node('clientCookie').required, false);
-  assert.equal(node('clientCookie').value, '');
-  assert.equal(node('#accountForm button[type="submit"]').hidden, true,
-    'a new WorkBuddy account is created by the login flow, not by the form');
-  // Every channel is created by its own official login: the credential field
-  // stays hidden for a new account of any of them.
-  context.applyTokenLabels('cline');
-  assert.equal(node('clineLoginGroup').hidden, false, 'the cline login must be presented');
-  assert.equal(node('ssoCredentialGroup').hidden, true);
-  assert.equal(node('#accountForm button[type="submit"]').hidden, true,
-    'a new Cline account is created by the login flow, not by the form');
-
-  // Editing keeps the login button (re-authorization) and the save button
-  // (settings), but still no credential field.
+  assert.equal(node('workbuddyLoginGroup').hidden, false);
+  assert.equal(node('#accountForm button[type="submit"]').hidden, true);
   node('accountId').value = '11';
   context.applyTokenLabels('workbuddy');
-  assert.equal(node('workbuddyLoginGroup').hidden, false);
-  assert.equal(node('ssoCredentialGroup').hidden, true);
   assert.equal(node('#accountForm button[type="submit"]').hidden, false);
-
-  // Switching to another channel leaves the WorkBuddy login behind.
-  context.applyTokenLabels('cline');
   node('accountId').value = '';
   context.applyTokenLabels('cline');
   assert.equal(node('workbuddyLoginGroup').hidden, true);
@@ -320,7 +276,6 @@ test('WorkBuddy creation cannot be submitted from the form', async () => {
   const { context, node } = loadUI();
   node('accountType').value = 'workbuddy';
   node('accountId').value = '';
-  node('clientCookie').value = 'refresh-token-typed-anyway';
   const notices = [];
   context.showToast = (message) => notices.push(message);
   context.fetch = () => { throw new Error('manual WorkBuddy creation must not send a request'); };
@@ -360,19 +315,17 @@ test('WorkBuddy edits may keep the stored credential and never display the refre
   const { context, node } = loadUI();
   const account = workBuddyAccount();
   vm.runInContext(`accounts = [${JSON.stringify(account)}]`, context);
-  assert.equal(context.getAccountToken(account), account.workbuddy_access_token);
   assert.equal(context.hasSidebarAccountCredential(account), true);
+  assert.equal(context.hasSidebarAccountCredential({ ...account, has_credential: false }), false,
+    'a visible access token must not override the server credential verdict');
   assert.equal(context.hasSidebarAccountCredential({ account_type: 'workbuddy', enabled: true }), false);
 
   node('accountType').value = 'workbuddy';
   node('accountId').value = '11';
   node('enabled').checked = true;
-  // The credential field is hidden for this channel, so an edit submits no
-  // client_cookie at all.
-  node('clientCookie').value = '';
+  // Settings updates never carry any credential fields.
   let sent;
   context.fetch = async (url, options) => { sent = { url, options }; return { ok: true }; };
-  context.clearAccountImportStatus = () => {};
   context.closeModal = () => {};
   context.loadAccounts = () => {};
   context.showToast = () => {};
@@ -382,8 +335,8 @@ test('WorkBuddy edits may keep the stored credential and never display the refre
   assert.equal(sent.options.method, 'PUT');
   const body = JSON.parse(sent.options.body);
   assert.equal(body.account_type, 'workbuddy');
-  // An empty submission must not overwrite the server-side credential.
-  assert.ok(!body.client_cookie || body.client_cookie === '', JSON.stringify(body));
+  assert.equal(body.client_cookie, undefined);
+  assert.equal(body.refresh_token, undefined);
 });
 
 test('WorkBuddy rows show the metered credits, plan label and signed-in email', () => {
@@ -424,10 +377,69 @@ test('WorkBuddy rows show the metered credits, plan label and signed-in email', 
   assert.equal(context.accountUsageCounter(account), 202);
   assert.equal(context.accountUsageCounter({ account_type: 'cline', request_count: 7 }), 7);
 
-  // The token column identifies the account by its signed-in address.
+  // The identity leads with the email; the secondary credential summary uses
+  // the server flag rather than exposing any access or refresh token.
+  assert.equal(context.accountIdentityPrimary(account), 'operator@example.com');
   const tokenCell = context.formatTokenDisplay(account);
-  assert.match(tokenCell, /operator@example\.com/);
+  assert.equal(tokenCell, '凭证已配置');
   assert.doesNotMatch(tokenCell, /workbuddy_refresh_token/);
+});
+
+test('WorkBuddy and Qoder share snapshot parsing without mixing spent-credit semantics', () => {
+  const { context } = loadUI();
+  const fields = { quota_supported: true, quota_limit: 350, quota_remaining: 120.5,
+    quota_used: 19.25, quota_unit: 'credit', quota_reset_at: '2027-01-01T00:00:00Z' };
+  const workbuddy = context.getQuotaStats(workBuddyAccount(fields));
+  const qoder = context.getQuotaStats(qoderTrialAccount({ ...fields, quota_exhausted: true,
+    quota_upgrade_url: ' https://qoder.com/upgrade ' }));
+  assert.equal(workbuddy.used, 229.5, 'WorkBuddy spent amount derives from the remaining meter');
+  assert.equal(qoder.used, 19.25, 'Qoder spent amount comes from quota_used');
+  assert.equal(workbuddy.workbuddy, true);
+  assert.equal(qoder.qoder, true);
+  assert.equal(qoder.exhausted, true);
+  assert.equal(qoder.upgradeUrl, 'https://qoder.com/upgrade');
+  assert.equal(workbuddy.resetAt, qoder.resetAt);
+});
+
+test('estimated and upstream-confirmed Grok Free windows retain distinct provenance', () => {
+  const { context } = loadUI();
+  const base = { account_type: 'grok', credential_type: 'oauth', grok_provider: 'build',
+    quota_limit: 500, quota_used: 125, quota_window_hours: 24, quota_reset_at: '2027-01-01',
+    quota_source: 'billingProfile', quota_confidence: 'estimated', quota_limit_known: false };
+  const estimate = context.getQuotaStats(base);
+  const confirmed = context.getQuotaStats({ ...base, quota_source: 'upstreamExhaustion',
+    quota_confidence: 'confirmed' });
+  assert.equal(estimate.estimated, true);
+  assert.equal(estimate.confirmedFree, undefined);
+  assert.equal(estimate.limitKnown, false);
+  assert.equal(estimate.resetAt, '');
+  assert.match(context.buildQuotaMarkup(base), /≈/);
+  assert.equal(confirmed.confirmedFree, true);
+  assert.equal(confirmed.estimated, undefined);
+  assert.equal(confirmed.limitKnown, true);
+  assert.equal(confirmed.resetAt, base.quota_reset_at);
+  assert.doesNotMatch(context.buildQuotaMarkup({ ...base, quota_source: 'upstreamExhaustion',
+    quota_confidence: 'confirmed' }), /≈/);
+});
+
+test('official-login cleanup stops each provider and hides its own status and link', () => {
+  const { context, node } = loadUI();
+  const calls = [];
+  for (const [provider, stop, status, link] of [
+    ['WorkBuddyLogin', 'stopWorkBuddyLogin', 'workbuddyLoginStatus', ''],
+    ['QoderLogin', 'stopQoderLogin', 'qoderLoginStatus', 'qoderLoginLink'],
+    ['ClineLogin', 'stopClineLogin', 'clineLoginStatus', 'clineLoginLink'],
+  ]) {
+    context[provider] = { stop: () => calls.push(provider) };
+    node(status).hidden = false;
+    node(status).textContent = 'pending';
+    if (link) node(link).hidden = false;
+    context[stop]();
+    assert.equal(node(status).hidden, true);
+    assert.equal(node(status).textContent, '');
+    if (link) assert.equal(node(link).hidden, true);
+  }
+  assert.deepEqual(calls, ['WorkBuddyLogin', 'QoderLogin', 'ClineLogin']);
 });
 
 test('WorkBuddy without a meter snapshot says so instead of showing a fake quota', () => {
@@ -443,36 +455,34 @@ test('WorkBuddy without a meter snapshot says so instead of showing a fake quota
   assert.equal(context.getQuotaStats({ account_type: 'workbuddy', usage_limit: 350, usage_current: 147.28 }).unknown, true);
 });
 
-test('workbuddy-auth module exposes a popup login without persisting tokens', () => {
-  const source = fs.readFileSync(path.join(__dirname, 'static/js/workbuddy-auth.js'), 'utf8');
-  assert.match(source, /api\/workbuddy\/login/);
-  assert.match(source, /window\.open\(/);
-  assert.doesNotMatch(source, /localStorage\.setItem\([^)]*token/i);
-  assert.doesNotMatch(source, /document\.cookie/);
+test('WorkBuddy delegates to the shared browser driver without persisting tokens', () => {
+  const wrapper = fs.readFileSync(path.join(__dirname, 'static/js/workbuddy-auth.js'), 'utf8');
+  const driver = fs.readFileSync(path.join(__dirname, 'static/js/device-auth.js'), 'utf8');
+  const page = fs.readFileSync(path.join(__dirname, 'templates/pages/accounts.html'), 'utf8');
+  assert.match(wrapper, /DeviceAuthLogin\.create\(/);
+  assert.match(wrapper, /api\/workbuddy\/login/);
+  assert.match(wrapper, /workbuddy_login_v1/);
+  assert.match(wrapper, /workbuddyLoginLink/);
+  assert.ok(page.indexOf('/js/device-auth.js') < page.indexOf('/js/workbuddy-auth.js'), 'load the driver first');
+  assert.doesNotMatch(wrapper, /localStorage\.setItem\([^)]*token/i);
+  assert.doesNotMatch(wrapper, /document\.cookie/);
+  assert.match(driver, /window\.open\(/);
+  assert.match(driver, /setLink\(authURL\)/);
 });
 
-test('workbuddy-auth reports the server error code instead of blaming the network', () => {
+test('WorkBuddy keeps operator-facing server errors and original terminal messages', () => {
   const source = fs.readFileSync(path.join(__dirname, 'static/js/workbuddy-auth.js'), 'utf8');
-  // Every server-side failure code must have an operator-facing message.
   for (const code of [
-    'upstream_unreachable',
-    'upstream_rejected',
-    'origin_mismatch',
-    'insecure_origin',
-    'store_unavailable',
-    'too_many_logins',
+    'upstream_unreachable', 'upstream_rejected', 'origin_mismatch',
+    'insecure_origin', 'store_unavailable', 'too_many_logins',
+    'unsupported_media_type', 'transaction_failed',
   ]) {
     assert.match(source, new RegExp(`${code}:`), `no message for ${code}`);
   }
-  // The response body must be read, not discarded behind a generic message.
-  assert.match(source, /readErrorPayload\(/);
-  // The popup is reserved during the click, before any await, so the browser
-  // does not treat it as a blocked script-initiated window.
-  const startIndex = source.indexOf('function start()');
-  const reserveIndex = source.indexOf("window.open('about:blank'", startIndex);
-  const awaitIndex = source.indexOf('await begin(', startIndex);
-  assert.ok(reserveIndex > startIndex, 'popup is not reserved in start()');
-  assert.ok(awaitIndex === -1 || reserveIndex < awaitIndex, 'popup must be reserved before the first await');
+  assert.match(source, /complete: 'WorkBuddy 官方登录完成，账号已保存'/);
+  assert.match(source, /failed: 'WorkBuddy 授权失败，请重新发起登录。'/);
+  assert.match(source, /expired: 'WorkBuddy 授权已超时，请重新发起登录。'/);
+  assert.match(fs.readFileSync(path.join(__dirname, 'static/js/device-auth.js'), 'utf8'), /readErrorPayload\(response\)/);
 });
 
 test('clicking the WorkBuddy tab then 添加账号 shows the WorkBuddy login', () => {
@@ -500,7 +510,6 @@ test('clicking the WorkBuddy tab then 添加账号 shows the WorkBuddy login', (
   assert.equal(node('workbuddyLoginGroup').hidden, false, 'workbuddy login must be visible');
   assert.equal(node('grokDeviceLoginGroup').hidden, true, 'grok login must stay hidden');
   assert.equal(node('clineLoginGroup').hidden, true, 'cline login must stay hidden');
-  assert.equal(node('ssoCredentialGroup').hidden, true, 'workbuddy is OAuth-only, no manual field');
 });
 
 test('every platform tab maps to its own provider login surface', () => {
@@ -513,10 +522,10 @@ test('every platform tab maps to its own provider login surface', () => {
   context.renderPlatformTabs();
 
   const expectations = {
-    cline: { workbuddyLoginGroup: true, qoderLoginGroup: true, clineLoginGroup: false, ssoCredentialGroup: true },
-    workbuddy: { workbuddyLoginGroup: false, qoderLoginGroup: true, clineLoginGroup: true, ssoCredentialGroup: true },
-    qoder: { workbuddyLoginGroup: true, qoderLoginGroup: false, clineLoginGroup: true, ssoCredentialGroup: true },
-    grok: { workbuddyLoginGroup: true, qoderLoginGroup: true, clineLoginGroup: true, ssoCredentialGroup: true },
+    cline: { workbuddyLoginGroup: true, qoderLoginGroup: true, clineLoginGroup: false },
+    workbuddy: { workbuddyLoginGroup: false, qoderLoginGroup: true, clineLoginGroup: true },
+    qoder: { workbuddyLoginGroup: true, qoderLoginGroup: false, clineLoginGroup: true },
+    grok: { workbuddyLoginGroup: true, qoderLoginGroup: true, clineLoginGroup: true },
   };
   for (const [platform, expected] of Object.entries(expectations)) {
     node('accountId').value = '';
@@ -544,10 +553,7 @@ test('Qoder is OAuth-only in the modal: no manual credential field and no PAT en
   assert.equal(node('workbuddyLoginGroup').hidden, true, 'the workbuddy login must stay hidden');
   // The channel is OAuth-only: there must be no credential field to type a PAT
   // into, and no submit button for a new account.
-  assert.equal(node('ssoCredentialGroup').hidden, true, 'qoder has no manual credential field');
-  assert.equal(node('clientCookie').required, false, 'the hidden credential field must not be required');
-  assert.equal(node('clientCookie').value, '', 'the hidden credential field must be empty');
-  assert.match(node('tokenLabel').textContent, /Qoder/);
+  assert.equal(node('#accountForm button[type="submit"]').hidden, true, 'new Qoder account uses official login');
 });
 
 test('Qoder creation cannot be submitted from the form', () => {
@@ -556,7 +562,6 @@ test('Qoder creation cannot be submitted from the form', () => {
   context.accounts = [];
   node('accountId').value = '';
   node('accountType').value = 'qoder';
-  node('clientCookie').value = 'not-a-pat';
   let toast = '';
   vm.runInContext('globalThis.showToast = (message) => { globalThis.__lastToast = message; };', context);
   context.saveAccount({ preventDefault() {} });
@@ -992,14 +997,35 @@ test('账号管理 and 运维总览 count the same 异常 accounts from one pred
   }
   assert.equal(context.isAccountAbnormal(rows[3]), false);
 
-  // The provider-registry allowlist must not decide this. It used to choose which
-  // channels were asked for a credential at all, so an unloaded registry (script
-  // order, cached bundle) reclassified every channel without session columns.
+  // The status comes from the server's explicit credential verdict, even when
+  // the provider registry is unavailable during script startup.
   const registry = context.window.OrchidsProviderRegistry;
   context.window.OrchidsProviderRegistry = undefined;
   try {
     assert.equal(rows.filter(context.isSidebarAccountAbnormal).length, sidebar.abnormal, 'verdict must not depend on a loaded registry');
   } finally {
     context.window.OrchidsProviderRegistry = registry;
+  }
+});
+
+test('credential verdict drives sidebar counters and channel-specific row badges', () => {
+  const { context } = loadUI();
+  for (const [type, missingText, missingTip] of [
+    ['grok', '待登录', /Build OAuth/],
+    ['workbuddy', '待补全', /WorkBuddy/],
+    ['qoder', '待补全', /Qoder/],
+    ['cline', '待补全', /Cline/],
+  ]) {
+    const account = { id: 101, account_type: type, enabled: true, status_code: '', has_credential: true };
+    assert.equal(context.isSidebarAccountAbnormal(account), false, `${type}: credentialed sidebar`);
+    assert.equal(context.evaluateAccountStatus(account).text, '正常', `${type}: credentialed badge`);
+    const missing = { ...account, has_credential: false, session_id: 'obsolete-session', session_cookie: 'obsolete-cookie',
+      token: 'obsolete-token', credential_type: 'oauth', workbuddy_access_token: 'visible-token',
+      qoder_access_token: 'visible-token', cline_access_token: 'visible-token' };
+    assert.equal(context.isSidebarAccountAbnormal(missing), true, `${type}: missing credential sidebar`);
+    const badge = context.evaluateAccountStatus(missing);
+    assert.equal(badge.text, missingText, `${type}: missing credential badge`);
+    assert.match(badge.tip, missingTip);
+    assert.equal(badge.normal, false);
   }
 });

@@ -239,15 +239,6 @@
 .account-import-status.is-error { border-color: var(--bad); background: var(--bad-soft); }
 .account-import-status strong { color: var(--text-main); }
 
-.account-token-input {
-  font-family: var(--font-mono);
-  line-height: 1.5;
-  white-space: pre;
-  overflow-wrap: normal;
-  word-break: normal;
-  resize: vertical;
-}
-
 .accounts-mobile-list {
   display: grid;
   gap: var(--space-3);

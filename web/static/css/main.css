@@ -278,7 +278,6 @@ body::before,
 .sidebar-brand-text { min-width: 0; }
 
 .sidebar-header .title,
-.sidebar-title,
 .mobile-topbar-brand .title {
   color: var(--text-main);
   font-size: 0.95rem;
@@ -379,12 +378,6 @@ body::before,
   width: 100%;
   justify-content: center;
 }
-
-.sidebar-actions,
-.sidebar-list,
-.sidebar-toggle,
-.sidebar-expand-btn,
-.sidebar-action-btn { display: none; }
 
 /* Small screens: the sidebar becomes a drawer behind the top bar. */
 .mobile-topbar {
@@ -515,7 +508,6 @@ body::before,
 .btn-save,
 .btn-page,
 .btn-icon,
-.icon-btn,
 .action-icon,
 .ops-chip,
 .chip,
@@ -548,7 +540,6 @@ body::before,
 .btn-outline:hover,
 .btn-neutral:hover,
 .btn-icon:hover,
-.icon-btn:hover,
 .action-icon:hover,
 .models-action-btn:hover,
 .capability-action:hover,
@@ -566,7 +557,6 @@ body::before,
 
 .btn-primary,
 .btn-save,
-.send-btn,
 .models-primary-action {
   background: var(--accent);
   border-color: var(--accent);
@@ -621,7 +611,6 @@ body::before,
 
 /* Square icon button: 34x34 with a single glyph. */
 .btn-icon,
-.icon-btn,
 .action-icon,
 .panel-close-btn {
   width: var(--control-h);
@@ -714,8 +703,7 @@ textarea:focus,
 
 input:disabled,
 select:disabled,
-textarea:disabled,
-.is-unavailable input {
+textarea:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
@@ -808,8 +796,7 @@ input[type="range"],
 
 .input-wrapper .input-icon ~ input { padding-left: var(--space-8); }
 
-.password-toggle,
-.key-toggle {
+.password-toggle {
   position: absolute;
   right: var(--space-2);
   display: grid;
@@ -824,8 +811,7 @@ input[type="range"],
   cursor: pointer;
 }
 
-.password-toggle:hover,
-.key-toggle:hover { color: var(--text-main); background: var(--surface-2); }
+.password-toggle:hover { color: var(--text-main); background: var(--surface-2); }
 
 /* Switch. The JS toggles `.toggle.active` and keeps the native checkbox hidden. */
 .toggle {
@@ -912,7 +898,6 @@ details.collapsible > summary {
 .advanced-settings .advanced-body { padding: var(--space-4); }
 
 .collapsed { display: none; }
-.section-hidden { display: none; }
 
 /* -----------------------------------------------------------------------------
    7. Surfaces: cards, panels, sections
@@ -921,14 +906,10 @@ details.collapsible > summary {
 .card,
 .ops-card,
 .models-results-card,
-.grok-panel,
-.settings-panel,
 .estimate-panel,
 .doc-callout,
 .doc-table-wrap,
-.config-key-card,
-.cache-list,
-.task-list {
+.config-key-card {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   background: var(--surface-1);
@@ -941,8 +922,7 @@ details.collapsible > summary {
 
 .card-head,
 .section-head,
-.config-key-head,
-.settings-panel-head {
+.config-key-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -955,7 +935,6 @@ details.collapsible > summary {
 .card-head h2,
 .section-title,
 .config-section,
-.settings-panel-title,
 .models-section-label {
   font-size: 0.92rem;
   font-weight: 650;
@@ -1016,31 +995,6 @@ details.collapsible > summary {
 }
 
 .section-head { border-bottom: 0; padding-bottom: 0; }
-
-/* Settings blocks: label on the left, control on the right, one row per knob. */
-.settings-block,
-.function-settings-block {
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  background: var(--surface-2);
-  padding: var(--space-4);
-}
-
-.settings-block-full { grid-column: 1 / -1; }
-.function-header-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin-bottom: var(--space-3);
-}
-.function-title { font-size: 0.86rem; font-weight: 650; }
-
-.settings-grid,
-.function-stack {
-  display: grid;
-  gap: var(--space-3);
-}
 
 /* -----------------------------------------------------------------------------
    8. Metrics & stats
@@ -1126,16 +1080,6 @@ details.collapsible > summary {
 .metric-negative { color: var(--bad); }
 .metric-accent { color: var(--accent); }
 
-.meta-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: var(--space-3);
-}
-
-.meta-item { display: flex; flex-direction: column; gap: 2px; }
-.meta-label { color: var(--text-muted); font-size: 0.72rem; }
-.meta-value { color: var(--text-main); font-size: 0.84rem; font-variant-numeric: tabular-nums; }
-
 .estimate-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -1155,34 +1099,6 @@ details.collapsible > summary {
 .estimate-value-blue { color: var(--info); }
 .estimate-value-green { color: var(--ok); }
 .estimate-value-purple { color: var(--accent-purple); }
-
-.progress-wrap,
-.progress-wrap-spaced {
-  position: relative;
-  width: 100%;
-  height: 6px;
-  border-radius: var(--radius-pill);
-  background: var(--bg-inset);
-  overflow: hidden;
-}
-
-.progress-wrap-spaced { margin-top: var(--space-2); }
-
-.progress-bar,
-.progress-fill {
-  height: 100%;
-  border-radius: var(--radius-pill);
-  background: var(--accent);
-  transition: width var(--transition);
-}
-
-.progress-meta {
-  display: flex;
-  justify-content: space-between;
-  margin-top: var(--space-1);
-  color: var(--text-muted);
-  font-size: 0.72rem;
-}
 
 /* -----------------------------------------------------------------------------
    9. Tables
@@ -1282,9 +1198,7 @@ td.num { font-variant-numeric: tabular-nums; text-align: right; }
 .models-default-badge,
 .models-meta-pill,
 .protocol-tag,
-.account-tier-tag,
-.model-chip,
-.selected-count {
+.account-tier-tag {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
@@ -1303,13 +1217,11 @@ td.num { font-variant-numeric: tabular-nums; text-align: right; }
 .status-badge:empty { display: none; }
 
 .is-ok,
-.is-ready,
 .tag.is-ok,
 .status-badge.is-ok { color: var(--ok); border-color: rgba(74, 222, 155, 0.35); background: var(--ok-soft); }
 
 .is-warn,
 .is-warning,
-.is-pending,
 .status-badge.is-warn { color: var(--warn); border-color: rgba(245, 194, 100, 0.35); background: var(--warn-soft); }
 
 .is-bad,
@@ -1321,10 +1233,7 @@ td.num { font-variant-numeric: tabular-nums; text-align: right; }
 .status-badge.is-info { color: var(--info); border-color: rgba(108, 182, 255, 0.35); background: var(--info-soft); }
 
 .is-idle,
-.is-running,
-.is-loading,
-.is-unavailable,
-.is-filtered { color: var(--idle); border-color: var(--border-strong); background: var(--idle-soft); }
+.is-loading { color: var(--idle); border-color: var(--border-strong); background: var(--idle-soft); }
 
 .badge-grok,
 .badge-workbuddy,
@@ -1361,7 +1270,6 @@ td.num { font-variant-numeric: tabular-nums; text-align: right; }
 .filter-tabs,
 .platform-tabs,
 .config-tabs-shell,
-.grok-tabs,
 .logs-tabs,
 .tabs {
   display: flex;
@@ -1478,18 +1386,6 @@ td.num { font-variant-numeric: tabular-nums; text-align: right; }
 
 .drawer-backdrop.is-open { display: block; }
 
-.popover,
-.model-dropdown {
-  position: absolute;
-  z-index: var(--z-drawer);
-  min-width: 200px;
-  padding: var(--space-2);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
-  background: var(--surface-3);
-  box-shadow: var(--shadow-md);
-}
-
 .toast-container {
   position: fixed;
   top: var(--space-5);
@@ -1558,8 +1454,7 @@ td.num { font-variant-numeric: tabular-nums; text-align: right; }
 .empty-state-panel { border-radius: var(--radius-md); background: var(--surface-1); }
 
 .empty-state-mark,
-.models-empty-icon,
-.empty-title {
+.models-empty-icon {
   display: grid;
   place-items: center;
   width: 40px;
@@ -1571,7 +1466,6 @@ td.num { font-variant-numeric: tabular-nums; text-align: right; }
   font-weight: 700;
 }
 
-.empty-subtitle,
 .empty-state p { color: var(--text-muted); font-size: 0.8rem; }
 
 /* Loading is a skeleton shimmer, never a grey veil over live content: a veil
@@ -1697,28 +1591,7 @@ td.num { font-variant-numeric: tabular-nums; text-align: right; }
   border-left: 3px solid var(--info);
 }
 .doc-callout-amber { border-left-color: var(--warn); }
-.code-block,
-.clear-block,
-.length-block,
-.preset-block,
-.upload-block,
-.ratio-block,
-.ref-block,
-.img-grid {
-  display: block;
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  background: var(--bg-inset);
-  color: var(--text-soft);
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  line-height: 1.7;
-  overflow-x: auto;
-}
-
 .doc-inline-code,
-.inline-code,
 .inline-code,
 .doc-inline-code-red,
 .doc-model-code {
@@ -1735,9 +1608,7 @@ td.num { font-variant-numeric: tabular-nums; text-align: right; }
 /* -----------------------------------------------------------------------------
    16. Utilities
    -------------------------------------------------------------------------- */
-.hidden,
-.is-hidden { display: none !important; }
-
+.hidden { display: none !important; }
 .sr-only {
   position: absolute;
   width: 1px;
@@ -1747,10 +1618,8 @@ td.num { font-variant-numeric: tabular-nums; text-align: right; }
   white-space: nowrap;
 }
 
-.inline-flex-row { display: inline-flex; align-items: center; gap: var(--space-2); }
 .inline-actions { display: flex; align-items: center; gap: var(--space-2); }
 .eq { display: flex; align-items: center; }
-.has-url { word-break: break-all; }
 .muted { color: var(--text-muted); }
 .normal { color: var(--text-soft); }
 .abnormal { color: var(--bad); }
@@ -1777,7 +1646,6 @@ td.num { font-variant-numeric: tabular-nums; text-align: right; }
   body { font-size: 15px; }
 
   .stats-grid { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
-  .meta-grid { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
   .estimate-grid { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
 
   .modal-content { max-width: 700px; }
@@ -1800,7 +1668,6 @@ td.num { font-variant-numeric: tabular-nums; text-align: right; }
   .header-section h1 { font-size: 1.65rem; }
 
   .stats-grid { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
-  .meta-grid { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
   .estimate-grid { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 
   .modal-content,
@@ -1878,7 +1745,6 @@ td.num { font-variant-numeric: tabular-nums; text-align: right; }
   .estimate-grid { grid-template-columns: 1fr; gap: var(--space-2); }
 
   .pagination-shell,
-  .settings-panel-head,
   .section-head {
     flex-direction: column;
     align-items: stretch;

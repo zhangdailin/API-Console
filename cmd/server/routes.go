@@ -198,13 +198,13 @@ func registerRoutes(
 	// context against the wrong number. On the unified prefix the channel is the
 	// model's, not the path's.
 	mux.HandleFunc("/v1/messages/count_tokens", inferenceAuth(limiter.Limit(grok.ModelDispatcher(h.HandleCountTokens, h.HandleCountTokens, isNativeResponsesModel))))
-	registerWithPrefixes(mux, allPrefixes, "/files/", inferenceAuth(grokHandler.HandleFiles))
+	registerWithPrefixes(mux, []string{"/grok/v1", "/v1"}, "/files/", inferenceAuth(grokHandler.HandleFiles))
 
 	// --- Public auth/login (no prefix duplication) ---
 	mux.HandleFunc("/api/login", apiHandler.HandleLogin)
 	mux.HandleFunc("/api/logout", apiHandler.HandleLogout)
 
-	// --- Admin API routes (session auth, dual prefix) ---
+	// --- Admin API routes (session auth) ---
 	sessionAuth := func(h http.HandlerFunc) http.HandlerFunc {
 		return middleware.SessionAuthDynamic(func() (string, string) {
 			current := currentConfig()
@@ -270,20 +270,6 @@ func registerRoutes(
 		}
 		apiHandler.HandleJournalRecords(w, r)
 	}))
-
-	// Admin routes with dual prefix: /api/v1/admin/* and /v1/admin/*
-	adminPrefixes := []string{"/api/v1/admin", "/v1/admin"}
-	adminRoutes := []struct {
-		path    string
-		handler http.HandlerFunc
-	}{
-		{"/config", apiHandler.HandleConfig},
-		{"/verify", grokHandler.HandleAdminVerify},
-		{"/storage", grokHandler.HandleAdminStorage},
-	}
-	for _, rt := range adminRoutes {
-		registerWithPrefixes(mux, adminPrefixes, rt.path, sessionAuth(rt.handler))
-	}
 
 	// --- Static assets ---
 	staticRootHandler := web.StaticHandler()

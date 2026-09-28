@@ -248,8 +248,6 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 //
 // Anything that has already emitted content is returned immediately: a replay
 // would duplicate the answer, and a usage-only frame would double-count billing.
-const transientAttempts = TransientMaxRetries + 1
-
 func (c *Client) runChat(ctx context.Context, url string, body []byte, model modelEntry, requestID string, fields RuntimeFields, toolsEnabled bool, onMessage func(upstream.SSEMessage)) error {
 	// Authentication repair has its own one-shot budget; only transient
 	// failures consume the transient retry counter.

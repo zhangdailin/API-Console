@@ -74,8 +74,8 @@ function getChannelScopedModels() {
   return sortModels(scoped);
 }
 
-function getFilteredModels() {
-  let filtered = getChannelScopedModels().slice();
+function getFilteredModels(channelModels = getChannelScopedModels()) {
+  let filtered = channelModels;
 
   if (modelStatusFilter) {
     filtered = filtered.filter((m) => normalizeModelStatus(m.status) === modelStatusFilter);
@@ -322,7 +322,7 @@ function renderPagination(current, total) {
 function renderModels() {
   const container = document.getElementById("modelsList");
   const channelModels = getChannelScopedModels();
-  const filtered = getFilteredModels();
+  const filtered = getFilteredModels(channelModels);
   updateModelSummary(channelModels, filtered);
   renderModelRefreshSummary();
 

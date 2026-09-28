@@ -662,7 +662,6 @@ func normalizeGrokTokenInput(acc *store.Account) {
 	acc.SessionCookie = ""
 	acc.SessionID = ""
 	acc.ClientUat = ""
-	acc.ProjectID = ""
 }
 
 // grokAccountIsOAuth reports whether a Grok account is a Build CLI OAuth account.
@@ -697,9 +696,6 @@ func preserveGrokOAuthCredentials(acc, existing *store.Account) {
 	}
 	if strings.TrimSpace(acc.TeamID) == "" {
 		acc.TeamID = existing.TeamID
-	}
-	if strings.TrimSpace(acc.UpstreamMode) == "" {
-		acc.UpstreamMode = existing.UpstreamMode
 	}
 }
 
@@ -2029,9 +2025,6 @@ func (a *API) HandleAccountByID(w http.ResponseWriter, r *http.Request) {
 		}
 		if acc.ClientUat == "" {
 			acc.ClientUat = existing.ClientUat
-		}
-		if acc.ProjectID == "" {
-			acc.ProjectID = existing.ProjectID
 		}
 		if acc.UserID == "" {
 			acc.UserID = existing.UserID
