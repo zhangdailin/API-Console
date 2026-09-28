@@ -1,171 +1,36 @@
-# Orchids-2api
+# API Console
 
 [中文](README.md) | [English](README_EN.md)
 
-A Go-based multi-channel proxy that exposes Claude Messages style and OpenAI-compatible APIs across four upstream channels: `workbuddy`, `qoder`, `cline`, and `grok`.
+A Go proxy for WorkBuddy, Qoder, Cline, and Grok Build OAuth. It exposes Claude Messages, OpenAI Chat Completions, and Responses-compatible APIs. The unified `/v1` prefix routes by model; `/{channel}/v1` selects a channel explicitly.
 
-## Current Status
+## Quick start
 
-- `internal/handler` serves `workbuddy` / `qoder` / `cline` for both `/v1/messages` and `/v1/chat/completions`
-- `internal/grok` handles Grok Messages, Responses, Chat, image, video, speech, and local media endpoints
-- per-channel model sync is available through `POST /api/models/refresh`
-- The Qoder channel is OAuth-only: accounts come exclusively from the official `qoder.com` device authorization flow, and it accepts no pasted personal access token
-- The Cline channel is OAuth-only too: the WorkOS device grant is exchanged at `api.cline.bot` for the Cline credential (sent as `Bearer workos:<accessToken>`), and the model catalog is read from `GET /ai/cline/recommended-models` with no compiled-in fallback
-
-## Core Features
-
-- multi-account pools with per-channel load balancing
-- Claude Messages compatible endpoints
-- OpenAI Chat Completions compatible endpoints
-- model management, default model selection, and sorting
-- admin UI and admin API
-- Redis-backed persistence
-- Prometheus metrics and optional `pprof`
-- Grok image generation/editing, Console video generation/edit/extension, Console TTS/STT/Realtime, and local media caching
-- API-key authentication by default, per-key model/RPM/expiration policies, and AES-GCM encryption for persisted account credentials
-
-## Supported Channels
-
-| Channel | Public routes |
-|---|---|
-| `workbuddy` | `/workbuddy/v1/messages`, `/workbuddy/v1/chat/completions` |
-| `qoder` | `/qoder/v1/messages`, `/qoder/v1/chat/completions` |
-| `cline` | `/cline/v1/messages`, `/cline/v1/chat/completions` |
-| `grok` | `/grok/v1/messages`, `/grok/v1/responses`, `/grok/v1/chat/completions`, image, video, speech, and file routes |
-
-Unified model lookup:
-
-- `GET /v1/models`
-- `GET /v1/models/{id}`
-
-Standard Grok video routes include `/v1/videos/generations`, `/v1/videos/edits`, and `/v1/videos/extensions`; the legacy Web app-chat generator remains available at `/v1/videos`. Video jobs are isolated by API key and their metadata is persisted in Redis for one hour. Standard Console jobs that already obtained an upstream `request_id` resume polling with the original account after restart. A renewable 30-second Redis lease allows only one worker across instances and permits takeover after expiry. `media_dir` can be a shared filesystem mount. Multi-replica mode requires Redis, a unique `deployment_instance_id` per replica, one common `deployment_cluster_id`, and `shared_media=true`; startup validates a cluster marker and read/write access before workers start. `/v1/media/inputs` accepts temporary image/video uploads up to 20 MiB and returns an API-key-scoped `file_id` valid for 24 hours. Grok speech routes include native `/v1/tts`, `/v1/stt`, `/v1/realtime`, plus OpenAI-compatible `/v1/audio/speech`, `/v1/audio/tasks`, and `/v1/audio/transcriptions`. Transcriptions support `json`, `verbose_json`, and `text`; parameters that cannot be represented by Console STT are rejected explicitly.
-
-## Documentation
-
-- [Architecture](docs/architecture.md)
-- [API Reference](docs/api-reference.md)
-- [Configuration](docs/configuration.md)
-- [Deployment](docs/deployment.md)
-
-Historical reviews and fix logs remain available in Git history. The topic guides above describe current behavior.
-
-## Requirements
-
-- Go `1.24+`
-- Redis `7+`
-- Windows / Linux / macOS
-
-## Quick Start
-
-### 1. Start Redis
+Requires Go **1.26.6+** (see `go.mod`) and Redis. Start Redis, copy the example config, then run the server:
 
 ```bash
-docker run -d --name orchids-redis -p 6379:6379 redis:7
-```
-
-### 2. Create `config.json`
-
-Copy the safe example first (`config.json` is not tracked by Git):
-
-```bash
+docker run -d --name api-console-redis -p 6379:6379 redis:7
 cp config.example.json config.json
-```
-
-```json
-{
-  "port": "3002",
-  "store_mode": "redis",
-  "redis_addr": "127.0.0.1:6379",
-  "admin_user": "admin",
-  "admin_pass": "",
-  "admin_path": "/admin",
-  "inference_auth_enabled": true,
-  "credential_encryption_key_file": "data/credential.key",
-  "response_store_ttl_hours": 720,
-  "debug_enabled": false
-}
-```
-
-Notes:
-
-- if `admin_pass` is omitted, the server generates a random password at startup and prints it to logs
-- in production, set a strong `admin_pass` explicitly and keep `debug_enabled` set to `false`
-- if Redis already contains `settings:config`, that stored config overrides the file on boot
-- the first start creates `data/credential.key`; persist and back it up with Redis, because losing it makes stored account credentials unreadable
-- create an API key in the admin UI and send it as `Authorization: Bearer <API Key>`; Anthropic SDKs may use `x-api-key`
-
-### 3. Start the server
-
-Development:
-
-```bash
 go run ./cmd/server -config ./config.json
 ```
 
-Production:
+Open `http://127.0.0.1:3002/admin/`, sign in, add an account using the channel's official authorization flow, and create an API key. If `admin_pass` is empty, the generated admin password appears in the startup logs. Refresh each channel's model catalog in the admin UI; no models are published without an available account.
 
 ```bash
-go build -o orchids-server ./cmd/server
-./orchids-server -config ./config.json
+curl http://127.0.0.1:3002/health
+curl http://127.0.0.1:3002/v1/models -H 'Authorization: Bearer <API_KEY>'
+curl http://127.0.0.1:3002/v1/messages \
+  -H 'Authorization: Bearer <API_KEY>' -H 'Content-Type: application/json' \
+  -d '{"model":"<MODEL_ID>","max_tokens":256,"messages":[{"role":"user","content":"Hello"}]}'
 ```
 
-Windows:
+`/v1/messages`, `/v1/chat/completions`, and `/v1/responses` route by model. Channel-specific prefixes expose the same interfaces; `/v1/models` lists available models. Grok uses only the Build OAuth CLI upstream. All four channels offer official authorization through the admin UI.
 
-```powershell
-go build -o server.exe ./cmd/server
-.\server.exe -config .\config.json
-```
+## Security and operations
 
-## Common Commands
+- Model and inference endpoints require a managed API key (Anthropic clients may use `x-api-key`). **`inference_auth_enabled=false` does not disable this check**. Only sources explicitly included in `anonymous_allow_ips` can bypass it.
+- Redis `settings:config` (under `redis_prefix`) overrides the config file. Back up `data/credential.key` alongside Redis; without the encryption key, existing account credentials cannot be decrypted.
+- Set a strong admin password, leave `debug_enabled` off in production, and restrict public access to `/metrics` and the backend port. Trust only your actual reverse proxy IPs.
+- Test: `go test ./...`; build: `go build -o orchids-server ./cmd/server`. `orchids-server` remains the current binary name used by the build and deployment tooling, not the new project name.
 
-Run all tests:
-
-```bash
-go test ./...
-```
-
-Rebuild:
-
-```bash
-go build -o orchids-server ./cmd/server
-```
-
-Basic health checks:
-
-```bash
-curl -s http://127.0.0.1:3002/health
-curl -s http://127.0.0.1:3002/v1/models -H 'Authorization: Bearer sk-...'
-```
-
-## Model Sync Behavior
-
-- endpoint: `POST /api/models/refresh`
-- example body: `{"channel":"workbuddy"}`
-- sync is source-driven: each channel verifies upstream candidates by its own upstream capability
-- newly discovered models are inserted
-- locally stored models missing from the source are deleted
-- `verified` reports the number of models accepted into the synced set for that run
-
-## Admin
-
-- UI: `{admin_path}/`
-- login: `POST /api/login`
-- account management: `/api/accounts*`
-- model management: `/api/models*`
-- config management: `/api/config*`
-- token cache: `/api/token-cache/*`
-
-Auth methods:
-
-- `session_token` cookie
-- `Authorization: Bearer <admin_token>`
-- `X-Admin-Token: <admin_token>`
-- Basic Auth with password equal to `admin_pass`
-
-Model and inference endpoints require a managed API key by default. Each key can restrict models, requests per minute, and expiration; existing keys remain unrestricted unless configured. Set `inference_auth_enabled=false` only behind a trusted authenticating gateway.
-
-Grok Build Responses also supports `POST /v1/responses/compact` and `GET`/`DELETE /v1/responses/{response_id}`. Stored response ownership is isolated by client API key, pinned to the creating OAuth account, and retained for 720 hours by default.
-
-## License
-
-This repository follows the existing license policy already used in the repo.
+More: [API and account login](docs/api-reference.md) · [Configuration](docs/configuration.md) · [Host deployment](deploy/README.md).

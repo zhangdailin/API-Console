@@ -1,155 +1,17 @@
-# 部署指南
+# 部署注意事项
 
-本文档以当前代码实现为准，适用于 `workbuddy`、`qoder`、`cline` 和仅使用 Build OAuth CLI 的 `grok` 通道。
-
-## 1. 前置条件
-
-- Go `1.24+`
-- Redis `7+`
-- 已通过 `cp config.example.json config.json` 准备好本地配置
-
-最小配置示例见 [README.md](../README.md) 与 [configuration.md](../docs/configuration.md)。
-
-注意：
-
-- 启动后若 Redis 中已有 `settings:config`，会覆盖文件配置
-- 未设置 `admin_pass` 时，程序会自动生成随机密码并写入启动日志
-- 首次启动会创建 `data/credential.key` 并迁移 Redis 中的账号凭据；生产环境必须持久化和备份该文件
-
-## 2. 本地开发启动
+本地启动步骤见 [README](../README.md)；配置字段见 [配置速查](configuration.md)。构建需符合 `go.mod` 中的 Go 版本（当前为 **1.26.6**），使用 Redis 保存账号及配置。以下沿用当前部署工具使用的 `orchids-server` 二进制文件名；项目展示名称已改为 **API Console**，此处不是二进制改名。
 
 ```bash
-go mod download
-go run ./cmd/server -config ./config.json
-```
-
-## 3. 生产编译与启动
-
-### 3.1 Linux / macOS
-
-```bash
+go test ./...
 go build -o orchids-server ./cmd/server
 ./orchids-server -config ./config.json
 ```
 
-后台运行：
+- 显式设置强管理密码；`debug_enabled` 保持关闭。账号凭据的 `data/credential.key`（或环境变量密钥）必须与 Redis 一同备份和恢复。
+- Redis 的 `<redis_prefix>settings:config` 可覆盖文件配置，升级或修改参数后通过管理端核对实际值。
+- 后端默认监听所有网卡的端口；在防火墙或反向代理上阻止直接公网访问，尤其注意 `/metrics`。`trusted_proxies` 仅填写实际代理地址。
+- 多副本共享 Redis、密钥和集群 ID，并为每个副本配置不同的 `deployment_instance_id`。
+- 启动后检查 `/health`，再使用 API Key 请求 `/v1/models`；必要时在管理端按通道刷新模型。回归测试执行 `go test ./...`。
 
-```bash
-nohup ./orchids-server -config ./config.json > server.log 2>&1 &
-```
-
-### 3.2 Windows
-
-```powershell
-go build -o server.exe ./cmd/server
-.\server.exe -config .\config.json
-```
-
-后台运行：
-
-```powershell
-Start-Process -FilePath .\server.exe -ArgumentList '-config','.\config.json'
-```
-
-## 4. 重启流程
-
-### 4.1 Linux / macOS
-
-```bash
-pkill -f "./orchids-server -config ./config.json" || true
-go build -o orchids-server ./cmd/server
-nohup ./orchids-server -config ./config.json > server.log 2>&1 &
-```
-
-### 4.2 Windows
-
-```powershell
-Get-Process server -ErrorAction SilentlyContinue | Stop-Process -Force
-go build -o server.exe ./cmd/server
-Start-Process -FilePath .\server.exe -ArgumentList '-config','.\config.json'
-```
-
-## 5. 启动后验证
-
-基础检查：
-
-```bash
-curl -s http://127.0.0.1:3002/health
-curl -s http://127.0.0.1:3002/v1/models -H 'Authorization: Bearer sk-...'
-curl -s http://127.0.0.1:3002/metrics
-```
-
-端口检查：
-
-```bash
-lsof -iTCP:3002 -sTCP:LISTEN -n -P
-```
-
-Windows：
-
-```powershell
-Get-NetTCPConnection -LocalPort 3002 -ErrorAction SilentlyContinue
-```
-
-模型同步验证：
-
-- Grok 先在管理端通过 `/api/grok/device-auth*` 完成 Build OAuth 登录
-- 登录后调用 `POST /api/models/refresh`（请求体 `{"channel":"grok"}`），确认返回 `source=grok_build_models`
-- `GET /grok/v1/models` 只应出现 Build 上游实际发现的模型
-- 当前刷新是“按来源同步”：新增即写入、来源消失即删除；各通道按各自来源能力验证
-
-建议回归：
-
-```bash
-go test ./...
-```
-
-## 6. 可观测性与排障
-
-调试入口：
-
-- `GET /health`
-- `GET /metrics`
-- `GET /debug/pprof/`，仅 `debug_enabled=true` 且管理认证通过时可访问
-
-Linux / macOS 日志：
-
-```bash
-tail -n 200 server.log
-```
-
-Windows 日志通常取决于你的启动方式；若前台启动，直接查看控制台输出即可。
-
-重点关注：
-
-- `model not found`
-- `no available grok oauth account`
-- `Bad Gateway`
-- `stream parse error`
-
-凭据解密报错通常表示 `data/credential.key` 没有随 Redis 一起恢复，或启动时使用了不同的 `ORCHIDS_CREDENTIAL_ENCRYPTION_KEY`。不要生成新密钥覆盖旧文件。
-
-### 6.1 运维总览的统计口径
-
-`/admin/` 的运维总览每分钟落一个 Redis 桶（保留 8 天，趋势查询上限 24 小时），数字的口径如下，避免误读：
-
-| 项目 | 口径 |
-|---|---|
-| 请求数 / 成功率 | 只统计渠道前缀（`workbuddy`/`qoder`/`cline`/`grok`）。`http`（管理页、健康检查、扫描器）被计入聚合但排除在矩阵与总数之外，页面用 `excluded_aggregates` 说明；`probe` 仅是旧版本探测循环留下的历史聚合，不再产生新数据 |
-| 速率（RPM） | 按所选**窗口长度**计算，而不是按存在数据的桶数；60 分钟里 1 次请求显示 1/60 而不是 1 |
-| 延迟 P95 | 合并视图会收集各渠道的原始样本后统一计算（百分位不可相加）；`samples` 为 0 表示没有样本，页面显示“暂无样本”而不是健康的 0 |
-| 首字延迟 | 从**首个有效载荷字节**算起，提交响应头与 SSE keepalive 注释都不计入；非流式响应等于整个耗时 |
-| 失败判定 | HTTP 状态类之外，已提交 2xx 之后中途失败的流记为 `stream_error` 并计为失败（客户端看到的仍是 200） |
-
-告警按 30 分钟窗口每分钟评估一次：成功率低于 90% 需要窗口内至少 3 次失败才会告警（低于 50% 的严重故障不受该次数下限约束），低于 5 次请求不告警；恢复线为阈值 +3 个百分点，避免在阈値附近反复“告警/恢复”。`http`（以及历史 `probe` 聚合）永不参与告警。
-
-## 7. 升级建议
-
-每次升级后至少执行：
-
-```bash
-go test ./...
-go build -o orchids-server ./cmd/server
-```
-
-模型刷新逻辑变更时，刷新后用 `GET /v1/models` 复核来源与数量即可。
+仓库附带 [Caddy 与 systemd 主机部署手册](../deploy/README.md) 和 [`scripts/deploy-orchids.sh`](../scripts/deploy-orchids.sh)；这是特定主机环境的示例，应用前请核对地址、路径及防火墙规则。

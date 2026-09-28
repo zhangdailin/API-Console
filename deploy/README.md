@@ -1,136 +1,23 @@
-# Host deployment (us1)
+# 主机部署示例
 
-What runs on the server, and which file in this directory owns each piece.
+本目录是 Linux + systemd + Caddy 的**示例**，不是通用安装要求。通用启动方式见 [README](../README.md)，配置见 [配置速查](../docs/configuration.md)。部署前请将 `<HOST>`、域名、目录及服务名替换为实际值。
 
-| Piece | Path on the host | Source in this repo |
-| --- | --- | --- |
-| Server binary | `/opt/orchids-2api/orchids-server` | built from `./cmd/server` by `.github/workflows/release.yml` |
-| Config | `/opt/orchids-2api/config.json` (not in git) | `config.example.json` |
-| systemd unit | `/etc/systemd/system/orchids-2api.service` | — (host-local) |
-| Environment file | `/etc/orchids-2api.env` (`EnvironmentFile=`) | — (host-local, secrets) |
-| Reverse proxy | `/etc/caddy/Caddyfile` | `deploy/Caddyfile` |
-| Loopback guard | `/etc/orchids-guard.nft` + `orchids-3002-loopback.service` | `deploy/orchids-guard.nft`, `deploy/orchids-3002-loopback.service` |
+| 文件 | 用途 |
+|---|---|
+| [`Caddyfile`](Caddyfile) | 反向代理配置，应用前核对站点域名与已有站点 |
+| [`orchids-guard.nft`](orchids-guard.nft) | 限制后端端口仅由本机访问 |
+| [`orchids-3002-loopback.service`](orchids-3002-loopback.service) | 启动防火墙规则的 systemd 单元 |
+| [`../scripts/deploy-orchids.sh`](../scripts/deploy-orchids.sh) | 校验发布包、重启并健康检查，失败时回滚 |
 
-## Redis holds the live config, and it wins over config.json
+发布工作流 [`.github/workflows/release.yml`](../.github/workflows/release.yml) 生成 Linux/amd64 二进制与 SHA256 校验文件；上传前核对目标架构、校验和与目标主机的服务路径。按脚本帮助确认参数：
 
-Once the admin UI saves settings, the effective configuration lives in Redis at
-`<redis_prefix>settings:config` — a single JSON string of the same shape as
-`config.json`. It is overlaid on the file at startup, so **editing
-`config.json` alone silently stops taking effect** on a host that has ever
-saved from the UI, including for fields the file appears to own such as
-`admin_pass` and the upstream URLs. The symptom is a change that is obviously
-correct on disk but never observable at runtime.
-
-Check which value is actually in force before debugging anything else:
-
-```sh
-redis-cli get orchids:settings:config | python3 -m json.tool | head -40
+```bash
+bash scripts/deploy-orchids.sh --help
 ```
 
-Apply an operator change the same way — back it up, edit one field, write it
-back, restart:
+生产环境注意：
 
-```sh
-redis-cli get orchids:settings:config > /root/orchids-settings-config.backup.json
-redis-cli get orchids:settings:config | python3 -c 'import json,sys
-c = json.load(sys.stdin)
-c["grok_cli_oauth_device_url"] = "https://auth.x.ai/oauth2/device/code"
-sys.stdout.write(json.dumps(c, ensure_ascii=False, separators=(",", ":")))' \
-  | redis-cli -x set orchids:settings:config
-systemctl restart orchids-2api
-```
-
-Keep `config.json` in step anyway: it is the value a rebuilt host starts from
-before anybody opens the UI.
-
-## Deploy a build
-
-```sh
-# 1. build the released artifact (run from the repo root)
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-  go build -trimpath -ldflags "-s -w" -o dist/orchids-server-linux-amd64 ./cmd/server
-cd dist && sha256sum orchids-server-linux-amd64 > orchids-server-linux-amd64.sha256
-printf '%s\n' "version=manual-$(date -u +%Y%m%d-%H%M%S)" "commit=$(git rev-parse --short HEAD)" \
-  "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" goos=linux goarch=amd64 \
-  > orchids-server-linux-amd64.build-info.txt
-
-# 2. upload and deploy (the script verifies the checksum, keeps the old binary,
-#    restarts the service and rolls back when the health check fails)
-rsync -a dist/orchids-server-linux-amd64* scripts/deploy-orchids.sh root@HOST:/root/release/
-ssh root@HOST 'cd /root/release && bash deploy-orchids.sh \
-  --artifact ./orchids-server-linux-amd64 \
-  --checksum ./orchids-server-linux-amd64.sha256 \
-  --build-info ./orchids-server-linux-amd64.build-info.txt'
-```
-
-## Host access
-
-The wrappers in `.rsh/` run a command or copy files to the host:
-
-```sh
-./.rsh/run 'systemctl status orchids-2api'        # run from the repository root
-./.rsh/scp.sh dist/orchids-server-linux-amd64* root@<PROD_IP>:/root/release/
-```
-
-`.rsh/` is **not tracked**. It used to be, with the host's root password as a
-literal default in `.rsh/run`, which put that password in the public repository
-history — so the directory is now in `.gitignore` and the password is read from
-the environment or from an untracked file:
-
-- `RSH_PASS`, or
-- `.rsh/pass` (mode 0600), used when `RSH_PASS` is unset.
-
-Both wrappers refuse to run with neither set. Anything that needs to reach the
-host in CI should use a deploy key, not this password.
-
-## Bring up Caddy
-
-```sh
-install -m 0644 deploy/Caddyfile /etc/caddy/Caddyfile   # merge, do not clobber other sites
-caddy validate --config /etc/caddy/Caddyfile
-caddy fmt --overwrite /etc/caddy/Caddyfile
-systemctl enable --now caddy
-```
-
-`us1.daige.tech` is Cloudflare-proxied, so the browser sees Cloudflare's edge
-certificate while Caddy presents the Let's Encrypt certificate for the origin.
-Caddy needs 80/443 reachable from the internet for ACME renewals; the access log
-goes to `/var/log/caddy/access.log` (owned by the `caddy` user).
-
-## Trust the local reverse proxy, or the login limiter keys on Cloudflare
-
-A fresh `config.json` has `"trusted_proxies": []`, which makes the server discard
-every forwarding header and treat the caller as `127.0.0.1` — Caddy's address on
-the backend socket, not the browser's. Behind Cloudflare that collapses *every*
-visitor onto Cloudflare's edge IP, so the login rate limiter
-(`NewRateLimiter(5, 15*time.Minute)`, in memory, keyed by `ClientIP`) hands all
-users one shared bucket of five attempts: a few failed logins anywhere lock out
-`/admin` for everyone with `429 Too many login attempts`, which the login page
-surfaces as a generic failure.
-
-List the reverse proxy's own address, never a range arbitrary clients can reach:
-
-```json
-"trusted_proxies": ["127.0.0.1/32", "::1/128"]
-```
-
-Verify with the `remote_ip` field of a `Request completed` log line: it must name
-the real client, not `127.0.0.1` and not a Cloudflare edge address. The limiter
-lives in process memory, so a restart also clears an in-flight lockout.
-
-## Keep the backend off the public internet
-
-`orchids-server` listens on `:3002` for every interface and has no bind-address
-setting, so "only Caddy should expose the backend publicly" is enforced in the
-packet filter instead:
-
-```sh
-install -m 0644 deploy/orchids-guard.nft /etc/orchids-guard.nft
-install -m 0644 deploy/orchids-3002-loopback.service /etc/systemd/system/
-systemctl daemon-reload && systemctl enable --now orchids-3002-loopback.service
-nft list table inet orchids_guard      # iifname != "lo" tcp dport 3002 drop
-```
-
-The guard unit is ordered `Before=orchids-2api.service caddy.service`, so it is
-in place before either can accept traffic. To remove it later:
-`systemctl disable --now orchids-3002-loopback.service`.
+1. 服务监听 `:3002`，必须用防火墙或等效网络策略阻止绕过反向代理直接访问。合并 Caddy 配置时不要覆盖其他站点。
+2. `trusted_proxies` 只信任本地真实代理 IP；不要把任意互联网来源设为可信代理。
+3. Redis 中 `<redis_prefix>settings:config` 可覆盖 `config.json`；修改配置后检查管理端实际值。备份 Redis 及凭据加密密钥，避免更新或回滚后无法解密账号。
+4. 部署后检查 `/health`，再用托管 API Key 检查 `/v1/models`。限制 `/metrics` 的外部访问。
