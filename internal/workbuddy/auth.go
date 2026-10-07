@@ -16,6 +16,7 @@ import (
 
 	"encoding/json"
 
+	"orchids-api/internal/refreshqueue"
 	"orchids-api/internal/store"
 	"orchids-api/internal/util"
 )
@@ -553,6 +554,11 @@ func (t *tokenUpdater) Token(ctx context.Context, creds Credentials) (string, er
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.initialize(creds)
+	release, err := t.acquireLatest(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer release()
 	if t.dirty {
 		if err := t.persist(ctx, t.creds, t.dirtyExpectedRefresh); err != nil {
 			return "", err
@@ -608,6 +614,15 @@ func (t *tokenUpdater) RefreshNow(ctx context.Context, creds Credentials) (Crede
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.initialize(creds)
+	previous := t.creds.AccessToken
+	release, err := t.acquireLatest(ctx)
+	if err != nil {
+		return t.creds, err
+	}
+	defer release()
+	if token, valid := t.creds.Token(time.Now()); valid && token != previous {
+		return t.creds, nil
+	}
 	if t.dirty {
 		if err := t.persist(ctx, t.creds, t.dirtyExpectedRefresh); err != nil {
 			return t.creds, err
@@ -642,6 +657,33 @@ func (t *tokenUpdater) initialize(creds Credentials) {
 	}
 	t.creds = creds
 	t.initialized = true
+}
+
+// Called with t.mu held. Flush a pending rotation before reading durable state.
+func (t *tokenUpdater) acquireLatest(ctx context.Context) (func(), error) {
+	release, err := refreshqueue.AcquireCredential(ctx, "workbuddy", t.accountStore, t.accountID)
+	if err != nil {
+		return nil, err
+	}
+	if t.dirty {
+		if err := t.persist(ctx, t.creds, t.dirtyExpectedRefresh); err != nil {
+			release()
+			return nil, err
+		}
+		t.dirty = false
+		t.dirtyExpectedRefresh = ""
+	}
+	latest, err := refreshqueue.LatestAccount(ctx, t.accountStore, t.accountID)
+	if err != nil {
+		release()
+		return nil, err
+	}
+	if latest != nil {
+		t.creds = ResolveCredentials(latest)
+		t.token = t.creds.AccessToken
+		t.until = t.creds.ExpiresAt
+	}
+	return release, nil
 }
 
 func (t *tokenUpdater) refresh(ctx context.Context, creds Credentials) (Credentials, error) {

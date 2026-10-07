@@ -14,6 +14,7 @@ import (
 
 	"orchids-api/internal/config"
 	"orchids-api/internal/debug"
+	"orchids-api/internal/refreshqueue"
 	"orchids-api/internal/store"
 	"orchids-api/internal/upstream"
 	"orchids-api/internal/util"
@@ -49,6 +50,7 @@ type Client struct {
 	creds Credentials
 
 	requestTimeout time.Duration
+	streamIdle     time.Duration
 
 	stateMu              sync.RWMutex
 	refreshMu            sync.Mutex
@@ -91,6 +93,7 @@ func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
 		control:            httpclient.GetSharedHTTPClient(proxyKey, authRequestTimeout, proxyFunc),
 		stream:             httpclient.GetSharedHTTPClientWithLimits(proxyKey+"|cline-chat", 0, proxyFunc, cfg != nil && cfg.ClineHTTP2Enabled, cfg),
 		requestTimeout:     timeout,
+		streamIdle:         5 * time.Minute,
 	}
 	if cfg != nil {
 		client.apiBase = util.FirstNonEmptyURL(cfg.ClineAPIBaseURL, client.apiBase)
@@ -210,6 +213,18 @@ func (c *Client) forceRefresh(ctx context.Context, rejected Credentials) error {
 func (c *Client) refresh(ctx context.Context, previous Credentials) (Credentials, error) {
 	c.refreshMu.Lock()
 	defer c.refreshMu.Unlock()
+	c.stateMu.RLock()
+	owner := c.accountStore
+	id := int64(0)
+	if c.account != nil {
+		id = c.account.ID
+	}
+	c.stateMu.RUnlock()
+	release, err := refreshqueue.AcquireCredential(ctx, "cline", owner, id)
+	if err != nil {
+		return Credentials{}, err
+	}
+	defer release()
 
 	// Another goroutine may have refreshed while this one waited.
 	current, dirty, expectedRefresh := c.currentCredentialState()
@@ -224,9 +239,16 @@ func (c *Client) refresh(ctx context.Context, previous Credentials) (Credentials
 		}
 		c.markCredentialsClean(current)
 	}
+	if latest, err := refreshqueue.LatestAccount(ctx, owner, id); err != nil {
+		return Credentials{}, err
+	} else if latest != nil {
+		current = ResolveCredentials(latest)
+		c.storeCredentials(current, false, "")
+	}
 	if current.AccessValid(time.Now()) && current.AccessToken != previous.AccessToken {
 		return current, nil
 	}
+	previous = current
 
 	refreshed, err := c.Refresh(ctx, previous.RefreshToken)
 	if err != nil {
@@ -364,7 +386,7 @@ func (c *Client) runChat(ctx context.Context, url string, body []byte, model, ta
 		if emitted {
 			return err
 		}
-		if attempt == 0 && isUnauthorized(err) {
+		if attempt == 0 && isUnauthorized(err) && upstream.RemainingAttempts(ctx) != 0 {
 			if refreshErr := c.forceRefresh(ctx, attemptCredentials); refreshErr != nil {
 				return refreshErr
 			}
@@ -376,8 +398,8 @@ func (c *Client) runChat(ctx context.Context, url string, body []byte, model, ta
 }
 
 // attemptChat performs one upstream attempt and consumes its stream.
-func (c *Client) attemptChat(ctx context.Context, url string, body []byte, model, taskID string, creds Credentials, emit func(upstream.SSEMessage)) (streamResult, error) {
-	reqCtx, cancel := util.WithDefaultTimeout(ctx, c.requestTimeout)
+func (c *Client) attemptChat(ctx context.Context, url string, body []byte, model, taskID string, creds Credentials, emit func(upstream.SSEMessage)) (result streamResult, attemptErr error) {
+	reqCtx, cancel := util.WithAttemptTimeout(ctx, c.requestTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, url, strings.NewReader(string(body)))
@@ -392,6 +414,11 @@ func (c *Client) attemptChat(ctx context.Context, url string, body []byte, model
 
 	attempt := debug.BeginUpstream(ctx, req.Method, req.URL.String(), req.Header, body)
 	req = attempt.TraceRequest(req)
+	finishAttempt, err := upstream.BeginAttempt(ctx)
+	if err != nil {
+		return streamResult{}, err
+	}
+	defer func() { finishAttempt(attemptErr) }()
 	resp, err := c.stream.Do(req)
 	attempt.Response(resp, err)
 	if resp != nil {
@@ -400,14 +427,21 @@ func (c *Client) attemptChat(ctx context.Context, url string, body []byte, model
 	if err != nil {
 		return streamResult{}, &attemptStreamError{err: fmt.Errorf("send cline request: %w", err)}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 		return streamResult{}, classifyStatus(resp.StatusCode, raw)
 	}
 
-	return consumeStream(resp.Body, requestCarriesTools(body), emit)
+	monitored, progress := httpclient.MonitorProgressIdle(resp.Body, c.streamIdle, cancel, "cline")
+	resp.Body = monitored
+	return consumeStream(resp.Body, requestCarriesTools(body), func(m upstream.SSEMessage) {
+		progress()
+		if emit != nil {
+			emit(m)
+		}
+	})
 }
 
 // requestCarriesTools keeps fallback parsing disabled for plain-text requests:

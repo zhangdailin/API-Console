@@ -7,6 +7,7 @@
 | 目标 | 文档 |
 |---|---|
 | 首次了解项目 | [架构与运行链路](architecture.md) |
+| 理解关键不变量、跨模块链路与认知验收 | [系统关键合同](system-contracts.md) |
 | 配置 Redis、账号及代理 | [配置完整指南](configuration.md) |
 | 应用接入与管理接口 | [API 参考](api-reference.md) |
 | 判断协议与模型能力 | [协议能力与兼容边界](coding-protocol-capabilities.md) |

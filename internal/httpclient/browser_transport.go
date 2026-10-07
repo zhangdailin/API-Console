@@ -26,12 +26,27 @@ type browserLikeRoundTripper struct {
 	// transport. It is chosen from the User-Agent the caller will send, so the
 	// fingerprint and the advertised browser version cannot contradict each
 	// other — a mismatch is one of the most reliable bot signals.
-	hello utls.ClientHelloID
+	hello         utls.ClientHelloID
+	headerTimeout time.Duration
+	requests      *h2ConnectionLimits
 }
 
 func (rt *browserLikeRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req != nil && strings.EqualFold(req.URL.Scheme, "https") {
-		return rt.http2.RoundTrip(req)
+		if rt.requests == nil {
+			return roundTripH2Headers(rt.http2, req, rt.headerTimeout)
+		}
+		release, err := rt.requests.acquire(req.Context(), req.URL.Host)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := roundTripH2Headers(rt.http2, req, rt.headerTimeout)
+		if err != nil {
+			release()
+			return resp, err
+		}
+		resp.Body = &cancelOnCloseBody{ReadCloser: resp.Body, cancel: release}
+		return resp, nil
 	}
 	return rt.http1.RoundTrip(req)
 }
@@ -84,8 +99,13 @@ func getSharedBrowserHTTPClient(proxyKey string, timeout, headerTimeout time.Dur
 		return client
 	}
 
+	connections := &h2ConnectionLimits{max: maxConns}
 	rt := &browserLikeRoundTripper{
-		hello: hello,
+		headerTimeout: headerTimeout,
+		// Bound admission as well as sockets. Cold HTTP/2 connections do not
+		// know the peer stream limit until SETTINGS arrives.
+		requests: &h2ConnectionLimits{max: maxConns},
+		hello:    hello,
 		http1: &http.Transport{
 			Proxy:                 proxyFunc,
 			DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
@@ -100,11 +120,24 @@ func getSharedBrowserHTTPClient(proxyKey string, timeout, headerTimeout time.Dur
 			TLSClientConfig:       &stdtls.Config{MinVersion: stdtls.VersionTLS12},
 		},
 		http2: &http2.Transport{
-			AllowHTTP:       false,
-			ReadIdleTimeout: 20 * time.Second,
-			PingTimeout:     10 * time.Second,
+			IdleConnTimeout: 90 * time.Second,
+			// One reusable active connection per host avoids dialing while all
+			// sockets are at capacity. Stream limits are honored across requests.
+			StrictMaxConcurrentStreams: true,
+			AllowHTTP:                  false,
+			ReadIdleTimeout:            20 * time.Second,
+			PingTimeout:                10 * time.Second,
 			DialTLSContext: func(ctx context.Context, network, addr string, cfg *stdtls.Config) (net.Conn, error) {
-				return dialUTLSHTTP2ContextWithHello(ctx, network, addr, cfg, proxyFunc, hello)
+				release, err := connections.acquire(ctx, addr)
+				if err != nil {
+					return nil, err
+				}
+				conn, err := dialUTLSHTTP2ContextWithHello(ctx, network, addr, cfg, proxyFunc, hello)
+				if err != nil {
+					release()
+					return nil, err
+				}
+				return &limitedH2Conn{Conn: conn, release: release}, nil
 			},
 			TLSClientConfig: &stdtls.Config{
 				MinVersion: stdtls.VersionTLS12,
@@ -137,11 +170,16 @@ func dialUTLSHTTP2ContextWithHello(ctx context.Context, network, addr string, cf
 		MinVersion: utls.VersionTLS12,
 		NextProtos: []string{"h2"},
 	}
+	if cfg != nil {
+		utlsCfg.RootCAs = cfg.RootCAs
+	}
 	if hello == (utls.ClientHelloID{}) {
 		hello = utls.HelloChrome_Auto
 	}
 	conn := utls.UClient(rawConn, utlsCfg, hello)
-	if err := conn.HandshakeContext(ctx); err != nil {
+	handshakeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if err := conn.HandshakeContext(handshakeCtx); err != nil {
 		rawConn.Close()
 		return nil, err
 	}

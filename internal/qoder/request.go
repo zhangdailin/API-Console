@@ -771,7 +771,7 @@ func filterTags(tags []string) []string {
 
 // attemptChat performs one upstream attempt and consumes its stream.
 func (c *Client) attemptChat(ctx context.Context, url string, body []byte, model modelEntry, requestID string, fields RuntimeFields, creds Credentials, toolsEnabled bool, emit func(upstream.SSEMessage)) (result streamResult, attemptErr error) {
-	reqCtx, cancel := util.WithDefaultTimeout(ctx, c.requestTimeout)
+	reqCtx, cancel := util.WithAttemptTimeout(ctx, c.requestTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, url, bytes.NewReader(body))
@@ -829,6 +829,11 @@ func (c *Client) attemptChat(ctx context.Context, url string, body []byte, model
 			originalEmit(m)
 		}
 	}
+	finishAttempt, err := upstream.BeginAttempt(ctx)
+	if err != nil {
+		return streamResult{}, err
+	}
+	defer func() { finishAttempt(attemptErr) }()
 	resp, err := c.stream.Do(req)
 	attempt.Response(resp, err)
 	latency.Response(resp)
@@ -838,14 +843,21 @@ func (c *Client) attemptChat(ctx context.Context, url string, body []byte, model
 		return streamResult{}, &attemptStreamError{err: fmt.Errorf("send qoder request: %w", err), retryable: IsTransientTransport(err)}
 	}
 	resp.Body = attempt.CaptureBody(resp.Body)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 		return streamResult{}, classifyStatus(resp.StatusCode, resp.Header.Get("Retry-After"), raw)
 	}
 
-	result, err = consumeStreamObserved(resp.Body, toolsEnabled, emit, func() { latency.Mark("first_sse_ms") })
+	monitored, progress := httpclient.MonitorProgressIdle(resp.Body, c.streamIdle, cancel, "qoder")
+	resp.Body = monitored
+	result, err = consumeStreamObserved(resp.Body, toolsEnabled, func(m upstream.SSEMessage) {
+		progress()
+		if emit != nil {
+			emit(m)
+		}
+	}, func() { latency.Mark("first_sse_ms") })
 	for _, key := range []string{"firstTokenDuration", "totalDuration", "serverDuration"} {
 		if v, ok := result.Usage[key]; ok {
 			latency.Set("upstream_"+key, v)

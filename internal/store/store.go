@@ -307,6 +307,14 @@ type WorkBuddyCredentialPatch struct {
 	Email                string
 }
 
+// GrokCredentialPatch preserves concurrent account edits during OAuth rotation.
+type GrokCredentialPatch struct {
+	ExpectedRefreshToken        string
+	AccessToken, RefreshToken   string
+	ExpiresAt                   time.Time
+	UserID, Email, Name, TeamID string
+}
+
 // QoderAccountPatch contains the independently refreshed Qoder client state.
 // Nil slices mean "not changed"; the remaining zero values keep the stored
 // value, matching the provider's rotated-credential semantics.
@@ -346,6 +354,7 @@ type accountStore interface {
 	UpdateWorkBuddyCredentials(ctx context.Context, id int64, patch WorkBuddyCredentialPatch) error
 	UpdateQoderAccount(ctx context.Context, id int64, patch QoderAccountPatch) error
 	UpdateClineCredentials(ctx context.Context, id int64, patch ClineCredentialPatch) error
+	UpdateGrokCredentials(ctx context.Context, id int64, patch GrokCredentialPatch) error
 	DeleteAccount(ctx context.Context, id int64) error
 	GetAccount(ctx context.Context, id int64) (*Account, error)
 	ListAccounts(ctx context.Context) ([]*Account, error)
@@ -562,6 +571,13 @@ func (s *Store) UpdateQoderAccount(ctx context.Context, id int64, patch QoderAcc
 func (s *Store) UpdateClineCredentials(ctx context.Context, id int64, patch ClineCredentialPatch) error {
 	if s.accounts != nil {
 		return s.accounts.UpdateClineCredentials(ctx, id, patch)
+	}
+	return fmt.Errorf("store not configured")
+}
+
+func (s *Store) UpdateGrokCredentials(ctx context.Context, id int64, patch GrokCredentialPatch) error {
+	if s != nil && s.accounts != nil {
+		return s.accounts.UpdateGrokCredentials(ctx, id, patch)
 	}
 	return fmt.Errorf("store not configured")
 }

@@ -14,6 +14,7 @@ import (
 
 	"orchids-api/internal/config"
 	"orchids-api/internal/debug"
+	"orchids-api/internal/refreshqueue"
 	"orchids-api/internal/store"
 	"orchids-api/internal/upstream"
 	"orchids-api/internal/util"
@@ -64,6 +65,7 @@ type Client struct {
 	runtimeAccessToken  string
 	runtimeRefreshToken string
 	requestTimeout      time.Duration
+	streamIdle          time.Duration
 
 	entropy source
 
@@ -111,6 +113,7 @@ func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
 		control:        httpclient.GetSharedHTTPClient(proxyKey, authRequestTimeout, proxyFunc),
 		stream:         httpclient.GetSharedHTTPClientWithLimits(proxyKey+"|qoder-chat", 0, proxyFunc, http2, cfg),
 		requestTimeout: timeout,
+		streamIdle:     5 * time.Minute,
 		entropy:        cryptoSource{},
 	}
 	if acc != nil {
@@ -295,6 +298,9 @@ func (c *Client) runChat(ctx context.Context, url string, body []byte, model mod
 			// double-count billing even when no assistant token was emitted.
 			return err
 		}
+		if upstream.RemainingAttempts(ctx) == 0 {
+			return err
+		}
 		var agentErr *agentLimitError
 		if errors.As(err, &agentErr) {
 			// agentLimitResetTime is emitted by the inference agent and is not an
@@ -457,6 +463,18 @@ func (c *Client) forceRefresh(ctx context.Context, rejected Credentials) error {
 func (c *Client) refresh(ctx context.Context, previous Credentials) (Credentials, error) {
 	c.refreshMu.Lock()
 	defer c.refreshMu.Unlock()
+	c.stateMu.RLock()
+	owner := c.accountStore
+	id := int64(0)
+	if c.account != nil {
+		id = c.account.ID
+	}
+	c.stateMu.RUnlock()
+	release, err := refreshqueue.AcquireCredential(ctx, "qoder", owner, id)
+	if err != nil {
+		return Credentials{}, err
+	}
+	defer release()
 
 	// Another goroutine may have refreshed while this one waited.
 	current, dirty, expectedRefresh := c.currentCredentialState()
@@ -466,9 +484,16 @@ func (c *Client) refresh(ctx context.Context, previous Credentials) (Credentials
 		}
 		c.markCredentialsClean(current)
 	}
+	if latest, err := refreshqueue.LatestAccount(ctx, owner, id); err != nil {
+		return Credentials{}, err
+	} else if latest != nil {
+		current = ResolveCredentials(latest)
+		c.storeCredentials(current, false, "")
+	}
 	if current.AccessValid(time.Now()) && current.AccessToken != previous.AccessToken {
 		return current, nil
 	}
+	previous = current
 
 	refreshed, err := c.Refresh(ctx, previous.RefreshToken)
 	if err != nil {

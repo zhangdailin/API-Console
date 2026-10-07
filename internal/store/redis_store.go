@@ -388,6 +388,22 @@ func (s *redisStore) UpdateClineCredentials(ctx context.Context, id int64, patch
 	})
 }
 
+func (s *redisStore) UpdateGrokCredentials(ctx context.Context, id int64, patch GrokCredentialPatch) error {
+	return s.updateAccountAtomic(ctx, id, func(acc *Account) error {
+		if err := applyCredentialPatch("grok", patch.ExpectedRefreshToken, patch.AccessToken, patch.RefreshToken, patch.ExpiresAt,
+			&acc.OAuthAccessToken, &acc.OAuthRefreshToken, &acc.OAuthExpiresAt); err != nil {
+			return err
+		}
+		patchString(&acc.UserID, patch.UserID)
+		patchString(&acc.Email, patch.Email)
+		patchString(&acc.TeamID, patch.TeamID)
+		if acc.Name == "" || acc.Name == "grok-device-login" {
+			patchString(&acc.Name, patch.Name)
+		}
+		return nil
+	})
+}
+
 func (s *redisStore) DeleteAccount(ctx context.Context, id int64) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis store not configured")

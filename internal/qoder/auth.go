@@ -66,10 +66,8 @@ const (
 	sceneClientID = "6"
 )
 
-// RefreshLead is how long before expiry the device token is renewed. The CLI
-// refreshes when the token has less than an hour left, because a request signed
-// with a token that expires mid-stream is rejected upstream.
-const RefreshLead = time.Hour
+// RefreshLead bounds clock skew without immediately refreshing short-lived grants.
+const RefreshLead = time.Minute
 
 // loginHosts are the only hosts a browser authorization URL may point at. The
 // server never sees the operator's password, so a tampered URL is the one place

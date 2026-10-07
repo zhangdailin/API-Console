@@ -45,10 +45,10 @@ func TestQoderLoginRetainsRotationsAndProfileSnapshot(t *testing.T) {
 	defer server.Close()
 	a := &API{}
 	acc, err := a.buildQoderAccountFromCredentialsWithFactory(t.Context(), "test", "machine-id", qoder.Credentials{
-		AccessToken: "access-1", RefreshToken: "refresh-1", AccessExpiresAt: time.Now().Add(10 * time.Minute), Name: "poll-name",
+		AccessToken: "access-1", RefreshToken: "refresh-1", AccessExpiresAt: time.Now().Add(30 * time.Second), Name: "poll-name",
 	}, qoderLoginConfig(server.URL), qoder.NewFromAccount)
 	testutil.NoError(t, err)
-	testutil.Falsef(t, refreshes < 2, "refresh calls = %d; catalog/quota should renew short-lived credentials", refreshes)
+	testutil.Falsef(t, refreshes != 1, "refresh calls = %d; catalog/quota should reuse the renewed one-hour credential", refreshes)
 	wantAccess := fmt.Sprintf("access-%d", refreshes+1)
 	wantRefresh := fmt.Sprintf("refresh-%d", refreshes+1)
 	testutil.Falsef(t, acc.QoderAccessToken != wantAccess || acc.QoderRefreshToken != wantRefresh, "returned tokens = %q/%q, want %q/%q", acc.QoderAccessToken, acc.QoderRefreshToken, wantAccess, wantRefresh)

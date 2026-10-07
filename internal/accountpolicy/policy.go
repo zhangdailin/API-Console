@@ -164,6 +164,17 @@ func Classify(acc *store.Account, err error, model string) Verdict {
 	message := strings.TrimSpace(err.Error())
 	lower := strings.ToLower(message)
 	now := time.Now()
+	// An explicit inference-cap window is account-wide and may last hours;
+	// unlike a generic rate limit, its stated reset must not be capped at 30m.
+	if apperrors.IsClineInferenceCap(lower) {
+		cooldown := CooldownRateLimit
+		var hint retryAfterError
+		if stderrors.As(err, &hint) && hint.RetryAfter() > 0 {
+			cooldown = hint.RetryAfter()
+		}
+		return Verdict{Status: "429", Message: message, Scope: ScopeAccount,
+			Retryable: true, SwitchAccount: true, Cooldown: cooldown, At: now}
+	}
 
 	// The Qoder daily *request count* can run out while the credit meter still
 	// reports a positive balance. It is not an ordinary 30-second throttle:
@@ -264,19 +275,6 @@ func Classify(acc *store.Account, err error, model string) Verdict {
 		}
 	}
 
-	var retryAfter retryAfterError
-	if stderrors.As(err, &retryAfter) {
-		cooldown := retryAfter.RetryAfter()
-		if cooldown <= 0 {
-			cooldown = CooldownRateLimit
-		}
-		return Verdict{
-			Status: "429", Message: message,
-			Scope: ScopeAccount, Retryable: true, SwitchAccount: true,
-			Cooldown: cooldown, At: now,
-		}
-	}
-
 	// A model-scoped complaint must not take the account out of service: the
 	// other models of the same account remain usable.
 	if isModelScopedFailure(lower) {
@@ -286,7 +284,7 @@ func Classify(acc *store.Account, err error, model string) Verdict {
 			Model:         model,
 			Retryable:     Retryable(err),
 			SwitchAccount: true,
-			Cooldown:      CooldownRateLimit,
+			Cooldown:      rateLimitHint(err, CooldownRateLimit),
 			// Most model-scoped complaints are a frequency limit that a wait
 			// clears; the plan ones are not, and the pool needs to know which.
 			ModelCooldownKind: modelCooldownKindFor(lower),
@@ -348,7 +346,7 @@ func Classify(acc *store.Account, err error, model string) Verdict {
 		return Verdict{
 			Status: "429", Message: message,
 			Scope: ScopeAccount, Retryable: Retryable(err), SwitchAccount: true,
-			Cooldown: CooldownRateLimit, At: now,
+			Cooldown: rateLimitHint(err, CooldownRateLimit), At: now,
 		}
 	}
 
@@ -358,6 +356,15 @@ func Classify(acc *store.Account, err error, model string) Verdict {
 		Scope: ScopeNone, Retryable: Retryable(err), SwitchAccount: true,
 		At: now,
 	}
+}
+
+// A retry hint supplies duration only after the error's scope is classified.
+func rateLimitHint(err error, fallback time.Duration) time.Duration {
+	var hint retryAfterError
+	if stderrors.As(err, &hint) && hint.RetryAfter() > 0 {
+		return BoundRateLimitCooldown(hint.RetryAfter())
+	}
+	return fallback
 }
 
 // creditExhaustionVerdict maps a spent balance onto the capability state of the

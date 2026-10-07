@@ -2,7 +2,6 @@ package grok
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,10 +13,16 @@ import (
 	"time"
 
 	"orchids-api/internal/config"
+	"orchids-api/internal/refreshqueue"
 	"orchids-api/internal/store"
 )
 
-var cliOAuthAccountLocks sync.Map // map[string]*sync.Mutex
+type cliRotationKey struct {
+	owner *store.Store
+	id    int64
+}
+
+var cliOAuthPendingRotations sync.Map // cliRotationKey -> GrokCredentialPatch
 
 // CLIOAuth handles the Build CLI OAuth token lifecycle: return the current
 // access_token when unexpired, otherwise refresh via the refresh_token grant
@@ -66,11 +71,39 @@ func (o *CLIOAuth) accessToken(ctx context.Context, acc *store.Account, force bo
 	if acc == nil {
 		return "", fmt.Errorf("empty cli oauth account")
 	}
-	lock := cliOAuthLockForAccount(acc)
-	lock.Lock()
-	defer lock.Unlock()
+	var owner any = acc
+	id := acc.ID
+	if o.store != nil {
+		owner = o.store
+	}
+	if id == 0 {
+		id = -1
+	}
+	release, err := refreshqueue.AcquireCredential(ctx, "grok", owner, id)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+	rejected := acc.OAuthAccessToken
+	key := cliRotationKey{o.store, acc.ID}
+	if patch, ok := cliOAuthPendingRotations.Load(key); ok {
+		pending := patch.(store.GrokCredentialPatch)
+		if err := o.persistRotation(ctx, acc.ID, pending); err != nil {
+			latest, readErr := refreshqueue.LatestAccount(ctx, o.store, acc.ID)
+			// A later reauthorization supersedes a pending rotation. Never block
+			// that credential or overwrite it with a pre-reauthorization grant.
+			if readErr != nil || latest == nil || latest.OAuthRefreshToken == pending.ExpectedRefreshToken || latest.OAuthRefreshToken == pending.RefreshToken {
+				return "", err
+			}
+		}
+		cliOAuthPendingRotations.Delete(key)
+	}
 	if o != nil && o.store != nil && acc.ID != 0 {
-		if latest, err := o.store.GetAccount(ctx, acc.ID); err == nil && latest != nil {
+		latest, err := refreshqueue.LatestAccount(ctx, o.store, acc.ID)
+		if err != nil {
+			return "", err
+		}
+		if latest != nil {
 			acc.OAuthAccessToken = latest.OAuthAccessToken
 			acc.OAuthRefreshToken = latest.OAuthRefreshToken
 			acc.OAuthExpiresAt = latest.OAuthExpiresAt
@@ -80,25 +113,13 @@ func (o *CLIOAuth) accessToken(ctx context.Context, acc *store.Account, force bo
 	refreshToken := strings.TrimSpace(acc.OAuthRefreshToken)
 	expiresAt := acc.OAuthExpiresAt
 
-	if !force && accessToken != "" && (expiresAt.IsZero() || time.Until(expiresAt) > cliOAuthRefreshSkew) {
+	if (!force || accessToken != rejected) && accessToken != "" && (expiresAt.IsZero() || time.Until(expiresAt) > cliOAuthRefreshSkew) {
 		return accessToken, nil
 	}
 	if refreshToken == "" {
 		return "", &cliOAuthError{status: http.StatusUnauthorized, message: "grok cli oauth refresh token is missing"}
 	}
 	return o.refreshAndPersist(ctx, acc, refreshToken)
-}
-
-func cliOAuthLockForAccount(acc *store.Account) *sync.Mutex {
-	key := "unknown"
-	if acc != nil && acc.ID != 0 {
-		key = fmt.Sprintf("account:%d", acc.ID)
-	} else if acc != nil {
-		sum := sha256.Sum256([]byte(strings.TrimSpace(acc.OAuthRefreshToken)))
-		key = fmt.Sprintf("refresh:%x", sum[:])
-	}
-	value, _ := cliOAuthAccountLocks.LoadOrStore(key, &sync.Mutex{})
-	return value.(*sync.Mutex)
 }
 
 func (o *CLIOAuth) refreshAndPersist(ctx context.Context, acc *store.Account, refreshToken string) (string, error) {
@@ -115,13 +136,23 @@ func (o *CLIOAuth) refreshAndPersist(ctx context.Context, acc *store.Account, re
 	ApplyCLIOAuthIdentity(acc)
 	ApplyCLIOAuthIdentityToken(acc, identityToken)
 	if o != nil && o.store != nil && acc.ID != 0 {
-		if updateErr := o.store.UpdateAccount(ctx, acc); updateErr != nil {
-			// Keep serving with the in-memory tokens, but log so operators can
-			// detect a durable store write failure after rotation.
+		patch := store.GrokCredentialPatch{ExpectedRefreshToken: refreshToken, AccessToken: acc.OAuthAccessToken,
+			RefreshToken: acc.OAuthRefreshToken, ExpiresAt: acc.OAuthExpiresAt, UserID: acc.UserID, Email: acc.Email, Name: acc.Name, TeamID: acc.TeamID}
+		key := cliRotationKey{o.store, acc.ID}
+		cliOAuthPendingRotations.Store(key, patch)
+		if updateErr := o.persistRotation(ctx, acc.ID, patch); updateErr != nil {
 			slog.Warn("grok cli oauth: failed to persist rotated tokens", "account_id", acc.ID, "error", updateErr)
+			return "", updateErr
 		}
+		cliOAuthPendingRotations.Delete(key)
 	}
 	return accessToken, nil
+}
+
+func (o *CLIOAuth) persistRotation(ctx context.Context, id int64, patch store.GrokCredentialPatch) error {
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	return o.store.UpdateGrokCredentials(writeCtx, id, patch)
 }
 
 // refresh performs the OAuth refresh_token grant against auth.x.ai.

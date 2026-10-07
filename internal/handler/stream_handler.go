@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"log/slog"
 	"maps"
@@ -176,6 +177,7 @@ func shouldFlushSSEImmediately(event string, data []byte) bool {
 // --- sse framing functions removed ---
 
 type streamHandler struct {
+	cancelUpstream context.CancelFunc
 	// Configuration
 	config              *config.Config
 	isStream            bool
@@ -1708,6 +1710,9 @@ func (h *streamHandler) markWriteErrorLocked(event string, err error) {
 	h.requestFailed = true
 	h.returned.Store(true)
 	h.finalStopReason = "write_error"
+	if h.cancelUpstream != nil {
+		h.cancelUpstream()
+	}
 	middleware.MarkStreamFailure(h.w)
 	if !alreadyFailed {
 		slog.Warn("Response write failed", "event", event, "error", err)

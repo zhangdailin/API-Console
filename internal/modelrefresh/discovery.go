@@ -123,6 +123,7 @@ func discoverAccountCatalogModels(ctx context.Context, cfg *config.Config, s *st
 		switch accountType {
 		case "workbuddy":
 			client := workbuddy.NewFromAccount(acc, refreshModelRequestConfig(cfg, accountType))
+			client.SetAccountStore(s)
 			models, fetchErr := client.FetchModels(ctx)
 			client.Close()
 			attempt.Err = fetchErr
@@ -132,6 +133,7 @@ func discoverAccountCatalogModels(ctx context.Context, cfg *config.Config, s *st
 			}
 		case "qoder":
 			client := qoder.NewFromAccount(acc, refreshModelRequestConfig(cfg, accountType))
+			client.SetAccountStore(s)
 			catalog, fetchErr := client.FetchUpstreamModels(ctx)
 			client.Close()
 			attempt.Err = fetchErr

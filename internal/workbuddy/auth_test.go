@@ -109,7 +109,7 @@ func TestCredentialsToken_RefreshesBeforeExpiry(t *testing.T) {
 	fresh := Credentials{AccessToken: "token", ExpiresAt: time.Now().Add(72 * time.Hour)}
 	_, ok := fresh.Token(time.Now())
 	testutil.False(t, !ok, "a token valid for 72h must be reused")
-	stale := Credentials{AccessToken: "token", ExpiresAt: time.Now().Add(time.Hour)}
+	stale := Credentials{AccessToken: "token", ExpiresAt: time.Now().Add(30 * time.Second)}
 	_, ok = stale.Token(time.Now())
 	testutil.False(t, ok, "a token expiring within the refresh lead must trigger a refresh")
 	opaque := Credentials{AccessToken: "token"}

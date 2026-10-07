@@ -62,7 +62,7 @@ const (
 	clientUA       = "WorkBuddy/" + clientVersion + " WorkBuddy AI/" + clientVersion + " CLI/" + cliVersion
 	originReferer  = "https://www.workbuddy.ai"
 	defaultSystem  = "You are a helpful assistant."
-	minRefreshLead = 24 * time.Hour
+	minRefreshLead = time.Minute
 	streamIdle     = 5 * time.Minute
 )
 
@@ -159,7 +159,7 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	return c.runChat(ctx, req, c.requestTimeout, onMessage, logger)
 }
 
-func (c *Client) runChat(ctx context.Context, req upstream.UpstreamRequest, timeout time.Duration, onMessage func(upstream.SSEMessage), logger *debug.Logger) error {
+func (c *Client) runChat(ctx context.Context, req upstream.UpstreamRequest, timeout time.Duration, onMessage func(upstream.SSEMessage), logger *debug.Logger) (sendErr error) {
 	if c == nil {
 		return fmt.Errorf("workbuddy client is nil")
 	}
@@ -179,7 +179,7 @@ func (c *Client) runChat(ctx context.Context, req upstream.UpstreamRequest, time
 		logger.LogUpstreamRequest(url, map[string]string{"provider": "workbuddy"}, body)
 	}
 
-	reqCtx, cancel := util.WithDefaultTimeout(ctx, timeout)
+	reqCtx, cancel := util.WithAttemptTimeout(ctx, timeout)
 	defer cancel()
 	httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -189,6 +189,11 @@ func (c *Client) runChat(ctx context.Context, req upstream.UpstreamRequest, time
 
 	attempt := debug.BeginUpstream(ctx, httpReq.Method, httpReq.URL.String(), httpReq.Header, body)
 	httpReq = attempt.TraceRequest(httpReq)
+	finishAttempt, err := upstream.BeginAttempt(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { finishAttempt(sendErr) }()
 	resp, err := c.httpClient.Do(httpReq)
 	attempt.Response(resp, err)
 	if resp != nil {

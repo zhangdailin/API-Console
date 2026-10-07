@@ -710,7 +710,11 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	// Token count (for the leading usage display)
 	inputTokens := breakdown.Total
 
+	upstreamCtx, cancelUpstream := util.WithAttemptTimeout(r.Context(), time.Duration(cfg.RequestTimeout)*time.Second)
+	defer cancelUpstream()
+	r = r.WithContext(upstreamCtx)
 	sh := newStreamHandler(cfg, w, logger, noThinking, isStream, responseFormat)
+	sh.cancelUpstream = cancelUpstream
 	sh.setAllowedToolNames(declaredToolNames(effectiveTools))
 	if preSelectQoderRequest {
 		sh.setSurfaceToolRejects(true)
@@ -783,6 +787,8 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		retryDelay := time.Duration(cfg.RetryDelay) * time.Millisecond
 		retriesRemaining := maxRetries
+		budgetCtx, attemptBudget := upstream.WithAttemptBudget(r.Context(), maxRetries+1)
+		r = r.WithContext(budgetCtx)
 		// sharedRefusalWaited accumulates only the waits spent on a refusal that
 		// every account shares, which is bounded separately from maxRetries.
 		var sharedRefusalWaited time.Duration
@@ -853,10 +859,16 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 				slog.Debug("Using SendRequestWithPayload")
 			}
 
-			err = apiClient.SendRequestWithPayload(r.Context(), upstreamReq, primaryHandler, logger)
+			callsBefore := attemptBudget.Used()
+			callCtx := upstream.WithAttemptObserver(r.Context(), func(failed bool) {
+				middleware.RecordUpstreamAttempt(r.Context(), accountID, failed)
+			})
+			err = apiClient.SendRequestWithPayload(callCtx, upstreamReq, primaryHandler, logger)
 			// The same account id the diagnostics above reported, with or without
 			// diagnostics enabled.
-			middleware.RecordUpstreamAttempt(r.Context(), accountID, err != nil)
+			if attemptBudget.Used() == callsBefore {
+				middleware.RecordUpstreamAttempt(r.Context(), accountID, err != nil)
+			}
 			logutil.DebugIf(verboseDiagnostics, "Upstream client returned", "trace_id", traceID, "attempt", upstreamReq.Attempt, "error", err)
 
 			if err == nil {
@@ -969,7 +981,7 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 				sh.finishResponse("end_turn")
 				return
 			}
-			if retriesRemaining <= 0 {
+			if retriesRemaining <= 0 || attemptBudget.Remaining() <= 0 {
 				if currentAccount != nil && h.loadBalancer != nil {
 					slog.Error("Account request failed, max retries reached", "account", currentAccount.Name)
 				}
