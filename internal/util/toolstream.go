@@ -89,6 +89,57 @@ func (a *ToolCallAccumulator) Add(index int, id, name, args string) *ToolCall {
 	return state
 }
 
+// Order reports how many call instances have been accumulated. A stream reader
+// that appends a call recovered from another encoding uses it as the index, so
+// the recovery cannot merge into an existing instance at a reused index.
+func (a *ToolCallAccumulator) Order() int { return len(a.order) }
+
+// HasCallNamed reports whether a call with this name has been accumulated.
+//
+// Some upstreams emit one tool call twice: once as native deltas and once as a
+// textual copy. The copy is a duplicate when the native call already exists, so
+// this is how a recovered second intent is told from a repeated first one.
+func (a *ToolCallAccumulator) HasCallNamed(name string) bool {
+	for _, state := range a.order {
+		if state != nil && state.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// RepairArguments replaces the arguments of the first not-yet-emitted call
+// whose buffered arguments are not valid JSON — a call the upstream truncated
+// mid-object. It prefers a call with the given name and falls back to any
+// broken call, and reports whether it replaced anything.
+//
+// Repairing in place keeps the client's single tool_use block and the id the
+// native deltas carried; adding the textual copy as another call would hand
+// the client two calls for one intent. A call whose arguments are already
+// complete is left alone, so a textual copy of a healthy native call stays a
+// duplicate and is dropped by the caller.
+func (a *ToolCallAccumulator) RepairArguments(name, args string) bool {
+	if !json.Valid([]byte(strings.TrimSpace(args))) {
+		return false
+	}
+	for _, matchName := range []bool{true, false} {
+		for _, state := range a.order {
+			if state == nil || state.emitted || state.Arguments == "" {
+				continue
+			}
+			if matchName && state.Name != name {
+				continue
+			}
+			if json.Valid([]byte(strings.TrimSpace(state.Arguments))) {
+				continue
+			}
+			state.Arguments = args
+			return true
+		}
+	}
+	return false
+}
+
 // CompleteAll drains every not-yet-emitted call in stream order and marks them
 // delivered, so a second flush cannot hand the same call to the client twice.
 func (a *ToolCallAccumulator) CompleteAll() []*ToolCall {

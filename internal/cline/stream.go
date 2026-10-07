@@ -88,23 +88,95 @@ var clineTextToolBlockRE = regexp.MustCompile(`(?s)<tool_call>\s*(.*?)\s*</tool_
 var clineTextToolArgumentRE = regexp.MustCompile(`(?s)<arg_key>\s*([^<]+?)\s*</arg_key>\s*<arg_value>\s*(.*?)\s*</arg_value>`)
 var clineTextToolNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]*$`)
 
+// clineFunctionToolBlockRE matches the `<function=NAME>` dialect:
+//
+//	<tool_call><function=write_stdin><parameter=chars>x</parameter>…</function></tool_call>
+//
+// mimo-v2.6-flash serves this through the Xiaomi provider. It is a different
+// shape from the GLM dialects below, so it is tried first.
+var clineFunctionToolBlockRE = regexp.MustCompile(`(?s)<tool_call>\s*<function=([^>]+)>(.*?)</function>\s*</tool_call>`)
+var clineFunctionParameterRE = regexp.MustCompile(`(?s)<parameter=([^>]+)>(.*?)</parameter>`)
+
 const maxClineTextToolBufferBytes = 1 << 20
+const clineTextToolOpenTag = "<tool_call>"
+const clineTextToolCloseTag = "</tool_call>"
 
 // parseClineTextToolCalls converts the textual fallbacks emitted by some Cline
 // models (notably z-ai/glm) when the gateway returns a tool call inside the text
-// delta instead of OpenAI tool_calls deltas. Two formats have been observed:
+// delta instead of OpenAI tool_calls deltas. Three formats have been observed:
 //
-//   - <tool_call>bash:ignored</arg_value><arg_key>command</arg_key>...</tool_call>
+//   - <tool_call><function=NAME><parameter=KEY>VALUE</parameter>…</function></tool_call>
+//   - <tool_call>bash:ignored</arg_value><arg_key>command</arg_key>…</tool_call>
 //   - <tool_call>glob<tool_call>glob: *<tool_call>args: {"pattern":"*"}...
 //
-// The first format's value before arg_key is an unlabelled duplicate and is
+// The second format's value before arg_key is an unlabelled duplicate and is
 // intentionally ignored.
 func parseClineTextToolCalls(text string) (string, []toolCall) {
-	visible, calls := parseClineClosedTextToolCalls(text)
+	visible, calls := parseClineFunctionToolCalls(text)
+	if len(calls) > 0 {
+		return visible, calls
+	}
+	visible, calls = parseClineClosedTextToolCalls(text)
 	if len(calls) > 0 {
 		return visible, calls
 	}
 	return parseClineRepeatedTagToolCall(text)
+}
+
+// parseClineFunctionToolCalls reads the `<function=NAME>` dialect, where every
+// parameter is a labelled element carrying raw text rather than JSON. A value
+// that parses as JSON keeps its type, so `2000` stays a number and not "2000".
+//
+// A block is only recognised once it is complete. The upstream streams one block
+// across several frames, so a partial block is left in the text rather than
+// being parsed into a call with half its parameters.
+func parseClineFunctionToolCalls(text string) (string, []toolCall) {
+	matches := clineFunctionToolBlockRE.FindAllStringSubmatchIndex(text, -1)
+	if len(matches) == 0 {
+		return text, nil
+	}
+	calls := make([]toolCall, 0, len(matches))
+	var visible strings.Builder
+	last := 0
+	for _, match := range matches {
+		if len(match) < 6 {
+			continue
+		}
+		name := strings.TrimSpace(html.UnescapeString(text[match[2]:match[3]]))
+		args := map[string]interface{}{}
+		for _, parameter := range clineFunctionParameterRE.FindAllStringSubmatch(text[match[4]:match[5]], -1) {
+			if len(parameter) != 3 {
+				continue
+			}
+			key := strings.TrimSpace(html.UnescapeString(parameter[1]))
+			if key == "" {
+				continue
+			}
+			value := strings.TrimSpace(html.UnescapeString(parameter[2]))
+			var typed interface{}
+			if json.Unmarshal([]byte(value), &typed) == nil {
+				args[key] = typed
+			} else {
+				args[key] = value
+			}
+		}
+		if name == "" || len(args) == 0 {
+			visible.WriteString(text[last:match[1]])
+			last = match[1]
+			continue
+		}
+		raw, err := json.Marshal(args)
+		if err != nil {
+			visible.WriteString(text[last:match[1]])
+			last = match[1]
+			continue
+		}
+		visible.WriteString(text[last:match[0]])
+		last = match[1]
+		calls = append(calls, toolCall{ID: NewToolCallID(), Type: "function", Function: toolCallFunction{Name: name, Arguments: string(raw)}})
+	}
+	visible.WriteString(text[last:])
+	return visible.String(), calls
 }
 
 func parseClineClosedTextToolCalls(text string) (string, []toolCall) {
@@ -161,7 +233,7 @@ func parseClineClosedTextToolCalls(text string) (string, []toolCall) {
 }
 
 func parseClineRepeatedTagToolCall(text string) (string, []toolCall) {
-	const marker = "<tool_call>"
+	const marker = clineTextToolOpenTag
 	first := strings.Index(text, marker)
 	if first < 0 {
 		return text, nil
@@ -289,7 +361,6 @@ func consumeStream(body io.Reader, toolsEnabled bool, onMessage func(upstream.SS
 	tools := util.NewToolCallAccumulator()
 	var pendingText strings.Builder
 	var thinkingSplitter clineThinkingSplitter
-	sawNativeTools := false
 	sawFinish := false
 
 	emitText := func(text string) { upstream.EmitTextDelta(onMessage, text, &result.SawMeaningfulEvent) }
@@ -311,19 +382,83 @@ func consumeStream(body io.Reader, toolsEnabled bool, onMessage func(upstream.SS
 		}
 	}
 
+	// A native tool call whose arguments never closed is the upstream emitting
+	// the same call twice: the deltas stop mid-object while the textual copy in
+	// the content delta carries every parameter. Repairing the native call keeps
+	// one tool_use block with the id the deltas carried and complete arguments;
+	// emitting both would hand the client a malformed fragment plus a duplicate.
+	// A recovered call that matches nothing is a genuine second intent, so it is
+	// appended rather than dropped.
+	recoverTextToolCalls := func(calls []toolCall) {
+		for _, call := range calls {
+			if tools.RepairArguments(call.Function.Name, call.Function.Arguments) {
+				continue
+			}
+			if tools.HasCallNamed(call.Function.Name) {
+				continue
+			}
+			tools.Add(tools.Order(), call.ID, call.Function.Name, call.Function.Arguments)
+		}
+	}
+
+	// flushPendingText emits the part of the buffered content that can no longer
+	// become a tool call and keeps the rest. A textual fallback block arrives in
+	// fragments, so a complete block is resolved as soon as it closes and only
+	// an unclosed tail is held. `final` releases the tail: at end of stream an
+	// incomplete opening tag is prose, and holding it would lose the text.
+	//
+	// Holding only the unclosed tail is what keeps an answer streaming while a
+	// block assembles, and it is why the repair below can still see the block:
+	// the closing tag arrives before the finish_reason that triggers the flush.
+	flushPendingText := func(final bool) {
+		if pendingText.Len() == 0 {
+			return
+		}
+		buffer := pendingText.String()
+		// Resolve every complete block, keeping the text before and after it.
+		visible, calls := parseClineTextToolCalls(buffer)
+		recoverTextToolCalls(calls)
+		if final {
+			pendingText.Reset()
+			emitText(visible)
+			return
+		}
+		// Hold the unclosed tail: everything from the last opening tag that has
+		// no closing tag yet, plus a trailing fragment that could still open one.
+		keep := 0
+		if start := strings.LastIndex(visible, clineTextToolOpenTag); start >= 0 &&
+			!strings.Contains(visible[start:], clineTextToolCloseTag) {
+			keep = len(visible) - start
+		} else {
+			for n := min(len(visible), len(clineTextToolOpenTag)-1); n > 0; n-- {
+				if strings.HasSuffix(visible, clineTextToolOpenTag[:n]) {
+					keep = n
+					break
+				}
+			}
+		}
+		if len(visible)-keep <= 0 {
+			pendingText.Reset()
+			pendingText.WriteString(visible)
+			return
+		}
+		emitText(visible[:len(visible)-keep])
+		pendingText.Reset()
+		pendingText.WriteString(visible[len(visible)-keep:])
+	}
+
 	emitContent := func(content string) {
 		if content == "" {
 			return
 		}
-		if toolsEnabled && !sawNativeTools {
-			pendingText.WriteString(content)
-			if pendingText.Len() > maxClineTextToolBufferBytes {
-				emitText(pendingText.String())
-				pendingText.Reset()
-			}
-		} else {
+		if !toolsEnabled {
+			// Without declared tools, literal tool markup is user-visible content.
 			emitText(content)
+			return
 		}
+		pendingText.WriteString(content)
+		// A buffer this large is not a tool call; release it rather than grow.
+		flushPendingText(pendingText.Len() > maxClineTextToolBufferBytes)
 	}
 
 	emitTools := func() {
@@ -385,25 +520,16 @@ func consumeStream(body io.Reader, toolsEnabled bool, onMessage func(upstream.SS
 		}
 		for _, call := range delta.ToolCalls {
 			result.SawMeaningfulEvent = true
-			if !sawNativeTools {
-				sawNativeTools = true
-				// Textual tool markup and native deltas are duplicate encodings.
-				// Preserve ordinary prose but strip any complete fallback blocks.
-				if pendingText.Len() > 0 {
-					visible, _ := parseClineTextToolCalls(pendingText.String())
-					emitText(visible)
-					pendingText.Reset()
-				}
-			}
 			tools.Add(call.Index, call.ID, call.Function.Name, call.Function.Arguments)
 		}
-		// OpenAI-style tool arguments can span several deltas. Emitting on the
-		// first delta loses every later fragment and produces invalid JSON. A
-		// non-empty finish reason closes the choice; [DONE]/EOF is handled below.
+		// Arguments can span deltas, so the textual fallback is only resolvable
+		// once the stream has stopped producing content. Flushing before the
+		// finish-time emit lets a truncated native call be repaired in place.
 		finishReason := strings.TrimSpace(chunk.Choices[0].FinishReason)
 		if finishReason != "" {
 			result.UpstreamFinishReason = finishReason
 			sawFinish = true
+			flushPendingText(true)
 			emitTools()
 		}
 	}
@@ -416,14 +542,7 @@ func consumeStream(body io.Reader, toolsEnabled bool, onMessage func(upstream.SS
 		return result, ErrStreamTruncated
 	}
 	thinkingSplitter.feed("", true, emitReasoning, emitContent)
-	if toolsEnabled && !sawNativeTools && pendingText.Len() > 0 {
-		visible, calls := parseClineTextToolCalls(pendingText.String())
-		emitText(visible)
-		for index, call := range calls {
-			tools.Add(index, call.ID, call.Function.Name, call.Function.Arguments)
-		}
-		pendingText.Reset()
-	}
+	flushPendingText(true)
 	emitTools()
 	return result, nil
 }

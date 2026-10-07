@@ -212,6 +212,103 @@ func TestConsumeStreamConvertsGLMTextToolCall(t *testing.T) {
 	testutil.Equal(t, result.FinishReason(), "tool_use")
 }
 
+// TestConsumeStreamRecoversTruncatedToolCallFromTextMarkup is the mimo-v2.6-flash
+// failure seen on the Xiaomi provider: the native tool_calls deltas stop inside
+// the argument object (`{"chars": `) while the content delta carries a complete
+// textual copy of the same call.
+//
+// Before the fix the client received a tool_use block whose input was that
+// unparseable fragment, plus a text block holding the raw markup — a
+// `write_stdin` call with no session_id and no yield_time_ms, which is what the
+// caller reported. One tool_use block with complete arguments is the wanted
+// outcome, and the markup must not reach the client as text.
+func TestConsumeStreamRecoversTruncatedToolCallFromTextMarkup(t *testing.T) {
+	frames := []string{
+		`{"choices":[{"delta":{"content":"","role":"assistant"},"finish_reason":null}]}`,
+		`{"choices":[{"delta":{"content":"<tool_call><function=write_stdin><parameter=chars>"},"finish_reason":null}]}`,
+		`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_6b63","type":"function","function":{"name":"write_stdin","arguments":""}}]},"finish_reason":null}]}`,
+		`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"chars\": "}}]},"finish_reason":null}]}`,
+		`{"choices":[{"delta":{"content":"</parameter><parameter=max_output_tokens>"},"finish_reason":null}]}`,
+		`{"choices":[{"delta":{"content":"2000"},"finish_reason":null}]}`,
+		`{"choices":[{"delta":{"content":"</parameter><parameter=session_id>44579"},"finish_reason":null}]}`,
+		`{"choices":[{"delta":{"content":"</parameter><parameter=yield_time_ms>1000"},"finish_reason":null}]}`,
+		`{"choices":[{"delta":{"content":"</parameter></function></tool_call>"},"finish_reason":null}]}`,
+		`{"choices":[{"delta":{"content":"","role":"assistant"},"finish_reason":"tool_calls"}]}`,
+	}
+	var stream strings.Builder
+	for _, frame := range frames {
+		stream.WriteString("data: " + frame + "\n\n")
+	}
+	stream.WriteString("data: [DONE]\n\n")
+
+	var calls []upstream.SSEMessage
+	var text strings.Builder
+	result, err := consumeStream(strings.NewReader(stream.String()), true, func(msg upstream.SSEMessage) {
+		switch msg.Type {
+		case "model.tool-call":
+			calls = append(calls, msg)
+		case "model.text-delta":
+			text.WriteString(msg.Event["delta"].(string))
+		}
+	})
+	testutil.NoError(t, err, "consumeStream() error = %v")
+	testutil.Equal(t, len(calls), 1)
+	testutil.Equal(t, calls[0].Event["toolCallId"], "call_6b63")
+	testutil.Equal(t, calls[0].Event["toolName"], "write_stdin")
+	// Every parameter of the textual copy has to survive, typed as the upstream
+	// wrote it: a numeric parameter must not arrive as a quoted string.
+	testutil.Equal(t, calls[0].Event["input"], `{"chars":"","max_output_tokens":2000,"session_id":44579,"yield_time_ms":1000}`)
+	testutil.Falsef(t, strings.Contains(text.String(), "parameter="), "text = %q, want no raw markup", text.String())
+	testutil.Equal(t, result.ToolCallCount, 1)
+	testutil.Equal(t, result.FinishReason(), "tool_use")
+}
+
+// TestConsumeStreamDoesNotDuplicateAnIntactTextualToolCall is the other half of
+// the same stream: when the native deltas already carry complete arguments, the
+// textual copy is a duplicate and must not become a second tool_use block.
+func TestConsumeStreamDoesNotDuplicateAnIntactTextualToolCall(t *testing.T) {
+	frames := []string{
+		`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_ok","type":"function","function":{"name":"exec_command","arguments":"{\"cmd\": \"ls\"}"}}]},"finish_reason":null}]}`,
+		`{"choices":[{"delta":{"content":"<tool_call><function=exec_command><parameter=cmd>ls</parameter></function></tool_call>"},"finish_reason":null}]}`,
+		`{"choices":[{"delta":{"content":"","role":"assistant"},"finish_reason":"tool_calls"}]}`,
+	}
+	var stream strings.Builder
+	for _, frame := range frames {
+		stream.WriteString("data: " + frame + "\n\n")
+	}
+	stream.WriteString("data: [DONE]\n\n")
+
+	var calls []upstream.SSEMessage
+	result, err := consumeStream(strings.NewReader(stream.String()), true, func(msg upstream.SSEMessage) {
+		if msg.Type == "model.tool-call" {
+			calls = append(calls, msg)
+		}
+	})
+	testutil.NoError(t, err, "consumeStream() error = %v")
+	testutil.Equal(t, len(calls), 1)
+	// The native arguments win unchanged: the textual copy is a duplicate of a
+	// call that was never broken, so it is dropped rather than merged.
+	testutil.Equal(t, calls[0].Event["input"], `{"cmd": "ls"}`)
+	testutil.Equal(t, result.ToolCallCount, 1)
+}
+
+// TestParseClineFunctionToolCallKeepsProseAndParameterTypes covers the
+// `<function=NAME>` dialect on its own: surrounding prose survives, a numeric
+// parameter stays a number, and an entity-escaped value is unescaped.
+func TestParseClineFunctionToolCallKeepsProseAndParameterTypes(t *testing.T) {
+	markup := "先清理会话。<tool_call><function=write_stdin><parameter=chars></parameter><parameter=max_output_tokens>2000</parameter><parameter=session_id>44579</parameter></function></tool_call> 完成。"
+	visible, calls := parseClineTextToolCalls(markup)
+	testutil.Equal(t, visible, "先清理会话。 完成。")
+	testutil.Equal(t, len(calls), 1)
+	testutil.Equal(t, calls[0].Function.Name, "write_stdin")
+	testutil.Equal(t, calls[0].Function.Arguments, `{"chars":"","max_output_tokens":2000,"session_id":44579}`)
+
+	escaped := `<tool_call><function=write><parameter=content>&quot;ok&quot;</parameter></function></tool_call>`
+	_, calls = parseClineTextToolCalls(escaped)
+	testutil.Equal(t, len(calls), 1)
+	testutil.Equal(t, calls[0].Function.Arguments, `{"content":"ok"}`)
+}
+
 func TestParseClineTextToolCallPreservesStructuredArguments(t *testing.T) {
 	markup := `<tool_call>write:ignored</arg_value><arg_key>content</arg_key><arg_value>{&quot;ok&quot;:true}</arg_value><arg_key>count</arg_key><arg_value>2</arg_value></tool_call>`
 	visible, calls := parseClineTextToolCalls(markup)
