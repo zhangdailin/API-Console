@@ -2,6 +2,9 @@ package egress
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -54,6 +57,32 @@ func TestManagerAcquireDirectNode(t *testing.T) {
 	lease, err := m.Acquire(context.Background(), "cli", "acct-1")
 	testutil.NoError(t, err, "acquire failed: %v")
 	defer lease.Release()
+}
+
+func TestLeaseReleasePreventsReuse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	m := NewManager(&config.Config{
+		GrokEgressEnabled: true,
+		GrokEgressNodes:   []config.EgressNodeConfig{{Name: "direct", Scope: "all"}},
+	})
+	lease, err := m.Acquire(context.Background(), "cli", "acct-release")
+	testutil.NoError(t, err)
+	lease.Release()
+	lease.Release()
+	req, err := http.NewRequest(http.MethodGet, server.URL, nil)
+	testutil.NoError(t, err)
+	_, err = lease.Do(req)
+	testutil.True(t, errors.Is(err, errLeaseReleased), "released lease must reject a valid request")
+	other, err := m.Acquire(context.Background(), "cli", "acct-other")
+	testutil.NoError(t, err)
+	defer other.Release()
+	resp, err := other.Do(req)
+	testutil.NoError(t, err, "releasing one lease must not close the shared client")
+	defer resp.Body.Close()
+	testutil.Equal(t, resp.StatusCode, http.StatusNoContent)
 }
 
 func TestManagerUnhealthyNodeSkipped(t *testing.T) {

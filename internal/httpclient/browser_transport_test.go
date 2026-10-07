@@ -2,9 +2,14 @@ package httpclient
 
 import (
 	"context"
+	stdtls "crypto/tls"
+	"crypto/x509"
+	"encoding/base64"
+	"errors"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"orchids-api/internal/testutil"
 	"strconv"
@@ -44,6 +49,83 @@ func TestDialHTTPSProxyAwareSupportsSOCKS5(t *testing.T) {
 	_, err = io.ReadFull(conn, buf)
 	testutil.CheckNoError(t, err)
 	testutil.Equal(t, string(buf), "ping")
+}
+
+func TestDialHTTPSProxyAwareSupportsHTTPSProxy(t *testing.T) {
+	proxyDone := make(chan struct{})
+	connectTarget := make(chan string, 1)
+	connectAuth := make(chan string, 1)
+	proxy := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodConnect {
+			http.Error(w, "CONNECT required", http.StatusMethodNotAllowed)
+			return
+		}
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "hijacking unavailable", http.StatusInternalServerError)
+			return
+		}
+		conn, _, err := hijacker.Hijack()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		connectTarget <- r.Host
+		connectAuth <- r.Header.Get("Proxy-Authorization")
+		if _, err := io.WriteString(conn, "HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
+			return
+		}
+		_, _ = io.Copy(conn, conn)
+		close(proxyDone)
+	}))
+	proxy.StartTLS()
+	t.Cleanup(func() {
+		proxy.Close()
+	})
+
+	proxyURL, err := url.Parse(proxy.URL)
+	testutil.NoError(t, err)
+	proxyURL.User = url.UserPassword("proxy-user", "proxy-secret")
+	roots := x509.NewCertPool()
+	roots.AddCert(proxy.Certificate())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, targetHost, err := dialHTTPSProxyTunnel(ctx, "tcp", "upstream.example:443", "upstream.example", proxyURL, &stdtls.Config{RootCAs: roots, ServerName: proxyURL.Hostname(), MinVersion: stdtls.VersionTLS12})
+	testutil.NoError(t, err, "HTTPS proxy dial failed")
+	defer conn.Close()
+	testutil.Equal(t, targetHost, "upstream.example")
+	testutil.Equal(t, <-connectTarget, "upstream.example:443")
+	testutil.Equal(t, <-connectAuth, "Basic "+base64.StdEncoding.EncodeToString([]byte("proxy-user:proxy-secret")))
+	testutil.NoError(t, conn.SetDeadline(time.Now().Add(5*time.Second)))
+	_, err = conn.Write([]byte("ping"))
+	testutil.NoError(t, err)
+	buf := make([]byte, 4)
+	_, err = io.ReadFull(conn, buf)
+	testutil.NoError(t, err)
+	testutil.Equal(t, string(buf), "ping")
+	testutil.NoError(t, conn.Close())
+	select {
+	case <-proxyDone:
+	case <-ctx.Done():
+		t.Fatal("HTTPS proxy tunnel did not close")
+	}
+}
+
+func TestDialHTTPSProxyAwareRejectsUntrustedHTTPSProxy(t *testing.T) {
+	proxy := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("untrusted proxy must not receive a CONNECT request")
+	}))
+	defer proxy.Close()
+	proxyURL, err := url.Parse(proxy.URL)
+	testutil.NoError(t, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := dialHTTPSProxyAware(ctx, "tcp", "upstream.example:443", http.ProxyURL(proxyURL))
+	if conn != nil {
+		conn.Close()
+	}
+	var untrusted x509.UnknownAuthorityError
+	testutil.True(t, errors.As(err, &untrusted), "HTTPS proxy certificate must be verified")
 }
 
 func startEchoListener(t *testing.T) net.Listener {

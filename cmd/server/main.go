@@ -129,9 +129,13 @@ func main() {
 
 	// Load the saved config from Redis when one is present.
 	if savedConfig, err := s.GetSetting(context.Background(), "config"); err == nil && savedConfig != "" {
-		if err := json.Unmarshal([]byte(savedConfig), cfg); err != nil {
+		savedCfg := cfg.Clone()
+		if err := json.Unmarshal([]byte(savedConfig), savedCfg); err != nil {
 			slog.Warn("Failed to load config from Redis, using file config", "error", err)
+		} else if err := config.ValidateProxyConfig(savedCfg); err != nil {
+			slog.Warn("Invalid proxy config from Redis, using file config", "error", err)
 		} else {
+			*cfg = *savedCfg
 			config.ApplyDefaults(cfg)
 			configureRuntimeLogging(cfg)
 			slog.Debug("Config loaded from Redis")

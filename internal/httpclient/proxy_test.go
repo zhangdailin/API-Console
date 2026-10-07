@@ -84,3 +84,19 @@ func TestParseProxyURL_Socks5(t *testing.T) {
 	testutil.Equal(t, proxyURL.Scheme, "socks5")
 	testutil.Equal(t, proxyURL.Host, "127.0.0.1:1080")
 }
+
+func TestParseProxyURLRejectsMalformedValues(t *testing.T) {
+	for _, raw := range []string{"ftp://proxy.local:3128", "http://", "not a proxy"} {
+		_, err := ParseProxyURL(raw)
+		if err == nil {
+			t.Fatalf("ParseProxyURL(%q) should fail", raw)
+		}
+	}
+}
+
+func TestProxyFuncFromConfigFailsClosedOnMalformedProxy(t *testing.T) {
+	proxyFunc := ProxyFuncFromConfig(&config.Config{ProxyURL: "ftp://proxy.local:3128"})
+	proxyURL, err := proxyFunc(&http.Request{URL: &url.URL{Scheme: "https", Host: "example.com"}})
+	testutil.Error(t, err)
+	testutil.True(t, proxyURL == nil)
+}

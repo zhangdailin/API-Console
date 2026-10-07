@@ -228,3 +228,44 @@ func TestPersistConfigValidatesAnonymousAllowIPs(t *testing.T) {
 	valid := &config.Config{AnonymousAllowIPs: []string{"203.0.113.20", "198.51.100.0/24"}}
 	testutil.NoError(t, a.persistConfig(ctx, nil, valid), "a valid allowlist was rejected: %v")
 }
+
+func TestPersistConfigRejectsMalformedProxy(t *testing.T) {
+	a, s, cleanup := newTestAPI(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	broken := &config.Config{ProxyURL: "ftp://proxy.local:3128"}
+	err := a.persistConfig(ctx, nil, broken)
+	testutil.Error(t, err)
+	saved, getErr := s.GetSetting(ctx, "config")
+	testutil.Falsef(t, getErr != nil || strings.Contains(saved, "ftp://proxy.local"), "invalid proxy reached the store: %q err=%v", saved, getErr)
+}
+
+func TestHandleConfigSaveRejectsProxyWithoutPublishingOrPersisting(t *testing.T) {
+	for _, field := range []string{"proxy_url", "proxy_http", "proxy_https"} {
+		t.Run(field, func(t *testing.T) {
+			a, s, _ := setupConfigAPI(t)
+			ctx := context.Background()
+			before := a.ConfigSnapshot()
+			testutil.NoError(t, s.SetSetting(ctx, "config", "unchanged"))
+			hookCalled := false
+			a.SetConfigChangeHook(func(*config.Config) { hookCalled = true })
+			patch := map[string]string{field: "http://proxy-user:proxy-secret@proxy.local:%zz"}
+			body, err := json.Marshal(patch)
+			testutil.NoError(t, err)
+			rec := httptest.NewRecorder()
+			a.HandleConfigSave(rec, httptest.NewRequest(http.MethodPost, "/api/config/save", strings.NewReader(string(body))))
+			var envelope struct {
+				Code int `json:"code"`
+			}
+			testutil.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+			testutil.NotEqual(t, envelope.Code, 0)
+			testutil.MustNotContainAny(t, rec.Body.String(), "proxy-user", "proxy-secret")
+			testutil.Equal(t, a.ConfigSnapshot(), before)
+			testutil.False(t, hookCalled, "invalid config must not invoke the publication hook")
+			saved, err := s.GetSetting(ctx, "config")
+			testutil.NoError(t, err)
+			testutil.Equal(t, saved, "unchanged")
+		})
+	}
+}

@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"orchids-api/internal/testutil"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -91,4 +92,33 @@ func TestLegacyInferenceAuthOptOutIsIgnored(t *testing.T) {
 	testutil.NoError(t, json.Unmarshal([]byte(`{"inference_auth_enabled":false}`), &cfg))
 	ApplyDefaults(&cfg)
 	testutil.False(t, cfg.AnonymousAllowIPs != nil, "legacy opt-out must not introduce an anonymous allowlist")
+}
+
+func TestValidateProxyConfigRejectsMalformedProxy(t *testing.T) {
+	testutil.Error(t, ValidateProxyConfig(&Config{ProxyURL: "ftp://proxy.local:3128"}))
+	testutil.Error(t, ValidateProxyConfig(&Config{ProxyHTTP: "not a proxy"}))
+	testutil.NoError(t, ValidateProxyConfig(&Config{ProxyURL: "socks5://127.0.0.1:1080"}))
+	testutil.NoError(t, ValidateProxyConfig(&Config{}))
+}
+
+func TestLoadRejectsMalformedProxyConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	testutil.NoError(t, os.WriteFile(path, []byte(`{"proxy_url":"ftp://proxy.local:3128"}`), 0600))
+	_, _, err := Load(path)
+	testutil.Error(t, err)
+}
+
+func TestProxyValidationRejectsInvalidAddressesWithoutLeakingCredentials(t *testing.T) {
+	for _, raw := range []string{
+		"http://proxy-user:proxy-secret@proxy.local:%zz",
+		"http://proxy-user:proxy-secret@:8080",
+		"https://proxy-user:proxy-secret@proxy.local:65536",
+		"socks5://proxy-user:proxy-secret@proxy.local:0",
+	} {
+		err := ValidateProxyConfig(&Config{ProxyURL: raw})
+		if err == nil {
+			t.Fatal("invalid proxy address was accepted")
+		}
+		testutil.MustNotContainAny(t, err.Error(), "proxy-user", "proxy-secret")
+	}
 }

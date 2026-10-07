@@ -69,6 +69,7 @@ type Manager struct {
 }
 
 var errNoClient = errors.New("egress client not initialized")
+var errLeaseReleased = errors.New("egress lease already released")
 var errNoHealthyNode = errors.New("egress no healthy node for scope")
 
 // NewManager builds an egress manager from configuration. Returns nil when
@@ -126,7 +127,6 @@ func (m *Manager) Acquire(ctx context.Context, scope, affinity string) (*Lease, 
 		NodeID:   node.Name,
 		ProxyURL: node.URL,
 		client:   client,
-		manager:  m,
 	}
 	return lease, nil
 }

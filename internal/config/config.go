@@ -251,6 +251,9 @@ func Load(path string) (*Config, string, error) {
 	}
 
 	ApplyDefaults(&cfg)
+	if err := ValidateProxyConfig(&cfg); err != nil {
+		return nil, "", fmt.Errorf("invalid proxy config: %w", err)
+	}
 	return &cfg, resolvedPath, nil
 }
 

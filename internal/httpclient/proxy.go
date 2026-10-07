@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
@@ -15,29 +16,28 @@ func ProxyFunc(httpProxy, httpsProxy, user, pass string, bypass []string) func(*
 	user = strings.TrimSpace(user)
 	pass = strings.TrimSpace(pass)
 
-	parseProxy := func(raw string) *url.URL {
-		raw = strings.TrimSpace(raw)
-		if raw == "" {
-			return nil
-		}
-		if !strings.Contains(raw, "://") {
-			raw = "http://" + raw
-		}
-		u, err := url.Parse(raw)
+	parseProxy := func(raw string) (*url.URL, error) {
+		u, err := ParseProxyURL(raw)
 		if err != nil {
-			return nil
+			return nil, fmt.Errorf("invalid proxy: %w", err)
 		}
-		if u.Host == "" {
-			return nil
+		if u == nil {
+			return nil, nil
 		}
 		if user != "" && u.User == nil {
 			u.User = url.UserPassword(user, pass)
 		}
-		return u
+		return u, nil
 	}
 
-	httpURL := parseProxy(httpProxy)
-	httpsURL := parseProxy(httpsProxy)
+	httpURL, httpErr := parseProxy(httpProxy)
+	httpsURL, httpsErr := parseProxy(httpsProxy)
+	if httpErr != nil {
+		return func(*http.Request) (*url.URL, error) { return nil, httpErr }
+	}
+	if httpsErr != nil {
+		return func(*http.Request) (*url.URL, error) { return nil, httpsErr }
+	}
 	useEnv := httpURL == nil && httpsURL == nil
 
 	return func(req *http.Request) (*url.URL, error) {
@@ -81,6 +81,9 @@ func ProxyFuncFromURL(proxyURL *url.URL, bypass []string) func(*http.Request) (*
 	if proxyURL == nil {
 		return DirectProxyFunc()
 	}
+	if _, err := ParseProxyURL(proxyURL.String()); err != nil {
+		return func(*http.Request) (*url.URL, error) { return nil, err }
+	}
 	return func(req *http.Request) (*url.URL, error) {
 		if req == nil || req.URL == nil {
 			return nil, nil
@@ -93,26 +96,7 @@ func ProxyFuncFromURL(proxyURL *url.URL, bypass []string) func(*http.Request) (*
 }
 
 func ParseProxyURL(raw string) (*url.URL, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil, nil
-	}
-	if !strings.Contains(raw, "://") {
-		raw = "http://" + raw
-	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		return nil, err
-	}
-	if u.Host == "" {
-		return nil, nil
-	}
-	switch strings.ToLower(strings.TrimSpace(u.Scheme)) {
-	case "http", "https", "socks5", "socks5h":
-		return u, nil
-	default:
-		return nil, nil
-	}
+	return config.ParseProxyURL(raw)
 }
 
 func ProxyURLFromConfig(cfg *config.Config) *url.URL {
@@ -146,7 +130,14 @@ func ProxyFuncFromConfig(cfg *config.Config) func(*http.Request) (*url.URL, erro
 	if cfg == nil {
 		return http.ProxyFromEnvironment
 	}
-	if proxyURL, err := ParseProxyURL(cfg.ProxyURL); err == nil && proxyURL != nil {
+	if err := config.ValidateProxyConfig(cfg); err != nil {
+		return func(*http.Request) (*url.URL, error) { return nil, err }
+	}
+	if strings.TrimSpace(cfg.ProxyURL) != "" {
+		proxyURL, err := ParseProxyURL(cfg.ProxyURL)
+		if err != nil {
+			return func(*http.Request) (*url.URL, error) { return nil, err }
+		}
 		if user := strings.TrimSpace(cfg.ProxyUser); user != "" && proxyURL.User == nil {
 			proxyURL.User = url.UserPassword(user, cfg.ProxyPass)
 		}

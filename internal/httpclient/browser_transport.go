@@ -179,10 +179,48 @@ func dialHTTPSProxyAware(ctx context.Context, network, addr string, proxyFunc fu
 		conn, err := dialSOCKS5Proxy(ctx, network, addr, proxyURL)
 		return conn, host, err
 	case "https":
-		return nil, "", fmt.Errorf("browser http2 proxy scheme %q is not supported; use http or socks5", proxyURL.Scheme)
+		return dialHTTPSProxyTunnel(ctx, network, addr, host, proxyURL, nil)
 	default:
 		return nil, "", fmt.Errorf("browser http2 proxy scheme %q is not supported", proxyURL.Scheme)
 	}
+}
+
+func dialHTTPSProxyTunnel(ctx context.Context, network, addr, targetHost string, proxyURL *url.URL, tlsConfig *stdtls.Config) (net.Conn, string, error) {
+	proxyAddr := proxyURL.Host
+	if _, _, err := net.SplitHostPort(proxyAddr); err != nil {
+		proxyAddr = net.JoinHostPort(proxyURL.Hostname(), "443")
+	}
+	forward := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	rawConn, err := forward.DialContext(ctx, network, proxyAddr)
+	if err != nil {
+		return nil, "", err
+	}
+	config := &stdtls.Config{
+		ServerName: proxyURL.Hostname(),
+		MinVersion: stdtls.VersionTLS12,
+		NextProtos: []string{"http/1.1"},
+	}
+	if tlsConfig != nil {
+		config = tlsConfig
+	}
+	// Streaming clients can have no overall deadline; still bound the proxy's
+	// TLS handshake so a stalled proxy cannot hold a dial forever.
+	deadline := time.Now().Add(15 * time.Second)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+	_ = rawConn.SetDeadline(deadline)
+	tlsConn := stdtls.Client(rawConn, config)
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		_ = rawConn.Close()
+		return nil, "", err
+	}
+	_ = tlsConn.SetDeadline(time.Time{})
+	if err := writeHTTPConnect(ctx, tlsConn, addr, proxyURL); err != nil {
+		_ = tlsConn.Close()
+		return nil, "", err
+	}
+	return tlsConn, targetHost, nil
 }
 
 func dialHTTPProxyTunnel(ctx context.Context, network, addr, targetHost string, proxyURL *url.URL) (net.Conn, string, error) {

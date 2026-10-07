@@ -108,3 +108,7 @@ function_analysis_report.md
 # Local one-off diagnostic output and raw live verification records
 /docs/diagnostics/
 /docs/verification/
+
+# AOCI agent host integration (machine-bound; do not commit)
+.mcp.json
+.mcp.json.backup.*

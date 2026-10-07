@@ -312,6 +312,9 @@ func (a *API) persistConfig(ctx context.Context, current, newCfg *config.Config)
 	if _, err := middleware.NewAnonymousAllowlist(storedCfg.AnonymousAllowIPs); err != nil {
 		return fmt.Errorf("anonymous_allow_ips: %w", err)
 	}
+	if err := config.ValidateProxyConfig(storedCfg); err != nil {
+		return fmt.Errorf("proxy config: %w", err)
+	}
 
 	data, err := json.Marshal(storedCfg)
 	if err != nil {

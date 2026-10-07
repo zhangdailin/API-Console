@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 
 	"orchids-api/internal/config"
 )
@@ -123,8 +124,7 @@ type Lease struct {
 	NodeID   string
 	ProxyURL string
 	client   *http.Client
-	manager  *Manager
-	release  func()
+	released atomic.Bool
 }
 
 // Do issues the request through the lease's proxy-aware client.
@@ -132,14 +132,17 @@ func (l *Lease) Do(req *http.Request) (*http.Response, error) {
 	if l == nil || l.client == nil {
 		return nil, errNoClient
 	}
+	if l.released.Load() {
+		return nil, errLeaseReleased
+	}
 	return l.client.Do(req)
 }
 
-// Release returns the lease's underlying client to the pool.
+// Release marks the lease closed. The HTTP client itself is shared
+// process-wide, so no exclusive connection pool is owned by a lease.
 func (l *Lease) Release() {
-	if l != nil && l.release != nil {
-		l.release()
-		l.release = nil
+	if l != nil {
+		l.released.Store(true)
 	}
 }
 
