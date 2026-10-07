@@ -45,3 +45,27 @@ func TestDefaultOutputLimit(t *testing.T) {
 		t.Fatalf("default limit missing: %s", raw)
 	}
 }
+
+func TestConfiguredOutputBudgetPreservesExplicitLimit(t *testing.T) {
+	c := &Client{defaultMaxTokens: 16384}
+	for _, limit := range []*int{nil, new(int)} {
+		if limit != nil {
+			*limit = 64
+		}
+		raw, err := c.buildBody(upstream.UpstreamRequest{Model: "m", MaxTokens: limit})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body map[string]interface{}
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatal(err)
+		}
+		want := 16384
+		if limit != nil {
+			want = 64
+		}
+		if body["max_tokens"] != float64(want) {
+			t.Fatalf("budget changed: %s", raw)
+		}
+	}
+}

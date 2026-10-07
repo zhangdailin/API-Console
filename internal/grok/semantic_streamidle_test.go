@@ -260,3 +260,15 @@ func (r *semanticIdleCountingReader) Close() error {
 	r.closes.Add(1)
 	return nil
 }
+
+func TestFirstGenerationIgnoresEmptyOutputItemIdentity(t *testing.T) {
+	var d buildSSEActivityDetector
+	d.Observe([]byte("event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"message\",\"id\":\"msg-1\"}}\n\n"))
+	if d.generated {
+		t.Fatal("control item ID must not release first-generation deadline")
+	}
+	d.Observe([]byte("event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"x\"}\n\n"))
+	if !d.generated {
+		t.Fatal("text must release first-generation deadline")
+	}
+}

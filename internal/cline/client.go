@@ -93,7 +93,7 @@ func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
 		control:            httpclient.GetSharedHTTPClient(proxyKey, authRequestTimeout, proxyFunc),
 		stream:             httpclient.GetSharedHTTPClientWithLimits(proxyKey+"|cline-chat", 0, proxyFunc, cfg != nil && cfg.ClineHTTP2Enabled, cfg),
 		requestTimeout:     timeout,
-		streamIdle:         5 * time.Minute,
+		streamIdle:         cfg.SharedStreamIdleTimeout(),
 	}
 	if cfg != nil {
 		client.apiBase = util.FirstNonEmptyURL(cfg.ClineAPIBaseURL, client.apiBase)

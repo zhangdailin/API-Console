@@ -28,6 +28,9 @@ type requestObservation struct {
 	attempts, failures, switches int64
 	account                      int64
 	providerReached              bool
+	retryWaitMS, queueWaitMS     int64
+	httpPhaseSamples             int64
+	httpPhases                   map[string]int64
 	finalEvent                   *audit.Event
 	journal                      audit.Logger
 }
@@ -252,6 +255,42 @@ func finishRequestJournal(r *http.Request, w *TracedResponseWriter, duration tim
 	}
 	metadata["http_status"], metadata["path"], metadata["method"] = w.StatusCode, r.URL.Path, r.Method
 	metadata["trace_id"] = GetTraceID(r.Context())
+	if !w.FirstWriteAt().IsZero() {
+		metadata["ttfb_ms"] = w.FirstWriteAt().Sub(w.startedAt).Milliseconds()
+	}
+	if !w.ContentWriteAt().IsZero() && (w.isSSE() || w.StatusCode < 400) {
+		metadata["first_token_ms"] = w.ContentWriteAt().Sub(w.startedAt).Milliseconds()
+		if !w.isSSE() {
+			metadata["first_token_kind"] = "body_ttfb"
+		}
+	}
+	if w.isSSE() {
+		metadata["visible_output"] = w.tokenDetector.visible
+		metadata["reasoning_only"] = w.tokenDetector.reasoning && !w.tokenDetector.visible && !w.tokenDetector.tool
+		if w.tokenDetector.finish != "" {
+			metadata["finish_reason"] = w.tokenDetector.finish
+		}
+		if !w.visibleWriteAt.IsZero() {
+			metadata["first_visible_token_ms"] = w.visibleWriteAt.Sub(w.startedAt).Milliseconds()
+		}
+	}
+	if reason, ok := metadata["finish_reason"].(string); ok {
+		metadata["output_truncated"] = isTokenTruncation(reason)
+	}
+	if box, ok := r.Context().Value(requestObservationKey{}).(*requestObservation); ok {
+		box.mu.Lock()
+		metadata["upstream_http_phase_samples"] = box.httpPhaseSamples
+		phaseSnapshot := make(map[string]int64, len(box.httpPhases))
+		for k, v := range box.httpPhases {
+			phaseSnapshot[k] = v
+		}
+		metadata["upstream_http_phases_sum"] = phaseSnapshot
+		metadata["retry_wait_ms"] = box.retryWaitMS
+		metadata["queue_wait_ms"] = box.queueWaitMS
+		metadata["upstream_attempts"] = box.attempts
+		metadata["account_switches"] = box.switches
+		box.mu.Unlock()
+	}
 	e.Metadata = metadata
 	if w.StreamFailed() {
 		e.Status = "stream_error"
@@ -264,4 +303,16 @@ func finishRequestJournal(r *http.Request, w *TracedResponseWriter, duration tim
 		capture.Append("6_request_events.jsonl", fmtJSON(e)+"\n")
 	}
 	logger.Log(r.Context(), e)
+}
+
+// RecordRetryWait records lightweight wait evidence even with diagnostic capture off.
+func RecordRetryWait(ctx context.Context, category string, elapsed time.Duration) {
+	if box, ok := ctx.Value(requestObservationKey{}).(*requestObservation); ok {
+		box.mu.Lock()
+		defer box.mu.Unlock()
+		box.retryWaitMS += elapsed.Milliseconds()
+		if category == "upstream_queue" {
+			box.queueWaitMS += elapsed.Milliseconds()
+		}
+	}
 }

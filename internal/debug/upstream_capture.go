@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"orchids-api/internal/util"
 	"strings"
 	"time"
 )
@@ -51,6 +52,7 @@ func beginUpstream(c *Capture, method, url string, headers http.Header, body int
 	return a
 }
 func (a *UpstreamAttempt) TraceRequest(req *http.Request) *http.Request {
+	req = util.TraceHTTPPhases(req)
 	if a == nil {
 		return req
 	}

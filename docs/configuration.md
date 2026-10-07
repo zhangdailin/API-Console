@@ -133,3 +133,16 @@ Grok 语义空闲按有效生成事件衡量，keepalive 不延长时钟；下�
 `diagnostics_sample_every`、`diagnostics_max_concurrent` 控制诊断采样与并发。采样意味着不是每个请求都有正文；无采集时 API 明确 unavailable，而非返回空正文证明上游没有输出。
 
 改配置后按顺序核对：保存 HTTP 和管理 code 信封 → 当前有效值 → 是否需重启 → 重启后进程值 → 账号观察及真实请求。更多见 [故障排查](troubleshooting.md)。
+
+
+## 生成与排队预算
+
+`first_token_timeout_seconds` 默认 60，-1 关闭。它限制本请求跨重试、切号、排队的首生成等待；收到文本、推理或工具生成后停止，完整生成仍受 `request_timeout`、入口 `concurrency_timeout` 及渠道流空闲期限限制。首生成包含推理，并非用户看到首字的时间。原生上游非流式 JSON 不提供增量进度，收到成功响应头后释放这个流式看门狗；其完整正文仍有总期限。已有父期限取更早者。
+
+`shared_stream_idle_timeout_seconds` 控制 WorkBuddy、Qoder、Cline 的语义流空闲，默认 300，范围 30–600 秒。心跳、角色、纯用量不算生成进展，下游处理时间不计入上游空闲。Grok 保留专属流空闲配置。
+
+`qoder_queue_wait_budget_ms` 为 Qoder 的排队睡眠预算：0 继承 `shared_refusal_wait_budget_ms`，-1 禁止网关等待，正值单独设定。交互业务可选 3000ms；遇到上游 15/30 秒等待提示将直接返回 429 和 Retry-After。它减少失败等待，也减少请求在网关内等到队列恢复的机会；不保证模型恢复或吞吐增加。`qoder_queue_retry_interval_ms=0` 保留上游提示，正值覆盖间隔。此预算只计算排队睡眠，HTTP 往返由首生成及完整期限限制。
+
+`workbuddy_default_max_tokens` 默认 8192，可配置 1–131072，实际可用上限仍以账号模型目录及上游接受范围为准。仅未指定输出上限时使用；显式 `max_tokens`、`max_completion_tokens`、Responses `max_output_tokens` 按原协议优先级保留。推理模型的思考可能占用同一个输出预算。提高默认上限允许更长输出，不会预先生成这么多 Token，实际生成可能增加用量。
+
+上述字段可在管理页“生成预算与延迟”调整。保存后新请求读取首生成和排队预算，账号客户端通过指纹失效重新读取输出及流空闲配置；现有请求保留旧快照。全局并发容量及其处理超时在启动时装配，修改 `concurrency_timeout` 后需重启。

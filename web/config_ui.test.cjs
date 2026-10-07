@@ -91,7 +91,7 @@ test('a billing policy line reads in dollars and names the period',()=>{
 
 test('configuration payload hydrates security and proxy controls without simulated cache fields',()=>{
  const {api,node}=loadConfig();
- api.applyConfigurationPayload({admin_password:'secret',anonymous_allow_ips:['203.0.113.1'],proxy_url:'http://proxy.example:8080',proxy_bypass:['example.com']});
+ api.applyConfigurationPayload({admin_password:'secret',anonymous_allow_ips:['203.0.113.1'],proxy_url:'http://proxy.example:8080',proxy_bypass:['example.com'],shared_stream_idle_timeout_seconds:300,workbuddy_default_max_tokens:8192,first_token_timeout_seconds:60,request_timeout:7200,concurrency_timeout:7200,qoder_queue_wait_budget_ms:0,qoder_queue_retry_interval_ms:0});
  assert.equal(node('cfg_admin_pass').value,'secret');
  assert.equal(node('cfg_anonymous_allow_ips').value,'203.0.113.1');
  assert.equal(node('cfg_proxy_url').value,'http://proxy.example:8080');
@@ -104,12 +104,13 @@ test('save sends security and proxy settings but no local cache settings',async(
   saved=JSON.parse(options.body);
   return Promise.resolve({ok:true,json:()=>Promise.resolve({code:0})});
  });
+ api.applyConfigurationPayload({});
  node('cfg_admin_pass').value='changed';
  node('cfg_proxy_url').value='http://proxy.example:8080';
  node('cfg_anonymous_allow_ips').value='203.0.113.1';
  node('cfg_proxy_bypass').value='example.com';
  await api.saveConfiguration();
- same(saved,{admin_password:'changed',anonymous_allow_ips:['203.0.113.1'],proxy_url:'http://proxy.example:8080',proxy_bypass:['example.com']});
+ same(saved,{admin_password:'changed',anonymous_allow_ips:['203.0.113.1'],proxy_url:'http://proxy.example:8080',proxy_bypass:['example.com'],shared_stream_idle_timeout_seconds:300,workbuddy_default_max_tokens:8192,first_token_timeout_seconds:60,request_timeout:7200,concurrency_timeout:7200,qoder_queue_wait_budget_ms:0,qoder_queue_retry_interval_ms:0});
 });
 
 test('configuration page omits simulated cache section, stats and clear actions',()=>{
@@ -168,3 +169,13 @@ for (const scenario of [
   assert.deepStrictEqual(notices,[{message:'配置加载失败：'+reason,kind:'error'}]);
  });
 }
+
+
+test('performance controls preserve explicit values and reject invalid save',async()=>{
+ let calls=0; const {api,node}=loadConfig(()=>{calls++; return Promise.resolve({ok:true,json:()=>({code:0})});});
+ api.applyConfigurationPayload({workbuddy_default_max_tokens:16384,first_token_timeout_seconds:-1,qoder_queue_wait_budget_ms:3000});
+ assert.equal(node('cfg_workbuddy_default_max_tokens').value,'16384');
+ assert.equal(node('cfg_first_token_timeout_seconds').value,'-1');
+ node('cfg_workbuddy_default_max_tokens').value='0';
+ await api.saveConfiguration(); assert.equal(calls,0);
+});

@@ -122,3 +122,23 @@ func TestProxyValidationRejectsInvalidAddressesWithoutLeakingCredentials(t *test
 		testutil.MustNotContainAny(t, err.Error(), "proxy-user", "proxy-secret")
 	}
 }
+
+func TestIndependentGenerationAndQueueBudgets(t *testing.T) {
+	c := &Config{RequestTimeout: 7200, FirstTokenTimeoutSeconds: 15, WorkBuddyDefaultMaxTokens: 16384, QoderQueueWaitBudgetMs: -1}
+	ApplyHardcoded(c)
+	if c.FirstGenerationTimeout().Seconds() != 15 || c.WorkBuddyOutputBudget() != 16384 || c.QoderQueueBudget() != 0 {
+		t.Fatal("explicit settings lost")
+	}
+	c.QoderQueueWaitBudgetMs = 0
+	if c.QoderQueueBudget() != -1 {
+		t.Fatal("inheritance lost")
+	}
+	c.QoderQueueWaitBudgetMs = 3000
+	if c.QoderQueueBudget().Milliseconds() != 3000 {
+		t.Fatal("queue budget lost")
+	}
+	c.FirstTokenTimeoutSeconds = -1
+	if c.FirstGenerationTimeout() != 0 {
+		t.Fatal("cannot disable")
+	}
+}

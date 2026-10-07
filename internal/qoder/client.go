@@ -113,7 +113,7 @@ func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
 		control:        httpclient.GetSharedHTTPClient(proxyKey, authRequestTimeout, proxyFunc),
 		stream:         httpclient.GetSharedHTTPClientWithLimits(proxyKey+"|qoder-chat", 0, proxyFunc, http2, cfg),
 		requestTimeout: timeout,
-		streamIdle:     5 * time.Minute,
+		streamIdle:     cfg.SharedStreamIdleTimeout(),
 		entropy:        cryptoSource{},
 	}
 	if acc != nil {

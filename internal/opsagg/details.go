@@ -9,21 +9,29 @@ import (
 )
 
 type Counters struct {
-	DetailedRequests   int64 `json:"detailed_requests"`
-	UsageSamples       int64 `json:"usage_samples"`
-	AttemptFailures    int64 `json:"attempt_failures"`
-	AccountSwitchSum   int64 `json:"account_switch_sum"`
-	AccountSwitchCount int64 `json:"account_switch_count"`
-	ClientErrors       int64 `json:"client_errors"`
-	ServerErrors       int64 `json:"server_errors"`
-	StreamErrors       int64 `json:"stream_errors"`
-	UpstreamAuth       int64 `json:"upstream_auth"`
-	RateLimited        int64 `json:"rate_limited"`
-	Rejected           int64 `json:"rejected"`
-	QuotaExhausted     int64 `json:"quota_exhausted"`
+	OutputEvidenceSamples int64 `json:"output_evidence_samples"`
+	VisibleAnswers        int64 `json:"visible_answers"`
+	ReasoningOnly         int64 `json:"reasoning_only"`
+	OutputTruncated       int64 `json:"output_truncated"`
+	DetailedRequests      int64 `json:"detailed_requests"`
+	UsageSamples          int64 `json:"usage_samples"`
+	AttemptFailures       int64 `json:"attempt_failures"`
+	AccountSwitchSum      int64 `json:"account_switch_sum"`
+	AccountSwitchCount    int64 `json:"account_switch_count"`
+	ClientErrors          int64 `json:"client_errors"`
+	ServerErrors          int64 `json:"server_errors"`
+	StreamErrors          int64 `json:"stream_errors"`
+	UpstreamAuth          int64 `json:"upstream_auth"`
+	RateLimited           int64 `json:"rate_limited"`
+	Rejected              int64 `json:"rejected"`
+	QuotaExhausted        int64 `json:"quota_exhausted"`
 }
 
 func (c *Counters) Add(other Counters) {
+	c.OutputEvidenceSamples += other.OutputEvidenceSamples
+	c.VisibleAnswers += other.VisibleAnswers
+	c.ReasoningOnly += other.ReasoningOnly
+	c.OutputTruncated += other.OutputTruncated
 	c.DetailedRequests += other.DetailedRequests
 	c.UsageSamples += other.UsageSamples
 	c.AttemptFailures += other.AttemptFailures
@@ -38,10 +46,14 @@ func (c *Counters) Add(other Counters) {
 	c.QuotaExhausted += other.QuotaExhausted
 }
 func (c Counters) Values() map[string]int64 {
-	return map[string]int64{"detailed_requests": c.DetailedRequests, "usage_samples": c.UsageSamples, "attempt_failures": c.AttemptFailures, "account_switch_sum": c.AccountSwitchSum, "account_switch_count": c.AccountSwitchCount, "client_errors": c.ClientErrors, "server_errors": c.ServerErrors, "stream_errors": c.StreamErrors, "upstream_auth": c.UpstreamAuth, "rate_limited": c.RateLimited, "rejected": c.Rejected, "quota_exhausted": c.QuotaExhausted}
+	return map[string]int64{"output_evidence_samples": c.OutputEvidenceSamples, "visible_answers": c.VisibleAnswers, "reasoning_only": c.ReasoningOnly, "output_truncated": c.OutputTruncated, "detailed_requests": c.DetailedRequests, "usage_samples": c.UsageSamples, "attempt_failures": c.AttemptFailures, "account_switch_sum": c.AccountSwitchSum, "account_switch_count": c.AccountSwitchCount, "client_errors": c.ClientErrors, "server_errors": c.ServerErrors, "stream_errors": c.StreamErrors, "upstream_auth": c.UpstreamAuth, "rate_limited": c.RateLimited, "rejected": c.Rejected, "quota_exhausted": c.QuotaExhausted}
 }
 func countersFrom(fields map[string]string) Counters {
 	var c Counters
+	c.OutputEvidenceSamples, _ = strconv.ParseInt(fields["output_evidence_samples"], 10, 64)
+	c.VisibleAnswers, _ = strconv.ParseInt(fields["visible_answers"], 10, 64)
+	c.ReasoningOnly, _ = strconv.ParseInt(fields["reasoning_only"], 10, 64)
+	c.OutputTruncated, _ = strconv.ParseInt(fields["output_truncated"], 10, 64)
 	c.DetailedRequests, _ = strconv.ParseInt(fields["detailed_requests"], 10, 64)
 	c.UsageSamples, _ = strconv.ParseInt(fields["usage_samples"], 10, 64)
 	c.AttemptFailures, _ = strconv.ParseInt(fields["attempt_failures"], 10, 64)
@@ -112,6 +124,18 @@ func (a *Aggregator) observeDetails(ctx context.Context, pipe redis.Pipeliner, k
 		return
 	}
 	c := Counters{DetailedRequests: 1, AttemptFailures: o.AttemptFailures, AccountSwitchSum: o.AccountSwitches, AccountSwitchCount: 1}
+	if o.OutputEvidence {
+		c.OutputEvidenceSamples = 1
+	}
+	if o.OK && o.VisibleOutput {
+		c.VisibleAnswers = 1
+	}
+	if o.OK && o.ReasoningOnly {
+		c.ReasoningOnly = 1
+	}
+	if o.OutputTruncated {
+		c.OutputTruncated = 1
+	}
 	if o.UsageReported {
 		c.UsageSamples = 1
 	}

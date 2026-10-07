@@ -15,17 +15,20 @@ func (w *TracedResponseWriter) isSSE() bool {
 // Only generated text, reasoning or tool content contributes a TTFT sample.
 // Oversized events are skipped with bounded memory, without changing the stream.
 type tokenSSEDetector struct {
-	line         []byte
-	data         []byte
-	event        string
-	size         int
-	overflow     bool
-	lineNonempty bool
+	visible, reasoning, tool bool
+	finish                   string
+	line                     []byte
+	data                     []byte
+	event                    string
+	size                     int
+	overflow                 bool
+	lineNonempty             bool
 }
 
 const maxTokenEventBytes = 1 << 20
 
 func (d *tokenSSEDetector) observe(chunk []byte) bool {
+	anyGenerated := false
 	for _, b := range chunk {
 		if b != '\n' {
 			if b != '\r' {
@@ -43,10 +46,17 @@ func (d *tokenSSEDetector) observe(chunk []byte) bool {
 		line := bytes.TrimSuffix(d.line, []byte{'\r'})
 		if !d.lineNonempty {
 			generated := !d.overflow && generatedTokenEvent(d.event, d.data)
-			*d = tokenSSEDetector{}
-			if generated {
-				return true
+			if !d.overflow {
+				s := streamOutputSignals(d.event, d.data)
+				d.visible = d.visible || s.visible
+				d.reasoning = d.reasoning || s.reasoning
+				d.tool = d.tool || s.tool
+				if s.finish != "" {
+					d.finish = s.finish
+				}
 			}
+			*d = tokenSSEDetector{visible: d.visible, reasoning: d.reasoning, tool: d.tool, finish: d.finish}
+			anyGenerated = anyGenerated || generated
 			continue
 		}
 		if !d.overflow {
@@ -65,7 +75,7 @@ func (d *tokenSSEDetector) observe(chunk []byte) bool {
 		d.line = nil
 		d.lineNonempty = false
 	}
-	return false
+	return anyGenerated
 }
 
 func generatedTokenEvent(event string, data []byte) bool {

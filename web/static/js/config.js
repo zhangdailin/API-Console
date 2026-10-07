@@ -67,7 +67,9 @@ function parseAnonymousAllowIPs() {
     .filter(Boolean);
 }
 
+const PERFORMANCE_FIELDS = { shared_stream_idle_timeout_seconds: 300, workbuddy_default_max_tokens: 8192, first_token_timeout_seconds: 60, request_timeout: 7200, concurrency_timeout: 7200, qoder_queue_wait_budget_ms: 0, qoder_queue_retry_interval_ms: 0 };
 const CONFIG_TRACKED_FIELDS = [
+  ...Object.keys(PERFORMANCE_FIELDS).map(key => "cfg_" + key),
   "cfg_admin_pass",
   "cfg_anonymous_allow_ips",
   "cfg_proxy_url",
@@ -246,6 +248,7 @@ function applyConfigurationPayload(cfg) {
   if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) { throw new Error("配置接口返回格式无效"); }
   setConfigControlValue("cfg_admin_pass", cfg.admin_password || cfg.admin_pass || "");
   setConfigControlValue("cfg_anonymous_allow_ips", Array.isArray(cfg.anonymous_allow_ips) ? cfg.anonymous_allow_ips.join("\n") : "");
+  Object.entries(PERFORMANCE_FIELDS).forEach(([key, fallback]) => setConfigControlValue("cfg_" + key, cfg[key] ?? fallback));
   setConfigControlValue("cfg_proxy_url", cfg.proxy_url || "");
   setConfigControlValue("cfg_proxy_bypass", normalizeProxyBypass(cfg.proxy_bypass).join("\n"));
 }
@@ -280,6 +283,15 @@ async function saveConfiguration() {
     proxy_bypass: parseProxyBypass(proxyBypassRaw),
   };
 
+  for (const key of Object.keys(PERFORMANCE_FIELDS)) {
+    const input = document.getElementById("cfg_" + key);
+    if (!input) continue;
+    const value = Number(input.value);
+    if (input.value.trim() === "" || (key === "shared_stream_idle_timeout_seconds" && (value < 30 || value > 600)) || (value < 0 && !["first_token_timeout_seconds", "qoder_queue_wait_budget_ms"].includes(key)) || !Number.isSafeInteger(value) || value < -1 || value > (key.includes("tokens") ? 131072 : key.endsWith("_ms") ? 86400000 : 86400) || ((key === "request_timeout" || key === "concurrency_timeout" || key === "workbuddy_default_max_tokens") && value < 1)) {
+      setConfigSaveError("性能配置必须填写范围内的整数"); return;
+    }
+    data[key] = value;
+  }
   const saveBtn = document.getElementById("cfgSaveBtn");
   configSaving = true;
   if (saveBtn) {

@@ -529,6 +529,9 @@
     meter(sla, slaRate, slaRate >= 0.95 ? '' : slaRate >= 0.8 ? 'is-warn' : 'is-error');
     rowList(sla, [
       { label: '成功数', value: fmtInt(slaSuccess) },
+      { label: '输出证据样本', value: fmtInt(totals.output_evidence_samples || 0) },
+      { label: '可见答案 / 仅推理', value: fmtInt(totals.visible_answers || 0) + ' / ' + fmtInt(totals.reasoning_only || 0) },
+      { label: '输出预算截断', value: fmtInt(totals.output_truncated || 0) },
       // This row counts failed REQUESTS in the selected window, not accounts.
       // It used to read 异常数, the same word the sidebar uses for the account
       // counter, so an operator comparing the two saw 11 against 5 and could not

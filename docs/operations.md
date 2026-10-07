@@ -83,3 +83,12 @@ probe / http 基础设施不进入全部通道业务汇总。已 HTTP 200 后 SS
 Redis 桶可汇总多个写入者，但 runtime、采集健康、进程准入及告警当前状态有本地边界。每副本读到的管理页面不自动成为整个集群完整状态。
 
 验收时模拟读取失败、写丢弃、零样本与空流量，确认页面分别表达；TTFT 未知不能是 0，缺 P99 不能拿 P95 替代。真实浏览器和生产数据范围需另行验证，本次没有执行这些在线检查。
+
+
+## 输出完整性与延迟证据
+
+HTTP 成功、协议完成、可见输出与预算截断是不同口径。正常 `length` / `max_tokens` 终止保持 HTTP 成功及原结束原因，日志新增 `output_truncated`；只产生推理而没有文本或工具时标记 `reasoning_only`。运维概览提供 `output_evidence_samples`、`visible_answers`、`reasoning_only`、`output_truncated`，旧记录没有输出证据，不补造为完整答案。
+
+请求日志的 `first_token_ms` 为首生成（包括推理和工具；非流式采用正文首写的 TTFB 近似），`first_visible_token_ms` 是流式文本首字。另有 `retry_wait_ms`、`queue_wait_ms`、`upstream_attempts`、`account_switches`。普通日志也采集 `upstream_http_phase_samples` 及 `upstream_http_phases_sum` 的 DNS、TCP、TLS、取连接、响应头耗时。各阶段可能重叠，累计值不能相加当作请求总耗时；复用连接及自定义传输可能缺阶段，缺失不能解释为零。不会保存请求正文、凭据、代理地址或模型输出。
+
+这些数值测量源站内的链路。公网客户端的 DNS、TLS、CDN 等时间须另测，并按 `X-Orchids-Request-ID` 关联 Caddy 与请求日志。源站之外的额外等待不能仅凭一个样本归因模型或网关。

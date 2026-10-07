@@ -116,6 +116,6 @@ test('detail panel reads the HTTP status and first-token latency from metadata',
   });
   const text=allText(api.ids.logsDetailBody);
   assert.match(text,/HTTP 429/,'the recorded HTTP status was not shown');
-  assert.match(text,/首 Token[\s\S]*135 ms/,'the measured first-token latency was not shown');
+  assert.match(text,/首生成（含推理）[\s\S]*135 ms/,'the measured first-token latency was not shown');
   assert.match(text,/限流/);
 });

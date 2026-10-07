@@ -2,6 +2,8 @@ package handler
 
 import (
 	"bytes"
+	"io"
+	"strings"
 
 	"net/http"
 
@@ -282,24 +284,55 @@ func TestStreamHandler_CoalescesNonTextFlushes(t *testing.T) {
 	// The seed above wrote the opening frame without marking the stream started
 	// (production's writeMessageStartLocked is what sets messageStartWritten), so
 	// the first delta also emits the deferred opening frame and flushes it. The
-	// delta itself is deferred one slot into the threshold.
+	// first delta itself must also flush, without waiting for another frame.
 	writeFrame("content_block_delta", thinkingData)
-	testutil.Equal(t, rec.flushes, 2)
+	testutil.Equal(t, rec.flushes, 3)
 
 	// The remaining deferred thinking frames below the threshold add no flush.
-	for i := 0; i < sseDeferredFlushFrameThreshold-2; i++ {
+	for i := 0; i < sseDeferredFlushFrameThreshold-1; i++ {
 		writeFrame("content_block_delta", thinkingData)
 	}
-	testutil.Equal(t, rec.flushes, 2)
+	testutil.Equal(t, rec.flushes, 3)
 
 	// The frame that reaches sseDeferredFlushFrameThreshold flushes the batch.
 	writeFrame("content_block_delta", thinkingData)
-	testutil.Equal(t, rec.flushes, 3)
+	testutil.Equal(t, rec.flushes, 4)
 
 	textData, err := marshalSSEContentBlockDeltaTextBytes(0, "hi")
 	testutil.NoError(t, err, "marshal text delta: %v")
 	writeFrame("content_block_delta", textData)
-	testutil.Equal(t, rec.flushes, 4)
+	testutil.Equal(t, rec.flushes, 5)
+}
+
+func TestStreamHandler_FirstReasoningDeltaFlushesWithoutNextEvent(t *testing.T) {
+	for _, format := range []adapter.ResponseFormat{adapter.FormatAnthropic, adapter.FormatOpenAI} {
+		sh, rec := newStreamTestHandler(t, false, true, format)
+		sh.handleMessage(upstream.SSEMessage{Type: "model", Event: map[string]any{"type": "reasoning-start"}})
+		before := rec.flushes
+		sh.handleMessage(upstream.SSEMessage{Type: "model", Event: map[string]any{"type": "reasoning-delta", "delta": "first thought"}})
+		if rec.flushes <= before || !strings.Contains(rec.buf.String(), "first thought") || !sh.firstContentDeltaFlushed {
+			t.Fatalf("format %v did not flush first reasoning delta: %s", format, rec.buf.String())
+		}
+	}
+}
+
+type shortFrameWriter struct{ flushRecorder }
+
+func (w *shortFrameWriter) Write(p []byte) (int, error) { return len(p) - 1, nil }
+
+func TestStreamHandler_FrameShortWriteCancelsUpstream(t *testing.T) {
+	sh, _ := newStreamTestHandler(t, false, true, adapter.FormatAnthropic)
+	w := &shortFrameWriter{}
+	sh.w = w
+	cancelled := false
+	sh.cancelUpstream = func() { cancelled = true }
+	sh.emitSSEFrameLocked("content_block_delta", []byte(`{"delta":"hello"}`), true, false)
+	if !cancelled {
+		t.Fatal("short write did not cancel upstream")
+	}
+	if err := sh.writeStreamFrameLocked("vendor_event", []byte(`{}`)); err != io.ErrShortWrite {
+		t.Fatalf("short write = %v", err)
+	}
 }
 
 func TestStreamHandler_FinishResponse_SuppressesGenericEmptyFallbackWhenRequested(t *testing.T) {

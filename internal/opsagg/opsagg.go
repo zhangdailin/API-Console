@@ -29,17 +29,18 @@ const (
 
 // Outcome is one finished request attributed to a channel, model and account.
 type Outcome struct {
-	HTTPStatus                               int
-	Detailed, UsageReported, ProviderReached bool
-	AttemptFailures, AccountSwitches         int64
-	Channel                                  string
-	Model                                    string
-	Status                                   string
+	OutputEvidence, VisibleOutput, ReasoningOnly, OutputTruncated bool
+	HTTPStatus                                                    int
+	Detailed, UsageReported, ProviderReached                      bool
+	AttemptFailures, AccountSwitches                              int64
+	Channel                                                       string
+	Model                                                         string
+	Status                                                        string
 	// OK decides the success ratio. A retry that eventually succeeded is OK.
 	OK bool
-	// DurationMS is the whole request; FirstTokenMS is when the first byte was
-	// produced. They are kept apart so a slow prefill is distinguishable from
-	// slow generation.
+	// DurationMS is the whole request; FirstTokenMS is the first generated SSE
+	// text, reasoning or tool event (non-streaming uses body TTFB). Visible text
+	// latency is recorded separately in request journal metadata.
 	DurationMS      int64
 	FirstTokenMS    int64
 	InputTokens     int64

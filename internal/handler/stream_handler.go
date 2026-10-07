@@ -143,6 +143,12 @@ func (h *streamHandler) flushSSEWithLenLocked(event string, dataLen int, immedia
 	if h.flusher == nil {
 		return
 	}
+	// Do not wait for a batch before delivering the first reasoning or tool
+	// delta. Low-cadence streams may take seconds to produce the next frame.
+	if event == "content_block_delta" && !h.firstContentDeltaFlushed {
+		h.firstContentDeltaFlushed = true
+		immediate = true
+	}
 	if force || immediate {
 		h.deferredFlushFrames = 0
 		h.deferredFlushBytes = 0
@@ -238,16 +244,18 @@ type streamHandler struct {
 	// The position is exactly len(contentBlocks)-1 at creation, so the indices are
 	// dense and monotonic and a slice replaces the map the per-token delta paths
 	// used to hash into once per frame.
-	textBlockBuilders     []*strings.Builder
-	thinkingBlockBuilders []*strings.Builder
-	thinkingBlockSigs     []string
-	contentBlocks         []map[string]interface{}
-	pendingThinkingSig    string
-	hasTextOutput         bool
-	deferredFlushFrames   int
-	deferredFlushBytes    int
-	openAIChunkScratch    []byte
-	ssePayloadScratch     []byte
+	textBlockBuilders        []*strings.Builder
+	thinkingBlockBuilders    []*strings.Builder
+	thinkingBlockSigs        []string
+	contentBlocks            []map[string]interface{}
+	pendingThinkingSig       string
+	hasTextOutput            bool
+	deferredFlushFrames      int
+	deferredFlushBytes       int
+	firstContentDeltaFlushed bool
+	openAIChunkScratch       []byte
+	sseFrameScratch          []byte
+	ssePayloadScratch        []byte
 
 	// Tool Handling (proxy mode only)
 	pendingToolCalls    []toolCall
@@ -567,10 +575,36 @@ func (h *streamHandler) writeOpenAISSEBytes(event string, data []byte) (bool, er
 		return false, nil
 	}
 	h.openAIChunkScratch = raw[:0]
-	if err := writeOpenAIFrame(h.w, raw); err != nil {
+	if err := h.writeStreamFrameLocked("", raw); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+// One write per frame avoids repeated deadline updates and pipe rendezvous
+// when Chat is translated into Responses. The buffer belongs to this handler
+// and is reused only after Write returns; callers hold h.mu.
+func (h *streamHandler) writeStreamFrameLocked(event string, data []byte) error {
+	frame := h.sseFrameScratch[:0]
+	if event != "" {
+		if prefix := sseFramePrefix(event); prefix != nil {
+			frame = append(frame, prefix...)
+		} else {
+			frame = append(frame, sseEventPrefixBytes...)
+			frame = append(frame, event...)
+			frame = append(frame, sseDataJoinBytes...)
+		}
+	} else {
+		frame = append(frame, sseDataPrefixBytes...)
+	}
+	frame = append(frame, data...)
+	frame = append(frame, sseLineBreakBytes...)
+	h.sseFrameScratch = frame[:0]
+	n, err := h.w.Write(frame)
+	if err == nil && n != len(frame) {
+		err = io.ErrShortWrite
+	}
+	return err
 }
 
 // emitSSEFrameLocked writes one frame the caller has already serialized, in the
@@ -602,7 +636,7 @@ func (h *streamHandler) emitSSEFrameLocked(event string, data []byte, immediate,
 		}
 		return
 	}
-	if err := writeSSEFrameBytes(h.w, event, data); err != nil {
+	if err := h.writeStreamFrameLocked(event, data); err != nil {
 		h.markWriteErrorLocked(event, err)
 		return
 	}
@@ -992,6 +1026,7 @@ func (h *streamHandler) resetRoundState() {
 	h.hasTextOutput = false
 	h.deferredFlushFrames = 0
 	h.deferredFlushBytes = 0
+	h.firstContentDeltaFlushed = false
 }
 
 // sanitizeToolInput normalizes upstream tool input for Claude Code compatibility.

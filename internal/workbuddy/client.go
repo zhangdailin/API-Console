@@ -79,12 +79,13 @@ const (
 
 // Client is one WorkBuddy account's upstream client.
 type Client struct {
-	httpClient     *http.Client
-	baseURL        string
-	requestTimeout time.Duration
-	streamIdle     time.Duration
-	account        *store.Account
-	accountStore   AccountUpdater
+	httpClient       *http.Client
+	baseURL          string
+	requestTimeout   time.Duration
+	streamIdle       time.Duration
+	defaultMaxTokens int
+	account          *store.Account
+	accountStore     AccountUpdater
 
 	creds   Credentials
 	updater *tokenUpdater
@@ -119,12 +120,13 @@ func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
 		accountSnapshot = &copied
 	}
 	return &Client{
-		httpClient:     httpclient.GetSharedHTTPClientWithLimits(proxyKey+"|workbuddy-chat", timeout, proxyFunc, cfg != nil && cfg.WorkBuddyHTTP2Enabled, cfg),
-		baseURL:        baseURL,
-		requestTimeout: timeout,
-		streamIdle:     streamIdle,
-		account:        accountSnapshot,
-		creds:          ResolveCredentials(acc),
+		httpClient:       httpclient.GetSharedHTTPClientWithLimits(proxyKey+"|workbuddy-chat", timeout, proxyFunc, cfg != nil && cfg.WorkBuddyHTTP2Enabled, cfg),
+		baseURL:          baseURL,
+		requestTimeout:   timeout,
+		streamIdle:       cfg.SharedStreamIdleTimeout(),
+		defaultMaxTokens: cfg.WorkBuddyOutputBudget(),
+		account:          accountSnapshot,
+		creds:            ResolveCredentials(acc),
 	}
 }
 
@@ -208,9 +210,16 @@ func (c *Client) runChat(ctx context.Context, req upstream.UpstreamRequest, time
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
 		return apiErrorWithRetry(resp.StatusCode, raw, parseRetryAfter(resp.Header.Get("Retry-After")))
 	}
-	resp.Body = monitorStreamIdle(resp.Body, c.streamIdle, cancel)
-
-	result, err := consumeStream(resp.Body, onMessage)
+	monitored, progress := httpclient.MonitorProgressIdle(resp.Body, c.streamIdle, cancel, "workbuddy")
+	resp.Body = monitored
+	result, err := consumeStream(resp.Body, func(msg upstream.SSEMessage) {
+		if msg.Type == "model.text-delta" || msg.Type == "model.reasoning-delta" || msg.Type == "model.tool-call" {
+			progress()
+		}
+		if onMessage != nil {
+			onMessage(msg)
+		}
+	})
 	if err != nil {
 		if typed, ok := err.(*APIError); ok && typed.RetryDelay == 0 {
 			typed.RetryDelay = parseRetryAfter(resp.Header.Get("Retry-After"))
@@ -272,7 +281,11 @@ func (c *Client) buildBody(req upstream.UpstreamRequest) ([]byte, error) {
 	if req.MaxTokens != nil {
 		body["max_tokens"] = *req.MaxTokens
 	} else {
-		body["max_tokens"] = 8192
+		budget := c.defaultMaxTokens
+		if budget <= 0 {
+			budget = 8192
+		}
+		body["max_tokens"] = budget
 	}
 	if req.Temperature != nil {
 		body["temperature"] = *req.Temperature

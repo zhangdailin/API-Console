@@ -828,7 +828,12 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 			TraceID:           middleware.GetTraceID(r.Context()),
 			ChatSessionID:     chatSessionID,
 		}
-		primaryHandler := sh.handleMessage
+		primaryHandler := func(msg upstream.SSEMessage) {
+			if msg.Type == "model.text-delta" || msg.Type == "model.reasoning-delta" || msg.Type == "model.tool-call" {
+				util.MarkGenerationProgress(r.Context())
+			}
+			sh.handleMessage(msg)
+		}
 		var attempt int
 		for {
 			if returned, _ := sh.terminalState(); returned {
@@ -885,6 +890,14 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 				}
 				slog.Warn("Ignoring upstream error after terminal response", "trace_id", traceID, "attempt", upstreamReq.Attempt, "error", err)
 				break
+			}
+			if r.Context().Err() != nil {
+				category := "client"
+				if context.Cause(r.Context()) == context.DeadlineExceeded {
+					category = "timeout"
+				}
+				sh.reportRequestFailure("Request deadline or cancellation", category, apperrors.PublicMessage("context deadline exceeded"), 0)
+				return
 			}
 			errStr := err.Error()
 			errClass := apperrors.ClassifyUpstreamError(errStr)
@@ -1088,13 +1101,20 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 				budgetMs = cfg.SharedRefusalWaitBudgetMs
 			}
 			waitBudget := SharedRefusalWaitBudget(budgetMs)
+			queueDisabled := false
+			if targetChannel == "qoder" && errClass.Category == "upstream_queue" && cfg != nil {
+				if specific := cfg.QoderQueueBudget(); specific >= 0 {
+					waitBudget = specific
+					queueDisabled = specific == 0
+				}
+			}
 			// A shared refusal is a gate on the upstream's side, not this account's
 			// throttle, so the wait is spent on the same account and can repeat.
 			// Bound the total by the shortest deadline in front of this process,
 			// which is the edge proxy's origin timeout, not the caller's patience:
 			// answering past the edge's limit does not give the caller the work,
 			// it gives it a 520 from the edge.
-			if sharedRefusal && sharedRefusalWait > 0 && !sharedRefusalWaitAllowedWithin(sharedRefusalWaited, sharedRefusalWait, waitBudget) {
+			if sharedRefusal && (queueDisabled || (sharedRefusalWait > 0 && !sharedRefusalWaitAllowedWithin(sharedRefusalWaited, sharedRefusalWait, waitBudget))) {
 				slog.Warn("Shared upstream refusal exceeded the wait budget; answering now",
 					"trace_id", traceID,
 					"waited", sharedRefusalWaited,
@@ -1125,9 +1145,10 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 			if retryDelayForAttempt > 0 {
 				waitCompleted = util.SleepWithContext(r.Context(), retryDelayForAttempt)
 				debug.RecordWait(r.Context(), errClass.Category, retryDelayForAttempt, time.Since(waitStarted), !waitCompleted)
+				middleware.RecordRetryWait(r.Context(), errClass.Category, time.Since(waitStarted))
 			}
 			if !waitCompleted {
-				sh.finishResponse("end_turn")
+				sh.reportRequestFailure("Request canceled during retry wait", "timeout", apperrors.PublicMessage("context deadline exceeded"), 0)
 				return
 			}
 			if sharedRefusal {
@@ -1245,8 +1266,25 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 			usageSource = audit.UsageSourceUpstream
 		}
 		metadata := map[string]interface{}{
-			"stream": isStream,
+			"stream":               isStream,
+			"finish_reason":        sh.finalStopReason,
+			"requested_max_tokens": req.outputTokenLimit(),
 		}
+		visibleOutput, reasoningOutput, toolOutput := false, false, false
+		for _, block := range sh.contentBlocks {
+			switch block["type"] {
+			case "text":
+				text, _ := block["text"].(string)
+				visibleOutput = visibleOutput || text != ""
+			case "thinking":
+				text, _ := block["thinking"].(string)
+				reasoningOutput = reasoningOutput || text != ""
+			case "tool_use":
+				toolOutput = true
+			}
+		}
+		metadata["visible_output"] = visibleOutput
+		metadata["reasoning_only"] = reasoningOutput && !visibleOutput && !toolOutput
 		for key, value := range sh.usageMetadata {
 			metadata[key] = value
 		}

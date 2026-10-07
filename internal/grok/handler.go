@@ -156,7 +156,7 @@ func (h *Handler) auditChatOutcome(ctx context.Context, acc *store.Account, req 
 	usage := result.Usage
 	prompt, _ := usage["prompt_tokens_details"].(map[string]interface{})
 	completion, _ := usage["completion_tokens_details"].(map[string]interface{})
-	metadata := map[string]interface{}{"finish_reason": result.Finish}
+	metadata := map[string]interface{}{"finish_reason": result.Finish, "visible_output": result.SawText}
 	addReasoningDiagnostics(ctx, metadata)
 	duration := int64(0)
 	if !req.StartedAt.IsZero() {

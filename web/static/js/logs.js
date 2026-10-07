@@ -566,7 +566,20 @@
     // Same metadata contract as http_status above: the measured first-token latency
     // lives in metadata, so the row has to look there or the figure is never shown.
     const firstTokenMS = event.first_token_ms || meta.first_token_ms;
-    if (firstTokenMS) usageFacts.push(fact('首 Token', firstTokenMS + ' ms'));
+    if (firstTokenMS != null) usageFacts.push(fact(meta.first_token_kind === 'body_ttfb' ? '非流式 TTFB' : '首生成（含推理）', firstTokenMS + ' ms'));
+    if (meta.first_visible_token_ms != null) usageFacts.push(fact('首字', meta.first_visible_token_ms + ' ms'));
+    if (meta.finish_reason) usageFacts.push(fact('结束原因', meta.finish_reason));
+    if (meta.output_truncated) usageFacts.push(fact('输出预算', '耗尽 / 输出截断'));
+    if (meta.reasoning_only) usageFacts.push(fact('可见答案', '仅推理输出'));
+    if (meta.retry_wait_ms != null) usageFacts.push(fact('重试等待', meta.retry_wait_ms + ' ms'));
+    if (meta.queue_wait_ms != null) usageFacts.push(fact('上游排队等待', meta.queue_wait_ms + ' ms'));
+    if (meta.upstream_attempts != null) usageFacts.push(fact('上游尝试', String(meta.upstream_attempts)));
+    if (meta.upstream_http_phase_samples > 0) {
+      const labels = { dns_ms: '上游 DNS', tcp_ms: '上游 TCP', tls_ms: '上游 TLS', connection_wait_ms: '上游取连接', response_headers_ms: '上游响应头' };
+      Object.entries(labels).forEach(([key,label]) => {
+        if (meta.upstream_http_phases_sum?.[key] != null) usageFacts.push(fact(label + '（尝试累计）', meta.upstream_http_phases_sum[key] + ' ms'));
+      });
+    }
     const reportedTokens = (event.input_tokens || 0) + (event.output_tokens || 0);
     if (reportedTokens > 0) {
       usageFacts.push(fact('Token', (event.input_tokens || 0) + ' in / ' + (event.output_tokens || 0) + ' out'));
@@ -657,9 +670,6 @@
       if (indexMeta.truncated) parts.push('已截断');
       if (indexMeta.retention) parts.push('保留 ' + indexMeta.retention);
       container.appendChild(note(parts.join(' · ')));
-    container.appendChild(note('统一链路：入口请求 → 上游调用与响应 → 客户端响应 → 请求结果。协议转换和渠道专属诊断作为补充记录；旧记录可能缺少阶段。'));
-    const download = (name, text) => { const url = URL.createObjectURL(new Blob([text], {type:'text/plain;charset=utf-8'})); const a = document.createElement('a'); a.href=url; a.download=name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); };
-    const save = make('button', '', '下载完整诊断'); save.type='button'; save.addEventListener('click', () => download('diagnostics-'+(entry.request_id || 'request')+'.json', JSON.stringify(entry,null,2))); container.appendChild(save);
     }
 
     if (!requestID) {
@@ -668,6 +678,11 @@
       return;
     }
 
+    diagnosticDownloadButton(container, '下载完整诊断', async () => {
+      const payload = await readDiagnostics(requestID);
+      if (!payload.available) throw new Error(payload.note || '没有该请求的诊断记录。');
+      downloadDiagnosticText('diagnostics-' + requestID + '.json', JSON.stringify(payload.entry, null, 2), 'application/json;charset=utf-8');
+    });
     const body = make('div', 'logs-diagnostic-body');
     const button = make('button', 'btn', '展开诊断内容');
     button.type = 'button';
@@ -677,6 +692,56 @@
     panel.appendChild(container);
   }
 
+  async function readDiagnostics(requestID) {
+    const payload = await ConsoleAPI.json('/api/journal/diagnostics?request_id=' + encodeURIComponent(requestID), {
+      credentials: 'same-origin',
+    });
+    if (!payload || typeof payload.available !== 'boolean' || (payload.available && (!payload.entry || typeof payload.entry !== 'object' || Array.isArray(payload.entry)))) {
+      throw new Error('诊断接口返回格式无效');
+    }
+    return payload;
+  }
+
+  function downloadDiagnosticText(name, content, type = 'text/plain;charset=utf-8') {
+    const url = URL.createObjectURL(new Blob([content], { type }));
+    const link = make('a');
+    link.href = url;
+    link.download = name.replace(/[\\/:*?"<>|\x00-\x1f]/g, '_');
+    link.hidden = true;
+    try {
+      document.body.appendChild(link);
+      link.click();
+    } finally {
+      link.remove();
+      // Keep the URL alive while the browser starts consuming the download.
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    }
+  }
+
+  function diagnosticDownloadButton(container, label, download) {
+    const button = make('button', 'btn', label);
+    button.type = 'button';
+    const errorNote = note('');
+    errorNote.hidden = true;
+    button.addEventListener('click', async () => {
+      if (button.disabled) return;
+      button.disabled = true;
+      button.textContent = '正在准备下载…';
+      errorNote.hidden = true;
+      errorNote.textContent = '';
+      try { await download(); }
+      catch (error) {
+        errorNote.textContent = '下载诊断失败：' + (error.message || error);
+        errorNote.hidden = false;
+      } finally {
+        button.disabled = false;
+        button.textContent = label;
+      }
+    });
+    container.appendChild(button);
+    container.appendChild(errorNote);
+  }
+
   async function loadDiagnostics(requestID, body, button) {
     if (button) {
       button.disabled = true;
@@ -684,11 +749,7 @@
     }
     body.replaceChildren();
     try {
-      const response = await ConsoleAPI.request('/api/journal/diagnostics?request_id=' + encodeURIComponent(requestID), {
-        credentials: 'same-origin',
-      });
-      if (!response.ok) throw new Error('HTTP ' + response.status);
-      const payload = await response.json();
+      const payload = await readDiagnostics(requestID);
       if (!payload.available) body.appendChild(note(payload.note || '没有该请求的诊断记录。'));
       else renderBundle(body, payload.entry || {}, payload.retention || '');
     } catch (error) { body.appendChild(note('读取诊断日志失败：' + (error.message || error))); }
@@ -703,8 +764,7 @@
     if (entry.truncated) parts.push('已截断');
     container.appendChild(note(parts.join(' · ')));
     container.appendChild(note('统一链路：入口请求 → 上游调用与响应 → 客户端响应 → 请求结果。协议转换和渠道专属诊断作为补充记录；旧记录可能缺少阶段。'));
-    const download = (name, text) => { const url = URL.createObjectURL(new Blob([text], {type:'text/plain;charset=utf-8'})); const a = document.createElement('a'); a.href=url; a.download=name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); };
-    const save = make('button', '', '下载完整诊断'); save.type='button'; save.addEventListener('click', () => download('diagnostics-'+(entry.request_id || 'request')+'.json', JSON.stringify(entry,null,2))); container.appendChild(save);
+    diagnosticDownloadButton(container, '下载完整诊断', () => downloadDiagnosticText('diagnostics-' + (entry.request_id || 'request') + '.json', JSON.stringify(entry, null, 2), 'application/json;charset=utf-8'));
 
     if (entry.note) container.appendChild(note(entry.note));
     if (sections.length === 0) {
@@ -753,7 +813,7 @@
       const pre = make('pre', '', details.open ? (section.payload || '（空）') : '');
       details.appendChild(pre);
       details.addEventListener('toggle', () => { if (details.open && !pre.textContent) pre.textContent=section.payload || '（空）'; });
-      const saveSection = make('button', '', '下载本段完整内容'); saveSection.type='button'; saveSection.addEventListener('click', () => download(section.name || 'diagnostic.txt', section.payload || '')); details.appendChild(saveSection);
+      diagnosticDownloadButton(details, '下载本段完整内容', () => downloadDiagnosticText(section.name || 'diagnostic.txt', section.payload || ''));
       container.appendChild(details);
     });
   }

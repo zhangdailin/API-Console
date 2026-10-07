@@ -17,6 +17,7 @@ import (
 	"orchids-api/internal/debug"
 	"orchids-api/internal/logutil"
 	"orchids-api/internal/opsagg"
+	"orchids-api/internal/util"
 )
 
 // TraceIDHeader is the name of the HTTP header carrying the request trace ID.
@@ -103,6 +104,7 @@ type TracedResponseWriter struct {
 	// contentWriteAt ignores SSE control events, empty deltas and keepalives.
 	// Non-streaming responses use the first body write as a TTFB approximation.
 	contentWriteAt time.Time
+	visibleWriteAt time.Time
 	startedAt      time.Time
 	tokenDetector  tokenSSEDetector
 	// streamFailed records that the handler already committed a 2xx status and
@@ -186,14 +188,17 @@ func (w *TracedResponseWriter) Write(b []byte) (int, error) {
 		w.firstWriteAt = now
 	}
 	n, err := w.ResponseWriter.Write(b)
-	if w.contentWriteAt.IsZero() && n > 0 {
+	if n > 0 {
 		payload := false
 		if w.isSSE() {
 			payload = w.tokenDetector.observe(b[:n])
+			if w.visibleWriteAt.IsZero() && w.tokenDetector.visible {
+				w.visibleWriteAt = now
+			}
 		} else {
 			payload = isPayloadWrite(b[:n])
 		}
-		if payload {
+		if payload && w.contentWriteAt.IsZero() {
 			w.contentWriteAt = now
 		}
 	}
@@ -238,7 +243,20 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 		// The handler will publish the model it resolved; the hint must exist
 		// before the handler runs because the request context is already cloned.
 		requestCtx, readModel := RequestModelHint(r.Context())
-		r = r.WithContext(context.WithValue(requestCtx, requestObservationKey{}, &requestObservation{}))
+		box := &requestObservation{}
+		requestCtx = context.WithValue(requestCtx, requestObservationKey{}, box)
+		requestCtx = util.WithHTTPPhaseObserver(requestCtx, func(phases map[string]int64) {
+			box.mu.Lock()
+			defer box.mu.Unlock()
+			if box.httpPhases == nil {
+				box.httpPhases = map[string]int64{}
+			}
+			box.httpPhaseSamples++
+			for k, v := range phases {
+				box.httpPhases[k] += v
+			}
+		})
+		r = r.WithContext(requestCtx)
 
 		logutil.DebugIf(logutil.VerboseDiagnosticsEnabled(), "Request started",
 			"trace_id", traceID,
@@ -347,7 +365,7 @@ func recordRequestOutcome(r *http.Request, wrapped *TracedResponseWriter, durati
 		firstWrite = wrapped.FirstWriteAt()
 	}
 	firstTokenMS := int64(0)
-	if !firstWrite.IsZero() {
+	if !firstWrite.IsZero() && (wrapped.isSSE() || wrapped.StatusCode < 400) {
 		firstTokenMS = firstWrite.Sub(wrapped.startedAt).Milliseconds()
 		if firstTokenMS < 0 {
 			firstTokenMS = 0
@@ -361,8 +379,22 @@ func recordRequestOutcome(r *http.Request, wrapped *TracedResponseWriter, durati
 	}
 	if detailedOutcomeRecorder != nil {
 		outcome := opsagg.Outcome{Channel: inferenceRequestChannel(r), Model: model, Status: statusClass, HTTPStatus: wrapped.StatusCode, OK: statusClass == "2xx", DurationMS: durationMS, FirstTokenMS: firstTokenMS, At: time.Now(), Detailed: true}
+		if wrapped.isSSE() {
+			outcome.OutputEvidence = true
+			outcome.VisibleOutput = wrapped.tokenDetector.visible
+			outcome.ReasoningOnly = wrapped.tokenDetector.reasoning && !wrapped.tokenDetector.visible && !wrapped.tokenDetector.tool
+			outcome.OutputTruncated = isTokenTruncation(wrapped.tokenDetector.finish)
+		}
 		if box, ok := r.Context().Value(requestObservationKey{}).(*requestObservation); ok {
 			box.mu.Lock()
+			if !wrapped.isSSE() && box.finalEvent != nil {
+				meta := box.finalEvent.Metadata
+				outcome.VisibleOutput, outcome.OutputEvidence = meta["visible_output"].(bool)
+				outcome.ReasoningOnly, _ = meta["reasoning_only"].(bool)
+				if reason, ok := meta["finish_reason"].(string); ok {
+					outcome.OutputTruncated = isTokenTruncation(reason)
+				}
+			}
 			outcome.InputTokens = box.input
 			outcome.CachedTokens = box.cached
 			outcome.OutputTokens = box.output

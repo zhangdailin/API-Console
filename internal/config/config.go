@@ -57,7 +57,8 @@ type Config struct {
 	// ── WorkBuddy international backend (www.workbuddy.ai) ──
 	// Overridable for self-hosted regional deployments and for tests that need a
 	// stubbed upstream. Empty means the production international host.
-	WorkBuddyBaseURL string `json:"workbuddy_base_url,omitempty"`
+	WorkBuddyDefaultMaxTokens int    `json:"workbuddy_default_max_tokens,omitempty"`
+	WorkBuddyBaseURL          string `json:"workbuddy_base_url,omitempty"`
 
 	// ── Qoder (qoder.com CLI device authorization) ──
 	// The Qoder CLI talks to three hosts. They are configurable so a deployment
@@ -153,7 +154,10 @@ type Config struct {
 	SharedRefusalWaitBudgetMs int `json:"shared_refusal_wait_budget_ms,omitempty"`
 	// QoderQueueRetryIntervalMs overrides the queue retry interval. Zero keeps
 	// the upstream hint; a positive value schedules retries at this interval.
-	QoderQueueRetryIntervalMs int `json:"qoder_queue_retry_interval_ms,omitempty"`
+	SharedStreamIdleTimeoutSeconds int `json:"shared_stream_idle_timeout_seconds,omitempty"`
+	FirstTokenTimeoutSeconds       int `json:"first_token_timeout_seconds,omitempty"`
+	QoderQueueWaitBudgetMs         int `json:"qoder_queue_wait_budget_ms,omitempty"`
+	QoderQueueRetryIntervalMs      int `json:"qoder_queue_retry_interval_ms,omitempty"`
 	// Quality-hold policy. The gateway withholds a degraded reasoning turn
 	// instead of streaming it, then retries it on another account. Holding is on
 	// by default and fails open once the retry budget is spent.
@@ -320,6 +324,14 @@ func ApplyHardcoded(cfg *Config) {
 	vTrue := true
 	cfg.Stream = &vTrue
 	cfg.MaxRetries = boundedDefault(cfg.MaxRetries, 3, 20)
+	cfg.WorkBuddyDefaultMaxTokens = cfg.WorkBuddyOutputBudget()
+	if cfg.FirstTokenTimeoutSeconds < 0 {
+		cfg.FirstTokenTimeoutSeconds = -1
+	} else {
+		cfg.FirstTokenTimeoutSeconds = boundedDefault(cfg.FirstTokenTimeoutSeconds, 60, 86400)
+	}
+	cfg.QoderQueueWaitBudgetMs = max(-1, min(cfg.QoderQueueWaitBudgetMs, 86400000))
+	cfg.SharedStreamIdleTimeoutSeconds = max(30, boundedDefault(cfg.SharedStreamIdleTimeoutSeconds, 300, 600))
 	cfg.RetryDelay = boundedDefault(cfg.RetryDelay, 1000, 60000)
 	// The shared-refusal wait budget is a ceiling, not a minimum: zero asks for
 	// the built-in 90s, and an operator may raise it up to a day. It is not
