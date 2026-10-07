@@ -104,10 +104,24 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+      # Generate an explicit body so publishing the same tag replaces the notes
+      # rather than appending another generated changelog to an existing release.
+      - name: Generate release notes
+        if: startsWith(github.ref, 'refs/tags/') && inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="$RELEASE_TAG" -f target_commitish="$GITHUB_SHA" \
+            --jq '.body' > "$RUNNER_TEMP/release-notes.md"
+
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/') && inputs.dry_run != true
         uses: softprops/action-gh-release@v3
         with:
           files: dist/*
-          generate_release_notes: true
+          body_path: ${{ runner.temp }}/release-notes.md
+          generate_release_notes: false
+          append_body: false
           prerelease: ${{ contains(steps.meta.outputs.version, '-') }}
