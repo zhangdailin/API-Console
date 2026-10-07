@@ -37,7 +37,45 @@ chmod +x orchids-server-linux-amd64
 ./orchids-server-linux-amd64 --version
 ```
 
-校验目标架构、版本、commit 与下载摘要。不要用本地打包名称或网页最新版本替代运行进程身份。当前没有把源码 Dockerfile / Compose 作为通用应用发行方式；README 的 Docker 命令只是启动 Redis。
+校验目标架构、版本、commit 与下载摘要。不要用本地打包名称或网页最新版本替代运行进程身份。
+
+### Docker 镜像
+
+`.github/workflows/docker.yml` 构建 Linux amd64 镜像，检查容器版本、Redis 连接下的启动、健康接口、登录页和凭据密钥文件创建，再将同一个镜像发布至 `ghcr.io/zhangdailin/api-console`。PR 只构建检查，不登录或推送 GHCR；手动运行也会构建并发布。
+
+| 触发 | 镜像标签 |
+|---|---|
+| push main | `main`、`sha-<12位提交号>` |
+| push v1.2.3 等正式标签 | `v1.2.3`、`latest`、`sha-<12位提交号>` |
+| push v1.2.3-rc.1 等预发布标签 | 原始版本标签、`sha-<12位提交号>`，不更新 `latest` |
+| 手动运行 | 提交标签；选择 main 或版本标签时还生成对应标签 |
+
+发布使用自动提供的 `GITHUB_TOKEN` 和 `packages: write`，不需要额外配置 Docker Hub 密钥。已有 GHCR 包需允许此仓库的 Actions 写入；匿名拉取需在包设置中启用 Public。工作流中的容器检查不替代原有 Go / Web 测试工作流，也不证明真实上游生成可用。
+
+首次发布后可拉取 `main`；`latest` 要等正式版本标签构建成功才存在。生产部署建议记录镜像 digest 并固定它：
+
+```bash
+docker pull ghcr.io/zhangdailin/api-console:main
+docker run --rm ghcr.io/zhangdailin/api-console:main --version
+```
+
+以下为 Linux Docker 示例。先复制 `config.example.json` 为 `config.json`，把 `redis_addr` 改为 `api-console-redis:6379`，设置强 `admin_pass`，保持 `credential_encryption_key_file` 为 `data/credential.key`。配置文件需让容器 UID 10001 可读，例如将文件属主设为 10001 并使用 0600 权限。
+
+```bash
+docker network create api-console
+docker run -d --name api-console-redis --network api-console \
+  --restart unless-stopped -v api-console-redis:/data \
+  redis:7-alpine redis-server --appendonly yes
+docker run -d --name api-console --network api-console \
+  --restart unless-stopped -p 127.0.0.1:3002:3002 \
+  -v "$PWD/config.json:/app/config.json:ro" \
+  -v api-console-data:/app/data \
+  ghcr.io/zhangdailin/api-console:main
+```
+
+镜像以非 root 用户运行，网页已嵌入二进制；配置不打包进镜像。`api-console-data` 保存凭据主密钥，必须与 Redis 一起备份和保留。使用已有 Redis 时填写容器可达地址，容器内 `127.0.0.1` 不指向宿主机。替换为宿主目录挂载时，确保数据目录可由 UID/GID 10001 写入。
+
+本地构建使用 `docker build -t api-console:local .`；更新 Go 版本时同步 Dockerfile 的默认 `GO_VERSION`，CI 自动从 go.mod 读取。容器升级通过拉取目标镜像后重建容器完成，保留上述配置和数据卷；不使用面板中的 systemd 在线二进制替换功能。
 
 ## 4. 常驻服务与反向代理
 

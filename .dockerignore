@@ -1,0 +1,16 @@
+# Only build inputs enter the context; local configuration and credentials stay out.
+**
+!go.mod
+!go.sum
+!cmd/
+!cmd/**
+!internal/
+!internal/**
+!web/
+!web/**
+**/.*/
+**/data/
+**/*.key
+**/*.log
+**/node_modules/
+**/testdata/
