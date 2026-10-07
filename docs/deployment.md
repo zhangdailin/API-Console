@@ -48,7 +48,9 @@ chmod +x orchids-server-linux-amd64
 | push main | `main`、`sha-<12位提交号>` |
 | push v1.2.3 等正式标签 | `v1.2.3`、`latest`、`sha-<12位提交号>` |
 | push v1.2.3-rc.1 等预发布标签 | 原始版本标签、`sha-<12位提交号>`，不更新 `latest` |
-| 手动运行 | 提交标签；选择 main 或版本标签时还生成对应标签 |
+| 手动运行 | 提交标签；源码 ref 为 main 或版本标签时还生成对应标签 |
+
+手动运行可填写 `build_ref` 指定源码分支、版本标签或提交；留空使用所选工作流 ref。已有版本需要用新版工作流重新构建时，选择 main 的工作流并把 `build_ref` 填为该版本标签，镜像仍记录标签对应的源码提交。
 
 发布使用自动提供的 `GITHUB_TOKEN` 和 `packages: write`，不需要额外配置 Docker Hub 密钥。已有 GHCR 包需允许此仓库的 Actions 写入；匿名拉取需在包设置中启用 Public。工作流中的容器检查不替代原有 Go / Web 测试工作流，也不证明真实上游生成可用。
 

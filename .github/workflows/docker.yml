@@ -7,6 +7,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      build_ref:
+        description: 'Source branch, tag, or commit to build (empty uses the selected workflow ref)'
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -26,23 +31,27 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.build_ref || github.ref }}
 
       - name: Resolve build metadata
         id: meta
         shell: bash
+        env:
+          SOURCE_REF: ${{ inputs.build_ref || github.ref }}
         run: |
           commit="$(git rev-parse HEAD)"
           version="sha-${commit:0:12}"
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
           tags=("$image:$version")
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            version="$GITHUB_REF_NAME"
+          if [[ "$SOURCE_REF" == refs/tags/* || "$SOURCE_REF" == v* ]]; then
+            version="${SOURCE_REF#refs/tags/}"
             [[ "$version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]] || { echo 'Invalid version tag'; exit 1; }
             tags+=("$image:$version")
             if [[ "$version" != *-* ]]; then
               tags+=("$image:latest")
             fi
-          elif [[ "$GITHUB_REF" == refs/heads/main ]]; then
+          elif [[ "$SOURCE_REF" == refs/heads/main || "$SOURCE_REF" == main ]]; then
             tags+=("$image:main")
           fi
           {
@@ -109,7 +118,8 @@ jobs:
             -v "$RUNNER_TEMP/docker-config.json:/app/config.json:ro" \
             -v api-console-ci-data:/app/data api-console:verify
           curl --fail --silent --show-error --retry 20 --retry-connrefused \
-            --retry-delay 1 --max-time 5 http://127.0.0.1:3002/health > "$RUNNER_TEMP/health.json"
+            --retry-all-errors --retry-delay 1 --max-time 5 \
+            http://127.0.0.1:3002/health > "$RUNNER_TEMP/health.json"
           python3 - <<'PY'
           import json, os
           from pathlib import Path
