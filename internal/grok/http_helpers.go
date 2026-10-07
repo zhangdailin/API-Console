@@ -103,16 +103,6 @@ func writeGrokUpstreamError(w http.ResponseWriter, err error) {
 	writeGrokErrorCode(w, status, category, apperrors.PublicMessage(text))
 }
 
-// upstreamStatusMarker is the stamp this codebase puts on an error that really
-// came from an upstream HTTP response (see grokUpstreamError.Error).
-//
-// Matching the whole marker rather than a bare "status=" is what keeps a local
-// error out of the upstream branch. An error that merely mentions a status —
-// "job status=404 not found in store", "account status=402 parked" — is a local
-// condition, and classifying it as upstream both answers 4xx as 5xx and replaces
-// the operator's message with a generic sentence.
-const upstreamStatusMarker = "upstream status="
-
 // isUpstreamFailure reports whether err came from an attempt against an upstream
 // service. Only those may carry upstream detail, so only those are sanitized;
 // everything else is a local error that can be returned as-is.
@@ -121,15 +111,9 @@ func isUpstreamFailure(err error) bool {
 		return false
 	}
 	var typed *grokUpstreamError
-	if errors.As(err, &typed) || strings.Contains(strings.ToLower(err.Error()), upstreamStatusMarker) && parseUpstreamStatus(err) > 0 {
-		return true
-	}
-	// Both transports in this channel render the same failure: the CLI/Build
-	// client prefixes "grok cli upstream status=…", the chat relay "grok upstream
-	// status=…". A bare "status=" without either prefix is a local condition and
-	// must stay local.
-	if text := strings.ToLower(err.Error()); parseUpstreamStatus(err) > 0 &&
-		(strings.HasPrefix(strings.TrimSpace(text), "grok cli upstream") || strings.HasPrefix(strings.TrimSpace(text), "grok upstream")) {
+	var synthetic *syntheticCooldownError
+	var oauth *cliOAuthError
+	if errors.As(err, &typed) || errors.As(err, &synthetic) || errors.As(err, &oauth) {
 		return true
 	}
 	var urlErr *url.Error

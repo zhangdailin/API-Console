@@ -38,67 +38,49 @@ func TestParseModelListReadsTheObservedGroupShape(t *testing.T) {
 	testutil.False(t, !ultimate.IsReasoning, "is_reasoning was dropped")
 }
 
-// TestParseModelListAcceptsTheOtherNestings proves the parser is not pinned to
-// one envelope: a bare array, a `data` wrapper, an encoded string payload and an
-// unlisted group all still yield the catalog.
-func TestParseModelListAcceptsTheOtherNestings(t *testing.T) {
+func TestParseModelListAcceptsObservedEncoding(t *testing.T) {
 	t.Parallel()
-
-	row := `{"key":"qmodel_latest","display_name":"Qwen3.7-Max","max_input_tokens":1000000}`
-	cases := map[string]string{
-		"bare array":     `[` + row + `]`,
-		"data wrapper":   `{"code":0,"data":{"models":[` + row + `]}}`,
-		"models field":   `{"models":[` + row + `]}`,
-		"unlisted group": `{"llm":[` + row + `]}`,
-	}
-	for name, payload := range cases {
-		catalog, err := parseModelList([]byte(payload))
-		testutil.Falsef(t, err != nil, "%s: parseModelList() error = %v", name, err)
-		_, err = catalog.Resolve("Qwen3.7-Max")
-		testutil.CheckNoError(t, err)
-	}
-
-	// Encode=1 nests the payload as a JSON string, so the inner document has to
-	// be escaped on the wire. Building it with the encoder is the only way to
-	// produce a valid fixture for that.
-	inner, err := json.Marshal(map[string]string{"chat": `[` + row + `]`})
-	testutil.NoError(t, err, "marshal inner payload: %v")
-	_, err = parseModelList(inner)
-	testutil.CheckNoError(t, err)
-	encoded, err := json.Marshal(map[string]json.RawMessage{"code": json.RawMessage(`0`), "data": inner})
-	testutil.NoError(t, err, "marshal encoded envelope: %v")
-	catalog, err := parseModelList(encoded)
-	testutil.NoError(t, err, "encoded data: parseModelList() error = %v")
-	_, err = catalog.Resolve("Qwen3.7-Max")
-	testutil.CheckNoError(t, err)
-}
-
-// TestParseModelListRejectsAResponseWithoutRows proves an unrelated payload is
-// not mistaken for a catalog.
-func TestParseModelListRejectsAResponseWithoutRows(t *testing.T) {
-	t.Parallel()
-
-	for _, payload := range map[string]string{
-		"failure envelope": `{"success":false,"msgCode":400,"message":"Request method 'POST' not supported"}`,
-		"unkeyed rows":     `{"chat":[{"display_name":"Qwen3.7-Max"}]}`,
-		"empty":            ``,
-		"scalar":           `42`,
+	encodedGroup, err := json.Marshal(map[string]string{"chat": `[{"key":"qmodel_latest","display_name":"Qwen3.7-Max"}]`})
+	testutil.NoError(t, err)
+	encodedData, err := json.Marshal(observedCatalogResponse)
+	testutil.NoError(t, err)
+	for _, payload := range []string{
+		string(encodedGroup),
+		`{"data":` + observedCatalogResponse + `}`,
+		`{"data":` + string(encodedData) + `}`,
+		`{"data":` + string(encodedGroup) + `}`,
 	} {
-		_, err := parseModelList([]byte(payload))
-		testutil.CheckError(t, err)
+		catalog, err := parseModelList([]byte(payload))
+		testutil.NoError(t, err)
+		_, err = catalog.Resolve("Qwen3.7-Max")
+		testutil.NoError(t, err)
 	}
 }
 
-// TestModelListRoutesAreReadsWithTheCosySigner pins the routes the channel
-// probes. The read is a GET: the gateway answers POST on this path with
-// "Request method 'POST' not supported", so probing it would only add noise.
-func TestModelListRoutesAreReadsWithTheCosySigner(t *testing.T) {
+func TestParseModelListRejectsUnobservedShapes(t *testing.T) {
 	t.Parallel()
-
-	testutil.NotEqual(t, len(modelListRoutes), 0)
-	for _, route := range modelListRoutes {
-		testutil.Equal(t, route.method, "GET")
-		testutil.Equal(t, route.body, "")
-		testutil.MustContain(t, route.path, "/model/list")
+	row := `{"key":"qmodel_latest","display_name":"Qwen3.7-Max"}`
+	for name, payload := range map[string]string{
+		"bare array":          `[` + row + `]`,
+		"models":              `{"models":[` + row + `]}`,
+		"wrapped models":      `{"data":{"models":[` + row + `]}}`,
+		"unknown group":       `{"llm":[` + row + `]}`,
+		"completion":          `{"completion":[` + row + `]}`,
+		"embedding":           `{"embedding":[` + row + `]}`,
+		"nested data":         `{"data":{"data":{"chat":[` + row + `]}}}`,
+		"outer string":        `"{\"chat\":[]}"`,
+		"failure":             `{"success":false,"message":"catalog denied"}`,
+		"unkeyed":             `{"chat":[{"display_name":"model"}]}`,
+		"empty chat":          `{"chat":[]}`,
+		"null":                `null`,
+		"empty":               ``,
+		"scalar":              `42`,
+		"invalid":             `{`,
+		"conflicting wrapper": `{"chat":[` + row + `],"data":{}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := parseModelList([]byte(payload))
+			testutil.Error(t, err)
+		})
 	}
 }

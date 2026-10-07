@@ -42,7 +42,7 @@ func TestObservedContextTiersAndRequestDefault(t *testing.T) {
 }
 
 func TestObservedContextTierDuplicateMerge(t *testing.T) {
-	c, err := parseModelList([]byte(`[{"key":"k","max_input_tokens":180000,"context_config":{"default-label":{"token_count":200000,"is_default":true}}},{"key":"k","max_input_tokens":900000,"context_config":{"extended-label":{"token_count":1000000}}}]`))
+	c, err := parseModelList([]byte(`{"chat":[{"key":"k","max_input_tokens":180000,"context_config":{"default-label":{"token_count":200000,"is_default":true}}},{"key":"k","max_input_tokens":900000,"context_config":{"extended-label":{"token_count":1000000}}}]}`))
 	testutil.NoError(t, err)
 	model, _ := catalogFromIDs(catalogToIDs(c)).Resolve("k")
 	info := model.ContextWindowInfo()

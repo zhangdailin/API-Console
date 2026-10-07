@@ -365,9 +365,9 @@ func consoleUsage(v map[string]interface{}) map[string]interface{} {
 func (h *Handler) finishUpstreamChat(ctx context.Context, w http.ResponseWriter, req *ChatCompletionsRequest, sess *chatAccountSession, logger *debug.Logger, name, url string, headers func() http.Header, payload map[string]interface{}, resp *http.Response, err error) (*parkedResponse, bool) {
 	if err != nil {
 		h.auditChatOutcome(ctx, sess.acc, req, chatOutcome{Finish: "error", Err: err})
-		slog.Error(name+" chat upstream failed", "url", url, "status", parseUpstreamStatus(err), "error", err)
+		slog.Error(name+" chat upstream failed", "url", url, "status", upstreamStatus(err), "error", err)
 		if logger != nil {
-			logger.LogUpstreamHTTPError(url, parseUpstreamStatus(err), "", err)
+			logger.LogUpstreamHTTPError(url, upstreamStatus(err), "", err)
 		}
 		if markAllGrokAccountStatuses(err) {
 			h.markAccountStatus(ctx, sess.acc, err)

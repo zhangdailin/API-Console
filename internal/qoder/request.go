@@ -720,7 +720,7 @@ func (c *Client) applyAuthHeadersBytes(req *http.Request, creds Credentials, fie
 	set("Cache-Control", "no-cache")
 	set("Connection", "keep-alive")
 	set("Content-Type", "application/json")
-	set("Cosy-Business-Product", c.businessProduct())
+	set("Cosy-Business-Product", sceneBusinessProduct)
 	set("Cosy-Business-Type", sceneBusinessType)
 	set("Cosy-ClientType", sceneClientID)
 	set("Cosy-Data-Policy", dataPolicyHeader(c.dataPolicyAgreed()))
@@ -784,7 +784,7 @@ func (c *Client) attemptChat(ctx context.Context, url string, body []byte, model
 	attempt := debug.BeginUpstream(ctx, req.Method, req.URL.String(), req.Header, body)
 	var traceMetadata map[string]interface{}
 	if debug.FromContext(ctx) != nil {
-		traceMetadata = map[string]interface{}{"provider": "qoder", "model_key": model.Key, "model_source": model.Source, "host": req.URL.Host, "httpdns_ip": req.Header.Get("X-Qoder-Httpdns-Ip"), "body_bytes": len(body), "protocol_profile": c.protocol.name}
+		traceMetadata = map[string]interface{}{"provider": "qoder", "model_key": model.Key, "model_source": model.Source, "host": req.URL.Host, "httpdns_ip": req.Header.Get("X-Qoder-Httpdns-Ip"), "body_bytes": len(body)}
 	}
 	traceCtx, latency := attempt.Trace(req.Context(), traceMetadata)
 	if latency != nil {

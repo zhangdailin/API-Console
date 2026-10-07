@@ -75,13 +75,15 @@ func newQoderE2EStub(t *testing.T) *qoderE2EStub {
 		case "/api/v1/userinfo":
 			_, _ = w.Write([]byte(`{"uid":"uid-e2e","name":"e2e","email":"e2e@example.com"}`))
 		case "/algo/api/v2/model/list":
+			testutil.CheckEqual(t, r.Method, http.MethodGet)
+			testutil.CheckEqual(t, r.URL.RawQuery, "Encode=1")
 			// The catalog is now read from the signed control plane, so the
 			// refresh depends on this route answering with the account's models.
 			testutil.CheckFalsef(t, r.Header.Get("Cosy-Key") == "" || r.Header.Get("Cosy-MachineId") == "", "model list request is missing the derived auth chain: %v", r.Header)
 			auth := r.Header.Get("Authorization")
 			testutil.CheckFalsef(t, !strings.HasPrefix(auth, "Bearer COSY."), "model list Authorization = %q, want a COSY bearer", auth)
 			stub.modelListCalls++
-			_, _ = w.Write([]byte(`{"code":0,"data":{"models":[` +
+			_, _ = w.Write([]byte(`{"code":0,"data":{"chat":[` +
 				`{"key":"qmodel_latest","name":"Qwen3.7-Max","display_name":"Qwen3.7-Max","format":"openai","source":"system","enable":true,"is_reasoning":false,"max_input_tokens":1000000},` +
 				`{"key":"dmodel","name":"DeepSeek-V4-Pro","display_name":"DeepSeek-V4-Pro","format":"openai","source":"system","enable":true,"is_reasoning":true,"max_input_tokens":1000000}` +
 				`]}}`))

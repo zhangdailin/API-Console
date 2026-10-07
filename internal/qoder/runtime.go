@@ -55,17 +55,6 @@ type RuntimeFields struct {
 	Key string
 }
 
-// runtimeFieldInput is the exact AES plaintext. Field names and the absence of
-// HTML escaping are part of the wire contract: the ciphertext is not
-// re-derived upstream, so a different byte layout decrypts to a payload the
-// gateway will not accept.
-type runtimeFieldInput struct {
-	UID              string   `json:"uid"`
-	OrganizationID   string   `json:"organization_id"`
-	OrganizationTags []string `json:"organization_tags"`
-	DataPolicyAgreed bool     `json:"data_policy_agreed"`
-}
-
 // referenceRuntimeFieldInput matches the reference bridge's encrypted
 // AuthIdentity. Values (including unknown metadata) are strings, and empty
 // keys are serialized instead of omitted. Tokens must never be logged.
@@ -82,8 +71,7 @@ type referenceRuntimeFieldInput struct {
 }
 
 // referenceRuntimeFieldsFor uses the same random temp-key and encrypted
-// identity layout as qoder2api's cosy.NewSession. The existing CLI fixture
-// still pins runtimeFieldsFor independently for legacy imported sessions.
+// identity layout as qoder2api's cosy.NewSession.
 func referenceRuntimeFieldsFor(entropy source, in referenceRuntimeFieldInput) (RuntimeFields, error) {
 	if entropy == nil {
 		entropy = cryptoSource{}
@@ -112,46 +100,6 @@ func referenceRuntimeFieldsFor(entropy source, in referenceRuntimeFieldInput) (R
 	return RuntimeFields{EncryptUserInfo: base64.StdEncoding.EncodeToString(sealed), Key: base64.StdEncoding.EncodeToString(wrapped)}, nil
 }
 
-// runtimeFieldsFor derives the pair for one account. entropy is the random
-// source; tests supply a deterministic reader.
-func runtimeFieldsFor(entropy source, in runtimeFieldInput) (RuntimeFields, error) {
-	if entropy == nil {
-		entropy = cryptoSource{}
-	}
-	// The tags field is always present, even when empty: the gateway's own
-	// serializer emits an empty array rather than omitting the key.
-	if in.OrganizationTags == nil {
-		in.OrganizationTags = []string{}
-	}
-
-	var raw [16]byte
-	if _, err := entropy.Read(raw[:]); err != nil {
-		return RuntimeFields{}, fmt.Errorf("read runtime field entropy: %w", err)
-	}
-	key := runtimeASCIIKey(reverseMaskUUID(raw))
-
-	plaintext, err := json.Marshal(in)
-	if err != nil {
-		return RuntimeFields{}, fmt.Errorf("marshal runtime fields: %w", err)
-	}
-	sealed, err := aesCBCEncryptPKCS7(plaintext, key)
-	if err != nil {
-		return RuntimeFields{}, err
-	}
-	publicKey, err := runtimePublicKey()
-	if err != nil {
-		return RuntimeFields{}, err
-	}
-	wrapped, err := rsaEncryptPKCS1v15WithSource(entropy, publicKey, key)
-	if err != nil {
-		return RuntimeFields{}, fmt.Errorf("wrap runtime key: %w", err)
-	}
-	return RuntimeFields{
-		EncryptUserInfo: base64.StdEncoding.EncodeToString(sealed),
-		Key:             base64.StdEncoding.EncodeToString(wrapped),
-	}, nil
-}
-
 // source is the entropy seam. Both the UUID bytes and the RSA padding come from
 // it, which is what makes the derivation reproducible under test.
 type source interface {
@@ -161,19 +109,6 @@ type source interface {
 type cryptoSource struct{}
 
 func (cryptoSource) Read(p []byte) (int, error) { return rand.Read(p) }
-
-// reverseMaskUUID turns 16 random bytes into a UUID by reversing them and then
-// applying the RFC 4122 version/variant masks, exactly as the CLI does. The
-// reversal is not decoration: the AES key is derived from the resulting bytes.
-func reverseMaskUUID(raw [16]byte) [16]byte {
-	var out [16]byte
-	for i := range raw {
-		out[i] = raw[15-i]
-	}
-	out[6] = (out[6] & 0x0f) | 0x40
-	out[8] = (out[8] & 0x3f) | 0x80
-	return out
-}
 
 // formatUUID renders 16 bytes as a lowercase 8-4-4-4-12 UUID string.
 func formatUUID(value [16]byte) string {
@@ -185,15 +120,6 @@ func formatUUID(value [16]byte) string {
 	hex.Encode(out[24:36], value[10:16])
 	out[8], out[13], out[18], out[23] = '-', '-', '-', '-'
 	return string(out[:])
-}
-
-// runtimeASCIIKey is the AES key: the lowercase hex of the first 8 UUID bytes,
-// kept as 16 ASCII characters. It is deliberately not hex-decoded — decoding it
-// would produce an 8-byte key that the gateway cannot use.
-func runtimeASCIIKey(value [16]byte) []byte {
-	encoded := make([]byte, 16)
-	hex.Encode(encoded, value[:8])
-	return encoded
 }
 
 // aesCBCEncryptPKCS7 encrypts with AES-128-CBC, the key doubling as the IV, and

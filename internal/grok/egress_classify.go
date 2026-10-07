@@ -52,9 +52,7 @@ func ClassifyUpstreamResponse(status int, header http.Header, body []byte) Upstr
 	return UpstreamErrorUnknown
 }
 
-// ClassifyUpstreamError classifies a returned error, preferring the typed
-// grokUpstreamError and falling back to the legacy "grok upstream status=.. body=.."
-// text format for plain errors.
+// ClassifyUpstreamError classifies typed upstream HTTP evidence.
 func ClassifyUpstreamError(err error) UpstreamErrorKind {
 	if err == nil {
 		return UpstreamErrorUnknown
@@ -63,8 +61,7 @@ func ClassifyUpstreamError(err error) UpstreamErrorKind {
 	if errors.As(err, &typed) {
 		return ClassifyUpstreamResponse(typed.status, typed.header, []byte(typed.body))
 	}
-	status := parseUpstreamStatus(err)
-	return ClassifyUpstreamResponse(status, nil, []byte(upstreamErrorBody(err)))
+	return UpstreamErrorUnknown
 }
 
 // IsDefinitiveAccountBlockBody accepts only explicit error code or message

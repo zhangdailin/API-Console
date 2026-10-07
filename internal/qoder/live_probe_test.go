@@ -75,9 +75,6 @@ func probeEnvironment(t *testing.T) (*config.Config, *store.Store) {
 	if raw, err := s.GetSetting(context.Background(), "config"); err == nil && strings.TrimSpace(raw) != "" {
 		var override map[string]interface{}
 		if json.Unmarshal([]byte(raw), &override) == nil {
-			if v, ok := override["qoder_protocol_profile"].(string); ok && v != "" {
-				cfg.QoderProtocolProfile = v
-			}
 			if v, ok := override["qoder_inference_base_url"].(string); ok && v != "" {
 				cfg.QoderInferenceURL = v
 			}

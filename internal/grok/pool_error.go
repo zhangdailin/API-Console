@@ -117,8 +117,7 @@ func writeGrokUpstreamFailure(w http.ResponseWriter, status int, err error) {
 		}
 	}
 	// A typed upstream credential failure is an operator-owned pool problem, not
-	// a rejection of the caller's API key. Legacy untyped errors keep the status
-	// their caller computed for compatibility.
+	// a rejection of the caller's API key.
 	var typed *grokUpstreamError
 	if errors.As(err, &typed) && (status == http.StatusUnauthorized || status == http.StatusForbidden) {
 		status = http.StatusServiceUnavailable

@@ -2,6 +2,7 @@ package grok
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"orchids-api/internal/testutil"
 	"testing"
@@ -49,7 +50,7 @@ func TestClassifyUpstreamResponse(t *testing.T) {
 	}
 }
 
-func TestClassifyUpstreamError_LegacyText(t *testing.T) {
+func TestClassifyUpstreamError_Typed(t *testing.T) {
 	cases := []struct {
 		name string
 		err  error
@@ -64,18 +65,34 @@ func TestClassifyUpstreamError_LegacyText(t *testing.T) {
 	}
 }
 
-func TestClassifyUpstreamError_PlainText(t *testing.T) {
+func TestClassifyUpstreamError_Wrapped(t *testing.T) {
 	cases := []struct {
 		name string
 		err  error
 		want UpstreamErrorKind
 	}{
-		{name: "legacy 403", err: errors.New("grok upstream status=403 body=forbidden"), want: UpstreamErrorGenericForbidden},
-		{name: "legacy blocked", err: errors.New("grok upstream status=403 body={\"code\":\"blocked-user\"}"), want: UpstreamErrorAccountBlock},
-		{name: "legacy 429", err: errors.New("grok upstream status=429 body=rate limit exceeded"), want: UpstreamErrorRateLimited},
-		{name: "legacy no status", err: errors.New("forbidden"), want: UpstreamErrorUnknown},
+		{name: "wrapped 403", err: fmt.Errorf("attempt failed: %w", newCLIUpstreamError(403, nil, []byte("forbidden"))), want: UpstreamErrorGenericForbidden},
+		{name: "wrapped blocked", err: fmt.Errorf("attempt failed: %w", newCLIUpstreamError(403, nil, []byte(`{"code":"blocked-user"}`))), want: UpstreamErrorAccountBlock},
+		{name: "wrapped 429", err: fmt.Errorf("attempt failed: %w", newCLIUpstreamError(429, nil, []byte("rate limit exceeded"))), want: UpstreamErrorRateLimited},
+		{name: "plain text is not HTTP evidence", err: errors.New("grok upstream status=403 body=blocked-user"), want: UpstreamErrorUnknown},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) { testutil.Equal(t, ClassifyUpstreamError(c.err), c.want) })
+	}
+}
+
+func TestUpstreamStatusUsesTypedEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want int
+	}{
+		{nil, 0},
+		{newCLIUpstreamError(401, nil, nil), 401},
+		{&cliOAuthError{status: 403, message: "invalid_grant"}, 403},
+		{fmt.Errorf("attempt: %w", newCLIUpstreamError(429, nil, nil)), 429},
+		{errors.New("job status=404 body=missing"), 0},
+		{errors.New("grok upstream status=429 body=slow down"), 0},
+	} {
+		testutil.Equal(t, upstreamStatus(tc.err), tc.want)
 	}
 }

@@ -495,7 +495,7 @@ func stripInjectedReasoningReplay(payload map[string]interface{}) bool {
 }
 
 func isReasoningReplayDecodeError(err error) bool {
-	if err == nil || parseUpstreamStatus(err) != http.StatusBadRequest {
+	if err == nil || upstreamStatus(err) != http.StatusBadRequest {
 		return false
 	}
 	text := strings.ToLower(err.Error())

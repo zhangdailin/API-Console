@@ -134,11 +134,11 @@ func TestWriteGrokNoAccountError_ClassifiesTheSameWayAsEveryOtherEntrance(t *tes
 // body. A pool failure is stored as its classified message; every other failure
 // keeps its own text, which describes that job rather than the pool.
 func TestWriteGrokUpstreamFailure_KeepsProseOutOfTheBody(t *testing.T) {
-	upstream := errors.New(`grok cli upstream status=403 body={"error":{"code":"forbidden","message":"Access denied."}}`)
+	upstream := newCLIUpstreamError(403, nil, []byte("{\"error\":{\"code\":\"forbidden\",\"message\":\"Access denied.\"}}"))
 	rec := httptest.NewRecorder()
 	writeGrokUpstreamFailure(rec, http.StatusForbidden, upstream)
 
-	testutil.Equal(t, rec.Code, http.StatusForbidden)
+	testutil.Equal(t, rec.Code, http.StatusServiceUnavailable)
 	body := rec.Body.String()
 	testutil.MustContain(t, body, apperrors.PublicMessage(upstream.Error()))
 	for _, leaked := range []string{"This page is out of date", "upstream status=", "code\":7"} {

@@ -3,7 +3,6 @@ package grok
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -103,7 +102,7 @@ func (h *Handler) handleGatewayCompaction(w http.ResponseWriter, r *http.Request
 			return
 		}
 		if status < 200 || status >= 300 {
-			lastErr = fmt.Errorf("upstream status=%d", status)
+			lastErr = newCLIUpstreamError(status, resp.Header, data)
 			if attempt < responses.CompactionMaxAttempts && responses.CompactionHTTPErrorIsTransient(status, string(data)) &&
 				waitGatewayCompactionRetry(r.Context(), responses.CompactionRetryPause) {
 				continue

@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/url"
 	"orchids-api/internal/httpclient"
-	"strconv"
 	"strings"
 	"time"
 
@@ -101,32 +100,6 @@ func (r responseBodyCloser) Close() error {
 		}
 	}
 	return firstErr
-}
-
-// parseUpstreamStatus extracts the "status=<code>" marker the upstream error
-// types carry, so callers can branch on an HTTP status without unwrapping.
-func parseUpstreamStatus(err error) int {
-	if err == nil {
-		return 0
-	}
-	raw := err.Error()
-	idx := strings.Index(raw, "status=")
-	if idx < 0 {
-		return 0
-	}
-	rest := raw[idx+len("status="):]
-	n := 0
-	for n < len(rest) && rest[n] >= '0' && rest[n] <= '9' {
-		n++
-	}
-	if n == 0 {
-		return 0
-	}
-	code, convErr := strconv.Atoi(rest[:n])
-	if convErr != nil {
-		return 0
-	}
-	return code
 }
 
 // TokenFingerprint is a short, non-reversible digest of a credential, used in

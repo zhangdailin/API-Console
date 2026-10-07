@@ -45,52 +45,6 @@ type entropyExhaustedError struct{}
 
 func (*entropyExhaustedError) Error() string { return "test entropy source exhausted" }
 
-// TestRuntimeFieldsMatchesPinnedFixture pins the derived pair against the
-// synthetic fixture that fixes the Qoder CLI v1.1.34 byte layout.
-//
-// This is the single most load-bearing test in the package: the upstream does
-// not re-derive or verify these fields, it simply fails every request whose
-// encryption or key-wrapping differs. A silent change here would break the
-// channel in a way that looks like an expired credential.
-func TestRuntimeFieldsMatchesPinnedFixture(t *testing.T) {
-	t.Parallel()
-
-	uuidEntropy, err := base64.StdEncoding.DecodeString("AQIDBAUGBwgJCgsMDQ4PEA==")
-	testutil.NoError(t, err, "decode uuid entropy: %v")
-	paddingEntropy, err := base64.StdEncoding.DecodeString("ERITFBUWFxgZGhscHR4fICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj9AQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpbXF1eX2BhYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fQ==")
-	testutil.NoError(t, err, "decode padding entropy: %v")
-
-	source := newRecordingSource(uuidEntropy, paddingEntropy)
-	fields, err := runtimeFieldsFor(source, runtimeFieldInput{
-		UID:              "synthetic-user-0001",
-		OrganizationID:   "synthetic-org-0001",
-		OrganizationTags: []string{"synthetic-a", "b"},
-		DataPolicyAgreed: true,
-	})
-	testutil.NoError(t, err, "runtimeFieldsFor() error = %v")
-
-	const wantInfo = "A2MBsulMvdx5p3X6li/3gjwEdVeJ/EkXILah2VTr11+i+FqvTaZ90ZrsGAtfSUode28WR718Kzups7BnrO2w+LGj2Y3+3zswmr48XkCV+HvUuajHkcU+tPJdWeL69JwKA+h2be5MvPMEYFopCPt9jE/DBdk/2Q+1oBab6DYLbrp8u5IYpZq7Fe4IrCcskN0K"
-	const wantKey = "nKeC6jJtXTWF4TpnVNnxMT/6jY0gBZfCPfjQaKbIi0lS+j2REWVXO5f6BzlvfEvHCrC+UY7rBMZfYs/C72KNYVIH2HLAR8E1yPDAGvV2xViMw029bXcMVa9ib0vyaM4IEu7HJlNHzUXTJOvEBB4YUAyxTCysQ/oYct/JIpRNg7I="
-
-	testutil.CheckEqual(t, fields.EncryptUserInfo, wantInfo)
-	testutil.CheckEqual(t, fields.Key, wantKey)
-}
-
-// TestReverseMaskUUID pins the key derivation. The AES key is the hex of the
-// reversed, masked UUID bytes kept as ASCII; hex-decoding it instead would
-// produce an 8-byte key and a different ciphertext.
-func TestReverseMaskUUID(t *testing.T) {
-	t.Parallel()
-
-	raw := [16]byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10}
-	masked := reverseMaskUUID(raw)
-	got, want := formatUUID(masked), "100f0e0d-0c0b-4a09-8807-060504030201"
-	testutil.Falsef(t, got != want, "formatUUID() = %q, want %q", got, want)
-	got, want = string(runtimeASCIIKey(masked)), "100f0e0d0c0b4a09"
-	testutil.Falsef(t, got != want, "runtimeASCIIKey() = %q, want %q", got, want)
-	testutil.Equal(t, len(runtimeASCIIKey(masked)), 16)
-}
-
 // TestRuntimeFieldsAccessorRoundTrip proves a stored pair is accepted and a half
 // pair is rejected, so a partially written account re-derives instead of sending
 // an unusable header.
@@ -100,27 +54,6 @@ func TestRuntimeFieldsAccessorRoundTrip(t *testing.T) {
 	testutil.False(t, (RuntimeFields{}).Complete(), "Complete() = true for an empty pair")
 	testutil.False(t, (RuntimeFields{Key: "x"}).Complete(), "Complete() = true for a pair with no info")
 	testutil.False(t, !(RuntimeFields{EncryptUserInfo: "a", Key: "b"}).Complete(), "Complete() = false for a full pair")
-}
-
-// TestRuntimeFieldInputAlwaysCarriesTagsArray pins the empty-array encoding: the
-// gateway's own serializer emits `[]`, and omitting the key would change the
-// ciphertext.
-func TestRuntimeFieldInputAlwaysCarriesTagsArray(t *testing.T) {
-	t.Parallel()
-
-	source := newRecordingSource(bytes.Repeat([]byte{7}, 16), bytes.Repeat([]byte{9}, 109))
-	fields, err := runtimeFieldsFor(source, runtimeFieldInput{UID: "u"})
-	testutil.NoError(t, err, "runtimeFieldsFor() error = %v")
-	// Decrypt with the derived key to prove the plaintext contains "[]".
-	key := runtimeASCIIKey(reverseMaskUUID([16]byte{7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7}))
-	sealed, err := base64.StdEncoding.DecodeString(fields.EncryptUserInfo)
-	testutil.NoError(t, err, "decode ciphertext: %v")
-	block, err := aes.NewCipher(key)
-	testutil.NoError(t, err, "build cipher: %v")
-	plaintext := make([]byte, len(sealed))
-	cipher.NewCBCDecrypter(block, key).CryptBlocks(plaintext, sealed)
-	unpadded := unpadPKCS7(t, plaintext)
-	testutil.MustContain(t, string(unpadded), `"organization_tags":[]`)
 }
 
 func TestReferenceRuntimeIdentityIncludesTokensAndAccountClass(t *testing.T) {

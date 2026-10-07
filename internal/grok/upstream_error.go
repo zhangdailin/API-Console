@@ -1,6 +1,7 @@
 package grok
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,8 +15,8 @@ const maxUpstreamBodyBytes = 4096
 // grokUpstreamError is a typed Grok upstream failure that preserves the HTTP
 // status, a sanitized copy of the response headers, and a bounded body so
 // callers can classify upstream/account-block without re-parsing
-// err.Error() text. Error() keeps the legacy text shape ("grok upstream
-// status=N body=...") so existing string matchers keep working.
+// err.Error() text. Error() renders status and body for internal diagnostics and
+// the shared account-policy classifier.
 type grokUpstreamError struct {
 	status int
 	header http.Header
@@ -100,15 +101,16 @@ func readBoundedResponse(resp *http.Response) ([]byte, http.Header) {
 	return raw, headerCopy
 }
 
-// upstreamErrorBody extracts the body portion of a legacy plain error's text.
-func upstreamErrorBody(err error) string {
-	if err == nil {
-		return ""
+// upstreamStatus reads HTTP evidence from typed failures, including OAuth
+// failures and wrapped synthetic cooldowns. Local prose carries no status.
+func upstreamStatus(err error) int {
+	var upstream *grokUpstreamError
+	if errors.As(err, &upstream) {
+		return upstream.status
 	}
-	raw := err.Error()
-	idx := strings.Index(raw, "body=")
-	if idx < 0 {
-		return ""
+	var oauth *cliOAuthError
+	if errors.As(err, &oauth) {
+		return oauth.status
 	}
-	return raw[idx+len("body="):]
+	return 0
 }

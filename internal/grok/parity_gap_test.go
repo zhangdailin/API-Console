@@ -3,7 +3,6 @@ package grok
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -161,7 +160,7 @@ func TestReasoningReplayUsesPortableShapeAndCanBeStripped(t *testing.T) {
 	stripped := payload["input"].([]interface{})[0].(map[string]interface{})
 	_, exists = stripped["encrypted_content"]
 	testutil.False(t, exists, "encrypted replay content was not removed")
-	testutil.False(t, !isReasoningReplayDecodeError(fmt.Errorf("grok cli upstream status=400 body=Could not decode the compaction blob")), "compaction decode error was not recognized")
+	testutil.False(t, !isReasoningReplayDecodeError(newCLIUpstreamError(400, nil, []byte("Could not decode the compaction blob"))), "compaction decode error was not recognized")
 }
 
 func TestNativeReasoningReplayConvertsStringInput(t *testing.T) {

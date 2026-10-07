@@ -28,7 +28,6 @@ type Client struct {
 	// endpoints are resolved once from configuration so a request never has to
 	// consult the config snapshot again.
 	endpoints endpoints
-	protocol  protocolProfile
 	// clientID and clientVersion identify the CLI build this channel emulates.
 	clientID      string
 	clientVersion string
@@ -106,7 +105,6 @@ func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
 	}
 
 	client := &Client{
-		protocol:       resolveProtocolProfile(cfg),
 		endpoints:      resolveEndpoints(cfg),
 		clientID:       resolveClientID(cfg),
 		clientVersion:  resolveClientVersion(cfg),
@@ -130,8 +128,7 @@ func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
 	}
 	if acc != nil {
 		client.machineID = strings.TrimSpace(acc.QoderMachineID)
-		// Stored runtime ciphertext is deliberately not reused: it may belong
-		// to a different protocol profile. Derive the selected layout below.
+		// Derive runtime ciphertext from the current reference identity.
 	}
 	client.applyFingerprint()
 	return client
@@ -158,7 +155,7 @@ func (c *Client) aliyunUserType() string {
 
 // applyFingerprint preserves the QoderWork login device identity.
 func (c *Client) applyFingerprint() {
-	// QoderWork binds the machine token to the login device ID in both profiles.
+	// QoderWork binds the machine token to the login device ID.
 	c.machineToken = c.machineID
 	c.machineType = machineSceneType
 }
@@ -227,7 +224,7 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	// aliyun_user_type is deliberately empty: the QoderWork client sends no
 	// account class, and the account's own class is still reported through the
 	// quota path.
-	body, err := buildChatBodyProfile(req, model, sessionID, requestID, requestSetID, c.clientVersion, "", c.businessProduct())
+	body, err := buildChatBodyProfile(req, model, sessionID, requestID, requestSetID, c.clientVersion, "", sceneBusinessProduct)
 	if err != nil {
 		return err
 	}
@@ -525,26 +522,15 @@ func (c *Client) ensureRuntimeFields(ctx context.Context, creds Credentials) (Ru
 		// the identity is known.
 		return RuntimeFields{}, fmt.Errorf("qoder account has no user id yet; sign in again")
 	}
-	var fields RuntimeFields
-	var err error
-	if c.protocol.tokenlessRuntime {
-		fields, err = runtimeFieldsFor(c.entropy, runtimeFieldInput{
-			UID:              creds.UID,
-			OrganizationID:   creds.OrgID,
-			OrganizationTags: creds.OrgTags,
-			DataPolicyAgreed: c.dataPolicyAgreed(),
-		})
-	} else {
-		fields, err = referenceRuntimeFieldsFor(c.entropy, referenceRuntimeFieldInput{
-			Name:               creds.Name,
-			Aid:                creds.UID,
-			UID:                creds.UID,
-			OrganizationID:     creds.OrgID,
-			UserType:           aliyunUserTypeOr(c.aliyunUserType()),
-			SecurityOAuthToken: creds.AccessToken,
-			RefreshToken:       creds.RefreshToken,
-		})
-	}
+	fields, err := referenceRuntimeFieldsFor(c.entropy, referenceRuntimeFieldInput{
+		Name:               creds.Name,
+		Aid:                creds.UID,
+		UID:                creds.UID,
+		OrganizationID:     creds.OrgID,
+		UserType:           aliyunUserTypeOr(c.aliyunUserType()),
+		SecurityOAuthToken: creds.AccessToken,
+		RefreshToken:       creds.RefreshToken,
+	})
 	if err != nil {
 		return RuntimeFields{}, err
 	}
@@ -860,7 +846,6 @@ func (c *Client) ApplyProfile(profile Profile) {
 	c.stateMu.Lock()
 	defer c.stateMu.Unlock()
 	oldUID, oldName, oldOrg := c.creds.UID, c.creds.Name, c.creds.OrgID
-	oldTags := append([]string(nil), c.creds.OrgTags...)
 	if uid := strings.TrimSpace(profile.UID); uid != "" {
 		c.creds.UID = uid
 		if c.account != nil {
@@ -891,7 +876,7 @@ func (c *Client) ApplyProfile(profile Profile) {
 			c.account.QoderOrganizationTags = append([]string(nil), profile.OrgTags...)
 		}
 	}
-	if oldUID != c.creds.UID || oldName != c.creds.Name || oldOrg != c.creds.OrgID || (c.protocol.tokenlessRuntime && !slices.Equal(oldTags, c.creds.OrgTags)) {
+	if oldUID != c.creds.UID || oldName != c.creds.Name || oldOrg != c.creds.OrgID {
 		c.runtime = RuntimeFields{}
 		c.runtimeAccessToken = ""
 		c.runtimeRefreshToken = ""

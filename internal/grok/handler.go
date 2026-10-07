@@ -455,7 +455,7 @@ func (h *Handler) reserveAccount(acc *store.Account) (func(), bool) {
 func (h *Handler) markAccountStatus(ctx context.Context, acc *store.Account, err error) {
 	// Invalid parameters and missing resources are request errors, not evidence
 	// that the credential is unusable. Do not poison account routing with them.
-	if status := parseUpstreamStatus(err); status >= 400 && status < 500 && status != 401 && status != 402 && status != 403 && status != 429 {
+	if status := upstreamStatus(err); status >= 400 && status < 500 && status != 401 && status != 402 && status != 403 && status != 429 {
 		return
 	}
 	var oauthErr *cliOAuthError
@@ -494,7 +494,7 @@ func (h *Handler) markAccountStatus(ctx context.Context, acc *store.Account, err
 	// keeps the next request from immediately re-selecting the same account
 	// while the upstream recovers, without marking the credential as broken.
 	if acc != nil {
-		if status := parseUpstreamStatus(err); status >= 500 {
+		if status := upstreamStatus(err); status >= 500 {
 			acc.QuotaResetAt = time.Now().Add(serverFaultHold)
 		}
 	}
@@ -524,7 +524,7 @@ const serverFaultHold = 5 * time.Second
 // isModelScopedRefusal reports whether an upstream failure refused one model
 // rather than the credential itself.
 func isModelScopedRefusal(err error) bool {
-	if err == nil || parseUpstreamStatus(err) != 403 {
+	if err == nil || upstreamStatus(err) != 403 {
 		return false
 	}
 	lower := strings.ToLower(err.Error())
@@ -656,10 +656,10 @@ func shouldSwitchGrokAccount(err error) bool {
 	if status == "401" || status == "429" || isSharedGrokRateLimitError(err) {
 		return true
 	}
-	if upstreamStatus := parseUpstreamStatus(err); upstreamStatus == http.StatusBadGateway ||
-		upstreamStatus == http.StatusServiceUnavailable ||
-		upstreamStatus == http.StatusGatewayTimeout ||
-		upstreamStatus == http.StatusInternalServerError {
+	if status := upstreamStatus(err); status == http.StatusBadGateway ||
+		status == http.StatusServiceUnavailable ||
+		status == http.StatusGatewayTimeout ||
+		status == http.StatusInternalServerError {
 		return true
 	}
 
@@ -687,7 +687,7 @@ func isSharedGrokRateLimitError(err error) bool {
 		return true
 	}
 	lower := strings.ToLower(err.Error())
-	if parseUpstreamStatus(err) != http.StatusTooManyRequests && !strings.Contains(lower, "too many requests") {
+	if upstreamStatus(err) != http.StatusTooManyRequests && !strings.Contains(lower, "too many requests") {
 		return false
 	}
 	// Only a parsed Team+Model response is shared. A bare 429/"too many
@@ -697,15 +697,11 @@ func isSharedGrokRateLimitError(err error) bool {
 	if ParseRateLimitMetadata([]byte(err.Error())) != nil {
 		return true
 	}
-	// Errors emitted by waitScopedRateLimit are synthetic: the structured
-	// response was parsed on the preceding attempt and the team/model cooldown
-	// is already registered, so there is no response body left to parse here.
-	return strings.Contains(lower, "body=too_many_requests team ") &&
-		strings.Contains(lower, " cooling down; retry-after=")
+	return false
 }
 
 func upstreamHTTPResponseStatus(err error) int {
-	if status := parseUpstreamStatus(err); status >= 400 && status <= 599 {
+	if status := upstreamStatus(err); status >= 400 && status <= 599 {
 		return status
 	}
 	return http.StatusBadGateway

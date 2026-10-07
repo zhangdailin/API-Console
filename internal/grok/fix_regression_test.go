@@ -32,6 +32,12 @@ func TestSyntheticCooldownCarriesTypedHint(t *testing.T) {
 	var hinted interface{ RetryAfter() time.Duration }
 	testutil.Falsef(t, !errors.As(err, &hinted) || hinted.RetryAfter() != 12*time.Second, "typed cooldown hint missing: %v", err)
 	testutil.Falsef(t, !isSharedGrokRateLimitError(err) || markAllGrokAccountStatuses(err) || !shouldSwitchGrokAccount(err), "synthetic cooldown policy mismatch: %v", err)
+	var upstream *grokUpstreamError
+	testutil.True(t, errors.As(err, &upstream), "synthetic cooldown lost HTTP evidence")
+	testutil.Equal(t, upstreamStatus(err), http.StatusTooManyRequests)
+	testutil.Equal(t, ClassifyUpstreamError(err), UpstreamErrorRateLimited)
+	testutil.Equal(t, upstreamRetryAfterSeconds(err), 12)
+	testutil.True(t, isUpstreamFailure(err), "synthetic cooldown was classified as local")
 }
 
 func TestReadAndValidateNativeResponseBeforeCommit(t *testing.T) {
@@ -135,20 +141,20 @@ func TestIsPrivateBuildControlEvent(t *testing.T) {
 }
 
 func TestIsModelScopedRefusal(t *testing.T) {
-	scoped := []string{
-		"grok cli upstream status=403 body={\"error\":\"access to the chat endpoint is denied\"}",
-		"grok upstream status=403 body=model is not available",
-		"grok cli upstream status=403 body={\"message\":\"not available for model grok-4.6\"}",
-	}
-	for _, raw := range scoped {
-		testutil.Falsef(t, !isModelScopedRefusal(errors.New(raw)), "isModelScopedRefusal(%q) = false, want true", raw)
-	}
-	for _, raw := range []string{
-		"grok upstream status=403 body=account banned",
-		"grok upstream status=401 body=unauthorized",
-		"grok upstream status=429 body=slow down",
+	for _, body := range []string{
+		`{"error":"access to the chat endpoint is denied"}`,
+		"model is not available",
+		`{"message":"not available for model grok-4.6"}`,
 	} {
-		testutil.Falsef(t, isModelScopedRefusal(errors.New(raw)), "isModelScopedRefusal(%q) = true, want false", raw)
+		err := newCLIUpstreamError(403, nil, []byte(body))
+		testutil.True(t, isModelScopedRefusal(err), "model refusal not recognized")
+	}
+	for _, err := range []error{
+		newCLIUpstreamError(403, nil, []byte("account banned")),
+		newCLIUpstreamError(401, nil, []byte("unauthorized")),
+		newCLIUpstreamError(429, nil, []byte("slow down")),
+	} {
+		testutil.False(t, isModelScopedRefusal(err), "account refusal mistaken for model refusal")
 	}
 }
 

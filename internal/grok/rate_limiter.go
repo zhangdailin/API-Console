@@ -13,18 +13,23 @@ import (
 )
 
 type syntheticCooldownError struct {
-	identity string
-	model    string
-	delay    time.Duration
+	*grokUpstreamError
+	delay time.Duration
 }
 
 func newSyntheticCooldownError(identity, model string, delay time.Duration) error {
-	return &syntheticCooldownError{identity: identity, model: model, delay: accountpolicy.BoundRateLimitCooldown(delay)}
+	delay = accountpolicy.BoundRateLimitCooldown(delay)
+	return &syntheticCooldownError{
+		grokUpstreamError: &grokUpstreamError{
+			status: http.StatusTooManyRequests,
+			header: http.Header{"Retry-After": {fmt.Sprint(int64((delay + time.Second - 1) / time.Second))}},
+			body:   fmt.Sprintf("too_many_requests team %s model %s cooling down; retry-after=%s", identity, model, delay.Round(time.Second)),
+		},
+		delay: delay,
+	}
 }
 
-func (e *syntheticCooldownError) Error() string {
-	return fmt.Sprintf("grok upstream status=429 body=too_many_requests team %s model %s cooling down; retry-after=%s", e.identity, e.model, e.delay.Round(time.Second))
-}
+func (e *syntheticCooldownError) Unwrap() error { return e.grokUpstreamError }
 
 func (e *syntheticCooldownError) RetryAfter() time.Duration { return e.delay }
 

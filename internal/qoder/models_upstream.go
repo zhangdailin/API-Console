@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"orchids-api/internal/httpclient"
 	"strings"
@@ -19,20 +18,8 @@ import (
 // already holds: the signature is computed over the runtime key, the encoded
 // body and the signed path, none of which are chat specific.
 //
-// modelListRoutes are the routes the catalog has been observed at, in probe
-// order. The read is a GET: the gateway answers POST to this path with
-// "Request method 'POST' not supported". The query variant is the one the CLI's
-// other control-plane calls use, and is kept as a compatibility fallback for a
-// gateway build that expects it.
-var modelListRoutes = []struct {
-	method string
-	path   string
-	body   string
-}{
-	{method: http.MethodGet, path: "/algo/api/v2/model/list?Encode=1"},
-	{method: http.MethodGet, path: "/algo/api/v2/model/list"},
-	{method: http.MethodGet, path: "/algo/api/v2/model/list?FetchKeys=llm_model_result&Encode=1"},
-}
+// The observed catalog read uses this GET route and has no request body.
+const modelListPath = "/algo/api/v2/model/list?Encode=1"
 
 // FetchUpstreamModels reads the account-scoped model catalog from the signed
 // upstream control plane.
@@ -56,38 +43,17 @@ func (c *Client) FetchUpstreamModels(ctx context.Context) (*Catalog, error) {
 		return nil, err
 	}
 
-	var lastErr error
-	for _, route := range modelListRoutes {
-		catalog, fetchErr := c.fetchModelListOnce(ctx, creds, fields, route.method, route.path, route.body)
-		if fetchErr == nil {
-			return catalog, nil
-		}
-		lastErr = fetchErr
-	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("no model list route is configured")
-	}
-	return nil, fmt.Errorf("qoder upstream model list unavailable: %w", lastErr)
+	return c.fetchModelListOnce(ctx, creds, fields)
 }
 
 // fetchModelListOnce performs one signed catalog read.
-func (c *Client) fetchModelListOnce(ctx context.Context, creds Credentials, fields RuntimeFields, method, path, rawBody string) (*Catalog, error) {
-	body := ""
-	if strings.TrimSpace(rawBody) != "" {
-		// The signature covers the encoded body, so the wire form is what both
-		// the signature and the request must carry.
-		body = string(EncodeBody([]byte(rawBody)))
-	}
-	url := strings.TrimRight(c.endpoints.inference, "/") + path
+func (c *Client) fetchModelListOnce(ctx context.Context, creds Credentials, fields RuntimeFields) (*Catalog, error) {
+	url := strings.TrimRight(c.endpoints.inference, "/") + modelListPath
 
 	reqCtx, cancel := context.WithTimeout(ctx, authRequestTimeout)
 	defer cancel()
 
-	var reader io.Reader
-	if body != "" {
-		reader = strings.NewReader(body)
-	}
-	req, err := http.NewRequestWithContext(reqCtx, method, url, reader)
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +61,7 @@ func (c *Client) fetchModelListOnce(ctx context.Context, creds Credentials, fiel
 	if err != nil {
 		return nil, err
 	}
-	if err := c.applyAuthHeaders(req, creds, fields, requestID, "", "", body, signPath(url)); err != nil {
+	if err := c.applyAuthHeaders(req, creds, fields, requestID, "", "", "", signPath(url)); err != nil {
 		return nil, err
 	}
 	// The catalog is a JSON document, not an event stream: overriding the chat
@@ -104,31 +70,25 @@ func (c *Client) fetchModelListOnce(ctx context.Context, creds Credentials, fiel
 
 	resp, raw, err := httpclient.DoReadBody(c.control, req, 4<<20)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrAuthUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", ErrAuthUnavailable, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, apiError(method, url, resp.StatusCode, raw)
+		return nil, apiError(http.MethodGet, url, resp.StatusCode, raw)
 	}
 
 	catalog, parseErr := parseModelList(raw)
 	if parseErr != nil {
 		// The gateway's own reason travels in the error; the raw body is not
 		// reported upwards so an unrelated payload cannot reach a log line.
-		return nil, fmt.Errorf("%s %s: %w", method, signPath(url), parseErr)
+		return nil, fmt.Errorf("%s %s: %w", http.MethodGet, signPath(url), parseErr)
 	}
 	if catalog.Len() == 0 {
-		return nil, fmt.Errorf("%s %s returned an empty catalog", method, signPath(url))
+		return nil, fmt.Errorf("%s %s returned an empty catalog", http.MethodGet, signPath(url))
 	}
 	return catalog, nil
 }
 
-// parseModelList decodes the catalog from the shapes the gateway has used.
-//
-// The observed response groups the rows by capability under a top-level object
-// ("chat" first), and the rows are keyed objects rather than bare identifiers.
-// The envelope also nests under `data` (sometimes as a JSON string when the
-// request asked for encoding). Every shape is accepted so a change in nesting
-// does not silently read as "no models".
+// parseModelList accepts the observed chat group and its Encode=1 data wrapper.
 func parseModelList(raw []byte) (*Catalog, error) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 {
@@ -154,71 +114,33 @@ func parseModelList(raw []byte) (*Catalog, error) {
 	return nil, fmt.Errorf("catalog response carried no model list")
 }
 
-// catalogGroupKeys are the capability groups the catalog is nested under, in
-// preference order. "chat" is the group this channel serves; the rest are
-// accepted so a gateway that reorganises the groups is still readable.
-var catalogGroupKeys = []string{"chat", "models", "list", "data", "completion", "completions", "embedding"}
-
-// decodeCatalogEntries accepts an array of model rows, or an object wrapping
-// them under one of catalogGroupKeys — or, as a last resort, under any field
-// whose value decodes into model rows.
-//
-// A payload that is itself an encoded JSON string is decoded once more, because
-// the gateway's Encode=1 mode nests that way. Only rows carrying a key count:
-// that is what separates a real catalog from an unrelated array of objects, so
-// an unrecognised shape reports "no catalog" instead of a list of blanks.
+// Only chat rows carrying a key can establish a catalog observation. Unwrap
+// data and encoded chat once each; arbitrary groups and recursive nesting are
+// not part of the observed wire contract.
 func decodeCatalogEntries(raw json.RawMessage) ([]modelEntry, bool) {
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 {
-		return nil, false
-	}
-
-	// An encoded payload arrives as a JSON string holding JSON.
-	if trimmed[0] == '"' {
-		var inner string
-		if err := json.Unmarshal(trimmed, &inner); err != nil {
-			return nil, false
-		}
-		return decodeCatalogEntries([]byte(inner))
-	}
-
-	if trimmed[0] == '[' {
-		var entries []modelEntry
-		if err := json.Unmarshal(trimmed, &entries); err != nil {
-			return nil, false
-		}
-		return usableCatalogEntries(entries)
-	}
-
-	if trimmed[0] != '{' {
-		return nil, false
-	}
-
 	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(trimmed, &fields); err != nil {
+	if err := json.Unmarshal(raw, &fields); err != nil {
 		return nil, false
 	}
-	for _, key := range catalogGroupKeys {
-		payload, ok := fields[key]
-		if !ok {
-			continue
-		}
-		if entries, ok := decodeCatalogEntries(payload); ok {
-			return entries, true
+	if data, ok := fields["data"]; ok {
+		fields = nil
+		if err := json.Unmarshal(decodeCatalogString(data), &fields); err != nil {
+			return nil, false
 		}
 	}
-	// Field order from a map is not stable, so an unlisted group is found by
-	// trying each one. A row without a key cannot satisfy usableCatalogEntries,
-	// which keeps this from treating an unrelated object array as a catalog.
-	for key, payload := range fields {
-		if strings.Contains(key, "message") || strings.Contains(key, "msg") {
-			continue
-		}
-		if entries, ok := decodeCatalogEntries(payload); ok {
-			return entries, true
-		}
+	var entries []modelEntry
+	if err := json.Unmarshal(decodeCatalogString(fields["chat"]), &entries); err != nil {
+		return nil, false
 	}
-	return nil, false
+	return usableCatalogEntries(entries)
+}
+
+func decodeCatalogString(raw json.RawMessage) json.RawMessage {
+	var inner string
+	if json.Unmarshal(raw, &inner) == nil {
+		return json.RawMessage(inner)
+	}
+	return raw
 }
 
 // usableCatalogEntries reports the decodable rows that carry a key, and whether

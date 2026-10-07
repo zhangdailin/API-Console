@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"orchids-api/internal/config"
 	"orchids-api/internal/prompt"
 	"orchids-api/internal/testutil"
 	"orchids-api/internal/upstream"
@@ -16,7 +15,7 @@ import (
 // changes what the gateway is asked to accept, which is not something to do
 // without new evidence.
 
-// TestQoderWorkIdentityIsTheOnlyDialect checks that no profile falls back to the
+// TestQoderWorkIdentityIsTheOnlyDialect checks that the client never falls back to the
 // IDE emulation this channel was built around (client type 5, scene
 // "assistant", session_type "qoder", product "ide").
 func TestQoderWorkIdentityIsTheOnlyDialect(t *testing.T) {
@@ -30,10 +29,6 @@ func TestQoderWorkIdentityIsTheOnlyDialect(t *testing.T) {
 	// The capture reports client type 6 and machine type 5 in one request, so
 	// these cannot share a constant.
 	testutil.Equal(t, machineSceneType, "5")
-	for _, name := range []string{ProfileReference, ProfileSkillCLI} {
-		c := NewFromAccount(signedTestAccount(), &config.Config{QoderProtocolProfile: name})
-		testutil.Equal(t, c.businessProduct(), "qoder_work")
-	}
 }
 
 // TestQoderWorkBodyMatchesCapture pins the request body field for field. The

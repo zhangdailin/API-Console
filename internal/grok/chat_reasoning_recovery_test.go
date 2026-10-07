@@ -2,7 +2,6 @@ package grok
 
 import (
 	"encoding/base64"
-	"fmt"
 	"net/http"
 	"orchids-api/internal/testutil"
 	"testing"
@@ -24,7 +23,7 @@ func TestReplayCipherValidation(t *testing.T) {
 }
 
 func TestChatReasoningRecoveryResetsOnlyAfterDecodeFailure(t *testing.T) {
-	initial := fmt.Errorf("grok cli upstream status=400 body=invalid_encrypted_content")
+	initial := newCLIUpstreamError(400, nil, []byte("invalid_encrypted_content"))
 	payload := map[string]interface{}{"prompt_cache_key": "session", "input": []interface{}{map[string]interface{}{"type": "reasoning", "encrypted_content": "opaque", "summary": []interface{}{map[string]interface{}{"text": "remember this"}}}}}
 	calls := 0
 	response, err := recoverChatReasoning(payload, initial, func(stage string) (*http.Response, error) {
@@ -42,15 +41,15 @@ func TestChatReasoningRecoveryResetsOnlyAfterDecodeFailure(t *testing.T) {
 }
 
 func TestChatReasoningRecoveryPreservesPreviousResponse(t *testing.T) {
-	initial := fmt.Errorf("grok cli upstream status=400 body=invalid_encrypted_content")
+	initial := newCLIUpstreamError(400, nil, []byte("invalid_encrypted_content"))
 	payload := map[string]interface{}{"prompt_cache_key": "session", "previous_response_id": "resp_1"}
 	_, err := recoverChatReasoning(payload, initial, func(string) (*http.Response, error) { t.Fatal("unsafe reset"); return nil, nil })
 	testutil.Fail(t, err != initial || payload["prompt_cache_key"] != "session", err, payload)
 }
 
 func TestChatReasoningRecoveryDoesNotRetryRateLimit(t *testing.T) {
-	initial := fmt.Errorf("grok cli upstream status=400 body=invalid_encrypted_content")
-	limited := fmt.Errorf("grok cli upstream status=429 body=rate limited")
+	initial := newCLIUpstreamError(400, nil, []byte("invalid_encrypted_content"))
+	limited := newCLIUpstreamError(429, nil, []byte("rate limited"))
 	payload := map[string]interface{}{"prompt_cache_key": "session", "input": []interface{}{map[string]interface{}{"type": "reasoning", "encrypted_content": "opaque"}}}
 	calls := 0
 	_, err := recoverChatReasoning(payload, initial, func(string) (*http.Response, error) { calls++; return nil, limited })
