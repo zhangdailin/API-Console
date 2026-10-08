@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -11,16 +12,17 @@ import (
 )
 
 type ApiKey struct {
-	ID            int64    `json:"id"`
-	Name          string   `json:"name"`
-	KeyHash       string   `json:"-"`
-	KeyFull       string   `json:"-"`
-	KeyPrefix     string   `json:"key_prefix"`
-	KeySuffix     string   `json:"key_suffix"`
-	Enabled       bool     `json:"enabled"`
-	AllowedModels []string `json:"allowed_models,omitempty"`
-	RPMLimit      int      `json:"rpm_limit,omitempty"`
-	MaxConcurrent int      `json:"max_concurrent,omitempty"`
+	ID              int64    `json:"id"`
+	Name            string   `json:"name"`
+	KeyHash         string   `json:"-"`
+	KeyFull         string   `json:"-"`
+	KeyPrefix       string   `json:"key_prefix"`
+	SecretAvailable bool     `json:"secret_available"`
+	KeySuffix       string   `json:"key_suffix"`
+	Enabled         bool     `json:"enabled"`
+	AllowedModels   []string `json:"allowed_models,omitempty"`
+	RPMLimit        int      `json:"rpm_limit,omitempty"`
+	MaxConcurrent   int      `json:"max_concurrent,omitempty"`
 	// BillingLimitUSDTicks caps how much this key may spend, in USD ticks
 	// (1 USD = 10,000,000,000 ticks). Zero means unlimited, so a key created
 	// before this field existed keeps working unchanged.
@@ -41,6 +43,9 @@ type ApiKey struct {
 }
 
 type apiKeyStore interface {
+	GetApiKeySecret(context.Context, int64) (string, error)
+	RotateApiKey(context.Context, int64, string) (*ApiKey, error)
+	PatchApiKey(context.Context, int64, map[string]json.RawMessage) error
 	CreateApiKey(ctx context.Context, key *ApiKey) error
 	ListApiKeys(ctx context.Context) ([]*ApiKey, error)
 	UpdateApiKey(ctx context.Context, key *ApiKey) error

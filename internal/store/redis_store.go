@@ -31,6 +31,7 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"reflect"
@@ -47,6 +48,7 @@ type redisStore struct {
 	client      *redis.Client
 	prefix      string
 	credentials *credentialCipher
+	keySecrets  *credentialCipher
 	// changeEmitter announces persisted account mutations. It is nil when nobody
 	// listens (tests, a store without the notification bus), and a nil emitter is
 	// simply silent rather than an error.
@@ -97,7 +99,17 @@ func newRedisStore(addr, password string, db int, prefix string, credentialKey [
 		_ = client.Close()
 		return nil, err
 	}
+	var keySecrets *credentialCipher
+	if len(credentialKey) > 0 {
+		digest := sha256.Sum256(append([]byte("orchids:api-key-secret:v1:"), credentialKey...))
+		keySecrets, err = newCredentialCipher(digest[:])
+		if err != nil {
+			_ = client.Close()
+			return nil, err
+		}
+	}
 	s := &redisStore{
+		keySecrets:    keySecrets,
 		client:        client,
 		prefix:        prefix,
 		credentials:   credentials,

@@ -244,6 +244,7 @@ func (a *API) HandleKeys(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		w.Header().Set("Cache-Control", "no-store")
 		util.WriteJSONStatus(w, http.StatusCreated, newCreateKeyResponse(&key, fullKey))
 
 	default:
@@ -267,7 +268,7 @@ func (a *API) HandleKeyByID(w http.ResponseWriter, r *http.Request) {
 	// instead of a 400.
 	trimmedPath := strings.TrimSuffix(r.URL.Path, "/")
 	action := ""
-	for _, candidate := range []string{"reset-usage", "rotate"} {
+	for _, candidate := range []string{"reset-usage", "rotate", "secret"} {
 		if strings.HasSuffix(trimmedPath, "/"+candidate) {
 			action = candidate
 			trimmedPath = strings.TrimSuffix(trimmedPath, "/"+candidate)
@@ -281,6 +282,31 @@ func (a *API) HandleKeyByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if action == "secret" {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Pragma", "no-cache")
+		if r.Method != http.MethodGet {
+			writeMethodNotAllowed(w)
+			return
+		}
+		secret, err := a.store.GetApiKeySecret(r.Context(), id)
+		if err != nil {
+			if errors.Is(err, store.ErrNoRows) {
+				http.Error(w, "not found", 404)
+			} else if errors.Is(err, store.ErrApiKeySecretUnavailable) {
+				http.Error(w, err.Error(), 409)
+			} else {
+				http.Error(w, "API key secret unavailable", 503)
+			}
+			return
+		}
+		util.WriteJSON(w, map[string]string{"key": secret})
+		return
+	}
+	if action != "" && r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
 	switch r.Method {
 	case http.MethodPost:
 		// POST /api/keys/{id}/reset-usage: start a fresh billing period for this
@@ -308,10 +334,8 @@ func (a *API) HandleKeyByID(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// POST /api/keys/{id}/rotate: mint a new secret for an existing key.
-		// Only the hash is stored, so a secret that was not copied at creation
-		// can never be shown again -- the list knows only its prefix and
-		// suffix. Rotating is the supported way back to a usable secret without
-		// losing the key's id, name, policy and settled usage.
+		// Rotation atomically replaces the encrypted secret and authentication hash,
+		// retaining policy and usage; the previous secret immediately loses access.
 		if action == "rotate" {
 			key, err := a.store.GetApiKeyByID(r.Context(), id)
 			if err != nil {
@@ -324,16 +348,13 @@ func (a *API) HandleKeyByID(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "failed to generate api key", http.StatusInternalServerError)
 				return
 			}
-			hash := sha256.Sum256([]byte(fullKey))
-			key.KeyHash = hex.EncodeToString(hash[:])
-			key.KeyPrefix = "sk-"
-			key.KeySuffix = fullKey[len(fullKey)-4:]
-			// UpdateApiKey drops the retired hash index, so the old secret stops
-			// authenticating as soon as this succeeds.
-			if err := a.store.UpdateApiKey(r.Context(), key); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+			key, err = a.store.RotateApiKey(r.Context(), id, fullKey)
+			if err != nil {
+				writeApiKeyStoreError(w, err)
 				return
 			}
+
+			w.Header().Set("Cache-Control", "no-store")
 			util.WriteJSON(w, newCreateKeyResponse(key, fullKey))
 			return
 		}
@@ -405,7 +426,30 @@ func (a *API) HandleKeyByID(w http.ResponseWriter, r *http.Request) {
 			}
 			key.ExpiresAt = expiresAt
 		}
-		if err := a.store.UpdateApiKey(r.Context(), key); err != nil {
+		fields := map[string]json.RawMessage{}
+		add := func(name string, value any) { fields[name], _ = json.Marshal(value) }
+		if req.Enabled != nil {
+			add("enabled", key.Enabled)
+		}
+		if req.AllowedModels != nil {
+			add("allowed_models", key.AllowedModels)
+		}
+		if req.RPMLimit != nil {
+			add("rpm_limit", key.RPMLimit)
+		}
+		if req.MaxConcurrent != nil {
+			add("max_concurrent", key.MaxConcurrent)
+		}
+		if req.BillingLimitUSDTicks != nil {
+			add("billing_limit_usd_ticks", key.BillingLimitUSDTicks)
+		}
+		if req.BillingPeriodDays != nil {
+			add("billing_period_days", key.BillingPeriodDays)
+		}
+		if len(req.ExpiresAt) > 0 {
+			add("expires_at", key.ExpiresAt)
+		}
+		if err := a.store.PatchApiKey(r.Context(), id, fields); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

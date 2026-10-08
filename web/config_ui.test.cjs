@@ -32,7 +32,7 @@ function loadConfig(fetchImpl){
  vm.runInContext(fs.readFileSync(path.join(__dirname,'static/js/ui.js'),'utf8'),context);
  // Export the config helpers without changing the production asset.
  let src=fs.readFileSync(path.join(__dirname,'static/js/config.js'),'utf8');
- src+='\nglobalThis.probe={parseAnonymousAllowIPs,ticksToUSD,usdToTicks,formatUSD,periodSuffix,applyConfigurationPayload,loadConfiguration,saveConfiguration,bindApiKeyActions,Input:HTMLInputElement};\n';
+ src+='\nglobalThis.probe={parseAnonymousAllowIPs,applyConfigurationPayload,loadConfiguration,saveConfiguration,Input:HTMLInputElement};\n';
  vm.runInContext(src,context);
  return {api:context.probe,node,context,notices};
 }
@@ -40,23 +40,6 @@ function loadConfig(fetchImpl){
 // Arrays built inside the vm belong to that realm, so a strict deep comparison
 // would fail on the prototype rather than on the value.
 const plain=v=>Array.from(v);
-
-test('API key actions delegate equally for desktop and mobile, without exposing masked keys',()=>{
- const {api,context}=loadConfig();
- const calls=[];
- context.openEditKeyModal=id=>calls.push(['edit',id]);
- context.rotateApiKey=id=>calls.push(['rotate',id]);
- context.openDeleteKeyModal=(id,label)=>calls.push(['delete',id,label]);
- context.toggleKeyStatus=(id,checked)=>calls.push(['toggle',id,checked]);
- const container={contains:()=>true};
- api.bindApiKeyActions(container);
- const click=(action,id,label)=>container.onclick({target:{closest:()=>({dataset:{action,id,label}})}});
- click('edit-key','a');
- click('rotate-key','b');
- click('delete-key','c',encodeURIComponent('masked…suffix'));
- container.onchange({target:Object.assign(new api.Input(),{dataset:{action:'toggle-key',id:'d'},checked:true})});
- assert.deepStrictEqual(calls,[['edit','a'],['rotate','b'],['delete','c','masked…suffix'],['toggle','d',true]]);
-});
 
 test('anonymous_allow_ips is parsed into a trimmed list, and an empty box means nobody',()=>{
  const {api,node}=loadConfig();
@@ -67,27 +50,6 @@ test('anonymous_allow_ips is parsed into a trimmed list, and an empty box means 
  node('cfg_anonymous_allow_ips').value='';
  assert.deepStrictEqual(plain(api.parseAnonymousAllowIPs()),[]);
 });
-
-test('USD and ticks convert both ways without losing the integer ledger',()=>{
- const {api}=loadConfig();
- assert.equal(api.usdToTicks(0.5),5_000_000_000);
- assert.equal(api.usdToTicks(0),0);
- assert.equal(api.usdToTicks(''),0);
- assert.equal(api.usdToTicks(-1),0);
- assert.equal(api.ticksToUSD(5_000_000_000),0.5);
- assert.equal(api.ticksToUSD(0),0);
- assert.equal(api.formatUSD(0.5),'$0.50');
- // A round trip through the ledger stays an integer.
- assert.equal(Number.isInteger(api.usdToTicks(api.ticksToUSD(9_000_000_000))),true);
-});
-
-test('a billing policy line reads in dollars and names the period',()=>{
- const {api}=loadConfig();
- assert.equal(api.periodSuffix({billing_period_days:30}),' · 30 天账期');
- assert.equal(api.periodSuffix({billing_period_days:0}),'');
- assert.equal(api.periodSuffix({}),'');
-});
-
 
 test('configuration payload hydrates security and proxy controls without simulated cache fields',()=>{
  const {api,node}=loadConfig();

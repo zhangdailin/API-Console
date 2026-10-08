@@ -12,6 +12,7 @@ import (
 )
 
 type apiKeyRecord struct {
+	EncryptedSecret      string   `json:"encrypted_secret,omitempty"`
 	ID                   int64    `json:"id"`
 	Name                 string   `json:"name"`
 	KeyHash              string   `json:"key_hash"`
@@ -49,12 +50,19 @@ func (s *redisStore) CreateApiKey(ctx context.Context, key *ApiKey) error {
 	}
 
 	record := apiKeyRecordFromKey(key)
+	if key.KeyFull != "" {
+		record.EncryptedSecret, err = s.sealApiKey(key.KeyFull)
+		if err != nil {
+			return err
+		}
+		key.SecretAvailable = true
+	}
 	data, err := json.Marshal(record)
 	if err != nil {
 		return err
 	}
 
-	pipe := s.client.Pipeline()
+	pipe := s.client.TxPipeline()
 	pipe.Set(ctx, s.apiKeysKey(id), data, 0)
 	pipe.SAdd(ctx, s.apiKeysIDsKey(), id)
 	if record.KeyHash != "" {
@@ -89,31 +97,16 @@ func (s *redisStore) UpdateApiKey(ctx context.Context, key *ApiKey) error {
 	if key == nil || key.ID == 0 {
 		return ErrNoRows
 	}
-	existing, err := s.getApiKeyByID(ctx, key.ID)
-	if err != nil {
-		return err
-	}
-	record := apiKeyRecordFromKey(key)
-	data, err := json.Marshal(record)
-	if err != nil {
-		return err
-	}
-	pipe := s.client.Pipeline()
-	pipe.Set(ctx, s.apiKeysKey(key.ID), data, 0)
-	if existing.KeyHash != record.KeyHash {
-		if existing.KeyHash != "" {
-			pipe.Del(ctx, s.apiKeysHashKey(existing.KeyHash))
+	return s.mutateApiKey(ctx, key.ID, func(current *apiKeyRecord) error {
+		next := apiKeyRecordFromKey(key)
+		// Secret-bearing rows may only change identity through atomic rotation.
+		if current.EncryptedSecret != "" {
+			next.KeyHash, next.KeyPrefix, next.KeySuffix = current.KeyHash, current.KeyPrefix, current.KeySuffix
 		}
-		if record.KeyHash != "" {
-			pipe.Set(ctx, s.apiKeysHashKey(record.KeyHash), key.ID, 0)
-		}
-	}
-	// Keep the reservation mirror in step with the stored policy. The settled
-	// usage counter is ledger state, not a policy field, so an update never
-	// rewrites it.
-	pipe.Set(ctx, s.apiKeyBillingLimitKey(key.ID), record.BillingLimitUSDTicks, 0)
-	_, err = pipe.Exec(ctx)
-	return err
+		next.EncryptedSecret = current.EncryptedSecret
+		*current = next
+		return nil
+	})
 }
 
 func (s *redisStore) DeleteApiKey(ctx context.Context, id int64) error {
@@ -509,6 +502,7 @@ func apiKeyRecordFromKey(key *ApiKey) apiKeyRecord {
 
 func (r apiKeyRecord) toApiKey() *ApiKey {
 	return &ApiKey{
+		SecretAvailable:        r.EncryptedSecret != "",
 		ID:                     r.ID,
 		Name:                   r.Name,
 		KeyHash:                r.KeyHash,

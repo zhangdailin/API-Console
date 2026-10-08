@@ -57,6 +57,10 @@ func parseTemplates() (*template.Template, error) {
 // RenderIndex renders the main index page
 func (r *Renderer) RenderIndex(w http.ResponseWriter, req *http.Request, cfg *config.Config, s *store.Store) error {
 	activeTab := getActiveTab(req)
+	if activeTab == "tutorial" {
+		http.Redirect(w, req, cfg.AdminPath+"/?tab=keys&section=auth", http.StatusSeeOther)
+		return nil
+	}
 
 	// The sidebar account counters deliberately ship no server-side number. The
 	// page used to count !Enabled here, the accounts page counted its own verdict
@@ -84,8 +88,6 @@ func (r *Renderer) RenderIndex(w http.ResponseWriter, req *http.Request, cfg *co
 		templateName = "page-logs"
 	case "alerts":
 		templateName = "page-alerts"
-	case "tutorial":
-		templateName = "page-tutorial"
 	case "models":
 		templateName = "page-models"
 	case "keys":

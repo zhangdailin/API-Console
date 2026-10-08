@@ -46,26 +46,14 @@ func TestRenderIndexShipsNoCompetingSidebarCount(t *testing.T) {
 	testutil.MustNotContainAny(t, body, `id="footerTotal">2</span>`, `id="footerAbnormal">1</span>`)
 }
 
-// TestTutorialPageListsEveryChannel proves that the tutorial's single channel
-// table includes every public base URL. Channel content intentionally lives in
-// the template now; tutorial.js only fills the current origin and handles copy.
-func TestTutorialPageListsEveryChannel(t *testing.T) {
+func TestTutorialRedirectsToKeys(t *testing.T) {
 	renderer, err := NewRenderer()
-	testutil.NoError(t, err, "NewRenderer() error = %v")
-
+	testutil.NoError(t, err)
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/?tab=tutorial", nil)
-	testutil.NoError(t, renderer.RenderIndex(recorder, request, &config.Config{AdminPath: "/admin"}, nil), "RenderIndex() error = %v")
-	page := recorder.Body.String()
-
-	for _, key := range []string{"cline", "workbuddy", "qoder", "grok"} {
-		testutil.CheckContain(t, page, `badge-`+key)
-		// The row's copyable address must have been filled in for this channel.
-		testutil.CheckContain(t, page, `data-api-path="/`+key+`/v1"`)
-	}
-	for _, unrelatedID := range []string{"modelModal", "createKeyModal", "editKeyModal", "showKeyModal", "deleteKeyModal"} {
-		testutil.CheckNotContain(t, page, `id="`+unrelatedID+`"`)
-	}
+	err = renderer.RenderIndex(recorder, httptest.NewRequest("GET", "/?tab=tutorial", nil), &config.Config{AdminPath: "/console"}, nil)
+	testutil.NoError(t, err)
+	testutil.Equal(t, recorder.Code, http.StatusSeeOther)
+	testutil.Equal(t, recorder.Header().Get("Location"), "/console/?tab=keys&section=auth")
 }
 
 func TestPagesRenderOnlyTheirOwnModals(t *testing.T) {
@@ -105,7 +93,7 @@ func TestSidebarUsesRealLinks(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/?tab=ops", nil)
 	testutil.NoError(t, renderer.RenderIndex(recorder, request, &config.Config{AdminPath: "/console"}, nil), "RenderIndex() error = %v")
 	page := recorder.Body.String()
-	for _, tab := range []string{"ops", "logs", "accounts", "keys", "models", "alerts", "tutorial"} {
+	for _, tab := range []string{"ops", "logs", "accounts", "keys", "models", "alerts"} {
 		testutil.CheckContain(t, page, `href="/console/?tab=`+tab+`"`)
 	}
 	testutil.CheckNotContain(t, page, `onclick="switchTab(`)
@@ -123,7 +111,6 @@ func TestEveryPageRendersTheSharedDocumentHead(t *testing.T) {
 		"ops":      "opsAlertRules",
 		"logs":     "filterActor",
 		"alerts":   "alertsEvents",
-		"tutorial": "channels",
 		"models":   "currentChannelPill",
 		"keys":     "authConfig",
 		"accounts": "accountsList",

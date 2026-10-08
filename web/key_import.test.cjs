@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const source = fs.readFileSync(__dirname + '/static/js/tutorial.js', 'utf8');
+const source = fs.readFileSync(__dirname + '/static/js/api-key-import.js', 'utf8');
 const registry = fs.readFileSync(__dirname + '/static/js/provider-registry.js', 'utf8');
 function setup(fetcher) {
   const nodes = new Map(), calls = [];
@@ -14,27 +14,26 @@ function setup(fetcher) {
   }
   const document = { querySelectorAll: () => [], addEventListener() {}, createElement: node,
     getElementById(id) { if (!nodes.has(id)) nodes.set(id, node()); return nodes.get(id); } };
-  document.getElementById('tutImportApp').value = 'codex';
-  const window = { location: { origin: 'https://gateway.example', href: '' } };
-  const context = { window, document, URL, AbortController, Set, fetch: async (...args) => {
+  document.getElementById('keyImportApp').value = 'codex';
+  const window = { location: { origin: 'https://gateway.example', href: '' }, addEventListener() {} };
+  const context = { apiKeys: [{id:1,name:'test',secret_available:true,enabled:true}], keyStatus: row => row.enabled ? 'enabled' : 'disabled', getKeySecret: async () => 'sk-test+/=&', openModal() {}, closeModal() {}, setText: (id,text) => document.getElementById(id).textContent=text, window, document, URL, AbortController, Set, fetch: async (...args) => {
     calls.push(args); return fetcher ? fetcher(...args) : { ok: true, headers: new Headers({ 'content-type': 'application/json' }), json: async () => ({data: [{id: 'model/中文 +&?'}, {id: 'second'}]}) };
   } };
   vm.runInNewContext(registry, context); vm.runInNewContext(source, context);
-  const el = id => document.getElementById('tut' + id);
+  const el = id => document.getElementById('key' + id);
   const event = { preventDefault() {} };
-  return { el, window, calls, event, async load(channel = 'workbuddy') {
-    el('ImportChannel').value = channel; el('ImportChannel').events.change();
-    el('ImportKey').value = 'sk-test+/=&'; el('ImportKey').events.input();
-    await el('LoadModels').events.click();
+  return { el, window, calls, event, context, async load(channel = 'workbuddy') {
+    await context.openKeyImport(1);
+    if (channel !== 'workbuddy') { el('ImportChannel').value = channel; await el('ImportChannel').events.change(); }
     el('ImportModel').value = 'model/中文 +&?'; el('ImportModel').events.change();
   } };
 }
 test('all four channels import Codex and Claude with encoded credentials and exact endpoints', async () => {
   for (const channel of ['workbuddy', 'qoder', 'cline', 'grok']) {
     const t = setup(); await t.load(channel);
-    assert.equal(t.calls[0][0], 'https://gateway.example/' + channel + '/v1/models');
-    assert.equal(t.calls[0][1].credentials, 'omit');
-    assert.equal(t.calls[0][1].headers.Authorization, 'Bearer sk-test+/=&');
+    assert.equal(t.calls.at(-1)[0], 'https://gateway.example/' + channel + '/v1/models');
+    assert.equal(t.calls.at(-1)[1].credentials, 'omit');
+    assert.equal(t.calls.at(-1)[1].headers.Authorization, 'Bearer sk-test+/=&');
     for (const app of ['codex', 'claude']) {
       t.el('ImportApp').value = app; t.el('ImportApp').events.change();
       assert.equal(t.el('ImportButton').disabled, false);
@@ -56,7 +55,7 @@ test('Key/channel changes invalidate catalog; arbitrary model cannot be imported
   t.el('ImportForm').events.submit(t.event); assert.equal(t.window.location.href, '');
   t.el('ImportModel').value = 'second'; t.el('ImportModel').events.change();
   assert.equal(t.el('ImportButton').disabled, false);
-  t.el('ImportKey').events.input(); assert.equal(t.el('ImportButton').disabled, true);
+  t.context.closeKeyImport(); assert.equal(t.el('ImportButton').disabled, true);
   t.el('ImportForm').events.submit(t.event); assert.equal(t.window.location.href, '');
 });
 test('failed, empty or malformed catalog never enables import or exposes error secrets', async () => {
@@ -69,16 +68,32 @@ test('failed, empty or malformed catalog never enables import or exposes error s
   assert.doesNotMatch(t.el('CatalogStatus').textContent, /secret/);
 });
 test('late catalog cannot restore models after Key changes', async () => {
-  let resolve;
-  const t = setup(() => new Promise(r => { resolve = r; }));
+  let resolve, notify;
+  const started = new Promise(r => {notify=r;});
+  const t = setup(() => new Promise(r => { resolve = r; notify(); }));
   const pending = t.load();
-  t.el('ImportKey').value = 'sk-new'; t.el('ImportKey').events.input();
+  await started;
+  t.context.closeKeyImport();
   resolve({ok: true, headers: new Headers({'content-type':'application/json'}), json: async () => ({data:[{id:'model/中文 +&?'}]})});
   await pending; assert.equal(t.el('ImportButton').disabled, true); assert.equal(t.el('ImportModel').disabled, true);
 });
-test('tutorial describes all channel protocols and loads registry before import code', () => {
-  const html = fs.readFileSync(__dirname + '/templates/pages/tutorial.html', 'utf8');
-  assert.ok(html.indexOf('provider-registry.js') < html.indexOf('tutorial.js'));
-  assert.match(html, /data-api-path="\/grok"/); assert.doesNotMatch(html, /不适用|grok-3|"hy3"|填写对应凭据/);
+test('key page loads import logic without tutorials, budgets or secret storage', () => {
+  const html = fs.readFileSync(__dirname + '/templates/pages/config.html', 'utf8');
+  const modals = fs.readFileSync(__dirname + '/templates/components/modals/key-modals.html', 'utf8');
+  const sidebar = fs.readFileSync(__dirname + '/templates/partials/sidebar.html', 'utf8');
+  assert.ok(html.indexOf('provider-registry.js') < html.indexOf('api-key-import.js'));
+  assert.match(modals, /keyImportForm/); assert.doesNotMatch(sidebar, /tab=tutorial|使用教程/);
+  assert.doesNotMatch(modals, /billing|预算|账期|金额|消费/);
   assert.doesNotMatch(source, /localStorage|sessionStorage|console\./);
+});
+test('catalog failure can be retried and disabled keys cannot import', async () => {
+  let fail = true;
+  const t = setup(async () => { if (fail) throw Error('secret'); return {ok:true,headers:new Headers({'content-type':'application/json'}),json:async()=>({data:[{id:'second'}]})}; });
+  await t.load(); fail=false; await t.el('LoadModels').events.click();
+  t.el('ImportModel').value='second'; t.el('ImportModel').events.change();
+  assert.equal(t.el('ImportButton').disabled,false);
+  t.context.apiKeys[0].enabled=false;
+  t.el('ImportForm').events.submit(t.event);
+  assert.equal(t.window.location.href,'');
+  assert.equal(t.el('ImportButton').disabled,true);
 });

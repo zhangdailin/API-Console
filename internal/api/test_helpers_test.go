@@ -15,7 +15,7 @@ import (
 func newTestStore(t *testing.T, prefix string) (*store.Store, *miniredis.Miniredis) {
 	t.Helper()
 	mini := miniredis.RunT(t)
-	s, err := store.New(store.Options{RedisAddr: mini.Addr(), RedisPrefix: prefix})
+	s, err := store.New(store.Options{RedisAddr: mini.Addr(), CredentialEncryptionKey: []byte("01234567890123456789012345678901"), RedisPrefix: prefix})
 	testutil.NoError(t, err, "store.New() error = %v")
 	t.Cleanup(func() { _ = s.Close() })
 	return s, mini

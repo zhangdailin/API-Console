@@ -20,11 +20,11 @@ anonymous_allow_ips 空值要求所有来源使用 Key，名单配置损坏也�
 
 四个固定渠道都提供 OpenAI Chat Completions、Responses（Codex）及 Anthropic Messages（Claude Code）。OpenAI / Codex Base URL 使用上表含 `/v1` 的地址；Claude Code 和 Anthropic SDK 使用站点根地址或 `/{channel}`，由客户端追加 `/v1/messages`。其他客户端是否需要 `/v1` 取决于其追加路径方式。
 
-管理后台「使用教程」提供 CC Switch 一键导入：选择 Codex 或 Claude Code、渠道，粘贴完整面板 Key，点击「读取可用模型」，选择目录中的模型，再点击导入。目录使用该 Key 请求渠道公开 `/models`，因此遵守公开可见性与 Key 模型权限，不使用管理列表代替。Key 或渠道改变后必须重新读取；没有目录结果时不能导入。
+管理后台「配置管理 → API Key 管理」每条密钥提供复制与 CC Switch 导入：点击该密钥的导入按钮，选择 Codex 或 Claude Code、渠道和目录模型，再点击导入。弹窗按需读取完整密钥并自动读取默认 WorkBuddy 目录；切换渠道重新读取。目录使用该 Key 请求渠道公开 `/models`，因此遵守公开可见性与 Key 模型权限，不使用管理列表代替。Key 或渠道改变后必须重新读取；没有目录结果时不能导入。
 
 导入使用 [CC Switch 官方深链接协议](https://github.com/farion1231/cc-switch/blob/main/docs/user-manual/en/5-faq/5.3-deeplink.md) `ccswitch://v1/import`，要求本机已安装并注册协议的 CC Switch，浏览器允许打开应用。应用中的确认和启用仍由用户完成，网页不能检测导入成功。Claude Code 的默认模型及 Haiku / Sonnet / Opus 别名均映射到所选模型；Codex 使用 Responses，CC Switch 默认生成 `model_reasoning_effort="high"`，不支持 high 的模型需在启用前按目录能力调整或移除此字段。
 
-完整 Key 不写浏览器存储，仅用于同源模型请求与本机协议导入；深链接本身含密钥，不应分享。创建或轮换时保存的完整 Key 才能使用，列表中的掩码不可导入。该功能不自动测试真实生成，也不承诺全部模型支持视觉、搜索或完整编程工具。
+完整 Key 不写浏览器存储，仅用于同源模型请求与本机协议导入；深链接本身含密钥，不应分享。新建或轮换的 Key 可从列表按需复制和导入；旧版仅存哈希的 Key 继续有效，需要手动轮换后才支持复制和导入，列表中的掩码不可使用。旧教程地址自动转到 API Key 子标签。该功能不自动测试真实生成，也不承诺全部模型支持视觉、搜索或完整编程工具。
 
 ## 2. 推理与目录接口
 
@@ -120,6 +120,7 @@ Chat 桥接写递增 sequence_number，便于客户端识别顺序；当前没�
 | `/api/accounts/{id}` | GET / PUT / DELETE；账号编辑及刷新分支以处理器为准 |
 | `/api/keys` | GET 列表、POST 创建 |
 | `/api/keys/{id}` | PATCH 策略、DELETE 删除 |
+| `/api/keys/{id}/secret` | GET 管理员按需读取完整秘密，禁止缓存；旧 Key 返回 409 |
 | `/api/keys/{id}/rotate` | POST 轮换秘密，旧 Key 失效 |
 | `/api/keys/{id}/reset-usage` | POST 重置账期用量，区别于正常账期滚动 |
 | `/api/models` | GET 列表、POST 创建；分页参数存在时响应形态与裸列表不同 |
@@ -137,7 +138,7 @@ Chat 桥接写递增 sequence_number，便于客户端识别顺序；当前没�
 | `/api/system/version`、`check-updates`、`operation` | GET 版本、发行发现和升级状态 |
 | `/api/system/update`、`rollback` | POST 异步系统操作，见升级手册 |
 
-API Key 完整秘密只在创建或轮换时返回；列表掩码不能用于调用。支持模型白名单、请求限速、有效期、并发及预算；空模型白名单兼容解释为不限模型。费用预留和结算用整数 USD ticks，1 USD 为 100 亿 ticks。
+API Key 创建和轮换时返回完整秘密，并使用主密钥派生的独立加密用途保存密文；认证继续使用哈希。管理员可通过 secret 接口读取，列表仅返回掩码及 secret_available。加密能力未配置、密文损坏或解密失败时明确报错，不回退明文。轮换原子替换密文、哈希及索引，使旧 Key 立即失效；列表掩码不能用于调用。前端创建默认消费不限额，编辑不提交预算字段，已有后台预算策略继续生效。支持模型白名单、请求限速、有效期、并发及预算；空模型白名单兼容解释为不限模型。费用预留和结算用整数 USD ticks，1 USD 为 100 亿 ticks。
 
 ### 管理登录示例
 

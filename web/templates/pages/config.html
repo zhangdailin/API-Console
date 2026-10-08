@@ -65,7 +65,7 @@
               <h2 class="settings-card-title">认证与密钥</h2>
               <span class="mini-badge">访问控制</span>
             </div>
-            <p class="settings-card-note">后台登录凭据与推理 API Key 访问控制。API Key 请在侧栏“API 密钥”页面单独创建、禁用和撤销。</p>
+            <p class="settings-card-note">后台登录凭据与推理 API Key 访问控制。API Key 请在本页“API Key 管理”标签创建、复制和管理。</p>
             <div class="settings-card-body">
               <div class="form-row">
                 <div class="form-row-label">
@@ -150,9 +150,9 @@
           <h2 class="settings-card-title">API Key 管理</h2>
           <p class="settings-card-note">用于访问接口的身份认证；禁用的 Key 将立即无法访问 API。</p>
         </div>
-        <button type="button" class="btn btn-primary" onclick="openCreateKeyModal()">+ 创建 API Key</button>
+        <div class="key-toolbar-actions"><span id="keyCount" class="mini-badge">—</span><button id="keyRefresh" type="button" class="btn btn-outline" onclick="loadApiKeys()">刷新</button><button type="button" class="btn btn-primary" onclick="openCreateKeyModal()">+ 创建 API Key</button></div>
       </div>
-      <div id="keysList" class="settings-card-body"></div>
+      <div class="key-filters"><label class="key-search-label"><span class="sr-only">搜索密钥名称或尾号</span><input id="keySearch" class="form-input" type="search" placeholder="搜索名称或密钥尾号" oninput="filterApiKeys()"></label><select id="keyStatusFilter" class="form-input" aria-label="密钥状态" onchange="filterApiKeys()"><option value="">全部状态</option><option value="enabled">启用</option><option value="disabled">停用</option><option value="expired">已过期</option></select><span id="keyLoadStatus" role="status" aria-live="polite"></span></div><div id="keysList" class="settings-card-body key-list"></div><div class="key-list-footer"><span id="keyPageSummary"></span><div id="keyPagination" class="pagination"></div></div>
     </div>
   </main>
 
@@ -160,7 +160,10 @@
   <div class="toast-container" id="toastContainer"></div>
 
   {{template "page-scripts.html" .}}
+  <script src="{{.AdminPath}}/js/provider-registry.js?v={{.AssetVersion}}"></script>
   <script src="{{.AdminPath}}/js/config.js?v={{.AssetVersion}}"></script>
+  <script src="{{.AdminPath}}/js/api-keys.js?v={{.AssetVersion}}"></script>
+  <script src="{{.AdminPath}}/js/api-key-import.js?v={{.AssetVersion}}"></script>
 </body>
 
 </html>

@@ -821,35 +821,13 @@ test('anonymized Qoder payloads render exact 等级 / 配额 / 状态', () => {
 // ---------------------------------------------------------------------------
 // Channel enumeration drift.
 //
-// Adding a channel means touching several places that are plain markup: the
-// tutorial's quick-reference table, and every form that picks a channel. Qoder
-// shipped without any of them, so the tutorial page listed four channels and the
-// model form could not create a Qoder model at all. These cases read the real
-// templates and fail when a channel in the tutorial's own list is missing.
-// ---------------------------------------------------------------------------
+// Channel forms and badges consume the shared provider registry.
 
 const CHANNEL_SELECT_TEMPLATES = [
   'templates/components/modals/model-modal.html',
 ];
 
 const CHANNEL_KEYS = ['workbuddy', 'qoder', 'cline', 'grok'];
-
-test('every channel in the tutorial list appears in the tutorial quick-reference table', () => {
-  const template = fs.readFileSync(path.join(__dirname, 'templates/pages/tutorial.html'), 'utf8');
-  for (const key of CHANNEL_KEYS) {
-    assert.match(
-      template,
-      new RegExp(`badge-${key}\\b`),
-      `the tutorial quick-reference table has no row for ${key}`,
-    );
-    // Each row also has to expose a copyable base URL for that channel.
-    assert.match(
-      template,
-      new RegExp(`data-api-path="/${key}/v1"`),
-      `the tutorial table has no address cell for ${key}`,
-    );
-  }
-});
 
 test('channel forms are populated from the backend provider registry', () => {
   const template = fs.readFileSync(path.join(__dirname, CHANNEL_SELECT_TEMPLATES[0]), 'utf8');
@@ -859,7 +837,7 @@ test('channel forms are populated from the backend provider registry', () => {
   for (const key of CHANNEL_KEYS) assert.doesNotMatch(template, new RegExp(`<option value="${key}">`, 'i'));
 });
 
-test('every channel has a badge style, so the tutorial row is not unstyled', () => {
+test('every channel has a badge style, for channel labels', () => {
   const css = fs.readFileSync(path.join(__dirname, 'static/css/main.css'), 'utf8');
   for (const key of CHANNEL_KEYS) {
     assert.match(css, new RegExp(`\\.badge-${key}\\b`), `no CSS rule for .badge-${key}`);

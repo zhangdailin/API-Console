@@ -1,141 +1,168 @@
-<!-- 创建 Key 弹窗 -->
 <div class="modal" id="createKeyModal" role="dialog" aria-modal="true" aria-labelledby="createKeyModalTitle">
-  <div class="modal-content modal-content-md">
-    <div class="modal-header">
-      <h3 class="modal-title" id="createKeyModalTitle">创建 API Key</h3>
-      <button class="modal-close" type="button" onclick="closeCreateKeyModal()" aria-label="关闭创建 API Key 窗口">
-        &times;
-      </button>
-    </div>
-    <form onsubmit="createApiKey(event)">
-      <div class="form-group">
-        <label class="form-label">名称 / 备注（支持换行批量创建）</label>
-        <textarea class="form-input textarea-resizable" id="keyName" required placeholder="每行一个名称，例如：&#10;生产环境&#10;测试用&#10;开发者-张三"
-          rows="4"></textarea>
-      </div>
-      <div class="form-group">
-        <label class="form-label">允许模型（可选，每行或逗号分隔）</label>
-        <textarea class="form-input" id="keyAllowedModels" placeholder="留空表示全部模型，例如：&#10;grok-4.6" rows="3"></textarea>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">每分钟请求数（RPM）</label>
-          <input class="form-input" id="keyRPMLimit" type="number" min="0" value="0" />
-        </div>
-        <div class="form-group">
-          <label class="form-label">到期时间（可选）</label>
-          <input class="form-input" id="keyExpiresAt" type="datetime-local" />
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">用量上限（USD，0 为不限）</label>
-          <input class="form-input" id="keyBillingLimit" type="number" min="0" step="0.01" value="0" />
-        </div>
-        <div class="form-group">
-          <label class="form-label">账期（天，0 为不自动重置）</label>
-          <input class="form-input" id="keyBillingPeriod" type="number" min="0" value="0" />
-        </div>
-      </div>
-      <button type="submit" class="btn btn-primary modal-submit">
-        创建
-      </button>
-    </form>
-  </div>
+<div class="modal-content modal-content-md key-modal">
+<div class="modal-header">
+<h3 class="modal-title" id="createKeyModalTitle">创建 API Key</h3>
+<button class="modal-close" type="button" onclick="closeCreateKeyModal()" aria-label="关闭">&times;</button>
 </div>
-
-<!-- Key 策略编辑弹窗 -->
+<form onsubmit="createApiKey(event)">
+<div class="modal-body">
+<h4>基本信息</h4>
+<label class="form-label" for="keyName">名称 / 备注</label>
+<textarea class="form-input" id="keyName" required rows="3" placeholder="每行一个名称，支持批量创建">
+</textarea>
+<p class="form-hint">例如生产环境、开发测试；多个名称使用同一套访问策略。</p>
+<h4>访问限制</h4>
+<label class="form-label" for="keyAllowedModels">允许模型</label>
+<textarea class="form-input" id="keyAllowedModels" rows="3" placeholder="留空表示全部模型；换行或逗号分隔">
+</textarea>
+<div class="key-form-grid">
+<div>
+<label class="form-label" for="keyRPMLimit">每分钟请求数（RPM）</label>
+<input class="form-input" id="keyRPMLimit" type="number" min="0" step="1" value="0">
+</div>
+<div>
+<label class="form-label" for="keyMaxConcurrent">并发上限</label>
+<input class="form-input" id="keyMaxConcurrent" type="number" min="0" max="1024" step="1" value="0">
+</div>
+</div>
+<p class="form-hint">RPM 与并发上限为 0 时表示不限</p>
+<div>
+<label class="form-label" for="keyExpiresAt">到期时间</label>
+<input class="form-input" id="keyExpiresAt" type="datetime-local" >
+</div>
+<p class="form-hint">留空表示永不过期</p>
+<p id="createKeyError" class="warning-text" role="alert">
+</p>
+</div>
+<div class="modal-actions">
+<button type="button" class="btn btn-outline" onclick="closeCreateKeyModal()">取消</button>
+<button id="createKeySubmit" type="submit" class="btn btn-primary">创建密钥</button>
+</div>
+</form>
+</div>
+</div>
 <div class="modal" id="editKeyModal" role="dialog" aria-modal="true" aria-labelledby="editKeyModalTitle">
-  <div class="modal-content modal-content-md">
-    <div class="modal-header">
-      <h3 class="modal-title" id="editKeyModalTitle">编辑 API Key 策略</h3>
-      <button class="modal-close" type="button" onclick="closeEditKeyModal()" aria-label="关闭编辑 API Key 窗口">&times;</button>
-    </div>
-    <form onsubmit="saveKeyPolicy(event)">
-      <input type="hidden" id="editKeyId" />
-      <div class="form-group">
-        <label class="form-label">允许模型（每行或逗号分隔）</label>
-        <textarea class="form-input" id="editKeyAllowedModels" placeholder="留空表示全部模型" rows="4"></textarea>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">每分钟请求数（0 表示不限）</label>
-          <input class="form-input" id="editKeyRPMLimit" type="number" min="0" value="0" />
-        </div>
-        <div class="form-group">
-          <label class="form-label">到期时间（留空表示永不过期）</label>
-          <input class="form-input" id="editKeyExpiresAt" type="datetime-local" />
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">用量上限（USD，0 为不限）</label>
-          <input class="form-input" id="editKeyBillingLimit" type="number" min="0" step="0.01" value="0" />
-        </div>
-        <div class="form-group">
-          <label class="form-label">账期（天，0 为不自动重置）</label>
-          <input class="form-input" id="editKeyBillingPeriod" type="number" min="0" value="0" />
-        </div>
-      </div>
-      <p class="form-hint" id="editKeyBillingUsage"></p>
-      <button type="submit" class="btn btn-primary modal-submit">保存策略</button>
-    </form>
-  </div>
+<div class="modal-content modal-content-md key-modal">
+<div class="modal-header">
+<h3 class="modal-title" id="editKeyModalTitle">编辑访问策略</h3>
+<button class="modal-close" type="button" onclick="closeEditKeyModal()" aria-label="关闭">&times;</button>
 </div>
-
-<!-- Key 展示弹窗 -->
+<form onsubmit="saveKeyPolicy(event)">
+<div class="modal-body">
+<p id="editKeyName" class="key-note">
+</p>
+<input type="hidden" id="editKeyId">
+<h4>访问限制</h4>
+<label class="form-label" for="editKeyAllowedModels">允许模型</label>
+<textarea class="form-input" id="editKeyAllowedModels" rows="3" placeholder="留空表示全部模型；换行或逗号分隔">
+</textarea>
+<div class="key-form-grid">
+<div>
+<label class="form-label" for="editKeyRPMLimit">每分钟请求数（RPM）</label>
+<input class="form-input" id="editKeyRPMLimit" type="number" min="0" step="1" value="0">
+</div>
+<div>
+<label class="form-label" for="editKeyMaxConcurrent">并发上限</label>
+<input class="form-input" id="editKeyMaxConcurrent" type="number" min="0" max="1024" step="1" value="0">
+</div>
+</div>
+<p class="form-hint">RPM 与并发上限为 0 时表示不限</p>
+<div>
+<label class="form-label" for="editKeyExpiresAt">到期时间</label>
+<input class="form-input" id="editKeyExpiresAt" type="datetime-local" >
+</div>
+<p class="form-hint">留空表示永不过期</p>
+<p id="editKeyError" class="warning-text" role="alert">
+</p>
+</div>
+<div class="modal-actions">
+<button type="button" class="btn btn-outline" onclick="closeEditKeyModal()">取消</button>
+<button id="editKeySubmit" type="submit" class="btn btn-primary">保存策略</button>
+</div>
+</form>
+</div>
+</div>
 <div class="modal" id="showKeyModal" role="dialog" aria-modal="true" aria-labelledby="showKeyModalTitle">
-  <div class="modal-content modal-content-lg">
-    <div class="modal-header">
-      <h3 class="modal-title" id="showKeyModalTitle">API Key 已创建</h3>
-    </div>
-    <div class="modal-body">
-    <p class="modal-intro">
-      请立即复制并保存您的 API Key：
-    </p>
-    <div id="fullKeyDisplay" class="modal-scroll">
-    </div>
-    <div class="warning-box">
-      <strong>请妥善保存</strong><br />
-      关闭此窗口后将无法再次查看完整 Key
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-primary" type="button" onclick="copyAllKeys()">
-        复制全部
-      </button>
-      <button class="btn btn-neutral" type="button"
-        onclick="closeShowKeyModal()">
-        我已保存，关闭
-      </button>
-    </div>
-    </div>
-  </div>
+<div class="modal-content modal-content-lg key-modal">
+<div class="modal-header">
+<h3 class="modal-title" id="showKeyModalTitle">密钥已生成</h3>
 </div>
-
-<!-- 删除 Key 确认弹窗 -->
-<div class="modal" id="deleteKeyModal" role="alertdialog" aria-modal="true" aria-labelledby="deleteKeyModalTitle" aria-describedby="deleteKeyModalDescription">
-  <div class="modal-content modal-content-sm">
-    <div class="modal-header">
-      <h3 class="modal-title" id="deleteKeyModalTitle">删除 API Key</h3>
-      <button class="modal-close" type="button" onclick="closeDeleteKeyModal()" aria-label="关闭删除 API Key 窗口">
-        &times;
-      </button>
-    </div>
-    <div class="modal-body">
-    <p class="modal-confirm-text" id="deleteKeyModalDescription">
-      确定要删除 Key「<strong id="deleteKeyName"></strong>」吗？<br />
-      <span class="warning-text">此操作不可撤销，使用此 Key 的应用将无法访问。</span>
-    </p>
-    <input type="hidden" id="deleteKeyId" />
-    <div class="modal-actions">
-      <button class="btn btn-neutral" type="button"
-        onclick="closeDeleteKeyModal()">
-        取消
-      </button>
-      <button class="btn btn-danger" type="button" onclick="confirmDeleteKey()">
-        删除
-      </button>
-    </div>
-    </div>
-  </div>
+<div class="modal-body">
+<p class="form-hint">复制完整密钥用于客户端接入；以后也可从密钥列表复制。</p>
+<div id="fullKeyDisplay" class="modal-scroll">
+</div>
+</div>
+<div class="modal-actions">
+<button type="button" class="btn btn-outline" onclick="copyAllKeys()">复制全部成功项</button>
+<button type="button" class="btn btn-primary" onclick="closeShowKeyModal()">完成</button>
+</div>
+</div>
+</div>
+<div class="modal" id="deleteKeyModal" role="alertdialog" aria-modal="true" aria-labelledby="deleteKeyModalTitle">
+<div class="modal-content modal-content-sm key-modal">
+<div class="modal-header">
+<h3 id="deleteKeyModalTitle" class="modal-title">
+</h3>
+</div>
+<div class="modal-body">
+<p id="deleteKeyModalDescription">
+</p>
+<p id="deleteKeyError" class="warning-text" role="alert">
+</p>
+</div>
+<div class="modal-actions">
+<button type="button" class="btn btn-outline" onclick="closeDeleteKeyModal()">取消</button>
+<button id="deleteKeyConfirm" type="button" class="btn btn-danger" onclick="confirmDeleteKey()">
+</button>
+</div>
+</div>
+</div>
+<div class="modal" id="keyImportModal" role="dialog" aria-modal="true" aria-labelledby="keyImportTitle">
+<div class="modal-content modal-content-md key-modal">
+<div class="modal-header">
+<h3 class="modal-title" id="keyImportTitle">导入 CC Switch</h3>
+<button class="modal-close" type="button" onclick="closeKeyImport()" aria-label="关闭">&times;</button>
+</div>
+<form id="keyImportForm">
+<div class="modal-body">
+<p id="keyImportName" class="key-note">
+</p>
+<div class="key-form-grid">
+<div>
+<label class="form-label" for="keyImportApp">客户端</label>
+<select id="keyImportApp" class="form-input">
+<option value="codex">Codex</option>
+<option value="claude">Claude Code</option>
+</select>
+</div>
+<div>
+<label class="form-label" for="keyImportChannel">渠道</label>
+<select id="keyImportChannel" class="form-input">
+</select>
+</div>
+</div>
+<div class="key-catalog-status">
+<span id="keyCatalogStatus" role="status" aria-live="polite">
+</span>
+<button id="keyLoadModels" class="btn btn-outline" type="button">重新读取模型</button>
+</div>
+<label class="form-label" for="keyImportModel">模型</label>
+<select id="keyImportModel" class="form-input" disabled>
+<option value="">请先读取可用模型</option>
+</select>
+<label class="form-label">Base URL</label>
+<output id="keyImportEndpoint" class="key-endpoint">
+</output>
+<p id="keyImportHint" class="form-hint">
+</p>
+<p id="keyImportStatus" role="status" aria-live="polite">
+</p>
+<p class="form-hint">请先安装 CC Switch，导入后在应用中确认并启用提供者。</p>
+</div>
+<div class="modal-actions">
+<button class="btn btn-outline" type="button" onclick="closeKeyImport()">取消</button>
+<button id="keyImportButton" class="btn btn-primary" type="submit" disabled>导入 CC Switch</button>
+</div>
+</form>
+</div>
 </div>
