@@ -427,7 +427,12 @@ func (c *Client) attemptChat(ctx context.Context, url string, body []byte, model
 	if err != nil {
 		return streamResult{}, &attemptStreamError{err: fmt.Errorf("send cline request: %w", err)}
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if attemptErr == nil && result.SawMeaningfulEvent {
+			httpclient.DrainTerminalResponse(reqCtx, resp)
+		}
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))

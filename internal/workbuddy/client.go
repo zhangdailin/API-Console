@@ -229,6 +229,9 @@ func (c *Client) runChat(ctx context.Context, req upstream.UpstreamRequest, time
 	if !result.SawMeaningfulEvent {
 		return fmt.Errorf("workbuddy API returned no usable stream events")
 	}
+	// Finish may cause a streaming caller to cancel immediately. Reclaim the
+	// HTTP/1 connection before advertising completion to that caller.
+	httpclient.DrainTerminalResponse(reqCtx, resp)
 	if onMessage != nil {
 		event := map[string]interface{}{"finishReason": result.FinishReason()}
 		if len(result.Usage) > 0 {
