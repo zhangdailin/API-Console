@@ -2,7 +2,7 @@
 
 ## 1. 环境与结构
 
-Go 版本按 go.mod，当前 1.26.6。前端是 Go 模板与原生 JavaScript，Node.js 用于 *.test.cjs 测试，不是应用运行依赖。Redis 用于真实启动；不少单元测试使用隔离替身。
+Go 版本按 go.mod，当前 1.26.9。前端是 Go 模板与原生 JavaScript，Node.js 用于 *.test.cjs 测试，不是应用运行依赖。Redis 用于真实启动；不少单元测试使用隔离替身。
 
 源码尚使用 orchids-api 模块路径，release ldflags 也依赖它。当前项目展示名为 API-Console，命名审查不代表模块迁移已完成。
 

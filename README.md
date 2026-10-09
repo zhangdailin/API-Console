@@ -4,7 +4,7 @@
 
 **One gateway for WorkBuddy, Qoder, Cline, and Grok Build.**
 
-[![Go](https://img.shields.io/badge/Go-1.26.6%2B-00ADD8?logo=go&logoColor=white)](go.mod)
+[![Go](https://img.shields.io/badge/Go-1.26.9%2B-00ADD8?logo=go&logoColor=white)](go.mod)
 [![Redis](https://img.shields.io/badge/Redis-required-DC382D?logo=redis&logoColor=white)](config.example.json)
 [![CI](https://github.com/zhangdailin/API-Console/actions/workflows/ci.yml/badge.svg)](https://github.com/zhangdailin/API-Console/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/zhangdailin/API-Console)](https://github.com/zhangdailin/API-Console/releases)
@@ -50,7 +50,7 @@ Grok uses the **Build OAuth CLI upstream**. Available models and capabilities de
 
 | Component | Technology |
 |-----------|------------|
-| Backend | Go 1.26.6+, HTTP handlers, provider adapters |
+| Backend | Go 1.26.9+, HTTP handlers, provider adapters |
 | Frontend | Go templates, HTML, CSS, vanilla JavaScript |
 | Storage | Redis for accounts, configuration, API keys, response state, and operational data |
 | Packaging | Single binary with embedded web assets |
@@ -62,7 +62,7 @@ Grok uses the **Build OAuth CLI upstream**. Available models and capabilities de
 
 #### Prerequisites
 
-- Go **1.26.6+**, as specified in [go.mod](go.mod).
+- Go **1.26.9+**, as specified in [go.mod](go.mod).
 - A running Redis instance.
 - Network access to the upstream services you intend to use.
 

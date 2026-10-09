@@ -10,7 +10,7 @@ one of four upstream channels: **WorkBuddy**, **Qoder**, **Cline** and
 **Grok Build**. The deployed binary is named `orchids-server`; that is a build
 artifact name, not a project rename.
 
-Go version comes from `go.mod` (currently 1.26.6). Redis is required at runtime.
+Go version comes from `go.mod` (currently 1.26.9). Redis is required at runtime.
 
 ## Language convention
 

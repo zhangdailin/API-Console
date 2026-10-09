@@ -4,7 +4,7 @@
 
 **统一接入 WorkBuddy、Qoder、Cline 与 Grok Build。**
 
-[![Go](https://img.shields.io/badge/Go-1.26.6%2B-00ADD8?logo=go&logoColor=white)](go.mod)
+[![Go](https://img.shields.io/badge/Go-1.26.9%2B-00ADD8?logo=go&logoColor=white)](go.mod)
 [![Redis](https://img.shields.io/badge/Redis-required-DC382D?logo=redis&logoColor=white)](config.example.json)
 [![CI](https://github.com/zhangdailin/API-Console/actions/workflows/ci.yml/badge.svg)](https://github.com/zhangdailin/API-Console/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/zhangdailin/API-Console)](https://github.com/zhangdailin/API-Console/releases)
@@ -50,7 +50,7 @@ Grok 使用 **Build OAuth CLI 上游**。实际模型及能力取决于账号的
 
 | 组件 | 技术 |
 |------|------|
-| 后端 | Go 1.26.6+、HTTP 处理器、通道适配器 |
+| 后端 | Go 1.26.9+、HTTP 处理器、通道适配器 |
 | 前端 | Go 模板、HTML、CSS、原生 JavaScript |
 | 存储 | Redis，保存账号、配置、API Key、响应状态及运维数据 |
 | 打包 | 单个二进制内嵌前端资源 |
@@ -60,7 +60,7 @@ Grok 使用 **Build OAuth CLI 上游**。实际模型及能力取决于账号的
 
 ### 方式一：源码运行
 
-要求 Go **1.26.6+**（以 [go.mod](go.mod) 为准）、可用的 Redis，以及到所需上游的网络连接。
+要求 Go **1.26.9+**（以 [go.mod](go.mod) 为准）、可用的 Redis，以及到所需上游的网络连接。
 
 ```bash
 git clone https://github.com/zhangdailin/API-Console.git
