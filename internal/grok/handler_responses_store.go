@@ -52,6 +52,13 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 			w.Header().Set("X-Grok2API-Compaction-Session-Drift", strconv.Itoa(drifted))
 		}
 	}
+	// Store client input before flattening; input_items must never expose wire names.
+	storedPayload := responses.CloneStringInterfaceMap(payload)
+	namespaces, namespaceErr := responses.NormalizeNamespacePayload(payload)
+	if namespaceErr != nil {
+		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", namespaceErr.Error())
+		return
+	}
 	if err := normalizeBuildResponsesPayload(payload); err != nil {
 		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
@@ -80,6 +87,14 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 		}
 		if ownership.Provider != ProviderBuild {
 			writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", "previous response provider is incompatible")
+			return
+		}
+		if err := namespaces.MergeStored(ownership.ToolNamespaces); err != nil {
+			writeResponsesAPIError(w, http.StatusServiceUnavailable, "response_state_unavailable", "Stored response tool state unavailable")
+			return
+		}
+		if err := namespaces.ValidatePlainTools(storedPayload["tools"]); err != nil {
+			writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 			return
 		}
 		sess, err = h.openCLIAccountSessionByID(r.Context(), ownership.AccountID, spec.UpstreamModel)
@@ -139,7 +154,7 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 	}
 	copyNativeCLIResponseHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
-	responseID, captured, result := copyNativeCLIResponseAndCaptureModel(w, resp.Body, resp.Header.Get("Content-Type"), modelID)
+	responseID, captured, result := copyNativeCLIResponseAndCaptureModel(w, resp.Body, resp.Header.Get("Content-Type"), modelID, namespaces)
 	h.auditChatOutcome(r.Context(), sess.acc, &chatwire.Request{Model: modelID, StartedAt: started}, result)
 	if session := sessionFromContext(r.Context()); session.Replay && len(captured) > 0 && result.Err == nil {
 		h.captureReasoningReplay(r.Context(), modelID, session.Key, captured)
@@ -152,7 +167,11 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 	// the response it names. The stored record is what GET input_items answers
 	// from, so the chain is folded in here — otherwise a client that continues a
 	// conversation reads back a list with only the last turn in it.
-	storedInput := responses.InputItemsJSON(h.accumulatedInputItems(r, ownerHash, payload))
+	storedInput := responses.InputItemsJSON(h.accumulatedInputItems(r, ownerHash, storedPayload))
+	var storedNamespaces json.RawMessage
+	if len(namespaces) > 0 {
+		storedNamespaces, _ = json.Marshal(namespaces)
+	}
 	if err := h.saveStoredResponse(r, &store.StoredResponse{
 		ResponseID: responseID,
 		OwnerHash:  ownerHash,
@@ -164,6 +183,7 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 		// lets GET /responses/{id}/input_items answer locally instead of doing a
 		// second upstream round trip for data it already had.
 		InputItems:         storedInput,
+		ToolNamespaces:     storedNamespaces,
 		PreviousResponseID: strings.TrimSpace(chatwire.ParseLooseStringAny(payload["previous_response_id"])),
 	}); err != nil {
 		slog.Error("failed to save response ownership", "response_id", responseID, "account_id", sess.acc.ID, "error", err)
@@ -252,6 +272,12 @@ func (h *Handler) HandleResponseResource(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	defer resp.Body.Close()
+	if r.Method == http.MethodGet && len(ownership.ToolNamespaces) > 0 && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if err := restoreNativeResourceNamespaces(resp, ownership.ToolNamespaces); err != nil {
+			writeResponsesAPIError(w, http.StatusBadGateway, "upstream_error", "Response tool state unavailable")
+			return
+		}
+	}
 	copyNativeCLIResponseHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	streamNativeCLIResponse(w, resp.Body)
@@ -341,7 +367,11 @@ func readAndValidateNativeResponse(body io.Reader) ([]byte, error) {
 	return raw, nil
 }
 
-func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader, contentType, model string) (responseID string, captured []byte, result chatOutcome) {
+func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader, contentType, model string, mappings ...responses.ToolNamespaces) (responseID string, captured []byte, result chatOutcome) {
+	var namespaces responses.ToolNamespaces
+	if len(mappings) > 0 {
+		namespaces = mappings[0]
+	}
 	// The streaming capture is a bounded side buffer for usage/model recovery;
 	// only the non-streaming body needs the larger ceiling.
 	fullCapture := newBoundedResponseCapture(8 << 20)
@@ -377,10 +407,10 @@ func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader,
 			result.UsageSource = audit.UsageSourceUpstream
 		}
 		result.Finish, result.Err = responses.TerminalFinish("", response)
-		// Whole JSON Responses objects are already self-contained. Preserve their
-		// original bytes; strict serde supplementation is only needed for partial
-		// SSE events that clients assemble incrementally.
-		if redactResponseError(response) {
+		// Preserve JSON bytes unless restoring tool identities or masking errors.
+		// Partial SSE events also need strict-client supplementation below.
+		changed := namespaces.RestoreEnvelope(response)
+		if redactResponseError(response) || changed {
 			raw, _ = json.Marshal(response)
 		}
 		_, _ = io.MultiWriter(w, fullCapture).Write(raw)
@@ -419,7 +449,9 @@ func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader,
 			}
 
 		}
-		if supplementResponsesEvent(event, compat) || redactResponseError(event) {
+		changed := namespaces.RestoreEnvelope(event)
+		changed = supplementResponsesEvent(event, compat) || changed
+		if redactResponseError(event) || changed {
 			raw, _ := json.Marshal(event)
 			// The compat layer changed the payload, so the frame cannot be relayed
 			// as the upstream sent it.

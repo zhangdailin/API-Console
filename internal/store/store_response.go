@@ -24,6 +24,9 @@ type StoredResponse struct {
 	// list rather than failing, and previous_response_id expansion is unaffected
 	// because it reads Body.
 	InputItems json.RawMessage `json:"input_items,omitempty"`
+	// ToolNamespaces restores client tool identities from native upstream names.
+	// It shares the response's owner and TTL, including across gateway replicas.
+	ToolNamespaces json.RawMessage `json:"tool_namespaces,omitempty"`
 	// PreviousResponseID links a continuation to the response it continued, so
 	// the stored input list can report the whole conversation instead of only
 	// the last turn.

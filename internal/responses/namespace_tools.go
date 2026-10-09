@@ -7,12 +7,14 @@ import (
 )
 
 type namespaceToolIdentity struct {
-	namespace string
-	name      string
+	Namespace   string                 `json:"namespace"`
+	Name        string                 `json:"name"`
+	Function    map[string]interface{} `json:"function,omitempty"`
+	Description string                 `json:"description,omitempty"`
 }
 
 // ToolNamespaces keeps the client identity of each flattened function for one
-// request. Only grouped functions change names; schemas and arguments stay intact.
+// request and its continuation. Schemas and arguments stay intact.
 type ToolNamespaces map[string]namespaceToolIdentity
 
 // A stable suffix prevents collisions between groups, sanitized names and plain
@@ -34,8 +36,8 @@ func namespaceToolName(namespace, name string) string {
 	return fmt.Sprintf("%s_%x", prefix.String(), digest[:8])
 }
 
-// NormalizeBridgedNamespaces adapts the grouping used by Codex to Chat's flat
-// function declarations. Unsupported children still fail; this does not emulate
+// NormalizeBridgedNamespaces adapts Codex grouping to flat function declarations
+// for Chat and native upstreams. Unsupported children still fail; this does not emulate
 // custom tools, execute tools, or change their parameter JSON.
 func NormalizeBridgedNamespaces(req *CreateRequest) (ToolNamespaces, error) {
 	aliases := ToolNamespaces{}
@@ -79,7 +81,8 @@ func NormalizeBridgedNamespaces(req *CreateRequest) (ToolNamespaces, error) {
 				return nil, fmt.Errorf("tools[%d].tools[%d]: duplicate function identity", i, j)
 			}
 			seenNames[alias] = true
-			aliases[alias] = namespaceToolIdentity{namespace: namespace, name: name}
+			description, _ := tool["description"].(string)
+			aliases[alias] = namespaceToolIdentity{Namespace: namespace, Name: name, Function: CloneStringInterfaceMap(child), Description: description}
 			flat := CloneStringInterfaceMap(child)
 			flat["name"] = alias
 			if description, _ := tool["description"].(string); description != "" {
@@ -109,7 +112,11 @@ func NormalizeBridgedNamespaces(req *CreateRequest) (ToolNamespaces, error) {
 				return nil, fmt.Errorf("input[%d]: namespace and name must be nonempty strings", i)
 			}
 			lowered := CloneStringInterfaceMap(item)
-			lowered["name"] = namespaceToolName(ns, name)
+			alias := namespaceToolName(ns, name)
+			lowered["name"] = alias
+			if _, exists := aliases[alias]; !exists {
+				aliases[alias] = namespaceToolIdentity{Namespace: ns, Name: name}
+			}
 			delete(lowered, "namespace")
 			copyItems[i] = lowered
 		}
@@ -132,22 +139,29 @@ func NormalizeBridgedNamespaces(req *CreateRequest) (ToolNamespaces, error) {
 	if err := ValidateToolsAndHistory(map[string]interface{}{"tools": normalized, "input": input, "tool_choice": choice}); err != nil {
 		return nil, err
 	}
+	if err := aliases.ValidatePlainTools(req.Tools); err != nil {
+		return nil, err
+	}
 	req.Tools, req.Input, req.ToolChoice = normalized, input, choice
 	return aliases, nil
 }
 
-func (aliases ToolNamespaces) RestoreItem(item map[string]interface{}) {
+func (aliases ToolNamespaces) RestoreItem(item map[string]interface{}) bool {
 	if item["type"] != "function_call" {
-		return
+		return false
 	}
 	name, _ := item["name"].(string)
 	if identity, ok := aliases[name]; ok {
-		item["name"], item["namespace"] = identity.name, identity.namespace
+		item["name"], item["namespace"] = identity.Name, identity.Namespace
+		return true
 	}
+	return false
 }
 
-func (aliases ToolNamespaces) RestoreResponse(response map[string]interface{}) {
+func (aliases ToolNamespaces) RestoreResponse(response map[string]interface{}) bool {
+	changed := false
 	for _, item := range InterfaceMaps(response["output"]) {
-		aliases.RestoreItem(item)
+		changed = aliases.RestoreItem(item) || changed
 	}
+	return changed
 }

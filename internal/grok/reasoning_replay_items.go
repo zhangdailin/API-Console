@@ -143,7 +143,15 @@ func normalizeFunctionCallReplayItem(item map[string]interface{}) (map[string]in
 	if !ok || callID == "" || name == "" {
 		return nil, false
 	}
-	return map[string]interface{}{"type": "function_call", "call_id": callID, "name": name, "arguments": arguments}, true
+	normalized := map[string]interface{}{"type": "function_call", "call_id": callID, "name": name, "arguments": arguments}
+	if raw, exists := item["namespace"]; exists {
+		namespace, ok := raw.(string)
+		if !ok || strings.TrimSpace(namespace) == "" {
+			return nil, false
+		}
+		normalized["namespace"] = namespace
+	}
+	return normalized, true
 }
 
 func normalizeCustomToolCallReplayItem(item map[string]interface{}) (map[string]interface{}, bool) {

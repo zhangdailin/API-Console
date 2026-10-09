@@ -56,7 +56,7 @@ strict:false 和 json_object 不执行相同强制校验。答案围栏与外围
 
 工具名必须唯一，tool_choice 引用存在的声明，required 需要可执行工具。历史调用与结果按 call_id 配对，函数名不能替代身份。不同媒体内容必须提供 URL / data URI 等合法结构，不能直接塞裸 base64。
 
-WorkBuddy / Qoder / Cline 的 Responses 桥接支持 Codex namespace 中的 function：将分组身份编码为稳定的上游函数名，并在 JSON、SSE 和已存储响应中还原 namespace 与原始名称；tool_choice 和续轮历史使用同一映射，schema 和参数 JSON 不改写。Grok Build 的原生路径仍拒绝 namespace；custom、apply_patch、local_shell、tool_search 等扩展仍明确拒绝。文本中的工具标记仅作为文本输出，不转换为可执行调用；工具结果不读取客户端本地文件。
+四通道的 Responses 支持 Codex namespace 中的 function：将分组身份编码为稳定的上游函数名，并在 JSON、SSE 和响应资源中还原 namespace 与原始名称；tool_choice 和续轮历史使用同一映射，schema 和参数 JSON 不改写。Grok Build 保持原生 Responses 传输，映射随 Key 所有权和 TTL 保存，并保留推理回放中的分组身份。custom、apply_patch、local_shell、tool_search 等扩展仍明确拒绝。文本中的工具标记仅作为文本输出，不转换为可执行调用；工具结果不读取客户端本地文件。
 
 桥接不能无损接受任意未知 item、外部密文或原生托管工具。工具参数增量应聚合后再执行；缺 finish / DONE、参数错误和截断不能伪装完整成功。
 
