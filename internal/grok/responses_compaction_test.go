@@ -180,7 +180,7 @@ func TestBuildGatewayCompactionResponseShape(t *testing.T) {
 	testutil.NoError(t, responses.WriteCompactionStream(&builder, result), "write stream: %v")
 	names := make([]string, 0, 6)
 	var completedPayload map[string]interface{}
-	if err := consumeCompatibleSSE(strings.NewReader(builder.String()), func(event compatibleSSEEvent) error {
+	if err := responses.ConsumeSSE(strings.NewReader(builder.String()), func(event responses.SSEEvent) error {
 		names = append(names, event.Event)
 		if event.Event == "response.completed" {
 			if err := json.Unmarshal(event.Data(), &completedPayload); err != nil {
@@ -233,7 +233,7 @@ func TestHandleResponsesCompactionTriggerStreamsSyntheticEvents(t *testing.T) {
 	testutil.Falsef(t, !strings.Contains(got, "text/event-stream"), "Content-Type=%q", got)
 	var events []string
 	var blob string
-	if err := consumeCompatibleSSE(strings.NewReader(rec.Body.String()), func(event compatibleSSEEvent) error {
+	if err := responses.ConsumeSSE(strings.NewReader(rec.Body.String()), func(event responses.SSEEvent) error {
 		events = append(events, event.Event)
 		if event.Event == "response.completed" {
 			var payload map[string]interface{}

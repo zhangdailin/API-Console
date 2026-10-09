@@ -36,6 +36,9 @@ func TestProviderCredentialPatchesPreserveConcurrentAccountFields(t *testing.T) 
 	testutil.Equal(t, storedWB.Name, "after")
 	testutil.Equal(t, storedWB.UsageCurrent, 17)
 	testutil.Equal(t, storedWB.WorkBuddyRefreshToken, "refresh-new")
+	testutil.Equal(t, storedWB.ClientCookie, "")
+	testutil.Equal(t, storedWB.Token, "")
+	testutil.Equal(t, storedWB.RefreshToken, "")
 
 	qoder := &Account{
 		AccountType: "qoder", Enabled: true, Name: "qoder", UsageLimit: 100,
@@ -94,4 +97,27 @@ func TestProviderCredentialPatchRejectsStaleRotation(t *testing.T) {
 	stored, getErr := s.GetAccount(ctx, acc.ID)
 	testutil.NoError(t, getErr)
 	testutil.Equal(t, stored.QoderRefreshToken, "refresh-current")
+}
+
+func TestClineCredentialPatchPreservesEditsAndRejectsStaleRotation(t *testing.T) {
+	s, _ := newTestRedisStore(t, "cline-patch:")
+	ctx := context.Background()
+	acc := &Account{AccountType: "cline", Name: "original", Enabled: true, ClineRefreshToken: "old", ClineAccessToken: "old-access"}
+	testutil.NoError(t, s.CreateAccount(ctx, acc))
+	admin := *acc
+	admin.Name = "edited"
+	admin.Enabled = false
+	testutil.NoError(t, s.UpdateAccount(ctx, &admin))
+	patch := ClineCredentialPatch{ExpectedRefreshToken: "old", AccessToken: "new", RefreshToken: "rotated", ModelIDs: []string{"model-a"}}
+	testutil.NoError(t, s.UpdateClineCredentials(ctx, acc.ID, patch))
+	got, err := s.GetAccount(ctx, acc.ID)
+	testutil.NoError(t, err)
+	testutil.Equal(t, got.Name, "edited")
+	testutil.False(t, got.Enabled, "credential rotation re-enabled a disabled account")
+	testutil.Equal(t, got.ClineRefreshToken, "rotated")
+	patch.RefreshToken = "stale-rotation"
+	testutil.Error(t, s.UpdateClineCredentials(ctx, acc.ID, patch))
+	got, err = s.GetAccount(ctx, acc.ID)
+	testutil.NoError(t, err)
+	testutil.Equal(t, got.ClineRefreshToken, "rotated")
 }

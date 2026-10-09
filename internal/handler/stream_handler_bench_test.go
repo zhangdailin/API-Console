@@ -326,30 +326,6 @@ func BenchmarkAppendSSEMessageDelta_ReusedBuffer(b *testing.B) {
 	}
 }
 
-func BenchmarkSanitizeToolInput_NoOpUnknown(b *testing.B) {
-	input := `{"foo":"bar","n":1}`
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		_ = sanitizeToolInput("unknown", input)
-	}
-}
-
-func BenchmarkSanitizeToolInput_WriteMap(b *testing.B) {
-	input := `{"path":"/tmp/a.txt","content":"hello","overwrite":true}`
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		_ = sanitizeToolInput("Write", input)
-	}
-}
-
-func BenchmarkSanitizeToolInput_WriteAlreadyNormalized(b *testing.B) {
-	input := `{"file_path":"/tmp/a.txt","content":"hello"}`
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		_ = sanitizeToolInput("Write", input)
-	}
-}
-
 // Per-frame cost of the streaming relay end to end: one upstream text delta, from
 // handleMessage through the client-facing SSE write, carrying the block state it
 // actually touches. The benchmarks above measure the marshalling helpers in

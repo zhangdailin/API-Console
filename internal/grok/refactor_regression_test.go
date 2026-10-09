@@ -6,47 +6,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"orchids-api/internal/responses"
 	"orchids-api/internal/testutil"
 	"strings"
 	"testing"
 	"time"
 )
-
-func TestRefactorAliasMultilineKeepsMetadataAndRestoresNames(t *testing.T) {
-	aliases := map[string]buildToolAliasIdentity{"crm__lookup": {Kind: "function", Namespace: "crm", Name: "lookup"}}
-	input := "\uFEFF: keepalive\r\nid: ev_a\r\nretry: 1000\r\nevent: response.output_item.added\r\ndata: {\"type\":\"response.output_item.added\",\"item\":\r\ndata: {\"type\":\"function_call\",\"name\":\"crm__lookup\",\"id\":\"item_a\"}}\r\n\r\ndata: [DONE]\r\n\r\n"
-	body := rewriteBuildToolAliasResponse(io.NopCloser(strings.NewReader(input)), "text/event-stream", aliases)
-	defer body.Close()
-	raw, err := io.ReadAll(body)
-	testutil.NoError(t, err)
-	for _, want := range []string{": keepalive", "id: ev_a", "retry: 1000", "\"name\":\"lookup\"", "\"namespace\":\"crm\"", "data: [DONE]"} {
-		testutil.MustContain(t, string(raw), want)
-	}
-	testutil.MustNotContain(t, string(raw), "crm__lookup")
-}
-
-func TestRefactorSearchArgumentsSurviveItemDoneWithoutSnapshot(t *testing.T) {
-	aliases := map[string]buildToolAliasIdentity{"tool_search": {Kind: "tool_search"}}
-	added := map[string]interface{}{"id": "item_a", "call_id": "call_a", "name": "tool_search", "type": "function_call"}
-	// The done item repeats the name but does not repeat arguments; it must not
-	// replace the existing accumulator. Argument events can refer to call_id.
-	stream := parityFrame("response.output_item.added", map[string]interface{}{"item": added}) +
-		parityFrame("response.function_call_arguments.delta", map[string]interface{}{"call_id": "call_a", "delta": "{\"goal\":\"crm\"}"}) +
-		parityFrame("response.output_item.done", map[string]interface{}{"item": added})
-	body := rewriteBuildToolAliasResponse(io.NopCloser(strings.NewReader(stream)), "text/event-stream", aliases)
-	defer body.Close()
-	raw, err := io.ReadAll(body)
-	testutil.NoError(t, err)
-	testutil.Fail(t, strings.Contains(string(raw), "response.function_call_arguments") || !strings.Contains(string(raw), "\"goal\":\"crm\""), string(raw))
-}
-
-func TestRefactorAliasRejectsOversizedMultilineFrame(t *testing.T) {
-	input := strings.Repeat("data: "+strings.Repeat("a", 64<<10)+"\n", 130)
-	body := rewriteBuildToolAliasResponse(io.NopCloser(strings.NewReader(input)), "text/event-stream", nil)
-	defer body.Close()
-	_, err := io.Copy(io.Discard, body)
-	testutil.Error(t, err)
-}
 
 func TestRefactorNativeUsageSurvivesFullCaptureOverflow(t *testing.T) {
 	frame := parityFrame("response.in_progress", map[string]interface{}{"padding": strings.Repeat("a", 128<<10)})
@@ -54,7 +19,7 @@ func TestRefactorNativeUsageSurvivesFullCaptureOverflow(t *testing.T) {
 		"id": "resp_a", "status": "completed", "usage": map[string]interface{}{"input_tokens": 100, "output_tokens": 10},
 	}})
 	id, captured, result := copyNativeCLIResponseAndCaptureModel(httptest.NewRecorder(), strings.NewReader(stream), "text/event-stream", "grok-4.6")
-	testutil.Fail(t, id != "resp_a" || len(captured) != upstreamMaxEventBytes || result.Err != nil || interfaceToInt(result.Usage["completion_tokens"]) != 10, id, len(captured), result)
+	testutil.Fail(t, id != "resp_a" || len(captured) != responses.MaxEventBytes || result.Err != nil || interfaceToInt(result.Usage["completion_tokens"]) != 10, id, len(captured), result)
 }
 
 type refactorErrorReader struct{ err error }

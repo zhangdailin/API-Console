@@ -1,6 +1,7 @@
 package grok
 
 import (
+	"orchids-api/internal/chatwire"
 	"testing"
 
 	"encoding/json"
@@ -42,9 +43,6 @@ func TestResolveModelRetiredIDs(t *testing.T) {
 	for _, tc := range cases {
 		_, ok := ResolveModel(tc.id)
 		testutil.CheckFalsef(t, ok, "ResolveModel(%s) = true, want the retired identifier refused", tc.id)
-		if tc.checkDeprecated {
-			testutil.CheckTrue(t, IsDeprecatedModelID(tc.id), "IsDeprecatedModelID(%s) = false, want true")
-		}
 	}
 }
 
@@ -74,9 +72,9 @@ func TestLegacyCLIModelListCannotRouteImplicitModel(t *testing.T) {
 // TestChatCompletionsRequestValidateLeavesSamplingToUpstream pins that Validate
 // never invents temperature/top_p defaults; the upstream owns them.
 func TestChatCompletionsRequestValidateLeavesSamplingToUpstream(t *testing.T) {
-	req := ChatCompletionsRequest{
+	req := chatwire.Request{
 		Model: "grok-4.20-0309",
-		Messages: []ChatMessage{{
+		Messages: []chatwire.Message{{
 			Role:    "user",
 			Content: "hello",
 		}},
@@ -87,13 +85,13 @@ func TestChatCompletionsRequestValidateLeavesSamplingToUpstream(t *testing.T) {
 }
 
 func TestChatCompletionsRequestValidateToolChoice(t *testing.T) {
-	tools := []ToolDef{{
+	tools := []chatwire.ToolDef{{
 		Type:     "function",
 		Function: map[string]interface{}{"name": "weather"},
 	}}
 	cases := []struct {
 		name       string
-		tools      []ToolDef
+		tools      []chatwire.ToolDef
 		toolChoice interface{}
 		wantErr    bool
 	}{
@@ -129,9 +127,9 @@ func TestChatCompletionsRequestValidateToolChoice(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			req := ChatCompletionsRequest{
+			req := chatwire.Request{
 				Model:      "grok-4.20-0309",
-				Messages:   []ChatMessage{{Role: "user", Content: "hello"}},
+				Messages:   []chatwire.Message{{Role: "user", Content: "hello"}},
 				Tools:      tc.tools,
 				ToolChoice: tc.toolChoice,
 			}
@@ -184,7 +182,7 @@ func TestChatCompletionsRequestUnmarshalLooseTypes(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var req ChatCompletionsRequest
+			var req chatwire.Request
 			err := json.Unmarshal([]byte(tc.raw), &req)
 			testutil.Falsef(t, (err != nil) != tc.wantErr, "unmarshal error = %v, wantErr = %v", err, tc.wantErr)
 			if tc.wantErr {
@@ -225,7 +223,7 @@ func TestApplyDefaultChatStream(t *testing.T) {
 				cfg.Stream = tc.configStream
 			}
 			h := &Handler{cfg: cfg}
-			req := ChatCompletionsRequest{Stream: tc.stream, StreamProvided: tc.provided}
+			req := chatwire.Request{Stream: tc.stream, StreamProvided: tc.provided}
 			h.applyDefaultChatStream(&req)
 			testutil.Equal(t, req.Stream, tc.want)
 		})

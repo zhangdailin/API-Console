@@ -19,9 +19,9 @@ func TestInferenceOutcomeExcludesNonGeneration(t *testing.T) {
 		{"POST", "/cline/v1/nonexistent", "http"}, {"POST", "/v1/files", "http"},
 		{"POST", "/cline/v1/messages", "cline"}, {"POST", "/qoder/v1/chat/completions", "qoder"},
 		{"POST", "/workbuddy/v1/messages", "workbuddy"}, {"POST", "/grok/v1/messages", "grok"},
-		{"POST", "/v1/responses", "grok"}, {"POST", "/v1/images/generations", "grok"},
-		{"POST", "/v1/videos", "grok"}, {"POST", "/v1/audio/transcriptions", "grok"},
-		{"GET", "/v1/stt", "grok"}, {"GET", "/grok/v1/realtime", "grok"},
+		{"POST", "/v1/responses", "http"}, {"POST", "/v1/images/generations", "http"},
+		{"POST", "/v1/videos", "http"}, {"POST", "/v1/audio/transcriptions", "http"},
+		{"GET", "/v1/stt", "http"}, {"GET", "/grok/v1/realtime", "http"},
 	} {
 		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(tc.method, tc.path, nil))
 		testutil.CheckEqual(t, (*outcomes)[len(*outcomes)-1].Channel, tc.channel)
@@ -47,7 +47,7 @@ func TestTTFTWaitsForGeneratedContent(t *testing.T) {
 				}
 			}))
 			rec := httptest.NewRecorder()
-			h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/responses", nil))
+			h.ServeHTTP(rec, httptest.NewRequest("POST", "/grok/v1/responses", nil))
 			got := (*outcomes)[0]
 			testutil.Falsef(t, got.FirstTokenMS < 25 || got.FirstTokenMS > got.DurationMS, "incorrect TTFT: %+v", got)
 			testutil.Equal(t, rec.Body.String(), ": ping\n\n"+tc.control+tc.generated)
@@ -64,7 +64,7 @@ func TestTTFTNoGeneratedOutputHasNoSample(t *testing.T) {
 		w.Write([]byte("data: {\"type\":\"response.created\"}\n\ndata: {\"error\":{\"message\":\"failed\"}}\n\ndata: [DONE]\n\n"))
 		MarkStreamFailure(w)
 	}))
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", "/v1/responses", nil))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", "/grok/v1/responses", nil))
 	if got := (*outcomes)[0]; got.FirstTokenMS != 0 || got.StatusClass != "stream_error" {
 		t.Fatal(got)
 	}

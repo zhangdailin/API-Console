@@ -2,14 +2,14 @@ package grok
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"orchids-api/internal/chatwire"
 	"orchids-api/internal/responses"
 	"strings"
 	"time"
-
-	"encoding/json"
 
 	"orchids-api/internal/middleware"
 	"orchids-api/internal/util"
@@ -48,7 +48,7 @@ func (h *Handler) HandleResponses(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	var req ResponsesCreateRequest
+	var req responses.CreateRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeGrokError(w, http.StatusBadRequest, "invalid json")
 		return
@@ -173,7 +173,7 @@ func streamNativeCLIResponse(w http.ResponseWriter, body io.Reader) {
 // allowStreamedStore is true for a provider that can persist a streamed
 // response (the chat bridge when a response store is configured); Grok's native
 // path cannot, so it keeps rejecting store=true with stream=true.
-func validateResponsesCompatibilityFor(req ResponsesCreateRequest, allowStreamedStore bool) error {
+func validateResponsesCompatibilityFor(req responses.CreateRequest, allowStreamedStore bool) error {
 	if req.Store != nil && *req.Store && req.Stream && !allowStreamedStore {
 		return fmt.Errorf("store=true requires stream=false for this provider")
 	}
@@ -186,24 +186,24 @@ func validateResponsesCompatibilityFor(req ResponsesCreateRequest, allowStreamed
 	return nil
 }
 
-func (h *Handler) applyDefaultResponsesStream(req *ResponsesCreateRequest) {
+func (h *Handler) applyDefaultResponsesStream(req *responses.CreateRequest) {
 	if req == nil || req.StreamProvided {
 		return
 	}
 	req.Stream = h.defaultChatStream()
 }
 
-func chatRequestFromResponses(req ResponsesCreateRequest) (ChatCompletionsRequest, error) {
+func chatRequestFromResponses(req responses.CreateRequest) (chatwire.Request, error) {
 	model := normalizeModelID(req.Model)
 	if strings.TrimSpace(model) == "" {
-		return ChatCompletionsRequest{}, fmt.Errorf("model is required")
+		return chatwire.Request{}, fmt.Errorf("model is required")
 	}
 	messages, err := responsesInputToMessages(req.Input)
 	if err != nil {
-		return ChatCompletionsRequest{}, err
+		return chatwire.Request{}, err
 	}
 	if instructions := strings.TrimSpace(req.Instructions); instructions != "" {
-		messages = append([]ChatMessage{{Role: "system", Content: instructions}}, messages...)
+		messages = append([]chatwire.Message{{Role: "system", Content: instructions}}, messages...)
 	}
 	reasoningEffort := responsesReasoningEffort(req.Reasoning)
 	// Hosted tools (web_search / x_search) are the server-side searches the
@@ -213,7 +213,7 @@ func chatRequestFromResponses(req ResponsesCreateRequest) (ChatCompletionsReques
 	// the function declarations meant an explicit search request arrived as a
 	// plain text turn, and the model then answered that it had no web access.
 	tools, hostedTools := responsesToolsToChatTools(req.Tools)
-	out := ChatCompletionsRequest{
+	out := chatwire.Request{
 		SourceOperation:   "responses",
 		Model:             model,
 		Messages:          messages,
@@ -247,27 +247,27 @@ func chatRequestFromResponses(req ResponsesCreateRequest) (ChatCompletionsReques
 // response_format. Both are forwarded unchanged — the chat layer normalizes the
 // shape it receives — so a bridge that receives either one keeps the caller's
 // intent, including the `text.verbosity` control the format object may carry.
-func responsesTextControls(req ResponsesCreateRequest) map[string]interface{} {
+func responsesTextControls(req responses.CreateRequest) map[string]interface{} {
 	return cloneStringInterfaceMap(req.Text)
 }
 
 // responsesOutputFormat derives the chat `response_format` from either spelling.
 // `text.format` wins when both are present because it is the field the Responses
 // API defines.
-func responsesOutputFormat(req ResponsesCreateRequest) map[string]interface{} {
+func responsesOutputFormat(req responses.CreateRequest) map[string]interface{} {
 	if format, ok := req.Text["format"].(map[string]interface{}); ok && len(format) > 0 {
 		return cloneStringInterfaceMap(format)
 	}
 	return cloneStringInterfaceMap(req.ResponseFormat)
 }
 
-func responsesInputToMessages(input interface{}) ([]ChatMessage, error) {
+func responsesInputToMessages(input interface{}) ([]chatwire.Message, error) {
 	return responsesInputToMessagesMode(input, true)
 }
 
 // Native identity extraction never changes the payload sent upstream. Unknown
 // items remain in that original payload; only the chat bridge rejects them.
-func responsesInputToMessagesMode(input interface{}, strict bool) ([]ChatMessage, error) {
+func responsesInputToMessagesMode(input interface{}, strict bool) ([]chatwire.Message, error) {
 	switch v := input.(type) {
 	case nil:
 		return nil, fmt.Errorf("input is required")
@@ -275,9 +275,9 @@ func responsesInputToMessagesMode(input interface{}, strict bool) ([]ChatMessage
 		if strings.TrimSpace(v) == "" {
 			return nil, fmt.Errorf("input is required")
 		}
-		return []ChatMessage{{Role: "user", Content: v}}, nil
+		return []chatwire.Message{{Role: "user", Content: v}}, nil
 	case []interface{}:
-		messages := make([]ChatMessage, 0, len(v))
+		messages := make([]chatwire.Message, 0, len(v))
 		for index, raw := range v {
 			item, _ := raw.(map[string]interface{})
 			if item == nil {
@@ -286,22 +286,22 @@ func responsesInputToMessagesMode(input interface{}, strict bool) ([]ChatMessage
 				}
 				return nil, fmt.Errorf("input[%d] must be an object", index)
 			}
-			itemType := strings.ToLower(strings.TrimSpace(parseLooseStringAny(item["type"])))
+			itemType := strings.ToLower(strings.TrimSpace(chatwire.ParseLooseStringAny(item["type"])))
 			if itemType == "" {
-				if strings.TrimSpace(parseLooseStringAny(item["role"])) != "" {
+				if strings.TrimSpace(chatwire.ParseLooseStringAny(item["role"])) != "" {
 					itemType = "message"
 				}
 			}
 			switch itemType {
 			case "function_call":
-				name := parseLooseStringAny(item["name"])
+				name := chatwire.ParseLooseStringAny(item["name"])
 				if name == "" {
 					if !strict {
 						continue
 					}
 					return nil, fmt.Errorf("input[%d].name is required", index)
 				}
-				if strict && parseLooseStringAny(item["call_id"]) == "" {
+				if strict && chatwire.ParseLooseStringAny(item["call_id"]) == "" {
 					return nil, fmt.Errorf("input[%d].call_id is required", index)
 				}
 				args := "{}"
@@ -317,10 +317,10 @@ func responsesInputToMessagesMode(input interface{}, strict bool) ([]ChatMessage
 						}
 					}
 				}
-				messages = append(messages, ChatMessage{
+				messages = append(messages, chatwire.Message{
 					Role:    "assistant",
 					Content: nil,
-					ToolCalls: []ToolCall{{
+					ToolCalls: []chatwire.ToolCall{{
 						ID:   strings.TrimSpace(fmt.Sprint(item["call_id"])),
 						Type: "function",
 						Function: map[string]interface{}{
@@ -330,43 +330,43 @@ func responsesInputToMessagesMode(input interface{}, strict bool) ([]ChatMessage
 					}},
 				})
 			case "function_call_output":
-				if strict && parseLooseStringAny(item["call_id"]) == "" {
+				if strict && chatwire.ParseLooseStringAny(item["call_id"]) == "" {
 					return nil, fmt.Errorf("input[%d].call_id is required", index)
 				}
-				messages = append(messages, ChatMessage{
+				messages = append(messages, chatwire.Message{
 					Role:       "tool",
 					ToolCallID: strings.TrimSpace(fmt.Sprint(item["call_id"])),
 					Content:    bridgeToolOutput(item["output"]),
 				})
 			case "custom_tool_call":
-				name := firstNonEmpty(parseLooseStringAny(item["name"]), "custom_tool")
-				if strict && parseLooseStringAny(item["call_id"]) == "" {
+				name := firstNonEmpty(chatwire.ParseLooseStringAny(item["name"]), "custom_tool")
+				if strict && chatwire.ParseLooseStringAny(item["call_id"]) == "" {
 					return nil, fmt.Errorf("input[%d].call_id is required", index)
 				}
 				arguments, _ := json.Marshal(map[string]interface{}{"input": firstNonNil(item["input"], item["arguments"], "")})
-				messages = append(messages, ChatMessage{Role: "assistant", Content: nil, ToolCalls: []ToolCall{{
-					ID: firstNonEmpty(parseLooseStringAny(item["call_id"]), parseLooseStringAny(item["id"])), Type: "function",
+				messages = append(messages, chatwire.Message{Role: "assistant", Content: nil, ToolCalls: []chatwire.ToolCall{{
+					ID: firstNonEmpty(chatwire.ParseLooseStringAny(item["call_id"]), chatwire.ParseLooseStringAny(item["id"])), Type: "function",
 					Function: map[string]interface{}{"name": name, "arguments": string(arguments)},
 				}}})
 			case "custom_tool_call_output":
-				if strict && parseLooseStringAny(item["call_id"]) == "" {
+				if strict && chatwire.ParseLooseStringAny(item["call_id"]) == "" {
 					return nil, fmt.Errorf("input[%d].call_id is required", index)
 				}
-				messages = append(messages, ChatMessage{Role: "tool", ToolCallID: parseLooseStringAny(item["call_id"]), Content: bridgeToolOutput(item["output"])})
+				messages = append(messages, chatwire.Message{Role: "tool", ToolCallID: chatwire.ParseLooseStringAny(item["call_id"]), Content: bridgeToolOutput(item["output"])})
 			case "reasoning":
-				if strict && parseLooseStringAny(item["encrypted_content"]) != "" {
+				if strict && chatwire.ParseLooseStringAny(item["encrypted_content"]) != "" {
 					return nil, fmt.Errorf("input[%d]: encrypted reasoning requires a native Responses provider", index)
 				}
-				messages = append(messages, ChatMessage{
+				messages = append(messages, chatwire.Message{
 					Role: "assistant", Content: "",
-					ReasoningContent: responsesReasoningSummary(item), ReasoningEncryptedContent: parseLooseStringAny(item["encrypted_content"]),
+					ReasoningContent: responsesReasoningSummary(item), ReasoningEncryptedContent: chatwire.ParseLooseStringAny(item["encrypted_content"]),
 				})
 			case "message":
-				role := parseLooseStringAny(item["role"])
+				role := chatwire.ParseLooseStringAny(item["role"])
 				if role == "" {
 					role = "user"
 				}
-				messages = append(messages, ChatMessage{
+				messages = append(messages, chatwire.Message{
 					Role:    role,
 					Content: normalizeResponsesMessageContent(item["content"]),
 				})
@@ -401,7 +401,7 @@ func responsesReasoningSummary(item map[string]interface{}) string {
 	parts := make([]string, 0)
 	for _, raw := range interfaceSlice(item["summary"]) {
 		part, _ := raw.(map[string]interface{})
-		if text := parseLooseStringAny(part["text"]); text != "" {
+		if text := chatwire.ParseLooseStringAny(part["text"]); text != "" {
 			parts = append(parts, text)
 		}
 	}
@@ -430,7 +430,7 @@ func normalizeResponsesMessageContent(content interface{}) interface{} {
 		case "input_file", "file":
 			url := responsesPartURL(part, []string{"file", "file_url", "source", "file_data"}, []string{"url", "file_url", "data", "file_data"})
 			if url == "" {
-				url = parseLooseStringAny(part["file_id"])
+				url = chatwire.ParseLooseStringAny(part["file_id"])
 			}
 			if url != "" {
 				// The chat layer validates the portable file shape, so carry the
@@ -455,7 +455,7 @@ func responsesPartURL(part map[string]interface{}, keys, nestedKeys []string) st
 			}
 		case map[string]interface{}:
 			for _, nestedKey := range nestedKeys {
-				if s := parseLooseStringAny(v[nestedKey]); s != "" {
+				if s := chatwire.ParseLooseStringAny(v[nestedKey]); s != "" {
 					return s
 				}
 			}
@@ -469,14 +469,14 @@ func responsesPartURL(part map[string]interface{}, keys, nestedKeys []string) st
 // forwards untouched. A hosted tool has no `function` object, so it has no
 // ToolDef representation: dropping it was how web_search and x_search silently
 // disappeared between the Responses endpoint and the upstream.
-func responsesToolsToChatTools(tools []map[string]interface{}) ([]ToolDef, []map[string]interface{}) {
-	functions := make([]ToolDef, 0, len(tools))
+func responsesToolsToChatTools(tools []map[string]interface{}) ([]chatwire.ToolDef, []map[string]interface{}) {
+	functions := make([]chatwire.ToolDef, 0, len(tools))
 	var hosted []map[string]interface{}
 	seenHosted := map[string]struct{}{}
 	for _, tool := range tools {
 		declaredType := strings.TrimSpace(fmt.Sprint(tool["type"]))
 		if !strings.EqualFold(declaredType, "function") {
-			if normalized, native := nativeToolTypes[strings.ToLower(declaredType)]; native {
+			if normalized, native := chatwire.NativeToolTypes[strings.ToLower(declaredType)]; native {
 				// The hosted list is forwarded verbatim, so it carries the same
 				// uniqueness contract the function list is validated for: a
 				// duplicate would reach the upstream as two identical searches.
@@ -490,15 +490,15 @@ func responsesToolsToChatTools(tools []map[string]interface{}) ([]ToolDef, []map
 		}
 		if fn, _ := tool["function"].(map[string]interface{}); fn != nil {
 			if strings.TrimSpace(fmt.Sprint(fn["name"])) != "" {
-				functions = append(functions, ToolDef{Type: "function", Function: fn})
+				functions = append(functions, chatwire.ToolDef{Type: "function", Function: fn})
 			}
 			continue
 		}
-		name := parseLooseStringAny(tool["name"])
+		name := chatwire.ParseLooseStringAny(tool["name"])
 		if name == "" {
 			continue
 		}
-		functions = append(functions, ToolDef{Type: "function", Function: map[string]interface{}{
+		functions = append(functions, chatwire.ToolDef{Type: "function", Function: map[string]interface{}{
 			"name":        name,
 			"description": strings.TrimSpace(fmt.Sprint(tool["description"])),
 			"parameters":  firstNonNil(tool["parameters"], map[string]interface{}{}),
@@ -518,7 +518,7 @@ func responsesToolChoiceToChat(choice interface{}) interface{} {
 	if _, ok := m["function"].(map[string]interface{}); ok {
 		return choice
 	}
-	name := parseLooseStringAny(m["name"])
+	name := chatwire.ParseLooseStringAny(m["name"])
 	if name == "" {
 		return choice
 	}
@@ -551,7 +551,7 @@ func responsesObjectFromChat(model string, chat map[string]interface{}) map[stri
 		choice, _ := choices[0].(map[string]interface{})
 		finish = streamString(choice["finish_reason"])
 	}
-	status, details := responseStatusFromFinish(finish)
+	status, details := responses.StatusFromFinish(finish)
 	result := map[string]interface{}{"id": "resp_" + randomHex(12), "object": "response", "created_at": time.Now().Unix(), "status": status, "model": firstNonEmpty(interfaceString(chat["model"]), model), "output": output, "parallel_tool_calls": true, "tool_choice": "auto", "usage": responsesUsageFromChat(chat["usage"])}
 	if details != nil {
 		result["incomplete_details"] = details
@@ -630,7 +630,7 @@ func responsesOutputFromChat(chat map[string]interface{}) []interface{} {
 	}
 	parts := []interface{}{}
 	if text := streamString(message["content"]); text != "" {
-		parts = append(parts, map[string]interface{}{"type": "output_text", "text": text, "annotations": responseAnnotations(message["annotations"])})
+		parts = append(parts, map[string]interface{}{"type": "output_text", "text": text, "annotations": responses.Annotations(message["annotations"])})
 	}
 	if text := streamString(message["refusal"]); text != "" {
 		parts = append(parts, map[string]interface{}{"type": "refusal", "refusal": text})
@@ -646,7 +646,7 @@ func responseFunctionCallItem(call map[string]interface{}) map[string]interface{
 		return nil
 	}
 	fn, _ := call["function"].(map[string]interface{})
-	name := parseLooseStringAny(fn["name"])
+	name := chatwire.ParseLooseStringAny(fn["name"])
 	if name == "" {
 		return nil
 	}

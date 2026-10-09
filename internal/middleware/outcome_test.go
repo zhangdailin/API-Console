@@ -54,7 +54,7 @@ func TestObservedOutcome_TimeToFirstTokenSkipsKeepalives(t *testing.T) {
 		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n"))
 	}))
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req := httptest.NewRequest(http.MethodPost, "/grok/v1/chat/completions", nil)
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, req)
 
@@ -76,7 +76,7 @@ func TestObservedOutcome_FallsBackToFirstWrite(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	req := httptest.NewRequest(http.MethodPost, "/grok/v1/responses", nil)
 	handler.ServeHTTP(httptest.NewRecorder(), req)
 
 	testutil.Equal(t, len(*outcomes), 1)
@@ -96,7 +96,7 @@ func TestObservedOutcome_StreamFailureAfterCommittedStatus(t *testing.T) {
 		_, _ = w.Write([]byte("event: error\ndata: {\"error\":{\"code\":\"stream_error\"}}\n\n"))
 	}))
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req := httptest.NewRequest(http.MethodPost, "/grok/v1/chat/completions", nil)
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, req)
 

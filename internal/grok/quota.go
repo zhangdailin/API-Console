@@ -2,6 +2,7 @@ package grok
 
 import (
 	"net/http"
+	"orchids-api/internal/chatwire"
 	"regexp"
 	"slices"
 	"strconv"
@@ -43,7 +44,7 @@ func InferQuotaLimit(acc *store.Account) float64 {
 // see a Web auto/fast projection: those windows describe the same tiers with
 // different numbers, so a mixed-mode number would pick the wrong pool. Web
 // snapshots are Build-only.
-func inferSubscriptionFromRateLimitInfo(info *RateLimitInfo) string {
+func inferSubscriptionFromRateLimitInfo(info *chatwire.RateLimitInfo) string {
 	if info == nil || !info.HasLimit {
 		return ""
 	}
@@ -63,13 +64,13 @@ func inferSubscriptionFromRateLimitInfo(info *RateLimitInfo) string {
 	}
 }
 
-func ApplyQuotaInfo(acc *store.Account, info *RateLimitInfo) bool {
+func ApplyQuotaInfo(acc *store.Account, info *chatwire.RateLimitInfo) bool {
 	return applyQuotaInfo(acc, info, true)
 }
 
 // applyQuotaInfo persists one quota window. inferSubscription is false for the
 // Web aggregate projection, where the caller classifies from all modes itself.
-func applyQuotaInfo(acc *store.Account, info *RateLimitInfo, inferSubscription bool) bool {
+func applyQuotaInfo(acc *store.Account, info *chatwire.RateLimitInfo, inferSubscription bool) bool {
 	if acc == nil || info == nil {
 		return false
 	}

@@ -53,7 +53,7 @@ func TestDiagnosticsUniqueIdentityAndUnifiedCompletion(t *testing.T) {
 	}))))
 	ids := map[string]bool{}
 	for i, body := range []string{"first", "second", "bad-json"} {
-		req := httptest.NewRequest("POST", "/v1/responses", strings.NewReader(body))
+		req := httptest.NewRequest("POST", "/grok/v1/responses", strings.NewReader(body))
 		req.Header.Set(TraceIDHeader, "client-trace")
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
@@ -99,7 +99,7 @@ func TestDiagnosticsStreamFailureSummaryMatchesJournal(t *testing.T) {
 		MarkStreamFailure(w)
 	}))))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/responses", nil))
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/grok/v1/responses", nil))
 	requestID := rec.Header().Get(DiagnosticRequestIDHeader)
 	testutil.NotEqual(t, requestID, "")
 	b, err := store.Get(context.Background(), requestID)

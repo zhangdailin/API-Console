@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"orchids-api/internal/chatwire"
 	"strings"
 	"testing"
 
@@ -61,7 +62,7 @@ func TestAnthropicMessageIDReshapesChatCompletionsID(t *testing.T) {
 }
 
 func TestPrepareGrokSessionRecognizesAgentSessionHeaders(t *testing.T) {
-	base := []ChatMessage{{Role: "user", Content: "hello"}}
+	base := []chatwire.Message{{Role: "user", Content: "hello"}}
 	cases := map[string]string{
 		"X-Claude-Code-Session-Id": "claude-sid",
 		"X-Codex-Session-Id":       "codex-sid",

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"orchids-api/internal/modelrefresh"
+	"orchids-api/internal/responses"
 	"strings"
 	"time"
 
@@ -74,7 +75,7 @@ func registerRoutes(
 	})
 	inferenceAuth := func(next http.HandlerFunc) http.HandlerFunc {
 		authenticated := middleware.APIKeyAuthWithRequest(
-			// A key is required on the whole /v1 group; `inference_auth_enabled: false`
+			// A key is required on every provider inference route; `inference_auth_enabled: false`
 			// used to open every
 			// inference route to anonymous callers and is now advisory only. The one
 			// exception is an explicit anonymous_allow_ips source, which a deployment
@@ -125,30 +126,25 @@ func registerRoutes(
 				accountTracker,
 			),
 		)
-		// Reject overload before Redis authentication/billing work. Existing
-		// handler wrappers share this admission and do not acquire a second slot.
+		// Admit once, before Redis authentication/billing work.
 		return limiter.Limit(providerAdmission(coalesceFlush(authenticated)))
 	}
-	// channelPrefixes are the channels that share the generic Anthropic and
-	// OpenAI handlers. Grok is not among them: it has a native implementation of
-	// both. /v1 is excluded too, because it is the unified prefix — it dispatches
-	// by model instead of by path.
+	// All inference routes bind a provider by path, with or without /v1.
 	channelPrefixes := channel.GenericPrefixes()
-	// allPrefixes additionally serves the native Grok prefix and the unified one.
-	allPrefixes := append(channel.AllPrefixes(), "/v1")
+	allPrefixes := channel.AllPrefixes()
 
 	// --- Channel-specific message routes ---
 	// Every channel answers the same two endpoints; the path only tells the
 	// handler which channel's token profile and account pool to use.
-	registerWithPrefixes(mux, channelPrefixes, "/messages", inferenceAuth(limiter.Limit(h.HandleMessages)))
-	registerWithPrefixes(mux, channelPrefixes, "/messages/count_tokens", inferenceAuth(limiter.Limit(h.HandleCountTokens)))
+	registerWithPrefixes(mux, channelPrefixes, "/messages", inferenceAuth(h.HandleMessages))
+	registerWithPrefixes(mux, channelPrefixes, "/messages/count_tokens", inferenceAuth(h.HandleCountTokens))
 
 	// --- Model routes (channel prefixes → same handlers) ---
 	registerWithPrefixes(mux, allPrefixes, "/models", inferenceAuth(h.HandleModels))
 	registerWithPrefixes(mux, allPrefixes, "/models/", inferenceAuth(h.HandleModelByID))
 
-	// --- OpenAI-compatible chat/image routes (channel-specific + unified) ---
-	registerWithPrefixes(mux, channelPrefixes, "/chat/completions", inferenceAuth(limiter.Limit(h.HandleMessages)))
+	// --- OpenAI-compatible channel chat routes ---
+	registerWithPrefixes(mux, channelPrefixes, "/chat/completions", inferenceAuth(h.HandleMessages))
 
 	// --- OpenAI Responses API for the chat-completions-only channels ---
 	// Codex defaults to the Responses wire API, so without this bridge every
@@ -162,69 +158,25 @@ func registerRoutes(
 	if cfg != nil && cfg.ResponseStoreTTL > 0 {
 		responseStoreTTL = time.Duration(cfg.ResponseStoreTTL) * time.Hour
 	}
-	bridgeOptions := grok.ResponsesBridgeOptions{Store: s, TTL: responseStoreTTL}
+	bridgeOptions := responses.BridgeOptions{Store: s, TTL: responseStoreTTL}
 	channelResponses := grok.ResponsesBridgeHandler(h.HandleMessages, bridgeOptions)
 	channelResponsesSub := grok.ResponsesChannelSubpath(h.HandleMessages, bridgeOptions)
-	registerWithPrefixes(mux, channelPrefixes, "/responses", inferenceAuth(limiter.Limit(channelResponses)))
-	registerWithPrefixes(mux, channelPrefixes, "/responses/", inferenceAuth(limiter.Limit(channelResponsesSub)))
-	// The sibling endpoints below a response id are registered explicitly on
-	// every prefix. Going through the model dispatcher would route them by the
-	// body, and a cancel body carries no model: the same request would land on
-	// the native handler or the bridge depending on whether the client sent `{}`
-	// or nothing at all. Both answers come from the shared response store, so
-	// they are the same implementation whichever channel wrote the record.
+	registerWithPrefixes(mux, channelPrefixes, "/responses", inferenceAuth(channelResponses))
+	registerWithPrefixes(mux, channelPrefixes, "/responses/", inferenceAuth(channelResponsesSub))
+	// Resource actions share the same ownership-checked store on both bases.
 	registerWithPrefixes(mux, allPrefixes, "/responses/{response_id}/cancel",
-		inferenceAuth(limiter.Limit(grok.ResponsesCancelHandler(bridgeOptions))))
+		inferenceAuth(responses.CancelHandler(bridgeOptions)))
 	registerWithPrefixes(mux, allPrefixes, "/responses/{response_id}/input_items",
-		inferenceAuth(limiter.Limit(grok.ResponsesInputItemsHandler(bridgeOptions))))
+		inferenceAuth(responses.InputItemsHandler(bridgeOptions)))
 
-	grokPrefixes := []string{"/grok/v1"}
-	registerWithPrefixes(mux, grokPrefixes, "/chat/completions", inferenceAuth(limiter.Limit(grokHandler.HandleChatCompletions)))
-	registerWithPrefixes(mux, grokPrefixes, "/messages", inferenceAuth(limiter.Limit(grokHandler.HandleMessages)))
-	// /grok/v1 keeps the native Responses implementation; the unified /v1
-	// prefix dispatches by model so a Codex client can point at one base URL.
-	registerWithPrefixes(mux, grokPrefixes, "/responses", inferenceAuth(limiter.Limit(grokHandler.HandleResponses)))
-	registerWithPrefixes(mux, grokPrefixes, "/responses/compact", inferenceAuth(limiter.Limit(grokHandler.HandleResponsesCompact)))
-	registerWithPrefixes(mux, grokPrefixes, "/responses/", inferenceAuth(limiter.Limit(grokHandler.HandleResponseResource)))
-	isNativeResponsesModel := func(ctx context.Context, model string) (bool, error) {
-		if _, ok := grok.ResolveModel(model); ok {
-			return true, nil
-		}
-		// The channel lookup is a store read: give it the request's lifetime so a
-		// slow or unavailable Redis cannot pin a request thread, and report the
-		// failure instead of silently answering "not native" or "native".
-		channel, err := h.LookupChannelForModel(ctx, model)
-		if err != nil {
-			slog.Warn("Unified route channel lookup failed; using the bridged handler", "model", model, "error", err)
-			return false, err
-		}
-		return strings.EqualFold(channel, "grok"), nil
-	}
-	nativeResponsesSub := func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost && strings.HasSuffix(strings.TrimRight(r.URL.Path, "/"), "/responses/compact") {
-			grokHandler.HandleResponsesCompact(w, r)
-			return
-		}
-		grokHandler.HandleResponseResource(w, r)
-	}
-	// The unified prefix serves every channel's models, so it must not be owned
-	// by one provider: Grok models keep their native handlers, everything else
-	// goes through the shared pipeline, which picks the channel from the model.
-	mux.HandleFunc("/v1/chat/completions", inferenceAuth(limiter.Limit(grok.ModelDispatcher(grokHandler.HandleChatCompletions, h.HandleMessages, isNativeResponsesModel))))
-	mux.HandleFunc("/v1/messages", inferenceAuth(limiter.Limit(grok.ModelDispatcher(grokHandler.HandleMessages, h.HandleMessages, isNativeResponsesModel))))
-	mux.HandleFunc("/v1/responses", inferenceAuth(limiter.Limit(grok.ModelDispatcher(grokHandler.HandleResponses, channelResponses, isNativeResponsesModel))))
-	// POST is dispatched by model, but GET and DELETE have no model to read: the
-	// stored record decides instead, so a bridged record is served by the bridge
-	// that wrote it rather than by Grok's handler accepting a foreign record.
-	unifiedResponsesSub := grok.ModelDispatcher(nativeResponsesSub, channelResponsesSub, isNativeResponsesModel)
-	mux.HandleFunc("/v1/responses/", inferenceAuth(limiter.Limit(grok.ResponsesUnifiedResource(unifiedResponsesSub, bridgeOptions))))
-	// count_tokens takes the same dispatch decision as the request it precedes:
-	// dedicated channel prefixes have their own token profiles, and a client that
-	// counts against one channel while the completion runs on another plans its
-	// context against the wrong number. On the unified prefix the channel is the
-	// model's, not the path's.
-	mux.HandleFunc("/v1/messages/count_tokens", inferenceAuth(limiter.Limit(grok.ModelDispatcher(h.HandleCountTokens, h.HandleCountTokens, isNativeResponsesModel))))
-
+	grokPrefixes := channel.PrefixesFor(channel.Grok)
+	registerWithPrefixes(mux, grokPrefixes, "/chat/completions", inferenceAuth(grokHandler.HandleChatCompletions))
+	registerWithPrefixes(mux, grokPrefixes, "/messages", inferenceAuth(grokHandler.HandleMessages))
+	registerWithPrefixes(mux, grokPrefixes, "/messages/count_tokens", inferenceAuth(h.HandleCountTokens))
+	// Grok uses the native Build Responses implementation.
+	registerWithPrefixes(mux, grokPrefixes, "/responses", inferenceAuth(grokHandler.HandleResponses))
+	registerWithPrefixes(mux, grokPrefixes, "/responses/compact", inferenceAuth(grokHandler.HandleResponsesCompact))
+	registerWithPrefixes(mux, grokPrefixes, "/responses/", inferenceAuth(grokHandler.HandleResponseResource))
 	// --- Public auth/login (no prefix duplication) ---
 	mux.HandleFunc("/api/login", apiHandler.HandleLogin)
 	mux.HandleFunc("/api/logout", apiHandler.HandleLogout)
@@ -321,17 +273,7 @@ func registerRoutes(
 		}, http.DefaultServeMux.ServeHTTP))
 		slog.Debug("pprof enabled", "path", "/debug/pprof/")
 	}
-	// Guard every /v1 path, including aliases and unknown endpoints.
-	// Registered inference routes reuse the validated principal without charging
-	// their key's RPM budget or concurrency slot twice.
-	v1Guard := inferenceAuth(mux.ServeHTTP)
-	rootMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1" || strings.HasPrefix(r.URL.Path, "/v1/") {
-			v1Guard(w, r)
-			return
-		}
-		mux.ServeHTTP(w, r)
-	})
+	rootMux.Handle("/", mux)
 	return updater
 }
 

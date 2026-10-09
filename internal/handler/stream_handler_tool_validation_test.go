@@ -13,46 +13,13 @@ import (
 	"orchids-api/internal/upstream"
 )
 
-func TestHasRequiredToolInput(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name     string
-		tool     string
-		input    string
-		expected bool
-	}{
-		{name: "edit empty json", tool: "Edit", input: `{}`, expected: false},
-		{name: "edit missing old/new", tool: "Edit", input: `{"file_path":"/tmp/a"}`, expected: false},
-		{name: "edit valid", tool: "Edit", input: `{"file_path":"/tmp/a","old_string":"a","new_string":"b"}`, expected: true},
-		{name: "write empty json", tool: "Write", input: `{}`, expected: false},
-		{name: "write valid", tool: "Write", input: `{"file_path":"/tmp/a","content":"x"}`, expected: true},
-		{name: "lowercase write empty json", tool: "write", input: `{}`, expected: false},
-		{name: "lowercase write valid", tool: "write", input: `{"file_path":"a","content":"x"}`, expected: true},
-		{name: "lowercase write legacy path", tool: "write", input: `{"path":"a","content":"x"}`, expected: true},
-		{name: "lowercase bash empty cmd", tool: "bash", input: `{"cmd":""}`, expected: false},
-		{name: "bash empty", tool: "Bash", input: `{}`, expected: false},
-		{name: "bash valid", tool: "Bash", input: `{"command":"ls"}`, expected: true},
-		{name: "unknown tool malformed json", tool: "Unknown", input: `{`, expected: true},
-	}
-
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got := validToolCallInput(tc.tool, tc.input)
-			testutil.Equal(t, got, tc.expected)
-		})
-	}
-}
-
 func TestToolCallSameIDInvalidThenValid_UsesValidOne(t *testing.T) {
 	t.Parallel()
 
 	h := newToolValidationHandler(t)
 
 	// First frame is incomplete and should be rejected.
-	sendToolCall(h, "tool_same_id", "Edit", "{}")
+	sendToolCall(h, "tool_same_id", "Edit", "{")
 
 	// Second frame (same toolCallId) is valid and should be accepted.
 	sendToolCall(h, "tool_same_id", "Write", `{"file_path":"/tmp/a.txt","content":"x"}`)
@@ -173,52 +140,10 @@ func TestWriteToolCallNotDeclaredInCurrentRequest_IsSuppressed(t *testing.T) {
 	assertToolCallSuppressed(t, h, "Write")
 }
 
-func TestSandboxMetadataReadToolCall_IsSuppressed(t *testing.T) {
-	t.Parallel()
-	h := runToolCall(t, []string{"Read", "Bash"}, "sandbox_meta_read", "Read", `{"file_path":"/tmp/cc-agent/sb1-demo/.claude/.claude.json"}`)
-	assertToolCallSuppressed(t, h, "Read")
-}
-
 func TestTodoWriteToolCall_IsSuppressedWhenNotDeclared(t *testing.T) {
 	t.Parallel()
 	h := runToolCall(t, []string{"Read", "Write", "Edit", "Bash", "Glob", "Grep"}, "todo_1", "TodoWrite", `{"todos":[{"content":"Create calculator app with scientific notation support","status":"in_progress"}]}`)
 	assertToolCallSuppressed(t, h, "TodoWrite")
-}
-
-func TestTaskToolCall_IsAcceptedWhenClientDeclaredAgent(t *testing.T) {
-	t.Parallel()
-	h := runToolCall(t, declaredToolNames([]interface{}{map[string]interface{}{"name": "Agent"}}), "task_1", "Task", `{"description":"Explore calculator codebase","prompt":"Find calculator files","subagent_type":"Explore"}`)
-	assertToolCallSurvived(t, h, "Task")
-}
-
-func TestCustomMCPWebSearchToolCall_MapsToDeclaredWebSearch(t *testing.T) {
-	t.Parallel()
-	h := runToolCall(t, []string{"web_search"}, "ws_1", "mcp__tavily__web_search", `{"query":"Akron Ohio weather today March 29 2026 why so cold","timeRange":"day"}`)
-	assertToolCallSurvived(t, h, "web_search")
-}
-
-func TestCustomMCPFetchToolCall_MapsToDeclaredWebFetch(t *testing.T) {
-	t.Parallel()
-	h := runToolCall(t, []string{"web_fetch"}, "wf_1", "mcp__fetch__fetch", `{"url":"https://example.com","max_length":4000}`)
-	assertToolCallSurvived(t, h, "web_fetch")
-}
-
-func TestWebFetchToolCall_RewritesToDeclaredClientToolName(t *testing.T) {
-	t.Parallel()
-
-	h := newToolValidationHandler(t)
-	h.setAllowedToolNames([]string{"web_fetch", "mcp__tavily__web_extract"})
-	h.setClientTools([]interface{}{map[string]interface{}{"name": "mcp__tavily__web_extract"}})
-	sendToolCall(h, "wf_2", "web_fetch", `{"url":"https://linux.do/t/topic/1872670"}`)
-	sendToolFinish(h)
-
-	assertToolCallSurvived(t, h, "mcp__tavily__web_extract")
-}
-
-func TestTaskToolCall_IsAcceptedWhenDelegatedToolsStayWithinAllowedSet(t *testing.T) {
-	t.Parallel()
-	h := runToolCall(t, []string{"Read"}, "task_1", "Task", `{"description":"Get weather","prompt":"Read weather skill","allowed_tools":["Read"]}`)
-	assertToolCallSurvived(t, h, "Task")
 }
 
 func TestTaskToolCall_IsRejectedWhenDelegatedToolsExceedAllowedSet(t *testing.T) {
@@ -327,4 +252,20 @@ func sendToolFinish(h *streamHandler) {
 		Type:  "model.finish",
 		Event: map[string]interface{}{"finishReason": "tool_use"},
 	})
+}
+
+func TestNativeToolNamesAreNotAdapted(t *testing.T) {
+	for _, tc := range []struct{ declared, returned string }{{"Bash", "exec_command"}, {"Task", "Agent"}, {"web_fetch", "mcp__fetch__fetch"}, {"Read", "read"}} {
+		h := runToolCall(t, []string{tc.declared}, "call", tc.returned, `{}`)
+		assertToolCallSuppressed(t, h, tc.returned)
+	}
+	h := runToolCall(t, []string{"exec_command"}, "native", "exec_command", `{"cmd":"ls","justification":"keep","yield_time_ms":1000.0}`)
+	assertToolCallSurvived(t, h, "exec_command")
+}
+
+func TestNativeFunctionInputRequiresAnObject(t *testing.T) {
+	for _, input := range []string{`{`, `null`, `[]`, `"{}"`, `{} {}`} {
+		testutil.False(t, validToolCallInput("function", input), "invalid arguments must not be repaired")
+	}
+	testutil.True(t, validToolCallInput("arbitrary", `{"arguments":"{\"cmd\":\"ls\"}"}`), "native object must retain its fields")
 }

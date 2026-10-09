@@ -3,7 +3,7 @@ package modelpolicy
 import "strings"
 
 // providerPublicPrefixes are the accepted Build qualifiers.
-var providerPublicPrefixes = []string{"build/", "grok_build/"}
+var providerPublicPrefixes = []string{"build/"}
 
 // ExternalPublicID is the model name clients see.
 func ExternalPublicID(internalID string) string {
@@ -14,16 +14,4 @@ func ExternalPublicID(internalID string) string {
 		}
 	}
 	return id
-}
-
-// StripProviderPublicPrefix removes one provider qualifier, reporting whether it
-// removed anything.
-func StripProviderPublicPrefix(id string) (string, bool) {
-	normalized := strings.ToLower(strings.TrimSpace(id))
-	for _, prefix := range providerPublicPrefixes {
-		if strings.HasPrefix(normalized, prefix) {
-			return strings.TrimSpace(strings.TrimPrefix(normalized, prefix)), true
-		}
-	}
-	return normalized, false
 }

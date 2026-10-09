@@ -2,12 +2,14 @@ package grok
 
 import (
 	"fmt"
+	"orchids-api/internal/chatwire"
+	"orchids-api/internal/responses"
 	"strings"
 
 	"encoding/json"
 )
 
-func responsesInputFromChatMessages(messages []ChatMessage) ([]interface{}, string) {
+func responsesInputFromChatMessages(messages []chatwire.Message) ([]interface{}, string) {
 	items := make([]interface{}, 0, len(messages))
 	var instructions strings.Builder
 	for _, message := range messages {
@@ -71,10 +73,10 @@ func responsesInputFromChatMessages(messages []ChatMessage) ([]interface{}, stri
 	return items, strings.TrimSpace(instructions.String())
 }
 
-func validateNativeChatContent(messages []ChatMessage) error {
+func validateNativeChatContent(messages []chatwire.Message) error {
 	for _, message := range messages {
-		for _, part := range interfaceMaps(message.Content) {
-			switch parseLooseStringAny(part["type"]) {
+		for _, part := range responses.InterfaceMaps(message.Content) {
+			switch chatwire.ParseLooseStringAny(part["type"]) {
 			case "text", "input_text", "output_text", "image_url", "input_image":
 			default:
 				return fmt.Errorf("Build/Build Chat does not support content.type=%q", part["type"])
@@ -109,9 +111,9 @@ func responsesMessageParts(content interface{}, assistant bool) []interface{} {
 			case "image_url", "input_image", "image":
 				if url := responseImageURL(block); url != "" {
 					part := map[string]interface{}{"type": "input_image", "image_url": url}
-					detail := parseLooseStringAny(block["detail"])
+					detail := chatwire.ParseLooseStringAny(block["detail"])
 					if nested, ok := block["image_url"].(map[string]interface{}); ok && detail == "" {
-						detail = parseLooseStringAny(nested["detail"])
+						detail = chatwire.ParseLooseStringAny(nested["detail"])
 					}
 					if detail == "" {
 						// The upstream treats an absent detail as its own default,

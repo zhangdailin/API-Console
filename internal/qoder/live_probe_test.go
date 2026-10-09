@@ -36,7 +36,6 @@ import (
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
 	"orchids-api/internal/upstream"
-	"orchids-api/internal/util"
 
 	"golang.org/x/net/http2"
 )

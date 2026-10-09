@@ -1,7 +1,7 @@
 // Package pricing holds the official xAI price table and the pure functions the
 // gateway uses to price a finished request and to reserve a budget before one
-// starts. It is deliberately dependency-free: the same numbers must be usable
-// from the request path, the audit writer and tests.
+// starts. Current reasoning variants use the shared model policy, so the same
+// supported identifiers are priced on the request and audit paths.
 //
 // Money is carried as integer USD ticks (1 USD = 10,000,000,000 ticks) so a
 // ledger can accumulate costs without floating point drift. The published rates
@@ -11,8 +11,9 @@ package pricing
 import (
 	"bytes"
 	"encoding/json"
-	"regexp"
 	"strings"
+
+	"orchids-api/internal/modelpolicy"
 )
 
 const (
@@ -52,89 +53,37 @@ type tokenPrice struct {
 
 var officialTokenPrices = buildOfficialTokenPrices()
 
-// tokenPriceRule resolves a model family when the exact name is not published:
-// the official page prices every suffix of a family at the family rate.
-type tokenPriceRule struct {
-	Pattern        *regexp.Regexp
-	CanonicalModel string
-}
-
-// officialTokenPriceRules keeps the two special shapes (non-reasoning and
-// multi-agent) ahead of the generic family pattern, so a specific suffix is
-// never priced as the reasoning default.
-var officialTokenPriceRules = []tokenPriceRule{
-	{Pattern: regexp.MustCompile(`^grok-(?:build-0\.1|code-fast(?:-1)?|composer-2\.5-fast)(?:-[a-z0-9.]+)*$`), CanonicalModel: "grok-build-0.1"},
-	{Pattern: regexp.MustCompile(`^grok-4\.6(?:-[a-z0-9.]+)*$`), CanonicalModel: "grok-4.6"},
-	{Pattern: regexp.MustCompile(`^grok-4\.5(?:-[a-z0-9.]+)*$`), CanonicalModel: "grok-4.5"},
-	{Pattern: regexp.MustCompile(`^grok-4\.3(?:-[a-z0-9.]+)*$`), CanonicalModel: "grok-4.3"},
-	{Pattern: regexp.MustCompile(`^grok-4\.20-multi-agent(?:-[a-z0-9.]+)*$`), CanonicalModel: "grok-4.20-multi-agent-0309"},
-	{Pattern: regexp.MustCompile(`^grok-4\.20(?:-[a-z0-9.]+)*-non-reasoning(?:-[a-z0-9.]+)*$`), CanonicalModel: "grok-4.20-0309-non-reasoning"},
-	{Pattern: regexp.MustCompile(`^grok-4\.20(?:-[a-z0-9.]+)*$`), CanonicalModel: "grok-4.20-0309-reasoning"},
-}
-
-// buildOfficialTokenPrices returns the official per-token rate table. Every
-// alias resolves to the same canonical row.
-//
-// Published rates (USD per 1M tokens, standard / long-context above 200k input):
-//
-//	grok-build-0.1              $1     / $0.20 cached / $2     -> $2 / $0.40 / $4
-//	grok-4.6                    $2     / $0.50 cached / $6     -> $4 / $1    / $12
-//	grok-4.5                    $2     / $0.30 cached / $6     -> $4 / $0.60 / $12
-//	grok-4.3 and 4.20 family    $1.25  / $0.20 cached / $2.50  -> $2.50 / $0.40 / $5
+// buildOfficialTokenPrices contains exact active identifiers from the captured table.
 func buildOfficialTokenPrices() map[string]tokenPrice {
-	prices := make(map[string]tokenPrice)
-	register := func(canonical string, price tokenPrice, names ...string) {
-		price.CanonicalModel = canonical
-		prices[canonical] = price
-		for _, name := range names {
-			prices[name] = price
-		}
+	return map[string]tokenPrice{
+		"grok-composer-2.5-fast": {CanonicalModel: "grok-composer-2.5-fast", InputTicks: 10000, CachedInputTicks: 2000, OutputTicks: 20000, LongContextTokens: 200000, LongInputTicks: 20000, LongCachedTicks: 4000, LongOutputTicks: 40000},
+		"grok-4.6":               {CanonicalModel: "grok-4.6", InputTicks: 20000, CachedInputTicks: 5000, OutputTicks: 60000, LongContextTokens: 200000, LongInputTicks: 40000, LongCachedTicks: 10000, LongOutputTicks: 120000},
+		"grok-4.5":               {CanonicalModel: "grok-4.5", InputTicks: 20000, CachedInputTicks: 3000, OutputTicks: 60000, LongContextTokens: 200000, LongInputTicks: 40000, LongCachedTicks: 6000, LongOutputTicks: 120000},
 	}
-	register("grok-build-0.1", tokenPrice{InputTicks: 10000, CachedInputTicks: 2000, OutputTicks: 20000, LongContextTokens: 200000, LongInputTicks: 20000, LongCachedTicks: 4000, LongOutputTicks: 40000},
-		"grok-code-fast-1", "grok-code-fast", "grok-code-fast-1-0825", "grok-composer-2.5-fast")
-	register("grok-4.6", tokenPrice{InputTicks: 20000, CachedInputTicks: 5000, OutputTicks: 60000, LongContextTokens: 200000, LongInputTicks: 40000, LongCachedTicks: 10000, LongOutputTicks: 120000},
-		"grok-4.6-latest")
-	register("grok-4.5", tokenPrice{InputTicks: 20000, CachedInputTicks: 3000, OutputTicks: 60000, LongContextTokens: 200000, LongInputTicks: 40000, LongCachedTicks: 6000, LongOutputTicks: 120000},
-		"grok-4.5-latest", "grok-build-latest")
-	standard := tokenPrice{InputTicks: 12500, CachedInputTicks: 2000, OutputTicks: 25000, LongContextTokens: 200000, LongInputTicks: 25000, LongCachedTicks: 4000, LongOutputTicks: 50000}
-	register("grok-4.3", standard, "grok-4.3-latest", "grok-latest")
-	register("grok-4.20-multi-agent-0309", standard,
-		"grok-4.20-multi-agent", "grok-4.20-multi-agent-latest", "grok-4.20-multi-agent-beta-latest", "grok-4.20-multi-agent-beta-0309")
-	register("grok-4.20-0309-reasoning", standard,
-		"grok-4.20-reasoning-latest", "grok-4.20", "grok-4.20-reasoning", "grok-4.20-0309", "grok-4.20-beta", "grok-4.20-beta-0309", "grok-4.20-beta-latest", "grok-4.20-beta-reasoning", "grok-4.20-beta-latest-reasoning")
-	register("grok-4.20-0309-non-reasoning", standard,
-		"grok-4.20-non-reasoning", "grok-4.20-non-reasoning-latest", "grok-4.20-beta-non-reasoning", "grok-4.20-beta-latest-non-reasoning")
-	return prices
 }
 
-// resolveOfficialTokenPrice handles the internal source prefixes and the exact
-// published aliases first, then the anchored family rules. An unpriced model
-// must never be treated as costing zero.
+// Resolve exact identifiers and explicitly supported current reasoning variants.
+// Unknown models remain unpriced rather than receiving a guessed family rate.
 func resolveOfficialTokenPrice(model string) (tokenPrice, bool) {
 	normalized := normalizePricingModel(model)
 	if price, ok := officialTokenPrices[normalized]; ok {
 		return price, true
 	}
-	for _, rule := range officialTokenPriceRules {
-		if !rule.Pattern.MatchString(normalized) {
-			continue
-		}
-		price, ok := officialTokenPrices[rule.CanonicalModel]
-		return price, ok
+	// Model identifiers themselves contain hyphens; only the final component
+	// can be a reasoning effort.
+	i := strings.LastIndexByte(normalized, '-')
+	if i < 0 {
+		return tokenPrice{}, false
 	}
-	return tokenPrice{}, false
+	base, effort := normalized[:i], normalized[i+1:]
+	price, ok := officialTokenPrices[base]
+	if !ok || !modelpolicy.SupportsReasoningEffort(base, effort) {
+		return tokenPrice{}, false
+	}
+	return price, true
 }
-
-// normalizePricingModel strips only the source prefixes the gateway itself
-// attaches, so an arbitrary path fragment is never mistaken for a billable model.
 func normalizePricingModel(model string) string {
-	normalized := strings.ToLower(strings.TrimSpace(model))
-	for _, prefix := range []string{"build/", "grok_build/"} {
-		if strings.HasPrefix(normalized, prefix) {
-			return strings.TrimSpace(normalized[len(prefix):])
-		}
-	}
-	return normalized
+	return strings.TrimPrefix(strings.ToLower(strings.TrimSpace(model)), "build/")
 }
 
 // EstimateCost prices one finished text request from its token usage.

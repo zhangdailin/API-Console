@@ -23,12 +23,12 @@ func TestPublicModelResponseUsesRouteCreatedAt(t *testing.T) {
 	testutil.Equal(t, legacy.Created, legacyModelCreated)
 }
 
-func TestAppendGrokCompatibilityAliasesUsesCaseInsensitiveIndex(t *testing.T) {
+func TestAppendGrokReasoningVariantsUsesCaseInsensitiveIndex(t *testing.T) {
 	items := []PublicModelResponse{{ID: "GROK-4.6-HIGH", OwnedBy: "grok"}}
 	seen := map[string]struct{}{publicModelIDKey(items[0].ID): {}}
 	entry := PublicModelResponse{ID: "grok-4.6", OwnedBy: "Grok"}
 
-	items = appendGrokCompatibilityAliases(items, seen, entry)
+	items = appendGrokReasoningVariants(items, seen, entry)
 
 	counts := make(map[string]int)
 	for _, item := range items {
@@ -109,7 +109,7 @@ func TestHandleModelsPublishesConservativeEnabledBuildProfile(t *testing.T) {
 	}
 }
 
-// TestAppendGrokCompatibilityAliasesRespectsThePlane keeps the advertised alias
+// TestAppendGrokReasoningVariantsRespectsThePlane keeps the advertised alias
 // set equal to the set the resolver accepts. The entry carries the bare public
 // name, so the plane has to come from the row: a Build model that refuses an
 // effort parameter must not publish <name>-<effort> aliases that every request

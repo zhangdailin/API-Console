@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"orchids-api/internal/chatwire"
 	"orchids-api/internal/responses"
-	"orchids-api/internal/util"
 	"strconv"
 	"strings"
 	"time"
@@ -20,8 +20,6 @@ import (
 	"orchids-api/internal/middleware"
 	"orchids-api/internal/store"
 )
-
-const defaultStoredResponseTTL = 30 * 24 * time.Hour
 
 // maxNativeResponsesBytes bounds a buffered non-streaming native Build
 // Responses body. The reference implementation allows 128 MiB; the previous
@@ -40,7 +38,6 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}
-	toolAliases := collectBuildToolAliases(payload)
 	// Gateway-owned compaction state is expanded before the payload is
 	// normalized, so the summary reaches the upstream as an ordinary user
 	// message and the reasoning-replay machinery never sees a sealed blob.
@@ -58,7 +55,6 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}
-	compatibilityWarnings := takeBuildCompatibilityWarnings(payload)
 	if err := h.ensureModelCapability(r.Context(), modelID, store.CapabilityResponses); err != nil {
 		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", modelValidationMessage(modelID, err))
 		return
@@ -69,7 +65,7 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 	}
 
 	ownerHash := middleware.APIKeyFingerprint(r.Context())
-	previousID := strings.TrimSpace(parseLooseStringAny(payload["previous_response_id"]))
+	previousID := strings.TrimSpace(chatwire.ParseLooseStringAny(payload["previous_response_id"]))
 	var (
 		sess   *chatAccountSession
 		pinned bool
@@ -78,7 +74,7 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 	if previousID != "" && ownerHash != "" {
 		ownership, lookupErr := h.getStoredResponse(r, previousID, ownerHash)
 		if lookupErr != nil {
-			writeStoredResponseLookupError(w, lookupErr, "previous response not found")
+			responses.WriteStoredLookupError(w, lookupErr, "previous response not found")
 			return
 		}
 		if ownership.Provider != ProviderBuild {
@@ -141,19 +137,9 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 		resp.Body = io.NopCloser(strings.NewReader(string(raw)))
 	}
 	copyNativeCLIResponseHeaders(w.Header(), resp.Header)
-	if compatibilityWarnings != "" {
-		w.Header().Set("X-Grok2API-Compatibility-Warnings", compatibilityWarnings)
-	}
 	w.WriteHeader(resp.StatusCode)
-	responseBody := io.Reader(resp.Body)
-	var rewritten io.ReadCloser
-	if len(toolAliases) > 0 {
-		rewritten = rewriteBuildToolAliasResponse(resp.Body, resp.Header.Get("Content-Type"), toolAliases)
-		defer rewritten.Close()
-		responseBody = rewritten
-	}
-	responseID, captured, result := copyNativeCLIResponseAndCaptureModel(w, responseBody, resp.Header.Get("Content-Type"), modelID)
-	h.auditChatOutcome(r.Context(), sess.acc, &ChatCompletionsRequest{Model: modelID, StartedAt: started}, result)
+	responseID, captured, result := copyNativeCLIResponseAndCaptureModel(w, resp.Body, resp.Header.Get("Content-Type"), modelID)
+	h.auditChatOutcome(r.Context(), sess.acc, &chatwire.Request{Model: modelID, StartedAt: started}, result)
 	if session := sessionFromContext(r.Context()); session.Replay && len(captured) > 0 && result.Err == nil {
 		h.captureReasoningReplay(r.Context(), modelID, session.Key, captured)
 	}
@@ -165,7 +151,7 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 	// the response it names. The stored record is what GET input_items answers
 	// from, so the chain is folded in here — otherwise a client that continues a
 	// conversation reads back a list with only the last turn in it.
-	storedInput := responsesInputItemsJSON(h.accumulatedInputItems(r, ownerHash, payload))
+	storedInput := responses.InputItemsJSON(h.accumulatedInputItems(r, ownerHash, payload))
 	if err := h.saveStoredResponse(r, &store.StoredResponse{
 		ResponseID: responseID,
 		OwnerHash:  ownerHash,
@@ -177,7 +163,7 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 		// lets GET /responses/{id}/input_items answer locally instead of doing a
 		// second upstream round trip for data it already had.
 		InputItems:         storedInput,
-		PreviousResponseID: strings.TrimSpace(parseLooseStringAny(payload["previous_response_id"])),
+		PreviousResponseID: strings.TrimSpace(chatwire.ParseLooseStringAny(payload["previous_response_id"])),
 	}); err != nil {
 		slog.Error("failed to save response ownership", "response_id", responseID, "account_id", sess.acc.ID, "error", err)
 	}
@@ -194,7 +180,7 @@ func (h *Handler) HandleResponsesCompact(w http.ResponseWriter, r *http.Request)
 	if !decodeJSONBody(w, r, &payload) || payload == nil {
 		return
 	}
-	modelID := normalizeModelID(parseLooseStringAny(payload["model"]))
+	modelID := normalizeModelID(chatwire.ParseLooseStringAny(payload["model"]))
 	if modelID == "" {
 		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", "model is required")
 		return
@@ -227,8 +213,8 @@ func (h *Handler) HandleResponsesCompact(w http.ResponseWriter, r *http.Request)
 // resources of a response, so the id parser must never mistake the trailing
 // action for part of the id.
 func (h *Handler) HandleResponseResource(w http.ResponseWriter, r *http.Request) {
-	if action := responsesSubResourceAction(r.URL.Path); action != "" {
-		responsesSubResourceHandler(action, h.bridgeOptions())(w, r)
+	if action := responses.SubResourceAction(r.URL.Path); action != "" {
+		responses.SubResourceHandler(action, h.bridgeOptions())(w, r)
 		return
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodDelete {
@@ -236,31 +222,19 @@ func (h *Handler) HandleResponseResource(w http.ResponseWriter, r *http.Request)
 		writeResponsesAPIError(w, http.StatusMethodNotAllowed, "invalid_request_error", "method not allowed")
 		return
 	}
-	responseID := responseIDFromResourcePath(r.URL.Path)
+	responseID := responses.ResponseIDFromResourcePath(r.URL.Path)
 	if responseID == "" {
 		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", "response_id is required")
 		return
 	}
-	ownerHash := responsesOwnerHash(r.Context())
+	ownerHash := responses.OwnerHash(r.Context())
 	ownership, err := h.getStoredResponse(r, responseID, ownerHash)
 	if err != nil {
-		writeStoredResponseLookupError(w, err, "response not found")
+		responses.WriteStoredLookupError(w, err, "response not found")
 		return
 	}
 	if ownership.Provider != ProviderBuild {
-		if len(ownership.Body) == 0 {
-			writeResponsesAPIError(w, http.StatusNotFound, "response_not_found", "response not found")
-			return
-		}
-		if r.Method == http.MethodDelete {
-			_ = h.deleteStoredResponse(r, responseID, ownerHash)
-			util.WriteJSON(w, map[string]interface{}{"id": responseID, "object": "response.deleted", "deleted": true})
-			return
-		}
-		contentType := firstNonEmpty(strings.TrimSpace(ownership.ContentType), "application/json")
-		w.Header().Set("Content-Type", contentType)
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(ownership.Body)
+		responses.ServeStoredResource(w, r, ownership, h.lb.Store)
 		return
 	}
 	sess, err := h.openCLIAccountSessionByID(r.Context(), ownership.AccountID, ownership.Model)
@@ -292,11 +266,11 @@ const maxStoredInputChainDepth = 8
 // accumulatedInputItems returns this turn's input followed by the input of the
 // responses it continues (nearest ancestor first, bounded).
 func (h *Handler) accumulatedInputItems(r *http.Request, ownerHash string, payload map[string]interface{}) []interface{} {
-	current := responsesInputItems(payload["input"])
+	current := responses.InputItems(payload["input"])
 	if h == nil || r == nil || ownerHash == "" {
 		return current
 	}
-	previousID := strings.TrimSpace(parseLooseStringAny(payload["previous_response_id"]))
+	previousID := strings.TrimSpace(chatwire.ParseLooseStringAny(payload["previous_response_id"]))
 	seen := map[string]bool{}
 	for depth := 0; depth < maxStoredInputChainDepth && previousID != "" && !seen[previousID]; depth++ {
 		seen[previousID] = true
@@ -325,11 +299,11 @@ func (h *Handler) getStoredResponse(r *http.Request, responseID, ownerHash strin
 // bridgeOptions describes the response store the shared Responses helpers should
 // use for this handler.
 //
-// The native handler and the unified bridge are wired to the same store, so
+// The native handler and the channel bridge are wired to the same store, so
 // handing the native path the bridge's options lets one implementation of cancel
 // and input_items serve records written by either of them.
-func (h *Handler) bridgeOptions() ResponsesBridgeOptions {
-	opts := ResponsesBridgeOptions{}
+func (h *Handler) bridgeOptions() responses.BridgeOptions {
+	opts := responses.BridgeOptions{}
 	if h == nil || h.lb == nil || h.lb.Store == nil {
 		return opts
 	}
@@ -344,11 +318,7 @@ func (h *Handler) saveStoredResponse(r *http.Request, response *store.StoredResp
 	if h == nil || h.lb == nil || h.lb.Store == nil {
 		return errors.New("response store not configured")
 	}
-	ttl := defaultStoredResponseTTL
-	if h.configSnapshot() != nil && h.configSnapshot().ResponseStoreTTL > 0 {
-		ttl = time.Duration(h.configSnapshot().ResponseStoreTTL) * time.Hour
-	}
-	return h.lb.Store.SaveStoredResponse(r.Context(), response, ttl)
+	return h.lb.Store.SaveStoredResponse(r.Context(), response, h.bridgeOptions().TTLOrDefault())
 }
 
 func (h *Handler) deleteStoredResponse(r *http.Request, responseID, ownerHash string) error {
@@ -356,23 +326,6 @@ func (h *Handler) deleteStoredResponse(r *http.Request, responseID, ownerHash st
 		return errors.New("response store not configured")
 	}
 	return h.lb.Store.DeleteStoredResponse(r.Context(), responseID, ownerHash)
-}
-
-func responseIDFromResourcePath(path string) string {
-	marker := "/responses/"
-	index := strings.LastIndex(path, marker)
-	if index < 0 {
-		return ""
-	}
-	value := strings.Trim(strings.TrimSpace(path[index+len(marker):]), "/")
-	if value == "" || strings.Contains(value, "/") || strings.EqualFold(value, "compact") {
-		return ""
-	}
-	decoded, err := url.PathUnescape(value)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(decoded)
 }
 
 func readAndValidateNativeResponse(body io.Reader) ([]byte, error) {
@@ -422,7 +375,7 @@ func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader,
 		if len(result.Usage) > 0 {
 			result.UsageSource = audit.UsageSourceUpstream
 		}
-		result.Finish, result.Err = responseTerminalFinish("", response)
+		result.Finish, result.Err = responses.TerminalFinish("", response)
 		// Whole JSON Responses objects are already self-contained. Preserve their
 		// original bytes; strict serde supplementation is only needed for partial
 		// SSE events that clients assemble incrementally.
@@ -438,7 +391,7 @@ func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader,
 	terminal, done := false, false
 	failureCode, failureMessage := "", ""
 	compat := &responsesCompatibilityState{model: model}
-	err := consumeCompatibleSSE(body, func(frame compatibleSSEEvent) error {
+	err := responses.ConsumeSSE(body, func(frame responses.SSEEvent) error {
 		var event map[string]interface{}
 		kind := ""
 		if frame.HasData() {
@@ -456,7 +409,7 @@ func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader,
 			// not part of the Responses schema, and a strict client (Codex,
 			// Grok TUI) treats an unknown type as a protocol error. It never
 			// crosses the public boundary: it is filtered here.
-			if isPrivateBuildControlEvent(kind) {
+			if responses.IsPrivateBuildControlEvent(kind) {
 				return nil
 			}
 			response, _ := event["response"].(map[string]interface{})
@@ -494,7 +447,7 @@ func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader,
 			if response == nil {
 				response = event
 			}
-			result.Finish, result.Err = responseTerminalFinish(kind, response)
+			result.Finish, result.Err = responses.TerminalFinish(kind, response)
 			terminal = true
 			return io.EOF // A logical terminal must not wait for the socket to close.
 		}
@@ -530,7 +483,7 @@ func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader,
 				"error":  map[string]interface{}{"code": failureCode, "message": failureMessage},
 			},
 		})
-		frame := compatibleSSEEvent{Event: "response.failed"}
+		frame := responses.SSEEvent{Event: "response.failed"}
 		frame.SetData(string(failure))
 		if err := frame.WriteFrame(target); err != nil {
 			result.Err = err
@@ -570,36 +523,8 @@ func writeResponsesAPIError(w http.ResponseWriter, status int, code, message str
 	writeResponsesAPIErrorWithParam(w, status, code, message, "")
 }
 
-// writeResponsesAPIErrorWithParam is the same envelope with a `param` that names
-// the offending request field. A blob that cannot be decoded has to say which
-// input item to drop, and "param" is where an OpenAI-shaped client looks.
 func writeResponsesAPIErrorWithParam(w http.ResponseWriter, status int, code, message, param string) {
-	// The type has to follow the status: a client retries an overload or a rate
-	// limit and stops on a bad request, and a constant invalid_request_error
-	// told every client to stop, including for a 503 it could have retried.
-	errType := "invalid_request_error"
-	switch {
-	case status == http.StatusUnauthorized:
-		errType = "authentication_error"
-	case status == http.StatusForbidden:
-		errType = "permission_error"
-	case status == http.StatusTooManyRequests:
-		errType = "rate_limit_error"
-	case status >= 500:
-		errType = "server_error"
-	}
-	var paramValue interface{}
-	if strings.TrimSpace(param) != "" {
-		paramValue = param
-	}
-	util.WriteJSONStatus(w, status, map[string]interface{}{
-		"error": map[string]interface{}{
-			"message": message,
-			"type":    errType,
-			"code":    code,
-			"param":   paramValue,
-		},
-	})
+	responses.WriteAPIErrorWithParam(w, status, code, message, param)
 }
 
 // upstreamRejectionCode is the code a caller can act on: the upstream refused
@@ -739,12 +664,4 @@ func classifySynthesizedFailure(code, message string, err error) (string, string
 		return code, message
 	}
 	return codeForCategory("client"), apperrors.PublicMessage(text)
-}
-
-func writeStoredResponseLookupError(w http.ResponseWriter, err error, notFoundMessage string) {
-	if errors.Is(err, store.ErrNoRows) {
-		writeResponsesAPIError(w, http.StatusNotFound, "response_not_found", notFoundMessage)
-		return
-	}
-	writeResponsesAPIError(w, http.StatusServiceUnavailable, "response_store_unavailable", "response store unavailable")
 }

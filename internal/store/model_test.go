@@ -204,10 +204,8 @@ func TestStoreNew_KeepsUpstreamDiscoveredModels(t *testing.T) {
 	}
 }
 
-// TestStoreNew_RemovesDeprecatedGrokModelsOnly proves startup cleanup is limited
-// to identifiers known to be dead. Nothing is added, and a verified row that is
-// not on the deprecated list survives untouched.
-func TestStoreNew_RemovesDeprecatedGrokModelsOnly(t *testing.T) {
+// Startup preserves observed identifiers without a historical-name blacklist.
+func TestStoreNewPreservesObservedModelNames(t *testing.T) {
 	t.Parallel()
 
 	mini := miniredis.RunT(t)
@@ -235,56 +233,8 @@ func TestStoreNew_RemovesDeprecatedGrokModelsOnly(t *testing.T) {
 	testutil.NoError(t, err, "store.New() second error = %v")
 	t.Cleanup(func() { _ = s.Close() })
 
-	for _, id := range []string{"grok-4.5", "grok-imagine-image-quality", "grok-user-custom"} {
+	for _, id := range []string{"grok-4.5", "grok-imagine-image-quality", "grok-user-custom", "grok-4.3"} {
 		_, err := s.GetModelByChannelAndModelID(ctx, "grok", id)
 		testutil.CheckNoError(t, err)
-	}
-	_, err = s.GetModelByChannelAndModelID(ctx, "grok", "grok-4.3")
-	testutil.Error(t, err)
-}
-
-// TestCleanupDeprecatedModelIDsIsChannelScoped proves a retired identifier is
-// only removed from the channel that retired it.
-//
-// The cleanup used to match by identifier alone, which deleted working models:
-// the WorkBuddy and Cline upstream catalogs legitimately advertise grok-4.3 and
-// grok-build-0.1, so every restart removed rows a refresh had just published.
-func TestCleanupDeprecatedModelIDsIsChannelScoped(t *testing.T) {
-	t.Parallel()
-
-	mini := miniredis.RunT(t)
-	s, err := New(Options{
-		RedisAddr:   mini.Addr(),
-		RedisDB:     0,
-		RedisPrefix: "test:",
-	})
-	testutil.NoError(t, err, "store.New() error = %v")
-	ctx := context.Background()
-	for _, record := range []*Model{
-		{Channel: "Grok", ModelID: "grok-4.3", Name: "retired Grok route", Status: ModelStatusAvailable, Verified: true},
-		{Channel: "WorkBuddy", ModelID: "grok-4.3", Name: "upstream WorkBuddy route", Status: ModelStatusAvailable, Verified: true, Origin: "discovery"},
-		{Channel: "Cline", ModelID: "grok-build-0.1", Name: "upstream Cline route", Status: ModelStatusAvailable, Verified: true, Origin: "discovery"},
-		{Channel: "Grok", ModelID: "grok-build-0.1", Name: "retired Grok route", Status: ModelStatusAvailable, Verified: true},
-	} {
-		err := s.CreateModel(ctx, record)
-		testutil.CheckNoError(t, err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
-
-	s.cleanupDeprecatedModelIDs(ctx)
-
-	for _, probe := range []struct{ channel, modelID string }{
-		{"WorkBuddy", "grok-4.3"},
-		{"Cline", "grok-build-0.1"},
-	} {
-		_, err := s.GetModelByChannelAndModelID(ctx, probe.channel, probe.modelID)
-		testutil.CheckNoError(t, err)
-	}
-	for _, probe := range []struct{ channel, modelID string }{
-		{"Grok", "grok-4.3"},
-		{"Grok", "grok-build-0.1"},
-	} {
-		_, err := s.GetModelByChannelAndModelID(ctx, probe.channel, probe.modelID)
-		testutil.CheckError(t, err)
 	}
 }

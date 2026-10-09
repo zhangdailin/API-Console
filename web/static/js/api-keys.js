@@ -72,7 +72,6 @@ function renderApiKeys() {
   rows.slice((keyPage - 1) * 20, keyPage * 20).forEach(key => {
     const status = keyStatus(key), names = { enabled: '启用', disabled: '停用', expired: '已过期' };
     const identity = attach(make('td'), [make('div', 'key-name', key.name), make('code', 'key-masked', (key.key_prefix || 'sk-') + '••••' + key.key_suffix)]);
-    if (!key.secret_available) identity.appendChild(make('small', 'key-note', '轮换后可复制和导入'));
     const models = key.allowed_models?.length ? key.allowed_models : ['全部模型'];
     const permissions = attach(make('div', 'key-models'), models.slice(0, 2).map(model => make('span', 'tag', model)));
     if (models.length > 2) permissions.appendChild(make('span', 'key-note', '+' + (models.length - 2)));
@@ -85,7 +84,7 @@ function renderApiKeys() {
       keyButton('轮换', 'rotate-key', key.id), keyButton('删除', 'delete-key', key.id, true),
     ]);
     for (const button of actions.children) {
-      if (['copy-key', 'import-key'].includes(button.dataset.action) && !key.secret_available) { button.disabled = true; button.title = '旧密钥只存哈希，请手动轮换后使用'; }
+      if (['copy-key', 'import-key'].includes(button.dataset.action) && !key.secret_available) { button.disabled = true; button.title = '密钥内容不可用'; }
       if (button.dataset.action === 'import-key' && status !== 'enabled') { button.disabled = true; button.title = '密钥停用或已过期'; }
     }
     body.appendChild(attach(make('tr'), [identity, attach(make('td'), [make('span', 'key-status key-status-' + status, names[status])]), attach(make('td'), [permissions]), limits, dates, attach(make('td'), [actions])]));

@@ -121,7 +121,7 @@ WantedBy=multi-user.target
 3. 读取二进制 --version 和 /health 的 build，核对 version / commit / build_type。
 4. 本机与公网分别请求 /health，确认代理和防火墙路径。
 5. 登录管理端检查当前配置、账号观察、模型目录和日志采集健康。
-6. 用托管 API Key 请求 /v1/models，再按需要执行一个受控生成请求。
+6. 用托管 API Key 请求 /workbuddy/v1/models，再按需要执行一个受控生成请求。
 7. 对流式请求检查终止事件、工具参数和最终状态，而不只看首字节。
 
 真实生成可能消耗额度，需要选择明确账号 / 模型和请求预算。此次文档更新没有执行任何真实生成或部署。

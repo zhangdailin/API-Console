@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"orchids-api/internal/chatwire"
 	"strings"
 	"testing"
 	"time"
@@ -96,7 +97,7 @@ func TestBuildPreviousResponsePinsCreatingAccount(t *testing.T) {
 	testutil.Equal(t, first.Code, http.StatusOK)
 	var firstBody map[string]interface{}
 	_ = json.Unmarshal(first.Body.Bytes(), &firstBody)
-	second := request(`{"model":"grok-4.6","input":"second","stream":false,"previous_response_id":"` + parseLooseStringAny(firstBody["id"]) + `"}`)
+	second := request(`{"model":"grok-4.6","input":"second","stream":false,"previous_response_id":"` + chatwire.ParseLooseStringAny(firstBody["id"]) + `"}`)
 	testutil.Equal(t, second.Code, http.StatusOK)
 	testutil.Falsef(t, len(authHeaders) != 2 || authHeaders[0] == "" || authHeaders[0] != authHeaders[1], "requests were not pinned to the creating account: %v", authHeaders)
 }

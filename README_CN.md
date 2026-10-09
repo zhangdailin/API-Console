@@ -21,7 +21,7 @@
 
 API Console 是使用 Go 编写的自托管 AI API 网关，将多个上游账号接入统一接口。内置管理后台集中处理官方授权、账号管理、模型发现、API Key 和运维监控。
 
-提供 Claude Messages、OpenAI Chat Completions 与 Responses 兼容接口。统一入口 `/v1` 按模型分发，也可通过通道专属前缀明确指定上游。
+提供 Claude Messages、OpenAI Chat Completions 与 Responses 兼容接口。推理地址必须明确指定通道，`/{provider}` 与 `/{provider}/v1` 提供相同端点；根路径及统一 `/v1` 推理接口返回 404。
 
 ## 功能特性
 
@@ -43,7 +43,6 @@ API Console 是使用 Go 编写的自托管 AI API 网关，将多个上游账�
 | Qoder | 官方设备授权 | `/qoder/v1` |
 | Cline | WorkOS 设备授权 | `/cline/v1` |
 | Grok | Build OAuth 设备授权 | `/grok/v1` |
-| 统一路由 | 网关 API Key，按模型选择通道 | `/v1` |
 
 Grok 使用 **Build OAuth CLI 上游**。实际模型及能力取决于账号的上游权限；目录刷新失败保留既有观察结果，不以内置列表替代。
 
@@ -122,7 +121,7 @@ Linux 常驻服务、反向代理及后端端口保护见 [主机部署指南](d
 
 ## API 接入
 
-统一 Base URL 为 `http://127.0.0.1:3002/v1`。固定通道时，将 `/v1` 替换为对应前缀。
+例如 Base URL 为 `http://127.0.0.1:3002/workbuddy/v1`，也可选择 `/qoder/v1`、`/cline/v1` 或 `/grok/v1`。对应的不带 `/v1` 通道地址提供相同端点。
 
 | 方法 | 相对于 API 前缀的路径 | 用途 |
 |------|-----------------------|------|
@@ -137,7 +136,7 @@ Grok 使用 Build 原生 Responses 路径，其他通道通过 Chat Completions 
 ### 查询模型
 
 ```bash
-curl http://127.0.0.1:3002/v1/models \
+curl http://127.0.0.1:3002/workbuddy/v1/models \
   -H 'Authorization: Bearer <API_KEY>'
 ```
 
@@ -146,7 +145,7 @@ curl http://127.0.0.1:3002/v1/models \
 ### Chat Completions
 
 ```bash
-curl http://127.0.0.1:3002/v1/chat/completions \
+curl http://127.0.0.1:3002/workbuddy/v1/chat/completions \
   -H 'Authorization: Bearer <API_KEY>' \
   -H 'Content-Type: application/json' \
   -d '{"model":"<MODEL_ID>","messages":[{"role":"user","content":"你好！"}],"stream":true}'
@@ -155,7 +154,7 @@ curl http://127.0.0.1:3002/v1/chat/completions \
 ### Claude Messages
 
 ```bash
-curl http://127.0.0.1:3002/v1/messages \
+curl http://127.0.0.1:3002/workbuddy/v1/messages \
   -H 'x-api-key: <API_KEY>' \
   -H 'Content-Type: application/json' \
   -d '{"model":"<MODEL_ID>","max_tokens":256,"messages":[{"role":"user","content":"你好！"}]}'
@@ -164,7 +163,7 @@ curl http://127.0.0.1:3002/v1/messages \
 ### Responses
 
 ```bash
-curl http://127.0.0.1:3002/v1/responses \
+curl http://127.0.0.1:3002/workbuddy/v1/responses \
   -H 'Authorization: Bearer <API_KEY>' \
   -H 'Content-Type: application/json' \
   -d '{"model":"<MODEL_ID>","input":"你好！","stream":true}'

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"orchids-api/internal/responses"
 	"orchids-api/internal/util"
 	"strings"
 	"sync"
@@ -255,7 +256,7 @@ func (d *buildSSEActivityDetector) Observe(chunk []byte) bool {
 		}
 		d.observeLine(line)
 	}
-	if len(d.pending)+d.eventBytes > upstreamMaxEventBytes {
+	if len(d.pending)+d.eventBytes > responses.MaxEventBytes {
 		d.pending = nil
 		d.scanOffset = 0
 		d.overLimit = true
@@ -269,7 +270,7 @@ func (d *buildSSEActivityDetector) Observe(chunk []byte) bool {
 
 func (d *buildSSEActivityDetector) observeLine(line []byte) {
 	d.eventBytes += len(line)
-	if d.eventBytes > upstreamMaxEventBytes {
+	if d.eventBytes > responses.MaxEventBytes {
 		d.overLimit = true
 		d.eventName = ""
 		d.data = nil

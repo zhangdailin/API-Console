@@ -28,11 +28,6 @@ type chatResponseItem struct {
 type StreamOptions struct {
 	// onComplete receives the terminal response object after it is built.
 	OnComplete func(map[string]interface{})
-	// toolAliases restores the identity of a tool the bridge flattened before it
-	// sent the request (see normalizeBridgedTools). Without it every event would
-	// report the flat `namespace__name` the chat layer needed, while the caller
-	// declared a grouped tool and answers by its short name.
-	ToolAliases map[string]ToolAliasIdentity
 	// SearchHook turns a provider-private search delta into a Responses output
 	// item. Nil means the channel has no private search traffic, so the
 	// translator stays free of provider knowledge.
@@ -49,7 +44,6 @@ type SearchItemHook func(delta map[string]interface{}) (identity string, value m
 
 // WriteStreamFromChatReader is the translation itself.
 func WriteStreamFromChatReader(w http.ResponseWriter, request CreateRequest, reader io.Reader, opts StreamOptions) {
-	aliases := opts.ToolAliases
 	httpserver.StreamResponseHeaders(w)
 	writer := &httpserver.CheckedStreamWriter{Target: w}
 	id := "resp_" + util.RandomHex(12)
@@ -274,10 +268,9 @@ func WriteStreamFromChatReader(w http.ResponseWriter, request CreateRequest, rea
 					// item is put back on the name the caller declared straight
 					// away, so every event already carries it.
 					item := map[string]interface{}{"id": "fc_" + util.RandomHex(12), "type": "function_call", "call_id": callID, "name": name, "arguments": "", "status": "in_progress"}
-					RestoreBridgeToolCall(item, name, aliases)
 					state = add(item)
 					tools[index] = state
-				} else if (callID != "" && callID != state.value["call_id"]) || (name != "" && RestoreBridgeToolName(name, aliases) != state.value["name"]) {
+				} else if (callID != "" && callID != state.value["call_id"]) || (name != "" && name != state.value["name"]) {
 					return fmt.Errorf("tool identity changed")
 				}
 				if fragment, exists := fn["arguments"]; exists {

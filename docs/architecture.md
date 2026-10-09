@@ -13,14 +13,13 @@ API-Console 是 Go 服务与内嵌管理网页组成的多通道网关。Redis �
 | `cmd/server/main.go` | 配置、密钥、Redis、日志、处理器、后台任务与 HTTP 服务装配 |
 | `cmd/server/routes.go` | 推理、模型、管理、静态、健康和调试路由注册 |
 | `internal/channel` | 四通道定义、前缀、默认通道和浏览器注册表来源 |
-| `internal/dispatch` | 读取 POST 的 model，选择原生或桥接执行路径 |
 | `internal/middleware` | 鉴权、并发、预算、可信代理、请求跟踪、审计与流刷新 |
 | `internal/handler` | WorkBuddy / Qoder / Cline 共用推理编排 |
 | `internal/provider` | 共用通道的客户端工厂与能力接口 |
 | `internal/workbuddy`、`qoder`、`cline` | 各自授权、目录、请求构造和流解析 |
 | `internal/grok` | Build OAuth、原生 Responses、Chat / Messages 转换及会话状态 |
 | `internal/chatwire` | Chat 请求、内容块、工具声明与宽松标量解析 |
-| `internal/responses` | Responses 类型、SSE、工具规范化、资源、压缩与桥接输出 |
+| `internal/responses` | Responses 类型、SSE、标准工具校验、资源、压缩与桥接输出 |
 | `internal/httpclient` / `httpserver` | HTTP 传输、正文限制、超时、错误与流写出 |
 | `internal/loadbalancer` | 加权选择、账号快照和并发租约 |
 | `internal/accountpolicy` | 错误判定、冷却、重试、切号与重新授权策略 |
@@ -35,7 +34,7 @@ API-Console 是 Go 服务与内嵌管理网页组成的多通道网关。Redis �
 
 1. 读取 `-config` 指定文件，未指定时寻找 config.json / config.yaml / config.yml。
 2. 应用默认值和代码固定值，加载或创建凭据加密密钥。
-3. 使用文件中的 Redis 连接配置初始化存储，执行必要凭据迁移。
+3. 使用文件中的 Redis 连接配置初始化存储，只读验证账号凭据可解密性；不自动迁移旧凭据。
 4. 读取 Redis 已保存配置，发布有效配置快照；解析失败保留文件配置并记录警告。
 5. 装配会话、Key、账号调度、诊断、指标及处理器；注册路由。
 6. 启动刷新与告警后台任务，监听配置端口。
@@ -50,7 +49,7 @@ flowchart TD
     P --> A[进程及通道准入]
     A --> K[API Key 鉴权]
     K --> B[Key 并发与预算预留]
-    B --> D[统一模型分发或固定通道]
+    B --> D[路径绑定固定通道]
     D --> G[Build 原生 Responses / 兼容转换]
     D --> H[共享 Handler / Chat 桥接]
     G --> U[上游请求]
@@ -63,7 +62,7 @@ flowchart TD
 
 准入位于昂贵 Redis 鉴权和预算操作之前。Key 并发通过后才预留费用，避免已被拒绝的请求占用预算。同一请求经过重复包装时复用上下文身份，避免重复扣 RPM 或并发槽。
 
-统一入口的模型分发会原样回填请求体；资源 GET / DELETE 不含 model，由已存记录决定处理器。cancel 与 input_items 显式注册，不依赖空请求体的模型猜测。
+推理路径必须以通道开头，带或不带 /v1 使用相同账号池及处理器；统一入口与模型分发器已删除。资源 GET / DELETE 由路径选择处理器，并验证已存所有权；cancel 与 input_items 显式注册共享处理器。
 
 ## 5. 账号选择与重试
 

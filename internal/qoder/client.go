@@ -80,10 +80,6 @@ type Client struct {
 // a rotated refresh token and a derived runtime pair. It is satisfied by
 // *store.Store.
 type AccountUpdater interface {
-	UpdateAccount(ctx context.Context, acc *store.Account) error
-}
-
-type accountPatcher interface {
 	UpdateQoderAccount(ctx context.Context, id int64, patch store.QoderAccountPatch) error
 }
 
@@ -744,63 +740,21 @@ func (c *Client) recordQuotaNotice(ctx context.Context, notice *QuotaNotice) {
 	}
 }
 
-// persistPatch writes only Qoder-owned fields. Production stores implement the
-// atomic patch API; the full-account fallback keeps lightweight test stores
-// source compatible without weakening the real persistence path.
+// persistPatch uses the store's atomic provider patch, preserving concurrent edits.
 func (c *Client) persistPatch(ctx context.Context, patch store.QoderAccountPatch) error {
 	c.stateMu.RLock()
 	accountStore := c.accountStore
-	if c.account == nil {
-		c.stateMu.RUnlock()
-		return nil
+	var id int64
+	if c.account != nil {
+		id = c.account.ID
 	}
-	acc := *c.account
-	acc.QoderOrganizationTags = append([]string(nil), c.account.QoderOrganizationTags...)
-	acc.QoderModelIDs = append([]string(nil), c.account.QoderModelIDs...)
 	c.stateMu.RUnlock()
-	if accountStore == nil || acc.ID == 0 {
+	if accountStore == nil || id == 0 {
 		return nil
 	}
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	if patcher, ok := accountStore.(accountPatcher); ok {
-		if err := patcher.UpdateQoderAccount(writeCtx, acc.ID, patch); err != nil {
-			return fmt.Errorf("persist qoder account state: %w", err)
-		}
-		return nil
-	}
-	if patch.AccessToken != "" {
-		acc.QoderAccessToken = patch.AccessToken
-	}
-	if patch.RefreshToken != "" {
-		acc.QoderRefreshToken = patch.RefreshToken
-	}
-	if !patch.ExpiresAt.IsZero() {
-		acc.QoderExpiresAt = patch.ExpiresAt
-	}
-	if patch.UserID != "" {
-		acc.QoderUserID = patch.UserID
-	}
-	if patch.RuntimeInfo != "" {
-		acc.QoderRuntimeInfo = patch.RuntimeInfo
-	}
-	if patch.RuntimeKey != "" {
-		acc.QoderRuntimeKey = patch.RuntimeKey
-	}
-	if patch.ModelIDs != nil {
-		acc.QoderModelIDs = append([]string(nil), patch.ModelIDs...)
-	}
-	if patch.Quota != nil {
-		// The fallback has no atomic guard to lean on, so the freshness rule is
-		// applied here: a reading older than the one already on the record is
-		// dropped rather than allowed to rewind it. UpdateAccount re-applies the
-		// same rule server-side when the store supports it.
-		incoming := *patch.Quota
-		if acc.QoderQuota.SyncedAt.IsZero() || !incoming.SyncedAt.Before(acc.QoderQuota.SyncedAt) {
-			acc.QoderQuota = incoming
-		}
-	}
-	if err := accountStore.UpdateAccount(writeCtx, &acc); err != nil {
+	if err := accountStore.UpdateQoderAccount(writeCtx, id, patch); err != nil {
 		return fmt.Errorf("persist qoder account state: %w", err)
 	}
 	return nil

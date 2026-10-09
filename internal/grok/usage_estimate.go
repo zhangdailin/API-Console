@@ -2,6 +2,7 @@ package grok
 
 import (
 	"fmt"
+	"orchids-api/internal/chatwire"
 	"strings"
 	"unicode/utf8"
 
@@ -32,7 +33,7 @@ func approxTokenCount(text string) int {
 	return max(1, (runes+3)/4)
 }
 
-func estimatePromptUsageFromRequest(req *ChatCompletionsRequest) chatUsageEstimate {
+func estimatePromptUsageFromRequest(req *chatwire.Request) chatUsageEstimate {
 	var out chatUsageEstimate
 	if req == nil {
 		return out
@@ -80,11 +81,11 @@ func accumulatePromptContentUsage(out *chatUsageEstimate, content interface{}) {
 		blockType := strings.ToLower(strings.TrimSpace(fmt.Sprint(v["type"])))
 		switch blockType {
 		case "text", "input_text":
-			out.promptTextTokens += approxTokenCount(parseLooseStringAny(v["text"]))
+			out.promptTextTokens += approxTokenCount(chatwire.ParseLooseStringAny(v["text"]))
 		case "image_url":
 			out.promptImageTokens += estimatedImagePromptTokens
 			if imageURL, ok := v["image_url"].(map[string]interface{}); ok {
-				out.promptTextTokens += approxTokenCount(parseLooseStringAny(imageURL["detail"]))
+				out.promptTextTokens += approxTokenCount(chatwire.ParseLooseStringAny(imageURL["detail"]))
 			}
 		case "input_audio":
 			out.promptAudioTokens += estimatedAudioPromptTokens
@@ -92,7 +93,7 @@ func accumulatePromptContentUsage(out *chatUsageEstimate, content interface{}) {
 			// A file block is a document, not an image: charging it 256 image
 			// tokens invented usage the upstream never reported.
 			if fileData, ok := v["file"].(map[string]interface{}); ok {
-				out.promptTextTokens += approxTokenCount(parseLooseStringAny(fileData["filename"]))
+				out.promptTextTokens += approxTokenCount(chatwire.ParseLooseStringAny(fileData["filename"]))
 			}
 		default:
 			if raw, err := json.Marshal(v); err == nil {
@@ -111,13 +112,13 @@ func estimateCompletionUsage(finalContent string, toolCalls []map[string]interfa
 	// commas are serialization overhead, not tokens the model produced.
 	for _, call := range toolCalls {
 		function, _ := call["function"].(map[string]interface{})
-		out.completionTextTokens += approxTokenCount(parseLooseStringAny(function["name"]))
+		out.completionTextTokens += approxTokenCount(chatwire.ParseLooseStringAny(function["name"]))
 		out.completionTextTokens += approxTokenCount(stringifyToolArguments(function["arguments"]))
 	}
 	return out
 }
 
-func buildChatUsagePayload(req *ChatCompletionsRequest, finalContent string, toolCalls []map[string]interface{}) map[string]interface{} {
+func buildChatUsagePayload(req *chatwire.Request, finalContent string, toolCalls []map[string]interface{}) map[string]interface{} {
 	prompt := estimatePromptUsageFromRequest(req)
 	completion := estimateCompletionUsage(finalContent, toolCalls)
 	promptTokens := prompt.promptTextTokens + prompt.promptAudioTokens + prompt.promptImageTokens

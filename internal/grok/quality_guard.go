@@ -3,6 +3,7 @@ package grok
 import (
 	"context"
 	"log/slog"
+	"orchids-api/internal/chatwire"
 	"strings"
 	"time"
 
@@ -90,7 +91,7 @@ func qualityDegraded(sig qualitySignals) bool {
 }
 
 // qualityExpectsReasoning reports whether the request asked for reasoning.
-func qualityExpectsReasoning(req *ChatCompletionsRequest, replay bool) bool {
+func qualityExpectsReasoning(req *chatwire.Request, replay bool) bool {
 	if replay {
 		return true
 	}

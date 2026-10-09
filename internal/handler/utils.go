@@ -9,7 +9,6 @@ import (
 	"orchids-api/internal/channel"
 	"orchids-api/internal/middleware"
 	"orchids-api/internal/prompt"
-	"orchids-api/internal/util"
 )
 
 func channelFromPath(path string) string {
@@ -173,18 +172,17 @@ func lastUserIsToolResultFollowup(messages []prompt.Message) bool {
 func extractToolResultContent(content interface{}) string {
 	switch v := content.(type) {
 	case string:
-		return util.NormalizePersistedToolResultText(v)
+		return v
 	case []interface{}:
 		var parts []string
 		for _, item := range v {
 			if s, ok := item.(string); ok {
-				s = util.NormalizePersistedToolResultText(s)
 				if s != "" {
 					parts = append(parts, s)
 				}
 			}
 		}
-		return util.NormalizePersistedToolResultText(strings.Join(parts, "\n"))
+		return strings.Join(parts, "\n")
 	default:
 		return ""
 	}

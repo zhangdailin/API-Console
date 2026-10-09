@@ -13,15 +13,15 @@
 | Chat / Messages | 共享 Handler，通道分别构造上游请求 | 转换为 Build 请求再投影 |
 | Responses | Chat 桥接 | Build 原生 Responses |
 | 文本 SSE | 共享流状态机与 Responses 事件转换 | 原生转发或 Chat / Messages 转换 |
-| 函数工具与结果续轮 | 声明、参数、call_id 与结果转换 | 原生及工具别名恢复 |
+| 函数工具与结果续轮 | 标准协议转换，名称与参数保留 | 原生声明与调用透传 |
 | store / previous_response_id | 共享响应存储，展开历史 | 绑定 Key、原账号与原生资源策略 |
 | GET / DELETE 响应 | 本地存储资源 | 所有权验证后原生 / 记录路径 |
 | cancel / input_items | 共享所有权接口 | 共享记录接口；不承诺取消上游 |
 | compact | 网关摘要引用 | 密封网关摘要或原生路径，按配置决定 |
-| 精确 Token 计数 | 无；本地估算 | 无；专属 count_tokens 未注册 |
+| 精确 Token 计数 | 无；本地估算 | 无；本地估算 |
 | WebSocket 服务 | 未实现 | 未实现 |
 
-统一 /v1 与四个固定通道均提供 compact 分派。先前只列 Grok / 统一入口不完整。
+四个通道的 `/{provider}` 与 `/{provider}/v1` 均提供上述已实现能力及模型目录；根路径和统一 /v1 推理入口已删除。路径能力一致不代表各上游协议能力相同。
 
 ## 3. 字段与降级
 
@@ -34,7 +34,7 @@
 | include:reasoning.encrypted_content | Chat 桥接消费该输出投影请求并返回兼容警告，不伪造密文 |
 | 其他 include | 无等价共享传输时拒绝 |
 | 桥接 web_search / preview | 删除托管搜索并提示不可用；强制搜索且无法满足时拒绝 |
-| 其他托管工具 / MCP | 不能按共享函数工具能力宣称支持；Build 依已有规范化与上游能力 |
+| 其他托管工具 / MCP | 共享桥接拒绝；Build 使用原生格式，能力取决于上游 |
 | 外部加密推理历史 | Chat 桥接拒绝；Build 按原生状态策略 |
 | background=true | 不提供网关任务队列语义；桥接无等价能力，原生仍取决上游 |
 | stop | 支持的路径实行停止规则；Grok 转换 stop 可跨帧处理 |
@@ -56,7 +56,7 @@ strict:false 和 json_object 不执行相同强制校验。答案围栏与外围
 
 工具名必须唯一，tool_choice 引用存在的声明，required 需要可执行工具。历史调用与结果按 call_id 配对，函数名不能替代身份。不同媒体内容必须提供 URL / data URI 等合法结构，不能直接塞裸 base64。
 
-Build 工具规范化可恢复命名空间、custom 模拟、apply_patch 结构与整数 schema 参数，但不代表网关拥有或实际执行这些工具。执行方仍是客户端或上游托管能力。
+工具名称、schema 和参数不按客户端重写。namespace、custom、apply_patch、local_shell、tool_search 等客户端扩展格式明确拒绝；使用标准 function 声明。文本中的工具标记仅作为文本输出，不转换为可执行调用；工具结果不读取客户端本地文件。
 
 桥接不能无损接受任意未知 item、外部密文或原生托管工具。工具参数增量应聚合后再执行；缺 finish / DONE、参数错误和截断不能伪装完整成功。
 

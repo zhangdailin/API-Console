@@ -7,7 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
+
 	"strings"
 
 	"testing"
@@ -48,45 +48,6 @@ func userMessage(t *testing.T, text string) prompt.Message {
 func roleMessage(t *testing.T, role, text string) prompt.Message {
 	t.Helper()
 	return jsonMessage(t, role, text)
-}
-
-func TestResolveCredentials_ReadsAuthDocument(t *testing.T) {
-	t.Parallel()
-
-	uid := "0f0f0f0f-1111-2222-3333-444455556666"
-	expiry := time.Now().Add(48 * time.Hour)
-	token := jwtWithClaims(t, map[string]interface{}{
-		"sub":   uid,
-		"email": "operator@example.com",
-		"exp":   expiry.Unix(),
-	})
-	doc := `{"account":{"uid":"` + uid + `"},"auth":{"accessToken":"` + token +
-		`","refreshToken":"refresh-value","expiresAt":` + strconv.FormatInt(expiry.UnixMilli(), 10) + `}}`
-
-	creds := ResolveCredentials(&store.Account{ClientCookie: doc})
-	testutil.Equal(t, creds.AccessToken, token)
-	testutil.Equal(t, creds.RefreshToken, "refresh-value")
-	testutil.Equal(t, creds.UID, uid)
-	testutil.Equal(t, creds.Email, "operator@example.com")
-	testutil.Falsef(t, creds.ExpiresAt.IsZero() || creds.ExpiresAt.Before(time.Now().Add(24*time.Hour)), "ExpiresAt = %v, want a future expiry decoded from milliseconds", creds.ExpiresAt)
-}
-
-func TestResolveCredentials_SplitsKeyValuePairs(t *testing.T) {
-	t.Parallel()
-
-	creds := ResolveCredentials(&store.Account{
-		ClientCookie: "accessToken=abc.def.ghi; refreshToken=refresh-xyz",
-	})
-	testutil.Equal(t, creds.AccessToken, "abc.def.ghi")
-	testutil.Equal(t, creds.RefreshToken, "refresh-xyz")
-}
-
-func TestResolveCredentials_TreatsOpaqueValueAsRefreshToken(t *testing.T) {
-	t.Parallel()
-
-	creds := ResolveCredentials(&store.Account{ClientCookie: "opaque-refresh-value"})
-	testutil.Equal(t, creds.RefreshToken, "opaque-refresh-value")
-	testutil.Equal(t, creds.AccessToken, "")
 }
 
 func TestResolveCredentials_PrefersDedicatedFields(t *testing.T) {
@@ -292,9 +253,8 @@ func TestFetchModels_FiltersCLIWhitelist(t *testing.T) {
 	}
 }
 
-func (f *fakeUpdater) UpdateAccount(_ context.Context, acc *store.Account) error {
-	copied := *acc
-	f.saved = &copied
+func (f *fakeUpdater) UpdateWorkBuddyCredentials(_ context.Context, id int64, patch store.WorkBuddyCredentialPatch) error {
+	f.saved = &store.Account{ID: id, WorkBuddyAccessToken: patch.AccessToken, WorkBuddyRefreshToken: patch.RefreshToken, WorkBuddyExpiresAt: patch.ExpiresAt}
 	return nil
 }
 
@@ -352,5 +312,11 @@ func TestSilentRequestKeepsChainOfThoughtPrivate(t *testing.T) {
 		got, present := decoded["reasoning_effort"]
 		testutil.True(t, present, "effort %q: reasoning_effort is missing; the upstream would inline its reasoning into content")
 		testutil.Equal(t, got, DefaultReasoningEffort)
+	}
+}
+
+func TestResolveCredentialsIgnoresGenericSlots(t *testing.T) {
+	for _, raw := range []string{"opaque", "accessToken=access; refreshToken=refresh", `{"auth":{"accessToken":"access","refreshToken":"refresh"}}`} {
+		testutil.False(t, ResolveCredentials(&store.Account{ClientCookie: raw, Token: raw, RefreshToken: raw}).HasCredential(), "generic credentials must not migrate")
 	}
 }

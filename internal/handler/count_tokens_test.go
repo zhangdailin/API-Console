@@ -4,74 +4,42 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"orchids-api/internal/channel"
 	"strings"
 	"testing"
-
-	"orchids-api/internal/middleware"
-	"orchids-api/internal/store"
-	"orchids-api/internal/testutil"
 )
 
-// count_tokens decides the token profile from the channel, and on the unified
-// prefix the path names no channel at all. A path-only answer used to make every
-// /v1 request fall through to the generic estimate while the completion itself
-// ran on another channel, so a client that budgets its context against
-// count_tokens planned against a number that did not belong to the provider
-// serving it.
-func TestHandleCountTokensUsesTheModelChannelWhenThePathHasNone(t *testing.T) {
-	h, s, _ := setupModelValidationHandler(t)
-
-	mustCreateModel(t, s, "360", "WorkBuddy", "claude-opus-5", store.ModelStatusAvailable)
-
-	body := `{"model":"claude-opus-5","messages":[{"role":"user","content":"hello there, count my tokens"}]}`
-
-	// The tracing middleware installs the hint box in production and the unified
-	// dispatcher publishes the resolved model into it; count_tokens reads it back
-	// so it never has to look the model up a second time.
-	unified := httptest.NewRecorder()
-	unifiedReq := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", strings.NewReader(body))
-	unifiedCtx, _ := middleware.RequestModelHint(unifiedReq.Context())
-	unifiedCtx = middleware.WithRequestModel(unifiedCtx, "claude-opus-5")
-	h.HandleCountTokens(unified, unifiedReq.WithContext(unifiedCtx))
-	testutil.Equal(t, unified.Code, http.StatusOK)
-
-	channelScoped := httptest.NewRecorder()
-	h.HandleCountTokens(channelScoped, httptest.NewRequest(http.MethodPost, "/workbuddy/v1/messages/count_tokens", strings.NewReader(body)))
-	testutil.Equal(t, channelScoped.Code, http.StatusOK)
-
-	var unifiedBody, channelBody struct {
-		InputTokens   int    `json:"input_tokens"`
-		PromptProfile string `json:"prompt_profile"`
+// Counting needs neither a model catalog nor configured upstream clients.
+// The provider path determines the profile even for an unknown model.
+func TestHandleCountTokensUsesProviderPathWithoutCatalog(t *testing.T) {
+	h := &Handler{}
+	body := `{"model":"unknown","messages":[{"role":"user","content":"hello there, count my tokens"}]}`
+	var expectedTokens int
+	for _, provider := range channel.All() {
+		for _, base := range channel.PrefixesFor(provider.ID) {
+			t.Run(base, func(t *testing.T) {
+				w := httptest.NewRecorder()
+				h.HandleCountTokens(w, httptest.NewRequest(http.MethodPost, base+"/messages/count_tokens", strings.NewReader(body)))
+				if w.Code != http.StatusOK {
+					t.Fatalf("count = %d %s", w.Code, w.Body.String())
+				}
+				var result struct {
+					InputTokens int    `json:"input_tokens"`
+					Profile     string `json:"prompt_profile"`
+				}
+				if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+					t.Fatal(err)
+				}
+				if result.Profile != string(provider.ID) || result.InputTokens <= 0 {
+					t.Fatalf("incorrect count/profile: %#v", result)
+				}
+				if expectedTokens == 0 {
+					expectedTokens = result.InputTokens
+				}
+				if result.InputTokens != expectedTokens {
+					t.Fatalf("same input estimated differently: %d != %d", result.InputTokens, expectedTokens)
+				}
+			})
+		}
 	}
-	testutil.NoError(t, json.Unmarshal(unified.Body.Bytes(), &unifiedBody), "decode unified: %v")
-	testutil.NoError(t, json.Unmarshal(channelScoped.Body.Bytes(), &channelBody), "decode channel: %v")
-
-	testutil.Equal(t, unifiedBody.PromptProfile, "workbuddy")
-	if unifiedBody.PromptProfile != channelBody.PromptProfile {
-		t.Fatalf("unified profile = %q, channel profile = %q; the unified prefix must resolve the channel from the model",
-			unifiedBody.PromptProfile, channelBody.PromptProfile)
-	}
-	if unifiedBody.InputTokens != channelBody.InputTokens {
-		t.Fatalf("unified tokens = %d, channel tokens = %d; both requests must estimate identically",
-			unifiedBody.InputTokens, channelBody.InputTokens)
-	}
-}
-
-// A model that resolves to no channel still has to answer: count_tokens is a
-// budgeting call, and a 5xx there blocks the client before it ever sends the
-// completion.
-func TestHandleCountTokensAnswersForAnUnknownModel(t *testing.T) {
-	h, _, _ := setupModelValidationHandler(t)
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens",
-		strings.NewReader(`{"model":"who-knows","messages":[{"role":"user","content":"hi"}]}`))
-	ctx, _ := middleware.RequestModelHint(req.Context())
-	h.HandleCountTokens(rec, req.WithContext(ctx))
-	testutil.Equal(t, rec.Code, http.StatusOK)
-	var body struct {
-		InputTokens int `json:"input_tokens"`
-	}
-	testutil.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body), "decode: %v")
-	testutil.Falsef(t, body.InputTokens <= 0, "input_tokens = %d, want a positive estimate", body.InputTokens)
 }

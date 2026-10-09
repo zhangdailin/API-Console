@@ -115,8 +115,8 @@ func TestLegacyKeysAndMissingCipher(t *testing.T) {
 	a := New(s, "admin", "pass", &config.Config{})
 	rec := httptest.NewRecorder()
 	a.HandleKeyByID(rec, httptest.NewRequest("GET", fmt.Sprintf("/api/keys/%d/secret", key.ID), nil))
-	if rec.Code != 409 {
-		t.Fatal("legacy must require rotation")
+	if rec.Code != 503 {
+		t.Fatal("unavailable secrets must use the generic error")
 	}
 	if _, err = s.AuthorizeApiKey(context.Background(), raw); err != nil {
 		t.Fatal("legacy authentication changed", err)

@@ -10,7 +10,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 )
 
-func TestAccountCredentialsEncryptedAndLegacyMigratesOnWrite(t *testing.T) {
+func TestAccountCredentialsEncryptedAndPlaintextRejected(t *testing.T) {
 	mini := miniredis.RunT(t)
 	key := bytes.Repeat([]byte{0x2a}, 32)
 	s, err := New(Options{
@@ -59,12 +59,11 @@ func TestAccountCredentialsEncryptedAndLegacyMigratesOnWrite(t *testing.T) {
 	legacy := `{"id":2,"name":"legacy","account_type":"grok","enabled":true,"client_cookie":"legacy-secret"}`
 	mini.Set("cipher-test:accounts:id:2", legacy)
 	mini.SAdd("cipher-test:accounts:ids", "2")
-	legacyAcc, err := s.GetAccount(ctx, 2)
-	testutil.Equal(t, err, nil)
-	testutil.Equal(t, legacyAcc.ClientCookie, "legacy-secret")
-	testutil.NoError(t, s.UpdateAccount(ctx, legacyAcc), "legacy migration update error = %v")
-	migrated, _ := mini.Get("cipher-test:accounts:id:2")
-	testutil.Falsef(t, strings.Contains(migrated, "legacy-secret") || !strings.Contains(migrated, encryptedCredentialPrefix), "legacy account was not encrypted on write: %s", migrated)
+	_, err = s.GetAccount(ctx, 2)
+	testutil.Error(t, err)
+	unchanged, _ := mini.Get("cipher-test:accounts:id:2")
+	testutil.Equal(t, unchanged, legacy)
+
 }
 
 // Retired account metadata is intentionally dropped even when an old Redis row
@@ -110,7 +109,7 @@ func TestCredentialPlaintextWithMarkerIsStillEncrypted(t *testing.T) {
 	testutil.Equal(t, got, want)
 }
 
-func TestStoreStartupMigratesLegacyCredentials(t *testing.T) {
+func TestStoreStartupRejectsPlaintextWithoutMigration(t *testing.T) {
 	mini := miniredis.RunT(t)
 	legacy, err := New(Options{RedisAddr: mini.Addr(), RedisPrefix: "startup-migration:"})
 	testutil.NoError(t, err)
@@ -123,13 +122,12 @@ func TestStoreStartupMigratesLegacyCredentials(t *testing.T) {
 		RedisPrefix:             "startup-migration:",
 		CredentialEncryptionKey: bytes.Repeat([]byte{9}, 32),
 	})
-	testutil.NoError(t, err, "secure reopen error = %v")
-	t.Cleanup(func() { _ = secure.Close() })
+	testutil.Error(t, err)
+	testutil.Equal(t, secure, (*Store)(nil))
 	raw, _ := mini.Get("startup-migration:accounts:id:1")
-	testutil.Falsef(t, strings.Contains(raw, "legacy-on-disk") || !strings.Contains(raw, encryptedCredentialPrefix), "startup migration did not encrypt legacy account: %s", raw)
-	got, err := secure.GetAccount(context.Background(), acc.ID)
-	testutil.Equal(t, err, nil)
-	testutil.Equal(t, got.ClientCookie, "legacy-on-disk")
+	testutil.MustContain(t, raw, "legacy-on-disk")
+	testutil.MustNotContain(t, raw, encryptedCredentialPrefix)
+
 }
 
 func TestStoreStartupRejectsWrongCredentialKey(t *testing.T) {

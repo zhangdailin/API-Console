@@ -43,37 +43,6 @@ var workBuddyAuthDocument = func() string {
 }`
 }()
 
-func TestNormalizeWorkBuddyCredentials_SplitsDocumentIntoDedicatedFields(t *testing.T) {
-	t.Parallel()
-
-	acc := &store.Account{AccountType: "workbuddy", ClientCookie: workBuddyAuthDocument}
-	testutil.False(t, !NormalizeWorkBuddyCredentials(acc), "NormalizeWorkBuddyCredentials() = false, want true")
-	testutil.Equal(t, acc.WorkBuddyRefreshToken, "durable-refresh-token")
-	testutil.Falsef(t, acc.WorkBuddyAccessToken == "" || workbuddy.DecodeClaims(acc.WorkBuddyAccessToken).Sub != "07ab88c8-5596-4257-8d21-e9fcbe3a3810", "WorkBuddyAccessToken = %q, want the embedded token", acc.WorkBuddyAccessToken)
-	testutil.Equal(t, acc.WorkBuddyUID, "07ab88c8-5596-4257-8d21-e9fcbe3a3810")
-	// The identity the table labels the row with comes from the token claims.
-	testutil.Equal(t, acc.Email, "operator@example.com")
-	testutil.Equal(t, acc.Name, "operator@example.com")
-	testutil.False(t, acc.WorkBuddyExpiresAt.IsZero(), "WorkBuddyExpiresAt is zero, want the millisecond expiry converted")
-	// The generic credential slots are shared with other channels and must stay
-	// empty so the refresh token is never echoed through the account list.
-	for _, value := range map[string]string{
-		"ClientCookie": acc.ClientCookie,
-		"Token":        acc.Token,
-		"RefreshToken": acc.RefreshToken,
-	} {
-		testutil.Equal(t, value, "")
-	}
-}
-
-func TestNormalizeWorkBuddyCredentials_AcceptsBareRefreshToken(t *testing.T) {
-	t.Parallel()
-
-	acc := &store.Account{AccountType: "workbuddy", ClientCookie: "opaque-refresh-token"}
-	testutil.False(t, !NormalizeWorkBuddyCredentials(acc), "NormalizeWorkBuddyCredentials() = false, want true")
-	testutil.Equal(t, acc.WorkBuddyRefreshToken, "opaque-refresh-token")
-}
-
 func TestNormalizeWorkBuddyCredentials_RejectsEmptyInput(t *testing.T) {
 	t.Parallel()
 

@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"orchids-api/internal/chatwire"
+	"orchids-api/internal/responses"
 	"orchids-api/internal/testutil"
 	"strings"
 	"testing"
@@ -37,7 +39,7 @@ func TestRemainingSearchRestrictionsValidationAndWire(t *testing.T) {
 	tool, _ := anthropicSearchTool(anthropicTool{AllowedDomains: []string{"example.com"}})
 	h := &Handler{}
 	for _, build := range []bool{false, true} {
-		payload, err := h.responsesPayloadFromChat(ModelSpec{ID: "grok-4.6", UpstreamModel: "grok-4.6"}, &ChatCompletionsRequest{Model: "grok-4.6", Messages: []ChatMessage{{Role: "user", Content: "search"}}, ResponsesTools: []map[string]interface{}{tool}}, build)
+		payload, err := h.responsesPayloadFromChat(ModelSpec{ID: "grok-4.6", UpstreamModel: "grok-4.6"}, &chatwire.Request{Model: "grok-4.6", Messages: []chatwire.Message{{Role: "user", Content: "search"}}, ResponsesTools: []map[string]interface{}{tool}}, build)
 		testutil.NoError(t, err)
 		data, _ := json.Marshal(payload)
 		testutil.MustContain(t, string(data), "example.com")
@@ -47,7 +49,7 @@ func TestRemainingSearchRestrictionsValidationAndWire(t *testing.T) {
 func TestRemainingRefusalNonstream(t *testing.T) {
 	raw := `{"status":"completed","output":[{"type":"message","content":[{"type":"refusal","refusal":"Cannot help."}]}]}`
 	w := httptest.NewRecorder()
-	out := (&Handler{}).collectBuildChat(w, &ChatCompletionsRequest{Model: "grok-4.6"}, strings.NewReader(raw))
+	out := (&Handler{}).collectBuildChat(w, &chatwire.Request{Model: "grok-4.6"}, strings.NewReader(raw))
 	testutil.Fail(t, out.Err != nil, out.Err)
 	var chat map[string]interface{}
 	_ = json.Unmarshal(w.Body.Bytes(), &chat)
@@ -117,9 +119,9 @@ func remainingChatFrame(delta map[string]interface{}, finish interface{}) string
 func remainingResponse(t *testing.T, stream string) map[string]interface{} {
 	t.Helper()
 	w := httptest.NewRecorder()
-	writeResponsesStreamFromChatReaderRequestWithHook(w, ResponsesCreateRequest{Model: "grok-4.6"}, strings.NewReader(stream), nil)
+	writeResponsesStreamFromChatReaderRequestWithHook(w, responses.CreateRequest{Model: "grok-4.6"}, strings.NewReader(stream), nil)
 	var final map[string]interface{}
-	err := readResponseSSE(strings.NewReader(w.Body.String()), func(kind, data string) error {
+	err := responses.ReadSSE(strings.NewReader(w.Body.String()), func(kind, data string) error {
 		if kind == "response.completed" || kind == "response.failed" || kind == "response.incomplete" {
 			var event map[string]interface{}
 			_ = json.Unmarshal([]byte(data), &event)
@@ -194,7 +196,7 @@ func TestRemainingLateMessagesSignatureKeepsOriginalBlock(t *testing.T) {
 	count := 0
 	signed := false
 	open := map[int]bool{}
-	err := readResponseSSE(strings.NewReader(messages.String()), func(kind, data string) error {
+	err := responses.ReadSSE(strings.NewReader(messages.String()), func(kind, data string) error {
 		var v map[string]interface{}
 		_ = json.Unmarshal([]byte(data), &v)
 		index := interfaceToInt(v["index"])
@@ -230,6 +232,6 @@ func (r *remainingBrokenResponseWriter) Read([]byte) (int, error) { r.reads++; r
 
 func TestRemainingResponsesWriteFailureStopsReading(t *testing.T) {
 	w := &remainingBrokenResponseWriter{}
-	writeResponsesStreamFromChatReaderRequestWithHook(w, ResponsesCreateRequest{Model: "grok-4.6"}, w, nil)
+	writeResponsesStreamFromChatReaderRequestWithHook(w, responses.CreateRequest{Model: "grok-4.6"}, w, nil)
 	testutil.Equal(t, w.reads, 0)
 }

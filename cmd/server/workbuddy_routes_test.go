@@ -94,9 +94,8 @@ func TestRegisterRoutes_WorkBuddyEndpoints(t *testing.T) {
 	unknownBody := unknown.Body.String()
 	testutil.MustContain(t, unknownBody, "404 page not found")
 
-	// Inference auth must reject untrusted clients, but an authorized/allowlisted
-	// control must get through it. Otherwise the blanket /v1 guard also returns
-	// 401 for missing routes and conceals a registration regression.
+	// Both provider bases reject untrusted clients; allowlisted controls must
+	// reach the API handler so auth cannot conceal a registration regression.
 	for _, target := range []string{
 		"/workbuddy/v1/messages",
 		"/workbuddy/v1/chat/completions",
@@ -106,12 +105,11 @@ func TestRegisterRoutes_WorkBuddyEndpoints(t *testing.T) {
 		"/workbuddy/v1/responses/compact",
 		"/cline/v1/responses",
 		"/qoder/v1/responses",
-		// The unified prefix must serve every channel's models instead of
-		// belonging to the Grok handler alone.
-		"/v1/chat/completions",
-		"/v1/messages",
-		"/v1/messages/count_tokens",
-		"/v1/responses",
+		// The unversioned provider bases share the registered API capabilities.
+		"/workbuddy/chat/completions",
+		"/workbuddy/messages",
+		"/grok/messages/count_tokens",
+		"/workbuddy/responses",
 	} {
 		method := http.MethodPost
 		if strings.HasSuffix(target, "/models") {

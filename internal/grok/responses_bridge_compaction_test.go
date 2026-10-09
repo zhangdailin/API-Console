@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"orchids-api/internal/chatwire"
+	"orchids-api/internal/responses"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +21,7 @@ func TestBridgeCompactionRoundTripAndIsolation(t *testing.T) {
 	for _, channel := range []string{"workbuddy", "qoder", "cline"} {
 		t.Run(channel, func(t *testing.T) {
 			st := store.NewMemoryResponseStore(0)
-			var got ChatCompletionsRequest
+			var got chatwire.Request
 			calls := 0
 			chat := func(w http.ResponseWriter, r *http.Request) {
 				calls++
@@ -28,7 +30,7 @@ func TestBridgeCompactionRoundTripAndIsolation(t *testing.T) {
 				}
 				_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"Keep task A and file main.go"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}}`)
 			}
-			opts := ResponsesBridgeOptions{Store: st}
+			opts := responses.BridgeOptions{Store: st}
 			path := "/" + channel + "/v1/responses"
 			compact := httptest.NewRecorder()
 			ResponsesBridgeCompactHandler(chat, opts)(compact, httptest.NewRequest(http.MethodPost, path+"/compact", strings.NewReader(`{"model":"m","input":"task A","instructions":"keep paths"}`)))
@@ -76,7 +78,7 @@ func TestBridgeCompactionRoundTripAndIsolation(t *testing.T) {
 	}
 }
 
-type failedCompactionStore struct{ ResponsesStore }
+type failedCompactionStore struct{ responses.Store }
 
 func (failedCompactionStore) GetStoredResponse(context.Context, string, string) (*store.StoredResponse, error) {
 	return nil, errors.New("storage offline")
@@ -86,7 +88,7 @@ func (failedCompactionStore) SaveStoredResponse(context.Context, *store.StoredRe
 }
 
 func TestCompactionStorageOutageIsNotAClientError(t *testing.T) {
-	opts := ResponsesBridgeOptions{Store: failedCompactionStore{}}
+	opts := responses.BridgeOptions{Store: failedCompactionStore{}}
 	calls := 0
 	chat := func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -107,7 +109,7 @@ func TestCompactionStorageOutageIsNotAClientError(t *testing.T) {
 }
 
 func TestBridgeCompactionOwnerIsolationAndFailures(t *testing.T) {
-	opts := ResponsesBridgeOptions{Store: store.NewMemoryResponseStore(0)}
+	opts := responses.BridgeOptions{Store: store.NewMemoryResponseStore(0)}
 	calls := 0
 	chat := func(w http.ResponseWriter, r *http.Request) {
 		calls++

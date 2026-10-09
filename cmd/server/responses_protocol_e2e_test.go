@@ -84,24 +84,26 @@ func TestResponsesProtocolThroughAuthenticatedRoutes(t *testing.T) {
 			}
 			input := append(result["output"].([]interface{}), map[string]interface{}{"type": "message", "role": "user", "content": "continue"})
 			body, _ := json.Marshal(map[string]interface{}{"model": "m", "input": input})
-			continued := call(path, string(body))
+			// A summary made on /provider/v1 must continue on /provider as well.
+			continued := call("/"+channel+"/responses", string(body))
 			if continued.Code != 200 || len(client.requests) != 3 {
 				t.Fatalf("continue=%d %s calls=%d", continued.Code, continued.Body.String(), len(client.requests))
 			}
 			if !strings.Contains(client.requests[2].Messages[0].Content.GetText(), "main.go") {
 				t.Fatalf("summary lost: %#v", client.requests[2])
 			}
-			unified := call("/v1/responses/compact", `{"model":"m","input":[{"role":"user","content":"task A"}]}`)
-			if unified.Code != 200 {
-				t.Fatalf("unified compact=%d %s", unified.Code, unified.Body.String())
+			unversioned := call("/"+channel+"/responses/compact", `{"model":"m","input":[{"role":"user","content":"task A"}]}`)
+			if unversioned.Code != 200 {
+				t.Fatalf("unversioned compact=%d %s", unversioned.Code, unversioned.Body.String())
 			}
-			if err := json.Unmarshal(unified.Body.Bytes(), &result); err != nil {
+			if err := json.Unmarshal(unversioned.Body.Bytes(), &result); err != nil {
 				t.Fatal(err)
 			}
 			body, _ = json.Marshal(map[string]interface{}{"model": "m", "input": append(result["output"].([]interface{}), map[string]interface{}{"role": "user", "content": "continue"})})
-			unifiedNext := call("/v1/responses", string(body))
-			if unifiedNext.Code != 200 || len(client.requests) != 5 {
-				t.Fatalf("unified continuation=%d %s calls=%d", unifiedNext.Code, unifiedNext.Body.String(), len(client.requests))
+			// The reverse direction must retain the same compaction identity.
+			unversionedNext := call(path, string(body))
+			if unversionedNext.Code != 200 || len(client.requests) != 5 {
+				t.Fatalf("unversioned continuation=%d %s calls=%d", unversionedNext.Code, unversionedNext.Body.String(), len(client.requests))
 			}
 			client.emitTools = true
 			toolStream := call(path, `{"model":"m","input":"Call both probes","stream":true,"tools":[{"type":"function","name":"probe_first","parameters":{"type":"object"}},{"type":"function","name":"probe_second","parameters":{"type":"object"}}]}`)

@@ -338,10 +338,8 @@ func RequestModelHint(ctx context.Context) (context.Context, func() string) {
 	return context.WithValue(ctx, requestModelContextKey{}, box), func() string { return box.model }
 }
 
-// RequestModelFromContext reads back the model published by an upstream
-// dispatcher. A unified route has to know the model before the body reaches the
-// real handler, so the dispatcher publishes it here and a downstream handler can
-// reuse that single resolution instead of repeating a store lookup.
+// RequestModelFromContext reads the model published by the protocol handler,
+// allowing request metrics and downstream processing to share its identity.
 func RequestModelFromContext(ctx context.Context) string {
 	if ctx == nil {
 		return ""
@@ -426,43 +424,19 @@ const streamFailureClass = "stream_error"
 // requestChannel includes only routes that perform inference. Model discovery,
 // token counting, administration, resource polling and downloads are HTTP traffic.
 func requestChannel(path string) string {
-	channelID, endpoint := channel.ID(""), ""
-	if matched, ok := channel.FromPath(path); ok {
-		channelID = matched
-		definition, _ := channel.DefinitionFor(matched)
-		endpoint = strings.TrimPrefix(path, definition.APIPrefix+"/")
-	}
-	channelName := string(channelID)
-	if channelName == "" {
-		if rest, ok := strings.CutPrefix(path, "/v1/"); ok {
-			channelName, endpoint = string(channel.Grok), rest
-		}
-	}
-	switch endpoint {
-	case "messages", "chat/completions", "responses", "responses/compact":
-		if channelName != "" {
-			return channelName
-		}
-	}
-	if channelName == "grok" {
-		switch endpoint {
-		case "responses", "responses/compact", "images/generations", "images/edits",
-			"videos", "videos/generations", "videos/edits", "videos/extensions",
-			"tts", "stt", "audio/speech", "audio/tasks", "audio/transcriptions", "realtime":
-			return channelName
+	id, endpoint, ok := channel.EndpointFromPath(path)
+	if ok {
+		switch strings.TrimRight(endpoint, "/") {
+		case "messages", "chat/completions", "responses", "responses/compact":
+			return string(id)
 		}
 	}
 	return HTTPChannel
 }
 
 func inferenceRequestChannel(r *http.Request) string {
-	channelName := requestChannel(r.URL.Path)
 	if r.Method == http.MethodPost {
-		return channelName
-	}
-	if r.Method == http.MethodGet && channelName == "grok" &&
-		(strings.HasSuffix(r.URL.Path, "/stt") || strings.HasSuffix(r.URL.Path, "/realtime")) {
-		return channelName
+		return requestChannel(r.URL.Path)
 	}
 	return HTTPChannel
 }

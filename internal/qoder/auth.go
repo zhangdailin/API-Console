@@ -225,12 +225,6 @@ func signPath(rawURL string) string {
 }
 
 // ResolveCredentials extracts the device credential from an account record.
-//
-// The dedicated Qoder fields are authoritative. The generic slots are accepted
-// as a migration path for an account that was written before this channel had
-// its own columns, but only when they hold a JSON document this package
-// understands; a raw value is never guessed at, because the generic slots are
-// shared with channels whose credentials mean something else.
 func ResolveCredentials(acc *store.Account) Credentials {
 	if acc == nil {
 		return Credentials{}
@@ -245,67 +239,7 @@ func ResolveCredentials(acc *store.Account) Credentials {
 		OrgID:           strings.TrimSpace(acc.QoderOrganizationID),
 		OrgTags:         append([]string(nil), acc.QoderOrganizationTags...),
 	}
-	if creds.AccessToken != "" || creds.RefreshToken != "" {
-		return creds
-	}
-	for _, raw := range []string{acc.Token, acc.RefreshToken} {
-		if parsed, ok := ParseCredentialDocument(raw); ok {
-			return parsed
-		}
-	}
 	return creds
-}
-
-// credentialDocument is the shape this channel accepts as an imported
-// credential. It mirrors the CLI's own credential file, so an operator can move
-// an existing CLI session into the pool without re-authorizing.
-type credentialDocument struct {
-	UID                    string   `json:"uid"`
-	Name                   string   `json:"name"`
-	Email                  string   `json:"email"`
-	OrganizationID         string   `json:"organization_id"`
-	OrganizationName       string   `json:"organization_name"`
-	OrganizationTags       []string `json:"organization_tags"`
-	SecurityOAuthToken     string   `json:"security_oauth_token"`
-	AccessToken            string   `json:"access_token"`
-	RefreshToken           string   `json:"refresh_token"`
-	ExpireTime             int64    `json:"expire_time"`
-	RefreshTokenExpireTime int64    `json:"refresh_token_expire_time"`
-}
-
-// ParseCredentialDocument reads one imported credential document. It reports
-// false for anything that does not carry a token, so a caller never turns an
-// unrelated value into an account.
-func ParseCredentialDocument(raw string) (Credentials, bool) {
-	trimmed := strings.TrimSpace(raw)
-	if !strings.HasPrefix(trimmed, "{") {
-		return Credentials{}, false
-	}
-	var doc credentialDocument
-	if err := json.Unmarshal([]byte(trimmed), &doc); err != nil {
-		return Credentials{}, false
-	}
-	access := strings.TrimSpace(util.FirstNonEmptyUntrimmed(doc.SecurityOAuthToken, doc.AccessToken))
-	refresh := strings.TrimSpace(doc.RefreshToken)
-	if access == "" && refresh == "" {
-		return Credentials{}, false
-	}
-	creds := Credentials{
-		AccessToken:  access,
-		RefreshToken: refresh,
-		UID:          strings.TrimSpace(doc.UID),
-		Name:         strings.TrimSpace(doc.Name),
-		Email:        strings.TrimSpace(doc.Email),
-		OrgID:        strings.TrimSpace(doc.OrganizationID),
-		OrgTags:      append([]string(nil), doc.OrganizationTags...),
-	}
-	if doc.ExpireTime > 0 {
-		creds.AccessExpiresAt = unixSeconds(doc.ExpireTime)
-	}
-	if doc.RefreshTokenExpireTime > 0 {
-		creds.RefreshExpiresAt = unixSeconds(doc.RefreshTokenExpireTime)
-	}
-	return creds, true
 }
 
 // unixSeconds normalizes an upstream timestamp. The CLI stores seconds, but

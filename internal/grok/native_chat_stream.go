@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"orchids-api/internal/chatwire"
+	"orchids-api/internal/responses"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -95,7 +97,7 @@ type responseReasoningState struct {
 // buffers frames, and the classifier decides after every content event whether
 // to release them (deliver), keep waiting, or drop them and let the caller retry
 // on another account (withhold). A nil hold keeps the plain streaming path.
-func (h *Handler) streamBuildChatHolding(w http.ResponseWriter, req *ChatCompletionsRequest, body io.Reader, hold *buildQualityHold) (outcome chatOutcome) {
+func (h *Handler) streamBuildChatHolding(w http.ResponseWriter, req *chatwire.Request, body io.Reader, hold *buildQualityHold) (outcome chatOutcome) {
 	outcomeStarted := time.Now()
 	if hold != nil {
 		// The hold reads this stream's own accounting, so point it at the outcome
@@ -289,7 +291,7 @@ func (h *Handler) streamBuildChatHolding(w http.ResponseWriter, req *ChatComplet
 		outcome.Quality.ReasoningChars += int64(len(value))
 		return emit(map[string]interface{}{"reasoning_content": value, "reasoning_item_id": state.key}, "", nil)
 	}
-	err := readResponseSSE(body, func(event, data string) error {
+	err := responses.ReadSSE(body, func(event, data string) error {
 		if withheld {
 			return errQualityWithheld
 		}
@@ -305,7 +307,7 @@ func (h *Handler) streamBuildChatHolding(w http.ResponseWriter, req *ChatComplet
 		}
 		kind := firstNonEmpty(interfaceString(ev["type"]), event)
 		if kind == "error" || kind == "response.failed" {
-			return responseFailure(ev)
+			return responses.Failure(ev)
 		}
 		if terminal {
 			return nil
@@ -416,7 +418,7 @@ func (h *Handler) streamBuildChatHolding(w http.ResponseWriter, req *ChatComplet
 		}
 		if kind == "response.completed" || kind == "response.incomplete" {
 			response, _ := ev["response"].(map[string]interface{})
-			terminalFinish, err := responseTerminalFinish(kind, response)
+			terminalFinish, err := responses.TerminalFinish(kind, response)
 			if err != nil {
 				return err
 			}
@@ -464,7 +466,7 @@ func (h *Handler) streamBuildChatHolding(w http.ResponseWriter, req *ChatComplet
 			}
 			// Some compatible servers only provide a final output snapshot.
 			if refusal.Len() == 0 && filter.matched == "" {
-				if value := consoleExtractRefusal(response); value != "" {
+				if value := responses.ExtractRefusal(response); value != "" {
 					refusal.WriteString(value)
 					if err := emit(map[string]interface{}{"refusal": value}, "", nil); err != nil {
 						return err

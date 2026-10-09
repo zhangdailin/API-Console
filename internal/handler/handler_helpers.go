@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
-	"net/http"
 	"orchids-api/internal/provider"
 	"strings"
 	"time"
@@ -49,100 +48,6 @@ func (h *Handler) lookupModelRow(ctx context.Context, channel, modelID string) *
 		return nil
 	}
 	return m
-}
-
-// ChannelForModel reports the channel a model id is registered under, or an
-// empty string when the model is unknown. The unified /v1 routes use it to pick
-// between the native and the bridged implementation.
-//
-// The request model hint is consulted first: the unified entry points publish
-// the exact model string they are about to serve, and a Codex client asks about
-// the *family* name ("gpt-5-6-sol") while the catalog only stores the
-// effort-suffixed variants. Resolving through the hint keeps the answer
-// identical to the one the request path will compute, instead of a second,
-// subtly different lookup.
-func (h *Handler) ChannelForModel(ctx context.Context, modelID string) string {
-	channel, _ := h.LookupChannelForModel(ctx, modelID)
-	return channel
-}
-
-// LookupChannelForModel is ChannelForModel with the store error preserved. A
-// caller that must choose between two implementations needs to tell "this model
-// belongs to another channel" from "the store could not be read"; collapsing
-// both onto an empty channel is how a Redis hiccup turns into a wrong route.
-func (h *Handler) LookupChannelForModel(ctx context.Context, modelID string) (string, error) {
-	if h == nil || h.loadBalancer == nil || h.loadBalancer.Store == nil {
-		return "", nil
-	}
-	if hinted := strings.TrimSpace(middleware.RequestModelFromContext(ctx)); hinted != "" {
-		modelID = hinted
-	}
-	modelID = normalizeRequestedModelID(modelID)
-	if modelID == "" {
-		return "", nil
-	}
-	m, err := h.loadBalancer.Store.GetModelByModelID(ctx, modelID)
-	if err == nil && m != nil {
-		return strings.TrimSpace(m.Channel), nil
-	}
-	if err != nil && !isModelMissingError(err) {
-		return "", err
-	}
-	// A family name is not a catalog row. Fall back to the effort variant the
-	// request path would have selected, so "/v1/models/gpt-5-6-sol" and
-	// "/v1/chat/completions" agree on the channel.
-	variant := h.resolveEffortModelVariant(ctx, modelID, "", "")
-	if variant == "" || variant == modelID {
-		return "", nil
-	}
-	m, err = h.loadBalancer.Store.GetModelByModelID(ctx, variant)
-	if err != nil {
-		if isModelMissingError(err) {
-			return "", nil
-		}
-		return "", err
-	}
-	if m == nil {
-		return "", nil
-	}
-	return strings.TrimSpace(m.Channel), nil
-}
-
-// isModelMissingError reports whether a model lookup failed because the row does
-// not exist. The stores signal that both ways — ErrNoRows and a plain
-// "model not found" — and a caller that separates "unknown model" from "store
-// unavailable" has to accept both, or every miss looks like an outage.
-func isModelMissingError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, store.ErrNoRows) {
-		return true
-	}
-	return strings.Contains(strings.ToLower(err.Error()), "model not found")
-}
-
-// ModelChannel reports the channel a request should be served by. It is the one
-// place that decides between "the path already names a channel" and "the model
-// decides". Every entry point that used to call channelFromPath on a body that
-// carries a model must call this instead: on the unified prefix the path carries
-// no channel at all, so a path-only answer silently degrades to the generic
-// code path and the token count comes back with the wrong profile).
-func (h *Handler) ModelChannel(r *http.Request, modelID string) string {
-	ctx := context.Background()
-	if r != nil {
-		if channel := channelFromPath(r.URL.Path); channel != "" {
-			return channel
-		}
-		ctx = r.Context()
-	}
-	if h == nil {
-		return ""
-	}
-	if modelID == "" && r != nil {
-		modelID = middleware.RequestModelFromContext(ctx)
-	}
-	return h.ChannelForModel(ctx, modelID)
 }
 
 // requestReasoningEffort returns the effort a client asked for, from whichever
@@ -345,10 +250,6 @@ func (h *Handler) acquireReservedAccountSelection(ctx context.Context, targetCha
 	}
 }
 
-// honorsModelCooldown reports whether a channel's selection consults the
-// per-model cooldown its own verdicts write. Qoder scopes agent/model windows;
-// WorkBuddy may scope a plan refusal while accounts with a truly exhausted
-// package remain account-wide parked.
 // honorsModelCooldown reports whether a channel's selection consults the
 // per-model cooldown its own verdicts write. Qoder scopes agent/model windows;
 // WorkBuddy may scope a plan refusal while accounts with a truly exhausted

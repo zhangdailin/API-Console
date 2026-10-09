@@ -108,7 +108,7 @@ func TestAPIKeyBillingReservationSettles(t *testing.T) {
 	}, ledger, time.Minute)
 
 	recorder := httptest.NewRecorder()
-	handler(recorder, billingRequest(http.MethodPost, "/v1/chat/completions", billingChatBody, principal, "req-1"))
+	handler(recorder, billingRequest(http.MethodPost, "/grok/v1/chat/completions", billingChatBody, principal, "req-1"))
 
 	testutil.True(t, handlerRun, "handler must run for a reservation that fits")
 	testutil.Equal(t, seenBody, billingChatBody)
@@ -133,7 +133,7 @@ func TestAPIKeyBillingReservationReleasesUnsettledRequest(t *testing.T) {
 	}, ledger, time.Minute)
 
 	recorder := httptest.NewRecorder()
-	handler(recorder, billingRequest(http.MethodPost, "/v1/messages", billingChatBody, principal, "req-release"))
+	handler(recorder, billingRequest(http.MethodPost, "/grok/v1/messages", billingChatBody, principal, "req-release"))
 
 	testutil.Equal(t, len(ledger.releases), 1)
 	testutil.Equal(t, ledger.releases[0], "req-release")
@@ -153,7 +153,7 @@ func TestAPIKeyBillingReservationRefusesOverLimit(t *testing.T) {
 	}, ledger, time.Minute)
 
 	recorder := httptest.NewRecorder()
-	handler(recorder, billingRequest(http.MethodPost, "/v1/chat/completions", billingChatBody, principal, "req-over"))
+	handler(recorder, billingRequest(http.MethodPost, "/grok/v1/chat/completions", billingChatBody, principal, "req-over"))
 
 	testutil.False(t, handlerRun, "a refused reservation must not call the handler")
 	testutil.Equal(t, recorder.Code, http.StatusPaymentRequired)
@@ -185,7 +185,7 @@ func TestAPIKeyBillingReservationFailsClosedOnLedgerError(t *testing.T) {
 	}, ledger, time.Minute)
 
 	recorder := httptest.NewRecorder()
-	handler(recorder, billingRequest(http.MethodPost, "/v1/chat/completions", billingChatBody, principal, "req-err"))
+	handler(recorder, billingRequest(http.MethodPost, "/grok/v1/chat/completions", billingChatBody, principal, "req-err"))
 
 	testutil.False(t, handlerRun, "a failing ledger must not let the request through unmetered")
 	testutil.Equal(t, recorder.Code, http.StatusServiceUnavailable)
@@ -201,12 +201,12 @@ func TestAPIKeyBillingReservationSkipsUnbilledRequests(t *testing.T) {
 		body      string
 		principal *APIKeyPrincipal
 	}{
-		{"unlimited key", http.MethodPost, "/v1/chat/completions", billingChatBody, &APIKeyPrincipal{ID: 1}},
-		{"get", http.MethodGet, "/v1/chat/completions", "", &APIKeyPrincipal{ID: 1, BillingLimitUSDTicks: 10}},
-		{"empty body", http.MethodPost, "/v1/chat/completions", "", &APIKeyPrincipal{ID: 1, BillingLimitUSDTicks: 10}},
-		{"non inference path", http.MethodPost, "/v1/models", `{"model":"grok-4.6"}`, &APIKeyPrincipal{ID: 1, BillingLimitUSDTicks: 10}},
-		{"unpriced model", http.MethodPost, "/v1/chat/completions", `{"model":"gpt-5"}`, &APIKeyPrincipal{ID: 1, BillingLimitUSDTicks: 10}},
-		{"no principal", http.MethodPost, "/v1/chat/completions", billingChatBody, nil},
+		{"unlimited key", http.MethodPost, "/grok/v1/chat/completions", billingChatBody, &APIKeyPrincipal{ID: 1}},
+		{"get", http.MethodGet, "/grok/v1/chat/completions", "", &APIKeyPrincipal{ID: 1, BillingLimitUSDTicks: 10}},
+		{"empty body", http.MethodPost, "/grok/v1/chat/completions", "", &APIKeyPrincipal{ID: 1, BillingLimitUSDTicks: 10}},
+		{"non inference path", http.MethodPost, "/grok/v1/models", `{"model":"grok-4.6"}`, &APIKeyPrincipal{ID: 1, BillingLimitUSDTicks: 10}},
+		{"unpriced model", http.MethodPost, "/grok/v1/chat/completions", `{"model":"gpt-5"}`, &APIKeyPrincipal{ID: 1, BillingLimitUSDTicks: 10}},
+		{"no principal", http.MethodPost, "/grok/v1/chat/completions", billingChatBody, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -239,7 +239,7 @@ func TestAPIKeyBillingReservationReleasesAfterClientDisconnect(t *testing.T) {
 		}
 	}, ledger, time.Minute)
 
-	request := billingRequest(http.MethodPost, "/v1/chat/completions", billingChatBody, principal, "req-disconnect")
+	request := billingRequest(http.MethodPost, "/grok/v1/chat/completions", billingChatBody, principal, "req-disconnect")
 	ctx, cancel := context.WithCancel(request.Context())
 	ctx = context.WithValue(ctx, cancelKey{}, cancel)
 	handler(httptest.NewRecorder(), request.WithContext(ctx))
@@ -269,7 +269,7 @@ func TestAPIKeyBillingReservationRestoresOversizedBody(t *testing.T) {
 
 	body := `{"model":"grok-4.6","max_tokens":8,"messages":[{"role":"user","content":"` +
 		strings.Repeat("x", maxBillingBodyBytes+1024) + `"}]}`
-	handler(httptest.NewRecorder(), billingRequest(http.MethodPost, "/v1/chat/completions", body, principal, "req-big"))
+	handler(httptest.NewRecorder(), billingRequest(http.MethodPost, "/grok/v1/chat/completions", body, principal, "req-big"))
 
 	testutil.Equal(t, size, len(body))
 	testutil.Equal(t, len(ledger.settles), 1)
@@ -286,7 +286,7 @@ func TestSettleAPIKeyBillingRules(t *testing.T) {
 	principal := &APIKeyPrincipal{ID: 41, BillingLimitUSDTicks: 1_000_000_000_000}
 	reserved := func(t *testing.T, ledger *stubBillingLedger) context.Context {
 		t.Helper()
-		request := billingRequest(http.MethodPost, "/v1/chat/completions", billingChatBody, principal, "req-rules")
+		request := billingRequest(http.MethodPost, "/grok/v1/chat/completions", billingChatBody, principal, "req-rules")
 		handler := APIKeyBillingReservation(func(w http.ResponseWriter, r *http.Request) {
 			// Hand the reserved context back to the test through the ledger.
 			ledger.ctx = r.Context()
@@ -374,11 +374,11 @@ func TestBillingReservationConcurrentSettleIsIdempotent(t *testing.T) {
 }
 
 func TestBillingRequestPathMatching(t *testing.T) {
-	priced := []string{"/v1/chat/completions", "/v1/messages", "/v1/responses", "/grok/v1/messages", "/workbuddy/v1/chat/completions"}
+	priced := []string{"/grok/v1/chat/completions", "/grok/messages", "/grok/responses", "/qoder/responses/compact", "/cline/messages", "/workbuddy/v1/chat/completions"}
 	for _, path := range priced {
 		testutil.True(t, billingRequestPath(path), "billingRequestPath(%q) = false, want true")
 	}
-	for _, path := range []string{"/v1/models", "/api/keys", "/v1/tts", "/v1/images/generations", "/"} {
+	for _, path := range []string{"/grok/v1/models", "/api/keys", "/grok/v1/tts", "/grok/v1/images/generations", "/", "/v1/responses", "/messages", "/workbuddy/messages/count_tokens", "/workbuddy/responses/id/cancel", "/grok/responses/id/input_items"} {
 		testutil.Falsef(t, billingRequestPath(path), "billingRequestPath(%q) = true, want false", path)
 	}
 }

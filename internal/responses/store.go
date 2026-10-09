@@ -93,7 +93,7 @@ func ResponseIDFromResourcePath(path string) string {
 	if err != nil {
 		return ""
 	}
-	return decoded
+	return strings.TrimSpace(decoded)
 }
 
 // WriteStoredLookupError answers a store lookup failure: a missing row is a

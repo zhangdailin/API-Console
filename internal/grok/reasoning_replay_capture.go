@@ -3,6 +3,7 @@ package grok
 import (
 	"bytes"
 	"context"
+	"orchids-api/internal/responses"
 	"strings"
 
 	"encoding/json"
@@ -50,7 +51,7 @@ func replayItemsFromPayload(raw []byte) ([]interface{}, bool) {
 		return items, true
 	}
 	var completed map[string]interface{}
-	_ = readResponseSSE(bytes.NewReader(raw), func(_ string, data string) error {
+	_ = responses.ReadSSE(bytes.NewReader(raw), func(_ string, data string) error {
 		var event map[string]interface{}
 		if json.Unmarshal([]byte(data), &event) != nil {
 			return nil

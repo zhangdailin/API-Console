@@ -2,12 +2,13 @@ package grok
 
 import (
 	"net/http"
+	"orchids-api/internal/chatwire"
 	"strconv"
 	"strings"
 	"time"
 )
 
-func parseRateLimitInfo(headers http.Header) *RateLimitInfo {
+func parseRateLimitInfo(headers http.Header) *chatwire.RateLimitInfo {
 	if headers == nil {
 		return nil
 	}
@@ -45,7 +46,7 @@ func parseRateLimitInfo(headers http.Header) *RateLimitInfo {
 		return nil
 	}
 
-	info := &RateLimitInfo{
+	info := &chatwire.RateLimitInfo{
 		Limit:        limit,
 		HasLimit:     okLimit,
 		Remaining:    remaining,

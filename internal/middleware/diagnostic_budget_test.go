@@ -26,11 +26,14 @@ func TestDiagnosticSamplingAndConcurrentBudget(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	first := httptest.NewRecorder()
-	go func() { handler.ServeHTTP(first, httptest.NewRequest("POST", "/v1/responses", nil)); close(finished) }()
+	go func() {
+		handler.ServeHTTP(first, httptest.NewRequest("POST", "/grok/v1/responses", nil))
+		close(finished)
+	}()
 	<-entered
 	second, third := httptest.NewRecorder(), httptest.NewRecorder()
-	handler.ServeHTTP(second, httptest.NewRequest("POST", "/v1/responses", nil))
-	handler.ServeHTTP(third, httptest.NewRequest("POST", "/v1/responses", nil))
+	handler.ServeHTTP(second, httptest.NewRequest("POST", "/grok/v1/responses", nil))
+	handler.ServeHTTP(third, httptest.NewRequest("POST", "/grok/v1/responses", nil))
 	testutil.False(t, second.Header().Get("X-Diagnostic-Capture") != "sampled-out" || third.Header().Get("X-Diagnostic-Capture") != "budget-exhausted", "diagnostic budget did not skip captures")
 	close(release)
 	<-finished

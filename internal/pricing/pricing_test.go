@@ -18,20 +18,14 @@ func TestEstimateCostUsesOfficialRates(t *testing.T) {
 		// ticks per single token: uncached input, cached input, output
 		input, cached, output int64
 	}{
-		{"build", "grok-build-0.1", "grok-build-0.1", 10000, 2000, 20000},
-		{"build alias", "grok-code-fast-1", "grok-build-0.1", 10000, 2000, 20000},
+		{"build", "grok-composer-2.5-fast", "grok-composer-2.5-fast", 10000, 2000, 20000},
 		{"build 4.6", "grok-4.6", "grok-4.6", 20000, 5000, 60000},
-		{"build 4.6 latest", "grok-4.6-latest", "grok-4.6", 20000, 5000, 60000},
 		{"build 4.5", "grok-4.5", "grok-4.5", 20000, 3000, 60000},
-		{"build 4.3", "grok-4.3", "grok-4.3", 12500, 2000, 25000},
-		{"4.20 reasoning", "grok-4.20", "grok-4.20-0309-reasoning", 12500, 2000, 25000},
-		{"4.20 non-reasoning", "grok-4.20-beta-latest-non-reasoning", "grok-4.20-0309-non-reasoning", 12500, 2000, 25000},
-		{"4.20 multi agent", "grok-4.20-multi-agent-beta-latest", "grok-4.20-multi-agent-0309", 12500, 2000, 25000},
-		// Family rules price unpublished suffixes at the family rate.
-		{"family suffix", "grok-4.6-0309-reasoning", "grok-4.6", 20000, 5000, 60000},
+		{"current effort", "grok-4.6-high", "grok-4.6", 20000, 5000, 60000},
+		{"current xhigh", "grok-4.6-xhigh", "grok-4.6", 20000, 5000, 60000},
+		{"current composer effort", "grok-composer-2.5-fast-none", "grok-composer-2.5-fast", 10000, 2000, 20000},
 		// Source prefixes are stripped before resolution.
 		{"build prefix", "build/grok-4.6", "grok-4.6", 20000, 5000, 60000},
-		{"grok_build prefix", "grok_build/grok-code-fast", "grok-build-0.1", 10000, 2000, 20000},
 		{"case and space", "  Grok-4.6  ", "grok-4.6", 20000, 5000, 60000},
 	}
 	for _, tc := range cases {
@@ -57,7 +51,7 @@ func TestEstimateCostMatchesPublishedPerMillionPrices(t *testing.T) {
 	// 0.1M in at $2 + 0.1M out at $6 = $0.80 = 8e9 ticks (standard tier).
 	want := int64(8) * 1_000_000_000
 	testutil.Falsef(t, got.CostInUSDTicks != want, "cost = %d ticks, want %d", got.CostInUSDTicks, want)
-	got, ok = EstimateCost("grok-build-0.1", 100_000, 0, 0, 0)
+	got, ok = EstimateCost("grok-composer-2.5-fast", 100_000, 0, 0, 0)
 	testutil.Falsef(t, !ok || got.CostInUSDTicks != 1_000_000_000, "build input cost = %#v, %v; want $0.10", got, ok)
 }
 
@@ -88,7 +82,7 @@ func TestEstimateCostClampsInvalidInputs(t *testing.T) {
 func TestEstimateCostUnknownModelIsNotZeroCost(t *testing.T) {
 	t.Parallel()
 
-	for _, model := range []string{"", "   ", "grok-imagine-image", "gpt-5", "claude-sonnet-4", "other/grok-4.6"} {
+	for _, model := range []string{"", "   ", "grok-imagine-image", "gpt-5", "claude-sonnet-4", "other/grok-4.6", "grok-4.5-latest", "grok-code-fast", "grok-4.3", "grok-4.20", "grok_build/grok-4.6", "grok-4.6-0309-reasoning", "grok-4.5-xhigh", "grok-4.6-none", "grok-4.6-future", "grok-4.3-high"} {
 		got, ok := EstimateCost(model, 1_000, 0, 1_000, 0)
 		testutil.Falsef(t, ok, "EstimateCost(%q) = %#v, want unpriced", model, got)
 	}
@@ -97,6 +91,7 @@ func TestEstimateCostUnknownModelIsNotZeroCost(t *testing.T) {
 func TestEstimateTextReservationFromBodyMatchesLegacyEstimator(t *testing.T) {
 	bodies := [][]byte{
 		[]byte(`{"model":"grok-4.6","max_tokens":1000,"messages":[{"role":"user","content":"hello"}]}`),
+		[]byte(`{"model":"grok-4.6-high","max_tokens":1000,"messages":[{"role":"user","content":"hello"}]}`),
 		[]byte(`{"messages":[{"content":[{"type":"text","text":"你好"},{"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}}]}],"max_completion_tokens":42,"model":"grok-4.5"}`),
 		[]byte(`{"model":"build/grok-4.6","max_output_tokens":7,"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]}`),
 	}

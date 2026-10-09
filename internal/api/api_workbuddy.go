@@ -21,16 +21,14 @@ var errWorkBuddyMissingCredential = errors.New("workbuddy account is missing cre
 // ordinary edit that omits the token field must not wipe it.
 
 // resolveWorkBuddyCredentials delegates to the client package so the admin API
-// and the upstream client can never disagree about what a pasted credential
-// means (session document, key=value pairs, JWT or opaque refresh token).
+// and the upstream client use the same provider-owned credential fields.
 func resolveWorkBuddyCredentials(acc *store.Account) workbuddy.Credentials {
 	return workbuddy.ResolveCredentials(acc)
 }
 
 // NormalizeWorkBuddyCredentials stores a newly submitted credential in the
 // WorkBuddy fields. The identity (UID / signed-in address) comes from the
-// credential itself: the access-token JWT carries the Keycloak claims, so a
-// pasted session document is enough to label the account.
+// access-token JWT's Keycloak claims when available.
 func NormalizeWorkBuddyCredentials(acc *store.Account) bool {
 	if acc == nil {
 		return false

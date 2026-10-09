@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"orchids-api/internal/chatwire"
+	"orchids-api/internal/responses"
 	"strings"
 	"sync"
 	"time"
@@ -53,7 +55,7 @@ func withGrokSession(ctx context.Context, session grokSessionContext) context.Co
 // prepareGrokSession produces a stable, tenant- and model-isolated upstream
 // identity. Explicit client identities permit encrypted reasoning replay;
 // message-prefix fallback identities are affinity-only.
-func prepareGrokSession(r *http.Request, model, explicit string, messages []ChatMessage) grokSessionContext {
+func prepareGrokSession(r *http.Request, model, explicit string, messages []chatwire.Message) grokSessionContext {
 	seed, agentHint := strings.TrimSpace(explicit), ""
 	if seed == "" && r != nil {
 		// The explicit identities an agent client already sends: without them a
@@ -401,7 +403,7 @@ func validReplayCipher(value string) bool {
 }
 
 func (h *Handler) applyNativeReasoningReplay(model, key string, payload map[string]interface{}) {
-	if h == nil || payload == nil || strings.TrimSpace(parseLooseStringAny(payload["previous_response_id"])) != "" {
+	if h == nil || payload == nil || strings.TrimSpace(chatwire.ParseLooseStringAny(payload["previous_response_id"])) != "" {
 		return
 	}
 	items := h.loadReasoningReplayItems(model, key)
@@ -475,7 +477,7 @@ func stripInjectedReasoningReplay(payload map[string]interface{}) bool {
 			// A reasoning item without its proof is not portable. Preserve its
 			// readable summary as an ordinary assistant message instead.
 			parts := []interface{}{}
-			for _, summary := range interfaceMaps(item["summary"]) {
+			for _, summary := range responses.InterfaceMaps(item["summary"]) {
 				if value := interfaceString(summary["text"]); value != "" {
 					parts = append(parts, map[string]interface{}{"type": "output_text", "text": value})
 				}

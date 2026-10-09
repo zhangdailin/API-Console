@@ -37,12 +37,12 @@ func grokSearchHook(delta map[string]interface{}) (string, map[string]interface{
 
 // writeResponsesStreamFromChatReaderRequest translates a chat stream and always
 // registers the Build search hook: every Grok stream can carry one.
-func writeResponsesStreamFromChatReaderRequest(w http.ResponseWriter, request ResponsesCreateRequest, reader io.Reader, opts chatStreamOptions) {
+func writeResponsesStreamFromChatReaderRequest(w http.ResponseWriter, request responses.CreateRequest, reader io.Reader, opts chatStreamOptions) {
 	opts.SearchHook = grokSearchHook
 	responses.WriteStreamFromChatReader(w, request, reader, opts)
 }
 
 // writeResponsesStreamFromChatReaderRequestWithHook is the test-facing form.
-func writeResponsesStreamFromChatReaderRequestWithHook(w http.ResponseWriter, request ResponsesCreateRequest, reader io.Reader, onComplete func(map[string]interface{})) {
+func writeResponsesStreamFromChatReaderRequestWithHook(w http.ResponseWriter, request responses.CreateRequest, reader io.Reader, onComplete func(map[string]interface{})) {
 	writeResponsesStreamFromChatReaderRequest(w, request, reader, chatStreamOptions{OnComplete: onComplete})
 }

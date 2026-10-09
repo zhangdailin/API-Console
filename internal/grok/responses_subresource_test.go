@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"orchids-api/internal/responses"
 	"strings"
 	"sync"
 	"testing"
@@ -53,15 +54,15 @@ func TestParseResponsesResourcePath(t *testing.T) {
 		{"/something/else", "", "", false},
 	}
 	for _, tc := range cases {
-		id, action, ok := parseResponsesResourcePath(tc.path)
+		id, action, ok := responses.ParseResourcePath(tc.path)
 		testutil.Equal(t, ok, tc.wantOK)
 		testutil.Equal(t, id, tc.wantID)
 		testutil.Equal(t, action, tc.wantAction)
 		wantAction := ""
-		if tc.wantAction == responsesActionCancel || tc.wantAction == responsesActionInputItems {
+		if tc.wantAction == responses.ActionCancel || tc.wantAction == responses.ActionInputItems {
 			wantAction = tc.wantAction
 		}
-		testutil.Equal(t, responsesSubResourceAction(tc.path), wantAction)
+		testutil.Equal(t, responses.SubResourceAction(tc.path), wantAction)
 	}
 }
 
@@ -73,7 +74,7 @@ func TestResponsesInputItemsJSONNormalizesEveryInputShape(t *testing.T) {
 	t.Parallel()
 
 	var fromString []map[string]interface{}
-	testutil.NoError(t, json.Unmarshal(responsesInputItemsJSON("hello"), &fromString), "string input did not normalize: %v")
+	testutil.NoError(t, json.Unmarshal(responses.InputItemsJSON("hello"), &fromString), "string input did not normalize: %v")
 	testutil.Equal(t, len(fromString), 1)
 	testutil.Equal(t, fromString[0]["type"], "message")
 	testutil.Equal(t, fromString[0]["role"], "user")
@@ -89,21 +90,21 @@ func TestResponsesInputItemsJSONNormalizesEveryInputShape(t *testing.T) {
 		}},
 		map[string]interface{}{"id": "fc_known", "type": "function_call", "call_id": "call_1", "name": "f"},
 	}
-	testutil.NoError(t, json.Unmarshal(responsesInputItemsJSON(raw), &fromArray), "array input did not normalize: %v")
+	testutil.NoError(t, json.Unmarshal(responses.InputItemsJSON(raw), &fromArray), "array input did not normalize: %v")
 	testutil.Equal(t, len(fromArray), 2)
 	testutil.Equal(t, fromArray[1]["id"], "fc_known")
 	for i, item := range fromArray {
 		testutil.Falsef(t, interfaceString(item["id"]) == "" || interfaceString(item["status"]) == "", "item %d is missing id/status: %#v", i, item)
 	}
 
-	got := responsesInputItemsJSON(nil)
+	got := responses.InputItemsJSON(nil)
 	testutil.Falsef(t, got != nil, "nil input produced %s, want no stored items", got)
 }
 
 func TestResponsesInputItemsServesPersistedItems(t *testing.T) {
 	t.Parallel()
 
-	opts := ResponsesBridgeOptions{Store: store.NewMemoryResponseStore(0)}
+	opts := responses.BridgeOptions{Store: store.NewMemoryResponseStore(0)}
 	id := "resp_items_" + randomHex(8)
 	if err := opts.StoreFor().SaveStoredResponse(nil, &store.StoredResponse{ //nolint:staticcheck // nil ctx is fine for the in-process store
 		ResponseID: id,
@@ -111,12 +112,12 @@ func TestResponsesInputItemsServesPersistedItems(t *testing.T) {
 		Model:      "gpt-5.6-luna",
 		Provider:   bridgedResponseProvider,
 		Body:       []byte(`{"id":"` + id + `","object":"response","status":"completed"}`),
-		InputItems: responsesInputItemsJSON("first turn"),
+		InputItems: responses.InputItemsJSON("first turn"),
 	}, 0); err != nil {
 		t.Fatalf("SaveStoredResponse() error = %v", err)
 	}
 
-	handler := ResponsesInputItemsHandler(opts)
+	handler := responses.InputItemsHandler(opts)
 	rec := httptest.NewRecorder()
 	handler(rec, httptest.NewRequest(http.MethodGet, "/workbuddy/v1/responses/"+id+"/input_items", nil))
 
@@ -141,7 +142,7 @@ func TestResponsesInputItemsServesPersistedItems(t *testing.T) {
 func TestResponsesInputItemsUnknownResponseIs404(t *testing.T) {
 	t.Parallel()
 
-	handler := ResponsesInputItemsHandler(ResponsesBridgeOptions{Store: store.NewMemoryResponseStore(0)})
+	handler := responses.InputItemsHandler(responses.BridgeOptions{Store: store.NewMemoryResponseStore(0)})
 	rec := httptest.NewRecorder()
 	handler(rec, httptest.NewRequest(http.MethodGet, "/v1/responses/resp_missing/input_items", nil))
 
@@ -152,14 +153,14 @@ func TestResponsesInputItemsUnknownResponseIs404(t *testing.T) {
 func TestResponsesSubResourcesRejectWrongMethod(t *testing.T) {
 	t.Parallel()
 
-	opts := ResponsesBridgeOptions{Store: store.NewMemoryResponseStore(0)}
-	cancel := ResponsesCancelHandler(opts)
+	opts := responses.BridgeOptions{Store: store.NewMemoryResponseStore(0)}
+	cancel := responses.CancelHandler(opts)
 	rec := httptest.NewRecorder()
 	cancel(rec, httptest.NewRequest(http.MethodGet, "/v1/responses/resp_1/cancel", nil))
 	testutil.Falsef(t, rec.Code != http.StatusMethodNotAllowed || !strings.Contains(rec.Header().Get("Allow"), "POST"), "cancel GET: status=%d Allow=%q", rec.Code, rec.Header().Get("Allow"))
 	testutil.MustContain(t, rec.Body.String(), `"error"`)
 
-	items := ResponsesInputItemsHandler(opts)
+	items := responses.InputItemsHandler(opts)
 	rec = httptest.NewRecorder()
 	items(rec, httptest.NewRequest(http.MethodPost, "/v1/responses/resp_1/input_items", nil))
 	testutil.Falsef(t, rec.Code != http.StatusMethodNotAllowed || !strings.Contains(rec.Header().Get("Allow"), "GET"), "input_items POST: status=%d Allow=%q", rec.Code, rec.Header().Get("Allow"))
@@ -171,7 +172,7 @@ func TestResponsesSubResourcesRejectWrongMethod(t *testing.T) {
 func TestResponsesCancelFlipsStoredStatus(t *testing.T) {
 	t.Parallel()
 
-	opts := ResponsesBridgeOptions{Store: store.NewMemoryResponseStore(0)}
+	opts := responses.BridgeOptions{Store: store.NewMemoryResponseStore(0)}
 	id := "resp_cancel_" + randomHex(8)
 	body := `{"id":"` + id + `","object":"response","status":"completed","output":[` +
 		`{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"hi"}]}]}`
@@ -182,7 +183,7 @@ func TestResponsesCancelFlipsStoredStatus(t *testing.T) {
 		t.Fatalf("SaveStoredResponse() error = %v", err)
 	}
 
-	cancel := ResponsesCancelHandler(opts)
+	cancel := responses.CancelHandler(opts)
 	first := httptest.NewRecorder()
 	cancel(first, httptest.NewRequest(http.MethodPost, "/workbuddy/v1/responses/"+id+"/cancel", nil))
 	testutil.Equal(t, first.Code, http.StatusOK)
@@ -207,7 +208,7 @@ func TestResponsesCancelFlipsStoredStatus(t *testing.T) {
 func TestResponsesCancelUnknownResponseIs404(t *testing.T) {
 	t.Parallel()
 
-	cancel := ResponsesCancelHandler(ResponsesBridgeOptions{Store: store.NewMemoryResponseStore(0)})
+	cancel := responses.CancelHandler(responses.BridgeOptions{Store: store.NewMemoryResponseStore(0)})
 	rec := httptest.NewRecorder()
 	cancel(rec, httptest.NewRequest(http.MethodPost, "/v1/responses/resp_missing/cancel", nil))
 	testutil.Falsef(t, rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "response_not_found"), "status = %d body = %s", rec.Code, rec.Body.String())
@@ -219,7 +220,7 @@ func TestResponsesCancelUnknownResponseIs404(t *testing.T) {
 func TestResponsesCancelAnswersBuildOwnershipRecords(t *testing.T) {
 	t.Parallel()
 
-	opts := ResponsesBridgeOptions{Store: store.NewMemoryResponseStore(0)}
+	opts := responses.BridgeOptions{Store: store.NewMemoryResponseStore(0)}
 	id := "resp_build_" + randomHex(8)
 	if err := opts.StoreFor().SaveStoredResponse(nil, &store.StoredResponse{ //nolint:staticcheck // nil ctx is fine for the in-process store
 		ResponseID: id, OwnerHash: "anonymous", Model: "grok-4.6", Provider: ProviderBuild,
@@ -228,7 +229,7 @@ func TestResponsesCancelAnswersBuildOwnershipRecords(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	ResponsesCancelHandler(opts)(rec, httptest.NewRequest(http.MethodPost, "/grok/v1/responses/"+id+"/cancel", nil))
+	responses.CancelHandler(opts)(rec, httptest.NewRequest(http.MethodPost, "/grok/v1/responses/"+id+"/cancel", nil))
 	testutil.Equal(t, rec.Code, http.StatusOK)
 	var decoded map[string]interface{}
 	err := json.Unmarshal(rec.Body.Bytes(), &decoded)
@@ -246,7 +247,7 @@ func TestResponsesBridgeForwardsTextFormatAndInclude(t *testing.T) {
 
 	var mu sync.Mutex
 	calls := []recordedChatCall{}
-	bridge := ResponsesBridgeHandler(recordingChat(t, &calls, &mu), ResponsesBridgeOptions{})
+	bridge := ResponsesBridgeHandler(recordingChat(t, &calls, &mu), responses.BridgeOptions{})
 
 	body := `{"model":"gpt-5.6-luna","input":"hi","stream":true,` +
 		`"include":["reasoning.encrypted_content"],` +
@@ -278,7 +279,7 @@ func TestResponsesBridgePrefersTextFormatOverResponseFormat(t *testing.T) {
 
 	var mu sync.Mutex
 	calls := []recordedChatCall{}
-	bridge := ResponsesBridgeHandler(recordingChat(t, &calls, &mu), ResponsesBridgeOptions{})
+	bridge := ResponsesBridgeHandler(recordingChat(t, &calls, &mu), responses.BridgeOptions{})
 
 	body := `{"model":"gpt-5.6-luna","input":"hi","stream":true,` +
 		`"response_format":{"type":"text"},` +
@@ -301,14 +302,14 @@ func TestResponsesBridgePrefersTextFormatOverResponseFormat(t *testing.T) {
 func TestResponsesBridgeMemoryFallbackStoresResponses(t *testing.T) {
 	t.Parallel()
 
-	opts := ResponsesBridgeOptions{}
+	opts := responses.BridgeOptions{}
 	chat := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, `{"id":"chatcmpl-1","object":"chat.completion","created":1,"model":"gpt-5.6-luna","choices":[{"index":0,"message":{"role":"assistant","content":"fallback-answer"},"finish_reason":"stop"}]}`)
 	}
 	bridge := ResponsesBridgeHandler(chat, opts)
-	resource := ResponsesResourceHandler(opts)
+	resource := responses.ResourceHandler(opts)
 
 	create := httptest.NewRecorder()
 	bridge(create, httptest.NewRequest(http.MethodPost, "/workbuddy/v1/responses",
@@ -326,7 +327,7 @@ func TestResponsesBridgeMemoryFallbackStoresResponses(t *testing.T) {
 
 	// The in-process store must serve the items too, not just the body.
 	items := httptest.NewRecorder()
-	ResponsesInputItemsHandler(opts)(items, httptest.NewRequest(http.MethodGet, "/workbuddy/v1/responses/"+responseID+"/input_items", nil))
+	responses.InputItemsHandler(opts)(items, httptest.NewRequest(http.MethodGet, "/workbuddy/v1/responses/"+responseID+"/input_items", nil))
 	testutil.Falsef(t, items.Code != http.StatusOK || !strings.Contains(items.Body.String(), "hi"), "input_items status=%d body=%s", items.Code, items.Body.String())
 }
 
@@ -337,7 +338,7 @@ func TestResponsesBridgeMemoryFallbackStoresResponses(t *testing.T) {
 func TestResponsesSubResourcesRoundTripThroughRedis(t *testing.T) {
 	_, s, _ := setupValidationHandler(t)
 
-	opts := ResponsesBridgeOptions{Store: s}
+	opts := responses.BridgeOptions{Store: s}
 	chat := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -355,117 +356,19 @@ func TestResponsesSubResourcesRoundTripThroughRedis(t *testing.T) {
 	testutil.NotEqual(t, responseID, "")
 
 	items := httptest.NewRecorder()
-	ResponsesInputItemsHandler(opts)(items, httptest.NewRequest(http.MethodGet, "/workbuddy/v1/responses/"+responseID+"/input_items", nil))
+	responses.InputItemsHandler(opts)(items, httptest.NewRequest(http.MethodGet, "/workbuddy/v1/responses/"+responseID+"/input_items", nil))
 	testutil.Falsef(t, items.Code != http.StatusOK || !strings.Contains(items.Body.String(), "remember this turn"), "input_items status=%d body=%s", items.Code, items.Body.String())
 
 	cancelled := httptest.NewRecorder()
-	ResponsesCancelHandler(opts)(cancelled, httptest.NewRequest(http.MethodPost, "/workbuddy/v1/responses/"+responseID+"/cancel", nil))
+	responses.CancelHandler(opts)(cancelled, httptest.NewRequest(http.MethodPost, "/workbuddy/v1/responses/"+responseID+"/cancel", nil))
 	testutil.Falsef(t, cancelled.Code != http.StatusOK || !strings.Contains(cancelled.Body.String(), `"status":"cancelled"`), "cancel status=%d body=%s", cancelled.Code, cancelled.Body.String())
 
 	// The cancellation must be visible through a fresh read of the same store.
 	get := httptest.NewRecorder()
-	ResponsesResourceHandler(opts)(get, httptest.NewRequest(http.MethodGet, "/workbuddy/v1/responses/"+responseID, nil))
+	responses.ResourceHandler(opts)(get, httptest.NewRequest(http.MethodGet, "/workbuddy/v1/responses/"+responseID, nil))
 	testutil.Falsef(t, get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"status":"cancelled"`), "get after cancel status=%d body=%s", get.Code, get.Body.String())
 	// input_items must still be readable after the status rewrite.
 	itemsAgain := httptest.NewRecorder()
-	ResponsesInputItemsHandler(opts)(itemsAgain, httptest.NewRequest(http.MethodGet, "/workbuddy/v1/responses/"+responseID+"/input_items", nil))
+	responses.InputItemsHandler(opts)(itemsAgain, httptest.NewRequest(http.MethodGet, "/workbuddy/v1/responses/"+responseID+"/input_items", nil))
 	testutil.Falsef(t, itemsAgain.Code != http.StatusOK || !strings.Contains(itemsAgain.Body.String(), "remember this turn"), "input_items after cancel status=%d body=%s", itemsAgain.Code, itemsAgain.Body.String())
-}
-
-// TestResponsesUnifiedResourceHandsTheRecordToItsOwner is gap ①: GET/DELETE on
-// the unified prefix must follow the stored record rather than always landing on
-// Grok's handler, which used to accept records it did not write.
-func TestResponsesUnifiedResourceHandsTheRecordToItsOwner(t *testing.T) {
-	t.Parallel()
-
-	// newStore seeds one record whose body is built from the id the helper
-	// generates, so the caller never has to guess it.
-	newStore := func(provider string, body func(id string) string) (ResponsesStore, string) {
-		st := store.NewMemoryResponseStore(0)
-		id := "resp_route_" + randomHex(8)
-		payload := ""
-		if body != nil {
-			payload = body(id)
-		}
-		if err := st.SaveStoredResponse(nil, &store.StoredResponse{ //nolint:staticcheck // nil ctx is fine for the in-process store
-			ResponseID: id, OwnerHash: "anonymous", Model: "gpt-5.6-luna",
-			Provider: provider, ContentType: "application/json", Body: []byte(payload),
-		}, 0); err != nil {
-			t.Fatalf("SaveStoredResponse() error = %v", err)
-		}
-		return st, id
-	}
-
-	t.Run("bridged_record_goes_to_the_bridge", func(t *testing.T) {
-		st, id := newStore(bridgedResponseProvider, func(id string) string {
-			return `{"id":"` + id + `","object":"response","status":"completed","from":"bridge"}`
-		})
-		nativeCalls := 0
-		handler := ResponsesUnifiedResource(func(w http.ResponseWriter, r *http.Request) { nativeCalls++ }, ResponsesBridgeOptions{Store: st})
-
-		rec := httptest.NewRecorder()
-		handler(rec, httptest.NewRequest(http.MethodGet, "/v1/responses/"+id, nil))
-		testutil.Equal(t, nativeCalls, 0)
-		testutil.Falsef(t, rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "bridge"), "status=%d body=%s", rec.Code, rec.Body.String())
-	})
-
-	t.Run("build_record_stays_with_the_native_handler", func(t *testing.T) {
-		st, id := newStore(ProviderBuild, nil)
-		nativeCalls := 0
-		handler := ResponsesUnifiedResource(func(w http.ResponseWriter, r *http.Request) {
-			nativeCalls++
-			w.WriteHeader(http.StatusOK)
-			_, _ = io.WriteString(w, "native")
-		}, ResponsesBridgeOptions{Store: st})
-
-		rec := httptest.NewRecorder()
-		handler(rec, httptest.NewRequest(http.MethodGet, "/v1/responses/"+id, nil))
-		testutil.Equal(t, nativeCalls, 1)
-		testutil.MustContain(t, rec.Body.String(), "native")
-	})
-
-	// An id that was never stored is answered by the dispatcher itself: the
-	// store both handlers read is the same one, so "no such record" must not
-	// become a backend failure just because the native handler is unconfigured.
-	t.Run("unknown_record_is_answered_without_the_native_handler", func(t *testing.T) {
-		nativeCalls := 0
-		handler := ResponsesUnifiedResource(func(w http.ResponseWriter, r *http.Request) {
-			nativeCalls++
-			w.WriteHeader(http.StatusServiceUnavailable)
-		}, ResponsesBridgeOptions{Store: store.NewMemoryResponseStore(0)})
-
-		rec := httptest.NewRecorder()
-		handler(rec, httptest.NewRequest(http.MethodGet, "/v1/responses/resp_absent", nil))
-		testutil.Equal(t, nativeCalls, 0)
-		testutil.Falsef(t, rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "response_not_found"), "status = %d body = %s", rec.Code, rec.Body.String())
-	})
-
-	// A store that cannot be read is a different answer: the native handler owns
-	// the response_store_unavailable envelope, so it must still be consulted.
-	t.Run("unreadable_store_stays_with_the_native_handler", func(t *testing.T) {
-		nativeCalls := 0
-		handler := ResponsesUnifiedResource(func(w http.ResponseWriter, r *http.Request) {
-			nativeCalls++
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = io.WriteString(w, "store unavailable")
-		}, ResponsesBridgeOptions{Store: brokenResponsesStore{}})
-
-		rec := httptest.NewRecorder()
-		handler(rec, httptest.NewRequest(http.MethodGet, "/v1/responses/resp_any", nil))
-		testutil.Equal(t, nativeCalls, 1)
-		testutil.MustContain(t, rec.Body.String(), "store unavailable")
-	})
-
-	t.Run("sibling_actions_bypass_the_provider_decision", func(t *testing.T) {
-		st, id := newStore(bridgedResponseProvider, func(id string) string {
-			return `{"id":"` + id + `","object":"response","status":"completed"}`
-		})
-		nativeCalls := 0
-		handler := ResponsesUnifiedResource(func(w http.ResponseWriter, r *http.Request) { nativeCalls++ }, ResponsesBridgeOptions{Store: st})
-
-		rec := httptest.NewRecorder()
-		handler(rec, httptest.NewRequest(http.MethodGet, "/v1/responses/"+id+"/input_items", nil))
-		testutil.Equal(t, nativeCalls, 0)
-		testutil.Falsef(t, rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"object":"list"`), "status=%d body=%s", rec.Code, rec.Body.String())
-	})
 }

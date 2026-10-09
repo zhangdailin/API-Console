@@ -21,7 +21,7 @@ func declaredToolNames(tools []interface{}) []string {
 		if name == "" {
 			return
 		}
-		key := strings.ToLower(name)
+		key := name
 		if _, ok := seen[key]; ok {
 			return
 		}
@@ -35,10 +35,6 @@ func declaredToolNames(tools []interface{}) []string {
 			continue
 		}
 		add(name)
-		mappedName := toolname.NormalizeToolNameFallback(name)
-		if !strings.EqualFold(strings.TrimSpace(name), strings.TrimSpace(mappedName)) {
-			add(mappedName)
-		}
 	}
 
 	if len(out) == 0 {

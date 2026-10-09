@@ -108,10 +108,10 @@ func TestPublicModelsPublishWorkBuddyContextWindow(t *testing.T) {
 func TestPublicModelsPublishGrokContextWindow(t *testing.T) {
 	h, s, _ := setupModelValidationHandler(t)
 
-	publishModel(t, s, &store.Model{Channel: "grok", ModelID: "grok-4.3", Verified: true})
+	publishModel(t, s, &store.Model{Channel: "grok", ModelID: "grok-4.6", Verified: true})
 
 	entries := fetchPublicModels(t, h, "/grok/v1/models")
-	testutil.Equal(t, entries["grok-4.3"].ContextLength, 1000000)
+	testutil.Equal(t, entries["grok-4.6"].ContextLength, 500000)
 }
 
 // The Codex catalog used to fall back to a Grok-shaped 128k default for every

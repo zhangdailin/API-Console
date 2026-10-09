@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"orchids-api/internal/chatwire"
 	"strings"
 	"testing"
 	"time"
@@ -131,19 +132,19 @@ func TestDecideQualityRetryPolicy(t *testing.T) {
 
 func TestQualityRequestReplayUnsafe(t *testing.T) {
 	testutil.False(t, qualityRequestReplayUnsafe(nil), "nil request must be replay-safe")
-	testutil.False(t, qualityRequestReplayUnsafe(&ChatCompletionsRequest{}), "a plain request must be replay-safe")
+	testutil.False(t, qualityRequestReplayUnsafe(&chatwire.Request{}), "a plain request must be replay-safe")
 	functionTool := map[string]interface{}{"type": "function", "name": "weather"}
-	testutil.False(t, qualityRequestReplayUnsafe(&ChatCompletionsRequest{ResponsesTools: []map[string]interface{}{functionTool}}), "a client-executed function tool must be replay-safe")
+	testutil.False(t, qualityRequestReplayUnsafe(&chatwire.Request{ResponsesTools: []map[string]interface{}{functionTool}}), "a client-executed function tool must be replay-safe")
 	hosted := map[string]interface{}{"type": "web_search"}
-	testutil.False(t, !qualityRequestReplayUnsafe(&ChatCompletionsRequest{ResponsesTools: []map[string]interface{}{hosted}}), "a hosted search tool must block replay")
-	testutil.False(t, !qualityRequestReplayUnsafe(&ChatCompletionsRequest{WebSearchOptions: map[string]interface{}{"search_context_size": "low"}}), "web_search_options must block replay")
-	testutil.False(t, !qualityRequestReplayUnsafe(&ChatCompletionsRequest{MCPServers: []map[string]interface{}{{"url": "https://example.test"}}}), "mcp_servers must block replay")
+	testutil.False(t, !qualityRequestReplayUnsafe(&chatwire.Request{ResponsesTools: []map[string]interface{}{hosted}}), "a hosted search tool must block replay")
+	testutil.False(t, !qualityRequestReplayUnsafe(&chatwire.Request{WebSearchOptions: map[string]interface{}{"search_context_size": "low"}}), "web_search_options must block replay")
+	testutil.False(t, !qualityRequestReplayUnsafe(&chatwire.Request{MCPServers: []map[string]interface{}{{"url": "https://example.test"}}}), "mcp_servers must block replay")
 	remoteShell := map[string]interface{}{"type": "shell", "environment": map[string]interface{}{"type": "container"}}
-	testutil.False(t, !qualityRequestReplayUnsafe(&ChatCompletionsRequest{ResponsesTools: []map[string]interface{}{remoteShell}}), "a hosted shell must block replay")
+	testutil.False(t, !qualityRequestReplayUnsafe(&chatwire.Request{ResponsesTools: []map[string]interface{}{remoteShell}}), "a hosted shell must block replay")
 	localShell := map[string]interface{}{"type": "shell", "environment": map[string]interface{}{"type": "local"}}
-	testutil.False(t, qualityRequestReplayUnsafe(&ChatCompletionsRequest{ResponsesTools: []map[string]interface{}{localShell}}), "a local shell must stay replay-safe")
+	testutil.False(t, qualityRequestReplayUnsafe(&chatwire.Request{ResponsesTools: []map[string]interface{}{localShell}}), "a local shell must stay replay-safe")
 	// Unknown tool types default to no replay.
-	testutil.False(t, !qualityRequestReplayUnsafe(&ChatCompletionsRequest{ResponsesTools: []map[string]interface{}{{"type": "code_execution"}}}), "an unknown hosted tool must block replay")
+	testutil.False(t, !qualityRequestReplayUnsafe(&chatwire.Request{ResponsesTools: []map[string]interface{}{{"type": "code_execution"}}}), "an unknown hosted tool must block replay")
 }
 
 func TestDeferredResponseWriterHoldsThenCommits(t *testing.T) {
@@ -305,9 +306,9 @@ func TestServeNativeChatWithholdsDegradedTurnAndRetriesAnotherAccount(t *testing
 	spec, ok := h.resolveConversationModel(ctx, "grok-4.5")
 	testutil.True(t, ok, "grok-4.5 did not resolve")
 	effort := "high"
-	req := &ChatCompletionsRequest{
+	req := &chatwire.Request{
 		Model: "grok-4.5", Stream: true, ReasoningEffort: &effort,
-		Messages: []ChatMessage{{Role: "user", Content: "hello"}},
+		Messages: []chatwire.Message{{Role: "user", Content: "hello"}},
 	}
 	rec := httptest.NewRecorder()
 	h.serveNativeChat(ctx, rec, req, spec, sess, nil, true)

@@ -26,7 +26,6 @@ internal/loadbalancer/loadbalancer.go
 internal/grok/handler.go
 internal/api/api_ops.go
 internal/grok/quality_hold.go
-internal/grok/handler_responses_store.go
 internal/opsagg/opsagg.go
 "
 
@@ -38,6 +37,7 @@ while IFS= read -r path; do
 	*.go) ;;
 	*) continue ;;
 	esac
+	[ -f "$path" ] || continue
 	lines=$(wc -l <"$path" | tr -d ' ')
 	if [ "$lines" -le "$CEILING" ]; then
 		continue

@@ -190,7 +190,7 @@ func TestConsumeStreamEmitsEachToolCallOnce(t *testing.T) {
 	testutil.CheckEqual(t, result.FinishReason(), "tool_use")
 }
 
-func TestConsumeStreamConvertsGLMTextToolCall(t *testing.T) {
+func TestConsumeStreamKeepsGLMToolMarkupAsText(t *testing.T) {
 	stream := "data: {\"choices\":[{\"delta\":{\"content\":\"checking <tool_call>bash:ls -la /tmp/a</arg_value><arg_key>command</arg_key><arg_value>ls -la /tmp/a</arg_value></tool_call>\"},\"finish_reason\":\"stop\"}]}\n\n" +
 		"data: [DONE]\n\n"
 	var text strings.Builder
@@ -204,25 +204,14 @@ func TestConsumeStreamConvertsGLMTextToolCall(t *testing.T) {
 		}
 	})
 	testutil.NoError(t, err, "consumeStream() error = %v")
-	testutil.Equal(t, text.String(), "checking ")
-	testutil.Equal(t, len(calls), 1)
-	testutil.Equal(t, calls[0].Event["toolName"], "bash")
-	testutil.Equal(t, calls[0].Event["input"], `{"command":"ls -la /tmp/a"}`)
-	testutil.Equal(t, result.ToolCallCount, 1)
-	testutil.Equal(t, result.FinishReason(), "tool_use")
+	testutil.Equal(t, text.String(), "checking <tool_call>bash:ls -la /tmp/a</arg_value><arg_key>command</arg_key><arg_value>ls -la /tmp/a</arg_value></tool_call>")
+	testutil.Equal(t, len(calls), 0)
+	testutil.Equal(t, result.ToolCallCount, 0)
+	testutil.Equal(t, result.FinishReason(), "end_turn")
 }
 
-// TestConsumeStreamRecoversTruncatedToolCallFromTextMarkup is the mimo-v2.6-flash
-// failure seen on the Xiaomi provider: the native tool_calls deltas stop inside
-// the argument object (`{"chars": `) while the content delta carries a complete
-// textual copy of the same call.
-//
-// Before the fix the client received a tool_use block whose input was that
-// unparseable fragment, plus a text block holding the raw markup — a
-// `write_stdin` call with no session_id and no yield_time_ms, which is what the
-// caller reported. One tool_use block with complete arguments is the wanted
-// outcome, and the markup must not reach the client as text.
-func TestConsumeStreamRecoversTruncatedToolCallFromTextMarkup(t *testing.T) {
+// Textual tool markup never repairs a native argument fragment.
+func TestConsumeStreamDoesNotRepairNativeArgumentsFromTextMarkup(t *testing.T) {
 	frames := []string{
 		`{"choices":[{"delta":{"content":"","role":"assistant"},"finish_reason":null}]}`,
 		`{"choices":[{"delta":{"content":"<tool_call><function=write_stdin><parameter=chars>"},"finish_reason":null}]}`,
@@ -257,8 +246,8 @@ func TestConsumeStreamRecoversTruncatedToolCallFromTextMarkup(t *testing.T) {
 	testutil.Equal(t, calls[0].Event["toolName"], "write_stdin")
 	// Every parameter of the textual copy has to survive, typed as the upstream
 	// wrote it: a numeric parameter must not arrive as a quoted string.
-	testutil.Equal(t, calls[0].Event["input"], `{"chars":"","max_output_tokens":2000,"session_id":44579,"yield_time_ms":1000}`)
-	testutil.Falsef(t, strings.Contains(text.String(), "parameter="), "text = %q, want no raw markup", text.String())
+	testutil.Equal(t, calls[0].Event["input"], `{"chars": `)
+	testutil.True(t, strings.Contains(text.String(), "parameter="), "markup must remain text")
 	testutil.Equal(t, result.ToolCallCount, 1)
 	testutil.Equal(t, result.FinishReason(), "tool_use")
 }
@@ -290,57 +279,6 @@ func TestConsumeStreamDoesNotDuplicateAnIntactTextualToolCall(t *testing.T) {
 	// call that was never broken, so it is dropped rather than merged.
 	testutil.Equal(t, calls[0].Event["input"], `{"cmd": "ls"}`)
 	testutil.Equal(t, result.ToolCallCount, 1)
-}
-
-// TestParseClineFunctionToolCallKeepsProseAndParameterTypes covers the
-// `<function=NAME>` dialect on its own: surrounding prose survives, a numeric
-// parameter stays a number, and an entity-escaped value is unescaped.
-func TestParseClineFunctionToolCallKeepsProseAndParameterTypes(t *testing.T) {
-	markup := "先清理会话。<tool_call><function=write_stdin><parameter=chars></parameter><parameter=max_output_tokens>2000</parameter><parameter=session_id>44579</parameter></function></tool_call> 完成。"
-	visible, calls := parseClineTextToolCalls(markup)
-	testutil.Equal(t, visible, "先清理会话。 完成。")
-	testutil.Equal(t, len(calls), 1)
-	testutil.Equal(t, calls[0].Function.Name, "write_stdin")
-	testutil.Equal(t, calls[0].Function.Arguments, `{"chars":"","max_output_tokens":2000,"session_id":44579}`)
-
-	escaped := `<tool_call><function=write><parameter=content>&quot;ok&quot;</parameter></function></tool_call>`
-	_, calls = parseClineTextToolCalls(escaped)
-	testutil.Equal(t, len(calls), 1)
-	testutil.Equal(t, calls[0].Function.Arguments, `{"content":"ok"}`)
-}
-
-func TestParseClineTextToolCallPreservesStructuredArguments(t *testing.T) {
-	markup := `<tool_call>write:ignored</arg_value><arg_key>content</arg_key><arg_value>{&quot;ok&quot;:true}</arg_value><arg_key>count</arg_key><arg_value>2</arg_value></tool_call>`
-	visible, calls := parseClineTextToolCalls(markup)
-	testutil.Equal(t, visible, "")
-	testutil.Equal(t, len(calls), 1)
-	testutil.Equal(t, calls[0].Function.Arguments, `{"content":{"ok":true},"count":2}`)
-}
-
-func TestParseClineRepeatedTagToolCall(t *testing.T) {
-	text := `让我先看一下项目。<tool_call> GetType(ItemType) + $assetPath.Write and glob the workspace.<tool_call>glob<tool_call>glob: *<tool_call>args: {"pattern":"*"}<tool_call>run_in_background: false`
-	visible, calls := parseClineTextToolCalls(text)
-	testutil.Equal(t, visible, "让我先看一下项目。")
-	testutil.Equal(t, len(calls), 1)
-	testutil.Equal(t, calls[0].Function.Name, "glob")
-	testutil.Equal(t, calls[0].Function.Arguments, `{"pattern":"*"}`)
-}
-
-func TestParseClineCompactMultipleToolCalls(t *testing.T) {
-	text := `先查看结构。<tool_call>glob,{"pattern":"*"}<tool_call>glob,{"pattern":"*/*"}`
-	visible, calls := parseClineTextToolCalls(text)
-	testutil.Equal(t, visible, "先查看结构。")
-	testutil.Equal(t, len(calls), 2)
-	testutil.Equal(t, calls[0].Function.Name, "glob")
-	testutil.Equal(t, calls[0].Function.Arguments, `{"pattern":"*"}`)
-	testutil.Equal(t, calls[1].Function.Arguments, `{"pattern":"*/*"}`)
-}
-
-func TestParseClineRepeatedTagToolCallRejectsProse(t *testing.T) {
-	text := `plain <tool_call>this is not a tool<tool_call>args: {"x":1}`
-	visible, calls := parseClineTextToolCalls(text)
-	testutil.Equal(t, visible, text)
-	testutil.Equal(t, len(calls), 0)
 }
 
 func TestConsumeStreamLeavesTextToolMarkupWithoutDeclaredTools(t *testing.T) {

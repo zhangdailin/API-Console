@@ -52,7 +52,7 @@ func TestDiagnosticsStreamingAndExactlyOneOutcome(t *testing.T) {
 		w.(http.Flusher).Flush()
 		MarkStreamFailure(w)
 	}))))
-	req := httptest.NewRequest("POST", "/v1/responses", strings.NewReader(original))
+	req := httptest.NewRequest("POST", "/grok/v1/responses", strings.NewReader(original))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, req)

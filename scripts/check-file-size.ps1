@@ -17,7 +17,6 @@ $exempt = @(
   'internal/grok/handler.go',
   'internal/api/api_ops.go',
   'internal/grok/quality_hold.go',
-  'internal/grok/handler_responses_store.go',
   'internal/opsagg/opsagg.go'
 )
 function Get-LineCount([string]$p) {
@@ -27,6 +26,7 @@ function Get-LineCount([string]$p) {
 $status = 0
 foreach ($p in (git ls-files '*.go')) {
   if ($p -like '*_test.go') { continue }
+  if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { continue }
   $n = Get-LineCount $p
   if ($n -le $ceiling) { continue }
   if ($exempt -contains $p) { continue }

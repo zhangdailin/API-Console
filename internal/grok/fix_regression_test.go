@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"orchids-api/internal/chatwire"
+	"orchids-api/internal/responses"
 	"strings"
 	"testing"
 	"time"
@@ -136,8 +138,8 @@ func TestWriteGrokUpstreamErrorKeepsLocalValidationMessage(t *testing.T) {
 }
 
 func TestIsPrivateBuildControlEvent(t *testing.T) {
-	testutil.False(t, !isPrivateBuildControlEvent("response.doom_loop_check"), "doom loop control event must be treated as private")
-	testutil.False(t, isPrivateBuildControlEvent("response.output_text.delta"), "generated delta must not be treated as private")
+	testutil.False(t, !responses.IsPrivateBuildControlEvent("response.doom_loop_check"), "doom loop control event must be treated as private")
+	testutil.False(t, responses.IsPrivateBuildControlEvent("response.output_text.delta"), "generated delta must not be treated as private")
 }
 
 func TestIsModelScopedRefusal(t *testing.T) {
@@ -222,8 +224,8 @@ func TestBuildSessionUUIDIsStableAndValid(t *testing.T) {
 }
 
 func TestToolMessagesRequireCallID(t *testing.T) {
-	messages := []ChatMessage{
-		{Role: "assistant", ToolCalls: []ToolCall{{ID: "call_1", Type: "function", Function: map[string]interface{}{"name": "read", "arguments": "{}"}}}},
+	messages := []chatwire.Message{
+		{Role: "assistant", ToolCalls: []chatwire.ToolCall{{ID: "call_1", Type: "function", Function: map[string]interface{}{"name": "read", "arguments": "{}"}}}},
 		{Role: "tool", Name: "read", Content: "done"},
 	}
 	items, _ := responsesInputFromChatMessages(messages)
@@ -234,13 +236,13 @@ func TestToolMessagesRequireCallID(t *testing.T) {
 }
 
 func TestChatToolUseMustBeAnswered(t *testing.T) {
-	unanswered := []ChatMessage{
-		{Role: "assistant", ToolCalls: []ToolCall{{ID: "call_1", Function: map[string]interface{}{"name": "read"}}}},
+	unanswered := []chatwire.Message{
+		{Role: "assistant", ToolCalls: []chatwire.ToolCall{{ID: "call_1", Function: map[string]interface{}{"name": "read"}}}},
 		{Role: "user", Content: "next"},
 	}
 	err := validateChatToolSequence(unanswered)
 	testutil.Error(t, err)
-	answered := append([]ChatMessage{}, unanswered[0], ChatMessage{Role: "tool", ToolCallID: "call_1", Content: "ok"})
+	answered := append([]chatwire.Message{}, unanswered[0], chatwire.Message{Role: "tool", ToolCallID: "call_1", Content: "ok"})
 	testutil.NoError(t, validateChatToolSequence(answered), "a paired tool_use must be accepted: %v")
 }
 

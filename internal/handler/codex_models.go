@@ -94,16 +94,9 @@ type codexModelMetadata struct {
 
 // Keyed by the upstream model slug, with provider prefixes already stripped.
 var codexModelMetadataTable = map[string]codexModelMetadata{
-	"grok-4.5":                     {500000, "xAI Grok 4.5 frontier model with reasoning and vision.", true},
-	"grok-4.6":                     {500000, "xAI Grok 4.6 frontier model with reasoning and vision.", true},
-	"grok-4.3":                     {1000000, "xAI Grok 4.3 high-capacity reasoning model.", true},
-	"grok-build-0.1":               {256000, "xAI Grok Build 0.1 coding model.", false},
-	"grok-4.20-0309-reasoning":     {2000000, "xAI Grok 4.20 reasoning model.", true},
-	"grok-4.20-0309-non-reasoning": {2000000, "xAI Grok 4.20 non-reasoning model.", true},
-	"grok-4.20-multi-agent-0309":   {2000000, "xAI Grok 4.20 multi-agent model.", true},
-	"grok-3-mini":                  {131072, "xAI Grok 3 Mini model.", false},
-	"grok-3-mini-fast":             {131072, "xAI Grok 3 Mini Fast model.", false},
-	"grok-composer-2.5-fast":       {200000, "xAI Grok Composer 2.5 model.", false},
+	"grok-4.5":               {500000, "xAI Grok 4.5 frontier model with reasoning and vision.", true},
+	"grok-4.6":               {500000, "xAI Grok 4.6 frontier model with reasoning and vision.", true},
+	"grok-composer-2.5-fast": {200000, "xAI Grok Composer 2.5 model.", false},
 }
 
 // codexDefaultDescription is the single source for the unknown-model copy. The
@@ -316,11 +309,6 @@ func newCodexModelCatalog(items []PublicModelResponse) codexModelCatalog {
 		}
 		// Agent tools require the Build Responses route.
 		toolsSupported := codexAgentToolsSupported(item)
-		var applyPatchToolType *string
-		if toolsSupported {
-			value := "freeform"
-			applyPatchToolType = &value
-		}
 		reasoningSupported := false
 		for _, level := range levels {
 			if level != "none" {
@@ -347,7 +335,7 @@ func newCodexModelCatalog(items []PublicModelResponse) codexModelCatalog {
 			SupportsReasoningSummaries:        reasoningSupported,
 			DefaultReasoningSummary:           "auto",
 			SupportVerbosity:                  false,
-			ApplyPatchToolType:                applyPatchToolType,
+			ApplyPatchToolType:                nil,
 			WebSearchToolType:                 "text",
 			TruncationPolicy:                  codexTruncationPolicy{Mode: "tokens", Limit: 10000},
 			SupportsParallelToolCalls:         toolsSupported,

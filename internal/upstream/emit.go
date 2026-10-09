@@ -71,7 +71,7 @@ func EmitToolCalls(onMessage func(SSEMessage), states []*util.ToolCall, saw *boo
 		onMessage(SSEMessage{Type: "model.tool-call", Event: map[string]interface{}{
 			"toolCallId": id,
 			"toolName":   state.Name,
-			"input":      util.NormalizeToolInput(state.Arguments),
+			"input":      state.Arguments,
 		}})
 	}
 }

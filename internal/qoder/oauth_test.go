@@ -256,27 +256,6 @@ func TestResolveCredentialsPrefersDedicatedFields(t *testing.T) {
 	testutil.Falsef(t, got.HasCredential(), "credentials = %+v, want nothing resolved from an opaque generic slot", got)
 }
 
-// TestParseCredentialDocumentRoundTrips proves an imported CLI credential is
-// understood, and that a document without a token is refused.
-func TestParseCredentialDocumentRoundTrips(t *testing.T) {
-	t.Parallel()
-
-	raw := `{"uid":"u1","name":"n1","email":"e@example.com","organization_id":"org1","organization_tags":["a","b"],"security_oauth_token":"sot","refresh_token":"rt","expire_time":1700000000,"refresh_token_expire_time":1700086400}`
-	creds, ok := ParseCredentialDocument(raw)
-	testutil.True(t, ok, "ParseCredentialDocument() = false, want true")
-	testutil.Equal(t, creds.AccessToken, "sot")
-	testutil.Equal(t, creds.RefreshToken, "rt")
-	testutil.Equal(t, creds.UID, "u1")
-	testutil.Equal(t, creds.OrgID, "org1")
-	testutil.Equal(t, len(creds.OrgTags), 2)
-	testutil.Equal(t, creds.AccessExpiresAt.Unix(), 1700000000)
-
-	_, ok = ParseCredentialDocument(`{"uid":"u1"}`)
-	testutil.False(t, ok, "ParseCredentialDocument() = true for a document without a token")
-	_, ok = ParseCredentialDocument("not json")
-	testutil.False(t, ok, "ParseCredentialDocument() = true for a non-JSON value")
-}
-
 // TestUnixSecondsNormalizesMilliseconds proves a millisecond timestamp does not
 // land the expiry tens of thousands of years in the future, which would disable
 // refresh silently.
@@ -350,4 +329,9 @@ func TestEnsureAccessTokenSkipsRefreshWhileValid(t *testing.T) {
 	testutil.NoError(t, err, "ensureAccessToken() error = %v")
 	testutil.Equal(t, creds.AccessToken, "access-fresh")
 	testutil.Equal(t, refreshes, 0)
+}
+
+func TestResolveCredentialsIgnoresGenericDocument(t *testing.T) {
+	raw := `{"access_token":"access","refresh_token":"refresh","uid":"user"}`
+	testutil.False(t, ResolveCredentials(&store.Account{Token: raw, RefreshToken: raw, ClientCookie: raw}).HasCredential(), "generic credentials must not migrate")
 }

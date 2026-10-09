@@ -2,12 +2,13 @@ package grok
 
 import (
 	"fmt"
+	"orchids-api/internal/chatwire"
 	"strings"
 )
 
 // responsesPayloadFromChat converts Chat/Messages compatibility input into
 // the native Responses wire shape used by Build.
-func (h *Handler) responsesPayloadFromChat(spec ModelSpec, req *ChatCompletionsRequest, build bool) (map[string]interface{}, error) {
+func (h *Handler) responsesPayloadFromChat(spec ModelSpec, req *chatwire.Request, build bool) (map[string]interface{}, error) {
 	spec.Upstream = UpstreamCLI
 	if err := validateNativeChatContent(req.Messages); err != nil {
 		return nil, err

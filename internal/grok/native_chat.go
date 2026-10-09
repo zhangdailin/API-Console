@@ -7,6 +7,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"orchids-api/internal/chatwire"
+	"orchids-api/internal/responses"
 	"strings"
 	"time"
 
@@ -47,7 +49,7 @@ func chatMessageContentText(content interface{}) string {
 	}
 }
 
-func buildToolsFromOpenAI(tools []ToolDef) []map[string]interface{} {
+func buildToolsFromOpenAI(tools []chatwire.ToolDef) []map[string]interface{} {
 	if len(tools) == 0 {
 		return nil
 	}
@@ -55,7 +57,7 @@ func buildToolsFromOpenAI(tools []ToolDef) []map[string]interface{} {
 	for _, tool := range tools {
 		// A hosted tool (web_search / x_search) is forwarded as-is: it is the
 		// server-side search the caller asked for, not a function to call back.
-		if normalized, native := nativeToolTypes[strings.ToLower(strings.TrimSpace(tool.Type))]; native {
+		if normalized, native := chatwire.NativeToolTypes[strings.ToLower(strings.TrimSpace(tool.Type))]; native {
 			item := map[string]interface{}{"type": normalized}
 			for key, value := range tool.Raw {
 				switch key {
@@ -362,7 +364,7 @@ func consoleUsage(v map[string]interface{}) map[string]interface{} {
 // nothing reached the client, and the caller may retry it on another account. The
 // parked body is returned so the last attempt can still be delivered when the
 // retry budget runs out (the default fail-open policy).
-func (h *Handler) finishUpstreamChat(ctx context.Context, w http.ResponseWriter, req *ChatCompletionsRequest, sess *chatAccountSession, logger *debug.Logger, name, url string, headers func() http.Header, payload map[string]interface{}, resp *http.Response, err error) (*parkedResponse, bool) {
+func (h *Handler) finishUpstreamChat(ctx context.Context, w http.ResponseWriter, req *chatwire.Request, sess *chatAccountSession, logger *debug.Logger, name, url string, headers func() http.Header, payload map[string]interface{}, resp *http.Response, err error) (*parkedResponse, bool) {
 	if err != nil {
 		h.auditChatOutcome(ctx, sess.acc, req, chatOutcome{Finish: "error", Err: err})
 		slog.Error(name+" chat upstream failed", "url", url, "status", upstreamStatus(err), "error", err)
@@ -442,7 +444,7 @@ func (h *Handler) finishUpstreamChat(ctx context.Context, w http.ResponseWriter,
 	return nil, false
 }
 
-func (h *Handler) serveNativeChat(ctx context.Context, w http.ResponseWriter, req *ChatCompletionsRequest, spec ModelSpec, sess *chatAccountSession, logger *debug.Logger, build bool) {
+func (h *Handler) serveNativeChat(ctx context.Context, w http.ResponseWriter, req *chatwire.Request, spec ModelSpec, sess *chatAccountSession, logger *debug.Logger, build bool) {
 	if h == nil || sess == nil || sess.acc == nil || h.buildClient() == nil {
 		writeGrokError(w, http.StatusServiceUnavailable, "grok upstream client or account not configured")
 		return
@@ -457,9 +459,6 @@ func (h *Handler) serveNativeChat(ctx context.Context, w http.ResponseWriter, re
 	}
 	provider, endpoint, model := ProviderBuild, h.cliBaseURL()+"/responses", spec.UpstreamModel
 	ctx = withReasoningDiagnostics(ctx, payload)
-	if warnings := takeBuildCompatibilityWarnings(payload); warnings != "" {
-		w.Header().Set("X-Grok2API-Compatibility-Warnings", warnings)
-	}
 	openNext := func(excluded []int64) (*chatAccountSession, error) {
 		return h.openCLIAccountSession(ctx, excluded, model)
 	}
@@ -514,12 +513,6 @@ func (h *Handler) serveNativeChat(ctx context.Context, w http.ResponseWriter, re
 		// inner transport attempt to one account so the two bounded policies do not
 		// multiply into as many as 6×100 full upstream generations.
 		resp, err := h.retryWithAccountSwitchLimit(ctx, sess, 1500*time.Millisecond, request, openNext, nil, 1)
-		if err == nil && resp != nil {
-			tools := append(append([]map[string]interface{}(nil), req.ResponsesTools...), buildToolsFromOpenAI(req.Tools)...)
-			if aliases := collectBuildToolAliases(map[string]interface{}{"tools": tools}); len(aliases) > 0 {
-				resp.Body = rewriteBuildToolAliasResponse(resp.Body, resp.Header.Get("Content-Type"), aliases)
-			}
-		}
 		body, withheld := h.finishUpstreamChat(ctx, w, req, sess, logger, provider, endpoint, func() http.Header {
 			return h.cliHeaders(sess.acc, sess.token)
 		}, payload, resp, err)
@@ -638,7 +631,7 @@ func (h *Handler) retryWithAccountSwitchLimit(ctx context.Context, sess *chatAcc
 	}
 }
 
-func (h *Handler) collectBuildChat(w http.ResponseWriter, req *ChatCompletionsRequest, body io.Reader) (outcome chatOutcome) {
+func (h *Handler) collectBuildChat(w http.ResponseWriter, req *chatwire.Request, body io.Reader) (outcome chatOutcome) {
 	var raw map[string]interface{}
 	if err := json.NewDecoder(body).Decode(&raw); err != nil {
 		outcome.Err = err
@@ -646,13 +639,13 @@ func (h *Handler) collectBuildChat(w http.ResponseWriter, req *ChatCompletionsRe
 		return
 	}
 	if raw["error"] != nil || interfaceString(raw["status"]) == "failed" {
-		outcome.Err = responseFailure(raw)
+		outcome.Err = responses.Failure(raw)
 		writeGrokUpstreamError(w, outcome.Err)
 		return
 	}
 	outcomeStarted := time.Now()
 	text := consoleExtractMessageText(raw)
-	refusal := consoleExtractRefusal(raw)
+	refusal := responses.ExtractRefusal(raw)
 	filter := stopFilter{sequences: req.Stop}
 	text = filter.push(text, true)
 	reasoning := consoleExtractReasoningText(raw)

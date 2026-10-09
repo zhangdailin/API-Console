@@ -20,6 +20,16 @@ func TestRegistryInvariantsAndPathParsing(t *testing.T) {
 		testutil.Falsef(t, !ok || id != definition.ID, "path parse failed: %+v", definition)
 		id, model, ok := TrimModelPath(definition.APIPrefix + "/models/example")
 		testutil.Falsef(t, !ok || id != definition.ID || model != "example", "model path parse failed: %+v", definition)
+		for _, prefix := range PrefixesFor(definition.ID) {
+			id, endpoint, ok := EndpointFromPath(prefix + "/responses/compact")
+			testutil.Falsef(t, !ok || id != definition.ID || endpoint != "responses/compact", "endpoint parse failed for %s", prefix)
+			id, model, ok := TrimModelPath(prefix + "/models/example")
+			testutil.Falsef(t, !ok || id != definition.ID || model != "example", "model path parse failed for %s", prefix)
+		}
+	}
+	for _, path := range []string{"/v1/models/example", "/models/example", "/workbuddy-other/models/example", "/unknown/v1/models/example"} {
+		_, _, ok := TrimModelPath(path)
+		testutil.Falsef(t, ok, "non-provider model route accepted: %s", path)
 	}
 	testutil.Equal(t, defaults, 1)
 }
@@ -37,6 +47,6 @@ func TestRegistryIsWorkBuddyDefaultAfterChannelRemoval(t *testing.T) {
 	for i, id := range want {
 		testutil.Equal(t, all[i].ID, id)
 	}
-	testutil.Equal(t, len(GenericPrefixes()), 3)
-	testutil.Equal(t, len(AllPrefixes()), len(want))
+	testutil.Equal(t, len(GenericPrefixes()), 6)
+	testutil.Equal(t, len(AllPrefixes()), 2*len(want))
 }

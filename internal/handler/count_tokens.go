@@ -12,7 +12,7 @@ import (
 	"orchids-api/internal/middleware"
 )
 
-// HandleCountTokens handles /v1/messages/count_tokens requests.
+// HandleCountTokens estimates input usage on a provider Messages route.
 func (h *Handler) HandleCountTokens(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -40,15 +40,9 @@ func (h *Handler) HandleCountTokens(w http.ResponseWriter, r *http.Request) {
 	defer logger.Close()
 	logger.LogIncomingRequest(req)
 
-	// The channel is what picks the token profile, and on the unified prefix the
-	// path names no channel at all — only the model does. A path-only lookup here
-	// silently returned the generic estimate for every /v1 request, so a client
-	// that budgets its context against count_tokens planned against the wrong
-	// number. Channel names are compared case-insensitively everywhere else; the
-	// stored value is whatever the operator's catalog spells, so normalize it.
-	channel := strings.ToLower(h.ModelChannel(r, req.Model))
+	// The explicit provider path selects the token profile.
+	profile := channelFromPath(r.URL.Path)
 	breakdown := estimateRequestTokenBreakdown(req)
-	profile := channel
 
 	w.Header().Set("Content-Type", "application/json")
 	resp := map[string]interface{}{

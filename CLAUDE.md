@@ -54,7 +54,6 @@ was rewritten to CRLF — do not mass-reformat, fix the checkout instead.
 
 ```
 cmd/server        startup, route registration (routes.go is the only assembly point)
-internal/dispatch     routes a unified endpoint by model
 internal/responses     OpenAI Responses protocol: wire types, conversions, SSE,
                        sub-resources, compaction, chat→Responses bridge
 internal/chatwire     OpenAI Chat Completions wire types
@@ -74,14 +73,11 @@ internal/api      admin HTTP API
 internal/middleware  auth, rate limiting, tracing, diagnostics
 ```
 
-Two routing modes:
-
-- **`/v1/*`** dispatches **by model**. `grok.ModelDispatcher` reads `model` from
-  the POST body and sends the request to Grok's native handler or to the shared
-  pipeline, which resolves the channel from the model store.
-- **`/{channel}/v1/*`** pins the channel from the path, regardless of model.
-  Prefixes come from `internal/channel` (`/workbuddy/v1`, `/qoder/v1`,
-  `/cline/v1`, `/grok/v1`).
+Inference routes require a provider path: **`/{channel}/*`** and
+**`/{channel}/v1/*`** bind the same channel and expose the same endpoints.
+Prefixes come from `internal/channel` (WorkBuddy, Qoder, Cline and Grok).
+Root and unified `/v1` inference endpoints are unregistered and return 404.
+The root admin redirect, management APIs and health/metrics routes remain.
 
 Only Grok speaks Responses natively. The other three channels expose only
 `/v1/chat/completions`, so their Responses support goes through

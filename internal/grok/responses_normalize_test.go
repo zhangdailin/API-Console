@@ -2,131 +2,18 @@ package grok
 
 import (
 	"encoding/json"
-	"fmt"
+	"orchids-api/internal/chatwire"
+	"orchids-api/internal/responses"
+
 	"orchids-api/internal/testutil"
-	"strings"
+
 	"testing"
 )
 
-func TestBuildFunctionRootPreservesReferencedUnions(t *testing.T) {
-	for _, keyword := range []string{"oneOf", "anyOf"} {
-		schema := map[string]interface{}{
-			"type":  "object",
-			"$defs": map[string]interface{}{"view": map[string]interface{}{"type": "object", "required": []interface{}{"id"}}, "update": map[string]interface{}{"oneOf": []interface{}{map[string]interface{}{"type": "object"}, map[string]interface{}{}}}},
-			keyword: []interface{}{map[string]interface{}{"$ref": "#/$defs/view"}, map[string]interface{}{"$ref": "#/$defs/update"}},
-			"allOf": []interface{}{map[string]interface{}{"required": []interface{}{"mode"}}},
-		}
-		before, _ := json.Marshal(schema)
-		out := normalizeBuildFunctionRoot(schema)
-		if out["type"] != "object" || out[keyword] != nil {
-			t.Fatalf("root still exposes union: %v", out)
-		}
-		parts := out["allOf"].([]interface{})
-		if len(parts) != 2 || !mapsEqualJSON(parts[1].(map[string]interface{}), map[string]interface{}{keyword: schema[keyword]}) || !mapsEqualJSON(out["$defs"].(map[string]interface{}), schema["$defs"].(map[string]interface{})) {
-			t.Fatal("union or references changed")
-		}
-		after, _ := json.Marshal(schema)
-		if string(before) != string(after) {
-			t.Fatal("caller schema mutated")
-		}
-		if !mapsEqualJSON(out, normalizeBuildFunctionRoot(out)) {
-			t.Fatal("normalization not idempotent")
-		}
-	}
-}
-
-func TestBuildResponsesNormalizerFlattensNamespaceAndNullableRoot(t *testing.T) {
-	payload := map[string]interface{}{
-		"tools": []interface{}{
-			map[string]interface{}{
-				"type": "namespace", "name": "repo", "tools": []interface{}{
-					map[string]interface{}{"type": "function", "name": "read", "defer_loading": true, "parameters": map[string]interface{}{"type": []interface{}{"object", "null"}}},
-				},
-			},
-			map[string]interface{}{"type": "tool_search", "execution": "server"},
-		},
-		"tool_choice": map[string]interface{}{"type": "function", "name": "read", "namespace": "repo"},
-	}
-	testutil.NoError(t, normalizeBuildResponsesPayload(payload))
-	tools := interfaceMaps(payload["tools"])
-	testutil.Equal(t, len(tools), 1)
-	testutil.Equal(t, tools[0]["name"], "repo__read")
-	testutil.Equal(t, tools[0]["defer_loading"], nil)
-	parameters := tools[0]["parameters"].(map[string]interface{})
-	testutil.Equal(t, parameters["type"], "object")
-	choice := payload["tool_choice"].(map[string]interface{})
-	testutil.Equal(t, choice["name"], "repo__read")
-}
-
-func TestBuildResponsesNormalizerEmulatesClientToolSearch(t *testing.T) {
-	payload := map[string]interface{}{
-		"parallel_tool_calls": true,
-		"tools": []interface{}{
-			map[string]interface{}{"type": "function", "name": "deferred", "defer_loading": true, "parameters": map[string]interface{}{"type": "object"}},
-			map[string]interface{}{"type": "function", "name": "visible", "parameters": map[string]interface{}{"type": "object"}},
-			map[string]interface{}{"type": "tool_search", "execution": "client"},
-		},
-	}
-	testutil.NoError(t, normalizeBuildResponsesPayload(payload))
-	tools := interfaceMaps(payload["tools"])
-	testutil.Equal(t, len(tools), 2)
-	testutil.Equal(t, tools[0]["name"], "visible")
-	testutil.Equal(t, tools[1]["name"], "tool_search")
-	parallel, _ := payload["parallel_tool_calls"].(bool)
-	testutil.Falsef(t, parallel, "parallel_tool_calls=%#v", payload["parallel_tool_calls"])
-	warnings := takeBuildCompatibilityWarnings(payload)
-	testutil.MustContainAll(t, warnings, "client_tool_search_emulated", "client_tool_search_forced_serial")
-}
-
-func TestBuildResponsesNormalizerWarnsAndRenamesCollisions(t *testing.T) {
-	payload := map[string]interface{}{"tools": []interface{}{
-		map[string]interface{}{"type": "function", "name": "a b", "parameters": map[string]interface{}{"type": "object"}},
-		map[string]interface{}{"type": "function", "name": "a@b", "defer_loading": true, "parameters": map[string]interface{}{"type": []interface{}{"object", "null"}}},
-	}}
-	testutil.NoError(t, normalizeBuildResponsesPayload(payload))
-	tools := interfaceMaps(payload["tools"])
-	testutil.NotEqual(t, tools[0]["name"], tools[1]["name"])
-	warnings := takeBuildCompatibilityWarnings(payload)
-	for _, expected := range []string{"function_name_collision_renamed", "orphan_deferred_tool_loaded", "function_parameters_nullable_root_normalized"} {
-		testutil.MustContain(t, warnings, expected)
-	}
-}
-
-func TestBuildResponsesNormalizerPreservesNativeHistoryAndNormalizesExtensions(t *testing.T) {
-	native := map[string]interface{}{"type": "shell_call", "call_id": "native", "action": map[string]interface{}{"type": "exec", "commands": []interface{}{"pwd"}}, "future": "keep"}
-	payload := map[string]interface{}{"input": []interface{}{
-		native,
-		map[string]interface{}{"type": "agent_message", "author": "worker", "recipient": "manager", "content": "done", "encrypted_content": "must-not-leak"},
-		map[string]interface{}{"type": "local_shell_call", "call_id": "call_1", "action": map[string]interface{}{"type": "exec", "command": []interface{}{"printf", "hello world"}}},
-		map[string]interface{}{"type": "mcp_tool_call_output", "call_id": "mcp_1", "output": map[string]interface{}{"ok": true}, "secret": "drop"},
-	}}
-	testutil.NoError(t, normalizeBuildResponsesPayload(payload))
-	items := payload["input"].([]interface{})
-	first := items[0].(map[string]interface{})
-	testutil.Equal(t, first["future"], "keep")
-	testutil.Equal(t, first["type"], "shell_call")
-	agent := items[1].(map[string]interface{})
-	testutil.Falsef(t, agent["type"] != "message" || strings.Contains(agent["content"].([]interface{})[0].(map[string]interface{})["text"].(string), "must-not-leak"), "agent history=%#v", agent)
-	shell := items[2].(map[string]interface{})
-	testutil.Equal(t, shell["type"], "shell_call")
-	testutil.Equal(t, shell["call_id"], "call_1")
-	mcp := items[3].(map[string]interface{})
-	testutil.Falsef(t, mcp["type"] != "message" || strings.Contains(fmt.Sprint(mcp), "secret"), "mcp history=%#v", mcp)
-}
-
-func TestBuildResponsesNormalizerOpaqueAgentMessageUsesBoundary(t *testing.T) {
-	payload := map[string]interface{}{"input": []interface{}{map[string]interface{}{
-		"type": "agent_message", "content": map[string]interface{}{"ciphertext": "opaque-secret"},
-	}}}
-	testutil.NoError(t, normalizeBuildResponsesPayload(payload))
-	encoded := fmt.Sprint(payload["input"])
-	testutil.Falsef(t, strings.Contains(encoded, "opaque-secret") || !strings.Contains(encoded, "not portable"), "boundary=%s", encoded)
-}
-
 func TestResponsesPayloadFromChatPreservesMultimodalAndNormalizesBuildState(t *testing.T) {
-	req := &ChatCompletionsRequest{
+	req := &chatwire.Request{
 		Model: "grok-4.5", PromptCacheKey: "session", SafetyIdentifier: "user-1",
-		Messages: []ChatMessage{{Role: "user", Content: []interface{}{
+		Messages: []chatwire.Message{{Role: "user", Content: []interface{}{
 			map[string]interface{}{"type": "text", "text": "inspect"},
 			map[string]interface{}{"type": "image_url", "image_url": map[string]interface{}{"url": "data:image/png;base64,AA=="}},
 		}}},
@@ -158,4 +45,42 @@ func TestAnthropicRequestNormalizesMCPStrictAndOutputFormat(t *testing.T) {
 	testutil.Equal(t, chat.ResponsesTools[0]["type"], "mcp")
 	testutil.Equal(t, chat.ResponsesTools[0]["authorization"], "secret")
 	testutil.Falsef(t, chat.ResponseText["format"] == nil || chat.SafetyIdentifier != "user-1", "text/safety=%#v %q", chat.ResponseText, chat.SafetyIdentifier)
+}
+
+func TestNativeToolsRejectClientAdaptations(t *testing.T) {
+	for _, tools := range []interface{}{"invalid", []interface{}{nil}, []interface{}{1, map[string]interface{}{"type": "function", "name": "ok"}}} {
+		testutil.Error(t, normalizeBuildResponsesPayload(map[string]interface{}{"tools": tools}))
+	}
+	for _, kind := range []string{"namespace", "custom", "apply_patch", "local_shell", "tool_search"} {
+		payload := map[string]interface{}{"tools": []interface{}{map[string]interface{}{"type": kind, "name": "example", "tools": []interface{}{}}}}
+		testutil.Error(t, normalizeBuildResponsesPayload(payload))
+	}
+	for _, kind := range []string{"agent_message", "local_shell_call", "mcp_tool_call_output", "custom_tool_call", "apply_patch_call_output", "tool_search_call"} {
+		payload := map[string]interface{}{"input": []interface{}{map[string]interface{}{"type": kind, "call_id": "call"}}}
+		testutil.Error(t, normalizeBuildResponsesPayload(payload))
+	}
+}
+
+func TestNativeMCPHistoryIsNotLoweredToText(t *testing.T) {
+	items := []interface{}{map[string]interface{}{"type": "mcp_call", "name": "lookup", "arguments": `{"count":1.0}`}, map[string]interface{}{"type": "mcp_approval_response", "approval_request_id": "request", "approve": true}}
+	payload := map[string]interface{}{"tools": []map[string]interface{}{{"type": "mcp", "server_label": "docs"}}, "input": items}
+	before, _ := json.Marshal(items)
+	testutil.NoError(t, normalizeBuildResponsesPayload(payload))
+	after, _ := json.Marshal(payload["input"])
+	testutil.Equal(t, string(after), string(before))
+}
+
+func TestNativeToolsPreserveNamesSchemasAndArguments(t *testing.T) {
+	schema := map[string]interface{}{"type": "object", "anyOf": []interface{}{map[string]interface{}{"required": []interface{}{"value"}}}, "properties": map[string]interface{}{"value": map[string]interface{}{"type": "integer"}}}
+	tool := map[string]interface{}{"type": "function", "name": "Mixed.Case", "parameters": schema}
+	item := map[string]interface{}{"type": "function_call", "name": "Mixed.Case", "call_id": "call", "arguments": `{"value":1000.0}`}
+	before, _ := json.Marshal(map[string]interface{}{"tool": tool, "item": item})
+	payload := map[string]interface{}{"tools": []interface{}{tool}, "input": []interface{}{item}, "tool_choice": map[string]interface{}{"type": "function", "name": "Mixed.Case"}}
+	testutil.NoError(t, normalizeBuildResponsesPayload(payload))
+	after, _ := json.Marshal(map[string]interface{}{"tool": responses.InterfaceMaps(payload["tools"])[0], "item": responses.InterfaceMaps(payload["input"])[0]})
+	testutil.Equal(t, string(after), string(before))
+	for _, id := range []string{"grok-4.5-latest", "grok-4.6-latest", "grok-code-fast", "build/grok-4.6", "grok_build/grok-4.6", "grok-4.5-latest-high"} {
+		_, ok := ResolveModel(id)
+		testutil.False(t, ok, "historical aliases must not resolve")
+	}
 }

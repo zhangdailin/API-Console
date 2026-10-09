@@ -8,7 +8,6 @@ import (
 	"maps"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,7 +23,6 @@ import (
 	"orchids-api/internal/middleware"
 	"orchids-api/internal/perf"
 	"orchids-api/internal/tiktoken"
-	"orchids-api/internal/toolname"
 	"orchids-api/internal/upstream"
 	"orchids-api/internal/util"
 )
@@ -327,7 +325,7 @@ func (h *streamHandler) setAllowedToolNames(names []string) {
 	h.mu.Lock()
 	clear(h.allowedToolNames)
 	for _, name := range names {
-		key := strings.ToLower(strings.TrimSpace(name))
+		key := strings.TrimSpace(name)
 		if key == "" {
 			continue
 		}
@@ -439,124 +437,6 @@ func (h *streamHandler) historyBuilderAt(slots *[]*strings.Builder, idx int) *st
 		(*slots)[idx] = perf.AcquireStringBuilder()
 	}
 	return (*slots)[idx]
-}
-
-func (h *streamHandler) rewriteToolCallToClient(name, input string) (string, string) {
-	h.mu.Lock()
-	clientTools := h.clientTools
-	h.mu.Unlock()
-
-	canonical := strings.TrimSpace(toolname.NormalizeToolNameFallback(name))
-	if len(clientTools) == 0 {
-		return name, input
-	}
-
-	mapped := strings.TrimSpace(toolname.MapToolNameToClient(canonical, clientTools, nil))
-	if mapped == "" {
-		return name, input
-	}
-	// Cline may return fields that are valid for its internal TodoWrite schema
-	// but are not declared by the client schema. In particular, recent Cline
-	// builds add `id` to every `todos[]` item while Claude Code declares
-	// additionalProperties:false. Prune only fields rejected by that schema,
-	// recursively (including array item objects), before emitting tool_use.
-	input = sanitizeToolInputAgainstClientSchema(mapped, input, clientTools)
-	return mapped, input
-}
-
-func sanitizeToolInputAgainstClientSchema(name, input string, clientTools []interface{}) string {
-	trimmed := strings.TrimSpace(input)
-	if trimmed == "" {
-		return input
-	}
-	var payload interface{}
-	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
-		return input
-	}
-	if strings.EqualFold(strings.TrimSpace(name), "todowrite") || strings.EqualFold(strings.TrimSpace(name), "todo_write") || strings.EqualFold(strings.TrimSpace(name), "update_todo_list") {
-		if todos, ok := payload.(map[string]interface{})["todos"].([]interface{}); ok {
-			changed := false
-			for _, item := range todos {
-				if obj, ok := item.(map[string]interface{}); ok {
-					if _, exists := obj["id"]; exists {
-						delete(obj, "id")
-						changed = true
-					}
-				}
-			}
-			if changed {
-				encoded, err := json.Marshal(payload)
-				if err == nil {
-					return string(encoded)
-				}
-			}
-		}
-	}
-	var schema map[string]interface{}
-	wanted := strings.TrimSpace(toolname.NormalizeToolNameFallback(name))
-	for _, tool := range clientTools {
-		toolName, _, candidate := toolname.ExtractToolSpecFields(tool)
-		if strings.EqualFold(toolName, name) || strings.EqualFold(strings.TrimSpace(toolname.NormalizeToolNameFallback(toolName)), wanted) {
-			schema = candidate
-			break
-		}
-	}
-	if len(schema) == 0 && len(clientTools) == 1 {
-		_, _, schema = toolname.ExtractToolSpecFields(clientTools[0])
-	}
-	if len(schema) == 0 {
-		return input
-	}
-	sanitized, changed := pruneToolInputBySchema(payload, schema)
-	if !changed {
-		return input
-	}
-	encoded, err := json.Marshal(sanitized)
-	if err != nil {
-		return input
-	}
-	return string(encoded)
-}
-
-// pruneToolInputBySchema removes only properties explicitly forbidden by a
-// schema with additionalProperties:false. Nested object and array-item schemas
-// are handled as well; unconstrained objects are left untouched.
-func pruneToolInputBySchema(value interface{}, schema map[string]interface{}) (interface{}, bool) {
-	changed := false
-	if items, ok := schema["items"].(map[string]interface{}); ok {
-		if arr, ok := value.([]interface{}); ok {
-			out := make([]interface{}, len(arr))
-			for i, item := range arr {
-				var itemChanged bool
-				out[i], itemChanged = pruneToolInputBySchema(item, items)
-				changed = changed || itemChanged
-			}
-			return out, changed
-		}
-	}
-	obj, ok := value.(map[string]interface{})
-	if !ok {
-		return value, false
-	}
-	props, _ := schema["properties"].(map[string]interface{})
-	strict, _ := schema["additionalProperties"].(bool)
-	out := make(map[string]interface{}, len(obj))
-	for key, item := range obj {
-		propertySchema, hasSchema := props[key].(map[string]interface{})
-		if strict && !hasSchema {
-			changed = true
-			continue
-		}
-		if hasSchema {
-			var next interface{}
-			next, nestedChanged := pruneToolInputBySchema(item, propertySchema)
-			out[key] = next
-			changed = changed || nestedChanged
-		} else {
-			out[key] = item
-		}
-	}
-	return out, changed
 }
 
 func (h *streamHandler) release() {
@@ -1029,200 +909,6 @@ func (h *streamHandler) resetRoundState() {
 	h.firstContentDeltaFlushed = false
 }
 
-// sanitizeToolInput normalizes upstream tool input for Claude Code compatibility.
-// It drops or maps fields known to cause local tool validation failures.
-func sanitizeToolInput(name, input string) string {
-	trimmed := strings.TrimSpace(input)
-	if trimmed == "" {
-		return input
-	}
-
-	nameKey := strings.ToLower(strings.TrimSpace(name))
-	from, to := "path", "file_path"
-	switch nameKey {
-	case "write":
-		if !strings.Contains(trimmed, `"path"`) && !strings.Contains(trimmed, `"overwrite"`) {
-			return input
-		}
-	case "edit", "read":
-		if !strings.Contains(trimmed, `"path"`) {
-			return input
-		}
-	case "bash":
-		from, to = "cmd", "command"
-		if !strings.Contains(trimmed, `"cmd"`) {
-			return input
-		}
-	case "glob":
-		if !strings.Contains(trimmed, `"path"`) || strings.Contains(trimmed, `"pattern"`) {
-			return input
-		}
-	default:
-		return input
-	}
-	var payload map[string]interface{}
-	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
-		return input
-	}
-
-	changed := false
-	if nameKey == "glob" {
-		if _, exists := payload["pattern"]; !exists {
-			if path, ok := payload["path"].(string); ok && strings.TrimSpace(path) != "" {
-				payload["pattern"] = "*"
-				changed = true
-			}
-		}
-	} else {
-		// Write rejects overwrite; destination fields always win over aliases.
-		if nameKey == "write" {
-			if _, exists := payload["overwrite"]; exists {
-				delete(payload, "overwrite")
-				changed = true
-			}
-		}
-		if value, exists := payload[from]; exists {
-			if _, present := payload[to]; !present {
-				payload[to] = value
-			}
-			delete(payload, from)
-			changed = true
-		}
-	}
-
-	if !changed {
-		return input
-	}
-
-	normalized, err := json.Marshal(payload)
-	if err != nil {
-		return input
-	}
-	return string(normalized)
-}
-
-// normalizeUpstreamToolCall maps an upstream tool name onto the client's
-// vocabulary and sanitizes its input. It no longer rebases foreign absolute
-// paths: that needed a request workdir, and the gateway no longer models one.
-func normalizeUpstreamToolCall(name, input string) (string, string) {
-	rawName := strings.TrimSpace(name)
-	if rawName == "" {
-		return rawName, input
-	}
-	if bashInput, ok := rewriteDirectoryListToolInput(rawName, input); ok {
-		return "Bash", bashInput
-	}
-	normalizedName := normalizeUpstreamToolName(rawName)
-	return normalizedName, sanitizeToolInput(normalizedName, input)
-}
-
-func normalizeUpstreamToolName(name string) string {
-	mapped := toolname.NormalizeToolNameFallback(name)
-	if strings.TrimSpace(mapped) == "" {
-		return name
-	}
-	return mapped
-}
-
-// rewriteDirectoryListToolInput turns an LS-shaped upstream call into the Bash
-// equivalent the client can actually run. The workdir fallback is gone: an
-// unspecified path now means the client's own current directory.
-func rewriteDirectoryListToolInput(name, input string) (string, bool) {
-	if !isDirectoryListToolName(name) {
-		return "", false
-	}
-	path := extractDirectoryListPath(input)
-	if isPlaceholderDirectoryListPath(path) {
-		path = ""
-	}
-	if strings.TrimSpace(path) == "" {
-		path = "."
-	}
-	payload := map[string]string{
-		"command":     "ls -1A -- " + strconv.Quote(path),
-		"description": "List top-level directory entries",
-	}
-	normalized, err := json.Marshal(payload)
-	if err != nil {
-		return "", false
-	}
-	return string(normalized), true
-}
-
-func isDirectoryListToolName(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "ls", "listdir", "list_dir", "list_directory":
-		return true
-	default:
-		return false
-	}
-}
-
-func extractDirectoryListPath(input string) string {
-	trimmed := strings.TrimSpace(input)
-	if trimmed == "" {
-		return ""
-	}
-	var payload map[string]interface{}
-	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
-		return ""
-	}
-	for _, key := range []string{"path", "file_path", "directory", "dir"} {
-		if raw, ok := payload[key]; ok {
-			if path, ok := raw.(string); ok {
-				return strings.TrimSpace(path)
-			}
-		}
-	}
-	return ""
-}
-
-func isPlaceholderDirectoryListPath(path string) bool {
-	trimmed := strings.TrimSpace(path)
-	if trimmed == "" {
-		return false
-	}
-	for len(trimmed) > 1 && strings.HasSuffix(trimmed, "/") {
-		trimmed = strings.TrimSuffix(trimmed, "/")
-	}
-	switch trimmed {
-	case "/home/user/app":
-		return true
-	default:
-		return false
-	}
-}
-
-func hasNonProjectSandboxToolPath(name, input string) bool {
-	switch normalizeToolNameKey(name) {
-	case "read", "edit", "write", "glob", "grep":
-	default:
-		return false
-	}
-
-	fields, ok := decodeToolInputFields(input)
-	if !ok {
-		return false
-	}
-	return isNonProjectSandboxPath(resolveToolPath(fields.FilePath, fields.Path))
-}
-
-func isNonProjectSandboxPath(pathValue string) bool {
-	pathValue = strings.TrimSpace(strings.ReplaceAll(pathValue, "\\", "/"))
-	if pathValue == "" || !strings.HasPrefix(strings.ToLower(pathValue), "/tmp/cc-agent/") {
-		return false
-	}
-
-	parts := strings.Split(strings.Trim(pathValue, "/"), "/")
-	if len(parts) < 3 || !strings.EqualFold(parts[0], "tmp") || !strings.EqualFold(parts[1], "cc-agent") {
-		return false
-	}
-	if len(parts) == 3 {
-		return true
-	}
-	return !strings.EqualFold(strings.TrimSpace(parts[3]), "project")
-}
-
 func (h *streamHandler) emitToolCallNonStream(call toolCall) {
 	h.addOutputTokens(call.name)
 	h.addOutputTokens(call.input)
@@ -1556,17 +1242,8 @@ func (h *streamHandler) shouldAcceptToolCall(call toolCall) bool {
 	}
 	allowedTool := true
 	if len(h.allowedToolNames) > 0 {
-		lowerName := strings.ToLower(strings.TrimSpace(call.name))
-		_, allowedTool = h.allowedToolNames[lowerName]
-		if !allowedTool {
-			// Task lifecycle helper events are emitted alongside Task even though
-			// they are not exposed as normal user-declared tools.
-			if (lowerName == "taskoutput" || lowerName == "taskstop") && h.hasAllowedToolNameLocked("task") {
-				allowedTool = true
-			} else if lowerName == "task" && h.taskDelegationAllowedLocked(call.input) {
-				allowedTool = true
-			}
-		}
+		name := strings.TrimSpace(call.name)
+		_, allowedTool = h.allowedToolNames[name]
 	}
 	if !allowedTool && h.surfaceToolRejects && h.emptyOutputFallback == "" {
 		h.emptyOutputFallback = "The upstream model attempted to use a tool that is not available in this request."
@@ -1593,18 +1270,6 @@ func (h *streamHandler) shouldAcceptToolCall(call toolCall) bool {
 		}
 		return false
 	}
-	if hasNonProjectSandboxToolPath(call.name, call.input) {
-		h.mu.Lock()
-		h.suppressedToolCalls++
-		if h.surfaceToolRejects && h.emptyOutputFallback == "" {
-			h.emptyOutputFallback = "The upstream model attempted an operation outside the active project."
-		}
-		h.mu.Unlock()
-		if h.config != nil && h.config.DebugEnabled {
-			slog.Debug("sandbox metadata tool call suppressed", "tool", call.name, "input", call.input)
-		}
-		return false
-	}
 
 	if !validToolCallInput(call.name, call.input) {
 		h.mu.Lock()
@@ -1622,35 +1287,6 @@ func (h *streamHandler) shouldAcceptToolCall(call toolCall) bool {
 	return true
 }
 
-func (h *streamHandler) hasAllowedToolNameLocked(name string) bool {
-	_, ok := h.allowedToolNames[strings.ToLower(strings.TrimSpace(name))]
-	return ok
-}
-
-func (h *streamHandler) taskDelegationAllowedLocked(input string) bool {
-	type taskInput struct {
-		AllowedTools []string `json:"allowed_tools"`
-	}
-
-	var payload taskInput
-	if err := json.Unmarshal([]byte(strings.TrimSpace(input)), &payload); err != nil {
-		return false
-	}
-	if len(payload.AllowedTools) == 0 {
-		return false
-	}
-	for _, name := range payload.AllowedTools {
-		key := strings.ToLower(strings.TrimSpace(name))
-		if key == "" {
-			return false
-		}
-		if _, ok := h.allowedToolNames[key]; !ok {
-			return false
-		}
-	}
-	return true
-}
-
 func normalizeToolNameKey(name string) string { return strings.ToLower(strings.TrimSpace(name)) }
 
 func suppressedWriteContentFallback(call toolCall) string {
@@ -1664,64 +1300,6 @@ func suppressedWriteContentFallback(call toolCall) string {
 		return ""
 	}
 	return strings.TrimSpace(input.Content)
-}
-
-func isStructuredToolName(nameKey string) bool {
-	switch nameKey {
-	case "edit", "write", "bash", "read", "glob", "grep":
-		return true
-	default:
-		return false
-	}
-}
-
-type toolInputFields struct {
-	Command  string          `json:"command"`
-	Cmd      string          `json:"cmd"`
-	FilePath string          `json:"file_path"`
-	Path     string          `json:"path"`
-	Content  json.RawMessage `json:"content"`
-	Old      json.RawMessage `json:"old_string"`
-	New      json.RawMessage `json:"new_string"`
-}
-
-func decodeToolInputFields(input string) (toolInputFields, bool) {
-	raw := strings.TrimSpace(input)
-	raw = util.FirstNonEmptyUntrimmed(raw, "{}")
-	var fields toolInputFields
-	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
-		return toolInputFields{}, false
-	}
-	return fields, true
-}
-
-func resolveToolPath(filePath, path string) string {
-	if s := strings.TrimSpace(filePath); s != "" {
-		return s
-	}
-	if s := strings.TrimSpace(path); s != "" {
-		return s
-	}
-	return ""
-}
-
-func hasRequiredToolInputFields(nameKey string, fields toolInputFields) bool {
-	switch nameKey {
-	case "edit":
-		path := resolveToolPath(fields.FilePath, fields.Path)
-		return path != "" && len(fields.Old) > 0 && len(fields.New) > 0
-	case "write":
-		// Upstreams sometimes send "path" instead of "file_path", or we mapped it.
-		// Also strict checking might fail if "content" is empty string (though rare for meaningful write).
-		path := resolveToolPath(fields.FilePath, fields.Path)
-		return path != "" && len(fields.Content) > 0
-	case "bash":
-		return strings.TrimSpace(fields.Command) != "" || strings.TrimSpace(fields.Cmd) != ""
-	case "read":
-		return resolveToolPath(fields.FilePath, fields.Path) != ""
-	default:
-		return true
-	}
 }
 
 func (h *streamHandler) markWriteError(event string, err error) {
@@ -1984,8 +1562,6 @@ func (h *streamHandler) handleMessage(msg upstream.SSEMessage) {
 		toolID, _ := msg.Event["toolCallId"].(string)
 		toolName, _ := msg.Event["toolName"].(string)
 		inputStr, _ := msg.Event["input"].(string)
-		toolName, inputStr = normalizeUpstreamToolCall(toolName, inputStr)
-		toolName, inputStr = h.rewriteToolCallToClient(toolName, inputStr)
 		if toolID == "" {
 			return
 		}
@@ -2173,15 +1749,11 @@ func (h *streamHandler) InjectNoAvailableAccountError(lastErr string, selectErr 
 	h.reportRequestFailure("Injecting no available account error to client", out.Category, out.Message, 0)
 }
 
-// Tool shape validation is independent of whether another call had the same input.
+// Native function arguments must be a JSON object.
 func validToolCallInput(name, input string) bool {
-	nameKey := normalizeToolNameKey(name)
-	if nameKey == "" {
+	if strings.TrimSpace(name) == "" {
 		return false
 	}
-	if !isStructuredToolName(nameKey) {
-		return true
-	}
-	fields, ok := decodeToolInputFields(input)
-	return ok && hasRequiredToolInputFields(nameKey, fields)
+	var object map[string]json.RawMessage
+	return json.Unmarshal([]byte(input), &object) == nil && object != nil
 }

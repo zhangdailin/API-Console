@@ -10,16 +10,8 @@ import (
 )
 
 // quotaNoticeStore records what a quota-notice write asked the store to persist.
-// It implements both the atomic patch path and the full-account fallback so a
-// test can pin which one a notice uses.
 type quotaNoticeStore struct {
 	patches []store.QoderAccountPatch
-	full    []store.Account
-}
-
-func (s *quotaNoticeStore) UpdateAccount(_ context.Context, acc *store.Account) error {
-	s.full = append(s.full, *acc)
-	return nil
 }
 
 func (s *quotaNoticeStore) UpdateQoderAccount(_ context.Context, _ int64, patch store.QoderAccountPatch) error {
@@ -58,7 +50,6 @@ func TestRecordQuotaNoticeMovesTheAccountView(t *testing.T) {
 	})
 
 	testutil.Equal(t, len(fake.patches), 1)
-	testutil.Equal(t, len(fake.full), 0)
 	patch := fake.patches[0]
 	testutil.False(t, patch.Quota == nil, "patch carried no quota; the notice was dropped on the way to the store")
 	testutil.CheckFalse(t, !patch.Quota.Exhausted, "patch.Quota.Exhausted = false, want true")

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"orchids-api/internal/channel"
 	"orchids-api/internal/config"
 	"orchids-api/internal/testutil"
 )
@@ -28,7 +29,7 @@ func TestRegisterRoutes_ResponsesSubResources(t *testing.T) {
 	// A managed key, because /v1 requires one unconditionally.
 	e := newChannelE2E(t, "responses-routes:", "sk-responses-subresource", cfg)
 
-	for _, prefix := range []string{"/v1", "/grok/v1", "/cline/v1", "/workbuddy/v1", "/qoder/v1"} {
+	for _, prefix := range channel.AllPrefixes() {
 		t.Run(prefix, func(t *testing.T) {
 			for _, probe := range []struct {
 				method string
@@ -63,10 +64,10 @@ func TestRegisterRoutes_ResponsesSubResources(t *testing.T) {
 		})
 	}
 
-	// The response id itself must keep working on the unified prefix: the
+	// The response id itself must keep working on the provider prefix: the
 	// explicit sibling routes must not shadow the /responses/ subtree.
 	rec := httptest.NewRecorder()
-	resourceReq := httptest.NewRequest(http.MethodGet, "/v1/responses/resp_absent", nil)
+	resourceReq := httptest.NewRequest(http.MethodGet, "/workbuddy/responses/resp_absent", nil)
 	resourceReq.Header.Set("Authorization", "Bearer "+e.managedKey)
 	e.mux.ServeHTTP(rec, resourceReq)
 	testutil.Falsef(t, rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "response_not_found"), "GET /v1/responses/resp_absent status = %d body = %s", rec.Code, rec.Body.String())

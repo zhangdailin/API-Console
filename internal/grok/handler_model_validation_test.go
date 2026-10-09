@@ -164,7 +164,6 @@ func TestResolveConversationModelRejectsDeprecatedAlias(t *testing.T) {
 func TestResolveModel_RemovesGrok43BetaWebsite(t *testing.T) {
 	_, ok := ResolveModel("grok-4.3-beta")
 	testutil.False(t, ok, "ResolveModel(grok-4.3-beta) = true, want removed")
-	testutil.False(t, !IsDeprecatedModelID("grok-4.3-beta"), "grok-4.3-beta should be deprecated")
 }
 
 func TestEnsureModelEnabled_RejectsBuildOnlyGrok43EvenWhenStored(t *testing.T) {
@@ -183,7 +182,7 @@ func TestEnsureModelEnabled_RejectsBuildOnlyGrok43EvenWhenStored(t *testing.T) {
 	testutil.NoError(t, h.ensureModelEnabled(context.Background(), "grok-4.3"), "ensureModelEnabled(grok-4.3) error = %v")
 }
 
-func TestEnsureModelEnabled_RejectsDeprecatedGrok43Beta(t *testing.T) {
+func TestEnsureModelEnabledAcceptsVerifiedObservedName(t *testing.T) {
 	h, s, _ := setupValidationHandler(t)
 
 	if err := s.CreateModel(context.Background(), &store.Model{
@@ -197,7 +196,7 @@ func TestEnsureModelEnabled_RejectsDeprecatedGrok43Beta(t *testing.T) {
 	}
 
 	err := h.ensureModelEnabled(context.Background(), "grok-4.3-beta")
-	testutil.Error(t, err)
+	testutil.NoError(t, err)
 }
 
 func TestHandleChatCompletions_DoesNotProbeMissingModel(t *testing.T) {

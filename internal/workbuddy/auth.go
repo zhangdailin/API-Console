@@ -24,10 +24,6 @@ import (
 // AccountUpdater is the subset of the account store the client needs to persist
 // rotated refresh tokens. It is satisfied by *store.Store.
 type AccountUpdater interface {
-	UpdateAccount(ctx context.Context, acc *store.Account) error
-}
-
-type credentialUpdater interface {
 	UpdateWorkBuddyCredentials(ctx context.Context, id int64, patch store.WorkBuddyCredentialPatch) error
 }
 
@@ -59,19 +55,6 @@ func (c Credentials) Token(now time.Time) (string, bool) {
 	return c.AccessToken, true
 }
 
-// ResolveCredentials extracts credentials from an account record. Accepted
-// forms, in priority order:
-//
-//  1. a WorkBuddy auth JSON document ({auth:{accessToken,refreshToken},account:{uid}})
-//  2. `key=value` pairs separated by newlines, commas or semicolons
-//  3. a raw access token (JWT) or refresh token
-//
-// The long-lived refresh token is the preferred credential; the access token is
-// accepted because it is what the desktop session exposes most visibly.
-//
-// The identity (UID/E-mail) is proven whenever a decodable access-token JWT is
-// available: the token embeds the Keycloak claims, so a pasted session document
-// never needs a separate identity lookup.
 func ResolveCredentials(acc *store.Account) Credentials {
 	if acc == nil {
 		return Credentials{}
@@ -83,28 +66,6 @@ func ResolveCredentials(acc *store.Account) Credentials {
 		UID:          strings.TrimSpace(acc.WorkBuddyUID),
 		Email:        strings.TrimSpace(acc.Email),
 		ExpiresAt:    acc.WorkBuddyExpiresAt,
-	}
-
-	for _, raw := range []string{acc.ClientCookie, acc.Token, acc.RefreshToken} {
-		if strings.TrimSpace(raw) == "" {
-			continue
-		}
-		parsed := parseCredentialBlob(raw)
-		if creds.AccessToken == "" {
-			creds.AccessToken = parsed.AccessToken
-		}
-		if creds.RefreshToken == "" {
-			creds.RefreshToken = parsed.RefreshToken
-		}
-		if creds.UID == "" {
-			creds.UID = parsed.UID
-		}
-		if creds.Email == "" {
-			creds.Email = parsed.Email
-		}
-		if creds.ExpiresAt.IsZero() {
-			creds.ExpiresAt = parsed.ExpiresAt
-		}
 	}
 
 	// Fill what the token itself can prove. The stored expiry is intentionally
@@ -138,138 +99,6 @@ func (c Credentials) Fields() (accessToken, refreshToken, uid, email string, exp
 // HasCredential reports whether anything usable was supplied.
 func (c Credentials) HasCredential() bool {
 	return strings.TrimSpace(c.AccessToken) != "" || strings.TrimSpace(c.RefreshToken) != ""
-}
-
-// parseCredentialBlob understands one pasted credential value.
-func parseCredentialBlob(raw string) Credentials {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return Credentials{}
-	}
-
-	if strings.HasPrefix(raw, "{") {
-		if creds, ok := parseAuthDocument(raw); ok {
-			return creds
-		}
-	}
-
-	// key=value pairs (Cookie header style, desktop .info style, or an
-	// explicit access_token=/refresh_token= pair).
-	if strings.Contains(raw, "=") {
-		var creds Credentials
-		for _, part := range splitPairs(raw) {
-			key, value, ok := strings.Cut(part, "=")
-			if !ok {
-				continue
-			}
-			value = normalizeToken(value)
-			if value == "" {
-				continue
-			}
-			switch strings.ToLower(strings.TrimSpace(key)) {
-			case "accesstoken", "access_token":
-				creds.AccessToken = value
-			case "refreshtoken", "refresh_token":
-				creds.RefreshToken = value
-			case "uid", "sub", "userid", "user_id":
-				creds.UID = value
-			case "email":
-				creds.Email = value
-			}
-		}
-		if creds.AccessToken != "" || creds.RefreshToken != "" {
-			return creds
-		}
-	}
-
-	token := normalizeToken(raw)
-	claims := DecodeClaims(token)
-	if claims.Sub != "" || claims.ExpiresAt > 0 {
-		// A decodable JWT is an access token.
-		creds := Credentials{AccessToken: token, UID: claims.Sub, Email: claims.Email}
-		if claims.ExpiresAt > 0 {
-			creds.ExpiresAt = time.Unix(claims.ExpiresAt, 0)
-		}
-		return creds
-	}
-	// Otherwise treat it as the durable refresh token.
-	return Credentials{RefreshToken: token}
-}
-
-func splitPairs(raw string) []string {
-	replacer := strings.NewReplacer("\r\n", "\n", ";", "\n", ",", "\n")
-	parts := make([]string, 0, 4)
-	for _, line := range strings.Split(replacer.Replace(raw), "\n") {
-		if trimmed := strings.TrimSpace(line); trimmed != "" {
-			parts = append(parts, trimmed)
-		}
-	}
-	return parts
-}
-
-// parseAuthDocument reads the WorkBuddy auth store shape:
-//
-//	{"account":{"uid":...,"nickname":...},"auth":{"accessToken":...,"refreshToken":...,"expiresAt":<ms|s>}}
-func parseAuthDocument(raw string) (Credentials, bool) {
-	var doc struct {
-		AccessToken  string `json:"accessToken"`
-		RefreshToken string `json:"refreshToken"`
-		ExpiresAt    int64  `json:"expiresAt"`
-		UID          string `json:"uid"`
-		Auth         *struct {
-			AccessToken  string `json:"accessToken"`
-			RefreshToken string `json:"refreshToken"`
-			ExpiresAt    int64  `json:"expiresAt"`
-			Domain       string `json:"domain"`
-		} `json:"auth"`
-		Account *struct {
-			UID      string `json:"uid"`
-			Email    string `json:"email"`
-			Nickname string `json:"nickname"`
-		} `json:"account"`
-	}
-	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
-		return Credentials{}, false
-	}
-
-	creds := Credentials{
-		AccessToken:  normalizeToken(doc.AccessToken),
-		RefreshToken: normalizeToken(doc.RefreshToken),
-		UID:          strings.TrimSpace(doc.UID),
-	}
-	expiresAt := doc.ExpiresAt
-	if doc.Auth != nil {
-		if creds.AccessToken == "" {
-			creds.AccessToken = normalizeToken(doc.Auth.AccessToken)
-		}
-		if creds.RefreshToken == "" {
-			creds.RefreshToken = normalizeToken(doc.Auth.RefreshToken)
-		}
-		if expiresAt == 0 {
-			expiresAt = doc.Auth.ExpiresAt
-		}
-	}
-	if doc.Account != nil {
-		if creds.UID == "" {
-			creds.UID = strings.TrimSpace(doc.Account.UID)
-		}
-		creds.Email = strings.TrimSpace(doc.Account.Email)
-		if creds.Email == "" && strings.Contains(doc.Account.Nickname, "@") {
-			creds.Email = strings.TrimSpace(doc.Account.Nickname)
-		}
-	}
-	if creds.AccessToken == "" && creds.RefreshToken == "" {
-		return Credentials{}, false
-	}
-	if expiresAt > 0 {
-		// The desktop session file stores milliseconds; the bridge stores
-		// seconds. Anything past year 3000 is milliseconds.
-		if expiresAt > 32503680000 {
-			expiresAt /= 1000
-		}
-		creds.ExpiresAt = time.Unix(expiresAt, 0)
-	}
-	return creds, true
 }
 
 func normalizeToken(value string) string {
@@ -755,35 +584,9 @@ func (t *tokenUpdater) persist(parent context.Context, creds Credentials, expect
 		UID:                  creds.UID,
 		Email:                creds.Email,
 	}
-	if updater, ok := t.accountStore.(credentialUpdater); ok {
-		if err := updater.UpdateWorkBuddyCredentials(writeCtx, t.accountID, patch); err != nil {
-			return fmt.Errorf("persist rotated workbuddy credential: %w", err)
-		}
-		return nil
-	}
-
-	// Compatibility path for small test stores and integrations that only
-	// implement the historical full-account method.
-	acc := t.account
-	acc.WorkBuddyAccessToken = creds.AccessToken
-	if strings.TrimSpace(creds.RefreshToken) != "" {
-		acc.WorkBuddyRefreshToken = creds.RefreshToken
-		acc.ClientCookie = creds.RefreshToken
-	}
-	if !creds.ExpiresAt.IsZero() {
-		acc.WorkBuddyExpiresAt = creds.ExpiresAt
-	}
-	if creds.UID != "" {
-		acc.WorkBuddyUID = creds.UID
-	}
-	if creds.Email != "" && strings.TrimSpace(acc.Email) == "" {
-		acc.Email = creds.Email
-	}
-
-	if err := t.accountStore.UpdateAccount(writeCtx, &acc); err != nil {
+	if err := t.accountStore.UpdateWorkBuddyCredentials(writeCtx, t.accountID, patch); err != nil {
 		return fmt.Errorf("persist rotated workbuddy credential: %w", err)
 	}
-	t.account = acc
 	return nil
 }
 

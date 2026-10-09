@@ -288,10 +288,6 @@ func (s *redisStore) updateAccountAtomic(ctx context.Context, id int64, mutate f
 			if err != nil {
 				return err
 			}
-			legacyCredential, err := hasLegacyCredential(value)
-			if err != nil {
-				return err
-			}
 			current, err := s.unmarshalAccount(value, id)
 			if err != nil {
 				return err
@@ -305,9 +301,7 @@ func (s *redisStore) updateAccountAtomic(ctx context.Context, id int64, mutate f
 			// row or publish an event when a refresh observed exactly the state we
 			// already have.
 			current.UpdatedAt = previous.UpdatedAt
-			// A semantic no-op must still rewrite legacy plaintext credentials so
-			// the normal encrypted marshal path can complete the migration.
-			if reflect.DeepEqual(current, previous) && !(legacyCredential && s.credentials != nil) {
+			if reflect.DeepEqual(current, previous) {
 				return errAccountUnchanged
 			}
 			current.UpdatedAt = time.Now()
@@ -352,7 +346,6 @@ func (s *redisStore) UpdateWorkBuddyCredentials(ctx context.Context, id int64, p
 			&acc.WorkBuddyAccessToken, &acc.WorkBuddyRefreshToken, &acc.WorkBuddyExpiresAt); err != nil {
 			return err
 		}
-		patchString(&acc.ClientCookie, patch.RefreshToken)
 		patchString(&acc.WorkBuddyUID, patch.UID)
 		if email := strings.TrimSpace(patch.Email); email != "" && strings.TrimSpace(acc.Email) == "" {
 			acc.Email = email

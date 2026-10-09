@@ -10,7 +10,7 @@ import (
 )
 
 func TestValidateChatMessages_AcceptsCaseInsensitiveRoleAndType(t *testing.T) {
-	messages := []ChatMessage{
+	messages := []chatwire.Message{
 		{
 			Role: "User",
 			Content: []interface{}{
@@ -29,7 +29,7 @@ func TestValidateChatMessages_AcceptsCaseInsensitiveRoleAndType(t *testing.T) {
 
 func TestApplyQuotaInfo_InfersLiteSubscription(t *testing.T) {
 	acc := &store.Account{Subscription: "basic"}
-	changed := ApplyQuotaInfo(acc, &RateLimitInfo{
+	changed := ApplyQuotaInfo(acc, &chatwire.RateLimitInfo{
 		Limit:        70,
 		HasLimit:     true,
 		Remaining:    63,
@@ -44,7 +44,7 @@ func TestApplyQuotaInfo_InfersLiteSubscription(t *testing.T) {
 
 func TestApplyQuotaInfo_InfersBasicFromFreeAutoWindow(t *testing.T) {
 	acc := &store.Account{}
-	changed := ApplyQuotaInfo(acc, &RateLimitInfo{
+	changed := ApplyQuotaInfo(acc, &chatwire.RateLimitInfo{
 		Limit:        7,
 		HasLimit:     true,
 		Remaining:    7,

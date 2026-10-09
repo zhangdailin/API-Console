@@ -2,6 +2,7 @@ package grok
 
 import (
 	"context"
+	"orchids-api/internal/chatwire"
 	"testing"
 	"time"
 
@@ -130,7 +131,7 @@ func TestInferSubscriptionFromRateLimitInfoRequiresKnownShapes(t *testing.T) {
 		1000: "", 151: "", 149: "", 3: "",
 	}
 	for limit, want := range cases {
-		got := inferSubscriptionFromRateLimitInfo(&RateLimitInfo{Limit: limit, HasLimit: true})
+		got := inferSubscriptionFromRateLimitInfo(&chatwire.RateLimitInfo{Limit: limit, HasLimit: true})
 		testutil.Equal(t, got, want)
 	}
 }

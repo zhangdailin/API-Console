@@ -3,6 +3,7 @@ package grok
 import (
 	"bytes"
 	"io"
+	"orchids-api/internal/responses"
 	"orchids-api/internal/testutil"
 	"strings"
 	"testing"
@@ -13,7 +14,7 @@ func TestReadResponseSSEBytesPreservesPayloads(t *testing.T) {
 		"data: [DONE]\n\n"
 	var events []string
 	var payloads [][]byte
-	if err := readResponseSSEBytes(strings.NewReader(stream), func(event string, data []byte) error {
+	if err := responses.ReadSSEBytes(strings.NewReader(stream), func(event string, data []byte) error {
 		events = append(events, event)
 		payloads = append(payloads, bytes.Clone(data))
 		return nil
@@ -33,7 +34,7 @@ func BenchmarkReadResponseSSEBytesJSONPayload(b *testing.B) {
 	b.ReportAllocs()
 	b.SetBytes(int64(len(stream)))
 	for b.Loop() {
-		if err := readResponseSSEBytes(bytes.NewReader(stream), func(_ string, data []byte) error {
+		if err := responses.ReadSSEBytes(bytes.NewReader(stream), func(_ string, data []byte) error {
 			_, _ = io.Discard.Write(data)
 			return nil
 		}); err != nil {

@@ -1,7 +1,6 @@
 package responses
 
 import (
-	"errors"
 	"net/http"
 	"net/url"
 	"orchids-api/internal/util"
@@ -137,53 +136,6 @@ func InputItemsHandler(opts BridgeOptions) http.HandlerFunc {
 	}
 }
 
-// UnifiedResource routes GET/DELETE /responses/{id} on a prefix that
-// serves every channel's models.
-//
-// The stored record decides who answers. A Build record is the only one that
-// needs the OAuth account that created it, so it goes to the native handler;
-// every other record is served from the store by the bridge. Deciding here is
-// what stops the unified prefix from depending on Grok's handler accidentally
-// accepting records it did not write.
-//
-// An id that was never stored is answered here rather than delegated: the store
-// is the same one both handlers read, so "no such record" cannot become a
-// different answer depending on which handler happens to receive it, and a
-// native handler that is not configured must not turn a missing response into a
-// backend failure. Every other lookup failure stays with the native handler,
-// which owns the response_store_unavailable envelope.
-// isNativeProvider reports whether a stored record belongs to the native Build
-// plane rather than the bridge. It is injected because "build" is a Grok
-// provider label, not a Responses protocol concept, and this package must not
-// import the provider package.
-func UnifiedResource(nativeBuild http.HandlerFunc, opts BridgeOptions, isNativeProvider func(provider string) bool) http.HandlerFunc {
-	bridged := ResourceHandler(opts)
-	return func(w http.ResponseWriter, r *http.Request) {
-		if action := subResourceAction(r.URL.Path); action != "" {
-			subResourceHandler(action, opts)(w, r)
-			return
-		}
-		if r.Method != http.MethodGet && r.Method != http.MethodDelete {
-			nativeBuild(w, r)
-			return
-		}
-		responseID := ResponseIDFromResourcePath(r.URL.Path)
-		if responseID == "" {
-			nativeBuild(w, r)
-			return
-		}
-		record, err := opts.StoreFor().GetStoredResponse(r.Context(), responseID, OwnerHash(r.Context()))
-		switch {
-		case err == nil && !isNativeProvider(strings.TrimSpace(record.Provider)):
-			bridged(w, r)
-		case errors.Is(err, store.ErrNoRows):
-			WriteAPIError(w, http.StatusNotFound, "response_not_found", "response not found")
-		default:
-			nativeBuild(w, r)
-		}
-	}
-}
-
 // writeCancelledRecord flips a stored response to `cancelled` and echoes the
 // response object, which is what the Responses SDK expects from cancel.
 //
@@ -293,7 +245,7 @@ func writeStoredInputItems(w http.ResponseWriter, record *store.StoredResponse) 
 // Items the client already labelled keep their own id, so a replay stays
 // byte-stable.
 func inputItemsJSON(input interface{}) json.RawMessage {
-	items := inputItems(input)
+	items := InputItems(input)
 	if len(items) == 0 {
 		return nil
 	}
@@ -304,7 +256,8 @@ func inputItemsJSON(input interface{}) json.RawMessage {
 	return encoded
 }
 
-func inputItems(input interface{}) []interface{} {
+// InputItems normalizes input for storage and replay without modifying the caller.
+func InputItems(input interface{}) []interface{} {
 	switch value := input.(type) {
 	case nil:
 		return nil

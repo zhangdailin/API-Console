@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"orchids-api/internal/chatwire"
 	"strings"
 	"testing"
 	"time"
@@ -49,7 +50,7 @@ func TestBuildChatAppliesSelectedAccountReasoningProfile(t *testing.T) {
 			h.cliClient = NewCLIClient(h.cfg)
 			h.cliClient.httpClient = upstream.Client()
 			h.cliClient.oauth.httpClient = upstream.Client()
-			req := ChatCompletionsRequest{Model: model, Messages: []ChatMessage{{Role: "user", Content: "hello"}}}
+			req := chatwire.Request{Model: model, Messages: []chatwire.Message{{Role: "user", Content: "hello"}}}
 			if tc.requested != "" {
 				req.ReasoningEffort = &tc.requested
 			}

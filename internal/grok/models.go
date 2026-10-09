@@ -25,11 +25,11 @@ type ModelSpec struct {
 	// Upstream explicitly routes the model; served models use UpstreamCLI.
 	Upstream UpstreamKind
 	// AliasReasoningEffort is populated only while resolving an effort-suffixed
-	// compatibility alias and is copied into the request before normalization.
+	// model variant and is copied into the request before normalization.
 	AliasReasoningEffort string
 }
 
-// SupportedModels is the deliberately small public compatibility table. Build
+// SupportedModels is the deliberately small static route table. Build
 // OAuth capability snapshots remain authoritative; this table only describes the
 // routes this gateway serves itself.
 var SupportedModels = []ModelSpec{
@@ -46,27 +46,7 @@ var modelByID = func() map[string]ModelSpec {
 	return out
 }()
 
-// providerCompatibilityAliases preserve Build-qualified and historical names.
-var providerCompatibilityAliases = map[string]string{
-	"grok-4.5-latest":  "grok-4.5",
-	"grok-4.6-latest":  "grok-4.6",
-	"grok-code-fast":   "grok-composer-2.5-fast",
-	"grok-code-fast-1": "grok-composer-2.5-fast",
-	"build/grok-4.5":   "grok-4.5",
-	"build/grok-4.6":   "grok-4.6",
-}
-
-func IsDeprecatedModelID(modelID string) bool {
-	return modelpolicy.IsDeprecatedGrokModelID(normalizeModelID(modelID))
-}
-
 func normalizeModelID(modelID string) string { return strings.ToLower(strings.TrimSpace(modelID)) }
-
-// stripProviderPublicPrefix removes one provider qualifier, reporting whether it
-// removed anything.
-func stripProviderPublicPrefix(id string) (string, bool) {
-	return modelpolicy.StripProviderPublicPrefix(id)
-}
 
 // ParseReasoningModelAlias resolves a supported <model>-<effort> alias. The
 // suffix is accepted only when the base model's provider contract advertises
@@ -78,11 +58,7 @@ func ParseReasoningModelAlias(modelID string) (base, effort string, ok bool) {
 			continue
 		}
 		base = strings.TrimSuffix(id, "-"+candidate)
-		canonical := base
-		if alias, exists := providerCompatibilityAliases[base]; exists {
-			canonical = alias
-		}
-		if modelpolicy.SupportsReasoningEffort(canonical, candidate) {
+		if modelpolicy.SupportsReasoningEffort(base, candidate) {
 			return base, candidate, true
 		}
 	}
@@ -95,25 +71,7 @@ func ResolveModelAlias(modelID string) (ModelSpec, string, bool) {
 	if m, exists := modelByID[id]; exists {
 		return m, "", true
 	}
-	// Build-qualified spellings are accepted in any casing.
-	if stripped, changed := stripProviderPublicPrefix(id); changed {
-		if m, exists := modelByID[stripped]; exists {
-			return m, "", true
-		}
-		if canonical, exists := providerCompatibilityAliases[stripped]; exists {
-			m, found := modelByID[canonical]
-			return m, "", found
-		}
-		id = stripped
-	}
-	if canonical, exists := providerCompatibilityAliases[id]; exists {
-		m, found := modelByID[canonical]
-		return m, "", found
-	}
 	if base, effort, exists := ParseReasoningModelAlias(id); exists {
-		if canonical, aliased := providerCompatibilityAliases[base]; aliased {
-			base = canonical
-		}
 		m, found := modelByID[base]
 		return m, effort, found
 	}

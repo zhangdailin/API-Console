@@ -2,6 +2,7 @@ package grok
 
 import (
 	"bytes"
+	"orchids-api/internal/chatwire"
 	"orchids-api/internal/testutil"
 	"strings"
 	"testing"
@@ -103,15 +104,15 @@ func TestTranslateOpenAIChatStreamToAnthropic(t *testing.T) {
 
 func TestBuildPayloadIncludesMaxOutputTokens(t *testing.T) {
 	maxTokens := 321
-	payload, err := (&Handler{}).responsesPayloadFromChat(ModelSpec{UpstreamModel: "grok-4.6"}, &ChatCompletionsRequest{
-		Messages: []ChatMessage{{Role: "user", Content: "hello"}}, MaxTokens: &maxTokens,
+	payload, err := (&Handler{}).responsesPayloadFromChat(ModelSpec{UpstreamModel: "grok-4.6"}, &chatwire.Request{
+		Messages: []chatwire.Message{{Role: "user", Content: "hello"}}, MaxTokens: &maxTokens,
 	}, false)
 	testutil.NoError(t, err)
 	testutil.Equal(t, payload["max_output_tokens"], 321)
 }
 
 func TestChatRequestUnmarshalPreservesMaxTokens(t *testing.T) {
-	var req ChatCompletionsRequest
+	var req chatwire.Request
 	testutil.NoError(t, json.Unmarshal([]byte(`{"model":"grok-4.6","messages":[{"role":"user","content":"hi"}],"max_tokens":123}`), &req))
 	testutil.Falsef(t, req.MaxTokens == nil || *req.MaxTokens != 123, "max_tokens=%v", req.MaxTokens)
 }

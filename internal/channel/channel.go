@@ -67,38 +67,56 @@ func GenericPrefixes() []string {
 	out := []string{}
 	for _, definition := range definitions {
 		if definition.Generic {
-			out = append(out, definition.APIPrefix)
+			out = append(out, PrefixesFor(definition.ID)...)
 		}
 	}
 	return out
 }
 
 func AllPrefixes() []string {
-	out := make([]string, 0, len(definitions))
+	out := make([]string, 0, len(definitions)*2)
 	for _, definition := range definitions {
-		out = append(out, definition.APIPrefix)
+		out = append(out, PrefixesFor(definition.ID)...)
 	}
 	return out
 }
 
+// PrefixesFor returns the versioned and unversioned inference base paths.
+// APIPrefix remains the versioned URL advertised to OpenAI clients.
+func PrefixesFor(id ID) []string {
+	definition, ok := DefinitionFor(id)
+	if !ok {
+		return nil
+	}
+	return []string{definition.APIPrefix, strings.TrimSuffix(definition.APIPrefix, "/v1")}
+}
+
 func FromPath(path string) (ID, bool) {
+	id, _, ok := EndpointFromPath(path)
+	return id, ok
+}
+
+// EndpointFromPath requires a complete provider segment and strips either base.
+func EndpointFromPath(path string) (ID, string, bool) {
 	for _, definition := range definitions {
-		if strings.HasPrefix(path, definition.APIPrefix+"/") || path == definition.APIPrefix {
-			return definition.ID, true
+		for _, prefix := range PrefixesFor(definition.ID) {
+			if path == prefix {
+				return definition.ID, "", true
+			}
+			if endpoint, ok := strings.CutPrefix(path, prefix+"/"); ok {
+				return definition.ID, endpoint, true
+			}
 		}
 	}
-	return "", false
+	return "", "", false
 }
 
 func TrimModelPath(path string) (ID, string, bool) {
-	for _, definition := range definitions {
-		prefix := definition.APIPrefix + "/models/"
-		if strings.HasPrefix(path, prefix) {
-			return definition.ID, strings.TrimPrefix(path, prefix), true
+	id, endpoint, ok := EndpointFromPath(path)
+	if ok {
+		if model, matched := strings.CutPrefix(endpoint, "models/"); matched {
+			return id, model, true
 		}
-	}
-	if strings.HasPrefix(path, "/v1/models/") {
-		return "", strings.TrimPrefix(path, "/v1/models/"), true
 	}
 	return "", "", false
 }

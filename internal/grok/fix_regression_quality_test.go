@@ -2,6 +2,7 @@ package grok
 
 import (
 	"context"
+	"orchids-api/internal/chatwire"
 	"testing"
 	"time"
 
@@ -57,10 +58,10 @@ func TestQualityDegradedDetection(t *testing.T) {
 
 func TestQualityExpectsReasoning(t *testing.T) {
 	none, low := "none", "low"
-	testutil.False(t, qualityExpectsReasoning(&ChatCompletionsRequest{ReasoningEffort: &none}, false), "effort=none must not expect reasoning")
-	testutil.False(t, !qualityExpectsReasoning(&ChatCompletionsRequest{ReasoningEffort: &low}, false), "effort=low must expect reasoning")
+	testutil.False(t, qualityExpectsReasoning(&chatwire.Request{ReasoningEffort: &none}, false), "effort=none must not expect reasoning")
+	testutil.False(t, !qualityExpectsReasoning(&chatwire.Request{ReasoningEffort: &low}, false), "effort=low must expect reasoning")
 	testutil.False(t, !qualityExpectsReasoning(nil, true), "an active reasoning replay must expect reasoning")
-	testutil.False(t, qualityExpectsReasoning(&ChatCompletionsRequest{}, false), "a request without an effort must not expect reasoning")
+	testutil.False(t, qualityExpectsReasoning(&chatwire.Request{}, false), "a request without an effort must not expect reasoning")
 }
 
 func TestUnbindAffinityDropsTheSessionBinding(t *testing.T) {

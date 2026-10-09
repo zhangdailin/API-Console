@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"orchids-api/internal/chatwire"
+	"orchids-api/internal/responses"
 	"strings"
 	"sync"
 	"testing"
@@ -42,7 +44,7 @@ func TestResponsesStreamTranslationIsIncremental(t *testing.T) {
 	recorder := newObservedStreamWriter("response.output_text.delta")
 	done := make(chan struct{})
 	go func() {
-		writeResponsesStreamFromChatReaderRequestWithHook(recorder, ResponsesCreateRequest{Model: "grok-4.6"}, reader, nil)
+		writeResponsesStreamFromChatReaderRequestWithHook(recorder, responses.CreateRequest{Model: "grok-4.6"}, reader, nil)
 		close(done)
 	}()
 
@@ -65,7 +67,7 @@ func TestResponsesStreamAggregatesFragmentedToolArguments(t *testing.T) {
 		"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"1}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n" +
 		"data: [DONE]\n\n"
 	recorder := httptest.NewRecorder()
-	writeResponsesStreamFromChatReaderRequestWithHook(recorder, ResponsesCreateRequest{Model: "grok-4.6"}, strings.NewReader(raw), nil)
+	writeResponsesStreamFromChatReaderRequestWithHook(recorder, responses.CreateRequest{Model: "grok-4.6"}, strings.NewReader(raw), nil)
 	body := recorder.Body.String()
 	testutil.Equal(t, strings.Count(body, "event: response.output_item.added"), 1)
 	testutil.MustContain(t, body, `"arguments":"{\"x\":1}"`)
@@ -147,7 +149,7 @@ func TestReasoningReplayIsModelAndSessionIsolated(t *testing.T) {
 func TestReasoningReplayUsesPortableShapeAndCanBeStripped(t *testing.T) {
 	h := &Handler{}
 	h.storeReasoningReplay("grok-4.6", "session-a", validTestReplayCipher())
-	req := &ChatCompletionsRequest{Model: "grok-4.6", PromptCacheKey: "session-a", ReasoningReplay: true, Messages: []ChatMessage{{Role: "user", Content: "next"}}}
+	req := &chatwire.Request{Model: "grok-4.6", PromptCacheKey: "session-a", ReasoningReplay: true, Messages: []chatwire.Message{{Role: "user", Content: "next"}}}
 	payload, err := h.responsesPayloadFromChat(ModelSpec{UpstreamModel: "grok-4.6"}, req, true)
 	testutil.NoError(t, err)
 	input := payload["input"].([]interface{})
@@ -178,10 +180,10 @@ func TestNativeReasoningReplayConvertsStringInput(t *testing.T) {
 func TestPrepareGrokSessionSeparatesTenantsAndSoftReplay(t *testing.T) {
 	reqA := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	reqA.Header.Set("x-session-id", "same-client-session")
-	a := prepareGrokSession(reqA, "grok-4.6", "", []ChatMessage{{Role: "user", Content: "hello"}})
+	a := prepareGrokSession(reqA, "grok-4.6", "", []chatwire.Message{{Role: "user", Content: "hello"}})
 	testutil.Falsef(t, a.Key == "" || !a.Replay, "explicit session=%#v", a)
-	soft := prepareGrokSession(httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), "grok-4.6", "", []ChatMessage{{Role: "user", Content: "hello"}})
+	soft := prepareGrokSession(httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), "grok-4.6", "", []chatwire.Message{{Role: "user", Content: "hello"}})
 	testutil.Falsef(t, soft.Key == "" || soft.Replay, "soft session=%#v", soft)
-	otherModel := prepareGrokSession(reqA, "grok-4.5", "", []ChatMessage{{Role: "user", Content: "hello"}})
+	otherModel := prepareGrokSession(reqA, "grok-4.5", "", []chatwire.Message{{Role: "user", Content: "hello"}})
 	testutil.NotEqual(t, otherModel.Key, a.Key)
 }

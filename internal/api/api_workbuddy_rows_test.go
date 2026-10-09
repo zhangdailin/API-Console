@@ -5,7 +5,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
-	"strings"
+
 	"testing"
 	"time"
 
@@ -74,50 +74,6 @@ func TestHandleAccounts_WorkBuddyRowCarriesTierAndQuota(t *testing.T) {
 	if row["workbuddy_refresh_token"] != nil {
 		t.Fatalf("the refresh token leaked into the account list: %v", row["workbuddy_refresh_token"])
 	}
-}
-
-// TestHandleAccounts_PostWorkBuddyDocumentCapturesIdentityAndQuota covers the
-// manual/import path: a pasted session document must populate the account
-// identity (so 账号/邮箱 is filled) and carry the meter snapshot once synced.
-func TestHandleAccounts_PostWorkBuddyDocumentCapturesIdentityAndQuota(t *testing.T) {
-	srv := workBuddyAPIServer(t)
-	defer srv.Close()
-
-	s, _ := newTestStore(t, "wb-create:")
-	a := New(s, "", "", &config.Config{WorkBuddyBaseURL: srv.URL})
-
-	body, err := json.Marshal(map[string]interface{}{
-		"account_type":  "workbuddy",
-		"client_cookie": workBuddyAuthDocument,
-		"enabled":       true,
-		"weight":        1,
-	})
-	testutil.NoError(t, err, "marshal: %v")
-	req := httptest.NewRequest(http.MethodPost, "/api/accounts", strings.NewReader(string(body)))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	a.HandleAccounts(rec, req)
-	testutil.Equal(t, rec.Code, http.StatusCreated)
-
-	var row map[string]interface{}
-	err = json.Unmarshal(rec.Body.Bytes(), &row)
-	testutil.CheckNoError(t, err)
-	// The stubbed auth document embeds a JWT with sub/email claims.
-	testutil.Equal(t, row["email"], "operator@example.com")
-	testutil.Equal(t, row["workbuddy_uid"], "07ab88c8-5596-4257-8d21-e9fcbe3a3810")
-	testutil.Equal(t, row["quota_plan"], "Free Plan Subscription")
-	testutil.Equal(t, row["quota_remaining"], 47.28)
-	testutil.Equal(t, row["quota_limit"], 250.0)
-	testutil.False(t, row["workbuddy_refresh_token"] != nil, "the refresh token leaked in the create response")
-
-	// The same values must come back from the list endpoint the table reads.
-	listRec := httptest.NewRecorder()
-	a.HandleAccounts(listRec, httptest.NewRequest(http.MethodGet, "/api/accounts", nil))
-	var rows []map[string]interface{}
-	testutil.NoError(t, json.Unmarshal(listRec.Body.Bytes(), &rows), "decode list: %v")
-	testutil.Equal(t, len(rows), 1)
-	testutil.Equal(t, rows[0]["quota_plan"], "Free Plan Subscription")
-	testutil.Equal(t, rows[0]["email"], "operator@example.com")
 }
 
 // TestHandleAccounts_GrokRowCarriesSnapshotTimestamp covers the freshness signal

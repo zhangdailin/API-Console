@@ -36,6 +36,26 @@ func importBackup(t *testing.T, a *API, body []byte) ImportResult {
 	}
 	return result
 }
+
+func TestAccountBackupRejectsGenericCredentialSlots(t *testing.T) {
+	a, s := transferAPI(t, 3)
+	backup := ExportData{Version: 1, Accounts: []store.Account{
+		{AccountType: "workbuddy", Token: "access", RefreshToken: "refresh"},
+		{AccountType: "qoder", ClientCookie: `{"accessToken":"access","refreshToken":"refresh","machineId":"device"}`},
+	}}
+	body, err := json.Marshal(backup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := importBackup(t, a, body)
+	if result.Imported != 0 || result.Skipped != 2 {
+		t.Fatalf("result: %+v", result)
+	}
+	rows, err := s.ListAccounts(t.Context())
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("rows=%d err=%v", len(rows), err)
+	}
+}
 func TestAccountBackupRestoresFourChannelsAcrossEncryptionKeys(t *testing.T) {
 	source, s := transferAPI(t, 1)
 	target, destination := transferAPI(t, 2)
@@ -113,27 +133,6 @@ func TestAccountBackupRestoresFourChannelsAcrossEncryptionKeys(t *testing.T) {
 	restored, _ = destination.ListAccounts(t.Context())
 	if len(restored) != 4 {
 		t.Fatal("duplicate rows inserted")
-	}
-}
-func TestAccountBackupKeepsLegacyWorkBuddyCredential(t *testing.T) {
-	a, s := transferAPI(t, 1)
-	original := store.Account{AccountType: "workbuddy", Token: `{"auth":{"accessToken":"legacy-access","refreshToken":"legacy-refresh"},"account":{"uid":"legacy-uid"}}`, Enabled: true}
-	if err := s.CreateAccount(t.Context(), &original); err != nil {
-		t.Fatal(err)
-	}
-	w := httptest.NewRecorder()
-	a.HandleExport(w, httptest.NewRequest(http.MethodGet, "/api/export", nil))
-	var backup ExportData
-	if err := json.Unmarshal(w.Body.Bytes(), &backup); err != nil {
-		t.Fatal(err)
-	}
-	row := backup.Accounts[0]
-	if row.WorkBuddyRefreshToken != "legacy-refresh" || row.Token != "" {
-		t.Fatal("legacy credential not migrated")
-	}
-	b, _ := transferAPI(t, 2)
-	if result := importBackup(t, b, w.Body.Bytes()); result.Imported != 1 {
-		t.Fatal("legacy export not restorable")
 	}
 }
 func TestAccountImportRejectsInvalidFilesAndReportsInvalidRows(t *testing.T) {

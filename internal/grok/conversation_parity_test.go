@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"net/http/httptest"
+	"orchids-api/internal/chatwire"
+	"orchids-api/internal/responses"
 	"strings"
 	"sync"
 	"testing"
@@ -37,7 +39,7 @@ func parityText(text string) string {
 func parityRun(t *testing.T, stream string, stop ...string) (string, chatOutcome) {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	result := (&Handler{}).streamBuildChatHolding(rec, &ChatCompletionsRequest{Model: "grok-4.6", Stream: true, Stop: stop}, strings.NewReader(stream), nil)
+	result := (&Handler{}).streamBuildChatHolding(rec, &chatwire.Request{Model: "grok-4.6", Stream: true, Stop: stop}, strings.NewReader(stream), nil)
 	return rec.Body.String(), result
 }
 
@@ -49,7 +51,7 @@ type parityTool struct {
 func parityTools(t *testing.T, stream string) map[int]*parityTool {
 	t.Helper()
 	calls := map[int]*parityTool{}
-	err := readResponseSSE(strings.NewReader(stream), func(_, data string) error {
+	err := responses.ReadSSE(strings.NewReader(stream), func(_, data string) error {
 		if data == "[DONE]" {
 			return nil
 		}
@@ -187,7 +189,7 @@ func TestParityToolsAreVisibleBeforeStreamCompletes(t *testing.T) {
 	w := &parityNoticeWriter{ResponseRecorder: httptest.NewRecorder(), notice: make(chan struct{})}
 	done := make(chan chatOutcome, 1)
 	go func() {
-		done <- (&Handler{}).streamBuildChatHolding(w, &ChatCompletionsRequest{Model: "grok-4.6"}, reader, nil)
+		done <- (&Handler{}).streamBuildChatHolding(w, &chatwire.Request{Model: "grok-4.6"}, reader, nil)
 	}()
 	_, _ = io.WriteString(writer, parityItem("response.output_item.added", "fc_a", "call_a", "Read", ""))
 	select {
@@ -226,14 +228,14 @@ func TestParityReasoningAndSearchBlocks(t *testing.T) {
 func TestParityClientSearchToolsRemainClientTools(t *testing.T) {
 	h := &Handler{}
 	spec, _ := ResolveModel("grok-4.6")
-	request := &ChatCompletionsRequest{Messages: []ChatMessage{{Role: "user", Content: "hello"}}, Tools: []ToolDef{{Type: "function", Function: map[string]interface{}{"name": "web_search", "parameters": map[string]interface{}{"type": "object"}}}}}
+	request := &chatwire.Request{Messages: []chatwire.Message{{Role: "user", Content: "hello"}}, Tools: []chatwire.ToolDef{{Type: "function", Function: map[string]interface{}{"name": "web_search", "parameters": map[string]interface{}{"type": "object"}}}}}
 	payload, err := h.responsesPayloadFromChat(spec, request, false)
 	testutil.NoError(t, err)
-	tools := interfaceMaps(payload["tools"])
+	tools := responses.InterfaceMaps(payload["tools"])
 	testutil.Fail(t, len(tools) != 1 || tools[0]["type"] != "function" || tools[0]["parameters"] == nil, tools)
 	request.Tools = nil
 	payload, err = h.responsesPayloadFromChat(spec, request, false)
-	testutil.Fail(t, err != nil || len(interfaceMaps(payload["tools"])) != 0, payload, err)
+	testutil.Fail(t, err != nil || len(responses.InterfaceMaps(payload["tools"])) != 0, payload, err)
 }
 
 type parityAuditLog struct{ events []audit.Event }
@@ -252,7 +254,7 @@ func TestParityAuditCapturesTerminalUsageAndFailure(t *testing.T) {
 			response["error"] = map[string]interface{}{"message": "failed upstream"}
 		}
 		_, _, result := copyNativeCLIResponseAndCaptureModel(httptest.NewRecorder(), strings.NewReader(parityText("hello")+parityFrame(kind, map[string]interface{}{"response": response})), "text/event-stream", "grok-4.6")
-		h.auditChatOutcome(context.Background(), &store.Account{ID: 1}, &ChatCompletionsRequest{Model: "grok-4.6", StartedAt: time.Now().Add(-time.Second)}, result)
+		h.auditChatOutcome(context.Background(), &store.Account{ID: 1}, &chatwire.Request{Model: "grok-4.6", StartedAt: time.Now().Add(-time.Second)}, result)
 		testutil.Fail(t, len(events.events) != 1 || events.events[0].InputTokens != 100 || events.events[0].CachedInputTokens != 80 || (events.events[0].Status == "error") != failed, events.events)
 	}
 }
@@ -264,17 +266,6 @@ type parityBlockingSource struct {
 
 func (s *parityBlockingSource) Read([]byte) (int, error) { <-s.closed; return 0, io.EOF }
 func (s *parityBlockingSource) Close() error             { s.once.Do(func() { close(s.closed) }); return nil }
-func TestParityAliasCancellationClosesUpstream(t *testing.T) {
-	source := &parityBlockingSource{closed: make(chan struct{})}
-	body := rewriteBuildToolAliasResponse(source, "text/event-stream", nil)
-	_ = body.Close()
-	select {
-	case <-source.closed:
-	case <-time.After(time.Second):
-		t.Fatal("upstream source remained open")
-	}
-}
-
 func TestParityNonStreamingDoesNotLeakReasoningAndPreservesAllMessages(t *testing.T) {
 	for _, onlyReasoning := range []bool{false, true} {
 		output := []interface{}{map[string]interface{}{"type": "reasoning", "content": []interface{}{map[string]interface{}{"type": "reasoning_text", "text": "private plan"}}}}
@@ -285,7 +276,7 @@ func TestParityNonStreamingDoesNotLeakReasoningAndPreservesAllMessages(t *testin
 		}
 		data, _ := json.Marshal(map[string]interface{}{"status": "completed", "output": output})
 		rec := httptest.NewRecorder()
-		result := (&Handler{}).collectBuildChat(rec, &ChatCompletionsRequest{Model: "grok-4.6"}, bytes.NewReader(data))
+		result := (&Handler{}).collectBuildChat(rec, &chatwire.Request{Model: "grok-4.6"}, bytes.NewReader(data))
 		if onlyReasoning {
 			testutil.False(t, result.Err == nil, "reasoning-only completion accepted")
 		} else if result.Err != nil || !strings.Contains(rec.Body.String(), `"content":"first  second"`) {

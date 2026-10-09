@@ -6,12 +6,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"orchids-api/internal/audit"
+	"orchids-api/internal/channel"
 	"orchids-api/internal/pricing"
 )
 
@@ -28,10 +28,6 @@ const billingReleaseTimeout = 5 * time.Second
 // Bodies beyond it are still delivered to the handler in full; only the
 // reservation is computed from the prefix that was read.
 const maxBillingBodyBytes = 8 << 20
-
-// billingRequestPaths are the inference endpoints whose text cost is estimated
-// before the request runs. Model management endpoints must not be priced.
-var billingRequestPaths = []string{"/chat/completions", "/messages", "/responses"}
 
 // BillingReservation is the hold one request took against its client key. The
 // request-scoped pointer is mutated by SettleAPIKeyBilling so the deferred
@@ -266,11 +262,15 @@ func APIKeyBillingReservation(next http.HandlerFunc, reserver APIKeyBillingReser
 // counting request from a key that is already at its ceiling without ever
 // charging for it.
 func billingRequestPath(path string) bool {
-	if strings.HasSuffix(path, "/count_tokens") {
+	_, endpoint, ok := channel.EndpointFromPath(path)
+	if !ok {
 		return false
 	}
-	path = strings.ToLower(path)
-	return slices.ContainsFunc(billingRequestPaths, func(suffix string) bool { return strings.Contains(path, suffix) })
+	switch strings.TrimRight(endpoint, "/") {
+	case "messages", "chat/completions", "responses", "responses/compact":
+		return true
+	}
+	return false
 }
 
 // readBillingBody buffers the request body for estimation and restores it for

@@ -151,8 +151,7 @@ func TestHandleModels_KeepsGrokModelsVisibleWhenOnlyBasicPoolExists(t *testing.T
 func TestHandleModels_KeepsGrokModelsVisibleWhenAccountsHaveStatusCode(t *testing.T) {
 	h, s, _ := setupModelValidationHandler(t)
 
-	// The withdrawn identifiers are published too, so "stays hidden" is proven
-	// against the deprecated-name rule rather than against an empty store.
+	// Visibility follows verified observations, independent of historical names.
 	publishModel(t, s,
 		&store.Model{Channel: "Grok", ModelID: "grok-4.5"},
 		&store.Model{Channel: "Grok", ModelID: "grok-imagine-image"},
@@ -179,8 +178,8 @@ func TestHandleModels_KeepsGrokModelsVisibleWhenAccountsHaveStatusCode(t *testin
 	body := rec.Body.String()
 	testutil.MustContain(t, body, "grok-4.5")
 	testutil.MustContain(t, body, "grok-imagine-image")
-	for _, hidden := range []string{"grok-4.20-0309-non-reasoning", "grok-4.3-beta", "grok-4.3", "grok-build-0.1"} {
-		testutil.MustNotContain(t, body, `"id":"`+hidden+`"`)
+	for _, observed := range []string{"grok-4.20-0309-non-reasoning", "grok-4.3-beta", "grok-build-0.1"} {
+		testutil.MustContain(t, body, `"id":"`+observed+`"`)
 	}
 }
 

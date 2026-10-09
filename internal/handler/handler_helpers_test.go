@@ -13,7 +13,6 @@ import (
 
 	"orchids-api/internal/config"
 	"orchids-api/internal/loadbalancer"
-	"orchids-api/internal/middleware"
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
 )
@@ -365,57 +364,4 @@ func TestResolveEffortModelVariant_DoesNotResuffixAnEffortVariant(t *testing.T) 
 			testutil.Equal(t, h.resolveEffortModelVariant(context.Background(), tc.model, tc.effort, "workbuddy"), tc.want)
 		})
 	}
-}
-
-// On the unified prefix the path names no channel, so the channel must come from
-// the model. A path-only answer is what made count_tokens estimate every /v1
-// request with the generic profile while the completion ran on another channel.
-func TestModelChannelFallsBackToTheModelOnTheUnifiedPrefix(t *testing.T) {
-	h, s, _ := setupModelValidationHandler(t)
-
-	mustCreateModel(t, s, "330", "WorkBuddy", "claude-opus-5-low", store.ModelStatusAvailable)
-	mustCreateModel(t, s, "331", "WorkBuddy", "hy3", store.ModelStatusAvailable)
-
-	cases := []struct {
-		path  string
-		model string
-		want  string
-	}{
-		{"/cline/v1/messages/count_tokens", "anything", "cline"},
-		{"/v1/messages/count_tokens", "claude-opus-5-low", "WorkBuddy"},
-		{"/v1/messages/count_tokens", "hy3", "WorkBuddy"},
-		{"/v1/messages/count_tokens", "no-such-model", ""},
-	}
-	for _, tc := range cases {
-		r := httptest.NewRequest(http.MethodPost, "http://x"+tc.path, nil)
-		testutil.Equal(t, h.ModelChannel(r, tc.model), tc.want)
-	}
-}
-
-// The catalog advertises the family slug, so the by-id endpoint has to resolve
-// that family onto a variant the store actually has. Answering 404 here is what
-// pushes a Codex client back to guessing suffixes.
-func TestChannelLookupResolvesAnEffortFamilyName(t *testing.T) {
-	h, s, _ := setupModelValidationHandler(t)
-
-	mustCreateModel(t, s, "340", "WorkBuddy", "claude-opus-5-low", store.ModelStatusAvailable)
-	mustCreateModel(t, s, "341", "WorkBuddy", "claude-opus-5-medium", store.ModelStatusAvailable)
-
-	channel, err := h.LookupChannelForModel(context.Background(), "claude-opus-5")
-	testutil.NoError(t, err, "LookupChannelForModel() error = %v")
-	testutil.Equal(t, channel, "WorkBuddy")
-	testutil.Equal(t, h.ChannelForModel(context.Background(), "claude-opus-5"), "WorkBuddy")
-	testutil.Equal(t, h.ChannelForModel(context.Background(), "gpt-9-unknown"), "")
-}
-
-// The dispatcher publishes the model it routed on; downstream resolution must
-// prefer that single decision over repeating the lookup with a different name.
-func TestChannelLookupPrefersThePublishedRequestModel(t *testing.T) {
-	h, s, _ := setupModelValidationHandler(t)
-
-	mustCreateModel(t, s, "350", "WorkBuddy", "claude-opus-5-low", store.ModelStatusAvailable)
-
-	ctx, _ := middleware.RequestModelHint(context.Background())
-	ctx = middleware.WithRequestModel(ctx, "claude-opus-5-low")
-	testutil.Equal(t, h.ChannelForModel(ctx, "claude-opus-5"), "WorkBuddy")
 }

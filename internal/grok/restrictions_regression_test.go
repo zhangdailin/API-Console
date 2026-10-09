@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/responses"
 	"strings"
 	"testing"
 	"time"
@@ -16,35 +17,6 @@ import (
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
 )
-
-func TestRestrictionsToolNamesRemainCaseSensitiveAndRoundTrip(t *testing.T) {
-	tools := []ToolDef{{Type: "function", Function: map[string]interface{}{"name": "ReadFile"}}, {Type: "function", Function: map[string]interface{}{"name": "readfile"}}}
-	req := ChatCompletionsRequest{Model: "grok-4.6", Messages: []ChatMessage{{Role: "user", Content: "hi"}}, Tools: tools,
-		ToolChoice: map[string]interface{}{"type": "function", "function": map[string]interface{}{"name": "ReadFile"}}}
-	testutil.NoError(t, req.Validate())
-	req.ToolChoice.(map[string]interface{})["function"].(map[string]interface{})["name"] = "READFILE"
-	err := req.Validate()
-	testutil.Error(t, err)
-	err = validateToolDefinitions(append(tools, tools[0]))
-	testutil.Error(t, err)
-	longName := strings.Repeat("Long", 40)
-	declarations := []map[string]interface{}{{"type": "function", "name": "a b"}, {"type": "function", "name": "a_b_2"}, {"type": "function", "name": "a@b"}, {"type": "function", "name": longName}, {"type": "function", "name": "ReadFile"}, {"type": "function", "name": "readfile"}}
-	payload := map[string]interface{}{"tools": declarations, "tool_choice": map[string]interface{}{"type": "function", "name": longName}, "input": []interface{}{map[string]interface{}{"type": "function_call", "name": longName, "call_id": "call_x", "arguments": "{}"}}}
-	aliases := collectBuildToolAliases(payload)
-	testutil.NoError(t, normalizeBuildResponsesPayload(payload))
-	seen := map[string]bool{}
-	for _, tool := range interfaceMaps(payload["tools"]) {
-		name := tool["name"].(string)
-		testutil.Falsef(t, seen[name] || len(name) > 128, "invalid alias %q", name)
-		seen[name] = true
-	}
-	alias := payload["tool_choice"].(map[string]interface{})["name"].(string)
-	testutil.EqualAny(t, interfaceMaps(payload["input"])[0]["name"], alias)
-	raw, _ := json.Marshal(map[string]interface{}{"type": "function_call", "name": alias, "call_id": "call_x", "arguments": "{}"})
-	var restored map[string]interface{}
-	_ = json.Unmarshal(rewriteBuildToolAliasesJSON(raw, aliases), &restored)
-	testutil.EqualAny(t, restored["name"], longName)
-}
 
 // validatePayloadReasoning only checks structure and never rewrites the caller's
 // value. The wire normalization that follows maps client aliases onto the levels
@@ -66,7 +38,7 @@ func TestRestrictionsReasoningAliasesReachWire(t *testing.T) {
 		testutil.NoError(t, err)
 		testutil.Fail(t, payload["reasoning"].(map[string]interface{})["effort"] != test.effort, test, payload)
 		effort := test.effort
-		request := &ChatCompletionsRequest{Model: test.model, Messages: []ChatMessage{{Role: "user", Content: "hi"}}, ReasoningEffort: &effort}
+		request := &chatwire.Request{Model: test.model, Messages: []chatwire.Message{{Role: "user", Content: "hi"}}, ReasoningEffort: &effort}
 		err = request.Validate()
 		testutil.NoError(t, err)
 	}
@@ -74,7 +46,7 @@ func TestRestrictionsReasoningAliasesReachWire(t *testing.T) {
 
 func TestRestrictionsEmptyAndImageToolOutputs(t *testing.T) {
 	for _, content := range []interface{}{"", []interface{}{map[string]interface{}{"type": "image_url", "image_url": map[string]interface{}{"url": "https://example.com/a.png", "detail": "high"}}}} {
-		messages := []ChatMessage{{Role: "tool", ToolCallID: "call_a", Content: content}}
+		messages := []chatwire.Message{{Role: "tool", ToolCallID: "call_a", Content: content}}
 		testutil.NoError(t, chatwire.ValidateMessages(messages))
 		input, _ := responsesInputFromChatMessages(messages)
 		item := input[0].(map[string]interface{})
@@ -84,7 +56,7 @@ func TestRestrictionsEmptyAndImageToolOutputs(t *testing.T) {
 			testutil.Fail(t, parts[0].(map[string]interface{})["detail"] != "high", parts)
 		}
 	}
-	err := chatwire.ValidateMessages([]ChatMessage{{Role: "tool", Content: ""}})
+	err := chatwire.ValidateMessages([]chatwire.Message{{Role: "tool", Content: ""}})
 	testutil.Error(t, err)
 }
 
@@ -152,20 +124,20 @@ func TestRestrictionsBuildChatLongToolNameEndToEnd(t *testing.T) {
 	h.cliClient.httpClient = upstream.Client()
 	h.cliClient.oauth.httpClient = upstream.Client()
 	longName := strings.Repeat("Tool", 50)
-	tools := make([]ToolDef, 129)
+	tools := make([]chatwire.ToolDef, 129)
 	for i := range tools {
-		tools[i] = ToolDef{Type: "function", Function: map[string]interface{}{"name": fmt.Sprintf("tool_%d", i)}}
+		tools[i] = chatwire.ToolDef{Type: "function", Function: map[string]interface{}{"name": fmt.Sprintf("tool_%d", i)}}
 	}
 	tools[0].Function["name"] = longName
-	body, _ := json.Marshal(ChatCompletionsRequest{Model: model, Messages: []ChatMessage{{Role: "user", Content: "use the tool"}}, Tools: tools, ToolChoice: map[string]interface{}{"type": "function", "function": map[string]interface{}{"name": longName}}})
+	body, _ := json.Marshal(chatwire.Request{Model: model, Messages: []chatwire.Message{{Role: "user", Content: "use the tool"}}, Tools: tools, ToolChoice: map[string]interface{}{"type": "function", "function": map[string]interface{}{"name": longName}}})
 	rec := httptest.NewRecorder()
 	h.HandleChatCompletions(rec, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body)))
 	testutil.Falsef(t, rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), longName) || !strings.Contains(rec.Body.String(), "call_long"), "%d %s", rec.Code, rec.Body.String())
 	select {
 	case payload := <-received:
-		testutil.Equal(t, len(interfaceMaps(payload["tools"])), 129)
-		if name := parseLooseStringAny(payload["tool_choice"].(map[string]interface{})["name"]); name == "" || len(name) > 128 {
-			t.Fatal("invalid wire alias", name)
+		testutil.Equal(t, len(responses.InterfaceMaps(payload["tools"])), 129)
+		if name := chatwire.ParseLooseStringAny(payload["tool_choice"].(map[string]interface{})["name"]); name != longName {
+			t.Fatal("tool name changed", name)
 		}
 	default:
 		t.Fatal("Build was not called")

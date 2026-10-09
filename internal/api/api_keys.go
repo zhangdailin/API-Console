@@ -293,8 +293,6 @@ func (a *API) HandleKeyByID(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			if errors.Is(err, store.ErrNoRows) {
 				http.Error(w, "not found", 404)
-			} else if errors.Is(err, store.ErrApiKeySecretUnavailable) {
-				http.Error(w, err.Error(), 409)
 			} else {
 				http.Error(w, "API key secret unavailable", 503)
 			}

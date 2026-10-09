@@ -61,10 +61,6 @@ type Client struct {
 // AccountUpdater is the subset of the account store the client needs to persist
 // a rotated refresh token. It is satisfied by *store.Store.
 type AccountUpdater interface {
-	UpdateAccount(ctx context.Context, acc *store.Account) error
-}
-
-type accountPatcher interface {
 	UpdateClineCredentials(ctx context.Context, id int64, patch store.ClineCredentialPatch) error
 }
 
@@ -278,46 +274,21 @@ func (c *Client) refresh(ctx context.Context, previous Credentials) (Credentials
 	return merged, nil
 }
 
-// persistPatch writes only Cline-owned fields. Production stores implement the
-// atomic patch API; the full-account fallback keeps lightweight test stores
-// source compatible without weakening the real persistence path.
+// persistPatch uses the store's atomic provider patch, preserving concurrent edits.
 func (c *Client) persistPatch(ctx context.Context, patch store.ClineCredentialPatch) error {
 	c.stateMu.RLock()
 	accountStore := c.accountStore
-	if c.account == nil {
-		c.stateMu.RUnlock()
-		return nil
+	var id int64
+	if c.account != nil {
+		id = c.account.ID
 	}
-	acc := *c.account
-	acc.ClineModelIDs = append([]string(nil), c.account.ClineModelIDs...)
 	c.stateMu.RUnlock()
-	if accountStore == nil || acc.ID == 0 {
+	if accountStore == nil || id == 0 {
 		return nil
 	}
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	if patcher, ok := accountStore.(accountPatcher); ok {
-		if err := patcher.UpdateClineCredentials(writeCtx, acc.ID, patch); err != nil {
-			return fmt.Errorf("persist cline account state: %w", err)
-		}
-		return nil
-	}
-	if patch.AccessToken != "" {
-		acc.ClineAccessToken = patch.AccessToken
-	}
-	if patch.RefreshToken != "" {
-		acc.ClineRefreshToken = patch.RefreshToken
-	}
-	if !patch.ExpiresAt.IsZero() {
-		acc.ClineExpiresAt = patch.ExpiresAt
-	}
-	if patch.Email != "" {
-		acc.ClineEmail = patch.Email
-	}
-	if patch.ModelIDs != nil {
-		acc.ClineModelIDs = append([]string(nil), patch.ModelIDs...)
-	}
-	if err := accountStore.UpdateAccount(writeCtx, &acc); err != nil {
+	if err := accountStore.UpdateClineCredentials(writeCtx, id, patch); err != nil {
 		return fmt.Errorf("persist cline account state: %w", err)
 	}
 	return nil

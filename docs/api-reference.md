@@ -6,11 +6,10 @@
 
 | 前缀 | 路由规则 |
 |---|---|
-| `/v1` | 根据请求 model 选择通道 |
-| `/workbuddy/v1` | WorkBuddy 账号池 |
-| `/qoder/v1` | Qoder 账号池 |
-| `/cline/v1` | Cline 账号池 |
-| `/grok/v1` | Grok Build OAuth 账号池 |
+| `/workbuddy`、`/workbuddy/v1` | WorkBuddy 账号池 |
+| `/qoder`、`/qoder/v1` | Qoder 账号池 |
+| `/cline`、`/cline/v1` | Cline 账号池 |
+| `/grok`、`/grok/v1` | Grok Build OAuth 账号池 |
 
 推理和模型接口使用管理后台创建的 Key：`Authorization: Bearer <API_KEY>` 或 `x-api-key: <API_KEY>`，同时提供时 Bearer 优先。管理接口使用管理员会话或既有管理 token，不接受推理 Key 替代管理员。
 
@@ -18,17 +17,17 @@ anonymous_allow_ips 空值要求所有来源使用 Key，名单配置损坏也�
 
 ### 1.1 编程客户端与 CC Switch
 
-四个固定渠道都提供 OpenAI Chat Completions、Responses（Codex）及 Anthropic Messages（Claude Code）。OpenAI / Codex Base URL 使用上表含 `/v1` 的地址；Claude Code 和 Anthropic SDK 使用站点根地址或 `/{channel}`，由客户端追加 `/v1/messages`。其他客户端是否需要 `/v1` 取决于其追加路径方式。
+四个固定渠道都提供 OpenAI Chat Completions、Responses（Codex）及 Anthropic Messages（Claude Code）。OpenAI / Codex Base URL 使用上表含 `/v1` 的地址；Claude Code 和 Anthropic SDK 使用 `/{channel}`，由客户端追加 `/v1/messages`。其他客户端是否需要 `/v1` 取决于其追加路径方式。
 
 管理后台「配置管理 → API Key 管理」每条密钥提供复制与 CC Switch 导入：点击该密钥的导入按钮，选择 Codex 或 Claude Code、渠道和目录模型，再点击导入。弹窗按需读取完整密钥并自动读取默认 WorkBuddy 目录；切换渠道重新读取。目录使用该 Key 请求渠道公开 `/models`，因此遵守公开可见性与 Key 模型权限，不使用管理列表代替。Key 或渠道改变后必须重新读取；没有目录结果时不能导入。
 
 导入使用 [CC Switch 官方深链接协议](https://github.com/farion1231/cc-switch/blob/main/docs/user-manual/en/5-faq/5.3-deeplink.md) `ccswitch://v1/import`，要求本机已安装并注册协议的 CC Switch，浏览器允许打开应用。应用中的确认和启用仍由用户完成，网页不能检测导入成功。Claude Code 的默认模型及 Haiku / Sonnet / Opus 别名均映射到所选模型；Codex 使用 Responses，CC Switch 默认生成 `model_reasoning_effort="high"`，不支持 high 的模型需在启用前按目录能力调整或移除此字段。
 
-完整 Key 不写浏览器存储，仅用于同源模型请求与本机协议导入；深链接本身含密钥，不应分享。新建或轮换的 Key 可从列表按需复制和导入；旧版仅存哈希的 Key 继续有效，需要手动轮换后才支持复制和导入，列表中的掩码不可使用。旧教程地址自动转到 API Key 子标签。该功能不自动测试真实生成，也不承诺全部模型支持视觉、搜索或完整编程工具。
+完整 Key 不写浏览器存储，仅用于同源模型请求与本机协议导入；深链接本身含密钥，不应分享。新建或轮换的 Key 可从列表按需复制和导入，列表中的掩码不可使用。旧教程地址自动转到 API Key 子标签。该功能不自动测试真实生成，也不承诺全部模型支持视觉、搜索或完整编程工具。
 
 ## 2. 推理与目录接口
 
-下表路径相对于前缀：
+下表路径相对于前缀，两种通道前缀的能力相同。根路径和统一 `/v1` 推理入口返回 404，不再自动按模型跨通道分发，也不再提供汇总模型目录；管理 API、后台、健康检查和根地址后台跳转保留。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -37,18 +36,18 @@ anonymous_allow_ips 空值要求所有来源使用 Key，名单配置损坏也�
 | POST | `/messages` | Anthropic Messages 兼容输入输出 |
 | POST | `/chat/completions` | Chat Completions 兼容输入输出 |
 | POST | `/responses` | Responses，Grok 原生 Build，其他通道 Chat 桥接 |
-| POST | `/messages/count_tokens` | 本地 Token 估算；统一、WorkBuddy、Qoder、Cline 入口，Grok 专属前缀未注册 |
-| POST | `/responses/compact` | 网关摘要 / Build 压缩路径；四个固定通道及统一前缀均有相应分派 |
+| POST | `/messages/count_tokens` | 四通道均支持本地 Token 估算 |
+| POST | `/responses/compact` | 网关摘要 / Build 压缩路径；四通道两种前缀均支持 |
 
 模型应从当前目录选择，不要把示例字符串当可用白名单。目录正常不证明账号拥有生成额度；目录失败保留旧观察。
 
 ### 2.1 模型与聊天
 
 ```bash
-curl http://127.0.0.1:3002/v1/models \
+curl http://127.0.0.1:3002/workbuddy/v1/models \
   -H 'Authorization: Bearer <API_KEY>'
 
-curl http://127.0.0.1:3002/v1/chat/completions \
+curl http://127.0.0.1:3002/workbuddy/v1/chat/completions \
   -H 'Authorization: Bearer <API_KEY>' \
   -H 'Content-Type: application/json' \
   -d '{"model":"<MODEL_ID>","messages":[{"role":"user","content":"你好"}],"stream":true}'
@@ -59,7 +58,7 @@ stream 省略时可能采用服务默认，需 JSON 非流式结果时显式 str
 ### 2.2 Messages
 
 ```bash
-curl http://127.0.0.1:3002/v1/messages \
+curl http://127.0.0.1:3002/workbuddy/v1/messages \
   -H 'x-api-key: <API_KEY>' -H 'Content-Type: application/json' \
   -d '{"model":"<MODEL_ID>","max_tokens":256,"messages":[{"role":"user","content":"你好"}]}'
 ```
@@ -69,7 +68,7 @@ curl http://127.0.0.1:3002/v1/messages \
 ### 2.3 Responses 与续接
 
 ```bash
-curl http://127.0.0.1:3002/v1/responses \
+curl http://127.0.0.1:3002/workbuddy/v1/responses \
   -H 'Authorization: Bearer <API_KEY>' -H 'Content-Type: application/json' \
   -d '{"model":"<MODEL_ID>","input":"你好","stream":false,"store":true}'
 ```
@@ -99,7 +98,7 @@ curl http://127.0.0.1:3002/v1/responses \
 {"model":"<MODEL_ID>","input":[{"role":"user","content":"需要压缩的历史"}],"stream":false}
 ```
 
-将该请求发送至 `/v1/responses/compact`。桥接返回 object:response.compaction 与网关摘要引用；不是可在任意上游复用的推理密文。用同一 Key、模型和入口渠道续接，并在 TTL 内使用。压缩会调用模型并消耗实际用量，不执行用户工具。详情见 [协议能力](coding-protocol-capabilities.md)。
+将该请求发送至 `/{provider}/v1/responses/compact` 或 `/{provider}/responses/compact`。桥接返回 object:response.compaction 与网关摘要引用；不是可在任意上游复用的推理密文。用同一 Key、模型和入口渠道续接，并在 TTL 内使用。压缩会调用模型并消耗实际用量，不执行用户工具。详情见 [协议能力](coding-protocol-capabilities.md)。
 
 ## 4. 流式结果与失败
 
@@ -120,7 +119,7 @@ Chat 桥接写递增 sequence_number，便于客户端识别顺序；当前没�
 | `/api/accounts/{id}` | GET / PUT / DELETE；账号编辑及刷新分支以处理器为准 |
 | `/api/keys` | GET 列表、POST 创建 |
 | `/api/keys/{id}` | PATCH 策略、DELETE 删除 |
-| `/api/keys/{id}/secret` | GET 管理员按需读取完整秘密，禁止缓存；旧 Key 返回 409 |
+| `/api/keys/{id}/secret` | GET 管理员按需读取完整秘密，禁止缓存；内容不可用返回 503 |
 | `/api/keys/{id}/rotate` | POST 轮换秘密，旧 Key 失效 |
 | `/api/keys/{id}/reset-usage` | POST 重置账期用量，区别于正常账期滚动 |
 | `/api/models` | GET 列表、POST 创建；分页参数存在时响应形态与裸列表不同 |
@@ -164,11 +163,11 @@ cookie 文件按管理秘密保管。授权启动要求同源 HTTPS 或 loopback
 
 启动后根据返回的事务和官方 URL 完成浏览器授权；GET 同路径 `/{id}` 查询，DELETE `/{id}` 取消。持久 token、device code、PKCE verifier 等保留服务端，浏览器仅接收授权进度。每通道有事务准入上限，过期或取消后不能拿旧轮询结果覆盖新事务。
 
-Qoder / Cline / Grok 不提供手填个人 token 的通用创建方式；WorkBuddy 凭据导入用于迁移。账号管理投影脱敏，不表示导出文件也没有凭据。
+账号通过官方授权创建，备份导入只接受渠道专属凭据字段。账号管理投影脱敏，不表示导出文件也没有凭据。
 
 ### 6.1 账号导出与恢复
 
-账号管理提供「导出全部（含凭据）」与「导入账号」。导出涵盖全部渠道，不受当前渠道筛选或选中行限制，格式为 `version:1`、`export_at`、`accounts`。文件包含本渠道的明文访问令牌、刷新令牌及设备/身份、账号设置和已有目录快照；剔除其他渠道凭据，旧通用凭据尽可能规范到对应渠道字段。下载响应禁止缓存，文件本身不是加密文件。
+账号管理提供「导出全部（含凭据）」与「导入账号」。导出涵盖全部渠道，不受当前渠道筛选或选中行限制，格式为 `version:1`、`export_at`、`accounts`。文件包含本渠道的明文访问令牌、刷新令牌及设备/身份、账号设置和已有目录快照；剔除其他渠道及通用槽凭据，不自动迁移旧凭据。下载响应禁止缓存，文件本身不是加密文件。
 
 备份可导入另一个使用不同凭据加密主密钥的实例：导出前存储层已解密，导入由目标存储层重新加密。正常账号列表仍脱敏，不可用列表响应代替备份。API Key、独立模型管理记录、请求日志、Redis 命名空间及完整账本不在账号 JSON 中；账号 ID 和请求/当日 Token 计数不会恢复为原实例数据。恢复整个实例仍应备份 Redis 和加密主密钥。
 

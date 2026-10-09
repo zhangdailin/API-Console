@@ -9,24 +9,16 @@ import (
 // its wire contract accepts. A slug that is absent falls back to "none" only,
 // so an unknown model never advertises a level upstream may reject.
 var reasoningEffortCapabilities = map[string][]string{
-	"grok-4.5":                     {"low", "medium", "high"},
-	"grok-4.6":                     {"low", "medium", "high", "xhigh"},
-	"grok-4.7":                     {"low", "medium", "high", "xhigh"},
-	"grok-4.3":                     {"none", "low", "medium", "high"},
-	"grok-build-0.1":               {"none"},
-	"grok-4.20-0309-reasoning":     {"low", "medium", "high"},
-	"grok-4.20-0309-non-reasoning": {"none"},
-	"grok-4.20-multi-agent-0309":   {"low", "medium", "high", "xhigh"},
-	"grok-3-mini":                  {"low", "medium", "high"},
-	"grok-3-mini-fast":             {"low", "medium", "high"},
-	"grok-composer-2.5-fast":       {"none"},
+	"grok-4.5":               {"low", "medium", "high"},
+	"grok-4.6":               {"low", "medium", "high", "xhigh"},
+	"grok-4.7":               {"low", "medium", "high", "xhigh"},
+	"grok-composer-2.5-fast": {"none"},
 }
 
 // GrokModelSlug strips the optional Build provider prefix.
 func GrokModelSlug(publicID string) string {
 	slug := strings.ToLower(strings.TrimSpace(publicID))
 	slug = strings.TrimPrefix(slug, "build/")
-	slug = strings.TrimPrefix(slug, "grok_build/")
 	return slug
 }
 

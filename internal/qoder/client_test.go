@@ -151,7 +151,7 @@ type failingQoderUpdater struct {
 	calls int
 }
 
-func (f *failingQoderUpdater) UpdateAccount(context.Context, *store.Account) error {
+func (f *failingQoderUpdater) UpdateQoderAccount(context.Context, int64, store.QoderAccountPatch) error {
 	f.calls++
 	if f.fail {
 		return errors.New("write failed")

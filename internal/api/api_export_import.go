@@ -35,7 +35,7 @@ func (a *API) HandleExport(w http.ResponseWriter, r *http.Request) {
 		}
 		normalized := *acc
 		// Export the stored state, not the management projection: projection
-		// redaction would destroy legacy credentials before they can be migrated.
+		// redaction would remove credentials required to restore the account.
 		normalizePortableAccount(&normalized)
 		redactForeignCredentials(&normalized)
 		normalized.ID = 0
@@ -48,7 +48,7 @@ func (a *API) HandleExport(w http.ResponseWriter, r *http.Request) {
 	util.WriteJSON(w, exportData)
 }
 
-// normalizePortableAccount migrates legacy credential documents without making
+// normalizePortableAccount validates provider-owned restore credentials without
 // upstream calls. A durable refresh credential is required for a restorable row.
 func normalizePortableAccount(acc *store.Account) string {
 	acc.AccountType = strings.ToLower(strings.TrimSpace(acc.AccountType))
@@ -91,7 +91,7 @@ func normalizePortableAccount(acc *store.Account) string {
 // RedactQoderOutput clears the generic slots at all — and without this the export
 // would publish it.
 //
-// Legacy generic credentials are migrated before this function is called.
+// Generic credential slots are cleared before this function is called.
 func redactForeignCredentials(acc *store.Account) {
 	if acc == nil {
 		return

@@ -217,8 +217,6 @@ func (r streamResult) emitFinish(onMessage func(upstream.SSEMessage)) {
 // NewToolCallID mints a local tool-call id for upstream deltas that omit one.
 func NewToolCallID() string { return util.NewToolCallID() }
 
-const maxTextToolFallbackBytes = 2 << 20
-
 // sseFrame is one accumulated SSE event.
 type sseFrame struct {
 	event string
@@ -304,32 +302,13 @@ func readSSE(reader io.Reader, fn func(sseFrame) bool) error {
 	return nil
 }
 
-func consumeStreamObserved(body io.Reader, toolsEnabled bool, onMessage func(upstream.SSEMessage), onFrame func()) (streamResult, error) {
+func consumeStreamObserved(body io.Reader, _ bool, onMessage func(upstream.SSEMessage), onFrame func()) (streamResult, error) {
 	result := streamResult{}
 	tools := util.NewToolCallAccumulator()
-	var pendingText strings.Builder
-	bufferingToolText := toolsEnabled
-	// Leading whitespace is only relevant while deciding whether the stream can
-	// still begin with "Tool calls:". Tracking this offset incrementally avoids
-	// rescanning an ever-growing whitespace prefix on every tiny SSE delta.
-	toolPrefixOffset := 0
-	sawNativeTools := false
-
 	emitText := func(text string) { upstream.EmitTextDelta(onMessage, text, &result.SawMeaningfulEvent) }
-
-	flushPendingText := func() {
-		if pendingText.Len() == 0 {
-			return
-		}
-		emitText(pendingText.String())
-		pendingText.Reset()
-	}
 
 	emitTools := func() {
 		completed := tools.CompleteAll()
-		for _, call := range completed {
-			call.Arguments = normalizeCommandEscalation(call.Name, call.Arguments)
-		}
 		upstream.EmitToolCalls(onMessage, completed, &result.SawMeaningfulEvent, &result.ToolCallCount)
 	}
 
@@ -550,34 +529,10 @@ func consumeStreamObserved(body io.Reader, toolsEnabled bool, onMessage func(ups
 			rateLimitText.Reset()
 		}
 		if delta.Content != "" {
-			if !bufferingToolText || sawNativeTools {
-				emitText(delta.Content)
-			} else {
-				pendingText.WriteString(delta.Content)
-				candidate := pendingText.String()
-				for toolPrefixOffset < len(candidate) {
-					switch candidate[toolPrefixOffset] {
-					case ' ', '\t', '\r', '\n':
-						toolPrefixOffset++
-					default:
-						goto prefixReady
-					}
-				}
-			prefixReady:
-				if pendingText.Len() > maxTextToolFallbackBytes || !isPotentialTextToolCallAt(candidate, toolPrefixOffset) {
-					bufferingToolText = false
-					flushPendingText()
-				}
-			}
+			emitText(delta.Content)
 		}
 		for _, call := range delta.ToolCalls {
 			result.SawMeaningfulEvent = true
-			if !sawNativeTools {
-				sawNativeTools = true
-				// A textual prefix followed by native tool deltas is a duplicate
-				// representation, not assistant prose.
-				pendingText.Reset()
-			}
 			tools.Add(call.Index, call.ID, call.Function.Name, call.Function.Arguments)
 		}
 		if reason != "" && reason != "null" {
@@ -597,17 +552,6 @@ func consumeStreamObserved(body io.Reader, toolsEnabled bool, onMessage func(ups
 	}
 	if checkingRateLimitText && rateLimitText.Len() > 0 {
 		emitText(rateLimitText.String())
-	}
-	if toolsEnabled && !sawNativeTools && pendingText.Len() > 0 {
-		if parsed := parseTextToolCalls(pendingText.String()); len(parsed) > 0 {
-			pendingText.Reset()
-			for index, call := range parsed {
-				tools.Add(index, call.ID, call.Name, call.Arguments)
-			}
-			result.SawMeaningfulEvent = true
-		} else {
-			flushPendingText()
-		}
 	}
 	emitTools()
 	if !sawFinish {
@@ -647,73 +591,6 @@ func isModelRateLimitText(text string) bool {
 		strings.Contains(lower, "available upstream accounts are rate limited")
 }
 
-type textToolCall struct {
-	ID        string
-	Name      string
-	Arguments string
-}
-
-func isPotentialTextToolCallAt(text string, offset int) bool {
-	if offset >= len(text) {
-		return true
-	}
-	candidate := text[offset:]
-	const prefix = "Tool calls:"
-	return strings.HasPrefix(prefix, candidate) || strings.HasPrefix(candidate, prefix)
-}
-
-func parseTextToolCalls(text string) []textToolCall {
-	const prefix = "Tool calls:"
-	trimmed := strings.TrimSpace(text)
-	if !strings.HasPrefix(trimmed, prefix) {
-		return nil
-	}
-	payload := strings.TrimSpace(strings.TrimPrefix(trimmed, prefix))
-	if strings.HasPrefix(payload, "```") && strings.HasSuffix(payload, "```") {
-		if newline := strings.IndexByte(payload, '\n'); newline >= 0 {
-			payload = strings.TrimSpace(payload[newline+1 : len(payload)-3])
-		}
-	}
-	if !strings.HasPrefix(payload, "[") {
-		return nil
-	}
-
-	var raw []struct {
-		ID       string `json:"id"`
-		Function struct {
-			Name      string          `json:"name"`
-			Arguments json.RawMessage `json:"arguments"`
-		} `json:"function"`
-	}
-	if err := json.Unmarshal([]byte(payload), &raw); err != nil || len(raw) == 0 {
-		return nil
-	}
-	if len(raw) > 128 {
-		raw = raw[:128]
-	}
-	out := make([]textToolCall, 0, len(raw))
-	for _, call := range raw {
-		name := strings.TrimSpace(call.Function.Name)
-		if name == "" {
-			continue
-		}
-		arguments := "{}"
-		if len(call.Function.Arguments) > 0 && string(call.Function.Arguments) != "null" {
-			var encoded string
-			if json.Unmarshal(call.Function.Arguments, &encoded) == nil {
-				arguments = encoded
-			} else if json.Valid(call.Function.Arguments) {
-				arguments = string(call.Function.Arguments)
-			}
-		}
-		out = append(out, textToolCall{ID: strings.TrimSpace(call.ID), Name: name, Arguments: arguments})
-	}
-	return out
-}
-
-// busyCode is the gateway's queue/concurrency refusal. It arrives as a business
-// code, sometimes under a 401 status, so it must be classified before the status
-// is trusted.
 const busyCode = "10605"
 
 // errUpstreamUnauthorized marks an authentication failure that a token refresh

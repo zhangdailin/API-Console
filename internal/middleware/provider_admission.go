@@ -8,8 +8,7 @@ import (
 	"orchids-api/internal/channel"
 )
 
-// Explicit channel entrances have independent capacity budgets. Unified model
-// entrances remain protected by global and atomic per-account admission.
+// Both base paths for a provider share its independent capacity budget.
 func ProviderAdmission(limits func() map[string]int) func(http.HandlerFunc) http.HandlerFunc {
 	// One counter per channel, built from the channel table rather than a
 	// hardcoded list: a removed channel loses its slot, and an added one gains

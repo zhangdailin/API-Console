@@ -28,7 +28,7 @@ func textModel(id string) PublicModelResponse {
 func TestCodexCatalogExposesContextWindowAndModalities(t *testing.T) {
 	catalog := newCodexModelCatalog([]PublicModelResponse{
 		textModel("grok-4.6"),
-		textModel("grok-build-0.1"),
+		textModel("grok-composer-2.5-fast"),
 		textModel("grok-unknown-model"),
 	})
 
@@ -38,7 +38,7 @@ func TestCodexCatalogExposesContextWindowAndModalities(t *testing.T) {
 		modalities []string
 	}{
 		{"grok-4.6", 500000, []string{"text", "image"}},
-		{"grok-build-0.1", 256000, []string{"text"}},
+		{"grok-composer-2.5-fast", 200000, []string{"text"}},
 		{"grok-unknown-model", 128000, []string{"text"}},
 	} {
 		entry := codexEntryFor(t, catalog, tc.slug)
@@ -104,7 +104,7 @@ func TestCodexCatalogHidesMediaModels(t *testing.T) {
 	}
 	// Agent tooling is only advertised for Responses-capable text models.
 	entry := codexEntryFor(t, catalog, "grok-4.6")
-	testutil.Falsef(t, entry.ApplyPatchToolType == nil || !entry.SupportsParallelToolCalls, "grok-4.6 tooling = %#v", entry)
+	testutil.Falsef(t, entry.ApplyPatchToolType != nil || !entry.SupportsParallelToolCalls, "grok-4.6 tooling = %#v", entry)
 	if entry := codexEntryFor(t, catalog, "grok-imagine-image"); entry.ApplyPatchToolType != nil {
 		t.Fatalf("media model advertised apply_patch")
 	}

@@ -11,8 +11,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-var ErrApiKeySecretUnavailable = fmt.Errorf("rotate this legacy API key before copying it")
-
 func (s *Store) GetApiKeySecret(ctx context.Context, id int64) (string, error) {
 	return s.apiKeys.GetApiKeySecret(ctx, id)
 }
@@ -45,7 +43,7 @@ func (s *redisStore) GetApiKeySecret(ctx context.Context, id int64) (string, err
 		return "", err
 	}
 	if row.EncryptedSecret == "" {
-		return "", ErrApiKeySecretUnavailable
+		return "", fmt.Errorf("API key secret unavailable")
 	}
 	if !strings.HasPrefix(row.EncryptedSecret, encryptedCredentialPrefix) {
 		return "", fmt.Errorf("API key ciphertext is invalid")

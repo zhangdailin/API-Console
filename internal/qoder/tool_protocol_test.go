@@ -89,7 +89,7 @@ func TestBuildChatBodyNormalizesAnthropicToolControls(t *testing.T) {
 	testutil.Falsef(t, !ok || parallel, "parallel_tool_calls = %#v, want false", body["parallel_tool_calls"])
 }
 
-func TestConsumeStreamConvertsTextToolFallback(t *testing.T) {
+func TestConsumeStreamKeepsTextToolMarkup(t *testing.T) {
 	t.Parallel()
 	body := envelope(`{"choices":[{"delta":{"content":"Tool ca"}}]}`) +
 		envelope(`{"choices":[{"delta":{"content":"lls: [{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"README.md\\\"}\"}}]"},"finish_reason":"stop"}]}`) +
@@ -100,11 +100,11 @@ func TestConsumeStreamConvertsTextToolFallback(t *testing.T) {
 		events = append(events, message)
 	}, nil)
 	testutil.NoError(t, err, "consumeStreamObserved() error = %v")
-	testutil.Equal(t, result.FinishReason(), "tool_use")
-	testutil.Equal(t, len(events), 1)
-	testutil.Equal(t, events[0].Type, "model.tool-call")
-	testutil.Equal(t, events[0].Event["toolName"], "read_file")
-	testutil.Equal(t, events[0].Event["input"], `{"path":"README.md"}`)
+	testutil.Equal(t, result.FinishReason(), "end_turn")
+	testutil.Equal(t, result.ToolCallCount, 0)
+	for _, event := range events {
+		testutil.Equal(t, event.Type, "model.text-delta")
+	}
 }
 
 func TestConsumeStreamDoesNotParseTextFallbackWithoutTools(t *testing.T) {
@@ -135,7 +135,7 @@ func TestConsumeStreamInvalidTextToolFallbackRemainsText(t *testing.T) {
 	testutil.Falsef(t, text.String() != want || result.ToolCallCount != 0, "text=%q tool calls=%d", text.String(), result.ToolCallCount)
 }
 
-func TestConsumeStreamConvertsParallelTextToolFallback(t *testing.T) {
+func TestConsumeStreamKeepsParallelToolMarkup(t *testing.T) {
 	t.Parallel()
 	body := envelope(`{"choices":[{"delta":{"content":"Tool calls: [{\"id\":\"a\",\"function\":{\"name\":\"read\",\"arguments\":{\"path\":\"a\"}}},{\"id\":\"b\",\"function\":{\"name\":\"read\",\"arguments\":\"{\\\"path\\\":\\\"b\\\"}\"}}]"},"finish_reason":"stop"}]}`) +
 		"event:finish\ndata: {}\n\n"
@@ -146,11 +146,11 @@ func TestConsumeStreamConvertsParallelTextToolFallback(t *testing.T) {
 		}
 	}, nil)
 	testutil.NoError(t, err)
-	testutil.Equal(t, result.ToolCallCount, 2)
-	testutil.Equal(t, len(calls), 2)
+	testutil.Equal(t, result.ToolCallCount, 0)
+	testutil.Equal(t, len(calls), 0)
 }
 
-func TestConsumeStreamNativeToolSuppressesTextDuplicate(t *testing.T) {
+func TestConsumeStreamNativeToolKeepsSeparateProse(t *testing.T) {
 	t.Parallel()
 	body := envelope(`{"choices":[{"delta":{"content":"Tool calls: "}}]}`) +
 		envelope(`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"read","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`) +
@@ -161,8 +161,9 @@ func TestConsumeStreamNativeToolSuppressesTextDuplicate(t *testing.T) {
 	}, nil)
 	testutil.NoError(t, err)
 	testutil.Equal(t, result.ToolCallCount, 1)
-	testutil.Equal(t, len(events), 1)
-	testutil.Equal(t, events[0].Type, "model.tool-call")
+	testutil.Equal(t, len(events), 2)
+	testutil.Equal(t, events[0].Type, "model.text-delta")
+	testutil.Equal(t, events[1].Type, "model.tool-call")
 }
 
 func TestConsumeStreamLongSplitWhitespacePrefixStaysLinearAndFlushes(t *testing.T) {
@@ -184,7 +185,7 @@ func TestConsumeStreamLongSplitWhitespacePrefixStaysLinearAndFlushes(t *testing.
 }
 
 func TestConsumeStreamOversizedTextFallbackDegradesToText(t *testing.T) {
-	large := "Tool calls: " + strings.Repeat("x", maxTextToolFallbackBytes+1)
+	large := "Tool calls: " + strings.Repeat("x", 2<<20+1)
 	inner, err := json.Marshal(map[string]interface{}{"choices": []interface{}{map[string]interface{}{
 		"delta": map[string]interface{}{"content": large}, "finish_reason": "stop",
 	}}})

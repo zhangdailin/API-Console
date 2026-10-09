@@ -89,7 +89,7 @@ type flakyUpdater struct {
 	calls int
 }
 
-func (f *flakyUpdater) UpdateAccount(_ context.Context, _ *store.Account) error {
+func (f *flakyUpdater) UpdateWorkBuddyCredentials(_ context.Context, _ int64, _ store.WorkBuddyCredentialPatch) error {
 	f.calls++
 	if f.fail {
 		return errors.New("write failed")

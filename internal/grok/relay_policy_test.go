@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"orchids-api/internal/chatwire"
 	"reflect"
 	"strings"
 	"testing"
@@ -165,7 +166,7 @@ func TestRelayChatSamplingAndEffortAreClientOwned(t *testing.T) {
 	} {
 		effort := tc.effort
 		temperature, topP := 3.0, 1.5
-		req := &ChatCompletionsRequest{Model: "grok-4.5", Messages: []ChatMessage{{Role: "user", Content: "original"}}, ReasoningEffort: &effort, Temperature: &temperature, TopP: &topP}
+		req := &chatwire.Request{Model: "grok-4.5", Messages: []chatwire.Message{{Role: "user", Content: "original"}}, ReasoningEffort: &effort, Temperature: &temperature, TopP: &topP}
 		testutil.NoError(t, req.Validate())
 		payload, err := (&Handler{}).responsesPayloadFromChat(ModelSpec{ID: req.Model, UpstreamModel: req.Model, Upstream: UpstreamCLI}, req, true)
 		testutil.NoError(t, err)
@@ -183,7 +184,7 @@ func TestRelayBuildEffortAliasesFollowModelContract(t *testing.T) {
 		{"grok-composer-2.5-fast", "high", ""},
 	} {
 		effort := tc.effort
-		req := &ChatCompletionsRequest{Model: tc.model, Messages: []ChatMessage{{Role: "user", Content: "hi"}}, ReasoningEffort: &effort}
+		req := &chatwire.Request{Model: tc.model, Messages: []chatwire.Message{{Role: "user", Content: "hi"}}, ReasoningEffort: &effort}
 		payload, err := (&Handler{}).responsesPayloadFromChat(ModelSpec{ID: tc.model, UpstreamModel: tc.model, Upstream: UpstreamCLI}, req, true)
 		testutil.NoError(t, err)
 		reasoning, _ := payload["reasoning"].(map[string]interface{})

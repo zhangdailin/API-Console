@@ -10,7 +10,6 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"orchids-api/internal/modelcatalog"
-	"orchids-api/internal/modelpolicy"
 )
 
 var (
@@ -404,9 +403,9 @@ func New(opts Options) (*Store, error) {
 	store.models = redisStore
 	store.responses = redisStore
 	store.reasoning = redisStore
-	if err := redisStore.migrateLegacyAccountCredentials(context.Background()); err != nil {
+	if err := redisStore.validateAccountCredentials(context.Background()); err != nil {
 		_ = redisStore.Close()
-		return nil, fmt.Errorf("failed to migrate account credentials: %w", err)
+		return nil, fmt.Errorf("failed to validate account credentials: %w", err)
 	}
 	store.prepareModels()
 	return store, nil
@@ -422,9 +421,6 @@ func New(opts Options) (*Store, error) {
 // upstream withdrew them.
 func (s *Store) prepareModels() {
 	ctx := context.Background()
-	// Deprecated identifiers are removed because they are known-dead names that
-	// must not stay routable; this inspects stored rows and never adds any.
-	s.cleanupDeprecatedModelIDs(ctx)
 	// Route metadata for stored Grok rows is repaired in place.
 	s.backfillGrokRouteMetadata(ctx)
 }
@@ -445,47 +441,6 @@ func (s *Store) backfillGrokRouteMetadata(ctx context.Context) {
 		applyGrokRouteDefaults(&updated)
 		if err := s.UpdateModel(ctx, &updated); err != nil {
 			slog.Warn("failed to backfill Grok Build route metadata", "model_id", model.ModelID, "error", err)
-		}
-	}
-}
-
-// deprecatedModelIDsByChannel documents the rule below: a retired identifier is
-// retired *within a channel's namespace*, not everywhere.
-//
-// The list used to be applied by identifier alone. That deleted working models:
-// a channel catalog may legitimately advertise grok-4.3, grok-4.20-* and
-// grok-build-0.1 (they route xAI models), so every restart removed rows a
-// refresh had just published, and a refresh put them back. The channel is
-// therefore part of the entry.
-//
-// The Grok entries are the runtime interception list in modelpolicy
-// (deprecatedGrokModelIDs) plus the Grok-channel extra "grok-4.3"; keep the two
-// in step by deriving from modelpolicy rather than editing both lists.
-var deprecatedModelIDsByChannel = func() map[string][]string {
-	grokIDs := make([]string, 0, len(modelpolicy.DeprecatedGrokModelIDs)+1)
-	for id := range modelpolicy.DeprecatedGrokModelIDs {
-		grokIDs = append(grokIDs, id)
-	}
-	// grok-4.3 is deprecated for the Grok channel only: other channels may still
-	// route it.
-	grokIDs = append(grokIDs, "grok-4.3")
-	return map[string][]string{"Grok": grokIDs}
-}()
-
-// cleanupDeprecatedModelIDs removes retired identifiers from the channel whose
-// namespace retired them. It inspects stored rows and never adds any.
-func (s *Store) cleanupDeprecatedModelIDs(ctx context.Context) {
-	for channel, modelIDs := range deprecatedModelIDsByChannel {
-		for _, modelID := range modelIDs {
-			m, err := s.GetModelByChannelAndModelID(ctx, channel, modelID)
-			if err != nil || m == nil {
-				continue
-			}
-			if err := s.DeleteModel(ctx, m.ID); err != nil {
-				slog.Warn("Failed to remove deprecated model", "channel", channel, "model_id", modelID, "error", err)
-				continue
-			}
-			slog.Debug("Removed deprecated model", "channel", channel, "model_id", modelID)
 		}
 	}
 }

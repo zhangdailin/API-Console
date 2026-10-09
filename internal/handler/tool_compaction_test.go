@@ -96,7 +96,7 @@ func TestDeclaredToolNames_EmptyAndNoValidDeclarations(t *testing.T) {
 	}
 }
 
-func TestDeclaredToolNames_DeduplicatesNamesAndAliases(t *testing.T) {
+func TestDeclaredToolNames_PreservesExactNames(t *testing.T) {
 	tools := []interface{}{
 		map[string]interface{}{"name": " Agent "},
 		map[string]interface{}{"name": "task"},
@@ -104,7 +104,7 @@ func TestDeclaredToolNames_DeduplicatesNamesAndAliases(t *testing.T) {
 		map[string]interface{}{"name": "web_search"},
 	}
 	got := declaredToolNames(tools)
-	want := []string{"Agent", "Task", "WEB_SEARCH"}
+	want := []string{"Agent", "task", "WEB_SEARCH", "web_search"}
 	testutil.Equal(t, len(got), len(want))
 	for i := range want {
 		testutil.Equal(t, got[i], want[i])

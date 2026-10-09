@@ -150,15 +150,12 @@ func applyGrokBuildProfile(entry *PublicModelResponse, profile modelcatalog.Prof
 	}
 }
 
-func appendGrokCompatibilityAliases(items []PublicModelResponse, seen map[string]struct{}, entry PublicModelResponse) []PublicModelResponse {
+func appendGrokReasoningVariants(items []PublicModelResponse, seen map[string]struct{}, entry PublicModelResponse) []PublicModelResponse {
 	if !strings.EqualFold(entry.OwnedBy, "grok") {
 		return items
 	}
 	base := modelpolicy.GrokModelSlug(entry.ID)
 	aliases := make([]string, 0, 6)
-	if strings.Contains(strings.TrimSpace(entry.ID), "/") {
-		aliases = append(aliases, base)
-	}
 	// Publish only effort aliases supported by the Build model contract.
 	levels := modelpolicy.SupportedReasoningEfforts(entry.ID)
 	if len(levels) >= 2 {
@@ -228,12 +225,6 @@ func (h *Handler) HandleModels(w http.ResponseWriter, r *http.Request) {
 		// Publish one public row per external Build model ID.
 		publicIDKey := publicModelIDKey(publicID)
 		if _, duplicate := seenPublicModelIDs[publicIDKey]; duplicate {
-			// Preserve one OpenAI model row for duplicate Build aliases.
-			for i := range publicModels {
-				if publicModelIDKey(publicModels[i].ID) == publicIDKey {
-					break
-				}
-			}
 			continue
 		}
 		seenPublicModelIDs[publicIDKey] = struct{}{}
@@ -263,7 +254,7 @@ func (h *Handler) HandleModels(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		publicModels = append(publicModels, entry)
-		publicModels = appendGrokCompatibilityAliases(publicModels, seenPublicModelIDs, entry)
+		publicModels = appendGrokReasoningVariants(publicModels, seenPublicModelIDs, entry)
 	}
 
 	// Codex-family clients ask for a richer catalog that carries the context
@@ -293,10 +284,12 @@ func (h *Handler) HandleModelByID(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	path := r.URL.Path
-	_, id, matched := channel.TrimModelPath(path)
+	providerID, id, matched := channel.TrimModelPath(path)
 	if !matched {
-		id = strings.TrimPrefix(path, "/v1/models/")
+		apperrors.New("invalid_request_error", "Model route not found", http.StatusNotFound).WriteResponse(w)
+		return
 	}
+	filterChannel := string(providerID)
 
 	if id == "" {
 		apperrors.New("invalid_request_error", "Model ID required", http.StatusBadRequest).WriteResponse(w)
@@ -313,16 +306,7 @@ func (h *Handler) HandleModelByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filterChannel := channelFromPath(path)
-	var (
-		m   *store.Model
-		err error
-	)
-	if filterChannel != "" {
-		m, err = h.loadBalancer.Store.GetModelByChannelAndModelID(ctx, filterChannel, id)
-	} else {
-		m, err = h.loadBalancer.Store.GetModelByModelID(ctx, id)
-	}
+	m, err := h.loadBalancer.Store.GetModelByChannelAndModelID(ctx, filterChannel, id)
 	if err != nil || m == nil {
 		// The catalog collapses "<family>-<effort>" variants into one entry and
 		// advertises the *family* slug, so a client validating a catalog entry
@@ -330,11 +314,7 @@ func (h *Handler) HandleModelByID(w http.ResponseWriter, r *http.Request) {
 		// path would use; answering 404 here is what pushes a client back to
 		// guessing suffixes.
 		if variant := h.resolveEffortModelVariant(ctx, id, "", filterChannel); variant != "" && variant != id {
-			if filterChannel != "" {
-				m, err = h.loadBalancer.Store.GetModelByChannelAndModelID(ctx, filterChannel, variant)
-			} else {
-				m, err = h.loadBalancer.Store.GetModelByModelID(ctx, variant)
-			}
+			m, err = h.loadBalancer.Store.GetModelByChannelAndModelID(ctx, filterChannel, variant)
 		}
 	}
 	if err != nil || m == nil {

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"orchids-api/internal/responses"
 	"orchids-api/internal/testutil"
 	"strings"
 	"testing"
@@ -52,7 +53,7 @@ func TestResponsesNativeAuditBoundsWholeMultilineFrame(t *testing.T) {
 	line := "data: " + strings.Repeat("a", 64<<10) + "\n"
 	recorder := httptest.NewRecorder()
 	_, capture, result := copyNativeCLIResponseAndCaptureModel(recorder, strings.NewReader(strings.Repeat(line, 130)), "text/event-stream", "grok-4.6")
-	if result.Err == nil || len(capture) > upstreamMaxEventBytes || !strings.Contains(recorder.Body.String(), "response.failed") {
+	if result.Err == nil || len(capture) > responses.MaxEventBytes || !strings.Contains(recorder.Body.String(), "response.failed") {
 		t.Fatal("multiline audit accumulation is unbounded", result)
 	}
 }

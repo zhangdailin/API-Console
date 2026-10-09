@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"orchids-api/internal/accountpolicy"
 	"orchids-api/internal/audit"
+	"orchids-api/internal/chatwire"
 	"orchids-api/internal/config"
 	"orchids-api/internal/handler"
 	"orchids-api/internal/loadbalancer"
@@ -143,7 +144,7 @@ func (h *Handler) auditAttempt(ctx context.Context, acc *store.Account, provider
 	h.auditAttemptDiagnostic(ctx, acc, provider, attempt, started, err, stage, nil, nil, "")
 }
 
-func (h *Handler) auditChatOutcome(ctx context.Context, acc *store.Account, req *ChatCompletionsRequest, result chatOutcome) {
+func (h *Handler) auditChatOutcome(ctx context.Context, acc *store.Account, req *chatwire.Request, result chatOutcome) {
 	logger := h.auditLoggerSnapshot()
 	if logger == nil {
 		return
@@ -257,9 +258,6 @@ func (h *Handler) cacheValidatedModel(modelID string) {
 
 func (h *Handler) ensureModelEnabled(ctx context.Context, modelID string) error {
 	id := normalizeModelID(modelID)
-	if IsDeprecatedModelID(id) {
-		return fmt.Errorf("model not found")
-	}
 	if h.isModelValidationCached(id) {
 		return nil
 	}
@@ -335,7 +333,7 @@ func (h *Handler) ensureResolvedModelCapability(ctx context.Context, modelID str
 // can never turn into upstream model probes.
 func (h *Handler) resolveConversationModel(ctx context.Context, modelID string) (ModelSpec, bool) {
 	id := normalizeModelID(modelID)
-	if id == "" || IsDeprecatedModelID(id) {
+	if id == "" {
 		return ModelSpec{}, false
 	}
 	if spec, effort, ok := ResolveModelAlias(modelID); ok {

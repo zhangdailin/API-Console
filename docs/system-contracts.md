@@ -6,9 +6,9 @@
 
 API-Console 是 Go 网关与内嵌 Go 模板、原生 JavaScript 管理后台。Redis 保存主要业务状态，凭据主密钥来自文件或环境变量。Node 用于前端测试，不是服务运行依赖。
 
-WorkBuddy、Qoder、Cline 走共享 Handler、提供者工厂和能力适配；Grok Build 走独立处理器，上游生成使用 Responses，面向客户端提供 Chat / Messages 转换。统一入口按模型分发，固定通道入口绑定通道；响应子资源依赖已存所有权与提供者信息，不能用没有 model 的取消请求猜测渠道。
+WorkBuddy、Qoder、Cline 走共享 Handler、提供者工厂和能力适配；Grok Build 走独立处理器，上游生成使用 Responses，面向客户端提供 Chat / Messages 转换。所有推理入口通过路径绑定通道，通道根前缀与带 /v1 前缀能力一致；统一推理入口已删除。响应子资源依赖已存所有权，取消和输入历史显式注册共享接口。
 
-共享 Chat 线格式放在 `internal/chatwire`，Responses 协议放在 `internal/responses`，通用 HTTP 逻辑放在 `internal/httpclient` / `httpserver`。Grok shim 是兼容入口；修改共享协议时先定位真正实现。
+共享 Chat 线格式放在 `internal/chatwire`，Responses 协议放在 `internal/responses`，通用 HTTP 逻辑放在 `internal/httpclient` / `httpserver`。调用方直接使用所属包的实现。
 
 证据：[架构](architecture.md)、[启动装配](../cmd/server/main.go)、[路由](../cmd/server/routes.go)、[提供者能力装配](../internal/provider/capabilities_wire.go)。
 
@@ -27,7 +27,7 @@ WorkBuddy、Qoder、Cline 走共享 Handler、提供者工厂和能力适配；G
 
 ## 3. 防止错误修改的不变量
 
-1. **凭据与数据一起恢复。** 加密账号读取不能靠删除密钥修复；错误密钥与迁移失败须保留失败状态。压缩状态派生域 `orchids:secureblob:v1:` 与展示名无关，不能因改品牌机械更名。
+1. **凭据与数据一起恢复。** 加密账号读取不能靠删除密钥修复；错误密钥、坏密文与加密模式下的明文记录须明确失败，不自动迁移。压缩状态派生域 `orchids:secureblob:v1:` 与展示名无关，不能因改品牌机械更名。
 2. **轮换凭据不能覆盖更新结果。** 专用凭据补丁核对预期 refresh token；相同新令牌允许幂等重入，陈旧身份拒绝写入。普通账号编辑和计数器各有写入职责。
 3. **已交付输出限制重放。** 共享 Handler 发生部分输出后不重新生成；Grok 质量重试先暂存输出，并检查安全重放与预算，有副作用工具请求受保护。
 4. **流的 HTTP 成功不等于协议成功。** 各提供者与桥接层有自己的终止合同；不得把 EOF、keepalive 或已发出的 200 自动解释为成功完成。
@@ -52,11 +52,11 @@ WorkBuddy、Qoder、Cline 走共享 Handler、提供者工厂和能力适配；G
 | [Key 并发](../internal/middleware/key_concurrency_test.go) | 准入与释放、Key 与账号计数身份隔离 |
 | [可信代理](../internal/middleware/trusted_proxy_test.go) | 真实地址只来自可信代理链 |
 | [提供者凭据补丁](../internal/store/provider_credential_patch_test.go) | 陈旧轮换拒绝与并发字段保留 |
-| [凭据加密](../internal/store/credential_cipher_test.go) | 旧明文迁移、错误密钥与解密失败 |
+| [凭据加密](../internal/store/credential_cipher_test.go) | 明文拒绝、启动不改写、错误密钥与解密失败 |
 | [账号持久通知](../internal/store/account_events_test.go) | 持久后通知、异步分发与合并 |
 | [Key 权威鉴权](../internal/store/api_key_auth_test.go) | 存储策略与限流判定的权威来源 |
 | [客户端缓存事件](../internal/handler/client_cache_events_test.go) | 轮换退役旧客户端，最后租约释放后关闭 |
-| [Qoder 工具参数](../internal/qoder/tool_escalation_test.go) | 聚合后清孤立 justification，保留显式权限 |
+| [Qoder 原生工具](../internal/qoder/tool_protocol_test.go) | 原生函数参数保留、工具文本不执行、终止与用量处理 |
 | [Grok 质量暂存](../internal/grok/quality_hold_test.go) | 暂存、重试、预算与安全重放 |
 | [共享 SSE 接入](../internal/grok/responses_sse_adoption_test.go) | SSE 原始帧与共享实现边界 |
 | [会话状态存储](../internal/store/grok_session_store_test.go) | 亲和及推理回放的隔离、TTL 与身份 |

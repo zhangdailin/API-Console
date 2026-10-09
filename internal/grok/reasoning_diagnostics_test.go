@@ -2,6 +2,7 @@ package grok
 
 import (
 	"context"
+	"orchids-api/internal/chatwire"
 	"testing"
 	"time"
 
@@ -15,7 +16,7 @@ func TestBuildChatSummaryBoundary(t *testing.T) {
 	for _, operation := range []string{"", "messages", "responses"} {
 		for _, build := range []bool{false, true} {
 			for _, effort := range []string{"", "low", "xhigh", "none"} {
-				req := &ChatCompletionsRequest{Model: "grok-4.6", SourceOperation: operation, Messages: []ChatMessage{{Role: "user", Content: "hello"}}}
+				req := &chatwire.Request{Model: "grok-4.6", SourceOperation: operation, Messages: []chatwire.Message{{Role: "user", Content: "hello"}}}
 				if effort != "" {
 					req.ReasoningEffort = &effort
 				}
@@ -41,10 +42,10 @@ func TestChatReasoningSummaryIsClientOwned(t *testing.T) {
 	for _, build := range []bool{false, true} {
 		for _, operation := range []string{"", "messages", "responses"} {
 			summary, effort := "auto", "low"
-			req := &ChatCompletionsRequest{
+			req := &chatwire.Request{
 				Model: "grok-4.6", SourceOperation: operation,
 				ReasoningEffort: &effort, ReasoningSummary: &summary,
-				Messages: []ChatMessage{{Role: "user", Content: "hello"}},
+				Messages: []chatwire.Message{{Role: "user", Content: "hello"}},
 			}
 			payload, err := (&Handler{}).responsesPayloadFromChat(ModelSpec{UpstreamModel: "grok-4.6"}, req, build)
 			testutil.NoError(t, err)
@@ -61,7 +62,7 @@ func TestChatReasoningSummaryIsClientOwned(t *testing.T) {
 func TestChatAlwaysRequestsEncryptedReasoning(t *testing.T) {
 	for _, build := range []bool{false, true} {
 		for _, effort := range []string{"", "none", "low"} {
-			req := &ChatCompletionsRequest{Model: "grok-4.6", Messages: []ChatMessage{{Role: "user", Content: "hello"}}}
+			req := &chatwire.Request{Model: "grok-4.6", Messages: []chatwire.Message{{Role: "user", Content: "hello"}}}
 			if effort != "" {
 				req.ReasoningEffort = &effort
 			}
@@ -92,7 +93,7 @@ func TestAuditChatOutcomePersistsAccountTokens(t *testing.T) {
 	acc := &store.Account{AccountType: "grok", GrokProvider: ProviderBuild, Enabled: true}
 	testutil.NoError(t, s.CreateAccount(context.Background(), acc))
 	h := &Handler{lb: loadbalancer.NewWithCacheTTL(s, time.Minute), auditLogger: audit.NewNopLogger()}
-	h.auditChatOutcome(context.Background(), acc, &ChatCompletionsRequest{Model: "grok-4.7"}, chatOutcome{
+	h.auditChatOutcome(context.Background(), acc, &chatwire.Request{Model: "grok-4.7"}, chatOutcome{
 		Finish:      "stop",
 		Usage:       map[string]interface{}{"prompt_tokens": 120, "completion_tokens": 30, "total_tokens": 150},
 		UsageSource: audit.UsageSourceUpstream,
@@ -114,7 +115,7 @@ func TestReasoningDiagnosticsReachAttemptAndOutcome(t *testing.T) {
 		log := &parityAuditLog{}
 		h := &Handler{auditLogger: log}
 		h.auditAttempt(ctx, nil, ProviderBuild, 1, time.Now(), nil)
-		h.auditChatOutcome(ctx, nil, &ChatCompletionsRequest{}, chatOutcome{Finish: "stop"})
+		h.auditChatOutcome(ctx, nil, &chatwire.Request{}, chatOutcome{Finish: "stop"})
 		testutil.Equal(t, len(log.events), 2)
 		for _, event := range log.events {
 			want := effort
