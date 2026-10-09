@@ -111,7 +111,7 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 	payload["model"] = spec.UpstreamModel
 	call := func() (*http.Response, error) {
 		if pinned {
-			return h.buildClient().doResponsesAt(r.Context(), sess.acc, upstreamPath, payload)
+			return h.doCLIPinnedResponsesAt(r.Context(), sess, payload, spec.UpstreamModel, upstreamPath)
 		}
 		return h.doCLIWithAutoSwitchAt(r.Context(), sess, payload, spec.UpstreamModel, upstreamPath)
 	}

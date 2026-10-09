@@ -150,32 +150,6 @@ func applyGrokBuildProfile(entry *PublicModelResponse, profile modelcatalog.Prof
 	}
 }
 
-func appendGrokReasoningVariants(items []PublicModelResponse, seen map[string]struct{}, entry PublicModelResponse) []PublicModelResponse {
-	if !strings.EqualFold(entry.OwnedBy, "grok") {
-		return items
-	}
-	base := modelpolicy.GrokModelSlug(entry.ID)
-	aliases := make([]string, 0, 6)
-	// Publish only effort aliases supported by the Build model contract.
-	levels := modelpolicy.SupportedReasoningEfforts(entry.ID)
-	if len(levels) >= 2 {
-		for _, level := range levels {
-			aliases = append(aliases, base+"-"+level)
-		}
-	}
-	for _, alias := range aliases {
-		key := publicModelIDKey(alias)
-		if _, duplicate := seen[key]; duplicate {
-			continue
-		}
-		seen[key] = struct{}{}
-		copy := entry
-		copy.ID = alias
-		items = append(items, copy)
-	}
-	return items
-}
-
 func (h *Handler) HandleModels(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		apperrors.New("invalid_request_error", "Method not allowed", http.StatusMethodNotAllowed).WriteResponse(w)
@@ -254,7 +228,6 @@ func (h *Handler) HandleModels(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		publicModels = append(publicModels, entry)
-		publicModels = appendGrokReasoningVariants(publicModels, seenPublicModelIDs, entry)
 	}
 
 	// Codex-family clients ask for a richer catalog that carries the context

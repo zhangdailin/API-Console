@@ -103,6 +103,11 @@ func grokUpstreamFailureMessage(err error) string {
 // plane. That plane keeps its own envelope and the status the caller already
 // computed (a client acts on the status), while the prose goes to the log.
 func writeGrokUpstreamFailure(w http.ResponseWriter, status int, err error) {
+	var profileErr *buildReasoningProfileError
+	if errors.As(err, &profileErr) {
+		writeResponsesAPIErrorWithParam(w, http.StatusBadRequest, "invalid_request_error", profileErr.Error(), "reasoning.effort")
+		return
+	}
 	if err != nil {
 		slog.Warn("Reporting an upstream failure to the client", "error", err, "status", status)
 	}

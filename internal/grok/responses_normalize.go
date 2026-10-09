@@ -67,6 +67,7 @@ func normalizeBuildResponsesPayload(payload map[string]interface{}) error {
 		}
 	}
 	tools := responses.InterfaceMaps(payload["tools"])
+	tools = normalizeBuildFunctionTools(tools)
 	if len(tools) == 0 {
 		delete(payload, "tools")
 		delete(payload, "tool_choice")

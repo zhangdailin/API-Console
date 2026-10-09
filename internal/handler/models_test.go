@@ -23,20 +23,27 @@ func TestPublicModelResponseUsesRouteCreatedAt(t *testing.T) {
 	testutil.Equal(t, legacy.Created, legacyModelCreated)
 }
 
-func TestAppendGrokReasoningVariantsUsesCaseInsensitiveIndex(t *testing.T) {
-	items := []PublicModelResponse{{ID: "GROK-4.6-HIGH", OwnedBy: "grok"}}
-	seen := map[string]struct{}{publicModelIDKey(items[0].ID): {}}
-	entry := PublicModelResponse{ID: "grok-4.6", OwnedBy: "Grok"}
-
-	items = appendGrokReasoningVariants(items, seen, entry)
-
-	counts := make(map[string]int)
-	for _, item := range items {
-		counts[publicModelIDKey(item.ID)]++
+func TestGrokPublicCatalogUsesConfiguredModelIDs(t *testing.T) {
+	h, s, _ := setupModelValidationHandler(t)
+	publishModel(t, s,
+		&store.Model{Channel: "Grok", ModelID: "grok-4.7"},
+		&store.Model{Channel: "Grok", ModelID: "grok-4.6"},
+		&store.Model{Channel: "Grok", ModelID: "grok-4.6-high"},
+		&store.Model{Channel: "Grok", ModelID: "grok-4.7-offline", Status: store.ModelStatusOffline},
+	)
+	rec := httptest.NewRecorder()
+	h.HandleModels(rec, httptest.NewRequest(http.MethodGet, "/grok/v1/models", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body)
 	}
-	testutil.Equal(t, counts["grok-4.6-high"], 1)
-	for _, want := range []string{"grok-4.6-low", "grok-4.6-medium", "grok-4.6-xhigh"} {
-		testutil.Equal(t, counts[want], 1)
+	var payload PublicModelsListResponse
+	testutil.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload), "decode: %v")
+	var ids []string
+	for _, row := range payload.Data {
+		ids = append(ids, row.ID)
+	}
+	if strings.Join(ids, ",") != "grok-4.6,grok-4.6-high,grok-4.7" {
+		t.Fatalf("catalog invented or lost configured rows: %v", ids)
 	}
 }
 
@@ -108,9 +115,3 @@ func TestHandleModelsPublishesConservativeEnabledBuildProfile(t *testing.T) {
 		t.Fatalf("dynamic budgets=%+v", *got)
 	}
 }
-
-// TestAppendGrokReasoningVariantsRespectsThePlane keeps the advertised alias
-// set equal to the set the resolver accepts. The entry carries the bare public
-// name, so the plane has to come from the row: a Build model that refuses an
-// effort parameter must not publish <name>-<effort> aliases that every request
-// then rejects as model_not_found.

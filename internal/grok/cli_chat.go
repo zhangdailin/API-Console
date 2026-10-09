@@ -26,6 +26,17 @@ func (h *Handler) cliHeaders(acc *store.Account, token string) http.Header {
 	return h.buildClient().cliHeaders(acc, token)
 }
 
+// Continuations keep the creating account and apply its capability profile just
+// as first turns do. They must never bypass reasoning validation or switch accounts.
+func (h *Handler) doCLIPinnedResponsesAt(ctx context.Context, sess *chatAccountSession, payload map[string]interface{}, modelID, path string) (*http.Response, error) {
+	attempt, err := buildPayloadForAccount(payload, sess.acc, modelID)
+	if err != nil {
+		return nil, err
+	}
+	replacePayload(payload, attempt)
+	return h.buildClient().doResponsesAt(withReasoningDiagnostics(ctx, payload), sess.acc, path, payload)
+}
+
 // doCLIWithAutoSwitchAt issues a CLI request, switching to another OAuth account
 // on transient failures (401 after refresh, 5xx) while treating team-level 429
 // as shared (no switch).

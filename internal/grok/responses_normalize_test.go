@@ -70,15 +70,25 @@ func TestNativeMCPHistoryIsNotLoweredToText(t *testing.T) {
 	testutil.Equal(t, string(after), string(before))
 }
 
-func TestNativeToolsPreserveNamesSchemasAndArguments(t *testing.T) {
+func TestNativeToolsPreserveNamesConstraintsAndArguments(t *testing.T) {
 	schema := map[string]interface{}{"type": "object", "anyOf": []interface{}{map[string]interface{}{"required": []interface{}{"value"}}}, "properties": map[string]interface{}{"value": map[string]interface{}{"type": "integer"}}}
 	tool := map[string]interface{}{"type": "function", "name": "Mixed.Case", "parameters": schema}
 	item := map[string]interface{}{"type": "function_call", "name": "Mixed.Case", "call_id": "call", "arguments": `{"value":1000.0}`}
 	before, _ := json.Marshal(map[string]interface{}{"tool": tool, "item": item})
 	payload := map[string]interface{}{"tools": []interface{}{tool}, "input": []interface{}{item}, "tool_choice": map[string]interface{}{"type": "function", "name": "Mixed.Case"}}
 	testutil.NoError(t, normalizeBuildResponsesPayload(payload))
-	after, _ := json.Marshal(map[string]interface{}{"tool": responses.InterfaceMaps(payload["tools"])[0], "item": responses.InterfaceMaps(payload["input"])[0]})
-	testutil.Equal(t, string(after), string(before))
+	after, _ := json.Marshal(map[string]interface{}{"tool": tool, "item": item})
+	testutil.Equal(t, string(after), string(before)) // Caller objects are unchanged.
+	wireTool := responses.InterfaceMaps(payload["tools"])[0]
+	testutil.Equal(t, wireTool["name"], "Mixed.Case")
+	wireSchema := wireTool["parameters"].(map[string]interface{})
+	testutil.Equal(t, wireSchema["type"], "object")
+	testutil.Equal(t, wireSchema["anyOf"], nil)
+	got, _ := json.Marshal(wireSchema["allOf"])
+	testutil.Equal(t, string(got), `[{"anyOf":[{"required":["value"]}]}]`)
+	got, _ = json.Marshal(responses.InterfaceMaps(payload["input"])[0])
+	want, _ := json.Marshal(item)
+	testutil.Equal(t, string(got), string(want))
 	for _, id := range []string{"grok-4.5-latest", "grok-4.6-latest", "grok-code-fast", "build/grok-4.6", "grok_build/grok-4.6", "grok-4.5-latest-high"} {
 		_, ok := ResolveModel(id)
 		testutil.False(t, ok, "historical aliases must not resolve")
