@@ -20,7 +20,6 @@
     // Prevent slow overview/runtime requests from overlapping on each refresh
     // tick and multiplying server aggregation plus SVG rendering work.
     loading: false,
-    alertRequest: 0,
     overview: null,
     // outcome selects which cohort the latency cards describe: every request, the
     // ones that ended in a failure, or the ones where an upstream attempt failed
@@ -961,15 +960,15 @@
     const localChannel = (el('opsAlertChannel') || {}).value || '';
     const channel = state.channel || localChannel;
     const scope = { window: state.window, channel: state.channel };
-    const request = ++state.alertRequest;
-    const current = () => request === state.alertRequest && scope.window === state.window && scope.channel === state.channel;
+    const ticket = alertLoads.begin();
+    const current = () => ticket.isCurrent() && scope.window === state.window && scope.channel === state.channel;
     const range = windowRange();
     body.replaceChildren();
     try {
       const params = assignParams(new URLSearchParams({ kind: 'system', action: 'alert_', limit: '50' }), {
         channel, since: range.since.toISOString(), until: range.until.toISOString(),
       });
-      const response = await ConsoleAPI.request('/api/journal/records?' + params.toString(), { credentials: 'same-origin' });
+      const response = await ConsoleAPI.request('/api/journal/records?' + params.toString(), { signal: ticket.signal });
       if (!response.ok) throw new Error('HTTP ' + response.status);
       const payload = await response.json();
       if (!current()) return;
@@ -1227,12 +1226,17 @@
     if (dot) dot.className = 'ops-dot' + (tone ? ' ' + tone : '');
   }
 
+  const overviewLoads = ConsoleUI.requestGate();
+  const alertLoads = ConsoleUI.requestGate();
   async function load() {
     if (state.loading) {
       state.refreshPending = true;
+      overviewLoads.cancel();
+      alertLoads.cancel();
       return;
     }
     state.loading = true;
+    const ticket = overviewLoads.begin();
     const scope = { window: state.window, channel: state.channel };
     if (!state.overview) renderSkeletons();
     setStatus('读取中…', 'is-warn');
@@ -1240,15 +1244,15 @@
     try {
       const params = assignParams(new URLSearchParams({ window: String(state.window) }), { channel: state.channel });
       const [overviewResponse, runtimeResponse] = await Promise.all([
-        ConsoleAPI.request('/api/ops/overview?' + params.toString(), { credentials: 'same-origin' }),
-        ConsoleAPI.request('/api/ops/runtime', { credentials: 'same-origin' }).catch(() => null),
+        ConsoleAPI.request('/api/ops/overview?' + params.toString(), { signal: ticket.signal }),
+        ConsoleAPI.request('/api/ops/runtime', { signal: ticket.signal }).catch(() => null),
       ]);
       if (!overviewResponse.ok) throw new Error('HTTP ' + overviewResponse.status);
       const payload = await overviewResponse.json();
       const runtimePayload = runtimeResponse && runtimeResponse.ok
         ? await runtimeResponse.json().catch(() => null) : null;
       // A queued filter change owns the screen; never paint the previous scope.
-      if (scope.window !== state.window || scope.channel !== state.channel) return;
+      if (!ticket.isCurrent() || scope.window !== state.window || scope.channel !== state.channel) return;
       state.overview = payload;
       renderKpis(payload);
       renderHero(payload);
@@ -1268,7 +1272,7 @@
       state.countdown = state.refreshSeconds;
       await loadAlertEvents();
     } catch (error) {
-      if (scope.window !== state.window || scope.channel !== state.channel) return;
+      if (!ticket.accepts(error) || scope.window !== state.window || scope.channel !== state.channel) return;
       // A failed filter change has no valid historical scope to display.
       state.overview = null;
       if (!state.overview) {

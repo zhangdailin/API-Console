@@ -338,19 +338,6 @@ func RequestModelHint(ctx context.Context) (context.Context, func() string) {
 	return context.WithValue(ctx, requestModelContextKey{}, box), func() string { return box.model }
 }
 
-// RequestModelFromContext reads the model published by the protocol handler,
-// allowing request metrics and downstream processing to share its identity.
-func RequestModelFromContext(ctx context.Context) string {
-	if ctx == nil {
-		return ""
-	}
-	box, _ := ctx.Value(requestModelContextKey{}).(*requestModelHintBox)
-	if box == nil {
-		return ""
-	}
-	return box.model
-}
-
 func recordRequestOutcome(r *http.Request, wrapped *TracedResponseWriter, duration time.Duration, model string) {
 	if detailedOutcomeRecorder == nil || r == nil || wrapped == nil {
 		return

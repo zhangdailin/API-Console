@@ -63,7 +63,7 @@ func TestGetNextAccountExcludingByChannelWithTrackerFilter_ModelFilterEmptiesThe
 
 	_, err := lb.GetNextAccountExcludingByChannelWithTrackerFilter(context.Background(), nil, "workbuddy", tracker, func(*store.Account) error {
 		// The per-model cooldown filter: every candidate is withheld for this model.
-		return RejectModelThrottled
+		return ErrModelThrottled
 	})
 	testutil.False(t, err == nil, "expected a model-filtered selector error, got nil")
 	testutil.MustContain(t, err.Error(), "cooling down for the requested model")

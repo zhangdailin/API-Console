@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+
 	"github.com/redis/go-redis/v9"
 )
 
@@ -102,7 +103,7 @@ func (s *redisStore) DeleteReasoningReplay(ctx context.Context, model, key strin
 }
 
 func (s *redisStore) SaveReasoningReplay(ctx context.Context, replay *StoredReasoningReplay, ttl time.Duration) error {
-	if replay == nil || strings.TrimSpace(replay.Model) == "" || strings.TrimSpace(replay.SessionKey) == "" || (strings.TrimSpace(replay.EncryptedContent) == "" && len(replay.Items) == 0) {
+	if replay == nil || strings.TrimSpace(replay.Model) == "" || strings.TrimSpace(replay.SessionKey) == "" || len(replay.Items) == 0 {
 		return fmt.Errorf("invalid reasoning replay")
 	}
 	// Replay readers decode each item into a map; JSON scalars, arrays and null
@@ -127,9 +128,22 @@ func (s *redisStore) SaveReasoningReplay(ctx context.Context, replay *StoredReas
 
 func (s *redisStore) GetReasoningReplay(ctx context.Context, model, sessionKey string) (*StoredReasoningReplay, error) {
 	key := s.reasoningReplayKey(model, sessionKey)
-	return getExpiringRedisJSON[StoredReasoningReplay](ctx, s, key, func(replay *StoredReasoningReplay) time.Time {
+	replay, err := getExpiringRedisJSON[StoredReasoningReplay](ctx, s, key, func(replay *StoredReasoningReplay) time.Time {
 		return replay.ExpiresAt
 	})
+	if err != nil || replay == nil {
+		return replay, err
+	}
+	if len(replay.Items) == 0 {
+		return nil, nil
+	}
+	for _, item := range replay.Items {
+		var object map[string]interface{}
+		if json.Unmarshal(item, &object) != nil || object == nil {
+			return nil, nil
+		}
+	}
+	return replay, nil
 }
 
 func (s *redisStore) sessionAffinityKey(provider, model, sessionKey string) string {

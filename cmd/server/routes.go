@@ -159,8 +159,8 @@ func registerRoutes(
 		responseStoreTTL = time.Duration(cfg.ResponseStoreTTL) * time.Hour
 	}
 	bridgeOptions := responses.BridgeOptions{Store: s, TTL: responseStoreTTL}
-	channelResponses := grok.ResponsesBridgeHandler(h.HandleMessages, bridgeOptions)
-	channelResponsesSub := grok.ResponsesChannelSubpath(h.HandleMessages, bridgeOptions)
+	channelResponses := responses.ResponsesBridgeHandler(h.HandleMessages, bridgeOptions)
+	channelResponsesSub := responses.ResponsesChannelSubpath(h.HandleMessages, bridgeOptions)
 	registerWithPrefixes(mux, channelPrefixes, "/responses", inferenceAuth(channelResponses))
 	registerWithPrefixes(mux, channelPrefixes, "/responses/", inferenceAuth(channelResponsesSub))
 	// Resource actions share the same ownership-checked store on both bases.

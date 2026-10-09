@@ -1,9 +1,9 @@
-package grok
+package responses
 
 import (
 	"net/http"
 	"net/http/httptest"
-	"orchids-api/internal/responses"
+
 	"strings"
 	"sync"
 	"testing"
@@ -14,7 +14,7 @@ func TestBridgeConsumesEncryptedReasoningProjection(t *testing.T) {
 		for _, stream := range []string{"true", "false"} {
 			var mu sync.Mutex
 			var calls []recordedChatCall
-			bridge := ResponsesBridgeHandler(recordingChat(t, &calls, &mu), responses.BridgeOptions{})
+			bridge := ResponsesBridgeHandler(recordingChat(t, &calls, &mu), BridgeOptions{})
 			rec := httptest.NewRecorder()
 			bridge(rec, httptest.NewRequest(http.MethodPost, "/"+channel+"/v1/responses", strings.NewReader(`{"model":"test","input":"hello","stream":`+stream+`,"include":["reasoning.encrypted_content"]}`)))
 			if rec.Code != 200 || len(calls) != 1 {
@@ -34,7 +34,7 @@ func TestBridgeConsumesEncryptedReasoningProjection(t *testing.T) {
 
 func TestBridgeStillRejectsEncryptedInput(t *testing.T) {
 	called := false
-	bridge := ResponsesBridgeHandler(func(http.ResponseWriter, *http.Request) { called = true }, responses.BridgeOptions{})
+	bridge := ResponsesBridgeHandler(func(http.ResponseWriter, *http.Request) { called = true }, BridgeOptions{})
 	rec := httptest.NewRecorder()
 	bridge(rec, httptest.NewRequest("POST", "/qoder/v1/responses", strings.NewReader(`{"model":"test","input":[{"type":"reasoning","encrypted_content":"opaque"}],"include":["reasoning.encrypted_content"]}`)))
 	if called || rec.Code == 200 {
@@ -46,7 +46,7 @@ func TestBridgeDisablesHostedSearchWithoutInventingFunction(t *testing.T) {
 	for _, channel := range []string{"qoder", "workbuddy", "cline"} {
 		var mu sync.Mutex
 		var calls []recordedChatCall
-		bridge := ResponsesBridgeHandler(recordingChat(t, &calls, &mu), responses.BridgeOptions{})
+		bridge := ResponsesBridgeHandler(recordingChat(t, &calls, &mu), BridgeOptions{})
 		rec := httptest.NewRecorder()
 		bridge(rec, httptest.NewRequest("POST", "/"+channel+"/v1/responses", strings.NewReader(`{"model":"test","input":"hello","include":["reasoning.encrypted_content"],"tools":[{"type":"web_search","external_web_access":false},{"type":"function","name":"read_file","parameters":{"type":"object"}}]}`)))
 		if rec.Code != 200 || len(calls) != 1 {

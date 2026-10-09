@@ -40,8 +40,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"orchids-api/internal/util"
+
+	"github.com/redis/go-redis/v9"
 )
 
 type redisStore struct {
@@ -593,27 +594,25 @@ func (s *redisStore) getAccountsByIDs(ctx context.Context, ids []string, onlyEna
 	}
 
 	results := make([]*Account, len(values))
-	decodeErrs := make([]error, len(values))
-	decode := func(i int) {
+	decode := func(i int) error {
+		if values[i] == nil {
+			return nil
+		}
 		strVal, ok := values[i].(string)
 		if !ok || strVal == "" {
-			return
+			return fmt.Errorf("invalid account record #%d", idNums[i])
 		}
 		acc, err := s.unmarshalAccount([]byte(strVal), idNums[i])
 		if err != nil {
-			decodeErrs[i] = err
-			return
+			return err
 		}
-		if onlyEnabled && !acc.Enabled {
-			return
+		if !onlyEnabled || acc.Enabled {
+			results[i] = acc
 		}
-		results[i] = acc
+		return nil
 	}
-	forEachIndex(len(values), decode)
-	for _, decodeErr := range decodeErrs {
-		if decodeErr != nil {
-			return nil, decodeErr
-		}
+	if err := forEachIndex(len(values), decode); err != nil {
+		return nil, err
 	}
 	return compactNonNil(results), nil
 }

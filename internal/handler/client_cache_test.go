@@ -161,7 +161,7 @@ func TestAccountClientFingerprintCoversProviderConstructionInputs(t *testing.T) 
 		WorkBuddyRefreshToken: "wb-refresh",
 		WorkBuddyUID:          "wb-user",
 		WorkBuddyExpiresAt:    time.Unix(10, 0),
-		WorkBuddyModelIDs:     []string{"wb-model"},
+		WorkBuddyModelIDs:     []string{`{"id":"wb-model"}`},
 		QoderAccessToken:      "q-access",
 		QoderRefreshToken:     "q-refresh",
 		QoderExpiresAt:        time.Unix(20, 0),

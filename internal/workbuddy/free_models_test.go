@@ -15,8 +15,17 @@ func TestIsFreeModelUsesConfirmedSetOnly(t *testing.T) {
 }
 
 func TestIsFreeModelInCatalogRequiresAccountAdvertisement(t *testing.T) {
-	ids := []string{`{"id":"hy3","name":"HY3"}`, "deepseek-v4.1-flash", `{"id":"gpt-5.6-sol"}`}
+	ids := []string{`{"id":"hy3","name":"HY3"}`, `{"id":"deepseek-v4.1-flash"}`, `{"id":"gpt-5.6-sol"}`}
 	testutil.False(t, !IsFreeModelInCatalog(ids, "hy3") || !IsFreeModelInCatalog(ids, "deepseek-v4.1-flash"), "confirmed advertised free models should pass")
 	testutil.False(t, IsFreeModelInCatalog(ids, "hy4-preview-f"), "free model missing from this account catalog must not pass")
 	testutil.False(t, IsFreeModelInCatalog(ids, "gpt-5.6-sol"), "advertised paid model must not pass")
+}
+
+func TestBareCatalogDoesNotGrantFreeEntitlement(t *testing.T) {
+	if IsFreeModelInCatalog([]string{"hy3"}, "hy3") {
+		t.Fatal("retired bare snapshot granted entitlement")
+	}
+	if !IsFreeModelInCatalog(CatalogSnapshot([]WorkBuddyModel{{ID: "hy3"}}), "hy3") {
+		t.Fatal("current refreshed snapshot denied")
+	}
 }

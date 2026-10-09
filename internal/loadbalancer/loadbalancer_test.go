@@ -187,19 +187,19 @@ func TestFilterReasonsDecideTheEmptyPoolAnswer(t *testing.T) {
 		wantMsg string
 	}{
 		"every account is throttled": {
-			filter:  func(*store.Account) error { return RejectModelThrottled },
+			filter:  func(*store.Account) error { return ErrModelThrottled },
 			wantMsg: "cooling down for the requested model",
 		},
 		"no account's plan covers it": {
-			filter:  func(*store.Account) error { return RejectModelUnavailable },
+			filter:  func(*store.Account) error { return ErrModelUnavailable },
 			wantMsg: "not covered by any matching account's plan",
 		},
 		"a mix of throttled and uncovered": {
 			filter: func(acc *store.Account) error {
 				if acc.ID%2 == 0 {
-					return RejectModelUnavailable
+					return ErrModelUnavailable
 				}
-				return RejectModelThrottled
+				return ErrModelThrottled
 			},
 			wantMsg: "cooling down on some matching accounts",
 		},

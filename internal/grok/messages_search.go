@@ -9,7 +9,10 @@ import (
 
 	"encoding/json"
 
+	"orchids-api/internal/chatwire"
 	"orchids-api/internal/httpserver"
+	"orchids-api/internal/responses"
+	"orchids-api/internal/util"
 )
 
 // checkedStreamWriter lives in internal/httpserver: it is a generic io.Writer +
@@ -61,7 +64,7 @@ func anthropicSearchTool(tool anthropicTool) (map[string]interface{}, error) {
 }
 
 func searchIdentity(item map[string]interface{}) string {
-	id := interfaceString(item["id"])
+	id := chatwire.ParseLooseStringAny(item["id"])
 	if id == "" {
 		raw, _ := json.Marshal(item["action"])
 		id = fmt.Sprintf("%x", sha256.Sum256(raw))[:24]
@@ -75,23 +78,23 @@ func searchIdentity(item map[string]interface{}) string {
 func searchContent(item map[string]interface{}) []interface{} {
 	id := searchIdentity(item)
 	action, _ := item["action"].(map[string]interface{})
-	query := interfaceString(action["query"])
+	query := chatwire.ParseLooseStringAny(action["query"])
 	use := map[string]interface{}{"type": "server_tool_use", "id": id, "name": "web_search", "input": map[string]interface{}{"query": query}}
 	var content interface{} = []interface{}{}
-	if status := interfaceString(item["status"]); status == "failed" || status == "incomplete" || action == nil {
+	if status := chatwire.ParseLooseStringAny(item["status"]); status == "failed" || status == "incomplete" || action == nil {
 		content = map[string]interface{}{"type": "web_search_tool_result_error", "error_code": "unavailable"}
 	} else {
 		hits := []interface{}{}
 		seen := map[string]bool{}
-		for _, raw := range interfaceSlice(action["sources"]) {
+		for _, raw := range responses.InterfaceSlice(action["sources"]) {
 			source, _ := raw.(map[string]interface{})
-			link := interfaceString(source["url"])
+			link := chatwire.ParseLooseStringAny(source["url"])
 			parsed, err := url.Parse(link)
 			if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") || seen[link] {
 				continue
 			}
 			seen[link] = true
-			hits = append(hits, map[string]interface{}{"type": "web_search_result", "url": link, "title": firstNonEmpty(interfaceString(source["title"]), parsed.Host)})
+			hits = append(hits, map[string]interface{}{"type": "web_search_result", "url": link, "title": util.FirstNonEmpty(chatwire.ParseLooseStringAny(source["title"]), parsed.Host)})
 			if len(hits) >= 50 {
 				break
 			}
@@ -111,7 +114,7 @@ func (s *anthropicStreamState) writeSearch(w io.Writer, item map[string]interfac
 		return
 	}
 	action, _ := item["action"].(map[string]interface{})
-	query := interfaceString(action["query"])
+	query := chatwire.ParseLooseStringAny(action["query"])
 	if state == nil {
 		s.closeTextualBlocks(w)
 		state = &messageSearchState{index: s.startBlock(w, map[string]interface{}{"type": "server_tool_use", "id": id, "name": "web_search", "input": map[string]interface{}{}})}
@@ -139,12 +142,12 @@ func chatCitations(raw []interface{}) []interface{} {
 		if citation == nil {
 			citation = annotation
 		}
-		link := interfaceString(citation["url"])
+		link := chatwire.ParseLooseStringAny(citation["url"])
 		parsed, err := url.Parse(link)
 		if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
 			continue
 		}
-		result = append(result, map[string]interface{}{"type": "web_search_result_location", "url": link, "title": interfaceString(citation["title"]), "cited_text": interfaceString(citation["cited_text"])})
+		result = append(result, map[string]interface{}{"type": "web_search_result_location", "url": link, "title": chatwire.ParseLooseStringAny(citation["title"]), "cited_text": chatwire.ParseLooseStringAny(citation["cited_text"])})
 	}
 	return result
 }

@@ -50,7 +50,7 @@ func TestResponsesProtocolThroughAuthenticatedRoutes(t *testing.T) {
 			if err := s.CreateModel(context.Background(), &store.Model{Channel: channel, ModelID: "m", Name: "m", Status: store.ModelStatusAvailable, Verified: true, Origin: "discovery"}); err != nil {
 				t.Fatal(err)
 			}
-			if err := s.CreateAccount(context.Background(), &store.Account{Name: "test", AccountType: channel, Enabled: true, Weight: 1, ClineModelIDs: []string{"m"}}); err != nil {
+			if err := s.CreateAccount(context.Background(), &store.Account{Name: "test", AccountType: channel, Enabled: true, Weight: 1, ClineModelIDs: []string{`{"id":"m"}`}}); err != nil {
 				t.Fatal(err)
 			}
 			client := &responsesProtocolRecorder{}

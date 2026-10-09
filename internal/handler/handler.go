@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -10,7 +9,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"orchids-api/internal/provider"
 	rtdebug "runtime/debug"
 	"strings"
 	"sync"
@@ -18,7 +16,6 @@ import (
 
 	"encoding/json"
 
-	"orchids-api/internal/accountpolicy"
 	"orchids-api/internal/adapter"
 	"orchids-api/internal/audit"
 	"orchids-api/internal/config"
@@ -27,7 +24,6 @@ import (
 	"orchids-api/internal/loadbalancer"
 	"orchids-api/internal/logutil"
 	"orchids-api/internal/middleware"
-	"orchids-api/internal/pricing"
 	"orchids-api/internal/prompt"
 	"orchids-api/internal/store"
 	"orchids-api/internal/upstream"
@@ -244,126 +240,6 @@ func (h *Handler) computeRequestHash(r *http.Request, body []byte) string {
 	return hex.EncodeToString(hasher.Sum(nil))
 }
 
-func mapStopReasonToOpenAIFinishReason(stopReason string) *string {
-	switch strings.TrimSpace(stopReason) {
-	case "", "end_turn", "stop":
-		reason := "stop"
-		return &reason
-	case "tool_use":
-		reason := "tool_calls"
-		return &reason
-	case "max_tokens":
-		reason := "length"
-		return &reason
-	case "refusal":
-		reason := "content_filter"
-		return &reason
-	default:
-		reason := stopReason
-		return &reason
-	}
-}
-
-func buildOpenAINonStreamResponse(sh *streamHandler, model string, stopReason string) openAINonStreamResponse {
-	textParts := make([]string, 0, len(sh.contentBlocks))
-	reasoningParts := make([]string, 0, len(sh.contentBlocks))
-	toolCalls := make([]openAINonStreamToolCall, 0)
-
-	for i := range sh.contentBlocks {
-		blockType, _ := sh.contentBlocks[i]["type"].(string)
-		switch blockType {
-		case "thinking":
-			if builder := builderAt(sh.thinkingBlockBuilders, i); builder != nil {
-				if reasoning := builder.String(); reasoning != "" {
-					reasoningParts = append(reasoningParts, reasoning)
-					continue
-				}
-			}
-			if reasoning, ok := sh.contentBlocks[i]["thinking"].(string); ok && reasoning != "" {
-				reasoningParts = append(reasoningParts, reasoning)
-			}
-		case "text":
-			if builder := builderAt(sh.textBlockBuilders, i); builder != nil {
-				if text := builder.String(); text != "" {
-					textParts = append(textParts, text)
-					continue
-				}
-			}
-			if text, ok := sh.contentBlocks[i]["text"].(string); ok && text != "" {
-				textParts = append(textParts, text)
-			}
-		case "tool_use":
-			call := openAINonStreamToolCall{
-				Type: "function",
-			}
-			if id, ok := sh.contentBlocks[i]["id"].(string); ok {
-				call.ID = id
-			}
-			if name, ok := sh.contentBlocks[i]["name"].(string); ok {
-				call.Function.Name = name
-			}
-			switch input := sh.contentBlocks[i]["input"].(type) {
-			case string:
-				call.Function.Arguments = input
-			case nil:
-				call.Function.Arguments = "{}"
-			default:
-				raw, err := json.Marshal(input)
-				if err != nil {
-					call.Function.Arguments = "{}"
-				} else {
-					call.Function.Arguments = string(raw)
-				}
-			}
-			toolCalls = append(toolCalls, call)
-		}
-	}
-
-	content := strings.Join(textParts, "")
-	if strings.TrimSpace(content) == "" && len(toolCalls) > 0 {
-		content = ""
-	}
-
-	message := openAINonStreamMessage{
-		Role:             "assistant",
-		Content:          content,
-		ReasoningContent: strings.Join(reasoningParts, ""),
-	}
-	if len(toolCalls) > 0 {
-		message.ToolCalls = toolCalls
-	}
-
-	return openAINonStreamResponse{
-		ID:      sh.msgID,
-		Object:  "chat.completion",
-		Created: sh.startTime.Unix(),
-		Model:   model,
-		Choices: []openAINonStreamChoice{{
-			Index:        0,
-			Message:      message,
-			FinishReason: mapStopReasonToOpenAIFinishReason(stopReason),
-		}},
-		Usage: openAINonStreamUsage{
-			PromptTokens:     sh.inputTokens,
-			CompletionTokens: sh.outputTokens,
-			TotalTokens:      sh.inputTokens + sh.outputTokens,
-		},
-	}
-}
-
-// materializeBlockField copies a streamed text/thinking block's accumulated
-// content into its wire field before a non-streaming response is encoded. A
-// block that never streamed anything still gets the field, empty.
-func materializeBlockField(block map[string]interface{}, field string, builders []*strings.Builder, idx int) {
-	if builder := builderAt(builders, idx); builder != nil {
-		block[field] = builder.String()
-		return
-	}
-	if _, ok := block[field]; !ok {
-		block[field] = ""
-	}
-}
-
 func shortRequestTrace(hash string) string {
 	hash = strings.TrimSpace(hash)
 	if len(hash) <= 12 {
@@ -373,6 +249,12 @@ func shortRequestTrace(hash string) string {
 }
 
 func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
+	forcedChannel := channelFromPath(r.URL.Path)
+	if forcedChannel == "" {
+		apperrors.New("not_found_error", "Provider route not found", http.StatusNotFound).WriteResponse(w)
+		return
+	}
+
 	startTime := time.Now()
 	streamingStarted := false
 
@@ -483,34 +365,14 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	conversationKey := conversationKeyForRequest(r, req)
 	logutil.DebugIf(verboseDiagnostics, "Request dispatch initialized", "trace_id", traceID, "path", r.URL.Path, "conversation_id", conversationKey, "model", req.Model, "stream", req.Stream)
 
-	// The path names a channel only on a channel-prefixed route; on the unified
-	// prefix the model does. A model that ends in an effort word is only treated
-	// as such when the path did not already pin a channel (".../models/gpt-5-x-low"
-	// under a channel prefix is a real row, not a family plus an effort).
-	forcedChannel := channelFromPath(r.URL.Path)
 	effort := requestReasoningEffort(req)
-	if forcedChannel == "" {
-		if _, level := splitEffortVariantSuffix(normalizeRequestedModelID(req.Model)); level != "" {
-			effort = ""
-		}
-	}
 	req.Model = h.resolveEffortModelVariant(r.Context(), req.Model, effort, forcedChannel)
-	validatedModel, err := h.validateModelAvailability(r.Context(), req.Model, forcedChannel)
+	_, err = h.validateModelAvailability(r.Context(), req.Model, forcedChannel)
 	if err != nil {
 		apperrors.New("invalid_request_error", err.Error(), http.StatusBadRequest).WriteResponse(w)
 		return
 	}
 	targetChannel := strings.TrimSpace(forcedChannel)
-	if targetChannel == "" && validatedModel != nil {
-		targetChannel = strings.TrimSpace(validatedModel.Channel)
-	}
-	// The gateway no longer models a working directory at all. It used to extract
-	// one from headers/system/messages, remember it per conversation, drop the
-	// upstream session whenever it changed, answer the "what is my current
-	// working directory" question locally without
-	// calling upstream, and rebase foreign tool paths onto it. Every one of those
-	// behaviours is gone: the request that reached upstream is now the request the
-	// caller wrote.
 	if isSuggestionMode(req.Messages) {
 		suggestion := buildLocalSuggestion(req.Messages)
 		logutil.DebugIf(verboseDiagnostics, "Handling suggestion mode request locally", "suggestion", suggestion)
@@ -524,8 +386,7 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 
 	// WorkBuddy, Qoder and Cline forward raw OpenAI-style messages: their
 	// endpoint is OpenAI-shaped and the caller's request is passed upstream
-	// verbatim. The path or the model names the channel before selection; the
-	// selected account confirms it afterwards.
+	// verbatim. The path determines the channel before account selection.
 	preSelectChannel := passthroughChannelName(targetChannel)
 	protocolControls := upstream.UpstreamRequest{
 		ResponseFormat: req.ResponseFormat, ResponseText: req.ResponseText,
@@ -549,9 +410,7 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	// the model and check its answer; a non-strict request yields nil and every
 	// path below is unchanged.
 	structured := upstream.NewStructuredOutput(protocolControls)
-	preSelectWorkBuddyRequest := preSelectChannel == "workbuddy"
 	preSelectQoderRequest := preSelectChannel == "qoder"
-	preSelectClineRequest := preSelectChannel == "cline"
 	// Suggestion mode answered and returned above, so the gates below can only be
 	// triggered by tool_choice or by a tool_result-only follow-up; thinking stays
 	// suppressed only by configuration.
@@ -583,13 +442,26 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	failedAccountIDs := []int64{}
 	failedAccountSet := make(map[int64]struct{})
 
-	apiClient, currentAccount, releaseClient, trackedAccountID, err := h.acquireReservedAccountSelection(r.Context(), targetChannel, forcedChannel != "", failedAccountIDs, accountSelectionOptions{
+	var e *messageExecution
+	apiClient, currentAccount, releaseClient, trackedAccountID, err := h.acquireReservedAccountSelection(r.Context(), targetChannel, true, failedAccountIDs, accountSelectionOptions{
 		ModelID: strings.TrimSpace(req.Model),
 	})
 	// The client is held for the whole request: a credential change during it
 	// retires the client and closes it here, after the request finished.
-	defer func() { releaseClient() }()
-	defer func() { h.releaseTrackedAccount(trackedAccountID) }()
+	defer func() {
+		if e != nil {
+			e.releaseClient()
+		} else {
+			releaseClient()
+		}
+	}()
+	defer func() {
+		if e != nil {
+			h.releaseTrackedAccount(e.trackedAccountID)
+		} else {
+			h.releaseTrackedAccount(trackedAccountID)
+		}
+	}()
 	if err != nil {
 		slog.Error("selectAccount failed", "error", err, "channel", targetChannel)
 		logger.LogEarlyExit("select_account_failed", map[string]interface{}{
@@ -606,23 +478,7 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	logutil.DebugIf(verboseDiagnostics, "Checkpoint: selectAccount success")
 
-	// The selected account confirms the family the pre-selection guess named: the
-	// account type is authoritative when the path did not pin a channel.
-	accountChannel := ""
-	if currentAccount != nil {
-		accountChannel = passthroughChannelName(currentAccount.AccountType)
-	}
-	// The label follows the priority this gate has always used: WorkBuddy, then
-	// Qoder, then Cline. Passthrough channels do not trim history/tool results.
-	passthroughChannel := ""
-	switch {
-	case preSelectWorkBuddyRequest || accountChannel == "workbuddy":
-		passthroughChannel = "workbuddy"
-	case preSelectQoderRequest || accountChannel == "qoder":
-		passthroughChannel = "qoder"
-	case preSelectClineRequest || accountChannel == "cline":
-		passthroughChannel = "cline"
-	}
+	passthroughChannel := preSelectChannel
 	logutil.DebugIf(verboseDiagnostics && passthroughChannel != "", "Checkpoint: passthrough, skip context trimming", "channel", passthroughChannel)
 	logutil.DebugIf(verboseDiagnostics, "Checkpoint: message processing done")
 
@@ -719,13 +575,7 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	if preSelectQoderRequest {
 		sh.setSurfaceToolRejects(true)
 	}
-	// effectiveTools is either req.Tools or nil, so a request with no tools of its
-	// own has nothing to report here.
-	if len(req.Tools) > 0 {
-		sh.setClientTools(req.Tools)
-	}
 	sh.setDisallowToolCalls(gateNoTools)
-	sh.setEmptyOutputFallback(successfulFileMutationToolResultFallback(upstreamMessages))
 	// The compiled schema gates the finished answer; a request that declared no
 	// schema installs a nil check and behaves exactly as before.
 	sh.setStructuredOutput(structured.Validate)
@@ -776,571 +626,9 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
-	// Main execution
-	run := func() {
-		// A per-request chat session id, reused across account switches so the
-		// upstream keeps one conversation for this downstream request.
-		chatSessionID := "chat_" + randomSessionID()
-		maxRetries := cfg.MaxRetries
-		if maxRetries < 0 {
-			maxRetries = 0
-		}
-		retryDelay := time.Duration(cfg.RetryDelay) * time.Millisecond
-		retriesRemaining := maxRetries
-		budgetCtx, attemptBudget := upstream.WithAttemptBudget(r.Context(), maxRetries+1)
-		r = r.WithContext(budgetCtx)
-		// sharedRefusalWaited accumulates only the waits spent on a refusal that
-		// every account shares, which is bounded separately from maxRetries.
-		var sharedRefusalWaited time.Duration
+	e = &messageExecution{h: h, r: r, cfg: cfg, sh: sh, req: req, mappedModel: mappedModel, targetChannel: targetChannel, forcedChannel: forcedChannel, traceID: traceID, conversationKey: conversationKey, builtPrompt: builtPrompt, effort: effort, verboseDiagnostics: verboseDiagnostics, gateNoTools: gateNoTools, upstreamMessages: upstreamMessages, effectiveTools: effectiveTools, structured: structured, logger: logger, apiClient: apiClient, currentAccount: currentAccount, releaseClient: releaseClient, trackedAccountID: trackedAccountID, failedAccountIDs: failedAccountIDs, failedAccountSet: failedAccountSet}
+	e.run()
+	r, currentAccount, releaseClient, trackedAccountID = e.r, e.currentAccount, e.releaseClient, e.trackedAccountID
 
-		// Publish the model this request resolved to, so the per-minute
-		// aggregation can attribute the outcome to a model rather than only to a
-		// channel. The middleware cannot read the body itself.
-		r = r.WithContext(middleware.WithRequestModel(r.Context(), mappedModel))
-
-		payloadMessages := upstreamMessages
-		// The schema instruction is prepended rather than appended: a channel
-		// that truncates a long system array keeps the shape the answer must
-		// have, not the caller's prose behind it.
-		payloadSystem := upstream.PrependSystemHint(req.System, structured.SystemHint())
-
-		upstreamReq := upstream.UpstreamRequest{
-			ResponseFormat:    req.ResponseFormat,
-			ResponseText:      req.ResponseText,
-			Include:           req.Include,
-			PromptCacheKey:    req.PromptCacheKey,
-			ResponsesTools:    req.ResponsesTools,
-			MaxTokens:         req.outputTokenLimit(),
-			Temperature:       req.Temperature,
-			TopP:              req.TopP,
-			Stop:              req.stopSequences(),
-			Prompt:            builtPrompt,
-			Model:             mappedModel,
-			Messages:          payloadMessages,
-			System:            payloadSystem,
-			Tools:             effectiveTools,
-			ToolChoice:        req.ToolChoice,
-			ParallelToolCalls: req.ParallelToolCalls,
-			NoTools:           gateNoTools,
-			ReasoningEffort:   effort,
-			RequestID:         workBuddyConversationRequestID(r),
-			ConversationID:    explicitConversationID(r, req),
-			TraceID:           middleware.GetTraceID(r.Context()),
-			ChatSessionID:     chatSessionID,
-		}
-		primaryHandler := func(msg upstream.SSEMessage) {
-			if msg.Type == "model.text-delta" || msg.Type == "model.reasoning-delta" || msg.Type == "model.tool-call" {
-				util.MarkGenerationProgress(r.Context())
-			}
-			sh.handleMessage(msg)
-		}
-		var attempt int
-		for {
-			if returned, _ := sh.terminalState(); returned {
-				return
-			}
-			sh.resetRoundState()
-			var err error
-			upstreamReq.Attempt = attempt + 1
-			accountID := int64(0)
-			accountType, accountName := "", ""
-			if currentAccount != nil {
-				accountID, accountType, accountName = currentAccount.ID, currentAccount.AccountType, currentAccount.Name
-			}
-			if verboseDiagnostics {
-				slog.Debug(
-					"Calling upstream client",
-					"trace_id", traceID,
-					"attempt", upstreamReq.Attempt,
-					"max_attempts", maxRetries+1,
-					"channel", targetChannel,
-					"model", mappedModel,
-					"conversation_id", conversationKey,
-					"chat_session_id", chatSessionID,
-					"account_id", accountID,
-					"account_type", accountType,
-					"account_name", accountName,
-				)
-				slog.Debug("Using SendRequestWithPayload")
-			}
-
-			callsBefore := attemptBudget.Used()
-			callCtx := upstream.WithAttemptObserver(r.Context(), func(failed bool) {
-				middleware.RecordUpstreamAttempt(r.Context(), accountID, failed)
-			})
-			err = apiClient.SendRequestWithPayload(callCtx, upstreamReq, primaryHandler, logger)
-			// The same account id the diagnostics above reported, with or without
-			// diagnostics enabled.
-			if attemptBudget.Used() == callsBefore {
-				middleware.RecordUpstreamAttempt(r.Context(), accountID, err != nil)
-			}
-			logutil.DebugIf(verboseDiagnostics, "Upstream client returned", "trace_id", traceID, "attempt", upstreamReq.Attempt, "error", err)
-
-			if err == nil {
-				sh.forceFinishIfMissing()
-				logutil.DebugIf(verboseDiagnostics, "Upstream attempt completed", "trace_id", traceID, "attempt", upstreamReq.Attempt)
-				break
-			}
-			// A provider may emit its authoritative finish frame and then observe a
-			// transport cleanup error. Never reset terminal state and append a second
-			// response in that case.
-			if returned, failed := sh.terminalState(); returned {
-				if failed {
-					return
-				}
-				slog.Warn("Ignoring upstream error after terminal response", "trace_id", traceID, "attempt", upstreamReq.Attempt, "error", err)
-				break
-			}
-			if r.Context().Err() != nil {
-				category := "client"
-				if context.Cause(r.Context()) == context.DeadlineExceeded {
-					category = "timeout"
-				}
-				sh.reportRequestFailure("Request deadline or cancellation", category, apperrors.PublicMessage("context deadline exceeded"), 0)
-				return
-			}
-			errStr := err.Error()
-			errClass := apperrors.ClassifyUpstreamError(errStr)
-			if sh.hasAnyOutput() {
-				slog.Warn("Upstream failed after partial output, skip retry to avoid duplicated token billing", "trace_id", traceID, "attempt", upstreamReq.Attempt, "error", err)
-				// Partial content is not a successful completion. Streaming responses
-				// have already committed 200, so report the terminal failure in band;
-				// non-streaming responses have committed nothing and can still return
-				// the correct HTTP error without leaking the partial draft.
-				sh.reportRequestFailure("Reporting upstream failure after partial output",
-					errClass.Category, apperrors.PublicMessage(errStr), upstreamRetryAfter(err))
-				return
-			}
-
-			// Check for non-retriable errors
-			slog.Error("Request error", "trace_id", traceID, "attempt", upstreamReq.Attempt, "error", err, "category", errClass.Category, "retryable", errClass.Retryable)
-			// One decision for both questions this error raises: whether the
-			// account keeps its place in the pool, and whether the request may be
-			// retried. The scheduler reads the same policy, so a failure cannot be
-			// "cooling down" for one entrance and "retryable" for the other.
-			verdict := accountpolicy.Classify(currentAccount, err, req.Model)
-			// Mark the account status (auth-class errors are always marked,
-			// whether or not they are retryable)
-			if currentAccount != nil && h.loadBalancer != nil && h.loadBalancer.Store != nil {
-				if verdict.Scope == accountpolicy.ScopeModel && verdict.Model != "" && verdict.Cooldown > 0 {
-					// WorkBuddy code 6004 is a model-frequency limit. Persist only
-					// that model's cooldown; applying an empty account status here
-					// would either be skipped or accidentally clear unrelated state.
-					// The verdict's kind travels with the deadline: the selection
-					// layer cannot see this request, and has to know whether the
-					// model is throttled or simply not covered by the plan.
-					store.RecordModelCooldownWithReason(currentAccount, verdict.Model, time.Now().Add(verdict.Cooldown), verdict.ModelCooldownKind)
-					if persistErr := h.loadBalancer.Store.UpdateAccount(r.Context(), currentAccount); persistErr != nil {
-						slog.Warn("persist model cooldown failed", "account_id", currentAccount.ID, "model", verdict.Model, "error", persistErr)
-					}
-				} else if verdict.Status != "" {
-					logutil.DebugIf(verboseDiagnostics, "标记账号状态", "account_id", currentAccount.ID, "status", verdict.Status, "scope", string(verdict.Scope), "category", errClass.Category)
-					// Apply keeps the status and its operator-facing reason
-					// together, so the account table can explain the cooldown.
-					verdict.Apply(currentAccount)
-					// WorkBuddy keeps a spent account in the pool for its free tier
-					// only. When the upstream refuses that tier too — production
-					// answers 14018 "Credits exhausted" for a zero-balance plan on a
-					// confirmed free model — the tier is not available on this account
-					// either, and every later request pays for the same upstream
-					// rejection before switching. Scope the verdict to the model, so
-					// the pool stops offering this account for it while the balance is
-					// spent; the account keeps its free-only capability state.
-					if verdict.Status == store.AccountStatusWorkBuddyQuotaExhausted &&
-						provider.IsFreeModel("workbuddy", currentAccount, upstreamReq.Model) {
-						// Hold the model out of this account until its plan resets, but
-						// never past the cap below: the reset comes from the upstream's
-						// wall clock, whose zone the gateway cannot verify, so a misread
-						// boundary must not park a model for hours longer than the
-						// refusal deserves.
-						const freeTierMaxHold = 6 * time.Hour
-						freeTierHold := freeTierMaxHold
-						if reset := currentAccount.WorkBuddyQuota.ResetAt; reset.After(time.Now()) {
-							if until := time.Until(reset); until < freeTierHold {
-								freeTierHold = until
-							}
-						}
-						slog.Warn("WorkBuddy free tier refused on a spent account; scoping the model out",
-							"account_id", currentAccount.ID, "model", upstreamReq.Model, "hold", freeTierHold)
-						store.RecordModelCooldownWithReason(currentAccount, upstreamReq.Model, time.Now().Add(freeTierHold), store.ModelCooldownUnavailable)
-					}
-					h.loadBalancer.PersistAppliedAccountStatus(r.Context(), currentAccount, "账号策略判定: "+verdict.Status)
-				}
-			}
-
-			if !verdict.Retryable {
-				slog.Error("Aborting retries for non-retriable error", "error", err, "category", errClass.Category)
-				// A failure before any output is a failure, not an answer. The
-				// raw upstream text goes to the log; the client gets the category.
-				if errClass.Category == "canceled" {
-					if r.Context().Err() != nil {
-						sh.finishResponse("end_turn")
-						return
-					}
-					sh.reportRequestFailure("Reporting unexpected upstream cancellation", "server", "Upstream request was canceled unexpectedly", 0)
-					return
-				}
-				sh.reportRequestFailure("Reporting non-retriable upstream failure",
-					errClass.Category, apperrors.PublicMessage(errStr), upstreamRetryAfter(err))
-				return
-			}
-
-			// Shared queues may clear later within the advertised retry window.
-			// Use the bounded retry budget on the same account rather than handing
-			// every caller an early 429 after a single short probe. Once exhausted,
-			// the uncommitted response below still returns an honest HTTP 429.
-
-			if r.Context().Err() != nil {
-				sh.finishResponse("end_turn")
-				return
-			}
-			if retriesRemaining <= 0 || attemptBudget.Remaining() <= 0 {
-				if currentAccount != nil && h.loadBalancer != nil {
-					slog.Error("Account request failed, max retries reached", "account", currentAccount.Name)
-				}
-				// Same rule as the non-retriable branch above: with nothing sent yet
-				// this is a gateway failure, and the client sees it as one.
-				sh.reportRequestFailure("Reporting that retries are exhausted",
-					errClass.Category, apperrors.PublicMessage(errStr), upstreamRetryAfter(err))
-				return
-			}
-			retriesRemaining--
-			slog.Warn(
-				"Retrying upstream request without prior output",
-				"trace_id", traceID,
-				"attempt", upstreamReq.Attempt,
-				"category", errClass.Category,
-				"switch_account", verdict.SwitchAccount,
-				"retries_remaining", retriesRemaining,
-			)
-			if verdict.SwitchAccount && currentAccount != nil && h.loadBalancer != nil {
-				prevClient := apiClient
-				prevAccount := currentAccount
-				if _, ok := failedAccountSet[currentAccount.ID]; !ok {
-					failedAccountSet[currentAccount.ID] = struct{}{}
-					failedAccountIDs = append(failedAccountIDs, currentAccount.ID)
-				}
-				slog.Warn("Account request failed, switching account", "account", currentAccount.Name, "unsuccessful_attempts", len(failedAccountIDs))
-
-				// Release the old account's connection count
-				if trackedAccountID != 0 {
-					h.releaseTrackedAccount(trackedAccountID)
-					trackedAccountID = 0
-				}
-
-				nextClient, nextAccount, releaseNext, nextTrackedAccountID, retryErr := h.acquireReservedAccountSelection(r.Context(), targetChannel, forcedChannel != "", failedAccountIDs, accountSelectionOptions{
-					ModelID: upstreamReq.Model,
-				})
-				if retryErr == nil {
-					previousRelease := releaseClient
-					apiClient = nextClient
-					currentAccount = nextAccount
-					releaseClient = releaseNext
-					trackedAccountID = nextTrackedAccountID
-					previousRelease()
-					if verboseDiagnostics {
-						if currentAccount != nil {
-							slog.Debug("Switched to account", "account", currentAccount.Name)
-						} else {
-							slog.Debug("Switched to default upstream config")
-						}
-					}
-				} else {
-					if shouldRetryCurrentAccountWhenNoAlternative(errClass.Category) && prevAccount != nil {
-						reacquiredID, acquired := h.tryAcquireTrackedAccount(prevAccount)
-						if !acquired {
-							slog.Error("No account concurrency slot available for retry", "account_id", prevAccount.ID, "category", errClass.Category)
-							sh.InjectNoAvailableAccountError(errStr, retryErr)
-							sh.finishResponse("end_turn")
-							return
-						}
-						apiClient = prevClient
-						currentAccount = prevAccount
-						trackedAccountID = reacquiredID
-						slog.Warn(
-							"No alternate accounts available; retrying current account",
-							"trace_id", traceID,
-							"attempt", upstreamReq.Attempt,
-							"account_id", currentAccount.ID,
-							"category", errClass.Category,
-							"retry_error", retryErr,
-						)
-					} else {
-						slog.Error("No more accounts available", "error", retryErr)
-						sh.InjectNoAvailableAccountError(errStr, retryErr)
-						sh.finishResponse("end_turn")
-						return
-					}
-				}
-			}
-			retryDelayForAttempt := computeRetryDelay(retryDelay, attempt+1, errClass.Category)
-			if hinted := upstreamRetryAfter(err); hinted > retryDelayForAttempt {
-				retryDelayForAttempt = hinted
-			}
-			sharedRefusal := isSharedUpstreamRefusalClass(errClass)
-			// sharedRefusalWait is the selected interval, charged against the
-			// budget. The jitter below is added only to the sleep: it exists to
-			// decorrelate wake-ups, and charging it made the last reachable
-			// window unreachable (a 30s hint plus up to 5s of jitter spent 35s
-			// against a 60s budget that had already paid 30s).
-			sharedRefusalWait := time.Duration(0)
-			qoderIntervalMs := 0
-			if cfg != nil && errClass.Category == "upstream_queue" {
-				qoderIntervalMs = cfg.QoderQueueRetryIntervalMs
-			}
-			if retryDelayForAttempt > 0 && sharedRefusal {
-				// A configured Qoder interval overrides its provider hint. Other
-				// channels keep their existing early-probe policy.
-				sharedRefusalWait = sharedRefusalWaitForChannel(retryDelayForAttempt, attempt+1, targetChannel, qoderIntervalMs)
-			}
-			// configSnapshot reports nil for a nil handler, so the knob is read
-			// defensively: losing the setting must fall back to the built-in
-			// bound, not panic inside the retry loop.
-			budgetMs := 0
-			if cfg != nil {
-				budgetMs = cfg.SharedRefusalWaitBudgetMs
-			}
-			waitBudget := SharedRefusalWaitBudget(budgetMs)
-			queueDisabled := false
-			if targetChannel == "qoder" && errClass.Category == "upstream_queue" && cfg != nil {
-				if specific := cfg.QoderQueueBudget(); specific >= 0 {
-					waitBudget = specific
-					queueDisabled = specific == 0
-				}
-			}
-			// A shared refusal is a gate on the upstream's side, not this account's
-			// throttle, so the wait is spent on the same account and can repeat.
-			// Bound the total by the shortest deadline in front of this process,
-			// which is the edge proxy's origin timeout, not the caller's patience:
-			// answering past the edge's limit does not give the caller the work,
-			// it gives it a 520 from the edge.
-			if sharedRefusal && (queueDisabled || (sharedRefusalWait > 0 && !sharedRefusalWaitAllowedWithin(sharedRefusalWaited, sharedRefusalWait, waitBudget))) {
-				slog.Warn("Shared upstream refusal exceeded the wait budget; answering now",
-					"trace_id", traceID,
-					"waited", sharedRefusalWaited,
-					"next", sharedRefusalWait,
-					"budget", waitBudget,
-					"category", errClass.Category,
-				)
-				sh.reportRequestFailure("Reporting a shared refusal after the wait budget",
-					errClass.Category, apperrors.PublicMessage(errStr), upstreamRetryAfter(err))
-				return
-			}
-			if sharedRefusalWait > 0 {
-				retryDelayForAttempt = sharedRefusalSleepForChannel(sharedRefusalWait, targetChannel, qoderIntervalMs)
-			}
-			// Holding this account's concurrency slot through the wait starves the
-			// pool: the slot is reserved for the whole request, so ten requests
-			// waiting out a gate would occupy one account completely while the rest
-			// of the pool idled. Release it for the wait and take it back before the
-			// next attempt; if it is gone by then the account really is busy.
-			slotReleasedForWait := false
-			if retryDelayForAttempt > 0 && sharedRefusal && trackedAccountID != 0 {
-				h.releaseTrackedAccount(trackedAccountID)
-				trackedAccountID = 0
-				slotReleasedForWait = true
-			}
-			waitStarted := time.Now()
-			waitCompleted := true
-			if retryDelayForAttempt > 0 {
-				waitCompleted = util.SleepWithContext(r.Context(), retryDelayForAttempt)
-				debug.RecordWait(r.Context(), errClass.Category, retryDelayForAttempt, time.Since(waitStarted), !waitCompleted)
-				middleware.RecordRetryWait(r.Context(), errClass.Category, time.Since(waitStarted))
-			}
-			if !waitCompleted {
-				sh.reportRequestFailure("Request canceled during retry wait", "timeout", apperrors.PublicMessage("context deadline exceeded"), 0)
-				return
-			}
-			if sharedRefusal {
-				sharedRefusalWaited += sharedRefusalWait
-				if sharedRefusalWait == 0 {
-					// No hint to charge, but the attempt is still repeated: count
-					// the delay actually spent so a hintless gate cannot loop
-					// forever without moving the budget.
-					sharedRefusalWaited += retryDelayForAttempt
-				}
-			}
-			if slotReleasedForWait && currentAccount != nil {
-				reacquiredID, acquired := h.tryAcquireTrackedAccount(currentAccount)
-				if !acquired {
-					// Another request took the slot while this one waited. Ending
-					// here is the honest answer: the account is at its limit, and
-					// retrying would either exceed that limit or make the caller
-					// wait through a second gate.
-					slog.Warn("Account became busy during a shared-refusal wait; ending the request",
-						"trace_id", traceID, "account_id", currentAccount.ID, "account", currentAccount.Name)
-					sh.reportRequestFailure("Reporting a busy pool after a shared-refusal wait",
-						"rate_limit", apperrors.PoolBusyMessage, 0)
-					return
-				}
-				trackedAccountID = reacquiredID
-			}
-			attempt++
-		}
-	}
-
-	run()
-
-	// Ensure a final response
-	if !sh.hasReturn {
-		sh.finishResponse("end_turn")
-	}
-	if !isStream && !sh.requestFailed {
-		stopReason := sh.finalStopReason
-		if stopReason == "" {
-			stopReason = "end_turn"
-		}
-
-		for i := range sh.contentBlocks {
-			blockType, _ := sh.contentBlocks[i]["type"].(string)
-			switch blockType {
-			case "text":
-				materializeBlockField(sh.contentBlocks[i], "text", sh.textBlockBuilders, i)
-			case "thinking":
-				materializeBlockField(sh.contentBlocks[i], "thinking", sh.thinkingBlockBuilders, i)
-			}
-		}
-
-		if len(sh.contentBlocks) == 0 && sh.responseText.Len() > 0 {
-			sh.contentBlocks = append(sh.contentBlocks, map[string]interface{}{
-				"type": "text",
-				"text": sh.responseText.String(),
-			})
-		}
-		if sh.contentBlocks == nil {
-			sh.contentBlocks = make([]map[string]interface{}, 0)
-		}
-
-		var response interface{}
-		if responseFormat == adapter.FormatOpenAI {
-			response = buildOpenAINonStreamResponse(sh, req.Model, stopReason)
-		} else {
-			anthropicResponse := map[string]interface{}{
-				"id":            sh.msgID,
-				"type":          "message",
-				"role":          "assistant",
-				"content":       sh.contentBlocks,
-				"model":         req.Model,
-				"stop_reason":   stopReason,
-				"stop_sequence": nil,
-				"usage": map[string]int{
-					"input_tokens":  sh.inputTokens,
-					"output_tokens": sh.outputTokens,
-				},
-			}
-			response = anthropicResponse
-		}
-
-		if err := json.NewEncoder(w).Encode(response); err != nil {
-			sh.markWriteError("nonstream_response", err)
-			slog.Error("Failed to write JSON response", "error", err)
-		}
-
-	}
-
-	// Sync state and update stats using helpers. A failed request with no
-	// provider-reported usage must not turn the local input estimate into spend;
-	// still count the request itself for operational history.
-	statsInput, statsOutput := sh.inputTokens, sh.outputTokens
-	if sh.requestFailed && !sh.useUpstreamUsage {
-		statsInput, statsOutput = 0, 0
-	}
-	h.updateAccountStats(r.Context(), currentAccount, statsInput, statsOutput)
-
-	// Audit log
-	if h.auditLogger != nil {
-		accountID := int64(0)
-		channel := forcedChannel
-		if currentAccount != nil {
-			accountID = currentAccount.ID
-			if channel == "" {
-				channel = currentAccount.AccountType
-			}
-		}
-		status := "success"
-		if sh.requestFailed || (sh.finalStopReason == "" && !sh.hasReturn) {
-			status = "error"
-		}
-		usageSource := audit.UsageSourceEstimated
-		if sh.useUpstreamUsage {
-			usageSource = audit.UsageSourceUpstream
-		}
-		metadata := map[string]interface{}{
-			"stream":               isStream,
-			"finish_reason":        sh.finalStopReason,
-			"requested_max_tokens": req.outputTokenLimit(),
-		}
-		visibleOutput, reasoningOutput, toolOutput := false, false, false
-		for _, block := range sh.contentBlocks {
-			switch block["type"] {
-			case "text":
-				text, _ := block["text"].(string)
-				visibleOutput = visibleOutput || text != ""
-			case "thinking":
-				text, _ := block["thinking"].(string)
-				reasoningOutput = reasoningOutput || text != ""
-			case "tool_use":
-				toolOutput = true
-			}
-		}
-		metadata["visible_output"] = visibleOutput
-		metadata["reasoning_only"] = reasoningOutput && !visibleOutput && !toolOutput
-		for key, value := range sh.usageMetadata {
-			metadata[key] = value
-		}
-		event := audit.Event{
-			// One journal schema for every channel: the log centre must be able to
-			// compare two channels' requests on the same fields.
-			Kind:              audit.KindRequest,
-			RequestID:         middleware.GetRequestID(r.Context()),
-			Action:            "chat_request",
-			APIKeyID:          middleware.APIKeyID(r.Context()),
-			AccountID:         accountID,
-			Model:             req.Model,
-			Channel:           channel,
-			ClientIP:          r.RemoteAddr,
-			UserAgent:         r.UserAgent(),
-			Duration:          time.Since(startTime).Milliseconds(),
-			Status:            status,
-			Metadata:          metadata,
-			InputTokens:       sh.inputTokens,
-			CachedInputTokens: sh.cachedInputTokens,
-			CacheWriteTokens:  sh.cacheWriteTokens,
-			ReasoningTokens:   sh.reasoningTokens,
-			OutputTokens:      sh.outputTokens,
-			TotalTokens:       sh.inputTokens + sh.outputTokens,
-			UsageSource:       usageSource,
-		}
-		// Settle the reservation taken before the request and price the same
-		// event, so the journal answers "what did this cost" and the key's
-		// balance moves exactly once. An estimated row is never charged.
-		if result, priced := middleware.SettleAPIKeyBilling(
-			r.Context(), nil, req.Model, usageSource, int64(sh.inputTokens), int64(sh.cachedInputTokens), int64(sh.outputTokens),
-		); priced {
-			event.CostInUSDTicks = result.CostInUSDTicks
-			event.PricingModel = result.Model
-			event.PricingVersion = pricing.Version
-		}
-		h.auditLogger.Log(r.Context(), event)
-	}
-}
-
-func toolChoiceDisablesTools(choice interface{}) bool {
-	switch typed := choice.(type) {
-	case string:
-		return strings.EqualFold(strings.TrimSpace(typed), "none")
-	case map[string]interface{}:
-		return strings.EqualFold(strings.TrimSpace(fmt.Sprint(typed["type"])), "none")
-	default:
-		return false
-	}
-}
-
-func randomSessionID() string {
-	b := make([]byte, 6)
-	if _, err := rand.Read(b); err != nil {
-		// Fallback to time-based if crypto/rand fails (unlikely)
-		return fmt.Sprintf("%x", time.Now().UnixNano())
-	}
-	return hex.EncodeToString(b)
+	h.finishMessages(w, r, sh, req, currentAccount, forcedChannel, isStream, responseFormat, startTime, logger)
 }

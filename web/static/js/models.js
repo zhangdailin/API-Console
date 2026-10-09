@@ -55,9 +55,7 @@ function modelChannels() {
 }
 
 function normalizeModelStatus(status) {
-  if (status === true) return "available";
-  const value = String(status || "").trim().toLowerCase();
-  return value || "offline";
+  return ["available", "maintenance", "offline"].includes(status) ? status : "offline";
 }
 
 function statusMeta(status) {
@@ -505,14 +503,18 @@ async function runModelBatch(action) {
 // select column and no batch bar, so only the two row actions apply.
 
 
+const modelLoads = ConsoleUI.requestGate();
 async function loadModels() {
+  const ticket = modelLoads.begin();
   try {
-    models = await ConsoleAPI.json('/api/models', {}, { array: true });
+    const result = await ConsoleAPI.json('/api/models', { signal: ticket.signal }, { array: true });
+    if (!ticket.isCurrent()) return;
+    models = result;
     renderChannelTabs();
     updateModelChannelOptions();
     renderModels();
     updateRefreshButton();
-  } catch (err) { showToast("加载模型失败", "error"); }
+  } catch (err) { if (ticket.accepts(err)) showToast("加载模型失败", "error"); }
 }
 
 function filterModelsByChannel(channel) {

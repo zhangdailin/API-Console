@@ -8,8 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"orchids-api/internal/modelcatalog"
+
+	"github.com/redis/go-redis/v9"
 )
 
 var (
@@ -375,7 +376,6 @@ type modelStore interface {
 	DeleteModel(ctx context.Context, id string) error
 	GetModel(ctx context.Context, id string) (*Model, error)
 	ListModels(ctx context.Context) ([]*Model, error)
-	GetModelByModelID(ctx context.Context, modelID string) (*Model, error)
 	GetModelByChannelAndModelID(ctx context.Context, channel, modelID string) (*Model, error)
 	ReconcileDiscoveredModels(ctx context.Context, channel string, models []*Model, options ModelReconcileOptions) (*ModelReconcileResult, error)
 }

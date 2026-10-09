@@ -107,12 +107,12 @@ type AccountFilter func(*store.Account) error
 // The model-cooldown verdicts a filter can hand back. They are not failures:
 // they are the reason a candidate was withheld.
 var (
-	// RejectModelThrottled withholds a candidate that is cooling down for this
+	// ErrModelThrottled withholds a candidate that is cooling down for this
 	// model after the upstream asked for a pause.
-	RejectModelThrottled = errors.New("model is cooling down on this account")
-	// RejectModelUnavailable withholds a candidate whose plan does not cover the
+	ErrModelThrottled = errors.New("model is cooling down on this account")
+	// ErrModelUnavailable withholds a candidate whose plan does not cover the
 	// model at all.
-	RejectModelUnavailable = errors.New("model is not covered by this account's plan")
+	ErrModelUnavailable = errors.New("model is not covered by this account's plan")
 	// ErrAccountNotEligible withholds a candidate for one of the caller's other
 	// rules (a catalog mismatch, a free-model requirement). The pool does not name
 	// it, so an emptied pool keeps its existing wording for that shape.
@@ -205,9 +205,9 @@ func (lb *LoadBalancer) GetNextAccountExcludingByChannelWithTrackerFilter(ctx co
 				if rejectErr := filter(acc); rejectErr != nil {
 					filterWithheld++
 					switch {
-					case errors.Is(rejectErr, RejectModelUnavailable):
+					case errors.Is(rejectErr, ErrModelUnavailable):
 						filterUnavailable++
-					case errors.Is(rejectErr, RejectModelThrottled):
+					case errors.Is(rejectErr, ErrModelThrottled):
 						filterThrottled++
 					}
 					continue

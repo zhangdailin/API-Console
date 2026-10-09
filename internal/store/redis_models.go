@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"encoding/json"
+
 	"github.com/redis/go-redis/v9"
 )
 
@@ -38,7 +39,6 @@ func (s *redisStore) CreateModel(ctx context.Context, m *Model) error {
 	pipe.Set(ctx, s.modelsKey(m.ID), data, 0)
 	pipe.SAdd(ctx, s.modelsIDsKey(), m.ID)
 	if strings.TrimSpace(m.ModelID) != "" {
-		pipe.HSetNX(ctx, s.modelsModelIDMapKey(), m.ModelID, m.ID)
 		pipe.HSet(ctx, s.modelsChannelModelIDMapKey(), modelChannelIndexKey(m.Channel, m.ModelID), m.ID)
 	}
 	_, err = pipe.Exec(ctx)
@@ -74,10 +74,7 @@ func (s *redisStore) UpdateModel(ctx context.Context, m *Model) error {
 		}
 	}
 	if strings.TrimSpace(m.ModelID) != "" {
-		currentGlobalID, _ := s.client.HGet(ctx, s.modelsModelIDMapKey(), m.ModelID).Result()
-		if currentGlobalID == "" || currentGlobalID == m.ID || (prev != nil && currentGlobalID == prev.ID) {
-			pipe.HSet(ctx, s.modelsModelIDMapKey(), m.ModelID, m.ID)
-		}
+
 		pipe.HSet(ctx, s.modelsChannelModelIDMapKey(), modelChannelIndexKey(m.Channel, m.ModelID), m.ID)
 	}
 	_, err = pipe.Exec(ctx)
@@ -99,10 +96,7 @@ func (s *redisStore) DeleteModel(ctx context.Context, id string) error {
 	pipe.Del(ctx, s.modelsKey(id))
 	pipe.SRem(ctx, s.modelsIDsKey(), id)
 	if m != nil && strings.TrimSpace(m.ModelID) != "" {
-		currentGlobalID, _ := s.client.HGet(ctx, s.modelsModelIDMapKey(), m.ModelID).Result()
-		if currentGlobalID == id {
-			pipe.HDel(ctx, s.modelsModelIDMapKey(), m.ModelID)
-		}
+
 		pipe.HDel(ctx, s.modelsChannelModelIDMapKey(), modelChannelIndexKey(m.Channel, m.ModelID))
 	}
 	_, err := pipe.Exec(ctx)
@@ -202,7 +196,7 @@ func (s *redisStore) ReconcileDiscoveredModels(ctx context.Context, channel stri
 		prune = "1"
 	}
 	text, err := reconcileDiscoveredModelsScript.Run(ctx, s.client, []string{
-		s.modelsIDsKey(), s.modelsNextIDKey(), s.modelsModelIDMapKey(), s.modelsChannelModelIDMapKey(),
+		s.modelsIDsKey(), s.modelsNextIDKey(), s.modelsChannelModelIDMapKey(),
 	}, s.prefix+"models:id:", channelKey, prune, payload, strings.ToLower(strings.TrimSpace(options.ProviderScope))).Text()
 	if err != nil {
 		return nil, err
@@ -249,8 +243,6 @@ func (s *redisStore) modelsIDsKey() string { return s.prefix + "models:ids" }
 
 func (s *redisStore) modelsNextIDKey() string { return s.prefix + "models:next_id" }
 
-func (s *redisStore) modelsModelIDMapKey() string { return s.prefix + "models:model_id_map" }
-
 func (s *redisStore) modelsChannelModelIDMapKey() string {
 	return s.prefix + "models:channel_model_id_map"
 }
@@ -267,40 +259,6 @@ func normalizeModelChannelKey(channel string) string {
 
 func modelChannelIndexKey(channel, modelID string) string {
 	return normalizeModelChannelKey(channel) + "|" + strings.TrimSpace(modelID)
-}
-
-func (s *redisStore) GetModelByModelID(ctx context.Context, modelID string) (*Model, error) {
-	if s == nil || s.client == nil {
-		return nil, fmt.Errorf("redis store not configured")
-	}
-	modelID = strings.TrimSpace(modelID)
-	if modelID == "" {
-		return nil, fmt.Errorf("model not found")
-	}
-
-	// Try hash index first for O(1) lookup
-	id, err := s.client.HGet(ctx, s.modelsModelIDMapKey(), modelID).Result()
-	if err == nil && id != "" {
-		m, err := s.GetModel(ctx, id)
-		if err == nil && m != nil && strings.TrimSpace(m.ModelID) == modelID {
-			return m, nil
-		}
-		// Index stale or points to a different model, fall through to scan.
-	}
-
-	// Fallback to scan (for backward compatibility with existing data)
-	models, err := s.ListModels(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, m := range models {
-		if m.ModelID == modelID {
-			// Repair the index
-			s.client.HSet(ctx, s.modelsModelIDMapKey(), modelID, m.ID)
-			return m, nil
-		}
-	}
-	return nil, fmt.Errorf("model not found")
 }
 
 func (s *redisStore) GetModelByChannelAndModelID(ctx context.Context, channel, modelID string) (*Model, error) {

@@ -62,7 +62,7 @@ func (c *CLIClient) FetchBilling(ctx context.Context, acc *store.Account) (*CLIB
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return nil, fmt.Errorf("decode grok cli billing response: %w", err)
 	}
-	info := &CLIBillingInfo{Subscription: strings.TrimSpace(firstNonEmpty(payload.SubscriptionTier, payload.Config.SubscriptionTier))}
+	info := &CLIBillingInfo{Subscription: strings.TrimSpace(util.FirstNonEmpty(payload.SubscriptionTier, payload.Config.SubscriptionTier))}
 	if payload.Config.CreditUsagePercent != nil {
 		info.HasUsagePercent = true
 		info.UsagePercent = *payload.Config.CreditUsagePercent
@@ -190,5 +190,5 @@ func (c *CLIClient) fetchSubscriptionTier(ctx context.Context, acc *store.Accoun
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return "", fmt.Errorf("decode grok cli subscription response: %w", err)
 	}
-	return firstNonEmpty(payload.SubscriptionTier, payload.User.SubscriptionTier), nil
+	return util.FirstNonEmpty(payload.SubscriptionTier, payload.User.SubscriptionTier), nil
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http/httptest"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/responses"
 	"orchids-api/internal/testutil"
 	"strings"
 	"testing"
@@ -51,7 +52,7 @@ func TestCollectBuildChatSeparatesReasoningFromContent(t *testing.T) {
 	(&Handler{}).collectBuildChat(recorder, &chatwire.Request{Model: "grok-4.3"}, strings.NewReader(body))
 	var response map[string]interface{}
 	testutil.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-	choice := interfaceSlice(response["choices"])[0].(map[string]interface{})
+	choice := responses.InterfaceSlice(response["choices"])[0].(map[string]interface{})
 	message := choice["message"].(map[string]interface{})
 	testutil.Equal(t, message["content"], "public answer")
 	testutil.Equal(t, message["reasoning_content"], "private plan")

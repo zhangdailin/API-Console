@@ -1,19 +1,20 @@
-package grok
+package responses
 
 import (
 	"bytes"
-	"context"
 	"io"
 	"log/slog"
 	"net/http"
+	"orchids-api/internal/channel"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/httpserver"
 	"orchids-api/internal/util"
 	"strings"
 
 	"encoding/json"
 
 	"orchids-api/internal/middleware"
-	"orchids-api/internal/responses"
+
 	"orchids-api/internal/store"
 )
 
@@ -44,23 +45,27 @@ func responsesChatPath(path string) string {
 // without this bridge every request from Codex to those channels is a 404. The
 // bridge reuses the channel's chat handler verbatim: account selection,
 // retries, tool handling and streaming all stay where they already live.
-func ResponsesBridgeHandler(chat http.HandlerFunc, opts responses.BridgeOptions) http.HandlerFunc {
+func ResponsesBridgeHandler(chat http.HandlerFunc, opts BridgeOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !requireMethod(w, r, http.MethodPost) {
+		if _, ok := channel.FromPath(r.URL.Path); !ok {
+			WriteAPIError(w, http.StatusNotFound, "not_found_error", "Provider route not found")
 			return
 		}
-		body, err := readBoundedJSONBody(w, r)
+		if !httpserver.RequireMethod(w, r, http.MethodPost) {
+			return
+		}
+		body, err := httpserver.ReadBoundedJSONBody(w, r)
 		if err != nil {
 			return
 		}
-		var req responses.CreateRequest
+		var req CreateRequest
 		if err := json.Unmarshal(body, &req); err != nil {
-			writeGrokError(w, http.StatusBadRequest, "invalid json")
+			httpserver.WriteError(w, http.StatusBadRequest, "invalid json")
 			return
 		}
-		req.Model = normalizeModelID(req.Model)
+		req.Model = strings.ToLower(strings.TrimSpace(req.Model))
 		r = r.WithContext(middleware.WithRequestModel(r.Context(), req.Model))
-		if !requireAPIKeyModel(w, r, req.Model) {
+		if !httpserver.RequireAPIKeyModel(w, r, req.Model) {
 			return
 		}
 		// This is an optional request for an output projection, not encrypted
@@ -88,13 +93,13 @@ func ResponsesBridgeHandler(chat http.HandlerFunc, opts responses.BridgeOptions)
 		}
 		if searchDisabled {
 			if choice, ok := req.ToolChoice.(string); ok && choice == "required" && len(tools) == 0 {
-				writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", "web search is disabled for chat bridge; no executable required tool remains")
+				WriteAPIError(w, http.StatusBadRequest, "invalid_request_error", "web search is disabled for chat bridge; no executable required tool remains")
 				return
 			}
 			if choice, ok := req.ToolChoice.(map[string]interface{}); ok {
 				kind, _ := choice["type"].(string)
 				if strings.HasPrefix(kind, "web_search") {
-					writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", "web search is disabled for chat bridge; a forced search cannot be fulfilled")
+					WriteAPIError(w, http.StatusBadRequest, "invalid_request_error", "web search is disabled for chat bridge; a forced search cannot be fulfilled")
 					return
 				}
 			}
@@ -104,8 +109,8 @@ func ResponsesBridgeHandler(chat http.HandlerFunc, opts responses.BridgeOptions)
 		req.Tools = tools
 		// The bridge can always persist a response, streamed or not, because it
 		// writes the terminal object the client saw rather than the raw stream.
-		if err := validateResponsesCompatibilityFor(req, true); err != nil {
-			writeGrokUpstreamError(w, err)
+		if err := ValidateCompatibility(req, true); err != nil {
+			httpserver.WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		if !expandBridgedPreviousResponse(w, r, &req, opts) {
@@ -115,22 +120,22 @@ func ResponsesBridgeHandler(chat http.HandlerFunc, opts responses.BridgeOptions)
 			writeBridgeCompactionError(w, err)
 			return
 		}
-		if err := responses.ValidateBridgedTools(&req); err != nil {
-			writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
+		if err := ValidateBridgedTools(&req); err != nil {
+			WriteAPIError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 			return
 		}
-		chatReq, err := chatRequestFromResponses(req)
+		chatReq, err := ChatRequestFromResponses(req)
 		if err != nil {
-			writeGrokUpstreamError(w, err)
+			httpserver.WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		raw, err := json.Marshal(chatReq)
 		if err != nil {
-			writeGrokError(w, http.StatusInternalServerError, "failed to build chat request")
+			httpserver.WriteError(w, http.StatusInternalServerError, "failed to build chat request")
 			return
 		}
 
-		subReq := r.Clone(context.WithValue(r.Context(), chatSourceOperationKey{}, "responses"))
+		subReq := r.Clone(chatwire.WithSourceOperation(r.Context(), "responses"))
 		subReq.Method = http.MethodPost
 		subReq.URL.Path = responsesChatPath(r.URL.Path)
 		// Keep the inbound headers: the inner handler must observe the same
@@ -142,7 +147,7 @@ func ResponsesBridgeHandler(chat http.HandlerFunc, opts responses.BridgeOptions)
 		subReq.ContentLength = int64(len(raw))
 
 		if chatReq.Stream {
-			streamThroughChat(subReq, chat, func(status int, header http.Header, reader io.Reader) {
+			httpserver.StreamThroughChat(subReq, chat, func(status int, header http.Header, reader io.Reader) {
 				if status < 200 || status >= 300 {
 					for key, values := range header {
 						w.Header()[key] = values
@@ -151,30 +156,30 @@ func ResponsesBridgeHandler(chat http.HandlerFunc, opts responses.BridgeOptions)
 					_, _ = io.Copy(w, reader)
 					return
 				}
-				writeResponsesStreamFromChatReaderRequest(w, req, reader, chatStreamOptions{
+				WriteStreamFromChatReader(w, req, reader, StreamOptions{
 					OnComplete: bridgedResponseRecorder(r, req, opts),
 				})
 			})
 			return
 		}
 
-		rec := newCaptureResponseWriter()
+		rec := httpserver.NewCaptureResponseWriter()
 		chat(rec, subReq)
-		if rec.code < 200 || rec.code >= 300 {
+		if rec.Code < 200 || rec.Code >= 300 {
 			copyCapturedResponse(w, rec)
 			return
 		}
 		var chatBody map[string]interface{}
-		if err := json.Unmarshal(rec.body.Bytes(), &chatBody); err != nil {
-			writeGrokUpstreamError(w, err)
+		if err := json.Unmarshal(rec.Body.Bytes(), &chatBody); err != nil {
+			httpserver.WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		response := responsesObjectFromChat(req.Model, chatBody)
+		response := ObjectFromChat(req.Model, chatBody)
 		applyBridgedResponseExtras(response, req)
 		// Ownership is recorded for any successful response: the caller's `store`
 		// asks the upstream to retain, not this gateway.
 		if err := saveBridgedResponse(r, req, response, opts); err != nil {
-			writeGrokError(w, http.StatusServiceUnavailable, "failed to store response")
+			httpserver.WriteError(w, http.StatusServiceUnavailable, "failed to store response")
 			return
 		}
 		util.WriteJSON(w, response)
@@ -190,10 +195,10 @@ func ResponsesBridgeHandler(chat http.HandlerFunc, opts responses.BridgeOptions)
 //   - GET|DELETE /responses/{id}  served from the response store
 //   - POST /responses/{id}/cancel and GET /responses/{id}/input_items
 //     served from the response store (see responses_subresource.go)
-func ResponsesChannelSubpath(chat http.HandlerFunc, opts responses.BridgeOptions) http.HandlerFunc {
+func ResponsesChannelSubpath(chat http.HandlerFunc, opts BridgeOptions) http.HandlerFunc {
 	create := ResponsesBridgeHandler(chat, opts)
 	compact := ResponsesBridgeCompactHandler(chat, opts)
-	resource := responses.ResourceHandler(opts)
+	resource := ResourceHandler(opts)
 	return func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimRight(strings.TrimSpace(r.URL.Path), "/")
 		if strings.HasSuffix(path, "/responses/compact") {
@@ -208,7 +213,7 @@ func ResponsesChannelSubpath(chat http.HandlerFunc, opts responses.BridgeOptions
 	}
 }
 
-func applyBridgedResponseExtras(response map[string]interface{}, req responses.CreateRequest) {
+func applyBridgedResponseExtras(response map[string]interface{}, req CreateRequest) {
 	if response == nil {
 		return
 	}
@@ -220,26 +225,26 @@ func applyBridgedResponseExtras(response map[string]interface{}, req responses.C
 	}
 }
 
-func saveBridgedResponse(r *http.Request, req responses.CreateRequest, response map[string]interface{}, opts responses.BridgeOptions) error {
+func saveBridgedResponse(r *http.Request, req CreateRequest, response map[string]interface{}, opts BridgeOptions) error {
 	encoded, err := json.Marshal(response)
 	if err != nil {
 		return err
 	}
 	return opts.StoreFor().SaveStoredResponse(r.Context(), &store.StoredResponse{
 		ResponseID:  chatwire.ParseLooseStringAny(response["id"]),
-		OwnerHash:   responses.OwnerHash(r.Context()),
+		OwnerHash:   OwnerHash(r.Context()),
 		Model:       req.Model,
 		Provider:    bridgedResponseProvider,
 		ContentType: "application/json",
 		Body:        encoded,
-		InputItems:  responses.InputItemsJSON(req.Input),
+		InputItems:  InputItemsJSON(req.Input),
 	}, opts.TTLOrDefault())
 }
 
 // bridgedResponseRecorder persists the response the stream just finished with.
 // A stream cannot report a storage failure to the client any more, so the
 // failure is logged and the next turn sees response_not_found.
-func bridgedResponseRecorder(r *http.Request, req responses.CreateRequest, opts responses.BridgeOptions) func(map[string]interface{}) {
+func bridgedResponseRecorder(r *http.Request, req CreateRequest, opts BridgeOptions) func(map[string]interface{}) {
 	return func(response map[string]interface{}) {
 		// Only a completed response is a resource a client can continue from; a
 		// failed or partial one has no id worth owning.
@@ -256,19 +261,19 @@ func bridgedResponseRecorder(r *http.Request, req responses.CreateRequest, opts 
 // expandBridgedPreviousResponse prepends the stored conversation to the current
 // input when the client continues a stored response. It writes the error
 // response and returns false when the request cannot be continued.
-func expandBridgedPreviousResponse(w http.ResponseWriter, r *http.Request, req *responses.CreateRequest, opts responses.BridgeOptions) bool {
+func expandBridgedPreviousResponse(w http.ResponseWriter, r *http.Request, req *CreateRequest, opts BridgeOptions) bool {
 	previousID := strings.TrimSpace(req.PreviousResponseID)
 	if previousID == "" {
 		return true
 	}
-	previous, err := opts.StoreFor().GetStoredResponse(r.Context(), previousID, responses.OwnerHash(r.Context()))
+	previous, err := opts.StoreFor().GetStoredResponse(r.Context(), previousID, OwnerHash(r.Context()))
 	if err != nil {
-		responses.WriteStoredLookupError(w, err, "previous response not found")
+		WriteStoredLookupError(w, err, "previous response not found")
 		return false
 	}
 	expanded, err := expandStoredResponseInput(previous.Body, req.Input)
 	if err != nil {
-		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
+		WriteAPIError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return false
 	}
 	req.Input = expanded

@@ -16,9 +16,12 @@ function initDOMCache() {
 }
 
 // Load accounts from API
+const accountLoads = ConsoleUI.requestGate();
 async function loadAccounts() {
+  const ticket = accountLoads.begin();
   try {
-    const loadedAccounts = await ConsoleAPI.json('/api/accounts', {}, { array: true });
+    const loadedAccounts = await ConsoleAPI.json('/api/accounts', { signal: ticket.signal }, { array: true });
+    if (!ticket.isCurrent()) return;
     accounts = loadedAccounts.filter((account) => {
       if (String(account?.account_type || "").trim().toLowerCase() !== "grok") return true;
       return String(account?.credential_type || "").trim().toLowerCase() === "oauth" ||
@@ -32,6 +35,7 @@ async function loadAccounts() {
     // credentials, alter quota/status fields, and re-render rows one by one, so
     // they must only run after the operator clicks the account's refresh action.
   } catch (err) {
+    if (!ticket.accepts(err)) return;
     console.error("Failed to load accounts:", err);
     showToast("加载账号失败", "error");
   }

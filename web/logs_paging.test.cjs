@@ -119,3 +119,13 @@ test('detail panel reads the HTTP status and first-token latency from metadata',
   assert.match(text,/首生成（含推理）[\s\S]*135 ms/,'the measured first-token latency was not shown');
   assert.match(text,/限流/);
 });
+
+test('obsolete log failures preserve current records and pagination cursor',async()=>{
+  const api=load(), pending=[];
+  api.context.fetch=()=>new Promise((resolve,reject)=>pending.push({resolve,reject}));
+  const old=api.load(false); api.state.kind='operation'; const current=api.load(false);
+  pending[1].resolve(successResponse({data:[{event:{kind:'operation',action:'config_update'}}],next_cursor:'current-cursor'})); await current;
+  pending[0].reject(new Error('old failure')); await old;
+  assert.equal(api.state.cursor,'current-cursor'); assert.equal(api.state.records[0].event.kind,'operation');
+  assert.match(allText(api.ids.logsRows),/更新配置/); assert.doesNotMatch(allText(api.ids.logsRows),/old failure/);
+});

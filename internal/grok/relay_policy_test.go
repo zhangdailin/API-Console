@@ -90,7 +90,7 @@ func TestRelayNativeContextAndUpstreamDecisions(t *testing.T) {
 			}
 			testutil.Falsef(t, rec.Code != tc.status || calls != 1, "status=%d want=%d calls=%d body=%s", rec.Code, tc.status, calls, rec.Body.String())
 			// Session keys are tenant-scoped routing metadata; content is not.
-			testutil.NotEqual(t, interfaceString(received["prompt_cache_key"]), "")
+			testutil.NotEqual(t, chatwire.ParseLooseStringAny(received["prompt_cache_key"]), "")
 			received["prompt_cache_key"] = payload["prompt_cache_key"]
 			if !reflect.DeepEqual(received, payload) {
 				for key, want := range payload {
@@ -144,12 +144,12 @@ func TestRelayNativeResponsesRecoversOpaqueReasoning(t *testing.T) {
 		reasoningSeen := false
 		for _, raw := range items {
 			item, _ := raw.(map[string]interface{})
-			switch interfaceString(item["type"]) {
+			switch chatwire.ParseLooseStringAny(item["type"]) {
 			case "reasoning":
 				reasoningSeen = true
-				testutil.Equal(t, interfaceString(item["encrypted_content"]), "")
+				testutil.Equal(t, chatwire.ParseLooseStringAny(item["encrypted_content"]), "")
 			case "compaction":
-				testutil.Equal(t, interfaceString(item["encrypted_content"]), "client-native-compaction")
+				testutil.Equal(t, chatwire.ParseLooseStringAny(item["encrypted_content"]), "client-native-compaction")
 			}
 		}
 		testutil.Falsef(t, reasoningSeen, "retry %d kept an empty reasoning item instead of dropping it: %v", index, items)

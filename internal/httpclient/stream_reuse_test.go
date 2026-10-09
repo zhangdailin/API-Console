@@ -39,7 +39,7 @@ func TestTerminalTailHonorsOriginalRequestCancellation(t *testing.T) {
 			if channel == "workbuddy" {
 				client = workbuddy.NewFromAccount(&store.Account{WorkBuddyAccessToken: "test-access", WorkBuddyExpiresAt: time.Now().Add(time.Hour)}, cfg)
 			} else {
-				client = cline.NewFromAccount(&store.Account{ClineAccessToken: "test-access", ClineExpiresAt: time.Now().Add(time.Hour), ClineModelIDs: []string{"model-a"}}, cfg)
+				client = cline.NewFromAccount(&store.Account{ClineAccessToken: "test-access", ClineExpiresAt: time.Now().Add(time.Hour), ClineModelIDs: []string{`{"id":"model-a"}`}}, cfg)
 			}
 			parent, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
@@ -113,7 +113,7 @@ func TestSharedStreamsReuseHTTP1AfterDone(t *testing.T) {
 			if channel == "workbuddy" {
 				client = workbuddy.NewFromAccount(&store.Account{WorkBuddyAccessToken: "test-access", WorkBuddyExpiresAt: time.Now().Add(time.Hour)}, cfg)
 			} else {
-				client = cline.NewFromAccount(&store.Account{ClineAccessToken: "test-access", ClineExpiresAt: time.Now().Add(time.Hour), ClineModelIDs: []string{"model-a"}}, cfg)
+				client = cline.NewFromAccount(&store.Account{ClineAccessToken: "test-access", ClineExpiresAt: time.Now().Add(time.Hour), ClineModelIDs: []string{`{"id":"model-a"}`}}, cfg)
 			}
 			for i := 0; i < 2; i++ {
 				text := ""

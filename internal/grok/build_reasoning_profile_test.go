@@ -115,7 +115,7 @@ func TestBuildExplicitNoneUsesLowestCompatibleEffort(t *testing.T) {
 			}
 			testutil.NoError(t, err)
 			reasoning := payload["reasoning"].(map[string]interface{})
-			got := interfaceString(reasoning["effort"])
+			got := chatwire.ParseLooseStringAny(reasoning["effort"])
 			testutil.Falsef(t, !strings.EqualFold(got, tc.want), "effort=%q want=%q", got, tc.want)
 			testutil.False(t, reasoning["summary"] != "auto" || source["reasoning"].(map[string]interface{})["effort"] != " NONE ", "summary or immutable source changed")
 		})

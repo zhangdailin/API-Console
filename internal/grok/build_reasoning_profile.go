@@ -7,6 +7,7 @@ import (
 
 	"encoding/json"
 
+	"orchids-api/internal/chatwire"
 	"orchids-api/internal/modelcatalog"
 	"orchids-api/internal/modelpolicy"
 	"orchids-api/internal/store"
@@ -66,8 +67,8 @@ func buildPayloadForAccount(immutable map[string]interface{}, acc *store.Account
 	profile, found := buildCatalogProfile(acc, upstreamModel)
 	if !found {
 		reasoning, _ := payload["reasoning"].(map[string]interface{})
-		explicit := reasoning != nil && strings.TrimSpace(interfaceString(reasoning["effort"])) != ""
-		if explicit && strings.EqualFold(strings.TrimSpace(interfaceString(reasoning["effort"])), "none") &&
+		explicit := reasoning != nil && strings.TrimSpace(chatwire.ParseLooseStringAny(reasoning["effort"])) != ""
+		if explicit && strings.EqualFold(strings.TrimSpace(chatwire.ParseLooseStringAny(reasoning["effort"])), "none") &&
 			!modelpolicy.SupportsReasoningEffort(upstreamModel, "none") && modelpolicy.SupportsReasoningEffort(upstreamModel, "low") {
 			reasoning["effort"] = "low"
 		}
@@ -83,7 +84,7 @@ func buildPayloadForAccount(immutable map[string]interface{}, acc *store.Account
 	}
 
 	reasoning, _ := payload["reasoning"].(map[string]interface{})
-	explicit := reasoning != nil && strings.TrimSpace(interfaceString(reasoning["effort"])) != ""
+	explicit := reasoning != nil && strings.TrimSpace(chatwire.ParseLooseStringAny(reasoning["effort"])) != ""
 	if !explicit {
 		if profile.SupportsReasoningEffort {
 			if reasoning == nil {
@@ -99,7 +100,7 @@ func buildPayloadForAccount(immutable map[string]interface{}, acc *store.Account
 		return payload, nil
 	}
 
-	effort := strings.ToLower(strings.TrimSpace(interfaceString(reasoning["effort"])))
+	effort := strings.ToLower(strings.TrimSpace(chatwire.ParseLooseStringAny(reasoning["effort"])))
 	allowed := make(map[string]struct{}, len(profile.ReasoningEfforts))
 	for _, candidate := range profile.ReasoningEfforts {
 		allowed[strings.ToLower(strings.TrimSpace(candidate))] = struct{}{}

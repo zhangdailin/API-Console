@@ -33,19 +33,15 @@ type StoredResponse struct {
 	UpdatedAt          time.Time `json:"updated_at"`
 }
 
-// StoredReasoningReplay contains one opaque encrypted reasoning item. The key
+// StoredReasoningReplay contains normalized portable replay items. The key
 // is already tenant/model/session isolated by the gateway; Redis persistence
 // lets later turns resume on another replica without storing plaintext chain
 // of thought.
 type StoredReasoningReplay struct {
-	Model      string `json:"model"`
-	SessionKey string `json:"session_key"`
-	// EncryptedContent is the legacy single-cipher form. It is still written by
-	// paths that only observe one opaque reasoning item, and is always read for
-	// compatibility; Items takes precedence when present.
-	EncryptedContent string            `json:"encrypted_content,omitempty"`
-	Items            []json.RawMessage `json:"items,omitempty"`
-	ExpiresAt        time.Time         `json:"expires_at"`
+	Model      string            `json:"model"`
+	SessionKey string            `json:"session_key"`
+	Items      []json.RawMessage `json:"items,omitempty"`
+	ExpiresAt  time.Time         `json:"expires_at"`
 }
 
 type StoredSessionAffinity struct {

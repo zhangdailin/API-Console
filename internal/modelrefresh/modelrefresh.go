@@ -11,9 +11,9 @@ package modelrefresh
 import (
 	"errors"
 	"fmt"
+	"orchids-api/internal/util"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 const (
@@ -169,28 +169,10 @@ func boundedModelRefreshWorkers(total int, concurrency int) int {
 	return workers
 }
 
-// runIndexedModelRefreshWorkers applies work to every index using at most the
-// configured number of workers. Each index is handed out once, so callers can
-// safely write results[index] without a mutex and retain input ordering.
-func runIndexedModelRefreshWorkers(total, concurrency int, work func(index int)) {
-	workerCount := boundedModelRefreshWorkers(total, concurrency)
-	if workerCount == 0 || work == nil {
-		return
+// runIndexedModelRefreshWorkers retains the catalog concurrency limits.
+func runIndexedModelRefreshWorkers(total, concurrency int, work func(int)) []error {
+	if work == nil {
+		return nil
 	}
-	jobs := make(chan int)
-	var wg sync.WaitGroup
-	wg.Add(workerCount)
-	for range workerCount {
-		go func() {
-			defer wg.Done()
-			for index := range jobs {
-				work(index)
-			}
-		}()
-	}
-	for index := range total {
-		jobs <- index
-	}
-	close(jobs)
-	wg.Wait()
+	return util.RunIndexed(total, boundedModelRefreshWorkers(total, concurrency), func(index int) error { work(index); return nil })
 }

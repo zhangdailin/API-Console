@@ -2,26 +2,8 @@ package grok
 
 import (
 	"crypto/rand"
-	"encoding/hex"
 	"fmt"
-	"strconv"
-	"strings"
-
-	"encoding/json"
-
-	"orchids-api/internal/util"
 )
-
-func randomHex(n int) string {
-	if n <= 0 {
-		return ""
-	}
-	buf := make([]byte, n)
-	if _, err := rand.Read(buf); err != nil {
-		return ""
-	}
-	return hex.EncodeToString(buf)
-}
 
 func randomUUID() string {
 	buf := make([]byte, 16)
@@ -39,39 +21,4 @@ func randomUUID() string {
 	)
 }
 
-// firstNonEmpty delegates to the shared implementation in internal/util so the
-// package keeps its short local name without duplicating the logic.
-func firstNonEmpty(values ...string) string { return util.FirstNonEmpty(values...) }
-
 func isDigit(c byte) bool { return c >= '0' && c <= '9' }
-
-func uniqueStrings(input []string) []string { return util.UniqueStrings(input) }
-
-func interfaceToInt(v interface{}) int {
-	switch x := v.(type) {
-	case int:
-		return x
-	case int64:
-		return int(x)
-	case float64:
-		return int(x)
-	case json.Number:
-		if i, err := x.Int64(); err == nil {
-			return int(i)
-		}
-	case string:
-		if i, err := strconv.Atoi(strings.TrimSpace(x)); err == nil {
-			return i
-		}
-	}
-	return 0
-}
-
-func interfaceSlice(v interface{}) []interface{} {
-	switch x := v.(type) {
-	case []interface{}:
-		return x
-	default:
-		return nil
-	}
-}

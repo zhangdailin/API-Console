@@ -3,6 +3,7 @@ package grok
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"orchids-api/internal/chatwire"
 	"orchids-api/internal/testutil"
 	"strings"
 	"testing"
@@ -112,8 +113,8 @@ func TestRedactResponseErrorSeparatesRejectionFromFailure(t *testing.T) {
 				testutil.True(t, ok, "%s envelope = %#v")
 				envelope = nested
 			}
-			testutil.Equal(t, interfaceString(envelope["code"]), tc.wantCode)
-			testutil.Equal(t, interfaceString(envelope["message"]), tc.wantMessage)
+			testutil.Equal(t, chatwire.ParseLooseStringAny(envelope["code"]), tc.wantCode)
+			testutil.Equal(t, chatwire.ParseLooseStringAny(envelope["message"]), tc.wantMessage)
 			_, leaked := tc.event["param"]
 			testutil.Falsef(t, leaked, "error frame leaked the upstream param field: %#v", tc.event)
 			_, leaked = tc.event["code"]
@@ -133,9 +134,9 @@ func TestRedactResponseErrorNeverForwardsUpstreamText(t *testing.T) {
 	}
 	redactResponseError(event)
 	encoded := event["error"].(map[string]interface{})
-	testutil.MustNotContain(t, interfaceString(encoded["message"]), secret)
+	testutil.MustNotContain(t, chatwire.ParseLooseStringAny(encoded["message"]), secret)
 	got := codeForCategory("client")
-	testutil.Falsef(t, interfaceString(encoded["code"]) != got, "code = %q, want %q", interfaceString(encoded["code"]), got)
+	testutil.Falsef(t, chatwire.ParseLooseStringAny(encoded["code"]) != got, "code = %q, want %q", chatwire.ParseLooseStringAny(encoded["code"]), got)
 }
 
 // A failed response envelope is normalized so the message inside it cannot
@@ -154,10 +155,10 @@ func TestRedactResponseErrorNormalizesFailedEnvelope(t *testing.T) {
 	redactResponseError(event)
 	response := event["response"].(map[string]interface{})
 	envelope := response["error"].(map[string]interface{})
-	testutil.Equal(t, interfaceString(envelope["code"]), upstreamRejectionCode)
-	got := interfaceString(envelope["message"])
+	testutil.Equal(t, chatwire.ParseLooseStringAny(envelope["code"]), upstreamRejectionCode)
+	got := chatwire.ParseLooseStringAny(envelope["message"])
 	testutil.Falsef(t, !strings.Contains(got, "rejected the request parameters"), "envelope message = %q", got)
-	testutil.Equal(t, interfaceString(response["status"]), "failed")
+	testutil.Equal(t, chatwire.ParseLooseStringAny(response["status"]), "failed")
 }
 
 // A completed response that merely mentions an error field is not a failure and
@@ -168,7 +169,7 @@ func TestRedactResponseErrorLeavesCompletedEnvelopeStatus(t *testing.T) {
 	}
 	redactResponseError(event)
 	response := event["response"].(map[string]interface{})
-	testutil.Equal(t, interfaceString(response["status"]), "completed")
+	testutil.Equal(t, chatwire.ParseLooseStringAny(response["status"]), "completed")
 	testutil.True(t, response["error"] == nil, "successful response must retain error: null")
 }
 

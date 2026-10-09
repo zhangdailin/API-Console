@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"encoding/json"
+
 	"github.com/redis/go-redis/v9"
 )
 
@@ -413,29 +414,39 @@ func (s *redisStore) getApiKeysByIDs(ctx context.Context, ids []string) ([]*ApiK
 	usedValues, _ := usedCmd.Result()
 
 	results := make([]*ApiKey, len(values))
-	decode := func(i int) {
+	decode := func(i int) error {
+		if values[i] == nil {
+			return nil
+		}
 		strVal, ok := values[i].(string)
 		if !ok || strVal == "" {
-			return
+			return fmt.Errorf("invalid API key record #%d", idNums[i])
 		}
 		var record apiKeyRecord
 		if err := json.Unmarshal([]byte(strVal), &record); err != nil {
-			return
+			return fmt.Errorf("decode API key #%d: %w", idNums[i], err)
 		}
 		key := record.toApiKey()
 		if key.ID == 0 {
 			key.ID = idNums[i]
 		}
-		if i < len(usedValues) {
-			if raw, ok := usedValues[i].(string); ok {
-				if used, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64); err == nil {
-					key.BillingUsedUSDTicks = used
-				}
+		if i < len(usedValues) && usedValues[i] != nil {
+			raw, ok := usedValues[i].(string)
+			if !ok {
+				return fmt.Errorf("invalid API key usage #%d", key.ID)
 			}
+			used, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+			if err != nil {
+				return fmt.Errorf("decode API key usage #%d: %w", key.ID, err)
+			}
+			key.BillingUsedUSDTicks = used
 		}
 		results[i] = key
+		return nil
 	}
-	forEachIndex(len(values), decode)
+	if err := forEachIndex(len(values), decode); err != nil {
+		return nil, err
+	}
 
 	return compactNonNil(results), nil
 }

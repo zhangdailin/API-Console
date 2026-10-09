@@ -218,9 +218,7 @@ func signPath(rawURL string) string {
 		return rawURL
 	}
 	path := parsed.Path
-	if strings.HasPrefix(path, "/algo") {
-		path = strings.TrimPrefix(path, "/algo")
-	}
+	path = strings.TrimPrefix(path, "/algo")
 	return path
 }
 

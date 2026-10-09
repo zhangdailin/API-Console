@@ -18,23 +18,23 @@ func TestGrokBuildLimitsSurviveConfigRoundTrip(t *testing.T) {
 	testutil.NoError(t, json.Unmarshal(raw, &restored))
 	ApplyHardcoded(&restored)
 	testutil.False(t, restored.MaxRetries != 2 || restored.RetryDelay != 50 || restored.AccountSwitchCount != 4 || restored.RequestTimeout != 1800 || restored.ConcurrencyTimeout != 2400 || restored.Retry429Interval != 90, "runtime settings were overwritten")
-	testutil.False(t, restored.GrokRequestsPerSecond("build") != 10 || restored.GrokRequestTimeout("build") != 1800*time.Second, "Build limits lost")
-	testutil.Equal(t, restored.GrokStreamIdleTimeoutFor("build"), 300*time.Second)
+	testutil.False(t, restored.GrokRequestsPerSecond() != 10 || restored.GrokRequestTimeout() != 1800*time.Second, "Build limits lost")
+	testutil.Equal(t, restored.GrokStreamIdleTimeoutFor(), 300*time.Second)
 }
 
 func TestGrokBuildLimitsDefaultsAndBounds(t *testing.T) {
 	var cfg *Config
-	testutil.False(t, cfg.GrokRequestsPerSecond("build") != 0 || cfg.GrokRequestTimeout("build") != 600*time.Second, "unexpected defaults")
+	testutil.False(t, cfg.GrokRequestsPerSecond() != 0 || cfg.GrokRequestTimeout() != 600*time.Second, "unexpected defaults")
 	cfg = &Config{RequestTimeout: 999999, GrokBuildTimeout: 999999, GrokBuildRPS: 999999, GrokStreamIdleSeconds: 999999}
 	ApplyHardcoded(cfg)
-	testutil.False(t, cfg.RequestTimeout != 86400 || cfg.GrokRequestTimeout("build") != 24*time.Hour || cfg.GrokStreamIdleTimeoutFor("build") != 10*time.Minute || cfg.GrokRequestsPerSecond("build") != 1000, "invalid bounds")
+	testutil.False(t, cfg.RequestTimeout != 86400 || cfg.GrokRequestTimeout() != 24*time.Hour || cfg.GrokStreamIdleTimeoutFor() != 10*time.Minute || cfg.GrokRequestsPerSecond() != 1000, "invalid bounds")
 }
 
 func TestGrokBuildIdleDefaultsOverridesAndLegacyFallback(t *testing.T) {
 	var cfg *Config
-	testutil.Equal(t, cfg.GrokStreamIdleTimeoutFor("build"), 2*time.Minute)
+	testutil.Equal(t, cfg.GrokStreamIdleTimeoutFor(), 2*time.Minute)
 	cfg = &Config{GrokStreamIdleSeconds: 45, GrokBuildStreamIdleSeconds: 9999}
-	testutil.Equal(t, cfg.GrokStreamIdleTimeoutFor("build"), 10*time.Minute)
+	testutil.Equal(t, cfg.GrokStreamIdleTimeoutFor(), 10*time.Minute)
 	cfg.GrokBuildStreamIdleSeconds = 1
-	testutil.Equal(t, cfg.GrokStreamIdleTimeoutFor("build"), 30*time.Second)
+	testutil.Equal(t, cfg.GrokStreamIdleTimeoutFor(), 30*time.Second)
 }

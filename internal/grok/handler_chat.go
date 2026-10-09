@@ -12,8 +12,6 @@ import (
 	"orchids-api/internal/store"
 )
 
-type chatSourceOperationKey struct{}
-
 // Chat completions. The only Grok upstream this gateway speaks here is the Build
 // (OAuth CLI) plane; the legacy website and developer planes were removed,
 // so every conversation model is served by the native Responses bridge.
@@ -41,7 +39,7 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	req.StartedAt = time.Now()
-	req.SourceOperation, _ = r.Context().Value(chatSourceOperationKey{}).(string)
+	req.SourceOperation = chatwire.SourceOperation(r.Context())
 	verboseDiagnostics := logutil.VerboseDiagnosticsEnabled()
 	debugLogSSE := h != nil && h.configSnapshot() != nil && h.configSnapshot().DebugLogSSE
 	logger := debug.NewForContext(r.Context(), verboseDiagnostics, verboseDiagnostics && debugLogSSE)

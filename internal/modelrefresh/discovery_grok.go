@@ -40,12 +40,18 @@ func discoverGrokModelsReport(ctx context.Context, cfg *config.Config, s *store.
 	}
 
 	ordered := make([]grokBuildModelDiscovery, len(accounts))
-	runIndexedModelRefreshWorkers(len(accounts), concurrency, func(index int) {
+	taskErrors := runIndexedModelRefreshWorkers(len(accounts), concurrency, func(index int) {
 		acc := accounts[index]
+		ordered[index].account = acc
 		catalog, fetchErr := fetchGrokBuildModelsForRefresh(ctx, cfg, s, acc)
 		ordered[index] = grokBuildModelDiscovery{account: acc, catalog: catalog, err: fetchErr}
 	})
 
+	for index, taskErr := range taskErrors {
+		if taskErr != nil {
+			ordered[index].err = taskErr
+		}
+	}
 	now := time.Now().UTC()
 	seen := make(map[string]struct{})
 	for _, result := range ordered {

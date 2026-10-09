@@ -9,7 +9,6 @@ import (
 	"orchids-api/internal/chatwire"
 	"orchids-api/internal/responses"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -59,23 +58,23 @@ func parityTools(t *testing.T, stream string) map[int]*parityTool {
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			return err
 		}
-		for _, raw := range interfaceSlice(chunk["choices"]) {
+		for _, raw := range responses.InterfaceSlice(chunk["choices"]) {
 			choice, _ := raw.(map[string]interface{})
 			delta, _ := choice["delta"].(map[string]interface{})
-			for _, raw := range interfaceSlice(delta["tool_calls"]) {
+			for _, raw := range responses.InterfaceSlice(delta["tool_calls"]) {
 				call, _ := raw.(map[string]interface{})
-				index := interfaceToInt(call["index"])
+				index := responses.InterfaceToInt(call["index"])
 				fn, _ := call["function"].(map[string]interface{})
 				if calls[index] == nil {
 					calls[index] = &parityTool{}
 				}
 				tool := calls[index]
-				if id := interfaceString(call["id"]); id != "" {
+				if id := chatwire.ParseLooseStringAny(call["id"]); id != "" {
 					tool.id = id
 					tool.starts++
 				}
-				tool.name += streamString(fn["name"])
-				tool.args += streamString(fn["arguments"])
+				tool.name += responses.StreamString(fn["name"])
+				tool.args += responses.StreamString(fn["arguments"])
 			}
 		}
 		return nil
@@ -165,7 +164,7 @@ func TestParityMissingToolIDsAndUsage(t *testing.T) {
 	}
 	for _, cached := range []int{0, 80, 180} {
 		usage := anthropicUsageFromOpenAI(map[string]interface{}{"prompt_tokens": 100, "completion_tokens": 10, "prompt_tokens_details": map[string]interface{}{"cached_tokens": cached}})
-		testutil.Equal(t, interfaceToInt(usage["input_tokens"])+interfaceToInt(usage["cache_read_input_tokens"]), 100)
+		testutil.Equal(t, responses.InterfaceToInt(usage["input_tokens"])+responses.InterfaceToInt(usage["cache_read_input_tokens"]), 100)
 	}
 }
 
@@ -259,13 +258,6 @@ func TestParityAuditCapturesTerminalUsageAndFailure(t *testing.T) {
 	}
 }
 
-type parityBlockingSource struct {
-	closed chan struct{}
-	once   sync.Once
-}
-
-func (s *parityBlockingSource) Read([]byte) (int, error) { <-s.closed; return 0, io.EOF }
-func (s *parityBlockingSource) Close() error             { s.once.Do(func() { close(s.closed) }); return nil }
 func TestParityNonStreamingDoesNotLeakReasoningAndPreservesAllMessages(t *testing.T) {
 	for _, onlyReasoning := range []bool{false, true} {
 		output := []interface{}{map[string]interface{}{"type": "reasoning", "content": []interface{}{map[string]interface{}{"type": "reasoning_text", "text": "private plan"}}}}

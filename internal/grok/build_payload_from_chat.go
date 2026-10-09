@@ -3,6 +3,8 @@ package grok
 import (
 	"fmt"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/responses"
+	"orchids-api/internal/util"
 	"strings"
 )
 
@@ -61,7 +63,7 @@ func (h *Handler) responsesPayloadFromChat(spec ModelSpec, req *chatwire.Request
 		payload["safety_identifier"] = value
 	}
 	if len(req.ResponseText) > 0 {
-		payload["text"] = cloneStringInterfaceMap(req.ResponseText)
+		payload["text"] = responses.CloneStringInterfaceMap(req.ResponseText)
 	} else if len(req.ResponseFormat) > 0 {
 		payload["text"] = map[string]interface{}{"format": normalizeChatResponseFormat(req.ResponseFormat)}
 	}
@@ -69,7 +71,7 @@ func (h *Handler) responsesPayloadFromChat(spec ModelSpec, req *chatwire.Request
 	// Without it the replay cache is never populated, so a default (auto) turn
 	// would silently lose multi-turn reasoning continuity. The appended entry
 	// also means the list can never come back empty.
-	payload["include"] = uniqueStrings(append(append([]string(nil), req.Include...), "reasoning.encrypted_content"))
+	payload["include"] = util.UniqueStrings(append(append([]string(nil), req.Include...), "reasoning.encrypted_content"))
 	tools := append([]map[string]interface{}(nil), req.ResponsesTools...)
 	tools = append(tools, buildToolsFromOpenAI(req.Tools)...)
 	// OpenAI's web_search_options has no function form: it means "run the
@@ -92,7 +94,7 @@ func (h *Handler) responsesPayloadFromChat(spec ModelSpec, req *chatwire.Request
 		payload["parallel_tool_calls"] = *req.ParallelToolCalls
 	}
 	if len(req.Metadata) > 0 {
-		payload["metadata"] = cloneStringInterfaceMap(req.Metadata)
+		payload["metadata"] = responses.CloneStringInterfaceMap(req.Metadata)
 	}
 	if tier := strings.TrimSpace(req.ServiceTier); tier != "" {
 		payload["service_tier"] = tier

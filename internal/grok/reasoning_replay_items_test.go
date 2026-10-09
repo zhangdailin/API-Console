@@ -7,6 +7,7 @@ import (
 
 	"encoding/json"
 
+	"orchids-api/internal/chatwire"
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
 )
@@ -56,7 +57,7 @@ func TestFilterReplayItemsDropsWhatTheRequestAlreadyHas(t *testing.T) {
 	plain := []interface{}{map[string]interface{}{"role": "user", "content": "next"}}
 	got = filterReplayItemsForInput(plain, items)
 	testutil.Equal(t, len(got), 1)
-	testutil.Equal(t, interfaceString(got[0].(map[string]interface{})["type"]), "reasoning")
+	testutil.Equal(t, chatwire.ParseLooseStringAny(got[0].(map[string]interface{})["type"]), "reasoning")
 }
 
 func TestFilterReplayItemsMatchesPrefixedToolCallIDs(t *testing.T) {
@@ -71,7 +72,7 @@ func TestFilterReplayItemsMatchesPrefixedToolCallIDs(t *testing.T) {
 	got := filterReplayItemsForInput(input, items)
 	testutil.Equal(t, len(got), 1)
 	// The replayed call is rebound to the spelling the client already uses.
-	testutil.Equal(t, interfaceString(got[0].(map[string]interface{})["call_id"]), "toolu_call_1")
+	testutil.Equal(t, chatwire.ParseLooseStringAny(got[0].(map[string]interface{})["call_id"]), "toolu_call_1")
 }
 
 func TestInsertReplayItemsPlacesBeforeMatchingToolOutput(t *testing.T) {
@@ -91,20 +92,16 @@ func TestInsertReplayItemsPlacesBeforeMatchingToolOutput(t *testing.T) {
 		if want == "" {
 			continue
 		}
-		testutil.Equal(t, interfaceString(got[index].(map[string]interface{})["type"]), want)
+		testutil.Equal(t, chatwire.ParseLooseStringAny(got[index].(map[string]interface{})["type"]), want)
 	}
 }
 
-func TestReplayItemsFromLegacyCipher(t *testing.T) {
-	cipher := validTestReplayCipher()
-	items := replayItemsFromStored(&store.StoredReasoningReplay{EncryptedContent: cipher})
-	testutil.Equal(t, len(items), 1)
-	testutil.Equal(t, interfaceString(items[0].(map[string]interface{})["encrypted_content"]), cipher)
-	// A normalized item list takes precedence when both forms are present.
-	encoded, err := json.Marshal(map[string]interface{}{"type": "reasoning", "summary": []interface{}{}, "encrypted_content": testReplayCipher(4)})
-	testutil.NoError(t, err)
-	items = replayItemsFromStored(&store.StoredReasoningReplay{EncryptedContent: cipher, Items: []json.RawMessage{encoded}})
-	testutil.Falsef(t, len(items) != 1 || interfaceString(items[0].(map[string]interface{})["encrypted_content"]) == cipher, "items should win over the legacy cipher: %v", items)
+func TestReplayItemsRejectLegacyCipher(t *testing.T) {
+	var old store.StoredReasoningReplay
+	testutil.NoError(t, json.Unmarshal([]byte(`{"encrypted_content":"old-cipher"}`), &old))
+	testutil.Equal(t, len(replayItemsFromStored(&old)), 0)
+	encoded := json.RawMessage(`{"type":"reasoning","encrypted_content":"new-cipher"}`)
+	testutil.Equal(t, len(replayItemsFromStored(&store.StoredReasoningReplay{Items: []json.RawMessage{encoded}})), 1)
 }
 
 func TestCaptureReasoningReplayClearsStateWithoutAnchor(t *testing.T) {
@@ -128,7 +125,7 @@ func TestCaptureReasoningReplayFromStream(t *testing.T) {
 	h.captureReasoningReplay(context.Background(), "grok-4.6", "session", []byte(stream))
 	items := h.loadReasoningReplayItems("grok-4.6", "session")
 	testutil.Equal(t, len(items), 1)
-	testutil.Equal(t, interfaceString(items[0].(map[string]interface{})["encrypted_content"]), cipher)
+	testutil.Equal(t, chatwire.ParseLooseStringAny(items[0].(map[string]interface{})["encrypted_content"]), cipher)
 }
 
 func TestReasoningReplayCacheReturnsDeepCopies(t *testing.T) {
@@ -147,7 +144,7 @@ func TestReasoningReplayCacheReturnsDeepCopies(t *testing.T) {
 
 	again := h.loadReasoningReplayItems("grok-4.6", "session")
 	againItem := again[0].(map[string]interface{})
-	testutil.Equal(t, interfaceString(againItem["encrypted_content"]), cipher)
+	testutil.Equal(t, chatwire.ParseLooseStringAny(againItem["encrypted_content"]), cipher)
 	summary := againItem["summary"].([]interface{})[0].(map[string]interface{})
-	testutil.Equal(t, interfaceString(summary["text"]), "stable")
+	testutil.Equal(t, chatwire.ParseLooseStringAny(summary["text"]), "stable")
 }

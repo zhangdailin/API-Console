@@ -35,3 +35,5 @@ API-Console 支持 WorkBuddy、Qoder、Cline、Grok Build OAuth 四个通道。�
 ## 维护方式
 
 修改路由时同步 API 与能力矩阵；修改配置时同步字段、默认值、单位和是否需重启；修改统计时说明数据来源、分母、窗口、采样与保留范围。历史报告追加范围说明，不将原始证据改写成一次新的验证。
+
+- [持久数据格式退役与恢复](data-format-retirement.md)

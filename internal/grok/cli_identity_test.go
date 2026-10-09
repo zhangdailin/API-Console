@@ -22,7 +22,7 @@ var traceparentRE = regexp.MustCompile(`^00-[0-9a-f]{32}-[0-9a-f]{16}-01$`)
 func TestTraceparentIsWellFormedForTheRequestIdTheClientMints(t *testing.T) {
 	t.Parallel()
 
-	requestID := randomHex(16)
+	requestID := util.RandomHex(16)
 	testutil.Equal(t, len(requestID), 32)
 	trace := util.Traceparent(requestID)
 	testutil.Falsef(t, !traceparentRE.MatchString(trace), "traceparent = %q, want a version 00 trace context", trace)

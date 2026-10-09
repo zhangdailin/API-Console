@@ -63,13 +63,6 @@ func (s *Store) GetModel(ctx context.Context, id string) (*Model, error) {
 	return nil, fmt.Errorf("models store not configured")
 }
 
-func (s *Store) GetModelByModelID(ctx context.Context, modelID string) (*Model, error) {
-	if s.models != nil {
-		return s.models.GetModelByModelID(ctx, modelID)
-	}
-	return nil, fmt.Errorf("models store not configured")
-}
-
 func (s *Store) GetModelByChannelAndModelID(ctx context.Context, channel, modelID string) (*Model, error) {
 	if s.models != nil {
 		return s.models.GetModelByChannelAndModelID(ctx, channel, modelID)

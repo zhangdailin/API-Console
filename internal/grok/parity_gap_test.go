@@ -132,7 +132,7 @@ func TestReasoningReplayIsModelAndSessionIsolated(t *testing.T) {
 			return ""
 		}
 		item, _ := items[0].(map[string]interface{})
-		return interfaceString(item["encrypted_content"])
+		return chatwire.ParseLooseStringAny(item["encrypted_content"])
 	}
 	h.storeReasoningReplay("grok-4.6", "session-a", validTestReplayCipher())
 	testutil.Equal(t, replayCipher("grok-4.6", "session-a"), validTestReplayCipher())

@@ -28,8 +28,7 @@ type Model struct {
 //
 // The snapshot is stored as one JSON object per row, matching the other
 // observed-catalog channels: the whitelist alone would throw away what it was
-// observed alongside, and a row written by an older form is still accepted on
-// read.
+// observed alongside.
 type catalogSnapshotRow struct {
 	ID             string `json:"id"`
 	Name           string `json:"name,omitempty"`
@@ -116,19 +115,11 @@ func CatalogSupportsModel(rows []string, modelID string) bool {
 	return slices.ContainsFunc(rows, func(row string) bool { return strings.EqualFold(catalogID(row), modelID) })
 }
 
-// catalogID reads the identifier back out of a stored row. A bare id written by
-// an older build is still accepted.
+// catalogID accepts current JSON snapshot rows only.
 func catalogID(raw string) string {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
+	var row catalogSnapshotRow
+	if !strings.HasPrefix(strings.TrimSpace(raw), "{") || json.Unmarshal([]byte(raw), &row) != nil {
 		return ""
 	}
-	if strings.HasPrefix(trimmed, "{") {
-		row := catalogSnapshotRow{}
-		if err := json.Unmarshal([]byte(trimmed), &row); err != nil {
-			return ""
-		}
-		return strings.TrimSpace(row.ID)
-	}
-	return trimmed
+	return strings.TrimSpace(row.ID)
 }

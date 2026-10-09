@@ -294,7 +294,7 @@ func (a *API) HandleKeyByID(w http.ResponseWriter, r *http.Request) {
 			if errors.Is(err, store.ErrNoRows) {
 				http.Error(w, "not found", 404)
 			} else {
-				http.Error(w, "API key secret unavailable", 503)
+				http.Error(w, "API key secret unavailable", http.StatusServiceUnavailable)
 			}
 			return
 		}
@@ -335,7 +335,7 @@ func (a *API) HandleKeyByID(w http.ResponseWriter, r *http.Request) {
 		// Rotation atomically replaces the encrypted secret and authentication hash,
 		// retaining policy and usage; the previous secret immediately loses access.
 		if action == "rotate" {
-			key, err := a.store.GetApiKeyByID(r.Context(), id)
+			_, err := a.store.GetApiKeyByID(r.Context(), id)
 			if err != nil {
 				writeApiKeyStoreError(w, err)
 				return
@@ -346,7 +346,7 @@ func (a *API) HandleKeyByID(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "failed to generate api key", http.StatusInternalServerError)
 				return
 			}
-			key, err = a.store.RotateApiKey(r.Context(), id, fullKey)
+			key, err := a.store.RotateApiKey(r.Context(), id, fullKey)
 			if err != nil {
 				writeApiKeyStoreError(w, err)
 				return

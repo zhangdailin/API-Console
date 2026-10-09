@@ -117,7 +117,7 @@ func discoverAccountCatalogModels(ctx context.Context, cfg *config.Config, s *st
 	}
 
 	report := accountModelDiscoveryReport{Source: source, Attempts: make([]accountModelDiscoveryAttempt, len(accounts))}
-	runIndexedModelRefreshWorkers(len(accounts), concurrency, func(index int) {
+	taskErrors := runIndexedModelRefreshWorkers(len(accounts), concurrency, func(index int) {
 		acc := accounts[index]
 		attempt := accountModelDiscoveryAttempt{AccountID: acc.ID}
 		switch accountType {
@@ -162,6 +162,12 @@ func discoverAccountCatalogModels(ctx context.Context, cfg *config.Config, s *st
 		report.Attempts[index] = attempt
 	})
 
+	for index, taskErr := range taskErrors {
+		if taskErr != nil {
+			report.Attempts[index] = accountModelDiscoveryAttempt{AccountID: accounts[index].ID, Err: taskErr}
+		}
+	}
+
 	report.Candidates = unionAccountCatalogAttempts(report.Attempts)
 	succeeded, _ := report.counts()
 	if succeeded == 0 {
@@ -204,8 +210,8 @@ func accountCatalogSnapshotToDiscovered(channel string, acc *store.Account) []di
 		if trimmed == "" {
 			continue
 		}
-		row := storedAccountCatalogRow{ID: trimmed}
-		if strings.HasPrefix(trimmed, "{") && json.Unmarshal([]byte(trimmed), &row) != nil {
+		row := storedAccountCatalogRow{}
+		if !strings.HasPrefix(trimmed, "{") || json.Unmarshal([]byte(trimmed), &row) != nil {
 			continue
 		}
 		id := strings.TrimSpace(row.ID)

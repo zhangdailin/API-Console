@@ -6,10 +6,8 @@
 (function () {
   const { el, make, attach } = ConsoleUI;
 
-  // loadSeq numbers the page loads. A filter change can be answered out of order —
-  // switching to 操作日志 while the request list is still in flight — and the older
-  // answer must not overwrite the newer one.
-  const state = { kind: 'request', cursor: '', records: [], selected: null, back: '', loadSeq: 0 };
+  const listLoads = ConsoleUI.requestGate();
+  const state = { kind: 'request', cursor: '', records: [], selected: null, back: '' };
 
   // RESULT_LABELS names the classes the overview counts with, so the chip the log
   // centre shows and the chart that opened it use the same words.
@@ -870,13 +868,13 @@
     if (append && state.cursor) params.set('before', state.cursor);
     // This load owns the list from here on. Anything still in flight answers an older
     // question (a previous tab, or a previous filter) and is dropped when it lands.
-    const seq = ++state.loadSeq;
+    const ticket = listLoads.begin();
     try {
-      const response = await ConsoleAPI.request('/api/journal/records?' + params.toString(), { credentials: 'same-origin' });
-      if (seq !== state.loadSeq) return;
+      const response = await ConsoleAPI.request('/api/journal/records?' + params.toString(), { signal: ticket.signal });
+      if (!ticket.isCurrent()) return;
       if (!response.ok) throw new Error('HTTP ' + response.status);
       const payload = await response.json();
-      if (seq !== state.loadSeq) return;
+      if (!ticket.isCurrent()) return;
       state.cursor = payload.next_cursor || '';
       state.records = append ? state.records.concat(payload.data || []) : payload.data || [];
       renderRows(append);
@@ -914,7 +912,7 @@
     } catch (error) {
       // A failure that belongs to a superseded load must not replace the newer list
       // with an error row either.
-      if (seq !== state.loadSeq) return;
+      if (!ticket.accepts(error)) return;
       const body = el('logsRows');
       if (body) {
         body.replaceChildren();

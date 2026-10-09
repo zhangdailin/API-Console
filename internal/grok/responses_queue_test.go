@@ -14,7 +14,7 @@ import (
 )
 
 func TestResponsesBridgeStreamCompletesAndCloses(t *testing.T) {
-	bridge := ResponsesBridgeHandler(func(w http.ResponseWriter, r *http.Request) {
+	bridge := responses.ResponsesBridgeHandler(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(w, "data: {\"id\":\"chatcmpl-test\",\"model\":\"qwen3.8-flash\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
 	}, responses.BridgeOptions{})
@@ -34,7 +34,7 @@ func TestResponsesBridgeStreamCompletesAndCloses(t *testing.T) {
 func TestResponsesBridgePreservesQueueRefusal(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		t.Run(fmt.Sprint(stream), func(t *testing.T) {
-			bridge := ResponsesBridgeHandler(func(w http.ResponseWriter, r *http.Request) {
+			bridge := responses.ResponsesBridgeHandler(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				w.Header().Set("Retry-After", "30")
 				w.WriteHeader(http.StatusTooManyRequests)
@@ -55,7 +55,7 @@ func TestResponsesBridgePropagatesQueueCancellation(t *testing.T) {
 			defer cancel()
 			started := make(chan struct{})
 			finished := make(chan struct{})
-			bridge := ResponsesBridgeHandler(func(w http.ResponseWriter, r *http.Request) {
+			bridge := responses.ResponsesBridgeHandler(func(w http.ResponseWriter, r *http.Request) {
 				close(started)
 				<-r.Context().Done()
 				w.WriteHeader(http.StatusServiceUnavailable)

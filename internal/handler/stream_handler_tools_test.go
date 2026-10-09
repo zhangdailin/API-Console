@@ -29,7 +29,7 @@ func TestStreamHandler_NoToolsGateSuppressesValidToolCall(t *testing.T) {
 	testutil.MustContain(t, out, `"stop_reason":"end_turn"`)
 }
 
-func TestStreamHandler_NoToolsWriteReturnsContentAsText(t *testing.T) {
+func TestStreamHandler_RejectedWriteDoesNotLeakContent(t *testing.T) {
 	sh, rec := newStreamTestHandler(t, false, true, adapter.FormatAnthropic)
 
 	sh.setAllowedToolNames(nil)
@@ -47,6 +47,7 @@ func TestStreamHandler_NoToolsWriteReturnsContentAsText(t *testing.T) {
 
 	out := rec.buf.String()
 	testutil.MustNotContain(t, out, `"type":"tool_use"`)
-	testutil.MustContain(t, out, "Ready")
+	testutil.MustNotContainAny(t, out, "Ready", "index.html", "<!doctype")
+	testutil.MustContain(t, out, "compatible tool")
 	testutil.MustContain(t, out, `"stop_reason":"end_turn"`)
 }

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"orchids-api/internal/chatwire"
 	"orchids-api/internal/responses"
+	"orchids-api/internal/util"
 	"strconv"
 	"strings"
 	"time"
@@ -331,11 +332,11 @@ func (h *Handler) deleteStoredResponse(r *http.Request, responseID, ownerHash st
 func readAndValidateNativeResponse(body io.Reader) ([]byte, error) {
 	raw, err := io.ReadAll(io.LimitReader(body, maxNativeResponsesBytes+1))
 	if err != nil || len(raw) > maxNativeResponsesBytes {
-		return nil, fmt.Errorf("Upstream response unavailable")
+		return nil, fmt.Errorf("upstream response unavailable")
 	}
 	var response map[string]interface{}
 	if json.Unmarshal(raw, &response) != nil || response == nil {
-		return nil, fmt.Errorf("Invalid upstream response")
+		return nil, fmt.Errorf("invalid upstream response")
 	}
 	return raw, nil
 }
@@ -370,7 +371,7 @@ func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader,
 			result.Err = fmt.Errorf("invalid upstream response JSON")
 			return
 		}
-		responseID = interfaceString(response["id"])
+		responseID = chatwire.ParseLooseStringAny(response["id"])
 		result.Usage = consoleUsage(response)
 		if len(result.Usage) > 0 {
 			result.UsageSource = audit.UsageSourceUpstream
@@ -404,7 +405,7 @@ func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader,
 				failureCode, failureMessage = "invalid_upstream_event", "upstream response event is not a JSON object"
 				return fmt.Errorf("%s", failureMessage)
 			}
-			kind = firstNonEmpty(interfaceString(event["type"]), frame.Event)
+			kind = util.FirstNonEmpty(chatwire.ParseLooseStringAny(event["type"]), frame.Event)
 			// response.doom_loop_check is a private Grok control event: it is
 			// not part of the Responses schema, and a strict client (Codex,
 			// Grok TUI) treats an unknown type as a protocol error. It never
@@ -413,7 +414,7 @@ func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader,
 				return nil
 			}
 			response, _ := event["response"].(map[string]interface{})
-			if id := interfaceString(response["id"]); id != "" {
+			if id := chatwire.ParseLooseStringAny(response["id"]); id != "" {
 				responseID = id
 			}
 
@@ -436,8 +437,8 @@ func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader,
 			result.UsageSource = audit.UsageSourceUpstream
 		}
 		item, _ := event["item"].(map[string]interface{})
-		meaningful := strings.HasSuffix(kind, ".delta") && streamString(event["delta"]) != ""
-		toolStart := kind == "response.output_item.added" && interfaceString(item["type"]) == "function_call" && interfaceString(item["name"]) != ""
+		meaningful := strings.HasSuffix(kind, ".delta") && responses.StreamString(event["delta"]) != ""
+		toolStart := kind == "response.output_item.added" && chatwire.ParseLooseStringAny(item["type"]) == "function_call" && chatwire.ParseLooseStringAny(item["name"]) != ""
 		if result.FirstToken.IsZero() && (meaningful || toolStart) {
 			result.FirstToken = time.Now()
 		}
@@ -597,11 +598,11 @@ func upstreamErrorText(raw interface{}) string {
 	case string:
 		return value
 	case map[string]interface{}:
-		return firstNonEmpty(
-			interfaceString(value["message"]),
-			interfaceString(value["detail"]),
-			interfaceString(value["error"]),
-			interfaceString(value["code"]),
+		return util.FirstNonEmpty(
+			chatwire.ParseLooseStringAny(value["message"]),
+			chatwire.ParseLooseStringAny(value["detail"]),
+			chatwire.ParseLooseStringAny(value["error"]),
+			chatwire.ParseLooseStringAny(value["code"]),
 		)
 	default:
 		return fmt.Sprint(raw)
@@ -628,16 +629,16 @@ func codeForCategory(category string) string {
 // would read the generic wrapper "Upstream request failed" instead of the
 // original upstream detail.
 func reconcileResponseErrorEnvelope(response map[string]interface{}) {
-	if response == nil || !strings.EqualFold(interfaceString(response["status"]), "failed") {
+	if response == nil || !strings.EqualFold(chatwire.ParseLooseStringAny(response["status"]), "failed") {
 		return
 	}
 	error_, _ := response["error"].(map[string]interface{})
-	if error_ == nil || strings.TrimSpace(interfaceString(error_["message"])) == "" || strings.TrimSpace(interfaceString(error_["code"])) == "" {
+	if error_ == nil || strings.TrimSpace(chatwire.ParseLooseStringAny(error_["message"])) == "" || strings.TrimSpace(chatwire.ParseLooseStringAny(error_["code"])) == "" {
 		return
 	}
 	response["error"] = map[string]interface{}{
-		"code":    interfaceString(error_["code"]),
-		"message": interfaceString(error_["message"]),
+		"code":    chatwire.ParseLooseStringAny(error_["code"]),
+		"message": chatwire.ParseLooseStringAny(error_["message"]),
 	}
 }
 

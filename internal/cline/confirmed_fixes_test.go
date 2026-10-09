@@ -24,7 +24,7 @@ func TestChatDoesNotLocallyRetryNonAuthFailure(t *testing.T) {
 		_, _ = io.WriteString(w, `{"error":"busy"}`)
 	}))
 	defer server.Close()
-	client := &Client{apiBase: server.URL, stream: server.Client(), creds: Credentials{AccessToken: "token"}, account: &store.Account{ClineModelIDs: []string{"model-a"}}}
+	client := &Client{apiBase: server.URL, stream: server.Client(), creds: Credentials{AccessToken: "token"}, account: &store.Account{ClineModelIDs: []string{`{"id":"model-a"}`}}}
 	err := client.SendRequestWithPayload(context.Background(), upstream.UpstreamRequest{Model: "model-a", RequestID: "logical-1", Messages: []prompt.Message{{Role: "user", Content: prompt.MessageContent{Text: "hi"}}}}, nil, nil)
 	testutil.False(t, err == nil, "expected upstream error")
 	testutil.Equal(t, attempts.Load(), 1)
@@ -47,7 +47,7 @@ func TestChatKeepsLogicalTaskIDAcross401Refresh(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client := &Client{apiBase: server.URL, stream: server.Client(), control: server.Client(), creds: Credentials{AccessToken: "old", RefreshToken: "refresh", ExpiresAt: time.Now().Add(time.Hour)}, account: &store.Account{ClineModelIDs: []string{"model-a"}}}
+	client := &Client{apiBase: server.URL, stream: server.Client(), control: server.Client(), creds: Credentials{AccessToken: "old", RefreshToken: "refresh", ExpiresAt: time.Now().Add(time.Hour)}, account: &store.Account{ClineModelIDs: []string{`{"id":"model-a"}`}}}
 	err := client.SendRequestWithPayload(context.Background(), upstream.UpstreamRequest{Model: "model-a", RequestID: "logical-1", Messages: []prompt.Message{{Role: "user", Content: prompt.MessageContent{Text: "hi"}}}}, nil, nil)
 	testutil.NoError(t, err)
 	testutil.Falsef(t, len(taskIDs) != 2 || taskIDs[0] != "sess_logical-1" || taskIDs[1] != taskIDs[0], "task ids=%v", taskIDs)

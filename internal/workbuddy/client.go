@@ -149,13 +149,6 @@ func (c *Client) SetAccountStore(s AccountUpdater) {
 // process-wide, so a client owns no resources to close.
 func (c *Client) Close() {}
 
-// monitorStreamIdle is the WorkBuddy spelling of the shared idle monitor. The
-// label is the only per-channel difference: it is what an operator reads in the
-// timeout error.
-func monitorStreamIdle(body io.ReadCloser, idle time.Duration, cancel context.CancelFunc) io.ReadCloser {
-	return httpclient.MonitorReadIdle(body, idle, cancel, "workbuddy")
-}
-
 // SendRequestWithPayload streams one chat completion to the caller.
 func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.UpstreamRequest, onMessage func(upstream.SSEMessage), logger *debug.Logger) error {
 	return c.runChat(ctx, req, c.requestTimeout, onMessage, logger)

@@ -19,7 +19,7 @@ function setup(fetcher) {
   const context = { apiKeys: [{id:1,name:'test',secret_available:true,enabled:true}], keyStatus: row => row.enabled ? 'enabled' : 'disabled', getKeySecret: async () => 'sk-test+/=&', openModal() {}, closeModal() {}, setText: (id,text) => document.getElementById(id).textContent=text, window, document, URL, AbortController, Set, fetch: async (...args) => {
     calls.push(args); return fetcher ? fetcher(...args) : { ok: true, headers: new Headers({ 'content-type': 'application/json' }), json: async () => ({data: [{id: 'model/中文 +&?'}, {id: 'second'}]}) };
   } };
-  vm.runInNewContext(registry, context); vm.runInNewContext(source, context);
+  vm.runInNewContext(fs.readFileSync(__dirname + "/static/js/ui.js", "utf8"), context); vm.runInNewContext(registry, context); vm.runInNewContext(source, context);
   const el = id => document.getElementById('key' + id);
   const event = { preventDefault() {} };
   return { el, window, calls, event, context, async load(channel = 'workbuddy') {

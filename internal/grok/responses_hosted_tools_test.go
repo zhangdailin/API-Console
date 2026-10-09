@@ -45,8 +45,8 @@ func chatRequestDeclaresHostedTool(req *chatwire.Request, want string) bool {
 // the model answered that it had no web access while the Build showed search
 // enabled. Both hosted tools must survive the bridge.
 func TestChatRequestFromResponses_KeepsHostedSearchTools(t *testing.T) {
-	chat, err := chatRequestFromResponses(responsesSearchRequest())
-	testutil.NoError(t, err, "chatRequestFromResponses() error = %v")
+	chat, err := responses.ChatRequestFromResponses(responsesSearchRequest())
+	testutil.NoError(t, err, "responses.ChatRequestFromResponses() error = %v")
 	testutil.CheckFalse(t, !chatRequestDeclaresHostedTool(&chat, "web_search"), "web_search was dropped by the Responses bridge")
 	testutil.CheckFalse(t, !chatRequestDeclaresHostedTool(&chat, "x_search"), "x_search was dropped by the Responses bridge")
 	testutil.Falsef(t, len(chat.Tools) == 0 || chat.Tools[0].Type != "function", "the function declaration must stay a function tool: %#v", chat.Tools)
@@ -56,8 +56,8 @@ func TestChatRequestFromResponses_KeepsHostedSearchTools(t *testing.T) {
 // the payload posted upstream — that is the only place the model can learn that
 // browsing was requested.
 func TestBuildPayloadForResponsesBridge_AdvertisesHostedSearchTools(t *testing.T) {
-	chat, err := chatRequestFromResponses(responsesSearchRequest())
-	testutil.NoError(t, err, "chatRequestFromResponses() error = %v")
+	chat, err := responses.ChatRequestFromResponses(responsesSearchRequest())
+	testutil.NoError(t, err, "responses.ChatRequestFromResponses() error = %v")
 	payload, err := (&Handler{}).responsesPayloadFromChat(ModelSpec{UpstreamModel: "grok-4.20-0309"}, &chat, false)
 	testutil.NoError(t, err, "responsesPayloadFromChat() error = %v")
 	declared := map[string]bool{}
@@ -105,8 +105,8 @@ func TestNormalizeBuildResponsesPayloadPreservesExplicitXSearch(t *testing.T) {
 func TestChatRequestFromResponses_DeduplicatesHostedTools(t *testing.T) {
 	req := responsesSearchRequest()
 	req.Tools = append(req.Tools, map[string]interface{}{"type": "web_search_preview"})
-	chat, err := chatRequestFromResponses(req)
-	testutil.NoError(t, err, "chatRequestFromResponses() error = %v")
+	chat, err := responses.ChatRequestFromResponses(req)
+	testutil.NoError(t, err, "responses.ChatRequestFromResponses() error = %v")
 	searches := 0
 	for _, tool := range chat.ResponsesTools {
 		if chatwire.ParseLooseStringAny(tool["type"]) == "web_search" {

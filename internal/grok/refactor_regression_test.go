@@ -19,7 +19,7 @@ func TestRefactorNativeUsageSurvivesFullCaptureOverflow(t *testing.T) {
 		"id": "resp_a", "status": "completed", "usage": map[string]interface{}{"input_tokens": 100, "output_tokens": 10},
 	}})
 	id, captured, result := copyNativeCLIResponseAndCaptureModel(httptest.NewRecorder(), strings.NewReader(stream), "text/event-stream", "grok-4.6")
-	testutil.Fail(t, id != "resp_a" || len(captured) != responses.MaxEventBytes || result.Err != nil || interfaceToInt(result.Usage["completion_tokens"]) != 10, id, len(captured), result)
+	testutil.Fail(t, id != "resp_a" || len(captured) != responses.MaxEventBytes || result.Err != nil || responses.InterfaceToInt(result.Usage["completion_tokens"]) != 10, id, len(captured), result)
 }
 
 type refactorErrorReader struct{ err error }

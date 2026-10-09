@@ -70,7 +70,7 @@ func NewHandler(cfg *config.Config, lb *loadbalancer.LoadBalancer) *Handler {
 			configureDistributedGrokLimits(lb.Store.RedisClient(), lb.Store.RedisPrefix())
 		}
 	}
-	instanceID := "grok-" + randomHex(16)
+	instanceID := "grok-" + util.RandomHex(16)
 	if cfg != nil && strings.TrimSpace(cfg.DeploymentInstance) != "" {
 		instanceID = strings.TrimSpace(cfg.DeploymentInstance)
 	}
@@ -182,8 +182,8 @@ func (h *Handler) auditChatOutcome(ctx context.Context, acc *store.Account, req 
 	}
 	event := audit.Event{Kind: audit.KindRequest, RequestID: middleware.GetRequestID(ctx), Action: "grok_request", APIKeyID: middleware.APIKeyID(ctx),
 		AccountID: accountID, Model: req.Model, Channel: "grok", Provider: provider, Status: status, Error: message, Duration: duration, Metadata: metadata,
-		InputTokens: interfaceToInt(usage["prompt_tokens"]), OutputTokens: interfaceToInt(usage["completion_tokens"]), TotalTokens: interfaceToInt(usage["total_tokens"]), UsageSource: usageSource,
-		CachedInputTokens: interfaceToInt(prompt["cached_tokens"]), ReasoningTokens: interfaceToInt(completion["reasoning_tokens"])}
+		InputTokens: responses.InterfaceToInt(usage["prompt_tokens"]), OutputTokens: responses.InterfaceToInt(usage["completion_tokens"]), TotalTokens: responses.InterfaceToInt(usage["total_tokens"]), UsageSource: usageSource,
+		CachedInputTokens: responses.InterfaceToInt(prompt["cached_tokens"]), ReasoningTokens: responses.InterfaceToInt(completion["reasoning_tokens"])}
 	// Price the turn and book it against the client key's reservation. Only
 	// upstream-reported usage is billed: an estimated count is this gateway's
 	// own guess and must never turn into money owed.

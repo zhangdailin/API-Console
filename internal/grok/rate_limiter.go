@@ -10,6 +10,7 @@ import (
 
 	"orchids-api/internal/accountpolicy"
 	"orchids-api/internal/store"
+	"orchids-api/internal/util"
 )
 
 type syntheticCooldownError struct {
@@ -126,7 +127,7 @@ func rateLimitIdentity(ctx context.Context, token string) string {
 func waitScopedRateLimit(ctx context.Context, provider, token, model string, rate float64) error {
 	identity := provider + ":" + rateLimitIdentity(ctx, token)
 	for _, scope := range []RateLimitScope{RateLimitScopeRPS, RateLimitScopeRPM} {
-		for _, target := range uniqueStrings([]string{model, "*"}) {
+		for _, target := range util.UniqueStrings([]string{model, "*"}) {
 			if remaining := teamCooldown.RetryAfterFor(scope, identity, target); remaining > 0 {
 				return newSyntheticCooldownError(identity, target, remaining)
 			}
@@ -189,7 +190,7 @@ func noteScopedRateLimit(ctx context.Context, provider, token, model string, sta
 	}
 	meta.RetryAfter = accountpolicy.BoundRateLimitCooldown(meta.RetryAfter)
 	identity := provider + ":" + rateLimitIdentity(ctx, token)
-	for _, target := range uniqueStrings([]string{firstNonEmpty(model, meta.Model, "*"), meta.Model}) {
+	for _, target := range util.UniqueStrings([]string{util.FirstNonEmpty(model, meta.Model, "*"), meta.Model}) {
 		teamCooldown.Note(meta.Scope, identity, target, meta.RetryAfter)
 		if meta.TeamID != "" {
 			teamCooldown.Note(meta.Scope, provider+":team:"+meta.TeamID, target, meta.RetryAfter)

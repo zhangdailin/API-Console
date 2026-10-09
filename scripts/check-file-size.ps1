@@ -4,10 +4,6 @@
 $ErrorActionPreference = 'Stop'
 $ceiling = 700
 $exempt = @(
-  'internal/handler/stream_handler.go',
-  'internal/grok/handler_messages.go',
-  'internal/handler/handler.go',
-  'internal/qoder/request.go',
   'internal/qoder/client.go',
   'internal/grok/native_chat.go',
   'internal/workbuddy/auth.go',

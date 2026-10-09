@@ -8,34 +8,57 @@ import (
 	"time"
 )
 
-func TestParallelFor(t *testing.T) {
-	t.Run("empty", func(t *testing.T) {
-		ParallelFor(0, func(i int) { t.Error("should not be called") })
-	})
-
-	t.Run("single item", func(t *testing.T) {
-		var called int32
-		ParallelFor(1, func(i int) { atomic.AddInt32(&called, 1) })
-		testutil.CheckEqual(t, called, 1)
-	})
-
-	t.Run("small batch (serial)", func(t *testing.T) {
-		n := 5
-		results := make([]int, n)
-		ParallelFor(n, func(i int) {
-			results[i] = i * 2
+func TestRunIndexed(t *testing.T) {
+	for _, workers := range []int{1, 4} {
+		seen := make([]int, 100)
+		var active, peak atomic.Int32
+		errs := RunIndexed(len(seen), workers, func(index int) error {
+			current := active.Add(1)
+			defer active.Add(-1)
+			for {
+				old := peak.Load()
+				if current <= old || peak.CompareAndSwap(old, current) {
+					break
+				}
+			}
+			seen[index]++
+			if index == 3 {
+				panic("secret value")
+			}
+			if index == 7 {
+				return context.Canceled
+			}
+			time.Sleep(time.Millisecond)
+			return nil
 		})
-		for i := 0; i < n; i++ {
-			testutil.CheckEqual(t, results[i], i*2)
+		for index, count := range seen {
+			if count != 1 {
+				t.Fatalf("index %d ran %d times", index, count)
+			}
 		}
-	})
-
-	t.Run("large batch (parallel)", func(t *testing.T) {
-		n := 100
-		var counter int64
-		ParallelFor(n, func(i int) { atomic.AddInt64(&counter, 1) })
-		testutil.CheckEqual(t, counter, int64(n))
-	})
+		if peak.Load() > int32(workers) {
+			t.Fatal("concurrency limit exceeded")
+		}
+		for index, err := range errs {
+			switch index {
+			case 3:
+				if err != ErrTaskPanic {
+					t.Fatal(err)
+				}
+			case 7:
+				if err != context.Canceled {
+					t.Fatal(err)
+				}
+			default:
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+	if RunIndexed(0, 4, func(int) error { t.Fatal("empty task executed"); return nil }) != nil {
+		t.Fatal("empty result")
+	}
 }
 
 func TestSleepWithContext(t *testing.T) {

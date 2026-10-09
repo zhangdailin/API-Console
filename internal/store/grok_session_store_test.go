@@ -21,7 +21,7 @@ func TestReasoningReplayItemsPersistenceAndExpiry(t *testing.T) {
 	testutil.NoError(t, s.SaveReasoningReplay(ctx, original, 2*time.Second), "SaveReasoningReplay(items) error = %v")
 	testutil.False(t, !original.ExpiresAt.IsZero(), "SaveReasoningReplay mutated caller expiry")
 	replay, err := s.GetReasoningReplay(ctx, original.Model, original.SessionKey)
-	testutil.Falsef(t, err != nil || replay == nil || !reflect.DeepEqual(replay.Items, items) || replay.EncryptedContent != "", "GetReasoningReplay(items) = %#v, %v", replay, err)
+	testutil.Falsef(t, err != nil || replay == nil || !reflect.DeepEqual(replay.Items, items), "GetReasoningReplay(items) = %#v, %v", replay, err)
 	testutil.Falsef(t, replay.ExpiresAt.IsZero() || time.Until(replay.ExpiresAt) <= 0, "missing future replay expiry: %v", replay.ExpiresAt)
 	mini.FastForward(3 * time.Second)
 	replay, err = s.GetReasoningReplay(ctx, original.Model, original.SessionKey)
@@ -56,27 +56,20 @@ func TestReasoningReplaySaveValidation(t *testing.T) {
 			testutil.Falsef(t, !errors.Is(err, ErrNoRows) || replay != nil, "GetReasoningReplay(invalid) = %#v, %v; want ErrNoRows", replay, err)
 		})
 	}
-	// An existing legacy cipher remains writable, but invalid modern items
-	// must not be silently discarded even if a legacy fallback is present.
-	if err := s.SaveReasoningReplay(ctx, &StoredReasoningReplay{
-		Model: "grok-4.6", SessionKey: "invalid-with-legacy", EncryptedContent: "opaque",
-		Items: []json.RawMessage{json.RawMessage(`null`)},
-	}, time.Hour); err == nil {
-		t.Fatal("SaveReasoningReplay() accepted invalid items with legacy cipher")
-	}
+
 }
 
 func TestReasoningReplayAndSessionAffinityLifecycle(t *testing.T) {
 	s, _ := newTestRedisStore(t, "grok-session-test:")
 	ctx := context.Background()
 	if err := s.SaveReasoningReplay(ctx, &StoredReasoningReplay{
-		Model: "grok-4.6", SessionKey: "session-a", EncryptedContent: "opaque",
+		Model: "grok-4.6", SessionKey: "session-a", Items: []json.RawMessage{json.RawMessage(`{"type":"reasoning","encrypted_content":"opaque"}`)},
 	}, time.Hour); err != nil {
 		t.Fatalf("SaveReasoningReplay() error = %v", err)
 	}
 	replay, err := s.GetReasoningReplay(ctx, "grok-4.6", "session-a")
 	testutil.Equal(t, err, nil)
-	testutil.Equal(t, replay.EncryptedContent, "opaque")
+	testutil.Equal(t, len(replay.Items), 1)
 	_, err = s.GetReasoningReplay(ctx, "grok-4.5", "session-a")
 	testutil.Falsef(t, !errors.Is(err, ErrNoRows), "cross-model replay err=%v", err)
 

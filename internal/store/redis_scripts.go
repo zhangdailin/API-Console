@@ -206,16 +206,16 @@ var (
 					if current_incoming.billing_source ~= nil then row.billing_source = current_incoming.billing_source end
 					table.insert(protected, model_id)
 				end
+				if row.status ~= "available" and row.status ~= "maintenance" and row.status ~= "offline" then row.status = "offline" end
 				redis.call("SET", row_prefix .. current.id, cjson.encode(row))
-				redis.call("HSET", KEYS[4], channel .. "|" .. model_id, current.id)
+				redis.call("HSET", KEYS[3], channel .. "|" .. model_id, current.id)
 				table.insert(updated, model_id)
 			else
 				local id = tostring(redis.call("INCR", KEYS[2]))
 				row.id = id
 				redis.call("SET", row_prefix .. id, cjson.encode(row))
 				redis.call("SADD", KEYS[1], id)
-				redis.call("HSETNX", KEYS[3], model_id, id)
-				redis.call("HSET", KEYS[4], channel .. "|" .. model_id, id)
+				redis.call("HSET", KEYS[3], channel .. "|" .. model_id, id)
 				table.insert(added, model_id)
 			end
 		end
@@ -227,9 +227,8 @@ var (
 					if (provider_scope ~= "" and prune) or origin == "discovery" then
 						redis.call("DEL", row_prefix .. current.id)
 						redis.call("SREM", KEYS[1], current.id)
-						if redis.call("HGET", KEYS[3], model_id) == current.id then redis.call("HDEL", KEYS[3], model_id) end
 						local index_key = channel .. "|" .. model_id
-						if redis.call("HGET", KEYS[4], index_key) == current.id then redis.call("HDEL", KEYS[4], index_key) end
+						if redis.call("HGET", KEYS[3], index_key) == current.id then redis.call("HDEL", KEYS[3], index_key) end
 						table.insert(deleted, model_id)
 					elseif origin == "" or origin == "manual" then table.insert(protected, model_id) end
 				end

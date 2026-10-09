@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"orchids-api/internal/audit"
 	"orchids-api/internal/middleware"
+	"orchids-api/internal/responses"
 	"orchids-api/internal/store"
 )
 
@@ -156,14 +157,14 @@ func (h *Handler) auditAttemptDiagnostic(ctx context.Context, acc *store.Account
 		metadata["response_body_truncated"] = len(body) >= maxUpstreamBodyBytes && upstream != nil
 		if json.Unmarshal(body, &parsed) == nil {
 			for _, key := range []string{"id", "status"} {
-				if value := streamString(parsed[key]); value != "" {
+				if value := responses.StreamString(parsed[key]); value != "" {
 					metadata["response_"+key] = diagnosticText(value, acc)
 				}
 			}
 			if detail, ok := parsed["error"].(map[string]interface{}); ok {
 				safe := map[string]interface{}{}
 				for _, key := range []string{"code", "type", "param", "message"} {
-					if value := streamString(detail[key]); value != "" {
+					if value := responses.StreamString(detail[key]); value != "" {
 						safe[key] = diagnosticText(value, acc)
 					}
 				}
@@ -173,7 +174,7 @@ func (h *Handler) auditAttemptDiagnostic(ctx context.Context, acc *store.Account
 	}
 	usageRaw, reported := parsed["usage"].(map[string]interface{})
 	metadata["usage_reported"] = reported
-	usage := responsesUsageFromChat(usageRaw)
+	usage := responses.UsageFromChat(usageRaw)
 	inputDetails, _ := usage["input_tokens_details"].(map[string]interface{})
 	outputDetails, _ := usage["output_tokens_details"].(map[string]interface{})
 	accountID := int64(0)
@@ -185,5 +186,5 @@ func (h *Handler) auditAttemptDiagnostic(ctx context.Context, acc *store.Account
 		usageSource = audit.UsageSourceUpstream
 	}
 	logger.Log(ctx, audit.Event{Kind: audit.KindRequest, RequestID: middleware.GetRequestID(ctx), APIKeyID: middleware.APIKeyID(ctx), AccountID: accountID, Action: "grok_upstream_attempt", Channel: "grok", Provider: provider, Attempt: attempt, Duration: time.Since(started).Milliseconds(), Status: status, Metadata: metadata,
-		InputTokens: interfaceToInt(usage["input_tokens"]), OutputTokens: interfaceToInt(usage["output_tokens"]), CachedInputTokens: interfaceToInt(inputDetails["cached_tokens"]), ReasoningTokens: interfaceToInt(outputDetails["reasoning_tokens"]), TotalTokens: interfaceToInt(usage["total_tokens"]), UsageSource: usageSource})
+		InputTokens: responses.InterfaceToInt(usage["input_tokens"]), OutputTokens: responses.InterfaceToInt(usage["output_tokens"]), CachedInputTokens: responses.InterfaceToInt(inputDetails["cached_tokens"]), ReasoningTokens: responses.InterfaceToInt(outputDetails["reasoning_tokens"]), TotalTokens: responses.InterfaceToInt(usage["total_tokens"]), UsageSource: usageSource})
 }

@@ -281,25 +281,19 @@ func (h *Handler) loadReasoningReplayItems(model, key string) []interface{} {
 	return cloneReplayItems(cacheItems)
 }
 
-// replayItemsFromStored reads the normalized item list, falling back to the
-// legacy single cipher so state written by an older build still replays.
+// replayItemsFromStored reads current normalized item lists only.
 func replayItemsFromStored(persisted *store.StoredReasoningReplay) []interface{} {
-	if len(persisted.Items) > 0 {
-		items := make([]interface{}, 0, len(persisted.Items))
-		for _, raw := range persisted.Items {
-			var item map[string]interface{}
-			if json.Unmarshal(raw, &item) == nil && item != nil {
-				items = append(items, item)
-			}
-		}
-		if len(items) > 0 {
-			return items
-		}
-	}
-	if !validReplayCipher(persisted.EncryptedContent) {
+	if persisted == nil {
 		return nil
 	}
-	return []interface{}{reasoningReplayItem(persisted.EncryptedContent)}
+	items := make([]interface{}, 0, len(persisted.Items))
+	for _, raw := range persisted.Items {
+		var item map[string]interface{}
+		if json.Unmarshal(raw, &item) == nil && item != nil {
+			items = append(items, item)
+		}
+	}
+	return items
 }
 
 func reasoningReplayItem(encrypted string) map[string]interface{} {
@@ -434,7 +428,7 @@ func (h *Handler) applyNativeReasoningReplay(model, key string, payload map[stri
 }
 
 func ensureReasoningEncryptedInclude(payload map[string]interface{}) {
-	includes := interfaceSlice(payload["include"])
+	includes := responses.InterfaceSlice(payload["include"])
 	for _, value := range includes {
 		if strings.EqualFold(strings.TrimSpace(fmt.Sprint(value)), "reasoning.encrypted_content") {
 			return
@@ -469,16 +463,16 @@ func stripInjectedReasoningReplay(payload map[string]interface{}) bool {
 	next := make([]interface{}, 0, len(input))
 	for _, raw := range input {
 		item, _ := raw.(map[string]interface{})
-		if item != nil && strings.EqualFold(interfaceString(item["type"]), "compaction") {
+		if item != nil && strings.EqualFold(chatwire.ParseLooseStringAny(item["type"]), "compaction") {
 			next = append(next, raw)
 			continue
 		}
-		if item != nil && strings.EqualFold(interfaceString(item["type"]), "reasoning") && interfaceString(item["encrypted_content"]) != "" {
+		if item != nil && strings.EqualFold(chatwire.ParseLooseStringAny(item["type"]), "reasoning") && chatwire.ParseLooseStringAny(item["encrypted_content"]) != "" {
 			// A reasoning item without its proof is not portable. Preserve its
 			// readable summary as an ordinary assistant message instead.
 			parts := []interface{}{}
 			for _, summary := range responses.InterfaceMaps(item["summary"]) {
-				if value := interfaceString(summary["text"]); value != "" {
+				if value := chatwire.ParseLooseStringAny(summary["text"]); value != "" {
 					parts = append(parts, map[string]interface{}{"type": "output_text", "text": value})
 				}
 			}
@@ -531,7 +525,7 @@ func payloadHasCompactionInput(payload map[string]interface{}) bool {
 		return false
 	}
 	for _, raw := range input {
-		if item, ok := raw.(map[string]interface{}); ok && strings.EqualFold(interfaceString(item["type"]), "compaction") {
+		if item, ok := raw.(map[string]interface{}); ok && strings.EqualFold(chatwire.ParseLooseStringAny(item["type"]), "compaction") {
 			return true
 		}
 	}

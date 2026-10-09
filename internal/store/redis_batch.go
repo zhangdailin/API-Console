@@ -1,6 +1,8 @@
 package store
 
 import (
+	"errors"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,14 +16,12 @@ const redisBatchParallelThreshold = 32
 
 // forEachIndex visits every position once, fanning the work out over the shared
 // worker pool only when the batch is large enough to be worth the scheduling.
-func forEachIndex(count int, visit func(i int)) {
+func forEachIndex(count int, visit func(int) error) error {
+	workers := 1
 	if count >= redisBatchParallelThreshold {
-		util.ParallelFor(count, visit)
-		return
+		workers = runtime.GOMAXPROCS(0)
 	}
-	for i := 0; i < count; i++ {
-		visit(i)
-	}
+	return errors.Join(util.RunIndexed(count, workers, visit)...)
 }
 
 // compactNonNil keeps the order of the decoded rows while dropping the positions

@@ -172,3 +172,62 @@ func TestGrokPartialCatalogNeverPrunes(t *testing.T) {
 	_, err = s.GetModelByChannelAndModelID(ctx, "Grok", "old")
 	testutil.CheckNoError(t, err)
 }
+
+func TestGrokCatalogPanicIsAccountFailureWithoutPruning(t *testing.T) {
+	for _, workers := range []int{1, 4} {
+		t.Run(fmt.Sprint(workers), func(t *testing.T) {
+			s, cleanup := setupModelRefreshStore(t)
+			defer cleanup()
+			ctx := context.Background()
+			clearModelsForChannel(t, ctx, s, "Grok")
+			for _, name := range []string{"healthy", "panic"} {
+				testutil.NoError(t, s.CreateAccount(ctx, &store.Account{AccountType: "grok", Name: name, Enabled: true, CredentialType: "oauth", OAuthAccessToken: "token", GrokModels: []string{"old"}}))
+			}
+			testutil.NoError(t, s.CreateModel(ctx, &store.Model{Channel: "Grok", ModelID: "old", Name: "old", Provider: "build", Origin: "discovery", Status: store.ModelStatusAvailable, Verified: true}))
+			previous := fetchGrokBuildModelsForRefresh
+			defer func() { fetchGrokBuildModelsForRefresh = previous }()
+			fetchGrokBuildModelsForRefresh = func(_ context.Context, _ *config.Config, _ *store.Store, acc *store.Account) ([]modelcatalog.Profile, error) {
+				if acc.Name == "panic" {
+					panic("private credential")
+				}
+				return []modelcatalog.Profile{{ModelID: "new"}}, nil
+			}
+			report, err := discoverGrokModelsReport(ctx, &config.Config{}, s, workers)
+			testutil.NoError(t, err)
+			succeeded, failed := report.counts()
+			if succeeded != 1 || failed != 1 {
+				t.Fatalf("counts=%d/%d", succeeded, failed)
+			}
+			for _, attempt := range report.Attempts {
+				if attempt.Err != nil && attempt.Err.Error() != "task panicked" {
+					t.Fatalf("unsafe task error: %v", attempt.Err)
+				}
+			}
+			result, err := syncModelsForChannelConcurrent(ctx, &config.Config{}, s, "Grok", workers)
+			testutil.NoError(t, err)
+			if !result.Partial || result.AccountsFailed != 1 || result.Deleted != 0 {
+				t.Fatalf("result=%+v", result)
+			}
+			_, err = s.GetModelByChannelAndModelID(ctx, "Grok", "old")
+			testutil.NoError(t, err)
+		})
+	}
+}
+
+func TestCatalogSnapshotsRequireJSONRows(t *testing.T) {
+	for _, ch := range []string{"workbuddy", "cline", "qoder"} {
+		t.Run(ch, func(t *testing.T) {
+			account := &store.Account{WorkBuddyModelIDs: []string{"old"}, ClineModelIDs: []string{"old"}, QoderModelIDs: []string{"old"}}
+			if got := accountCatalogSnapshotToDiscovered(ch, account); len(got) != 0 {
+				t.Fatalf("legacy accepted: %+v", got)
+			}
+			rows := []string{`{"id":"fresh"}`}
+			account.WorkBuddyModelIDs = rows
+			account.ClineModelIDs = rows
+			account.QoderModelIDs = rows
+			if got := accountCatalogSnapshotToDiscovered(ch, account); len(got) != 1 || got[0].ID != "fresh" {
+				t.Fatalf("current unavailable: %+v", got)
+			}
+		})
+	}
+}

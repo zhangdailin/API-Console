@@ -1,4 +1,4 @@
-package grok
+package responses
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"orchids-api/internal/chatwire"
-	"orchids-api/internal/responses"
+
 	"strings"
 	"testing"
 	"time"
@@ -30,7 +30,7 @@ func TestBridgeCompactionRoundTripAndIsolation(t *testing.T) {
 				}
 				_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"Keep task A and file main.go"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}}`)
 			}
-			opts := responses.BridgeOptions{Store: st}
+			opts := BridgeOptions{Store: st}
 			path := "/" + channel + "/v1/responses"
 			compact := httptest.NewRecorder()
 			ResponsesBridgeCompactHandler(chat, opts)(compact, httptest.NewRequest(http.MethodPost, path+"/compact", strings.NewReader(`{"model":"m","input":"task A","instructions":"keep paths"}`)))
@@ -52,7 +52,7 @@ func TestBridgeCompactionRoundTripAndIsolation(t *testing.T) {
 			if next.Code != 200 || len(got.Messages) != 2 || !strings.Contains(got.Messages[0].Content.(string), "task A") {
 				t.Fatalf("continuation=%d %s messages=%v", next.Code, next.Body.String(), got.Messages)
 			}
-			for _, other := range []string{"/other/v1/responses", path} {
+			for _, other := range []string{"/grok/v1/responses", path} {
 				model := "m"
 				if other == path {
 					model = "other-model"
@@ -66,7 +66,7 @@ func TestBridgeCompactionRoundTripAndIsolation(t *testing.T) {
 				}
 			}
 			id := strings.TrimPrefix(item["encrypted_content"].(string), bridgeCompactionPrefix)
-			if err := st.DeleteStoredResponse(nil, id, "anonymous"); err != nil {
+			if err := st.DeleteStoredResponse(context.Background(), id, "anonymous"); err != nil {
 				t.Fatal(err)
 			}
 			missing := httptest.NewRecorder()
@@ -78,7 +78,7 @@ func TestBridgeCompactionRoundTripAndIsolation(t *testing.T) {
 	}
 }
 
-type failedCompactionStore struct{ responses.Store }
+type failedCompactionStore struct{ Store }
 
 func (failedCompactionStore) GetStoredResponse(context.Context, string, string) (*store.StoredResponse, error) {
 	return nil, errors.New("storage offline")
@@ -88,7 +88,7 @@ func (failedCompactionStore) SaveStoredResponse(context.Context, *store.StoredRe
 }
 
 func TestCompactionStorageOutageIsNotAClientError(t *testing.T) {
-	opts := responses.BridgeOptions{Store: failedCompactionStore{}}
+	opts := BridgeOptions{Store: failedCompactionStore{}}
 	calls := 0
 	chat := func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -109,7 +109,7 @@ func TestCompactionStorageOutageIsNotAClientError(t *testing.T) {
 }
 
 func TestBridgeCompactionOwnerIsolationAndFailures(t *testing.T) {
-	opts := responses.BridgeOptions{Store: store.NewMemoryResponseStore(0)}
+	opts := BridgeOptions{Store: store.NewMemoryResponseStore(0)}
 	calls := 0
 	chat := func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -152,7 +152,7 @@ func TestBridgeCompactionOwnerIsolationAndFailures(t *testing.T) {
 
 func TestBridgeRejectsNonportableHistory(t *testing.T) {
 	for _, item := range []interface{}{map[string]interface{}{"type": "local_shell_call"}, map[string]interface{}{"type": "reasoning", "encrypted_content": "foreign-token"}, map[string]interface{}{"type": "function_call", "name": "f"}, "bad"} {
-		_, err := responsesInputToMessages([]interface{}{map[string]interface{}{"type": "message", "role": "user", "content": "hi"}, item})
+		_, err := InputToMessages([]interface{}{map[string]interface{}{"type": "message", "role": "user", "content": "hi"}, item})
 		if err == nil {
 			t.Fatalf("silently accepted history: %v", item)
 		}

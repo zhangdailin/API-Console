@@ -39,12 +39,8 @@ func IsFreeModelInCatalog(ids []string, modelID string) bool {
 			continue
 		}
 		row := catalogSnapshotRow{}
-		if strings.HasPrefix(trimmed, "{") {
-			if err := json.Unmarshal([]byte(trimmed), &row); err != nil {
-				continue
-			}
-		} else {
-			row.ID = trimmed
+		if !strings.HasPrefix(trimmed, "{") || json.Unmarshal([]byte(trimmed), &row) != nil {
+			continue
 		}
 		if strings.EqualFold(strings.TrimSpace(row.ID), modelID) {
 			return true

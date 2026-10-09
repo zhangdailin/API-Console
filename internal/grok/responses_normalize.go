@@ -117,7 +117,7 @@ func normalizeBuildReasoningEffort(payload map[string]interface{}, model string)
 	if reasoning == nil {
 		return
 	}
-	effort := strings.ToLower(strings.TrimSpace(interfaceString(reasoning["effort"])))
+	effort := strings.ToLower(strings.TrimSpace(chatwire.ParseLooseStringAny(reasoning["effort"])))
 	if effort == "" {
 		return
 	}

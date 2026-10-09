@@ -1,11 +1,12 @@
-package grok
+package responses
 
 import (
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"orchids-api/internal/responses"
+	"time"
+
 	"regexp"
 	"strings"
 	"sync"
@@ -13,6 +14,7 @@ import (
 
 	"encoding/json"
 
+	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
 )
 
@@ -76,7 +78,7 @@ func TestResponsesBridgeStreamNumbersEveryEvent(t *testing.T) {
 
 	var mu sync.Mutex
 	calls := []recordedChatCall{}
-	bridge := ResponsesBridgeHandler(recordingChat(t, &calls, &mu), responses.BridgeOptions{})
+	bridge := ResponsesBridgeHandler(recordingChat(t, &calls, &mu), BridgeOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "/qoder/v1/responses",
 		strings.NewReader(`{"model":"gpt-5.6-luna","input":"say hi","stream":true}`))
@@ -86,7 +88,7 @@ func TestResponsesBridgeStreamNumbersEveryEvent(t *testing.T) {
 
 	var numbers []int
 	seen := 0
-	if err := responses.ConsumeSSE(strings.NewReader(rec.Body.String()), func(event responses.SSEEvent) error {
+	if err := ConsumeSSE(strings.NewReader(rec.Body.String()), func(event SSEEvent) error {
 		// The [DONE] terminator is a chat-completions habit, not a Responses
 		// event, so it carries no envelope and no number.
 		if strings.TrimSpace(string(event.Data())) == "[DONE]" {
@@ -120,7 +122,7 @@ func TestResponsesBridgeStreamsChatAsResponses(t *testing.T) {
 
 	var mu sync.Mutex
 	calls := []recordedChatCall{}
-	bridge := ResponsesBridgeHandler(recordingChat(t, &calls, &mu), responses.BridgeOptions{})
+	bridge := ResponsesBridgeHandler(recordingChat(t, &calls, &mu), BridgeOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "/workbuddy/v1/responses",
 		strings.NewReader(`{"model":"gpt-5.6-luna","instructions":"be brief","input":"say hi","stream":true}`))
@@ -155,7 +157,7 @@ func TestResponsesBridgeNonStreamReturnsAResponseObject(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, `{"id":"chatcmpl-2","object":"chat.completion","created":1,"model":"gpt-5.6-luna","choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
 	}
-	bridge := ResponsesBridgeHandler(chat, responses.BridgeOptions{})
+	bridge := ResponsesBridgeHandler(chat, BridgeOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "/workbuddy/v1/responses",
 		strings.NewReader(`{"model":"gpt-5.6-luna","input":"say hi"}`))
@@ -179,7 +181,7 @@ func TestResponsesBridgeForwardsChatErrors(t *testing.T) {
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = io.WriteString(w, `{"error":{"message":"model not found","type":"invalid_request_error"}}`)
 	}
-	bridge := ResponsesBridgeHandler(chat, responses.BridgeOptions{})
+	bridge := ResponsesBridgeHandler(chat, BridgeOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "/workbuddy/v1/responses",
 		strings.NewReader(`{"model":"does-not-exist","input":"hi","stream":true}`))
@@ -195,7 +197,7 @@ func TestResponsesBridgeRejectsInvalidRequests(t *testing.T) {
 
 	bridge := ResponsesBridgeHandler(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("inner chat handler must not run for an invalid request")
-	}, responses.BridgeOptions{})
+	}, BridgeOptions{})
 
 	for name, body := range map[string]string{
 		"missing_model": `{"input":"hi"}`,
@@ -215,7 +217,7 @@ func TestResponsesBridgeRejectsInvalidRequests(t *testing.T) {
 func TestResponsesBridgeRejectsNonPost(t *testing.T) {
 	t.Parallel()
 
-	bridge := ResponsesBridgeHandler(func(w http.ResponseWriter, r *http.Request) {}, responses.BridgeOptions{})
+	bridge := ResponsesBridgeHandler(func(w http.ResponseWriter, r *http.Request) {}, BridgeOptions{})
 	rec := httptest.NewRecorder()
 	bridge(rec, httptest.NewRequest(http.MethodGet, "/workbuddy/v1/responses", nil))
 	testutil.Equal(t, rec.Code, http.StatusMethodNotAllowed)
@@ -226,7 +228,7 @@ func TestResponsesChannelSubpathServesCompactAndTrailingSlash(t *testing.T) {
 
 	var mu sync.Mutex
 	calls := []recordedChatCall{}
-	handler := ResponsesChannelSubpath(recordingChat(t, &calls, &mu), responses.BridgeOptions{})
+	handler := ResponsesChannelSubpath(recordingChat(t, &calls, &mu), BridgeOptions{})
 
 	for name, target := range map[string]string{
 		"trailing_slash": "/qoder/v1/responses/",
@@ -259,7 +261,7 @@ func TestResponsesChannelSubpathReportsUnstoredResponses(t *testing.T) {
 
 	handler := ResponsesChannelSubpath(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("the create handler must not serve a resource path")
-	}, responses.BridgeOptions{})
+	}, BridgeOptions{})
 
 	for _, method := range []string{http.MethodGet, http.MethodDelete} {
 		req := httptest.NewRequest(method, "/cline/v1/responses/resp_123", nil)
@@ -278,7 +280,7 @@ func TestResponsesChannelSubpathReportsUnstoredResponses(t *testing.T) {
 }
 
 func TestResponsesBridgeStoresAndServesResponses(t *testing.T) {
-	_, s, _ := setupValidationHandler(t)
+	s := store.NewMemoryResponseStore(time.Hour)
 
 	var mu sync.Mutex
 	var chatBodies []map[string]interface{}
@@ -293,9 +295,9 @@ func TestResponsesBridgeStoresAndServesResponses(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, `{"id":"chatcmpl-9","object":"chat.completion","created":1,"model":"gpt-5.6-luna","choices":[{"index":0,"message":{"role":"assistant","content":"stored-answer"},"finish_reason":"stop"}]}`)
 	}
-	opts := responses.BridgeOptions{Store: s}
+	opts := BridgeOptions{Store: s}
 	bridge := ResponsesBridgeHandler(chat, opts)
-	resource := responses.ResourceHandler(opts)
+	resource := ResourceHandler(opts)
 
 	create := httptest.NewRecorder()
 	bridge(create, httptest.NewRequest(http.MethodPost, "/workbuddy/v1/responses",
@@ -330,13 +332,13 @@ func TestResponsesBridgeStoresAndServesResponses(t *testing.T) {
 }
 
 func TestResponsesBridgeStoresStreamedResponse(t *testing.T) {
-	_, s, _ := setupValidationHandler(t)
+	s := store.NewMemoryResponseStore(time.Hour)
 
 	var mu sync.Mutex
 	calls := []recordedChatCall{}
-	opts := responses.BridgeOptions{Store: s}
+	opts := BridgeOptions{Store: s}
 	bridge := ResponsesBridgeHandler(recordingChat(t, &calls, &mu), opts)
-	resource := responses.ResourceHandler(opts)
+	resource := ResourceHandler(opts)
 
 	stream := httptest.NewRecorder()
 	bridge(stream, httptest.NewRequest(http.MethodPost, "/workbuddy/v1/responses",

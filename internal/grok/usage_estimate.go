@@ -3,6 +3,7 @@ package grok
 import (
 	"fmt"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/responses"
 	"strings"
 	"unicode/utf8"
 
@@ -155,8 +156,8 @@ func addReasoningUsage(usage map[string]interface{}, reasoning string) map[strin
 		details = map[string]interface{}{}
 		usage["completion_tokens_details"] = details
 	}
-	details["reasoning_tokens"] = interfaceToInt(details["reasoning_tokens"]) + reasoningTokens
-	usage["completion_tokens"] = interfaceToInt(usage["completion_tokens"]) + reasoningTokens
-	usage["total_tokens"] = interfaceToInt(usage["total_tokens"]) + reasoningTokens
+	details["reasoning_tokens"] = responses.InterfaceToInt(details["reasoning_tokens"]) + reasoningTokens
+	usage["completion_tokens"] = responses.InterfaceToInt(usage["completion_tokens"]) + reasoningTokens
+	usage["total_tokens"] = responses.InterfaceToInt(usage["total_tokens"]) + reasoningTokens
 	return usage
 }

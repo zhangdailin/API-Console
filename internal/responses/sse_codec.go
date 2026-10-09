@@ -139,7 +139,7 @@ func ConsumeSSE(source io.Reader, handle func(SSEEvent) error) error {
 		}
 		eventBytes += len(line)
 		if eventBytes > maxEventBytes {
-			return fmt.Errorf("Grok Build Responses SSE 单事件超过 %d MiB", maxEventBytes>>20)
+			return fmt.Errorf("grok Build Responses SSE 单事件超过 %d MiB", maxEventBytes>>20)
 		}
 		field, value, found := strings.Cut(line, ":")
 		if found && strings.HasPrefix(value, " ") {

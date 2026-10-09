@@ -38,8 +38,8 @@ func TestChatRequestFromResponses_ConvertsInputToolsAndReasoning(t *testing.T) {
 		ParallelToolCalls: &parallel,
 	}
 
-	chatReq, err := chatRequestFromResponses(req)
-	testutil.NoError(t, err, "chatRequestFromResponses() error: %v")
+	chatReq, err := responses.ChatRequestFromResponses(req)
+	testutil.NoError(t, err, "responses.ChatRequestFromResponses() error: %v")
 	testutil.Equal(t, len(chatReq.Messages), 4)
 	testutil.Equal(t, chatReq.Messages[0].Role, "system")
 	testutil.Equal(t, chatReq.Messages[0].Content, "用中文回答")
@@ -102,27 +102,27 @@ func TestValidateResponsesCompatibilityFor_RejectsUnsupportedBridgeFields(t *tes
 		{Background: &background},
 		{Truncation: "invalid"},
 	} {
-		err := validateResponsesCompatibilityFor(req, true)
+		err := responses.ValidateCompatibility(req, true)
 		testutil.CheckError(t, err)
 	}
 }
 
 func TestValidateResponsesCompatibilityFor_AcceptsBridgeFields(t *testing.T) {
 	store := true
-	if err := validateResponsesCompatibilityFor(responses.CreateRequest{
+	if err := responses.ValidateCompatibility(responses.CreateRequest{
 		Metadata: map[string]interface{}{"trace": "value"}, Truncation: "auto",
 		Include: []string{"reasoning.encrypted_content"}, Store: &store, Stream: true,
 	}, true); err != nil {
-		t.Fatalf("validateResponsesCompatibilityFor() error = %v", err)
+		t.Fatalf("responses.ValidateCompatibility() error = %v", err)
 	}
 }
 
 func TestChatRequestFromResponses_PreservesMaxOutputTokens(t *testing.T) {
 	maxOutputTokens := 128
-	chat, err := chatRequestFromResponses(responses.CreateRequest{
+	chat, err := responses.ChatRequestFromResponses(responses.CreateRequest{
 		Model: "grok-4.6", Input: "hello", MaxOutputTokens: &maxOutputTokens,
 	})
-	testutil.NoError(t, err, "chatRequestFromResponses() error = %v")
+	testutil.NoError(t, err, "responses.ChatRequestFromResponses() error = %v")
 	testutil.Falsef(t, chat.MaxTokens == nil || *chat.MaxTokens != maxOutputTokens, "MaxTokens=%v want %d", chat.MaxTokens, maxOutputTokens)
 }
 
@@ -278,7 +278,7 @@ func TestResponsesInputFileRoundTripsIntoChatMessages(t *testing.T) {
 			"type": "message", "role": "user",
 			"content": []interface{}{map[string]interface{}{"type": "input_text", "text": "see attached"}, part},
 		}}
-		messages, err := responsesInputToMessages(input)
+		messages, err := responses.InputToMessages(input)
 		testutil.Falsef(t, err != nil, "%v: %v", part, err)
 		err = chatwire.ValidateMessages(messages)
 		testutil.CheckNoError(t, err)

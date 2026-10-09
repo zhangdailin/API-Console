@@ -332,13 +332,13 @@ func TestClassifyStatusPreservesFailures(t *testing.T) {
 }
 
 // TestCatalogSnapshotRoundTripsTheObservedFeed proves the stored form keeps the
-// identifier, and that a bare id written by an older build still resolves.
+// identifier, while a retired bare ID is ignored.
 func TestCatalogSnapshotRoundTripsTheObservedFeed(t *testing.T) {
 	models := []Model{{ID: "x-ai/grok-4.1-fast", Name: "Grok 4.1 Fast", Provider: "x-ai", RequiresStream: true}}
 	rows := CatalogSnapshot(models)
 	testutil.Equal(t, len(rows), 1)
 	testutil.CheckEqual(t, catalogID(rows[0]), "x-ai/grok-4.1-fast")
-	testutil.CheckEqual(t, catalogID("openai/gpt-5"), "openai/gpt-5")
+	testutil.CheckEqual(t, catalogID("openai/gpt-5"), "")
 	// The snapshot is JSON rows, so the identifier has to survive the encoding.
 	var decoded map[string]interface{}
 	testutil.NoError(t, json.Unmarshal([]byte(rows[0]), &decoded), "row is not JSON: %v")

@@ -1,7 +1,5 @@
 package responses
 
-import ()
-
 func UsageFromChat(raw interface{}) map[string]interface{} {
 	usage, _ := raw.(map[string]interface{})
 	input := InterfaceToInt(FirstNonNil(usage["prompt_tokens"], usage["input_tokens"]))

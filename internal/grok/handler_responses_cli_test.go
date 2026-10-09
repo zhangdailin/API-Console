@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 
 	"orchids-api/internal/config"
+	"orchids-api/internal/responses"
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
 )
@@ -71,5 +72,5 @@ func TestHandleResponses_ProxiesBuildOAuthNatively(t *testing.T) {
 	testutil.Equal(t, received["previous_response_id"], "resp_previous")
 	metadata, _ := received["metadata"].(map[string]interface{})
 	testutil.Equal(t, metadata["trace"], "keep")
-	testutil.Equal(t, len(interfaceSlice(received["tools"])), 1)
+	testutil.Equal(t, len(responses.InterfaceSlice(received["tools"])), 1)
 }

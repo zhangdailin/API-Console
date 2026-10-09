@@ -22,7 +22,7 @@ func TestStreamStallHonorsIdleBudgetUnderLongParentDeadline(t *testing.T) {
 		<-r.Context().Done()
 	}))
 	defer s.Close()
-	c := NewFromAccount(&store.Account{ClineAccessToken: "access", ClineModelIDs: []string{"model-a"}}, &config.Config{ClineAPIBaseURL: s.URL})
+	c := NewFromAccount(&store.Account{ClineAccessToken: "access", ClineModelIDs: []string{`{"id":"model-a"}`}}, &config.Config{ClineAPIBaseURL: s.URL})
 	c.streamIdle = 20 * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()

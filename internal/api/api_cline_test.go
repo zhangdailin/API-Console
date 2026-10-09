@@ -13,12 +13,12 @@ func TestPreserveClineCredentialsOnEditKeepsCatalogTimestamp(t *testing.T) {
 	existing := &store.Account{
 		ClineAccessToken:    "access",
 		ClineRefreshToken:   "refresh",
-		ClineModelIDs:       []string{"model-a"},
+		ClineModelIDs:       []string{`{"id":"model-a"}`},
 		ClineModelsSyncedAt: syncedAt,
 	}
 	edited := &store.Account{}
 	PreserveClineCredentialsOnEdit(edited, existing)
 	testutil.Equal(t, len(edited.ClineModelIDs), 1)
-	testutil.Equal(t, edited.ClineModelIDs[0], "model-a")
+	testutil.Equal(t, edited.ClineModelIDs[0], existing.ClineModelIDs[0])
 	testutil.Falsef(t, !edited.ClineModelsSyncedAt.Equal(syncedAt), "ClineModelsSyncedAt = %v, want %v", edited.ClineModelsSyncedAt, syncedAt)
 }

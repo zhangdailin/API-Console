@@ -78,7 +78,7 @@ func TestChatAlwaysRequestsEncryptedReasoning(t *testing.T) {
 				}
 			case []interface{}:
 				for _, value := range values {
-					if interfaceString(value) == "reasoning.encrypted_content" {
+					if chatwire.ParseLooseStringAny(value) == "reasoning.encrypted_content" {
 						found = true
 					}
 				}

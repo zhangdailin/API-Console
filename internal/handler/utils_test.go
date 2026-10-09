@@ -267,9 +267,3 @@ func TestLastUserIsToolResultFollowup_AllowsTextAlongsideToolResult(t *testing.T
 
 	testutil.True(t, lastUserIsToolResultFollowup(messages), "expected tool_result+text to be recognized as follow-up")
 }
-
-func TestLooksLikeToolResultFailure_RecognizesEditValidationError(t *testing.T) {
-	testutil.True(t, looksLikeToolResultFailure("File has not been read yet. Read it first before writing to it."), "expected edit validation failure to be recognized")
-	testutil.True(t, looksLikeToolResultFailure("old_string not found in file"), "expected old_string-not-found failure to be recognized")
-	testutil.False(t, looksLikeToolResultFailure("Done"), "did not expect successful tool result to be treated as failure")
-}

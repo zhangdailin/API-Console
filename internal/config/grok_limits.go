@@ -13,7 +13,7 @@ func boundedDefault(value, fallback, maximum int) int {
 }
 
 // Pacing is optional and scoped to an account/team, never the whole endpoint.
-func (c *Config) GrokRequestsPerSecond(provider string) float64 {
+func (c *Config) GrokRequestsPerSecond() float64 {
 	if c == nil {
 		return 0
 	}
@@ -26,7 +26,7 @@ func (c *Config) GrokRequestsPerSecond(provider string) float64 {
 
 // HTTP total deadline (including response body). The ingress request deadline
 // remains independently controlled by concurrency_timeout.
-func (c *Config) GrokRequestTimeout(provider string) time.Duration {
+func (c *Config) GrokRequestTimeout() time.Duration {
 	value, fallback := 0, 600
 	if c != nil {
 		fallback = boundedDefault(c.RequestTimeout, 600, 86400)
@@ -37,7 +37,7 @@ func (c *Config) GrokRequestTimeout(provider string) time.Duration {
 
 // GrokStreamIdleTimeoutFor returns a channel-specific inactivity budget. A
 // legacy grok_stream_idle_seconds value remains an all-channel fallback.
-func (c *Config) GrokStreamIdleTimeoutFor(provider string) time.Duration {
+func (c *Config) GrokStreamIdleTimeoutFor() time.Duration {
 	value, fallback := 0, 120
 	if c != nil {
 		value = c.GrokStreamIdleSeconds

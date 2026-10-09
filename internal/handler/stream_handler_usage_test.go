@@ -88,10 +88,12 @@ func TestStreamHandler_KeepAlive_NoPanic(t *testing.T) {
 	testutil.MustContain(t, rec.buf.String(), ": keep-alive")
 }
 
-func TestStreamHandler_SuccessFallbackOverridesZeroUpstreamUsage(t *testing.T) {
+func TestStreamHandler_ToolRejectionExplainsZeroOutput(t *testing.T) {
 	sh, rec := newStreamTestHandler(t, false, true, adapter.FormatAnthropic)
 
-	sh.setEmptyOutputFallback("File operation completed successfully.")
+	sh.setSurfaceToolRejects(true)
+	sh.setDisallowToolCalls(true)
+	sh.shouldAcceptToolCall(toolCall{name: "Write", input: `{ "content": "private body" }`})
 	sh.handleMessage(upstream.SSEMessage{
 		Type: "model.finish",
 		Event: map[string]any{
@@ -101,7 +103,8 @@ func TestStreamHandler_SuccessFallbackOverridesZeroUpstreamUsage(t *testing.T) {
 	})
 
 	out := rec.buf.String()
-	testutil.MustContain(t, out, "File operation completed successfully.")
+	testutil.MustContain(t, out, "compatible tool")
+	testutil.MustNotContainAny(t, out, "private body", "File operation completed successfully.")
 	// The opening frame reports the usage known when it is opened, which is zero
 	// output tokens -- the same figure the eager opening call carried before it was
 	// deferred, so a whole-body search for a zero would now always find it. The

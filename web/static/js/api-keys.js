@@ -1,5 +1,6 @@
 // Key management shares the configuration page's modal and DOM primitives.
-let keyPage = 1, keysLoading = false, keysLoaded = false, keysLoadSequence = 0;
+let keyPage = 1, keysLoading = false, keysLoaded = false;
+const keyLoads = ConsoleUI.requestGate();
 const keyBusy = new Set();
 function keyStatus(key) {
   if (!key.enabled) return 'disabled';
@@ -13,25 +14,25 @@ function filteredKeys() {
 }
 function filterApiKeys() { keyPage = 1; renderApiKeys(); }
 async function loadApiKeys() {
-  const sequence = ++keysLoadSequence;
+  const ticket = keyLoads.begin();
   keysLoading = true;
   setText('keyLoadStatus', '正在刷新…');
   const refresh = document.getElementById('keyRefresh');
   if (refresh) refresh.disabled = true;
   if (!keysLoaded) document.getElementById('keysList').replaceChildren(make('div', 'key-loading', '正在加载密钥…'));
   try {
-    const result = await ConsoleAPI.json('/api/keys');
-    if (sequence !== keysLoadSequence) return;
+    const result = await ConsoleAPI.json('/api/keys', { signal: ticket.signal });
+    if (!ticket.isCurrent()) return;
     if (result !== null && !Array.isArray(result)) throw new Error('密钥列表格式无效');
     apiKeys = result || []; keysLoaded = true; renderApiKeys();
     setText('keyLoadStatus', '');
   } catch (err) {
-    if (sequence === keysLoadSequence) {
+    if (ticket.accepts(err)) {
       setText('keyLoadStatus', '加载失败，请点击刷新重试');
       if (!keysLoaded) document.getElementById('keysList').replaceChildren(make('div', 'empty-state', '密钥加载失败'));
     }
   } finally {
-    if (sequence === keysLoadSequence) { keysLoading = false; if (refresh) refresh.disabled = false; }
+    if (ticket.isCurrent()) { keysLoading = false; if (refresh) refresh.disabled = false; }
   }
 }
 function keyButton(label, action, id, danger = false) {
@@ -91,8 +92,8 @@ function renderApiKeys() {
   });
   table.appendChild(body); container.replaceChildren(ConsoleUI.responsiveTable(table)); bindApiKeyActions(container);
 }
-async function getKeySecret(id) {
-  const result = await ConsoleAPI.json('/api/keys/' + id + '/secret', { cache: 'no-store' });
+async function getKeySecret(id, options = {}) {
+  const result = await ConsoleAPI.json('/api/keys/' + id + '/secret', { ...options, cache: 'no-store' });
   if (!result || typeof result.key !== 'string' || !result.key.startsWith('sk-')) throw new Error('无法读取完整密钥');
   return result.key;
 }

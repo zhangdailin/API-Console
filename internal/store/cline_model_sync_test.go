@@ -25,7 +25,7 @@ func TestClineModelsSyncedAtJSONAndUpdateMerge(t *testing.T) {
 		Name:                "cline",
 		AccountType:         "cline",
 		Enabled:             true,
-		ClineModelIDs:       []string{"old-model"},
+		ClineModelIDs:       []string{`{"id":"old-model"}`},
 		ClineModelsSyncedAt: syncedAt,
 	}
 	testutil.NoError(t, s.CreateAccount(ctx, acc), "CreateAccount() error = %v")
@@ -36,7 +36,7 @@ func TestClineModelsSyncedAtJSONAndUpdateMerge(t *testing.T) {
 	testutil.NoError(t, s.UpdateAccount(ctx, &partial), "UpdateAccount(partial) error = %v")
 	got, err := s.GetAccount(ctx, acc.ID)
 	testutil.NoError(t, err, "GetAccount() error = %v")
-	testutil.Falsef(t, !got.ClineModelsSyncedAt.Equal(syncedAt) || len(got.ClineModelIDs) != 1 || got.ClineModelIDs[0] != "old-model", "partial update lost snapshot: ids=%v synced_at=%v", got.ClineModelIDs, got.ClineModelsSyncedAt)
+	testutil.Falsef(t, !got.ClineModelsSyncedAt.Equal(syncedAt) || len(got.ClineModelIDs) != 1 || got.ClineModelIDs[0] != acc.ClineModelIDs[0], "partial update lost snapshot: ids=%v synced_at=%v", got.ClineModelIDs, got.ClineModelsSyncedAt)
 
 	newer := syncedAt.Add(time.Minute)
 	got.ClineModelIDs = []string{"new-model"}

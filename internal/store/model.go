@@ -1,7 +1,6 @@
 package store
 
 import (
-	"bytes"
 	"encoding/json"
 	"slices"
 	"strings"
@@ -20,11 +19,7 @@ const (
 	CapabilityRealtime  = "realtime"
 )
 
-// ModelStatus is the availability state of a model.
-//
-// The admin frontend uses string states: available/maintenance/offline.
-// Older data and older clients may still carry a bool (true/false), so the
-// parser accepts both.
+// ModelStatus accepts only the current canonical states.
 type ModelStatus string
 
 const (
@@ -33,43 +28,25 @@ const (
 	ModelStatusOffline     ModelStatus = "offline"
 )
 
-// Enabled reports whether the model may be listed on the public /v1/models endpoint.
+// Enabled reports whether the model may be listed on its channel's public models endpoint.
 func (s ModelStatus) Enabled() bool { return s == ModelStatusAvailable }
 
 func (s *ModelStatus) UnmarshalJSON(data []byte) error {
-	data = bytes.TrimSpace(data)
-	if len(data) == 0 || string(data) == "null" {
-		*s = ModelStatusOffline
-		return nil
-	}
 	*s = ModelStatusOffline
-
-	// bool compatibility: true => available, false => offline
-	var b bool
-	if err := json.Unmarshal(data, &b); err == nil {
-		if b {
-			*s = ModelStatusAvailable
+	var value string
+	if json.Unmarshal(data, &value) == nil {
+		switch ModelStatus(value) {
+		case ModelStatusAvailable, ModelStatusMaintenance, ModelStatusOffline:
+			*s = ModelStatus(value)
 		}
-		return nil
-	}
-
-	// string state
-	var str string
-	if err := json.Unmarshal(data, &str); err == nil {
-		switch strings.ToLower(strings.TrimSpace(str)) {
-		case "available", "enabled", "true", "on", "1":
-			*s = ModelStatusAvailable
-		case "maintenance", "maint":
-			*s = ModelStatusMaintenance
-		}
-		return nil
 	}
 	return nil
 }
 
 func (s ModelStatus) MarshalJSON() ([]byte, error) {
-	// Always emit a string so the backend and the frontend agree.
-	if s == "" {
+	switch s {
+	case ModelStatusAvailable, ModelStatusMaintenance:
+	default:
 		s = ModelStatusOffline
 	}
 	return json.Marshal(string(s))

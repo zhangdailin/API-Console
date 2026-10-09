@@ -16,7 +16,7 @@ import (
 // message as before: silently dropping it would answer a caller who asked for a
 // code interpreter with a model that has none.
 func TestResponsesBridgeStillRejectsUnservableToolTypes(t *testing.T) {
-	bridge := ResponsesBridgeHandler(func(w http.ResponseWriter, r *http.Request) {
+	bridge := responses.ResponsesBridgeHandler(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("the inner chat handler must not run")
 	}, responses.BridgeOptions{})
 
@@ -36,7 +36,7 @@ func TestResponsesBridgeStillRejectsUnservableToolTypes(t *testing.T) {
 
 func TestResponsesBridgeRejectsClientToolFormatsBeforeUpstream(t *testing.T) {
 	for _, channel := range []string{"workbuddy", "qoder", "cline"} {
-		bridge := ResponsesBridgeHandler(func(w http.ResponseWriter, r *http.Request) { t.Fatal("unsupported tool reached upstream") }, responses.BridgeOptions{})
+		bridge := responses.ResponsesBridgeHandler(func(w http.ResponseWriter, r *http.Request) { t.Fatal("unsupported tool reached upstream") }, responses.BridgeOptions{})
 		for _, kind := range []string{"namespace", "custom", "apply_patch", "local_shell", "tool_search"} {
 			rec := httptest.NewRecorder()
 			body := `{"model":"model","input":"hello","tools":[{"type":"` + kind + `","name":"example"}]}`

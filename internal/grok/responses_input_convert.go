@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"orchids-api/internal/chatwire"
 	"orchids-api/internal/responses"
+	"orchids-api/internal/util"
 	"strings"
 
 	"encoding/json"
@@ -56,7 +57,7 @@ func responsesInputFromChatMessages(messages []chatwire.Message) ([]interface{},
 					continue
 				}
 				items = append(items, map[string]interface{}{
-					"type": "function_call", "call_id": firstNonEmpty(strings.TrimSpace(call.ID), "call_"+randomHex(12)),
+					"type": "function_call", "call_id": util.FirstNonEmpty(strings.TrimSpace(call.ID), "call_"+util.RandomHex(12)),
 					"name": name, "arguments": stringifyToolArguments(call.Function["arguments"]),
 				})
 			}
@@ -184,7 +185,7 @@ func stringifyToolArguments(value interface{}) string {
 }
 
 func normalizeChatResponseFormat(format map[string]interface{}) map[string]interface{} {
-	copy := cloneStringInterfaceMap(format)
+	copy := responses.CloneStringInterfaceMap(format)
 	if strings.EqualFold(strings.TrimSpace(fmt.Sprint(copy["type"])), "json_schema") {
 		if nested, ok := copy["json_schema"].(map[string]interface{}); ok {
 			flattened := map[string]interface{}{"type": "json_schema"}

@@ -121,7 +121,7 @@ func (m *Manager) Acquire(ctx context.Context, scope, affinity string) (*Lease, 
 	// proxy component is hashed so credentials never appear in cache keys or
 	// diagnostics, while a same-name node whose URL changes gets a fresh pool.
 	poolKey := "egress:" + node.Name + "|proxy=" + shortHash(node.URL) + "|" + fingerprint
-	client := httpclient.GetSharedHTTPClient(poolKey, m.cfg.GrokRequestTimeout(strings.ToLower(strings.TrimSpace(scope))), proxyFuncForNode(*node))
+	client := httpclient.GetSharedHTTPClient(poolKey, m.cfg.GrokRequestTimeout(), proxyFuncForNode(*node))
 
 	lease := &Lease{
 		NodeID:   node.Name,

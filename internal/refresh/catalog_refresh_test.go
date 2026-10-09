@@ -23,11 +23,11 @@ func TestCatalogRefreshDueUsesProviderSyncTimestamp(t *testing.T) {
 
 	testutil.False(t, clineCatalogRefreshDue(nil, now) || workBuddyCatalogRefreshDue(nil, now), "nil accounts must not be due")
 	testutil.False(t, !clineCatalogRefreshDue(&store.Account{}, now) || !workBuddyCatalogRefreshDue(&store.Account{}, now), "empty snapshots must be due")
-	testutil.False(t, !clineCatalogRefreshDue(&store.Account{ClineModelIDs: []string{"m"}}, now), "Cline snapshot without sync timestamp must be due")
-	testutil.False(t, clineCatalogRefreshDue(&store.Account{ClineModelIDs: []string{"m"}, ClineModelsSyncedAt: fresh, UpdatedAt: stale}, now), "fresh Cline sync must not become due because UpdatedAt is old")
-	testutil.False(t, !clineCatalogRefreshDue(&store.Account{ClineModelIDs: []string{"m"}, ClineModelsSyncedAt: stale, UpdatedAt: now}, now), "stale Cline sync must be due even when UpdatedAt is fresh")
-	testutil.False(t, workBuddyCatalogRefreshDue(&store.Account{WorkBuddyModelIDs: []string{"m"}, WorkBuddyModelsSyncedAt: fresh}, now), "fresh WorkBuddy sync must not be due")
-	testutil.False(t, !workBuddyCatalogRefreshDue(&store.Account{WorkBuddyModelIDs: []string{"m"}, WorkBuddyModelsSyncedAt: stale}, now), "stale WorkBuddy sync must be due")
+	testutil.False(t, !clineCatalogRefreshDue(&store.Account{ClineModelIDs: []string{`{"id":"m"}`}}, now), "Cline snapshot without sync timestamp must be due")
+	testutil.False(t, clineCatalogRefreshDue(&store.Account{ClineModelIDs: []string{`{"id":"m"}`}, ClineModelsSyncedAt: fresh, UpdatedAt: stale}, now), "fresh Cline sync must not become due because UpdatedAt is old")
+	testutil.False(t, !clineCatalogRefreshDue(&store.Account{ClineModelIDs: []string{`{"id":"m"}`}, ClineModelsSyncedAt: stale, UpdatedAt: now}, now), "stale Cline sync must be due even when UpdatedAt is fresh")
+	testutil.False(t, workBuddyCatalogRefreshDue(&store.Account{WorkBuddyModelIDs: []string{`{"id":"m"}`}, WorkBuddyModelsSyncedAt: fresh}, now), "fresh WorkBuddy sync must not be due")
+	testutil.False(t, !workBuddyCatalogRefreshDue(&store.Account{WorkBuddyModelIDs: []string{`{"id":"m"}`}, WorkBuddyModelsSyncedAt: stale}, now), "stale WorkBuddy sync must be due")
 }
 
 func TestRefreshWorkBuddyCatalogPersistsSuccessAndKeepsLKGOnFailure(t *testing.T) {
@@ -56,7 +56,7 @@ func TestRefreshWorkBuddyCatalogPersistsSuccessAndKeepsLKGOnFailure(t *testing.T
 		Enabled:                 true,
 		WorkBuddyAccessToken:    "access",
 		WorkBuddyUID:            "uid",
-		WorkBuddyModelIDs:       []string{"last-known-good"},
+		WorkBuddyModelIDs:       []string{`{"id":"last-known-good"}`},
 		WorkBuddyModelsSyncedAt: time.Now().Add(-time.Hour),
 	}
 	testutil.NoError(t, s.CreateAccount(context.Background(), acc), "CreateAccount() error = %v")

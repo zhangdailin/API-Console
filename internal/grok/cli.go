@@ -55,7 +55,7 @@ func NewCLIClient(cfg *config.Config) *CLIClient {
 	client := &CLIClient{cfg: cfg, responseHeaderTimeout: defaultCLIResponseHeaderTimeout}
 	// Shared browser client keeps the utls Chrome TLS fingerprint; the CLI
 	// upstream tolerates browser-like TLS even though headers are CLI identity.
-	client.httpClient = httpclient.GetSharedBrowserHTTPClientWithLimits("cli|"+httpclient.GenerateProxyKeyFromConfig(cfg), cfg.GrokRequestTimeout(ProviderBuild), 0, httpclient.ProxyFuncFromConfig(cfg), cfg)
+	client.httpClient = httpclient.GetSharedBrowserHTTPClientWithLimits("cli|"+httpclient.GenerateProxyKeyFromConfig(cfg), cfg.GrokRequestTimeout(), 0, httpclient.ProxyFuncFromConfig(cfg), cfg)
 	client.oauth = NewCLIOAuth(cfg, client.httpClient)
 	client.egress = egress.NewManager(cfg)
 	return client
@@ -141,7 +141,7 @@ func (c *CLIClient) doResponsesAt(ctx context.Context, acc *store.Account, path 
 	}
 	ctx = withRateLimitAccount(ctx, acc)
 	modelID := strings.TrimSpace(fmt.Sprint(payload["model"]))
-	if err := waitScopedRateLimit(ctx, ProviderBuild, acc.OAuthAccessToken, modelID, c.cfg.GrokRequestsPerSecond(ProviderBuild)); err != nil {
+	if err := waitScopedRateLimit(ctx, ProviderBuild, acc.OAuthAccessToken, modelID, c.cfg.GrokRequestsPerSecond()); err != nil {
 		return nil, err
 	}
 	authRetried := false
@@ -270,7 +270,7 @@ func (c *CLIClient) doResponsesOnceAt(ctx context.Context, acc *store.Account, p
 	if version := strings.TrimSpace(c.clientVersion()); version != "" {
 		headers.Set("x-grok-client-version", version)
 	}
-	requestID := randomHex(16)
+	requestID := util.RandomHex(16)
 	headers.Set("x-grok-req-id", requestID)
 	headers.Set("traceparent", util.Traceparent(requestID))
 	return c.request(ctx, acc, http.MethodPost, c.baseURL()+path, body, headers)
@@ -402,7 +402,7 @@ func (e buildModelCatalogEntry) profile() modelcatalog.Profile {
 	if e.Hidden || e.Meta.Hidden {
 		return modelcatalog.Profile{}
 	}
-	profile := modelcatalog.Profile{ModelID: firstNonEmpty(e.ID, e.Model, e.ModelID, e.Meta.Model, e.Meta.ModelID), SupportsBackendSearch: e.SupportsBackendSearch}
+	profile := modelcatalog.Profile{ModelID: util.FirstNonEmpty(e.ID, e.Model, e.ModelID, e.Meta.Model, e.Meta.ModelID), SupportsBackendSearch: e.SupportsBackendSearch}
 	if e.ContextWindow > 0 {
 		profile.ContextWindow = clampCatalogInt(e.ContextWindow)
 	} else {
@@ -441,7 +441,7 @@ func (e buildModelCatalogEntry) profile() modelcatalog.Profile {
 		}
 	}
 	if profile.DefaultReasoningEffort == "" {
-		profile.DefaultReasoningEffort = firstNonEmpty(e.ReasoningEffort, e.ReasoningEffortCamel)
+		profile.DefaultReasoningEffort = util.FirstNonEmpty(e.ReasoningEffort, e.ReasoningEffortCamel)
 	}
 	return modelcatalog.Normalize(profile)
 }
@@ -546,7 +546,7 @@ func (c *CLIClient) request(ctx context.Context, acc *store.Account, method, end
 	req = attempt.TraceRequest(req)
 	resp, err := doUpstreamHTTP(req, func(req *http.Request) (*http.Response, error) {
 		return c.doCLIRequest(requestCtx, acc, req)
-	}, c.cfg.GrokStreamIdleTimeoutFor(ProviderBuild), upstreamIdleBuildSemantic)
+	}, c.cfg.GrokStreamIdleTimeoutFor(), upstreamIdleBuildSemantic)
 	if headerTimer != nil {
 		headerTimer.Stop()
 	}
@@ -591,7 +591,7 @@ func cliEgressAffinity(acc *store.Account) string {
 	if acc == nil {
 		return "build_unknown"
 	}
-	identity := firstNonEmpty(acc.UserID, acc.Email, acc.OAuthRefreshToken, acc.OAuthAccessToken, fmt.Sprintf("id:%d", acc.ID))
+	identity := util.FirstNonEmpty(acc.UserID, acc.Email, acc.OAuthRefreshToken, acc.OAuthAccessToken, fmt.Sprintf("id:%d", acc.ID))
 	return credentialAffinity(identity)
 }
 

@@ -6,14 +6,7 @@ import (
 	"encoding/json"
 )
 
-// catalogSnapshotRow is the stored form of one catalog entry.
-//
-// The snapshot used to be a bare list of model ids, which preserved the
-// whitelist but threw away everything the whitelist was observed alongside: the
-// input window and the output budget. A client that budgets its context then had
-// nothing to read, and a long session looked like an overflow even though the
-// model accepted it. Each row is therefore stored as its own JSON object, and a
-// bare id written by an older build is still accepted on read.
+// catalogSnapshotRow preserves the observed catalog as JSON rows.
 type catalogSnapshotRow struct {
 	ID              string `json:"id"`
 	Name            string `json:"name,omitempty"`
@@ -66,14 +59,8 @@ func CatalogContextWindows(ids []string) (input map[string]int, output map[strin
 			continue
 		}
 		row := catalogSnapshotRow{}
-		if strings.HasPrefix(trimmed, "{") {
-			if err := json.Unmarshal([]byte(trimmed), &row); err != nil {
-				continue
-			}
-		} else {
-			// A bare id from a snapshot written before the richer form existed.
-			// There is no window to recover, but the id still has to resolve.
-			row.ID = trimmed
+		if !strings.HasPrefix(trimmed, "{") || json.Unmarshal([]byte(trimmed), &row) != nil {
+			continue
 		}
 		id := strings.ToLower(strings.TrimSpace(row.ID))
 		if id == "" {

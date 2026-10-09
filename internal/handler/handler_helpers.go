@@ -35,15 +35,10 @@ func (h *Handler) lookupModelRow(ctx context.Context, channel, modelID string) *
 	if candidate == "" {
 		return nil
 	}
-	var (
-		m   *store.Model
-		err error
-	)
 	if channel == "" {
-		m, err = h.loadBalancer.Store.GetModelByModelID(ctx, candidate)
-	} else {
-		m, err = h.loadBalancer.Store.GetModelByChannelAndModelID(ctx, channel, candidate)
+		return nil
 	}
+	m, err := h.loadBalancer.Store.GetModelByChannelAndModelID(ctx, channel, candidate)
 	if err != nil || m == nil {
 		return nil
 	}
@@ -286,9 +281,9 @@ func (h *Handler) selectAccountRecordWithOptions(ctx context.Context, targetChan
 				// emptied pool can say whether waiting could ever help.
 				switch store.ModelCooldownKind(acc, model, time.Now()) {
 				case store.ModelCooldownUnavailable:
-					return loadbalancer.RejectModelUnavailable
+					return loadbalancer.ErrModelUnavailable
 				case store.ModelCooldownThrottled:
-					return loadbalancer.RejectModelThrottled
+					return loadbalancer.ErrModelThrottled
 				}
 			}
 			switch strings.TrimSpace(acc.StatusCode) {

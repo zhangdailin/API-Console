@@ -103,7 +103,7 @@ func TestPreserveWorkBuddyCredentialsOnEdit_KeepsServerSideState(t *testing.T) {
 		WorkBuddyAccessToken:    "stored-access",
 		WorkBuddyRefreshToken:   "stored-refresh",
 		WorkBuddyUID:            "stored-uid",
-		WorkBuddyModelIDs:       []string{"hy3", "default-model", "gpt-6-astra", "kimi-k3"},
+		WorkBuddyModelIDs:       []string{`{"id":"hy3"}`, `{"id":"default-model"}`, `{"id":"gpt-6-astra"}`, `{"id":"kimi-k3"}`},
 		WorkBuddyModelsSyncedAt: time.Now(),
 	}
 	edited := &store.Account{AccountType: "workbuddy"}

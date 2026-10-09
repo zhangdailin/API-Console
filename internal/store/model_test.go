@@ -9,19 +9,6 @@ import (
 	"github.com/alicebob/miniredis/v2"
 )
 
-func TestGetModelByModelID_FallsBackWhenIndexPointsToWrongModel(t *testing.T) {
-	s, mini := newTestRedisStore(t, "test:")
-	ctx := context.Background()
-	want := &Model{Channel: "grok", ModelID: "target", Name: "target"}
-	other := &Model{Channel: "grok", ModelID: "other", Name: "other"}
-	testutil.NoError(t, s.CreateModel(ctx, want))
-	testutil.NoError(t, s.CreateModel(ctx, other))
-	mini.HSet("test:models:model_id_map", "target", other.ID)
-	got, err := s.GetModelByModelID(ctx, "target")
-	testutil.Equal(t, err, nil)
-	testutil.Equal(t, got.ModelID, "target")
-}
-
 func TestModelStatus_UnmarshalJSON(t *testing.T) {
 	t.Parallel()
 
@@ -31,11 +18,13 @@ func TestModelStatus_UnmarshalJSON(t *testing.T) {
 		want    ModelStatus
 		enabled bool
 	}{
-		{name: "bool true", input: `true`, want: ModelStatusAvailable, enabled: true},
+		{name: "bool true", input: `true`, want: ModelStatusOffline, enabled: false},
 		{name: "bool false", input: `false`, want: ModelStatusOffline, enabled: false},
 		{name: "available", input: `"available"`, want: ModelStatusAvailable, enabled: true},
 		{name: "maintenance", input: `"maintenance"`, want: ModelStatusMaintenance, enabled: false},
 		{name: "offline", input: `"offline"`, want: ModelStatusOffline, enabled: false},
+		{name: "old alias", input: `"enabled"`, want: ModelStatusOffline},
+		{name: "case alias", input: `"Available"`, want: ModelStatusOffline},
 		{name: "unknown", input: `"something"`, want: ModelStatusOffline, enabled: false},
 		{name: "null", input: `null`, want: ModelStatusOffline, enabled: false},
 	}

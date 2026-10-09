@@ -60,7 +60,7 @@ func TestHandleChatCompletions_DoesNotAutoRegisterUnknownModel(t *testing.T) {
 	h.HandleChatCompletions(rec, req)
 
 	testutil.Equal(t, rec.Code, http.StatusNotFound)
-	_, err := s.GetModelByModelID(context.Background(), "grok-5")
+	_, err := s.GetModelByChannelAndModelID(context.Background(), "grok", "grok-5")
 	testutil.Error(t, err)
 }
 
@@ -208,7 +208,7 @@ func TestHandleChatCompletions_DoesNotProbeMissingModel(t *testing.T) {
 	h.HandleChatCompletions(rec, req)
 
 	testutil.Equal(t, rec.Code, http.StatusNotFound)
-	if _, err := s.GetModelByModelID(context.Background(), "grok-5"); err == nil {
+	if _, err := s.GetModelByChannelAndModelID(context.Background(), "grok", "grok-5"); err == nil {
 		t.Fatal("unexpected created model grok-5")
 	} else if err.Error() == "" {
 		t.Fatalf("unexpected error: %v", err)

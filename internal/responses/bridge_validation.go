@@ -91,8 +91,3 @@ func ValidateBridgedTools(req *CreateRequest) error {
 	}
 	return nil
 }
-
-var nativeToolTypes = map[string]string{
-	"web_search": "web_search",
-	"x_search":   "x_search",
-}

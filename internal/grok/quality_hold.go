@@ -7,6 +7,8 @@ import (
 	"math"
 	"net/http"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/responses"
+	"orchids-api/internal/util"
 	"strings"
 	"sync"
 	"time"
@@ -350,13 +352,13 @@ func qualityRequestReplayUnsafe(req *chatwire.Request) bool {
 		return true
 	}
 	for _, tool := range req.ResponsesTools {
-		switch strings.ToLower(strings.TrimSpace(interfaceString(tool["type"]))) {
+		switch strings.ToLower(strings.TrimSpace(chatwire.ParseLooseStringAny(tool["type"]))) {
 		case "", "function", "custom", "local_shell", "apply_patch", "tool_search":
 			// These only ask the model to return a call; the client runs it.
 			continue
 		case "shell":
 			environment, _ := tool["environment"].(map[string]interface{})
-			if strings.ToLower(strings.TrimSpace(interfaceString(environment["type"]))) != "local" {
+			if strings.ToLower(strings.TrimSpace(chatwire.ParseLooseStringAny(environment["type"]))) != "local" {
 				return true
 			}
 		default:
@@ -370,12 +372,12 @@ func qualityRequestReplayUnsafe(req *chatwire.Request) bool {
 		if declaration == nil {
 			declaration = map[string]interface{}{"type": tool.Type}
 		}
-		switch strings.ToLower(strings.TrimSpace(firstNonEmpty(tool.Type, interfaceString(declaration["type"])))) {
+		switch strings.ToLower(strings.TrimSpace(util.FirstNonEmpty(tool.Type, chatwire.ParseLooseStringAny(declaration["type"])))) {
 		case "", "function", "custom", "local_shell", "apply_patch", "tool_search":
 			continue
 		case "shell":
 			environment, _ := declaration["environment"].(map[string]interface{})
-			if strings.ToLower(strings.TrimSpace(interfaceString(environment["type"]))) != "local" {
+			if strings.ToLower(strings.TrimSpace(chatwire.ParseLooseStringAny(environment["type"]))) != "local" {
 				return true
 			}
 		default:
@@ -649,7 +651,7 @@ func (c *buildQualityHold) signals(terminal bool) qualityStreamSignals {
 		Terminal:         terminal || quality.Terminal,
 		HoldExpired:      c.expired,
 		ReasoningStarted: c.reasoningStarted,
-		OutputTokens:     int64(interfaceToInt(c.outcome.Usage["completion_tokens"])),
+		OutputTokens:     int64(responses.InterfaceToInt(c.outcome.Usage["completion_tokens"])),
 	}
 	sig.HasReasoningDelta = quality.ReasoningChars > 0
 	sig.EncryptedFloor = encryptedThinkingFloor(0, 0, quality.ReasoningTokens)
@@ -745,8 +747,8 @@ func (h *Handler) auditQualityDegraded(ctx context.Context, acc *store.Account, 
 		Kind: audit.KindRequest, RequestID: middleware.GetRequestID(ctx), Action: "grok_quality_degraded",
 		APIKeyID: middleware.APIKeyID(ctx), AccountID: accountID, Model: model, Channel: "grok",
 		Provider: ProviderForAccount(acc), Status: "degraded", UsageSource: usageSource,
-		InputTokens:     interfaceToInt(outcome.Usage["prompt_tokens"]),
-		OutputTokens:    interfaceToInt(outcome.Usage["completion_tokens"]),
+		InputTokens:     responses.InterfaceToInt(outcome.Usage["prompt_tokens"]),
+		OutputTokens:    responses.InterfaceToInt(outcome.Usage["completion_tokens"]),
 		ReasoningTokens: int(outcome.Quality.ReasoningTokens),
 		Metadata: map[string]interface{}{
 			"mode":             mode,

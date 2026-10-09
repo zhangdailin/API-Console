@@ -1,6 +1,9 @@
 package grok
 
-import "net/http"
+import (
+	"net/http"
+	"orchids-api/internal/chatwire"
+)
 
 // recoverChatReasoning runs only after a recognized pre-generation decode 400.
 // A genuine compaction rejection is client-held upstream state and is never
@@ -17,7 +20,7 @@ func recoverChatReasoning(payload map[string]interface{}, initial error, call fu
 			return response, failure
 		}
 	}
-	if interfaceString(payload["previous_response_id"]) != "" || interfaceString(payload["prompt_cache_key"]) == "" {
+	if chatwire.ParseLooseStringAny(payload["previous_response_id"]) != "" || chatwire.ParseLooseStringAny(payload["prompt_cache_key"]) == "" {
 		return response, failure
 	}
 	delete(payload, "prompt_cache_key")

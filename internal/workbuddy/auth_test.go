@@ -2,7 +2,6 @@ package workbuddy
 
 import (
 	"context"
-	"encoding/base64"
 
 	"io"
 	"net/http"
@@ -20,13 +19,6 @@ import (
 	"orchids-api/internal/testutil"
 	"orchids-api/internal/upstream"
 )
-
-func jwtWithClaims(t *testing.T, claims map[string]interface{}) string {
-	t.Helper()
-	raw, err := json.Marshal(claims)
-	testutil.NoError(t, err, "marshal claims: %v")
-	return "header." + base64.RawURLEncoding.EncodeToString(raw) + ".signature"
-}
 
 // jsonMessage builds a message through the wire shape so MessageContent keeps
 // its string-vs-blocks union semantics (a nil Blocks slice alone reads as

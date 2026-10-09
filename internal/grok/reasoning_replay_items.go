@@ -1,6 +1,7 @@
 package grok
 
 import (
+	"orchids-api/internal/chatwire"
 	"orchids-api/internal/util"
 	"slices"
 	"strings"
@@ -39,7 +40,7 @@ func extractReplayItems(raw map[string]interface{}) ([]interface{}, bool) {
 		if !ok {
 			continue
 		}
-		switch strings.TrimSpace(interfaceString(item["type"])) {
+		switch strings.TrimSpace(chatwire.ParseLooseStringAny(item["type"])) {
 		case "reasoning", "message", "function_call", "custom_tool_call":
 			items = append(items, item)
 		}
@@ -63,7 +64,7 @@ func normalizeReplayItems(items []interface{}) ([]interface{}, bool) {
 			continue
 		}
 		normalized = append(normalized, next)
-		switch strings.TrimSpace(interfaceString(next["type"])) {
+		switch strings.TrimSpace(chatwire.ParseLooseStringAny(next["type"])) {
 		case "reasoning", "function_call", "custom_tool_call":
 			hasAnchor = true
 		}
@@ -72,7 +73,7 @@ func normalizeReplayItems(items []interface{}) ([]interface{}, bool) {
 }
 
 func normalizeReplayItem(item map[string]interface{}) (map[string]interface{}, bool) {
-	switch strings.TrimSpace(interfaceString(item["type"])) {
+	switch strings.TrimSpace(chatwire.ParseLooseStringAny(item["type"])) {
 	case "reasoning":
 		return normalizeReasoningReplayItem(item)
 	case "message":
@@ -101,7 +102,7 @@ func normalizeReasoningReplayItem(item map[string]interface{}) (map[string]inter
 }
 
 func normalizeAssistantMessageReplayItem(item map[string]interface{}) (map[string]interface{}, bool) {
-	if !strings.EqualFold(strings.TrimSpace(interfaceString(item["role"])), "assistant") {
+	if !strings.EqualFold(strings.TrimSpace(chatwire.ParseLooseStringAny(item["role"])), "assistant") {
 		return nil, false
 	}
 	content, ok := item["content"].([]interface{})
@@ -114,7 +115,7 @@ func normalizeAssistantMessageReplayItem(item map[string]interface{}) (map[strin
 		if !ok {
 			continue
 		}
-		switch strings.TrimSpace(interfaceString(part["type"])) {
+		switch strings.TrimSpace(chatwire.ParseLooseStringAny(part["type"])) {
 		case "output_text":
 			text, ok := part["text"].(string)
 			if !ok {
@@ -136,8 +137,8 @@ func normalizeAssistantMessageReplayItem(item map[string]interface{}) (map[strin
 }
 
 func normalizeFunctionCallReplayItem(item map[string]interface{}) (map[string]interface{}, bool) {
-	callID := strings.TrimSpace(interfaceString(item["call_id"]))
-	name := strings.TrimSpace(interfaceString(item["name"]))
+	callID := strings.TrimSpace(chatwire.ParseLooseStringAny(item["call_id"]))
+	name := strings.TrimSpace(chatwire.ParseLooseStringAny(item["name"]))
 	arguments, ok := item["arguments"].(string)
 	if !ok || callID == "" || name == "" {
 		return nil, false
@@ -146,13 +147,13 @@ func normalizeFunctionCallReplayItem(item map[string]interface{}) (map[string]in
 }
 
 func normalizeCustomToolCallReplayItem(item map[string]interface{}) (map[string]interface{}, bool) {
-	callID := strings.TrimSpace(interfaceString(item["call_id"]))
-	name := strings.TrimSpace(interfaceString(item["name"]))
+	callID := strings.TrimSpace(chatwire.ParseLooseStringAny(item["call_id"]))
+	name := strings.TrimSpace(chatwire.ParseLooseStringAny(item["name"]))
 	input, exists := item["input"]
 	if !exists || callID == "" || name == "" {
 		return nil, false
 	}
-	status := strings.TrimSpace(interfaceString(item["status"]))
+	status := strings.TrimSpace(chatwire.ParseLooseStringAny(item["status"]))
 	status = util.FirstNonEmptyUntrimmed(status, "completed")
 	return map[string]interface{}{"type": "custom_tool_call", "status": status, "call_id": callID, "name": name, "input": input}, true
 }
@@ -207,8 +208,8 @@ func lastAssistantReplayMessage(input []interface{}) (map[string]interface{}, bo
 		if !ok {
 			continue
 		}
-		typeName := strings.TrimSpace(interfaceString(item["type"]))
-		if (typeName != "" && typeName != "message") || !strings.EqualFold(strings.TrimSpace(interfaceString(item["role"])), "assistant") {
+		typeName := strings.TrimSpace(chatwire.ParseLooseStringAny(item["type"]))
+		if (typeName != "" && typeName != "message") || !strings.EqualFold(strings.TrimSpace(chatwire.ParseLooseStringAny(item["role"])), "assistant") {
 			continue
 		}
 		return item, true
@@ -222,7 +223,7 @@ func cachedAssistantReplayMessage(items []interface{}) (map[string]interface{}, 
 		if !ok {
 			continue
 		}
-		if strings.TrimSpace(interfaceString(item["type"])) == "message" && strings.EqualFold(strings.TrimSpace(interfaceString(item["role"])), "assistant") {
+		if strings.TrimSpace(chatwire.ParseLooseStringAny(item["type"])) == "message" && strings.EqualFold(strings.TrimSpace(chatwire.ParseLooseStringAny(item["role"])), "assistant") {
 			return item, true
 		}
 	}
@@ -251,7 +252,7 @@ func replayAssistantParts(raw interface{}) ([]replayAssistantPart, bool) {
 		if !ok {
 			return nil, false
 		}
-		switch strings.TrimSpace(interfaceString(part["type"])) {
+		switch strings.TrimSpace(chatwire.ParseLooseStringAny(part["type"])) {
 		case "output_text":
 			text, ok := part["text"].(string)
 			if !ok {
@@ -307,19 +308,19 @@ func filterReplayItemsForInput(input []interface{}, items []interface{}) []inter
 		if !ok {
 			continue
 		}
-		switch strings.TrimSpace(interfaceString(item["type"])) {
+		switch strings.TrimSpace(chatwire.ParseLooseStringAny(item["type"])) {
 		case "reasoning":
-			if encrypted := strings.TrimSpace(interfaceString(item["encrypted_content"])); encrypted != "" {
+			if encrypted := strings.TrimSpace(chatwire.ParseLooseStringAny(item["encrypted_content"])); encrypted != "" {
 				existingEncrypted[encrypted] = true
 			}
 		case "function_call_output", "custom_tool_call_output":
-			callID := interfaceString(item["call_id"])
+			callID := chatwire.ParseLooseStringAny(item["call_id"])
 			for _, candidate := range comparableReplayCallIDs(callID) {
 				existingOutputs[candidate] = callID
 			}
 		case "function_call", "custom_tool_call":
-			callID := interfaceString(item["call_id"])
-			for _, key := range replayToolCallKeys(strings.TrimSpace(interfaceString(item["type"])), callID) {
+			callID := chatwire.ParseLooseStringAny(item["call_id"])
+			for _, key := range replayToolCallKeys(strings.TrimSpace(chatwire.ParseLooseStringAny(item["type"])), callID) {
 				existingCalls[key] = true
 			}
 		}
@@ -330,10 +331,10 @@ func filterReplayItemsForInput(input []interface{}, items []interface{}) []inter
 		if !ok {
 			continue
 		}
-		typeName := strings.TrimSpace(interfaceString(item["type"]))
+		typeName := strings.TrimSpace(chatwire.ParseLooseStringAny(item["type"]))
 		switch typeName {
 		case "reasoning":
-			if existingEncrypted[strings.TrimSpace(interfaceString(item["encrypted_content"]))] {
+			if existingEncrypted[strings.TrimSpace(chatwire.ParseLooseStringAny(item["encrypted_content"]))] {
 				continue
 			}
 		case "message":
@@ -341,7 +342,7 @@ func filterReplayItemsForInput(input []interface{}, items []interface{}) []inter
 				continue
 			}
 		case "function_call", "custom_tool_call":
-			callID := interfaceString(item["call_id"])
+			callID := chatwire.ParseLooseStringAny(item["call_id"])
 			keys := replayToolCallKeys(typeName, callID)
 			if len(keys) == 0 || anyReplayCallKeyExists(existingCalls, keys) {
 				continue
@@ -394,9 +395,9 @@ func replayInsertIndex(input []interface{}, items []interface{}) int {
 		if !ok {
 			continue
 		}
-		typeName := strings.TrimSpace(interfaceString(item["type"]))
+		typeName := strings.TrimSpace(chatwire.ParseLooseStringAny(item["type"]))
 		if typeName == "function_call" || typeName == "custom_tool_call" {
-			for _, id := range comparableReplayCallIDs(interfaceString(item["call_id"])) {
+			for _, id := range comparableReplayCallIDs(chatwire.ParseLooseStringAny(item["call_id"])) {
 				replayCallIDs[id] = true
 			}
 		}
@@ -407,11 +408,11 @@ func replayInsertIndex(input []interface{}, items []interface{}) int {
 			if !ok {
 				continue
 			}
-			typeName := strings.TrimSpace(interfaceString(item["type"]))
+			typeName := strings.TrimSpace(chatwire.ParseLooseStringAny(item["type"]))
 			if typeName != "function_call_output" && typeName != "custom_tool_call_output" {
 				continue
 			}
-			callIDs := comparableReplayCallIDs(interfaceString(item["call_id"]))
+			callIDs := comparableReplayCallIDs(chatwire.ParseLooseStringAny(item["call_id"]))
 			if len(callIDs) == 0 {
 				return index
 			}
@@ -427,8 +428,8 @@ func replayInsertIndex(input []interface{}, items []interface{}) int {
 		if !ok {
 			continue
 		}
-		typeName := strings.TrimSpace(interfaceString(item["type"]))
-		if (typeName == "" || typeName == "message") && strings.EqualFold(strings.TrimSpace(interfaceString(item["role"])), "assistant") {
+		typeName := strings.TrimSpace(chatwire.ParseLooseStringAny(item["type"]))
+		if (typeName == "" || typeName == "message") && strings.EqualFold(strings.TrimSpace(chatwire.ParseLooseStringAny(item["role"])), "assistant") {
 			return index
 		}
 	}
@@ -445,8 +446,8 @@ func shouldInsertReplayBefore(entry interface{}) bool {
 	if !ok {
 		return true
 	}
-	typeName := strings.TrimSpace(interfaceString(item["type"]))
-	role := strings.ToLower(strings.TrimSpace(interfaceString(item["role"])))
+	typeName := strings.TrimSpace(chatwire.ParseLooseStringAny(item["type"]))
+	role := strings.ToLower(strings.TrimSpace(chatwire.ParseLooseStringAny(item["role"])))
 	if role == "" || (typeName != "" && typeName != "message") {
 		return true
 	}
@@ -465,16 +466,16 @@ func reasoningForCalls(items []interface{}) map[string]map[string]interface{} {
 		if !ok {
 			continue
 		}
-		switch strings.TrimSpace(interfaceString(item["type"])) {
+		switch strings.TrimSpace(chatwire.ParseLooseStringAny(item["type"])) {
 		case "reasoning":
-			if encrypted := strings.TrimSpace(interfaceString(item["encrypted_content"])); encrypted != "" {
+			if encrypted := strings.TrimSpace(chatwire.ParseLooseStringAny(item["encrypted_content"])); encrypted != "" {
 				pending = item
 			}
 		case "function_call", "custom_tool_call":
 			if pending == nil {
 				continue
 			}
-			callID := strings.TrimSpace(interfaceString(item["call_id"]))
+			callID := strings.TrimSpace(chatwire.ParseLooseStringAny(item["call_id"]))
 			if callID == "" {
 				continue
 			}
@@ -494,9 +495,9 @@ func hasReasoningBefore(input []interface{}, position int) bool {
 		if !ok {
 			return false
 		}
-		switch strings.TrimSpace(interfaceString(item["type"])) {
+		switch strings.TrimSpace(chatwire.ParseLooseStringAny(item["type"])) {
 		case "reasoning":
-			return strings.TrimSpace(interfaceString(item["encrypted_content"])) != ""
+			return strings.TrimSpace(chatwire.ParseLooseStringAny(item["encrypted_content"])) != ""
 		case "function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output", "message":
 			// A call boundary was reached without seeing the proof.
 			return false
@@ -528,9 +529,9 @@ func backfillReasoningForCalls(input []interface{}, cached []interface{}) []inte
 			out = append(out, entry)
 			continue
 		}
-		typeName := strings.TrimSpace(interfaceString(item["type"]))
+		typeName := strings.TrimSpace(chatwire.ParseLooseStringAny(item["type"]))
 		if typeName == "function_call" || typeName == "custom_tool_call" {
-			callID := strings.TrimSpace(interfaceString(item["call_id"]))
+			callID := strings.TrimSpace(chatwire.ParseLooseStringAny(item["call_id"]))
 			for _, key := range comparableReplayCallIDs(callID) {
 				proof, exists := index[key]
 				if !exists || seen[key] || hasReasoningBefore(append(out, entry), position) {

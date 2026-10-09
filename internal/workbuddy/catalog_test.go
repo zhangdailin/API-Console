@@ -23,9 +23,8 @@ func TestCatalogSnapshotRoundTripsWindows(t *testing.T) {
 	testutil.Equal(t, output["wb-small"], 0)
 }
 
-// A snapshot written by an older build is a bare id. It still has to resolve;
-// there is simply no window to recover from it.
-func TestCatalogContextWindowsAcceptsLegacyBareIDs(t *testing.T) {
+// Retired bare IDs do not contribute catalog information.
+func TestCatalogContextWindowsIgnoresRetiredBareIDs(t *testing.T) {
 	input, output := CatalogContextWindows([]string{"legacy-model", `{"id":"new-model","max_input_tokens":1000000}`})
 	_, ok := input["legacy-model"]
 	testutil.Falsef(t, ok, "a bare id must not invent a window: %#v", input)

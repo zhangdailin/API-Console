@@ -65,13 +65,13 @@ func TestRemainingResponsesSearchCitationsAndUsage(t *testing.T) {
 	ann := map[string]interface{}{"type": "url_citation", "url_citation": map[string]interface{}{"url": "https://example.com", "title": "source", "start_index": 0, "end_index": 6}}
 	s := remainingChatFrame(map[string]interface{}{"x_grok_search": search, "x_grok_search_done": false}, nil) + remainingChatFrame(map[string]interface{}{"x_grok_search": search, "x_grok_search_done": true}, nil) + remainingChatFrame(map[string]interface{}{"content": "answer"}, nil) + remainingChatFrame(map[string]interface{}{"annotations": []interface{}{ann, ann}}, "stop") + "data: [DONE]\n\n"
 	v := remainingResponse(t, s)
-	items := interfaceSlice(v["output"])
+	items := responses.InterfaceSlice(v["output"])
 	testutil.Equal(t, len(items), 2)
 	first := items[0].(map[string]interface{})
 	testutil.Fail(t, first["type"] != "web_search_call" || first["status"] != "completed", first)
 	msg := items[1].(map[string]interface{})
-	part := interfaceSlice(msg["content"])[0].(map[string]interface{})
-	annotations := interfaceSlice(part["annotations"])
+	part := responses.InterfaceSlice(msg["content"])[0].(map[string]interface{})
+	annotations := responses.InterfaceSlice(part["annotations"])
 	testutil.Fail(t, len(annotations) != 1 || annotations[0].(map[string]interface{})["url"] != "https://example.com", annotations)
 	chat := map[string]interface{}{"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": " answer ", "annotations": []interface{}{ann}, "x_grok_searches": []interface{}{search}}, "finish_reason": "length"}}, "usage": map[string]interface{}{"prompt_tokens": 10, "completion_tokens": 4, "prompt_tokens_details": map[string]interface{}{"cached_tokens": 3}, "completion_tokens_details": map[string]interface{}{"reasoning_tokens": 2}}}
 	v = responsesObjectFromChat("grok-4.6", chat)
@@ -150,12 +150,12 @@ func TestRemainingResponsesReasoningIdentity(t *testing.T) {
 	s := remainingChatFrame(map[string]interface{}{"reasoning_content": "first ", "reasoning_item_id": "rs_1"}, nil) + remainingChatFrame(map[string]interface{}{"content": "A"}, nil) + remainingChatFrame(map[string]interface{}{"reasoning_content": "second", "reasoning_item_id": "rs_2"}, nil) + remainingChatFrame(map[string]interface{}{}, "stop") + "data: [DONE]\n\n"
 	v := remainingResponse(t, s)
 	ids := map[string]bool{}
-	for _, raw := range interfaceSlice(v["output"]) {
+	for _, raw := range responses.InterfaceSlice(v["output"]) {
 		item, _ := raw.(map[string]interface{})
 		if item["type"] != "reasoning" {
 			continue
 		}
-		id := interfaceString(item["id"])
+		id := chatwire.ParseLooseStringAny(item["id"])
 		if ids[id] {
 			t.Fatalf("reused reasoning id=%s; second summary=%v", id, item["summary"])
 		}
@@ -176,7 +176,7 @@ func TestRemainingSearchDomainRestriction(t *testing.T) {
 }
 
 func TestRemainingResponsesUsageDetails(t *testing.T) {
-	out := responsesUsageFromChat(map[string]interface{}{"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120, "prompt_tokens_details": map[string]interface{}{"cached_tokens": 80}, "completion_tokens_details": map[string]interface{}{"reasoning_tokens": 10}})
+	out := responses.UsageFromChat(map[string]interface{}{"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120, "prompt_tokens_details": map[string]interface{}{"cached_tokens": 80}, "completion_tokens_details": map[string]interface{}{"reasoning_tokens": 10}})
 	testutil.Falsef(t, out["input_tokens_details"] == nil || out["output_tokens_details"] == nil, "detailed usage lost: %v", out)
 }
 func TestRemainingTerminalCitations(t *testing.T) {
@@ -199,7 +199,7 @@ func TestRemainingLateMessagesSignatureKeepsOriginalBlock(t *testing.T) {
 	err := responses.ReadSSE(strings.NewReader(messages.String()), func(kind, data string) error {
 		var v map[string]interface{}
 		_ = json.Unmarshal([]byte(data), &v)
-		index := interfaceToInt(v["index"])
+		index := responses.InterfaceToInt(v["index"])
 		switch kind {
 		case "content_block_start":
 			open[index] = true

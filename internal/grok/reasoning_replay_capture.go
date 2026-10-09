@@ -3,6 +3,7 @@ package grok
 import (
 	"bytes"
 	"context"
+	"orchids-api/internal/chatwire"
 	"orchids-api/internal/responses"
 	"strings"
 
@@ -56,7 +57,7 @@ func replayItemsFromPayload(raw []byte) ([]interface{}, bool) {
 		if json.Unmarshal([]byte(data), &event) != nil {
 			return nil
 		}
-		switch interfaceString(event["type"]) {
+		switch chatwire.ParseLooseStringAny(event["type"]) {
 		case "response.completed", "response.done":
 			completed = event
 		}

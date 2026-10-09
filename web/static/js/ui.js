@@ -9,7 +9,7 @@ globalThis.ConsoleAPI = (() => {
   }
   async function request(url, options = {}) {
     const response = await fetch(url, { credentials: 'same-origin', ...options });
-    if (response.status === 401) {
+    if (response.status === 401 && !options.signal?.aborted) {
       if (window.location) window.location.href = './login.html';
     }
     return response;
@@ -32,6 +32,19 @@ globalThis.ConsoleAPI = (() => {
 
 globalThis.ConsoleUI = (() => {
   const el = (id) => document.getElementById(id);
+  // A ticket owns updates until another request starts or the scope closes.
+  function requestGate() {
+    let sequence = 0, controller;
+    function cancel() { sequence++; controller?.abort(); controller = null; }
+    function begin() {
+      cancel();
+      controller = new AbortController();
+      const current = sequence, signal = controller.signal;
+      const isCurrent = () => current === sequence && !signal.aborted;
+      return Object.freeze({ signal, isCurrent, accepts: error => isCurrent() && error?.name !== 'AbortError' });
+    }
+    return Object.freeze({ begin, cancel });
+  }
   function make(tag, className, value) {
     const node = document.createElement(tag);
     if (className) node.className = className;
@@ -86,5 +99,5 @@ globalThis.ConsoleUI = (() => {
     });
     return table;
   }
-  return Object.freeze({ el, make, attach, setText, modal, pagination, responsiveTable });
+  return Object.freeze({ el, make, attach, setText, modal, pagination, responsiveTable, requestGate });
 })();

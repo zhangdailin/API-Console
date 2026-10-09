@@ -188,10 +188,10 @@ func consoleExtractMessageText(v interface{}) string {
 				if t != "message" && t != "response.output_message" {
 					continue
 				}
-				for _, raw := range interfaceSlice(m["content"]) {
+				for _, raw := range responses.InterfaceSlice(m["content"]) {
 					part, _ := raw.(map[string]interface{})
-					if kind := interfaceString(part["type"]); kind == "output_text" || kind == "text" {
-						text.WriteString(streamString(part["text"]))
+					if kind := chatwire.ParseLooseStringAny(part["type"]); kind == "output_text" || kind == "text" {
+						text.WriteString(responses.StreamString(part["text"]))
 					}
 				}
 			}
@@ -227,17 +227,17 @@ func consoleFlatAnnotations(v interface{}) []map[string]interface{} {
 		case map[string]interface{}:
 			t := strings.ToLower(strings.TrimSpace(fmt.Sprint(x["type"])))
 			if t == "url_citation" || (x["url"] != nil && (x["title"] != nil || x["start_index"] != nil || x["end_index"] != nil)) {
-				add(streamString(x["url"]), streamString(x["title"]), interfaceToInt(x["start_index"]), interfaceToInt(x["end_index"]))
+				add(responses.StreamString(x["url"]), responses.StreamString(x["title"]), responses.InterfaceToInt(x["start_index"]), responses.InterfaceToInt(x["end_index"]))
 			}
 			if t == "web_search_call" {
 				if action, _ := x["action"].(map[string]interface{}); action != nil {
-					for _, src := range interfaceSlice(action["sources"]) {
+					for _, src := range responses.InterfaceSlice(action["sources"]) {
 						if m, _ := src.(map[string]interface{}); m != nil {
-							add(streamString(m["url"]), streamString(m["title"]), 0, 0)
+							add(responses.StreamString(m["url"]), responses.StreamString(m["title"]), 0, 0)
 						}
 					}
 					if strings.EqualFold(strings.TrimSpace(fmt.Sprint(action["type"])), "open_page") {
-						add(streamString(action["url"]), "", 0, 0)
+						add(responses.StreamString(action["url"]), "", 0, 0)
 					}
 				}
 			}
@@ -299,32 +299,32 @@ func consoleUsage(v map[string]interface{}) map[string]interface{} {
 	if !ok {
 		return nil
 	}
-	prompt := interfaceToInt(raw["input_tokens"])
-	completion := interfaceToInt(raw["output_tokens"])
+	prompt := responses.InterfaceToInt(raw["input_tokens"])
+	completion := responses.InterfaceToInt(raw["output_tokens"])
 	if prompt == 0 {
-		prompt = interfaceToInt(raw["prompt_tokens"])
+		prompt = responses.InterfaceToInt(raw["prompt_tokens"])
 	}
 	if completion == 0 {
-		completion = interfaceToInt(raw["completion_tokens"])
+		completion = responses.InterfaceToInt(raw["completion_tokens"])
 	}
-	total := interfaceToInt(raw["total_tokens"])
+	total := responses.InterfaceToInt(raw["total_tokens"])
 	if total == 0 {
 		total = prompt + completion
 	}
 	reasoning := 0
 	if details, _ := raw["output_tokens_details"].(map[string]interface{}); details != nil {
-		reasoning = interfaceToInt(details["reasoning_tokens"])
+		reasoning = responses.InterfaceToInt(details["reasoning_tokens"])
 	}
 	if reasoning == 0 {
-		reasoning = interfaceToInt(raw["reasoning_tokens"])
+		reasoning = responses.InterfaceToInt(raw["reasoning_tokens"])
 	}
 	if reasoning == 0 {
 		if details, _ := raw["completion_tokens_details"].(map[string]interface{}); details != nil {
-			reasoning = interfaceToInt(details["reasoning_tokens"])
+			reasoning = responses.InterfaceToInt(details["reasoning_tokens"])
 		}
 	}
-	inputDetails, _ := firstDefined(raw["input_tokens_details"], raw["prompt_tokens_details"]).(map[string]interface{})
-	cached := min(max(interfaceToInt(inputDetails["cached_tokens"]), 0), max(prompt, 0))
+	inputDetails, _ := responses.FirstNonNil(raw["input_tokens_details"], raw["prompt_tokens_details"]).(map[string]interface{})
+	cached := min(max(responses.InterfaceToInt(inputDetails["cached_tokens"]), 0), max(prompt, 0))
 	normalized := map[string]interface{}{
 		"prompt_tokens":     prompt,
 		"completion_tokens": completion,
@@ -638,7 +638,7 @@ func (h *Handler) collectBuildChat(w http.ResponseWriter, req *chatwire.Request,
 		writeGrokUpstreamError(w, err)
 		return
 	}
-	if raw["error"] != nil || interfaceString(raw["status"]) == "failed" {
+	if raw["error"] != nil || chatwire.ParseLooseStringAny(raw["status"]) == "failed" {
 		outcome.Err = responses.Failure(raw)
 		writeGrokUpstreamError(w, outcome.Err)
 		return
@@ -659,12 +659,12 @@ func (h *Handler) collectBuildChat(w http.ResponseWriter, req *chatwire.Request,
 	var toolCalls []map[string]interface{}
 	var searches, reasoningItems []interface{}
 	var validationErr error
-	for _, entry := range interfaceSlice(raw["output"]) {
+	for _, entry := range responses.InterfaceSlice(raw["output"]) {
 		item, _ := entry.(map[string]interface{})
-		kind := interfaceString(item["type"])
+		kind := chatwire.ParseLooseStringAny(item["type"])
 		if kind == "function_call" {
-			id := firstNonEmpty(interfaceString(item["call_id"]), interfaceString(item["id"]))
-			name := interfaceString(item["name"])
+			id := util.FirstNonEmpty(chatwire.ParseLooseStringAny(item["call_id"]), chatwire.ParseLooseStringAny(item["id"]))
+			name := chatwire.ParseLooseStringAny(item["name"])
 			args, validArgs := item["arguments"].(string)
 			if id == "" || id == "<nil>" || name == "" || name == "<nil>" || seen[id] || !validArgs || !json.Valid([]byte(args)) {
 				validationErr = fmt.Errorf("invalid or duplicate upstream function_call")
@@ -699,7 +699,7 @@ func (h *Handler) collectBuildChat(w http.ResponseWriter, req *chatwire.Request,
 	}
 	upstreamUsage := consoleUsage(raw)
 	if details, _ := upstreamUsage["completion_tokens_details"].(map[string]interface{}); details != nil {
-		outcome.Quality.ReasoningTokens = int64(interfaceToInt(details["reasoning_tokens"]))
+		outcome.Quality.ReasoningTokens = int64(responses.InterfaceToInt(details["reasoning_tokens"]))
 	}
 	if validationErr != nil {
 		outcome.Err = validationErr
@@ -738,7 +738,7 @@ func (h *Handler) collectBuildChat(w http.ResponseWriter, req *chatwire.Request,
 			message["content"] = nil
 		}
 	}
-	if interfaceString(raw["status"]) == "incomplete" {
+	if chatwire.ParseLooseStringAny(raw["status"]) == "incomplete" {
 		finishReason = "length"
 	}
 	if filter.matched != "" {
@@ -759,7 +759,7 @@ func (h *Handler) collectBuildChat(w http.ResponseWriter, req *chatwire.Request,
 	outcome.Finish = finishReason
 	outcome.FirstToken = time.Now()
 	resp := map[string]interface{}{
-		"id":                 firstNonEmpty(interfaceString(raw["id"]), "chatcmpl_"+randomHex(8)),
+		"id":                 util.FirstNonEmpty(chatwire.ParseLooseStringAny(raw["id"]), "chatcmpl_"+util.RandomHex(8)),
 		"object":             "chat.completion",
 		"created":            time.Now().Unix(),
 		"model":              req.Model,
@@ -789,7 +789,7 @@ func (h *Handler) collectBuildChat(w http.ResponseWriter, req *chatwire.Request,
 // content differs from the (untyped) summary.
 func consoleReasoningField(item map[string]interface{}, field, partType string) string {
 	var out strings.Builder
-	for _, value := range interfaceSlice(item[field]) {
+	for _, value := range responses.InterfaceSlice(item[field]) {
 		part, _ := value.(map[string]interface{})
 		if part == nil {
 			continue
@@ -809,7 +809,7 @@ func consoleExtractReasoningText(raw map[string]interface{}) string {
 		return ""
 	}
 	var result strings.Builder
-	for _, value := range interfaceSlice(raw["output"]) {
+	for _, value := range responses.InterfaceSlice(raw["output"]) {
 		item, _ := value.(map[string]interface{})
 		if item == nil || !strings.EqualFold(strings.TrimSpace(fmt.Sprint(item["type"])), "reasoning") {
 			continue
@@ -828,7 +828,7 @@ func consoleExtractEncryptedReasoning(raw map[string]interface{}) string {
 		return ""
 	}
 	latest := ""
-	for _, value := range interfaceSlice(raw["output"]) {
+	for _, value := range responses.InterfaceSlice(raw["output"]) {
 		item, _ := value.(map[string]interface{})
 		if item == nil || !strings.EqualFold(strings.TrimSpace(fmt.Sprint(item["type"])), "reasoning") {
 			continue
@@ -854,7 +854,7 @@ func consoleToolCallFromItem(raw interface{}) map[string]interface{} {
 		callID = strings.TrimSpace(fmt.Sprint(item["id"]))
 	}
 	if callID == "" || callID == "<nil>" {
-		callID = "call_" + randomHex(12)
+		callID = "call_" + util.RandomHex(12)
 	}
 	arguments := "{}"
 	if rawArgs, ok := item["arguments"]; ok && rawArgs != nil {

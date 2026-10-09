@@ -3,57 +3,53 @@ package util
 
 import (
 	"context"
-	"runtime"
+	"errors"
 	"sync"
 	"time"
 )
 
-// ParallelFor runs n tasks concurrently, each receiving its index in [0, n).
-// Concurrency is derived from the CPU count; small batches run serially to avoid
-// the goroutine overhead.
-func ParallelFor(n int, fn func(int)) {
-	if n <= 0 {
-		return
+// ErrTaskPanic never exposes recovered values, which may contain secrets.
+var ErrTaskPanic = errors.New("task panicked")
+
+// RunIndexed executes each index once and returns errors in input order.
+// Serial and parallel execution both isolate panics and finish other tasks.
+func RunIndexed(total, workers int, work func(int) error) []error {
+	if total <= 0 || work == nil {
+		return nil
 	}
-
-	// Concurrency threshold: below this count running serially is cheaper.
-	const parallelThreshold = 8
-
-	if n < parallelThreshold {
-		// Handle small batches serially.
-		for i := 0; i < n; i++ {
-			fn(i)
+	workers = max(1, min(workers, total))
+	errs := make([]error, total)
+	run := func(index int) {
+		defer func() {
+			if recover() != nil {
+				errs[index] = ErrTaskPanic
+			}
+		}()
+		errs[index] = work(index)
+	}
+	if workers == 1 {
+		for index := range total {
+			run(index)
 		}
-		return
+		return errs
 	}
-
-	workers := min(runtime.GOMAXPROCS(0), n)
-
+	jobs := make(chan int)
 	var wg sync.WaitGroup
-	jobs := make(chan int, workers)
-
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
+	wg.Add(workers)
+	for range workers {
 		go func() {
 			defer wg.Done()
-			for idx := range jobs {
-				func() {
-					defer func() {
-						if r := recover(); r != nil {
-							// Prevent crash from panic in worker
-						}
-					}()
-					fn(idx)
-				}()
+			for index := range jobs {
+				run(index)
 			}
 		}()
 	}
-
-	for i := 0; i < n; i++ {
-		jobs <- i
+	for index := range total {
+		jobs <- index
 	}
 	close(jobs)
 	wg.Wait()
+	return errs
 }
 
 // SleepWithContext is a cancellable sleep; false means the context was cancelled.

@@ -2,6 +2,7 @@ package grok
 
 import (
 	"fmt"
+	"orchids-api/internal/chatwire"
 	"strings"
 	"time"
 )
@@ -23,10 +24,10 @@ func supplementResponsesEvent(event map[string]interface{}, state *responsesComp
 		return false
 	}
 	changed := false
-	kind := interfaceString(event["type"])
+	kind := chatwire.ParseLooseStringAny(event["type"])
 	response, _ := event["response"].(map[string]interface{})
 	if response != nil {
-		id := strings.TrimSpace(interfaceString(response["id"]))
+		id := strings.TrimSpace(chatwire.ParseLooseStringAny(response["id"]))
 		if id == "" {
 			id = state.ensureResponseID()
 			response["id"] = id
@@ -49,7 +50,7 @@ func supplementResponsesEvent(event map[string]interface{}, state *responsesComp
 			response["output"] = []interface{}{}
 			changed = true
 		}
-		if model := strings.TrimSpace(interfaceString(response["model"])); model != "" {
+		if model := strings.TrimSpace(chatwire.ParseLooseStringAny(response["model"])); model != "" {
 			state.model = model
 		} else {
 			response["model"] = state.model
@@ -58,14 +59,14 @@ func supplementResponsesEvent(event map[string]interface{}, state *responsesComp
 	}
 	if item, ok := event["item"].(map[string]interface{}); ok {
 		index, indexed := responseEventIndex(event["output_index"])
-		id := strings.TrimSpace(interfaceString(item["id"]))
+		id := strings.TrimSpace(chatwire.ParseLooseStringAny(item["id"]))
 		if indexed && state.itemIDs != nil && state.itemIDs[index] != "" {
 			id = state.itemIDs[index]
 		}
 		if id == "" {
 			id = state.nextItemID()
 		}
-		if interfaceString(item["id"]) != id {
+		if chatwire.ParseLooseStringAny(item["id"]) != id {
 			item["id"] = id
 			changed = true
 		}
@@ -78,7 +79,7 @@ func supplementResponsesEvent(event map[string]interface{}, state *responsesComp
 			}
 		}
 	}
-	if responsesEventNeedsItemID(kind) && strings.TrimSpace(interfaceString(event["item_id"])) == "" {
+	if responsesEventNeedsItemID(kind) && strings.TrimSpace(chatwire.ParseLooseStringAny(event["item_id"])) == "" {
 		if index, ok := responseEventIndex(event["output_index"]); ok {
 			id := ""
 			if state.itemIDs != nil {
@@ -96,7 +97,7 @@ func supplementResponsesEvent(event map[string]interface{}, state *responsesComp
 		}
 	}
 	if responsesEventCarriesResponseID(kind) {
-		id := strings.TrimSpace(interfaceString(event["id"]))
+		id := strings.TrimSpace(chatwire.ParseLooseStringAny(event["id"]))
 		if id == "" {
 			event["id"] = state.ensureResponseID()
 			changed = true
@@ -162,7 +163,7 @@ func ensureResponsesOutputTextAnnotations(value interface{}) bool {
 	changed := false
 	switch value := value.(type) {
 	case map[string]interface{}:
-		if interfaceString(value["type"]) == "output_text" {
+		if chatwire.ParseLooseStringAny(value["type"]) == "output_text" {
 			if _, ok := value["annotations"]; !ok || value["annotations"] == nil {
 				value["annotations"] = []interface{}{}
 				changed = true
