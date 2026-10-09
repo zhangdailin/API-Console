@@ -120,6 +120,12 @@ func ResponsesBridgeHandler(chat http.HandlerFunc, opts BridgeOptions) http.Hand
 			writeBridgeCompactionError(w, err)
 			return
 		}
+		storedRequest := req
+		namespaces, err := NormalizeBridgedNamespaces(&req)
+		if err != nil {
+			WriteAPIError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
+			return
+		}
 		if err := ValidateBridgedTools(&req); err != nil {
 			WriteAPIError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 			return
@@ -157,7 +163,8 @@ func ResponsesBridgeHandler(chat http.HandlerFunc, opts BridgeOptions) http.Hand
 					return
 				}
 				WriteStreamFromChatReader(w, req, reader, StreamOptions{
-					OnComplete: bridgedResponseRecorder(r, req, opts),
+					OnComplete:     bridgedResponseRecorder(r, storedRequest, opts),
+					ToolNamespaces: namespaces,
 				})
 			})
 			return
@@ -175,10 +182,11 @@ func ResponsesBridgeHandler(chat http.HandlerFunc, opts BridgeOptions) http.Hand
 			return
 		}
 		response := ObjectFromChat(req.Model, chatBody)
+		namespaces.RestoreResponse(response)
 		applyBridgedResponseExtras(response, req)
 		// Ownership is recorded for any successful response: the caller's `store`
 		// asks the upstream to retain, not this gateway.
-		if err := saveBridgedResponse(r, req, response, opts); err != nil {
+		if err := saveBridgedResponse(r, storedRequest, response, opts); err != nil {
 			httpserver.WriteError(w, http.StatusServiceUnavailable, "failed to store response")
 			return
 		}

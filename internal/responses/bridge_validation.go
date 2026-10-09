@@ -78,7 +78,7 @@ func ValidateToolsAndHistory(payload map[string]interface{}) error {
 }
 
 // ValidateBridgedTools checks the declaration and replay contract before the
-// existing standard Responses-to-Chat conversion.
+// standard Responses-to-Chat conversion, after namespace adaptation.
 func ValidateBridgedTools(req *CreateRequest) error {
 	if err := ValidateToolsAndHistory(map[string]interface{}{"tools": req.Tools, "tool_choice": req.ToolChoice, "input": req.Input}); err != nil {
 		return err

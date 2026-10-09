@@ -22,10 +22,13 @@ type chatResponseItem struct {
 	text      strings.Builder
 	signature string
 	closed    bool
+	wireName  string
 }
 
 // chatStreamOptions configures one chat-to-Responses translation.
 type StreamOptions struct {
+	// Restore grouped function identities before any public item event.
+	ToolNamespaces ToolNamespaces
 	// onComplete receives the terminal response object after it is built.
 	OnComplete func(map[string]interface{})
 	// SearchHook turns a provider-private search delta into a Responses output
@@ -268,9 +271,11 @@ func WriteStreamFromChatReader(w http.ResponseWriter, request CreateRequest, rea
 					// item is put back on the name the caller declared straight
 					// away, so every event already carries it.
 					item := map[string]interface{}{"id": "fc_" + util.RandomHex(12), "type": "function_call", "call_id": callID, "name": name, "arguments": "", "status": "in_progress"}
+					opts.ToolNamespaces.RestoreItem(item)
 					state = add(item)
+					state.wireName = name
 					tools[index] = state
-				} else if (callID != "" && callID != state.value["call_id"]) || (name != "" && name != state.value["name"]) {
+				} else if (callID != "" && callID != state.value["call_id"]) || (name != "" && name != state.wireName) {
 					return fmt.Errorf("tool identity changed")
 				}
 				if fragment, exists := fn["arguments"]; exists {

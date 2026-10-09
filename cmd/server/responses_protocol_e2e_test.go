@@ -14,18 +14,27 @@ import (
 	"orchids-api/internal/debug"
 	"orchids-api/internal/handler"
 	"orchids-api/internal/store"
+	"orchids-api/internal/toolname"
 	"orchids-api/internal/upstream"
 )
 
 type responsesProtocolRecorder struct {
-	requests  []upstream.UpstreamRequest
-	emitTools bool
+	requests       []upstream.UpstreamRequest
+	emitTools      bool
+	namespaceTools bool
 }
 
 func (c *responsesProtocolRecorder) SendRequestWithPayload(_ context.Context, req upstream.UpstreamRequest, emit func(upstream.SSEMessage), _ *debug.Logger) error {
 	c.requests = append(c.requests, req)
 	if c.emitTools {
-		for _, call := range []struct{ id, name, value string }{{"probe_a", "probe_first", "FIRST"}, {"probe_b", "probe_second", "SECOND"}} {
+		calls := []struct{ id, name, value string }{{"probe_a", "probe_first", "FIRST"}, {"probe_b", "probe_second", "SECOND"}}
+		if c.namespaceTools {
+			for i, tool := range req.Tools {
+				name, _, _ := toolname.ExtractToolSpecFields(tool)
+				calls[i].name = name
+			}
+		}
+		for _, call := range calls {
 			emit(upstream.SSEMessage{Type: "model", Event: map[string]interface{}{"type": "tool-call", "toolCallId": call.id, "toolName": call.name, "input": `{"value":"` + call.value + `"}`}})
 		}
 		emit(upstream.SSEMessage{Type: "model", Event: map[string]interface{}{"type": "finish", "finishReason": "tool_calls"}})
@@ -110,6 +119,12 @@ func TestResponsesProtocolThroughAuthenticatedRoutes(t *testing.T) {
 			wire := toolStream.Body.String()
 			if toolStream.Code != 200 || !strings.Contains(wire, "event: response.completed") || strings.Contains(wire, "event: response.failed") || !strings.Contains(wire, `"call_id":"probe_a"`) || !strings.Contains(wire, `"call_id":"probe_b"`) || strings.Count(wire, "event: response.function_call_arguments.done") != 2 {
 				t.Fatalf("two tools lost across Handler/Chat/Responses: %d %s", toolStream.Code, wire)
+			}
+			client.namespaceTools = true
+			namespaceStream := call(path, `{"model":"m","input":"Call both probes","stream":true,"tools":[{"type":"namespace","name":"local","tools":[{"type":"function","name":"probe","parameters":{"type":"object"}}]},{"type":"namespace","name":"remote","tools":[{"type":"function","name":"probe","parameters":{"type":"object"}}]}]}`)
+			wire = namespaceStream.Body.String()
+			if namespaceStream.Code != 200 || !strings.Contains(wire, "event: response.completed") || strings.Contains(wire, "event: response.failed") || !strings.Contains(wire, `"namespace":"local"`) || !strings.Contains(wire, `"namespace":"remote"`) || !strings.Contains(wire, `"name":"probe"`) {
+				t.Fatalf("namespace calls lost through authenticated route: %d %s", namespaceStream.Code, wire)
 			}
 		})
 	}
