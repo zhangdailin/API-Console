@@ -116,6 +116,7 @@ type Config struct {
 	GrokCLIOAuthTokenURL    string  `json:"grok_cli_oauth_token_url,omitempty"`
 	GrokBuildRPS            float64 `json:"grok_build_rps,omitempty"`
 	GrokBuildTimeout        int     `json:"grok_build_timeout_seconds,omitempty"`
+	GrokHideReasoning       bool    `json:"grok_hide_reasoning,omitempty"`
 	// GrokStreamIdleSeconds is the legacy all-channel fallback. The channel
 	// Build-specific field below takes precedence when set.
 	GrokStreamIdleSeconds      int `json:"grok_stream_idle_seconds,omitempty"`

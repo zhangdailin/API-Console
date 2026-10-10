@@ -216,7 +216,7 @@ func normalizeConfigPatchValue(key string, value interface{}) interface{} {
 	case "enable_token_refresh", "enable_usage_refresh", "enable_token_count",
 		"auto_refresh_token", "kiro_use_builtin_proxy",
 		"antigravity_use_builtin_proxy",
-		"enable_context_compress", "debug_enabled", "qoder_http2_enabled", "cline_http2_enabled", "workbuddy_http2_enabled":
+		"enable_context_compress", "debug_enabled", "grok_hide_reasoning", "qoder_http2_enabled", "cline_http2_enabled", "workbuddy_http2_enabled":
 		if b, ok := parseBoolish(value); ok {
 			return b
 		}

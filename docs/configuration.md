@@ -113,10 +113,13 @@ Grok 默认 base 为 `https://cli-chat-proxy.grok.com/v1`，CLI 版本当前默�
 | `grok_build_rps` | 非正 / 非有限关闭节奏；正值夹取 0.01–1000，按账号 / 团队范围执行 |
 | `grok_build_timeout_seconds` | 正值优先，最大 86400；未设时回退 request_timeout；示例文件显式为 600 |
 | `grok_build_stream_idle_seconds` | 优先于旧 grok_stream_idle_seconds；有效范围 30–600 秒，缺省 120 |
+| `grok_hide_reasoning` | 默认 false；true 隐藏 Grok 客户端输出中的思考文字，动态配置生效，不降低推理强度 |
 | `grok_egress_enabled` | 默认未启用，开启后没有健康节点则失败，不静默直连 |
 | `grok_egress_nodes` | name、url、weight、scope、proxied；URL 支持 http / socks5 / socks5h，scope 用 cli / all |
 | `quality_hold_enabled` | 指针字段保留显式 false，与省略不同 |
 | `quality_hold_max_attempts` / `quality_hold_timeout_ms` / `quality_hold_on_exhausted` | 质量暂存尝试、等待与预算耗尽策略；详见协议文档 |
+
+`grok_hide_reasoning` 同时处理 Chat、Messages、原生 Responses 的流与最终 JSON，以及原生响应资源 GET。答案、工具调用、费用和 reasoning_tokens 保留。原生 Responses 仍保留思考项身份和 encrypted_content，供客户端续接；后台原始推理回放与质量判断不受显示开关影响。该设置不会删除已经显示的历史消息，也不会改变上游生成或诊断采集中的原始内容。
 
 Grok 语义空闲按有效生成事件衡量，keepalive 不延长时钟；下游背压不应计成上游读取空闲。它与其他通道的字节空闲监视不同。
 

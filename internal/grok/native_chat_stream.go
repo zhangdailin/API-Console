@@ -155,7 +155,11 @@ func (h *Handler) streamBuildChatHolding(w http.ResponseWriter, req *chatwire.Re
 	activeReasoning := "anonymous"
 	searchDone := map[string]bool{}
 	finish := "stop"
+	hideReasoning := h.hideReasoning()
 	emit := func(delta map[string]interface{}, done string, usage map[string]interface{}) error {
+		if hideReasoning && hideChatReasoning(delta) && len(delta) == 0 && done == "" && usage == nil {
+			return checkHold(false)
+		}
 		choice := map[string]interface{}{"index": 0, "delta": delta, "finish_reason": nil}
 		if done != "" {
 			choice["finish_reason"] = done

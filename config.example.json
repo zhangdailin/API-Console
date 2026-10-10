@@ -23,6 +23,7 @@
   "grok_cli_oauth_device_url": "https://auth.x.ai/oauth2/device/code",
   "grok_cli_oauth_token_url": "https://auth.x.ai/oauth2/token",
   "grok_build_timeout_seconds": 600,
+  "grok_hide_reasoning": false,
   "grok_build_stream_idle_seconds": 120,
   "grok_build_rps": 0,
   "max_retries": 20,
