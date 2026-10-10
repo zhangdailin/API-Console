@@ -143,6 +143,8 @@ Grok 语义空闲按有效生成事件衡量，keepalive 不延长时钟；下�
 
 `qoder_queue_wait_budget_ms` 为 Qoder 的排队睡眠预算：0 继承 `shared_refusal_wait_budget_ms`，-1 禁止网关等待，正值单独设定。交互业务可选 3000ms；遇到上游 15/30 秒等待提示将直接返回 429 和 Retry-After。它减少失败等待，也减少请求在网关内等到队列恢复的机会；不保证模型恢复或吞吐增加。`qoder_queue_retry_interval_ms=0` 保留上游提示，正值覆盖间隔。此预算只计算排队睡眠，HTTP 往返由首生成及完整期限限制。
 
+**Qoder 免费档共享排队闸门的推荐配置。** Qoder 免费档把**所有账号**挡在同一个上游队列闸门后（业务码 10605：`isQueued=true`、`serviceAvailable=false`、`retryAfterSeconds=30`），因此失败不是账号级限流，**切号无效**，请求只能等闸门重新开放。默认值（`max_retries=3`、`shared_refusal_wait_budget_ms=15000`、`first_token_timeout_seconds=60`、`qoder_queue_retry_interval_ms=0`）会在约 24 秒内耗尽重试并返回 429，而闸门窗口是 30 秒，于是几乎必然失败。生产实测推荐：`max_retries=20`、`first_token_timeout_seconds=180`、`shared_refusal_wait_budget_ms=60000`、`qoder_queue_retry_interval_ms=5000`。用 5 秒间隔探测，60 秒预算内约可重试 12 次（约 79 秒墙钟），既覆盖一个完整 30 秒窗口，又留在 60 秒边缘安全上限内，不会被 100 秒源站超时的边缘代理截断成 520。不要为了等更久把预算抬过 60 秒：那只会换来边缘代理的 520，而不是更长的等待。
+
 `workbuddy_default_max_tokens` 默认 8192，可配置 1–131072，实际可用上限仍以账号模型目录及上游接受范围为准。仅未指定输出上限时使用；显式 `max_tokens`、`max_completion_tokens`、Responses `max_output_tokens` 按原协议优先级保留。推理模型的思考可能占用同一个输出预算。提高默认上限允许更长输出，不会预先生成这么多 Token，实际生成可能增加用量。
 
 上述字段可在管理页“生成预算与延迟”调整。保存后新请求读取首生成和排队预算，账号客户端通过指纹失效重新读取输出及流空闲配置；现有请求保留旧快照。全局并发容量及其处理超时在启动时装配，修改 `concurrency_timeout` 后需重启。
