@@ -309,6 +309,9 @@ func consumeStreamObserved(body io.Reader, _ bool, onMessage func(upstream.SSEMe
 
 	emitTools := func() {
 		completed := tools.CompleteAll()
+		for _, call := range completed {
+			call.Arguments = normalizeCommandEscalation(call.Name, call.Arguments)
+		}
 		upstream.EmitToolCalls(onMessage, completed, &result.SawMeaningfulEvent, &result.ToolCallCount)
 	}
 
