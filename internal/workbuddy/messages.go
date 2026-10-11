@@ -130,9 +130,9 @@ func buildMessages(req upstream.UpstreamRequest) []ChatMessage {
 			if role == "system" {
 				text = filterClientSystemText(text)
 			}
-			if strings.TrimSpace(text) == "" {
-				// An empty text message carries nothing for the upstream and
-				// trips its role/content validation.
+			if strings.TrimSpace(text) == "" && reasoningForReplay(msg) == "" {
+				// Keep an assistant reasoning item for its tool turn; an empty
+				// message without either text or reasoning carries nothing.
 				continue
 			}
 			out = append(out, ChatMessage{Role: role, Content: text, ReasoningContent: reasoningForReplay(msg)})
@@ -164,8 +164,8 @@ func buildMessages(req upstream.UpstreamRequest) []ChatMessage {
 		out = append([]ChatMessage{{Role: "system", Content: defaultSystem}}, out...)
 	}
 	// WorkBuddy chat compatibility uses one leading system message. Preserve
-	// each system/developer block in encounter order, and leave the relative
-	// order and call identities of user/assistant/tool messages untouched.
+	// each system/developer block in encounter order, then assemble split
+	// assistant tool turns while retaining call/result identities and order.
 	var system []string
 	normalized := make([]ChatMessage, 1, len(out))
 	for _, message := range out {
@@ -176,7 +176,46 @@ func buildMessages(req upstream.UpstreamRequest) []ChatMessage {
 		normalized = append(normalized, message)
 	}
 	normalized[0] = ChatMessage{Role: "system", Content: strings.Join(system, "\n\n")}
-	return normalized
+	return mergeAssistantToolTurns(normalized)
+}
+
+// Responses represents each parallel call as a separate item. WorkBuddy's
+// provider requires the whole assistant tool turn in one message immediately
+// before its results; separate assistant messages are rejected with 11133.
+// Only combine adjacent assistant items in a run containing calls. User and
+// tool messages remain boundaries, and no IDs, arguments or results are changed.
+func mergeAssistantToolTurns(messages []ChatMessage) []ChatMessage {
+	out := make([]ChatMessage, 0, len(messages))
+	for start := 0; start < len(messages); {
+		end := start + 1
+		hasCalls := len(messages[start].ToolCalls) > 0
+		if messages[start].Role == "assistant" {
+			for end < len(messages) && messages[end].Role == "assistant" {
+				hasCalls = hasCalls || len(messages[end].ToolCalls) > 0
+				end++
+			}
+		}
+		if !hasCalls || end == start+1 {
+			out = append(out, messages[start:end]...)
+		} else {
+			merged := ChatMessage{Role: "assistant"}
+			var text, reasoning []string
+			for _, message := range messages[start:end] {
+				if message.Content != "" {
+					text = append(text, message.Content)
+				}
+				if message.ReasoningContent != "" {
+					reasoning = append(reasoning, message.ReasoningContent)
+				}
+				merged.ToolCalls = append(merged.ToolCalls, message.ToolCalls...)
+			}
+			merged.Content = strings.Join(text, "\n")
+			merged.ReasoningContent = strings.Join(reasoning, "\n")
+			out = append(out, merged)
+		}
+		start = end
+	}
+	return out
 }
 
 func reasoningForReplay(msg prompt.Message) string {

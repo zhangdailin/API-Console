@@ -1,13 +1,86 @@
 package workbuddy
 
 import (
+	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
 	"orchids-api/internal/prompt"
+	"orchids-api/internal/responses"
 	"orchids-api/internal/testutil"
 	"orchids-api/internal/upstream"
 )
+
+func TestBuildBodyResponsesParallelToolFollowup(t *testing.T) {
+	// Codex sends one Responses item per parallel call, followed by all results.
+	// Replay its bridge conversion, not an already grouped Chat history.
+	var input interface{}
+	testutil.NoError(t, json.Unmarshal([]byte(`[
+		{"role":"user","content":"Read three files"},
+		{"type":"reasoning","summary":[{"text":"Inspect the files."}]},
+		{"role":"assistant","content":"Reading now."},
+		{"type":"function_call","call_id":"call-a","name":"read_file","arguments":"{\"path\":\"a\"}"},
+		{"type":"function_call","call_id":"call-b","name":"read_file","arguments":"{\"path\":\"b\"}"},
+		{"type":"function_call","call_id":"call-c","name":"read_file","arguments":"{\"path\":\"c\"}"},
+		{"type":"function_call_output","call_id":"call-a","output":"a result"},
+		{"type":"function_call_output","call_id":"call-b","output":"b result"},
+		{"type":"function_call_output","call_id":"call-c","output":"c result"}
+	]`), &input), "decode input: %v")
+	chat, err := responses.InputToMessages(input)
+	testutil.NoError(t, err, "Responses conversion: %v")
+	raw, err := json.Marshal(chat)
+	testutil.NoError(t, err, "encode Chat: %v")
+	var history []prompt.Message
+	testutil.NoError(t, json.Unmarshal(raw, &history), "decode prompt: %v")
+	before, _ := json.Marshal(history)
+	body, err := (&Client{}).buildBody(upstream.UpstreamRequest{Model: "deepseek-v4.1-flash", Messages: history})
+	testutil.NoError(t, err, "build body: %v")
+	var wire struct {
+		Messages []ChatMessage `json:"messages"`
+	}
+	testutil.NoError(t, json.Unmarshal(body, &wire), "decode body: %v")
+	testutil.Equal(t, len(wire.Messages), 6)
+	assistant := wire.Messages[2]
+	testutil.Equal(t, assistant.Role, "assistant")
+	testutil.Equal(t, assistant.Content, "Reading now.")
+	testutil.Equal(t, assistant.ReasoningContent, "Inspect the files.")
+	testutil.Equal(t, len(assistant.ToolCalls), 3)
+	for i, id := range []string{"call-a", "call-b", "call-c"} {
+		call, result := assistant.ToolCalls[i], wire.Messages[i+3]
+		testutil.Equal(t, call.ID, id)
+		testutil.Equal(t, call.Function.Name, "read_file")
+		testutil.Equal(t, call.Function.Arguments, `{"path":"`+string(rune('a'+i))+`"}`)
+		testutil.Equal(t, result.Role, "tool")
+		testutil.Equal(t, result.ToolCallID, id)
+		testutil.Equal(t, result.Content, string(rune('a'+i))+" result")
+	}
+	after, _ := json.Marshal(history)
+	testutil.Equal(t, string(after), string(before))
+}
+
+func TestBuildMessagesKeepsToolTurnAndUserBoundaries(t *testing.T) {
+	call := func(id string) prompt.Message {
+		return prompt.Message{Role: "assistant", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{{Type: "tool_use", ID: id, Name: "read_file", Input: map[string]interface{}{"path": id}}}}}
+	}
+	result := func(id string) prompt.Message {
+		return prompt.Message{Role: "user", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{{Type: "tool_result", ToolUseID: id, Content: id + " result"}}}}
+	}
+	history := []prompt.Message{userMessage(t, "start"), call("a"), result("a"), call("b"), userMessage(t, "new request"), call("c"), result("b"), result("c"), roleMessage(t, "assistant", "first answer"), roleMessage(t, "assistant", "second answer")}
+	messages := buildMessages(upstream.UpstreamRequest{Messages: history})
+	want := []string{"system", "user", "assistant", "tool", "assistant", "user", "assistant", "tool", "tool", "assistant", "assistant"}
+	var roles []string
+	for _, m := range messages {
+		roles = append(roles, m.Role)
+	}
+	if !reflect.DeepEqual(roles, want) {
+		t.Fatalf("turn boundaries changed: got %v want %v", roles, want)
+	}
+	for i, id := range map[int]string{2: "a", 4: "b", 6: "c"} {
+		testutil.Equal(t, len(messages[i].ToolCalls), 1)
+		testutil.Equal(t, messages[i].ToolCalls[0].ID, id)
+	}
+}
 
 func TestBuildMessages_RequiresSystemFirst(t *testing.T) {
 	t.Parallel()
