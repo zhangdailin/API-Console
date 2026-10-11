@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"orchids-api/internal/testutil"
@@ -8,6 +10,66 @@ import (
 	"testing"
 	"time"
 )
+
+type failingFlushRecorder struct {
+	*httptest.ResponseRecorder
+	flushes int
+	err     error
+}
+
+func (w *failingFlushRecorder) FlushError() error {
+	w.flushes++
+	if w.flushes > 1 {
+		return w.err
+	}
+	return nil
+}
+
+func TestCoalescedTimerFailureCancelsRequestAndRemainsSticky(t *testing.T) {
+	failure := errors.New("flush disconnected")
+	target := &failingFlushRecorder{ResponseRecorder: httptest.NewRecorder(), err: failure}
+	trace := NewTracedResponseWriter(target)
+	h := CoalesceStreamFlush(func() time.Duration { return 2 * time.Millisecond })(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("data: first\n\n"))
+		w.(http.Flusher).Flush()
+		w.Write([]byte("data: sparse\n\n"))
+		w.(http.Flusher).Flush()
+		select {
+		case <-r.Context().Done():
+		case <-time.After(time.Second):
+			t.Fatal("timer failure did not stop upstream")
+		}
+		if err := http.NewResponseController(w).Flush(); !errors.Is(err, failure) {
+			t.Fatalf("flush error lost: %v", err)
+		}
+		if _, err := w.Write([]byte("late")); !errors.Is(err, failure) {
+			t.Fatalf("write error lost: %v", err)
+		}
+	})
+	h(trace, httptest.NewRequest("POST", "/", nil))
+	if !trace.StreamFailed() || target.flushes != 2 || target.Body.String() != "data: first\n\ndata: sparse\n\n" {
+		t.Fatalf("marked=%v flushes=%d body=%q", trace.StreamFailed(), target.flushes, target.Body.String())
+	}
+}
+
+type coalescedShortWriter struct{ *httptest.ResponseRecorder }
+
+func (w coalescedShortWriter) Write(p []byte) (int, error) { return len(p) - 1, nil }
+
+func TestCoalescedShortWriteAndWrappedFailureAreObservable(t *testing.T) {
+	trace := NewTracedResponseWriter(coalescedShortWriter{httptest.NewRecorder()})
+	w := &coalescedWriter{ResponseWriter: trace, interval: time.Hour}
+	defer w.close()
+	if _, err := w.Write([]byte("frame")); !errors.Is(err, io.ErrShortWrite) || !trace.StreamFailed() {
+		t.Fatalf("err=%v marked=%v", err, trace.StreamFailed())
+	}
+	trace = NewTracedResponseWriter(httptest.NewRecorder())
+	w = &coalescedWriter{ResponseWriter: trace, interval: time.Hour}
+	MarkStreamFailure(w)
+	if !trace.StreamFailed() {
+		t.Fatal("coalescing hid the stream failure marker")
+	}
+}
 
 type flushRecorder struct {
 	*httptest.ResponseRecorder

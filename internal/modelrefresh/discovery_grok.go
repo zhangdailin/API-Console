@@ -11,7 +11,6 @@ import (
 	"orchids-api/internal/grok"
 	"orchids-api/internal/modelcatalog"
 	"orchids-api/internal/store"
-	"orchids-api/internal/util"
 )
 
 // fetchGrokBuildModelsForRefresh reads the official Build CLI catalog.  It is
@@ -80,11 +79,14 @@ func discoverGrokModelsReport(ctx context.Context, cfg *config.Config, s *store.
 			if id == "" {
 				continue
 			}
-			spec, ok := grok.ResolveModel(id)
-			if !ok {
-				spec = grok.ModelSpec{ID: id, Name: id, UpstreamModel: id, Upstream: grok.UpstreamCLI}
+			name := id
+			for _, profile := range result.account.GrokModelCatalog {
+				if strings.EqualFold(profile.ModelID, rawID) && strings.TrimSpace(profile.Name) != "" {
+					name = profile.Name
+					break
+				}
 			}
-			candidate := discoveredModel{ID: spec.ID, Name: util.FirstNonEmpty(spec.Name, spec.ID), Verified: true}
+			candidate := discoveredModel{ID: id, Name: name, Verified: true}
 			attempt.Candidates = append(attempt.Candidates, candidate)
 			key := strings.ToLower(candidate.ID)
 			if _, exists := seen[key]; !exists {
@@ -104,18 +106,7 @@ func discoverGrokModelsReport(ctx context.Context, cfg *config.Config, s *store.
 }
 
 func canonicalGrokRefreshModelID(modelID string) string {
-	id := strings.TrimSpace(modelID)
-	if id == "" {
-		return ""
-	}
-	// Media-generation products are not exposed by the Build-only gateway.
-	if strings.Contains(strings.ToLower(id), "imagine") || strings.Contains(strings.ToLower(id), "voice") || strings.HasPrefix(strings.ToLower(id), "grok-"+"stt") {
-		return ""
-	}
-	if spec, ok := grok.ResolveModel(id); ok {
-		return spec.ID
-	}
-	return strings.ToLower(id)
+	return strings.ToLower(strings.TrimSpace(modelID))
 }
 
 func grokBuildModelDiscoveryAccounts(ctx context.Context, s *store.Store) ([]*store.Account, error) {

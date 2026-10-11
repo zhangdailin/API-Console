@@ -10,6 +10,7 @@ import (
 
 	"orchids-api/internal/audit"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/httpserver"
 	"orchids-api/internal/responses"
 	"orchids-api/internal/util"
 )
@@ -69,15 +70,16 @@ func copyNativeResponseWithVisibility(w http.ResponseWriter, body io.Reader, con
 			raw, _ = json.Marshal(response)
 		}
 		written, writeErr := w.Write(raw)
-		result.Err = writeErr
-		if written != len(raw) && result.Err == nil {
-			result.Err = io.ErrShortWrite
+		if writeErr == nil && written != len(raw) {
+			writeErr = io.ErrShortWrite
+		}
+		if writeErr != nil {
+			result.Err = writeErr
 		}
 		return
 	}
 
-	flusher, _ := w.(http.Flusher)
-	target := deadlineResponseWriter{ResponseWriter: w}
+	target := &httpserver.CheckedStreamWriter{Target: deadlineResponseWriter{ResponseWriter: w}}
 	terminal, done := false, false
 	failureCode, failureMessage := "", ""
 	compat := &responsesCompatibilityState{model: model}
@@ -128,8 +130,10 @@ func copyNativeResponseWithVisibility(w http.ResponseWriter, body io.Reader, con
 				result.Err = err
 				return err
 			}
-			if flusher != nil {
-				flusher.Flush()
+			target.Flush()
+			if target.Err != nil {
+				result.Err = target.Err
+				return target.Err
 			}
 		}
 		if usage := consoleUsageFromStreamEvent(event); len(usage) > 0 {
@@ -195,8 +199,9 @@ func copyNativeResponseWithVisibility(w http.ResponseWriter, body io.Reader, con
 	// relays the native stream as the upstream ends it. A strict serde client
 	// treats an unknown frame as a protocol error, and appending one made the two
 	// gateways produce different bytes for the same upstream stream.
-	if flusher != nil {
-		flusher.Flush()
+	target.Flush()
+	if target.Err != nil {
+		result.Err = target.Err
 	}
 	return
 }

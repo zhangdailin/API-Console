@@ -1,46 +1,47 @@
 package modelpolicy
 
 import (
-	"slices"
+	"orchids-api/internal/modelcatalog"
+	"orchids-api/internal/store"
 	"strings"
 )
 
-// reasoningEffortCapabilities maps an upstream model slug to the effort levels
-// its wire contract accepts. A slug that is absent falls back to "none" only,
-// so an unknown model never advertises a level upstream may reject.
-var reasoningEffortCapabilities = map[string][]string{
-	"grok-4.5":               {"low", "medium", "high"},
-	"grok-4.6":               {"low", "medium", "high", "xhigh"},
-	"grok-4.7":               {"low", "medium", "high", "xhigh"},
-	"grok-composer-2.5-fast": {"none"},
-}
-
-// GrokModelSlug strips the optional Build provider prefix.
-func GrokModelSlug(publicID string) string {
-	slug := strings.ToLower(strings.TrimSpace(publicID))
-	slug = strings.TrimPrefix(slug, "build/")
-	return slug
-}
-
-// IsGrokComposerModel reports whether the model belongs to the Composer family,
-// which never accepts a configurable reasoning effort.
-func IsGrokComposerModel(publicID string) bool {
-	return strings.HasPrefix(GrokModelSlug(publicID), "grok-composer-")
-}
-
-// SupportedReasoningEfforts returns the configurable effort levels for a model.
-// An empty result means the model reasons intrinsically but exposes no
-// configurable effort parameter.
-func SupportedReasoningEfforts(publicID string) []string {
-	slug := GrokModelSlug(publicID)
-	if levels, ok := reasoningEffortCapabilities[slug]; ok {
-		return append([]string(nil), levels...)
+// GrokAccountCatalog prefers upstream profiles over the legacy identifier projection.
+func GrokAccountCatalog(acc *store.Account) []modelcatalog.Profile {
+	if acc == nil {
+		return nil
 	}
-	return []string{"none"}
+	if len(acc.GrokModelCatalog) > 0 {
+		return modelcatalog.CloneProfiles(acc.GrokModelCatalog)
+	}
+	out := make([]modelcatalog.Profile, 0, len(acc.GrokModels))
+	for _, id := range acc.GrokModels {
+		out = append(out, modelcatalog.Profile{ModelID: id})
+	}
+	return out
 }
 
-// SupportsReasoningEffort reports whether the model accepts the given level.
-func SupportsReasoningEffort(publicID, effort string) bool {
-	effort = strings.ToLower(strings.TrimSpace(effort))
-	return slices.ContainsFunc(SupportedReasoningEfforts(publicID), func(level string) bool { return level == effort })
+// GrokModelProfiles aggregates only authorized, enabled accounts bound to this route.
+// Temporary concurrency and rate limits do not remove a catalog entitlement.
+func GrokModelProfiles(model *store.Model, accounts []*store.Account) []modelcatalog.Profile {
+	if model == nil {
+		return nil
+	}
+	id := strings.TrimSpace(model.UpstreamModel)
+	if id == "" {
+		id = ExternalPublicID(model.ModelID)
+	}
+	catalogs := make([][]modelcatalog.Profile, 0, len(accounts))
+	for _, acc := range accounts {
+		if acc == nil || !acc.Enabled || !strings.EqualFold(strings.TrimSpace(acc.AccountType), "grok") || !store.AccountAuthActive(acc) || strings.TrimSpace(acc.StatusCode) == "401" || !model.AllowsAccount(acc.ID) {
+			continue
+		}
+		for _, profile := range GrokAccountCatalog(acc) {
+			if strings.EqualFold(strings.TrimSpace(profile.ModelID), id) {
+				catalogs = append(catalogs, []modelcatalog.Profile{profile})
+				break
+			}
+		}
+	}
+	return modelcatalog.Aggregate(catalogs...)
 }

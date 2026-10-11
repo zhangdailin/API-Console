@@ -51,40 +51,55 @@ func (e SSEEvent) HasData() bool { return len(e.data) > 0 }
 
 func (e SSEEvent) writeTo(writer io.Writer) error {
 	if len(e.raw) > 0 {
-		_, err := writer.Write(e.raw)
+		n, err := writer.Write(e.raw)
+		if err == nil && n != len(e.raw) {
+			err = io.ErrShortWrite
+		}
 		return err
 	}
+	// A rewritten frame is still one write. In the pipe bridge each separate
+	// write is a producer/consumer rendezvous and a transport deadline update.
+	size := 1
 	for _, comment := range e.Comments {
-		if _, err := fmt.Fprintln(writer, comment); err != nil {
-			return err
+		size += len(comment) + 1
+	}
+	for _, field := range e.Other {
+		size += len(field) + 1
+	}
+	for _, line := range e.data {
+		size += len("data: ") + len(line) + 1
+	}
+	for _, field := range []struct{ prefix, value string }{{"event: ", e.Event}, {"id: ", e.ID}, {"retry: ", e.Retry}} {
+		if field.value != "" {
+			size += len(field.prefix) + len(field.value) + 1
 		}
 	}
-	if e.Event != "" {
-		if _, err := fmt.Fprintf(writer, "event: %s\n", e.Event); err != nil {
-			return err
-		}
+	frame := make([]byte, 0, size)
+	for _, comment := range e.Comments {
+		frame = append(frame, comment...)
+		frame = append(frame, '\n')
 	}
-	if e.ID != "" {
-		if _, err := fmt.Fprintf(writer, "id: %s\n", e.ID); err != nil {
-			return err
-		}
-	}
-	if e.Retry != "" {
-		if _, err := fmt.Fprintf(writer, "retry: %s\n", e.Retry); err != nil {
-			return err
+	for _, field := range []struct{ prefix, value string }{{"event: ", e.Event}, {"id: ", e.ID}, {"retry: ", e.Retry}} {
+		if field.value != "" {
+			frame = append(frame, field.prefix...)
+			frame = append(frame, field.value...)
+			frame = append(frame, '\n')
 		}
 	}
 	for _, field := range e.Other {
-		if _, err := fmt.Fprintln(writer, field); err != nil {
-			return err
-		}
+		frame = append(frame, field...)
+		frame = append(frame, '\n')
 	}
 	for _, line := range e.data {
-		if _, err := fmt.Fprintf(writer, "data: %s\n", line); err != nil {
-			return err
-		}
+		frame = append(frame, "data: "...)
+		frame = append(frame, line...)
+		frame = append(frame, '\n')
 	}
-	_, err := fmt.Fprintln(writer)
+	frame = append(frame, '\n')
+	n, err := writer.Write(frame)
+	if err == nil && n != len(frame) {
+		err = io.ErrShortWrite
+	}
 	return err
 }
 

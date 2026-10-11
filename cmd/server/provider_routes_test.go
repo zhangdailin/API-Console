@@ -23,6 +23,9 @@ func TestProviderRoutesBothBasesAndRetiredUnifiedRoutes(t *testing.T) {
 	if err := s.CreateApiKey(context.Background(), &store.ApiKey{Name: "test", KeyHash: hex.EncodeToString(digest[:]), Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.CreateAccount(context.Background(), &store.Account{AccountType: "grok", CredentialType: "oauth", OAuthAccessToken: "observed", Enabled: true, GrokModels: []string{"shared-model"}}); err != nil {
+		t.Fatal(err)
+	}
 	for _, d := range channel.All() {
 		if err := s.CreateModel(context.Background(), &store.Model{Channel: string(d.ID), ModelID: "shared-model", Name: "shared-model", Status: store.ModelStatusAvailable, Verified: true}); err != nil {
 			t.Fatal(err)

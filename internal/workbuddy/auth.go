@@ -599,6 +599,7 @@ type WorkBuddyModel struct {
 	SupportsTools   bool   `json:"supportsToolCall"`
 	SupportsReason  bool   `json:"supportsReasoning"`
 	Disabled        bool   `json:"disabled"`
+	Credits         string `json:"credits"`
 	Reasoning       struct {
 		Effort string `json:"effort"`
 	} `json:"reasoning"`

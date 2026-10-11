@@ -38,7 +38,7 @@ func streamOutputSignals(event string, data []byte) outputSignals {
 		_ = json.Unmarshal(p[key], &d)
 		s.visible = nonemptyJSONString(d["text"])
 		s.reasoning = nonemptyJSONString(d["thinking"])
-		s.tool = nonemptyJSONString(d["partial_json"]) || nonemptyJSONString(d["name"])
+		s.tool = nonemptyJSONString(d["partial_json"]) || kind == "content_block_start" && nonemptyJSONString(d["name"])
 	case "message_delta":
 		var d struct {
 			StopReason string `json:"stop_reason"`

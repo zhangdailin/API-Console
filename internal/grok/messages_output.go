@@ -6,6 +6,7 @@ import (
 	"maps"
 	"net/http"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/httpserver"
 	"orchids-api/internal/responses"
 	"orchids-api/internal/util"
 	"slices"
@@ -214,6 +215,9 @@ type anthropicStreamState struct {
 }
 
 func translateOpenAIChatStreamToAnthropicWithInput(w io.Writer, reader io.Reader, model string, inputTokens int) error {
+	if target, ok := w.(http.ResponseWriter); ok {
+		w = httpserver.DeadlineResponseWriter{ResponseWriter: target}
+	}
 	tracked := &checkedStreamWriter{Target: w}
 	w = tracked
 	state := &anthropicStreamState{
@@ -237,18 +241,18 @@ func translateOpenAIChatStreamToAnthropicWithInput(w io.Writer, reader io.Reader
 		return tracked.Err
 	}
 	terminal := false
-	err := responses.ReadSSE(reader, func(event, data string) error {
+	err := responses.ReadSSEBytes(reader, func(event string, data []byte) error {
 		if tracked.Err != nil {
 			return tracked.Err
 		}
-		if data == "[DONE]" {
+		if string(data) == "[DONE]" {
 			if !terminal {
 				return fmt.Errorf("chat stream ended without finish_reason")
 			}
 			return io.EOF
 		}
 		var chunk map[string]interface{}
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+		if err := json.Unmarshal(data, &chunk); err != nil {
 			return fmt.Errorf("invalid chat SSE: %w", err)
 		}
 		if chunk["error"] != nil || event == "error" {
@@ -461,7 +465,11 @@ func writeAnthropicSSE(w io.Writer, event string, payload interface{}) {
 	if err != nil {
 		return
 	}
-	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, raw)
+	if tracked, ok := w.(*checkedStreamWriter); ok {
+		_ = tracked.WriteSSE(event, raw)
+	} else {
+		_ = httpserver.WriteSSEFrame(w, event, raw)
+	}
 	if flusher, ok := w.(http.Flusher); ok {
 		flusher.Flush()
 	}

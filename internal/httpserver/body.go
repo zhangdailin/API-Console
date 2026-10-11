@@ -17,7 +17,7 @@ const MaxJSONBodyBytes = 32 << 20
 // response on failure: 415 for a non-JSON content type, 413 for an oversized
 // body and 400 for malformed JSON.
 func DecodeJSONBody(w http.ResponseWriter, r *http.Request, v interface{}) bool {
-	if r == nil {
+	if r == nil || r.Body == nil {
 		WriteError(w, http.StatusBadRequest, "invalid request")
 		return false
 	}
@@ -31,13 +31,16 @@ func DecodeJSONBody(w http.ResponseWriter, r *http.Request, v interface{}) bool 
 	if r.Body != nil {
 		r.Body = http.MaxBytesReader(w, r.Body, MaxJSONBodyBytes)
 	}
-	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			WriteErrorCode(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body exceeds the configured limit")
-			return false
-		}
-		WriteError(w, http.StatusBadRequest, "invalid json")
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(v); err != nil {
+		writeJSONBodyError(w, err)
+		return false
+	}
+	// A request contains exactly one JSON value. Reading through EOF also
+	// enforces the limit on whitespace or a second value after a valid prefix.
+	var extra json.RawMessage
+	if err := decoder.Decode(&extra); err != io.EOF {
+		writeJSONBodyError(w, err)
 		return false
 	}
 	return true
@@ -54,13 +57,17 @@ func ReadBoundedJSONBody(w http.ResponseWriter, r *http.Request) ([]byte, error)
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxJSONBodyBytes))
 	if err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			WriteErrorCode(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body exceeds the configured limit")
-			return nil, err
-		}
-		WriteError(w, http.StatusBadRequest, "invalid json")
+		writeJSONBodyError(w, err)
 		return nil, err
 	}
 	return body, nil
+}
+
+func writeJSONBodyError(w http.ResponseWriter, err error) {
+	var maxErr *http.MaxBytesError
+	if errors.As(err, &maxErr) {
+		WriteErrorCode(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body exceeds the configured limit")
+		return
+	}
+	WriteError(w, http.StatusBadRequest, "invalid json")
 }

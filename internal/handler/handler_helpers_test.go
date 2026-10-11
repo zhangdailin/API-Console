@@ -365,3 +365,31 @@ func TestResolveEffortModelVariant_DoesNotResuffixAnEffortVariant(t *testing.T) 
 		})
 	}
 }
+
+// observeTestGrokCatalog supplies simulated upstream observations separately
+// from route records, so publication tests require both sources of evidence.
+func observeTestGrokCatalog(t *testing.T, s *store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	models, err := s.ListModels(ctx)
+	testutil.NoError(t, err)
+	var ids []string
+	for _, m := range models {
+		if strings.EqualFold(m.Channel, "grok") {
+			ids = append(ids, m.ModelID)
+		}
+	}
+	accounts, err := s.ListAccounts(ctx)
+	testutil.NoError(t, err)
+	found := false
+	for _, acc := range accounts {
+		if strings.EqualFold(acc.AccountType, "grok") {
+			acc.GrokModels = ids
+			testutil.NoError(t, s.UpdateAccount(ctx, acc))
+			found = true
+		}
+	}
+	if !found {
+		testutil.NoError(t, s.CreateAccount(ctx, &store.Account{AccountType: "grok", Enabled: true, CredentialType: "oauth", OAuthAccessToken: "test", GrokModels: ids}))
+	}
+}

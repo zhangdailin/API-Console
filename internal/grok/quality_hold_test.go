@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 
 	"orchids-api/internal/config"
+	"orchids-api/internal/modelcatalog"
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
 )
@@ -571,7 +572,7 @@ func TestNativeChatTransportAndQualityRetryShareBudget(t *testing.T) {
 			sess, err := h.openCLIAccountSessionByID(ctx, first.ID, "grok-4.5")
 			testutil.NoError(t, err)
 			defer sess.Close()
-			spec, _, ok := ResolveModelAlias("grok-4.5")
+			spec, _, ok := ResolveModelAlias("grok-4.5", []modelcatalog.Profile{{ModelID: "grok-4.5"}})
 			testutil.True(t, ok)
 			effort := "high"
 			req := &chatwire.Request{Model: "grok-4.5", Stream: true, ReasoningEffort: &effort, Messages: []chatwire.Message{{Role: "user", Content: "hello"}}}

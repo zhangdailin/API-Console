@@ -14,6 +14,7 @@ import (
 
 	"encoding/json"
 	"orchids-api/internal/audit"
+	"orchids-api/internal/modelcatalog"
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
 )
@@ -226,7 +227,7 @@ func TestParityReasoningAndSearchBlocks(t *testing.T) {
 
 func TestParityClientSearchToolsRemainClientTools(t *testing.T) {
 	h := &Handler{}
-	spec, _ := ResolveModel("grok-4.6")
+	spec, _ := ResolveModel("grok-4.6", []modelcatalog.Profile{{ModelID: "grok-4.6"}})
 	request := &chatwire.Request{Messages: []chatwire.Message{{Role: "user", Content: "hello"}}, Tools: []chatwire.ToolDef{{Type: "function", Function: map[string]interface{}{"name": "web_search", "parameters": map[string]interface{}{"type": "object"}}}}}
 	payload, err := h.responsesPayloadFromChat(spec, request, false)
 	testutil.NoError(t, err)

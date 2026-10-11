@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 
 	apperrors "orchids-api/internal/errors"
-	"orchids-api/internal/modelpolicy"
 )
 
 // Codex-family clients call GET /v1/models?client_version=... and expect a
@@ -61,9 +60,9 @@ type codexModelEntry struct {
 	TruncationPolicy                  codexTruncationPolicy `json:"truncation_policy"`
 	SupportsParallelToolCalls         bool                  `json:"supports_parallel_tool_calls"`
 	SupportsImageDetailOriginal       bool                  `json:"supports_image_detail_original"`
-	ContextWindow                     int                   `json:"context_window"`
+	ContextWindow                     int                   `json:"context_window,omitempty"`
 	MaxOutputTokens                   int                   `json:"max_output_tokens,omitempty"`
-	MaxContextWindow                  int                   `json:"max_context_window"`
+	MaxContextWindow                  int                   `json:"max_context_window,omitempty"`
 	EffectiveContextWindowPercent     int                   `json:"effective_context_window_percent"`
 	AutoCompactTokenLimit             *int                  `json:"auto_compact_token_limit"`
 	ExperimentalSupportedTools        []string              `json:"experimental_supported_tools"`
@@ -86,36 +85,7 @@ var codexReasoningDescriptions = map[string]string{
 	"max":     "Maximum reasoning depth for the hardest problems",
 }
 
-type codexModelMetadata struct {
-	contextWindow int
-	description   string
-	imageInput    bool
-}
-
-// Keyed by the upstream model slug, with provider prefixes already stripped.
-var codexModelMetadataTable = map[string]codexModelMetadata{
-	"grok-4.5":               {500000, "xAI Grok 4.5 frontier model with reasoning and vision.", true},
-	"grok-4.6":               {500000, "xAI Grok 4.6 frontier model with reasoning and vision.", true},
-	"grok-composer-2.5-fast": {200000, "xAI Grok Composer 2.5 model.", false},
-}
-
-// codexDefaultDescription is the single source for the unknown-model copy. The
-// wording is pinned: clients match on this string, so changing it is a wire
-// change even though nothing in the gateway parses it.
-const codexDefaultDescription = "Grok model served via grok2api."
-
-var codexDefaultMetadata = codexModelMetadata{
-	contextWindow: 128000,
-	description:   codexDefaultDescription,
-}
-
-// Reasoning levels and provider scoping live in modelpolicy so the wire
-// normalization and the advertised catalog can never diverge.
-func codexReasoningLevelsFor(publicID string) []string {
-	return modelpolicy.SupportedReasoningEfforts(publicID)
-}
-
-// The static fallback prefers medium, then the first supported level.
+// Prefer medium when a catalog menu has no declared default.
 func codexDefaultReasoningLevel(levels []string) string {
 	for _, level := range levels {
 		if level == "medium" {
@@ -137,7 +107,7 @@ func codexObservedReasoning(item PublicModelResponse) ([]string, string, bool) {
 	levels := make([]string, 0, len(item.ReasoningEfforts))
 	for _, raw := range item.ReasoningEfforts {
 		level := strings.ToLower(strings.TrimSpace(raw))
-		if _, known := codexReasoningDescriptions[level]; !known {
+		if level == "" {
 			continue
 		}
 		if _, duplicate := seen[level]; duplicate {
@@ -160,7 +130,11 @@ func codexObservedReasoning(item PublicModelResponse) ([]string, string, bool) {
 func codexReasoningLevelEntries(levels []string) []codexReasoningLevel {
 	result := make([]codexReasoningLevel, 0, len(levels))
 	for _, level := range levels {
-		result = append(result, codexReasoningLevel{Effort: level, Description: codexReasoningDescriptions[level]})
+		description := codexReasoningDescriptions[level]
+		if description == "" {
+			description = level
+		}
+		result = append(result, codexReasoningLevel{Effort: level, Description: description})
 	}
 	return result
 }
@@ -240,6 +214,9 @@ func newCodexModelCatalog(items []PublicModelResponse) codexModelCatalog {
 	order := make([]string, 0, len(items))
 	for _, item := range items {
 		name, level := splitEffortVariantSuffix(item.ID)
+		if strings.EqualFold(item.OwnedBy, "grok") {
+			name, level = item.ID, ""
+		}
 		if level == "" {
 			// Not an effort variant: it stands alone under its exact id.
 			families[item.ID] = &effortFamily{representative: item, variants: 1}
@@ -274,16 +251,8 @@ func newCodexModelCatalog(items []PublicModelResponse) codexModelCatalog {
 			name = item.ID
 			entry.levels = nil
 		}
-		slug := modelpolicy.GrokModelSlug(name)
-		metadata, ok := codexModelMetadataTable[slug]
-		if !ok {
-			metadata = codexDefaultMetadata
-		}
-		// A window observed from the channel's own catalog beats both the static
-		// table and the default. The default is Grok-shaped (128k), so applying it
-		// to a Qoder or WorkBuddy model reported a 1M-token model as eight times
-		// smaller and made the client compact a long session far too early.
-		contextWindow := metadata.contextWindow
+		slug := name
+		contextWindow := 0
 		if item.ContextLength > 0 {
 			contextWindow = item.ContextLength
 		} else if item.MaxInputTokens > 0 {
@@ -297,16 +266,21 @@ func newCodexModelCatalog(items []PublicModelResponse) codexModelCatalog {
 		if !observedReasoning {
 			levels = entry.levels
 			if len(levels) == 0 {
-				levels = codexReasoningLevelsFor(name)
+				levels = []string{"none"}
 			} else {
 				sortEffortLevels(levels)
 			}
 			defaultReasoningLevel = codexDefaultReasoningLevel(levels)
 		}
-		modalities := []string{"text"}
-		if metadata.imageInput {
-			modalities = append(modalities, "image")
+		displayName := item.Name
+		if displayName == "" {
+			displayName = codexDisplayName(slug)
 		}
+		description := item.Description
+		if description == "" {
+			description = item.ID
+		}
+		modalities := []string{"text"}
 		// Agent tools require the Build Responses route.
 		toolsSupported := codexAgentToolsSupported(item)
 		reasoningSupported := false
@@ -318,8 +292,8 @@ func newCodexModelCatalog(items []PublicModelResponse) codexModelCatalog {
 		}
 		models = append(models, codexModelEntry{
 			Slug:                              name,
-			DisplayName:                       codexDisplayName(slug),
-			Description:                       metadata.description,
+			DisplayName:                       displayName,
+			Description:                       description,
 			DefaultReasoningLevel:             defaultReasoningLevel,
 			SupportedReasoningLevels:          codexReasoningLevelEntries(levels),
 			ShellType:                         "shell_command",

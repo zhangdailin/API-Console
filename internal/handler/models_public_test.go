@@ -32,6 +32,7 @@ func TestHandleModels_FiltersAPIKeyModelAllowlist(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://example.com/grok/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer sk-test")
 	rec := httptest.NewRecorder()
+	observeTestGrokCatalog(t, s)
 	wrapper(rec, req)
 
 	testutil.Equal(t, rec.Code, http.StatusOK)
@@ -54,17 +55,19 @@ func TestHandleModelByID_HidesOfflineModel(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://example.com/workbuddy/v1/models/offline-only-model", nil)
 	rec := httptest.NewRecorder()
 
+	observeTestGrokCatalog(t, s)
 	h.HandleModelByID(rec, req)
 
 	testutil.Equal(t, rec.Code, http.StatusNotFound)
 }
 
 func TestHandleModelByID_HidesUnsupportedGrokModel(t *testing.T) {
-	h, _, _ := setupModelValidationHandler(t)
+	h, s, _ := setupModelValidationHandler(t)
 
 	req := httptest.NewRequest(http.MethodGet, "http://example.com/grok/v1/models/grok-4.1", nil)
 	rec := httptest.NewRecorder()
 
+	observeTestGrokCatalog(t, s)
 	h.HandleModelByID(rec, req)
 
 	testutil.Equal(t, rec.Code, http.StatusNotFound)
@@ -86,6 +89,7 @@ func TestHandleModelByID_ReturnsVisibleModel(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://example.com/grok/v1/models/grok-4.5", nil)
 	rec := httptest.NewRecorder()
 
+	observeTestGrokCatalog(t, s)
 	h.HandleModelByID(rec, req)
 
 	testutil.Equal(t, rec.Code, http.StatusOK)
@@ -115,6 +119,7 @@ func TestHandleModelByID_ReturnsVerifiedDynamicGrokModel(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://example.com/grok/v1/models/grok-future-6", nil)
 	rec := httptest.NewRecorder()
 
+	observeTestGrokCatalog(t, s)
 	h.HandleModelByID(rec, req)
 
 	testutil.Equal(t, rec.Code, http.StatusOK)
@@ -140,6 +145,7 @@ func TestHandleModels_KeepsGrokModelsVisibleWhenOnlyBasicPoolExists(t *testing.T
 	req := httptest.NewRequest(http.MethodGet, "http://example.com/grok/v1/models", nil)
 	rec := httptest.NewRecorder()
 
+	observeTestGrokCatalog(t, s)
 	h.HandleModels(rec, req)
 
 	testutil.Equal(t, rec.Code, http.StatusOK)
@@ -172,6 +178,7 @@ func TestHandleModels_KeepsGrokModelsVisibleWhenAccountsHaveStatusCode(t *testin
 	req := httptest.NewRequest(http.MethodGet, "http://example.com/grok/v1/models", nil)
 	rec := httptest.NewRecorder()
 
+	observeTestGrokCatalog(t, s)
 	h.HandleModels(rec, req)
 
 	testutil.Equal(t, rec.Code, http.StatusOK)
@@ -199,6 +206,7 @@ func TestHandleModelByID_ReturnsGrokModelWithoutRequiredPool(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://example.com/grok/v1/models/grok-imagine-video", nil)
 	rec := httptest.NewRecorder()
 
+	observeTestGrokCatalog(t, s)
 	h.HandleModelByID(rec, req)
 
 	testutil.Equal(t, rec.Code, http.StatusOK)

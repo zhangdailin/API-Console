@@ -2,8 +2,30 @@ package middleware
 
 import (
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
+
+func TestOutputEvidenceRecoversAfterOversizedFragmentedEvent(t *testing.T) {
+	var detector tokenSSEDetector
+	oversized := []byte("data: " + strings.Repeat("x", maxTokenEventBytes+1) + "\r\n\r\n")
+	for i := 0; i < len(oversized); i += 127 {
+		if detector.observe(oversized[i:min(i+127, len(oversized))]) {
+			t.Fatal("oversized event counted as output")
+		}
+	}
+	if cap(detector.line) > 64<<10 || cap(detector.data) > 64<<10 {
+		t.Fatal("oversized event retained in stream buffers")
+	}
+	frame := []byte("event: content_block_delta\r\ndata: {\"delta\":{\"text\":\"你好\"}}\r\n\r\n")
+	generated := false
+	for _, part := range frame {
+		generated = detector.observe([]byte{part}) || generated
+	}
+	if !generated || !detector.visible || detector.reasoning || detector.tool {
+		t.Fatalf("normal event lost after overflow: %+v", detector)
+	}
+}
 
 func TestOutputEvidenceSurvivesFragmentedWritesAndSeparatesReasoning(t *testing.T) {
 	w := NewTracedResponseWriter(httptest.NewRecorder())

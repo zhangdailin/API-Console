@@ -11,9 +11,8 @@ package pricing
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"strings"
-
-	"orchids-api/internal/modelpolicy"
 )
 
 const (
@@ -41,6 +40,7 @@ type Result struct {
 // integer USD ticks per token; LongContextTokens is the input size above which
 // the long-context column applies.
 type tokenPrice struct {
+	ReasoningAliases  []string
 	CanonicalModel    string
 	InputTicks        int64
 	CachedInputTicks  int64
@@ -56,9 +56,9 @@ var officialTokenPrices = buildOfficialTokenPrices()
 // buildOfficialTokenPrices contains exact active identifiers from the captured table.
 func buildOfficialTokenPrices() map[string]tokenPrice {
 	return map[string]tokenPrice{
-		"grok-composer-2.5-fast": {CanonicalModel: "grok-composer-2.5-fast", InputTicks: 10000, CachedInputTicks: 2000, OutputTicks: 20000, LongContextTokens: 200000, LongInputTicks: 20000, LongCachedTicks: 4000, LongOutputTicks: 40000},
-		"grok-4.6":               {CanonicalModel: "grok-4.6", InputTicks: 20000, CachedInputTicks: 5000, OutputTicks: 60000, LongContextTokens: 200000, LongInputTicks: 40000, LongCachedTicks: 10000, LongOutputTicks: 120000},
-		"grok-4.5":               {CanonicalModel: "grok-4.5", InputTicks: 20000, CachedInputTicks: 3000, OutputTicks: 60000, LongContextTokens: 200000, LongInputTicks: 40000, LongCachedTicks: 6000, LongOutputTicks: 120000},
+		"grok-composer-2.5-fast": {ReasoningAliases: []string{"none"}, CanonicalModel: "grok-composer-2.5-fast", InputTicks: 10000, CachedInputTicks: 2000, OutputTicks: 20000, LongContextTokens: 200000, LongInputTicks: 20000, LongCachedTicks: 4000, LongOutputTicks: 40000},
+		"grok-4.6":               {ReasoningAliases: []string{"low", "medium", "high", "xhigh"}, CanonicalModel: "grok-4.6", InputTicks: 20000, CachedInputTicks: 5000, OutputTicks: 60000, LongContextTokens: 200000, LongInputTicks: 40000, LongCachedTicks: 10000, LongOutputTicks: 120000},
+		"grok-4.5":               {ReasoningAliases: []string{"low", "medium", "high"}, CanonicalModel: "grok-4.5", InputTicks: 20000, CachedInputTicks: 3000, OutputTicks: 60000, LongContextTokens: 200000, LongInputTicks: 40000, LongCachedTicks: 6000, LongOutputTicks: 120000},
 	}
 }
 
@@ -77,11 +77,12 @@ func resolveOfficialTokenPrice(model string) (tokenPrice, bool) {
 	}
 	base, effort := normalized[:i], normalized[i+1:]
 	price, ok := officialTokenPrices[base]
-	if !ok || !modelpolicy.SupportsReasoningEffort(base, effort) {
+	if !ok || !slices.Contains(price.ReasoningAliases, effort) {
 		return tokenPrice{}, false
 	}
 	return price, true
 }
+
 func normalizePricingModel(model string) string {
 	return strings.TrimPrefix(strings.ToLower(strings.TrimSpace(model)), "build/")
 }

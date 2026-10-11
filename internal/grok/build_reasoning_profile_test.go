@@ -26,7 +26,7 @@ func TestBuildChatAppliesSelectedAccountReasoningProfile(t *testing.T) {
 	}{
 		{"explicit none uses lowest supported effort", "none", "low", http.StatusOK},
 		{"unsupported effort", "ultra", "", http.StatusBadRequest},
-		{"safe default", "", "low", http.StatusOK},
+		{"catalog default", "", "high", http.StatusOK},
 		{"explicit low", "low", "low", http.StatusOK},
 		{"max alias", "max", "xhigh", http.StatusOK},
 	} {
@@ -72,7 +72,7 @@ func TestBuildPayloadForAccountUsesCatalogDefaultAndValidation(t *testing.T) {
 	payload, err := buildPayloadForAccount(map[string]interface{}{"reasoning": map[string]interface{}{"summary": "auto"}}, acc, "grok-4.7")
 	testutil.NoError(t, err)
 	reasoning := payload["reasoning"].(map[string]interface{})
-	testutil.Equal(t, reasoning["effort"], "low")
+	testutil.Equal(t, reasoning["effort"], "high")
 	payload, err = buildPayloadForAccount(map[string]interface{}{"reasoning": map[string]interface{}{"effort": "none"}}, acc, "grok-4.7")
 	testutil.Falsef(t, err != nil || payload["reasoning"].(map[string]interface{})["effort"] != "low", "none compatibility payload=%v err=%v", payload, err)
 	_, err = buildPayloadForAccount(map[string]interface{}{"reasoning": map[string]interface{}{"effort": "ultra"}}, acc, "grok-4.7")
@@ -98,7 +98,7 @@ func TestBuildExplicitNoneUsesLowestCompatibleEffort(t *testing.T) {
 		want    string
 	}{
 		{"catalog chooses supported low", &modelcatalog.Profile{ModelID: "grok-4.7", SupportsReasoningEffort: true, ReasoningEfforts: []string{"high", "low"}}, "low"},
-		{"missing catalog uses static low", nil, "low"},
+		{"missing catalog preserves explicit control", nil, "NONE"},
 		{"no effort capability rejects explicit none", &modelcatalog.Profile{ModelID: "grok-4.7"}, "error"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -122,12 +122,11 @@ func TestBuildExplicitNoneUsesLowestCompatibleEffort(t *testing.T) {
 	}
 }
 
-func TestBuildMissingCatalogDefaultsKnownReasoningModelToLow(t *testing.T) {
-	payload, err := buildPayloadForAccount(map[string]interface{}{}, &store.Account{}, "grok-4.7")
-	testutil.NoError(t, err)
-	testutil.Equal(t, payload["reasoning"].(map[string]interface{})["effort"], "low")
-	payload, err = buildPayloadForAccount(map[string]interface{}{}, &store.Account{}, "unknown-model")
-	testutil.NoError(t, err)
-	_, exists := payload["reasoning"]
-	testutil.Falsef(t, exists, "unexpected reasoning=%v", payload["reasoning"])
+func TestBuildMissingCatalogDoesNotInventReasoning(t *testing.T) {
+	for _, id := range []string{"grok-4.7", "unknown-model"} {
+		payload, err := buildPayloadForAccount(map[string]interface{}{}, &store.Account{}, id)
+		testutil.NoError(t, err)
+		_, exists := payload["reasoning"]
+		testutil.False(t, exists, "unobserved default was invented")
+	}
 }

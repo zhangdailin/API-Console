@@ -7,6 +7,8 @@ import "strings"
 
 // Profile is the useful model metadata advertised by an upstream catalog.
 type Profile struct {
+	Name                    string   `json:"name,omitempty"`
+	Description             string   `json:"description,omitempty"`
 	ModelID                 string   `json:"model_id"`
 	ReasoningEfforts        []string `json:"reasoning_efforts,omitempty"`
 	DefaultReasoningEffort  string   `json:"default_reasoning_effort,omitempty"`
@@ -24,7 +26,7 @@ func Normalize(profile Profile) Profile {
 	efforts := make([]string, 0, len(profile.ReasoningEfforts))
 	for _, raw := range profile.ReasoningEfforts {
 		value := strings.ToLower(strings.TrimSpace(raw))
-		if value == "" || !knownReasoningEffort(value) {
+		if value == "" {
 			continue
 		}
 		if _, ok := seen[value]; ok {
@@ -48,15 +50,6 @@ func Normalize(profile Profile) Profile {
 		profile.MaxCompletionTokens = 0
 	}
 	return profile
-}
-
-func knownReasoningEffort(value string) bool {
-	switch value {
-	case "none", "minimal", "low", "medium", "high", "xhigh", "max":
-		return true
-	default:
-		return false
-	}
 }
 
 // CloneProfiles returns a deep copy suitable for handing across account/store

@@ -52,7 +52,7 @@ func TestSpentAccountKeepsFreeOnlyStateAndScopesTheRefusedModel(t *testing.T) {
 		Enabled:               true,
 		Weight:                1,
 		StatusCode:            store.AccountStatusWorkBuddyQuotaExhausted,
-		WorkBuddyModelIDs:     []string{`{"id":"hy3"}`, `{"id":"glm-5.3"}`},
+		WorkBuddyModelIDs:     []string{`{"id":"hy3","credits":"x0.00"}`, `{"id":"glm-5.3"}`},
 		WorkBuddyQuota:        store.WorkBuddyQuotaSnapshot{Remaining: 0, Limit: 100, ResetAt: reset},
 	}
 	testutil.NoError(t, s.CreateAccount(ctx, acc), "CreateAccount() error = %v")
@@ -122,7 +122,7 @@ func TestHealthyAccountStillServesFreeModels(t *testing.T) {
 		WorkBuddyRefreshToken: "rt",
 		Enabled:               true,
 		Weight:                1,
-		WorkBuddyModelIDs:     []string{`{"id":"hy3"}`},
+		WorkBuddyModelIDs:     []string{`{"id":"hy3","credits":"x0.00"}`},
 	}
 	testutil.NoError(t, s.CreateAccount(ctx, acc), "CreateAccount() error = %v")
 	publishModel(t, s, &store.Model{Channel: "WorkBuddy", ModelID: "hy3"})

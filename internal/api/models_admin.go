@@ -2,10 +2,13 @@ package api
 
 import (
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
+	"orchids-api/internal/modelpolicy"
 	"orchids-api/internal/store"
+	"orchids-api/internal/workbuddy"
 )
 
 // The bundled admin UI consumes GET /api/models as a bare array, which stays
@@ -20,6 +23,60 @@ type adminModelListEnvelope struct {
 	Page     int            `json:"page"`
 	PageSize int            `json:"pageSize"`
 	Total    int            `json:"total"`
+}
+
+func hasAccountScopedModels(models []*store.Model) bool {
+	for _, model := range models {
+		if model != nil && (strings.EqualFold(strings.TrimSpace(model.Channel), "workbuddy") || strings.EqualFold(strings.TrimSpace(model.Channel), "grok")) {
+			return true
+		}
+	}
+	return false
+}
+
+// Filtering is a read-time projection: discovery keeps its full catalog so
+// re-enabling an account with credits restores the list without rediscovery.
+// Temporary throttling and occupied concurrency slots do not change entitlement.
+func filterAdminModelEntitlements(models []*store.Model, accounts []*store.Account) []*store.Model {
+	out := make([]*store.Model, 0, len(models))
+	for _, model := range models {
+		if model == nil {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(model.Channel), "grok") {
+			if len(modelpolicy.GrokModelProfiles(model, accounts)) > 0 {
+				out = append(out, model)
+			}
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(model.Channel), "workbuddy") {
+			out = append(out, model)
+			continue
+		}
+		modelID := strings.TrimSpace(model.UpstreamModel)
+		if modelID == "" {
+			modelID = model.ModelID
+		}
+		for _, account := range accounts {
+			if account == nil || !account.Enabled || !store.AccountAuthActive(account) ||
+				!strings.EqualFold(strings.TrimSpace(account.AccountType), "workbuddy") ||
+				strings.TrimSpace(account.StatusCode) == "401" {
+				continue
+			}
+			if len(model.BoundAccountIDs) > 0 && !slices.Contains(model.BoundAccountIDs, account.ID) {
+				continue
+			}
+			status := strings.TrimSpace(account.StatusCode)
+			freeOnly := status == "402" || status == store.AccountStatusWorkBuddyQuotaExhausted ||
+				(account.UsageLimit > 0 && account.UsageCurrent <= 0)
+			if freeOnly && !workbuddy.IsFreeModelInCatalog(account.WorkBuddyModelIDs, modelID) {
+				continue
+			}
+			out = append(out, model)
+			break
+		}
+	}
+	return out
 }
 
 // adminModelPaging reads the optional paging query. requested reports whether the

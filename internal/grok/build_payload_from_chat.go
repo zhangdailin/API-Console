@@ -124,7 +124,6 @@ func (h *Handler) responsesPayloadFromChat(spec ModelSpec, req *chatwire.Request
 		if err := normalizeBuildResponsesPayload(payload); err != nil {
 			return nil, err
 		}
-		normalizeBuildReasoningEffort(payload, model)
 		return payload, nil
 	}
 	return payload, nil

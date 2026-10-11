@@ -12,6 +12,7 @@ type catalogSnapshotRow struct {
 	Name            string `json:"name,omitempty"`
 	MaxInputTokens  int64  `json:"max_input_tokens,omitempty"`
 	MaxOutputTokens int64  `json:"max_output_tokens,omitempty"`
+	Credits         string `json:"credits,omitempty"`
 }
 
 // CatalogSnapshot projects the observed catalog onto its stored form.
@@ -30,6 +31,7 @@ func CatalogSnapshot(models []WorkBuddyModel) []string {
 			Name:            strings.TrimSpace(model.Name),
 			MaxInputTokens:  model.MaxInputTokens,
 			MaxOutputTokens: model.MaxOutputTokens,
+			Credits:         model.Credits,
 		})
 		if err != nil {
 			continue

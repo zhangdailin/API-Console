@@ -3,7 +3,6 @@ package middleware
 import (
 	"bytes"
 	"encoding/json"
-	"orchids-api/internal/util"
 	"strings"
 )
 
@@ -45,9 +44,10 @@ func (d *tokenSSEDetector) observe(chunk []byte) bool {
 		}
 		line := bytes.TrimSuffix(d.line, []byte{'\r'})
 		if !d.lineNonempty {
-			generated := !d.overflow && generatedTokenEvent(d.event, d.data)
+			generated := false
 			if !d.overflow {
 				s := streamOutputSignals(d.event, d.data)
+				generated = s.visible || s.reasoning || s.tool
 				d.visible = d.visible || s.visible
 				d.reasoning = d.reasoning || s.reasoning
 				d.tool = d.tool || s.tool
@@ -55,7 +55,9 @@ func (d *tokenSSEDetector) observe(chunk []byte) bool {
 					d.finish = s.finish
 				}
 			}
-			*d = tokenSSEDetector{visible: d.visible, reasoning: d.reasoning, tool: d.tool, finish: d.finish}
+			d.event, d.size, d.overflow = "", 0, false
+			d.line = reusableTokenBuffer(d.line)
+			d.data = reusableTokenBuffer(d.data)
 			anyGenerated = anyGenerated || generated
 			continue
 		}
@@ -72,69 +74,18 @@ func (d *tokenSSEDetector) observe(chunk []byte) bool {
 				d.data = append(d.data, value...)
 			}
 		}
-		d.line = nil
+		d.line = d.line[:0]
 		d.lineNonempty = false
 	}
 	return anyGenerated
 }
 
-func generatedTokenEvent(event string, data []byte) bool {
-	var p map[string]json.RawMessage
-	if json.Unmarshal(data, &p) != nil {
-		return false
+// Do not keep a one-off large model event alive for the rest of the request.
+func reusableTokenBuffer(buffer []byte) []byte {
+	if cap(buffer) > 64<<10 {
+		return nil
 	}
-	var kind string
-	_ = json.Unmarshal(p["type"], &kind)
-	kind = util.FirstNonEmptyUntrimmed(kind, event)
-	switch kind {
-	case "response.output_text.delta", "response.reasoning_text.delta",
-		"response.reasoning_summary_text.delta", "response.refusal.delta",
-		"response.function_call_arguments.delta", "response.custom_tool_call_input.delta":
-		return nonemptyJSONString(p["delta"])
-	case "content_block_delta":
-		var delta map[string]json.RawMessage
-		_ = json.Unmarshal(p["delta"], &delta)
-		return nonemptyJSONString(delta["text"]) || nonemptyJSONString(delta["thinking"]) || nonemptyJSONString(delta["partial_json"])
-	case "content_block_start":
-		var block map[string]json.RawMessage
-		_ = json.Unmarshal(p["content_block"], &block)
-		return nonemptyJSONString(block["text"]) || nonemptyJSONString(block["thinking"]) || nonemptyJSONString(block["name"])
-	}
-	// OpenAI Chat Completions has no event type. Role-only and usage chunks
-	// contain no generated output. Tool names/arguments count; IDs alone do not.
-	var choices []struct {
-		Delta struct {
-			Content          string `json:"content"`
-			Reasoning        string `json:"reasoning"`
-			ReasoningContent string `json:"reasoning_content"`
-			Refusal          string `json:"refusal"`
-			ToolCalls        []struct {
-				Function struct {
-					Name      string
-					Arguments string
-				} `json:"function"`
-			} `json:"tool_calls"`
-			FunctionCall struct {
-				Name      string
-				Arguments string
-			} `json:"function_call"`
-		} `json:"delta"`
-	}
-	if json.Unmarshal(p["choices"], &choices) != nil {
-		return false
-	}
-	for _, c := range choices {
-		d := c.Delta
-		if d.Content != "" || d.Reasoning != "" || d.ReasoningContent != "" || d.Refusal != "" || d.FunctionCall.Name != "" || d.FunctionCall.Arguments != "" {
-			return true
-		}
-		for _, tool := range d.ToolCalls {
-			if tool.Function.Name != "" || tool.Function.Arguments != "" {
-				return true
-			}
-		}
-	}
-	return false
+	return buffer[:0]
 }
 
 func nonemptyJSONString(raw json.RawMessage) bool {

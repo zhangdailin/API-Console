@@ -158,9 +158,9 @@ func TestRelayNativeResponsesRecoversOpaqueReasoning(t *testing.T) {
 
 func TestRelayChatSamplingAndEffortAreClientOwned(t *testing.T) {
 	for _, tc := range []struct{ effort, want string }{
-		{"max", "high"},
-		{"xhigh", "high"},
-		{"minimal", "low"},
+		{"max", "max"},
+		{"xhigh", "xhigh"},
+		{"minimal", "minimal"},
 		{"low", "low"},
 		{"future-effort", "future-effort"},
 	} {
@@ -174,14 +174,13 @@ func TestRelayChatSamplingAndEffortAreClientOwned(t *testing.T) {
 	}
 }
 
-// A model that does advertise xhigh keeps it, and the client-only max alias
-// maps onto it. Composer never receives an effort but keeps its summary.
+// Before selecting an account, model names do not rewrite reasoning controls.
 func TestRelayBuildEffortAliasesFollowModelContract(t *testing.T) {
 	for _, tc := range []struct{ model, effort, want string }{
-		{"grok-4.6", "max", "xhigh"},
+		{"grok-4.6", "max", "max"},
 		{"grok-4.6", "xhigh", "xhigh"},
-		{"grok-4.5", "minimal", "low"},
-		{"grok-composer-2.5-fast", "high", ""},
+		{"grok-4.5", "minimal", "minimal"},
+		{"grok-composer-2.5-fast", "high", "high"},
 	} {
 		effort := tc.effort
 		req := &chatwire.Request{Model: tc.model, Messages: []chatwire.Message{{Role: "user", Content: "hi"}}, ReasoningEffort: &effort}

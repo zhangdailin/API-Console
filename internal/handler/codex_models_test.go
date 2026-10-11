@@ -37,9 +37,9 @@ func TestCodexCatalogExposesContextWindowAndModalities(t *testing.T) {
 		context    int
 		modalities []string
 	}{
-		{"grok-4.6", 500000, []string{"text", "image"}},
-		{"grok-composer-2.5-fast", 200000, []string{"text"}},
-		{"grok-unknown-model", 128000, []string{"text"}},
+		{"grok-4.6", 0, []string{"text"}},
+		{"grok-composer-2.5-fast", 0, []string{"text"}},
+		{"grok-unknown-model", 0, []string{"text"}},
 	} {
 		entry := codexEntryFor(t, catalog, tc.slug)
 		testutil.Equal(t, entry.ContextWindow, tc.context)
@@ -75,21 +75,12 @@ func TestCodexCatalogUsesObservedGrokProfile(t *testing.T) {
 	testutil.Equal(t, entry.MaxOutputTokens, 1000000)
 }
 
-func TestCodexCatalogReasoningLevels(t *testing.T) {
-	catalog := newCodexModelCatalog([]PublicModelResponse{
-		textModel("grok-4.6"),
-		textModel("grok-4.5"),
-	})
-
-	entry := codexEntryFor(t, catalog, "grok-4.6")
-	testutil.Equal(t, len(entry.SupportedReasoningLevels), 4)
-	testutil.Equal(t, entry.DefaultReasoningLevel, "medium")
-	if entry.SupportedReasoningLevels[3].Effort != "xhigh" || entry.SupportedReasoningLevels[3].Description == "" {
-		t.Fatalf("grok-4.6 top level = %#v", entry.SupportedReasoningLevels[3])
+func TestCodexCatalogDoesNotInferReasoningByName(t *testing.T) {
+	catalog := newCodexModelCatalog([]PublicModelResponse{textModel("grok-4.6"), textModel("grok-4.5")})
+	for _, entry := range catalog.Models {
+		testutil.Equal(t, len(entry.SupportedReasoningLevels), 1)
+		testutil.Equal(t, entry.SupportedReasoningLevels[0].Effort, "none")
 	}
-	// Grok 4.5 tops out at high.
-	levels := codexEntryFor(t, catalog, "grok-4.5").SupportedReasoningLevels
-	testutil.Falsef(t, len(levels) != 3 || levels[2].Effort != "high", "grok-4.5 levels=%v", levels)
 }
 
 func TestCodexCatalogHidesMediaModels(t *testing.T) {

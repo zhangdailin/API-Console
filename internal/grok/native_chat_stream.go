@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/httpserver"
 	"orchids-api/internal/responses"
 	"orchids-api/internal/util"
 	"strings"
@@ -115,14 +116,16 @@ func (h *Handler) streamBuildChatHolding(w http.ResponseWriter, req *chatwire.Re
 			}
 		}
 	}()
-	var output io.Writer = w
+	var output io.Writer = deadlineResponseWriter{ResponseWriter: w}
 	var respWriter http.ResponseWriter = w
-	var flusher http.Flusher
 	if hold != nil {
-		output, respWriter, flusher = hold.writer, hold.writer, hold.writer
+		output, respWriter = hold.writer, hold.writer
 	} else {
-		flusher = streamResponseHeaders(w)
+		streamResponseHeaders(w)
 	}
+	stream := &httpserver.CheckedStreamWriter{Target: output}
+	output = stream
+	var flusher http.Flusher = stream
 	// withheld aborts the read loop as soon as the classifier refuses the turn.
 	var withheld bool
 	checkHold := func(terminalEvent bool) error {
@@ -175,10 +178,13 @@ func (h *Handler) streamBuildChatHolding(w http.ResponseWriter, req *chatwire.Re
 		if err != nil {
 			return err
 		}
-		if _, err = fmt.Fprintf(output, "data: %s\n\n", raw); err != nil {
+		if err = stream.WriteSSE("", raw); err != nil {
 			return err
 		}
 		flusher.Flush()
+		if stream.Err != nil {
+			return stream.Err
+		}
 		return checkHold(false)
 	}
 	fail := func(err error) {
@@ -556,6 +562,10 @@ func (h *Handler) streamBuildChatHolding(w http.ResponseWriter, req *chatwire.Re
 		return
 	}
 	flusher.Flush()
+	if stream.Err != nil {
+		outcome.Err = stream.Err
+		return
+	}
 	outcome.Finish = finish
 	if req.ReasoningReplay {
 		if len(replayItems) > 0 {

@@ -13,6 +13,31 @@ import (
 	"testing/iotest"
 )
 
+type nativeFlushFailureWriter struct {
+	*httptest.ResponseRecorder
+	failure error
+}
+
+func (w nativeFlushFailureWriter) FlushError() error { return w.failure }
+
+func TestNativeResponsesFlushFailureAndNonStreamFailureRemainFailures(t *testing.T) {
+	failure := errors.New("disconnected while flushing")
+	target := nativeFlushFailureWriter{httptest.NewRecorder(), failure}
+	_, _, result := copyNativeCLIResponseAndCaptureModel(target, strings.NewReader(parityTerminal("response.completed")), "text/event-stream", "grok-4.6")
+	if !errors.Is(result.Err, failure) || result.Finish != "error" {
+		t.Fatalf("flush failure lost: %+v", result)
+	}
+	_, _, result = copyNativeCLIResponseAndCaptureModel(httptest.NewRecorder(), strings.NewReader(`{"id":"resp_failed","status":"failed","error":{"message":"upstream failed"}}`), "application/json", "grok-4.6")
+	if result.Err == nil || result.Finish != "error" {
+		t.Fatalf("successful JSON write hid upstream failure: %+v", result)
+	}
+	writer := newDeferredResponseWriter(compatShortWriter{httptest.NewRecorder()})
+	writer.Write([]byte("held result"))
+	if err := writer.Commit(); !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("quality hold hid short write: %v", err)
+	}
+}
+
 func TestResponsesNativeOutcomeStatusAndEOF(t *testing.T) {
 	for _, test := range []struct {
 		status, finish string

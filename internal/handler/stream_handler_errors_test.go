@@ -14,6 +14,37 @@ import (
 	"orchids-api/internal/upstream"
 )
 
+type terminalFlushFailureWriter struct {
+	*httptest.ResponseRecorder
+	failure error
+	writes  int
+}
+
+func (w *terminalFlushFailureWriter) Write(p []byte) (int, error) {
+	w.writes++
+	return w.ResponseRecorder.Write(p)
+}
+func (w *terminalFlushFailureWriter) FlushError() error { return w.failure }
+
+func TestStreamFlushFailureCancelsAndDoesNotEmitSuccessfulTerminal(t *testing.T) {
+	failure := errors.New("flush failed")
+	for _, format := range []adapter.ResponseFormat{adapter.FormatAnthropic, adapter.FormatOpenAI} {
+		target := &terminalFlushFailureWriter{ResponseRecorder: httptest.NewRecorder(), failure: failure}
+		logger := debug.New(false, false)
+		defer logger.Close()
+		sh := newStreamHandler(&config.Config{}, target, logger, false, true, format)
+		defer sh.release()
+		canceled := false
+		sh.cancelUpstream = func() { canceled = true }
+		sh.handleMessage(upstream.SSEMessage{Type: "model.text-delta", Event: map[string]interface{}{"delta": "hello"}})
+		sh.finishResponse("end_turn")
+		if !sh.requestFailed || sh.finalStopReason != "write_error" || !canceled || target.writes != 1 {
+			t.Fatalf("failed=%v reason=%s canceled=%v writes=%d", sh.requestFailed, sh.finalStopReason, canceled, target.writes)
+		}
+		testutil.MustNotContainAny(t, target.Body.String(), "[DONE]", "message_stop")
+	}
+}
+
 func TestInjectNoAvailableAccountError_RateLimitAnswers429(t *testing.T) {
 	rec := httptest.NewRecorder()
 	sh := newStreamHandler(&config.Config{}, rec, debug.New(false, false), true, false, adapter.FormatAnthropic)

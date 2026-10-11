@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 
-	"orchids-api/internal/modelpolicy"
 	"orchids-api/internal/provider"
 	"orchids-api/internal/store"
 )
@@ -104,9 +103,7 @@ func (h *Handler) observedModelContextWindows(ctx context.Context) *modelContext
 		}
 	}
 
-	// Dynamic Grok catalog observations above take precedence. The static table
-	// remains a compatibility fallback when an older account snapshot has no
-	// profile metadata.
+	// Missing catalog metadata remains unknown.
 	return w
 }
 
@@ -129,31 +126,7 @@ func mergeInputWindows(w *modelContextWindows, channel string, windows map[strin
 	}
 }
 
-// grokDeclaredContextWindow is the Grok window from the catalog's own table. It
-// is a separate path because Grok's window is not account-scoped and is already
-// published to Codex-family clients.
-func grokDeclaredContextWindow(modelID string) int {
-	slug := modelpolicy.GrokModelSlug(modelID)
-	if metadata, ok := codexModelMetadataTable[slug]; ok {
-		return metadata.contextWindow
-	}
-	return 0
-}
-
-// modelContextWindow resolves the reported window for one route row. It answers
-// zero when nothing was observed, and the caller omits the field.
+// modelContextWindow omits budgets which were not observed upstream.
 func (h *Handler) modelContextWindow(ctx context.Context, windows *modelContextWindows, channel, modelID, publicID string) (int, int) {
-	if input, output := windows.lookup(channel, modelID, publicID); input > 0 || output > 0 {
-		return input, output
-	}
-	if strings.EqualFold(strings.TrimSpace(channel), "grok") {
-		declared := grokDeclaredContextWindow(modelID)
-		if declared == 0 {
-			declared = grokDeclaredContextWindow(publicID)
-		}
-		if declared > 0 {
-			return declared, 0
-		}
-	}
 	return windows.lookup(channel, modelID, publicID)
 }

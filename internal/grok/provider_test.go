@@ -1,6 +1,7 @@
 package grok
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -33,27 +34,53 @@ func TestBuildCapabilitySnapshotAndRateLimitsDoNotBecomeBilling(t *testing.T) {
 
 func TestAccountSupportsModelUsesObservedBuildCatalog(t *testing.T) {
 	acc := &store.Account{AccountType: "grok", CredentialType: "oauth"}
-	testutil.False(t, !AccountSupportsModel(acc, "grok-4.6"), "unsynced account should remain eligible until its catalog is read")
+	testutil.False(t, AccountSupportsModel(acc, "grok-4.6"), "unsynced account must not grant model access")
 	ApplyCLIModelCatalog(acc, []modelcatalog.Profile{{ModelID: "grok-4.5"}}, time.Now())
 	testutil.Falsef(t, AccountSupportsModel(acc, "grok-4.6") || !AccountSupportsModel(acc, "grok-4.5"), "observed catalog not enforced: %#v", acc.GrokModels)
 }
 
-// TestApplyCLIModelCatalogRestoresBuildCatalogCompletion checks observed
-// models and supported Build-derived entries.
-func TestApplyCLIModelCatalogRestoresBuildCatalogCompletion(t *testing.T) {
+// TestApplyCLIModelCatalogContainsOnlyObservedModels checks observed
+// rows only, independently of subscription and credential type.
+func TestApplyCLIModelCatalogContainsOnlyObservedModels(t *testing.T) {
 	acc := &store.Account{AccountType: "grok", CredentialType: "oauth", GrokProvider: ProviderBuild, Subscription: "super"}
 	ApplyCLIModelCatalog(acc, []modelcatalog.Profile{{ModelID: "grok-4.6"}, {ModelID: "grok-imagine-video-1.5"}, {ModelID: "grok-4.6"}}, time.Now())
 
-	want := []string{"grok-4.6", "grok-imagine-video-1.5", "grok-4.5", "grok-composer-2.5-fast"}
+	want := []string{"grok-4.6", "grok-imagine-video-1.5"}
 	testutil.Equal(t, len(acc.GrokModels), len(want))
 	for i, model := range want {
 		testutil.Falsef(t, !strings.EqualFold(acc.GrokModels[i], model), "catalog = %#v, want %#v", acc.GrokModels, want)
 	}
-	for _, derived := range want[2:] {
-		testutil.True(t, AccountSupportsModel(acc, derived), "derived capability %q is missing: %#v")
+	for _, absent := range []string{"grok-4.5", "grok-composer-2.5-fast"} {
+		testutil.False(t, AccountSupportsModel(acc, absent), "unobserved model granted")
 	}
 	testutil.False(t, acc.GrokModelsSyncedAt.IsZero(), "the snapshot was not dated")
 }
 
-// The only capability gated on tier is the video 1.5 entry: a Super
-// account gains it, anything below loses it even if the catalog listed it.
+func TestCatalogRefreshRemovesDerivedIDsAndPreservesLastGoodOnEmpty(t *testing.T) {
+	now := time.Now().UTC()
+	acc := &store.Account{AccountType: "grok", CredentialType: "oauth", GrokModels: []string{"grok-4.7", "grok-composer-2.5-fast"}}
+	ApplyCLIModelCatalog(acc, []modelcatalog.Profile{{ModelID: "future-private-model", ReasoningEfforts: []string{"balanced"}, DefaultReasoningEffort: "balanced"}}, now)
+	testutil.Equal(t, strings.Join(acc.GrokModels, ","), "future-private-model")
+	spec, effort, ok := ResolveModelAlias("future-private-model-balanced", acc.GrokModelCatalog)
+	testutil.True(t, ok, "new upstream effort must not require a code change")
+	testutil.Equal(t, spec.UpstreamModel, "future-private-model")
+	testutil.Equal(t, effort, "balanced")
+	testutil.False(t, ApplyCLIModelCatalog(acc, nil, now.Add(time.Minute)), "empty catalog changed last-good state")
+	testutil.Equal(t, strings.Join(acc.GrokModels, ","), "future-private-model")
+	testutil.Equal(t, acc.GrokModelsSyncedAt, now)
+}
+
+func TestObservedExactEffortSuffixWinsOverAlias(t *testing.T) {
+	catalog := []modelcatalog.Profile{{ModelID: "future", ReasoningEfforts: []string{"high"}}, {ModelID: "future-high"}}
+	spec, effort, ok := ResolveModelAlias("future-high", catalog)
+	testutil.True(t, ok, "exact observed ID not resolved")
+	testutil.Equal(t, spec.UpstreamModel, "future-high")
+	testutil.Equal(t, effort, "")
+}
+
+func TestCatalogExplicitNoReasoningIsAuthoritative(t *testing.T) {
+	no := false
+	profile := (buildModelCatalogEntry{ID: "grok-4.7", SupportsReasoningEffort: &no, ReasoningEfforts: []json.RawMessage{json.RawMessage(`"high"`)}}).profile()
+	testutil.False(t, profile.SupportsReasoningEffort, "explicit false ignored")
+	testutil.Equal(t, len(profile.ReasoningEfforts), 0)
+}

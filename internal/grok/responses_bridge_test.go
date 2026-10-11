@@ -43,6 +43,7 @@ func responsesBridgeFixture(t *testing.T, upstreamStatus int, upstreamBody, mode
 		Subscription: "super",
 		Weight:       1,
 		AgentMode:    model,
+		GrokModels:   []string{model},
 	}); err != nil {
 		t.Fatalf("CreateAccount() error = %v", err)
 	}

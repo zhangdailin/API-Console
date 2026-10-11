@@ -106,6 +106,18 @@ func writeAll(w io.Writer, p []byte) error {
 // holding a connection open indefinitely.
 type DeadlineResponseWriter struct{ http.ResponseWriter }
 
+func (w DeadlineResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w DeadlineResponseWriter) Flush() { _ = w.FlushError() }
+
+// FlushError bounds the actual transport flush and preserves its error.
+func (w DeadlineResponseWriter) FlushError() error {
+	if err := setResponseWriteDeadline(w.ResponseWriter); err != nil {
+		return err
+	}
+	return http.NewResponseController(w.ResponseWriter).Flush()
+}
+
 // Write refreshes the deadline and forwards the write.
 func (w DeadlineResponseWriter) Write(p []byte) (int, error) {
 	if err := setResponseWriteDeadline(w.ResponseWriter); err != nil {
@@ -124,7 +136,11 @@ func WriteSSEBytes(w http.ResponseWriter, event string, data []byte) error {
 	if err := setResponseWriteDeadline(w); err != nil {
 		return err
 	}
-	var frame []byte
+	return WriteSSEFrame(w, event, data)
+}
+
+// AppendSSEFrame appends one complete frame to caller-owned scratch space.
+func AppendSSEFrame(frame []byte, event string, data []byte) []byte {
 	if event != "" {
 		frame = append(frame, sseEventPrefixBytes...)
 		frame = append(frame, event...)
@@ -133,7 +149,16 @@ func WriteSSEBytes(w http.ResponseWriter, event string, data []byte) error {
 	frame = append(frame, sseDataPrefixBytes...)
 	frame = append(frame, data...)
 	frame = append(frame, sseFrameSuffixBytes...)
-	return writeAll(w, frame)
+	return frame
+}
+
+// WriteSSEFrame also supports internal pipe writers and detects short writes.
+func WriteSSEFrame(w io.Writer, event string, data []byte) error {
+	size := len(sseDataPrefixBytes) + len(data) + len(sseFrameSuffixBytes)
+	if event != "" {
+		size += len(sseEventPrefixBytes) + len(event) + len(sseNewlineBytes)
+	}
+	return writeAll(w, AppendSSEFrame(make([]byte, 0, size), event, data))
 }
 
 // WriteSSEError sends an OpenAI-style SSE error event (no flush, no [DONE]).

@@ -5,8 +5,6 @@ import (
 	"orchids-api/internal/chatwire"
 	"orchids-api/internal/responses"
 	"strings"
-
-	"orchids-api/internal/modelpolicy"
 )
 
 // applyBuildResponseDefaults applies two defaults to every Build request:
@@ -106,43 +104,6 @@ func chatReasoningControls(req *chatwire.Request) map[string]interface{} {
 		}
 	}
 	return reasoning
-}
-
-// normalizeBuildReasoningEffort maps client effort aliases onto levels the
-// selected model actually accepts. Grok 4.5 and other models without an xhigh
-// wire contract take the proven defensive xhigh/max -> high mapping; models
-// that do advertise xhigh keep it. Composer never receives an effort at all,
-// but keeps its other reasoning controls such as summary.
-func normalizeBuildReasoningEffort(payload map[string]interface{}, model string) {
-	reasoning, _ := payload["reasoning"].(map[string]interface{})
-	if reasoning == nil {
-		return
-	}
-	effort := strings.ToLower(strings.TrimSpace(chatwire.ParseLooseStringAny(reasoning["effort"])))
-	if effort == "" {
-		return
-	}
-	if modelpolicy.IsGrokComposerModel(model) {
-		delete(reasoning, "effort")
-		if len(reasoning) == 0 {
-			delete(payload, "reasoning")
-		}
-		return
-	}
-	var normalized string
-	switch effort {
-	case "minimal":
-		normalized = "low"
-	case "xhigh", "max":
-		if modelpolicy.SupportsReasoningEffort(model, "xhigh") {
-			normalized = "xhigh"
-		} else {
-			normalized = "high"
-		}
-	default:
-		return
-	}
-	reasoning["effort"] = normalized
 }
 
 func validatePayloadReasoning(payload map[string]interface{}) error {

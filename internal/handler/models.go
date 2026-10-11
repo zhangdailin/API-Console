@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"net/http"
 	"sort"
 	"strings"
@@ -18,6 +17,8 @@ import (
 )
 
 type PublicModelResponse struct {
+	Name          string   `json:"name,omitempty"`
+	Description   string   `json:"description,omitempty"`
 	ID            string   `json:"id"`
 	Object        string   `json:"object"`
 	Created       int64    `json:"created"`
@@ -92,62 +93,21 @@ func externalPublicModelID(channel, internalID string) string {
 
 func publicModelIDKey(id string) string { return strings.ToLower(strings.TrimSpace(id)) }
 
-// grokBuildProfiles returns the conservative capability view shared by every
-// enabled Build account that advertised a model.
-func (h *Handler) grokBuildProfiles(ctx context.Context) map[string]modelcatalog.Profile {
-	if h == nil || h.loadBalancer == nil || h.loadBalancer.Store == nil {
-		return nil
-	}
-	accounts, err := h.loadBalancer.Store.GetEnabledAccounts(ctx)
-	if err != nil {
-		return nil
-	}
-	catalogs := make([][]modelcatalog.Profile, 0, len(accounts))
-	for _, acc := range accounts {
-		if acc == nil || !strings.EqualFold(strings.TrimSpace(acc.AccountType), "grok") {
-			continue
-		}
-		provider := strings.ToLower(strings.TrimSpace(acc.GrokProvider))
-		if provider == "" && strings.EqualFold(strings.TrimSpace(acc.CredentialType), "oauth") {
-			provider = "build"
-		}
-		if provider != "build" || len(acc.GrokModelCatalog) == 0 {
-			continue
-		}
-		catalogs = append(catalogs, acc.GrokModelCatalog)
-	}
-	if len(catalogs) == 0 {
-		return nil
-	}
-	profiles := modelcatalog.Aggregate(catalogs...)
-	out := make(map[string]modelcatalog.Profile, len(profiles))
-	for _, profile := range profiles {
-		for _, id := range []string{profile.ModelID, modelpolicy.ExternalPublicID(profile.ModelID)} {
-			if key := publicModelIDKey(id); key != "" {
-				out[key] = profile
-			}
-		}
-	}
-	return out
-}
-
 func applyGrokBuildProfile(entry *PublicModelResponse, profile modelcatalog.Profile) {
 	if entry == nil {
 		return
 	}
+	entry.Name = profile.Name
+	entry.Description = profile.Description
 	entry.ReasoningEfforts = append([]string(nil), profile.ReasoningEfforts...)
 	entry.DefaultReasoningEffort = profile.DefaultReasoningEffort
 	supportsReasoning := profile.SupportsReasoningEffort
 	supportsSearch := profile.SupportsBackendSearch
 	entry.SupportsReasoningEffort = &supportsReasoning
 	entry.SupportsBackendSearch = &supportsSearch
-	if profile.ContextWindow > 0 {
-		entry.ContextLength = profile.ContextWindow
-		entry.MaxInputTokens = profile.ContextWindow
-	}
-	if profile.MaxCompletionTokens > 0 {
-		entry.MaxOutputTokens = profile.MaxCompletionTokens
-	}
+	entry.ContextLength = profile.ContextWindow
+	entry.MaxInputTokens = profile.ContextWindow
+	entry.MaxOutputTokens = profile.MaxCompletionTokens
 }
 
 func (h *Handler) HandleModels(w http.ResponseWriter, r *http.Request) {
@@ -180,15 +140,25 @@ func (h *Handler) HandleModels(w http.ResponseWriter, r *http.Request) {
 		}
 		return strings.ToLower(allModels[i].ModelID) < strings.ToLower(allModels[j].ModelID)
 	})
-	var publicModels []PublicModelResponse
+	publicModels := make([]PublicModelResponse, 0, len(allModels))
 	seenPublicModelIDs := make(map[string]struct{}, len(allModels))
 	// One read of the observed catalogs answers every row below, so the model
 	// list reports the same window the request path forwards upstream.
 	contextWindows := h.observedModelContextWindows(ctx)
-	grokProfiles := h.grokBuildProfiles(ctx)
+	var grokAccounts []*store.Account
+	if filterChannel == "grok" || filterChannel == "" {
+		grokAccounts, err = h.loadBalancer.Store.GetEnabledAccounts(ctx)
+		if err != nil {
+			apperrors.New("api_error", "Failed to read model account entitlements", http.StatusServiceUnavailable).WriteResponse(w)
+			return
+		}
+	}
 	for _, m := range allModels {
 		mChannel, ok := isVisiblePublicModel(m, filterChannel)
 		if !ok {
+			continue
+		}
+		if strings.EqualFold(mChannel, "grok") && len(modelpolicy.GrokModelProfiles(m, grokAccounts)) == 0 {
 			continue
 		}
 		// A Build qualifier is an internal routing detail; publish the bare name.
@@ -217,16 +187,11 @@ func (h *Handler) HandleModels(w http.ResponseWriter, r *http.Request) {
 		entry.MaxInputTokens = input
 		entry.MaxOutputTokens = output
 		if strings.EqualFold(mChannel, "grok") {
-			provider := strings.ToLower(strings.TrimSpace(m.Provider))
-			if provider == "build" || provider == "" {
-				for _, id := range []string{m.ModelID, m.UpstreamModel, publicID} {
-					if profile, ok := grokProfiles[publicModelIDKey(id)]; ok {
-						applyGrokBuildProfile(&entry, profile)
-						break
-					}
-				}
+			if profiles := modelpolicy.GrokModelProfiles(m, grokAccounts); len(profiles) > 0 {
+				applyGrokBuildProfile(&entry, profiles[0])
 			}
 		}
+
 		publicModels = append(publicModels, entry)
 	}
 
@@ -300,6 +265,20 @@ func (h *Handler) HandleModelByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var profile *modelcatalog.Profile
+	if strings.EqualFold(mChannel, "grok") {
+		accounts, accountErr := h.loadBalancer.Store.GetEnabledAccounts(ctx)
+		if accountErr != nil {
+			apperrors.New("api_error", "Failed to read model account entitlements", http.StatusServiceUnavailable).WriteResponse(w)
+			return
+		}
+		profiles := modelpolicy.GrokModelProfiles(m, accounts)
+		if len(profiles) == 0 {
+			apperrors.New("invalid_request_error", "Model not found", http.StatusNotFound).WriteResponse(w)
+			return
+		}
+		profile = &profiles[0]
+	}
 	resp := publicModelResponse(m.ModelID, mChannel, m.CreatedAt)
 	// The single-model lookup answers with the same window the list publishes, so
 	// a client that validates one catalog entry learns the real number instead of
@@ -309,6 +288,9 @@ func (h *Handler) HandleModelByID(w http.ResponseWriter, r *http.Request) {
 	resp.ContextLength = input
 	resp.MaxInputTokens = input
 	resp.MaxOutputTokens = output
+	if profile != nil {
+		applyGrokBuildProfile(&resp, *profile)
+	}
 
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		apperrors.New("api_error", "Failed to encode response", http.StatusInternalServerError).WriteResponse(w)

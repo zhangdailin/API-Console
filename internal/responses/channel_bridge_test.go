@@ -1,6 +1,7 @@
 package responses
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +18,63 @@ import (
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
 )
+
+type frameShortWriter struct{ calls int }
+
+func (w *frameShortWriter) Write(p []byte) (int, error) { w.calls++; return len(p) - 1, nil }
+
+type terminalFlushWriter struct {
+	*httptest.ResponseRecorder
+	failure error
+}
+
+func (w terminalFlushWriter) FlushError() error {
+	if strings.Contains(w.Body.String(), "event: response.completed") {
+		return w.failure
+	}
+	return nil
+}
+
+func TestResponsesCompletionCallbackRequiresTerminalDelivery(t *testing.T) {
+	input := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"}}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+	for _, failure := range []error{nil, errors.New("terminal flush disconnected")} {
+		calls := 0
+		w := terminalFlushWriter{httptest.NewRecorder(), failure}
+		WriteStreamFromChatReader(w, CreateRequest{Model: "test"}, strings.NewReader(input), StreamOptions{OnComplete: func(map[string]interface{}) { calls++ }})
+		want := 1
+		if failure != nil {
+			want = 0
+		}
+		if calls != want {
+			t.Fatalf("completion recorded before delivery: failure=%v calls=%d", failure, calls)
+		}
+	}
+}
+
+func TestSSEFramesDetectShortWritesAndRewriteAsOneFrame(t *testing.T) {
+	err := ConsumeSSE(strings.NewReader("event: demo\r\nid: original\r\ndata: old\r\n\r\n"), func(frame SSEEvent) error {
+		short := &frameShortWriter{}
+		if err := frame.WriteFrame(short); !errors.Is(err, io.ErrShortWrite) || short.calls != 1 {
+			t.Fatalf("raw short write: %v calls=%d", err, short.calls)
+		}
+		frame.SetData("first", "second")
+		short.calls = 0
+		if err := frame.WriteFrame(short); !errors.Is(err, io.ErrShortWrite) || short.calls != 1 {
+			t.Fatalf("rewritten short write: %v calls=%d", err, short.calls)
+		}
+		var actual strings.Builder
+		if err := frame.WriteFrame(&actual); err != nil {
+			return err
+		}
+		if actual.String() != "event: demo\nid: original\ndata: first\ndata: second\n\n" {
+			t.Fatal(actual.String())
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestResponsesChatPathMapsTheChannelPrefix(t *testing.T) {
 	t.Parallel()

@@ -11,6 +11,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 
 	"orchids-api/internal/loadbalancer"
+	"orchids-api/internal/modelcatalog"
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
 )
@@ -97,7 +98,7 @@ func TestEnsureModelCapability_RejectsPersistedCapabilityMismatch(t *testing.T) 
 
 func TestResolveConversationModel_AppliesPersistedRoute(t *testing.T) {
 	h, s, _ := setupValidationHandler(t)
-	testutil.NoError(t, s.CreateAccount(context.Background(), &store.Account{AccountType: "grok", CredentialType: "oauth", GrokProvider: ProviderBuild, OAuthAccessToken: "token", Enabled: true, GrokModels: []string{"future-build-chat"}}), "CreateAccount() error = %v")
+	testutil.NoError(t, s.CreateAccount(context.Background(), &store.Account{AccountType: "grok", CredentialType: "oauth", GrokProvider: ProviderBuild, OAuthAccessToken: "token", Enabled: true, GrokModels: []string{"future-build-chat", "grok-routed-build"}}), "CreateAccount() error = %v")
 	if err := s.CreateModel(context.Background(), &store.Model{
 		Channel: "Grok", ModelID: "future-build-chat", Name: "routed",
 		Status: store.ModelStatusAvailable, Verified: true, Provider: ProviderBuild,
@@ -137,17 +138,18 @@ func TestEnsureModelEnabled_PrefersGrokChannelWhenModelIDExistsInOtherProvider(t
 }
 
 func TestResolveModel_ParsesSupportedEffortSuffixes(t *testing.T) {
+	catalog := []modelcatalog.Profile{{ModelID: "grok-4.5", ReasoningEfforts: []string{"low"}}, {ModelID: "grok-4.6", ReasoningEfforts: []string{"xhigh"}}}
 	for _, tc := range []struct {
 		id, effort string
 	}{
 		{"grok-4.5-low", "low"},
 		{"grok-4.6-xhigh", "xhigh"},
 	} {
-		_, effort, ok := ResolveModelAlias(tc.id)
+		_, effort, ok := ResolveModelAlias(tc.id, catalog)
 		testutil.Falsef(t, !ok || effort != tc.effort, "ResolveModelAlias(%q) effort=%q ok=%v", tc.id, effort, ok)
 	}
 	for _, id := range []string{"grok-4.5-xhigh", "grok-4.6-none"} {
-		_, _, ok := ResolveModelAlias(id)
+		_, _, ok := ResolveModelAlias(id, catalog)
 		testutil.Falsef(t, ok, "ResolveModelAlias(%q) unexpectedly accepted", id)
 	}
 }

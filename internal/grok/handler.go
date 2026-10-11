@@ -13,6 +13,7 @@ import (
 	"orchids-api/internal/handler"
 	"orchids-api/internal/loadbalancer"
 	"orchids-api/internal/middleware"
+	"orchids-api/internal/modelcatalog"
 	"orchids-api/internal/modelpolicy"
 	"orchids-api/internal/pricing"
 	"orchids-api/internal/responses"
@@ -327,19 +328,8 @@ func (h *Handler) ensureResolvedModelCapability(ctx context.Context, modelID str
 	return nil
 }
 
-// resolveConversationModel resolves the built-in Build catalog and
-// account-discovered Build models. A discovered model is routable only when at
-// least one enabled Build account advertises it, so arbitrary client strings
-// can never turn into upstream model probes.
+// resolveConversationModel routes only the enabled accounts' observed catalog.
 func (h *Handler) resolveConversationModel(ctx context.Context, modelID string) (ModelSpec, bool) {
-	id := normalizeModelID(modelID)
-	if id == "" {
-		return ModelSpec{}, false
-	}
-	if spec, effort, ok := ResolveModelAlias(modelID); ok {
-		spec.AliasReasoningEffort = effort
-		return h.applyPersistedRoute(ctx, spec), true
-	}
 	if h == nil || h.lb == nil || h.lb.Store == nil {
 		return ModelSpec{}, false
 	}
@@ -347,21 +337,28 @@ func (h *Handler) resolveConversationModel(ctx context.Context, modelID string) 
 	if err != nil {
 		return ModelSpec{}, false
 	}
+	catalogs := make([][]modelcatalog.Profile, 0, len(accounts))
 	for _, acc := range accounts {
-		if ProviderForAccount(acc) != ProviderBuild || len(acc.GrokModels) == 0 {
+		if ProviderForAccount(acc) != ProviderBuild || !store.AccountAuthActive(acc) || strings.TrimSpace(acc.StatusCode) == "401" {
 			continue
 		}
-		for _, candidate := range acc.GrokModels {
-			if strings.EqualFold(strings.TrimSpace(candidate), id) {
-				spec := ModelSpec{ID: id, Name: id, UpstreamModel: strings.TrimSpace(candidate), Upstream: UpstreamCLI}
-				return h.applyPersistedRoute(ctx, spec), true
-			}
+		catalogs = append(catalogs, modelpolicy.GrokAccountCatalog(acc))
+	}
+	spec, effort, ok := ResolveModelAlias(modelID, catalogs...)
+	if !ok {
+		return ModelSpec{}, false
+	}
+	spec.AliasReasoningEffort = effort
+	spec = h.applyPersistedRoute(ctx, spec)
+	for _, acc := range accounts {
+		if ProviderForAccount(acc) == ProviderBuild && store.AccountAuthActive(acc) && strings.TrimSpace(acc.StatusCode) != "401" && AccountSupportsModel(acc, spec.UpstreamModel) && h.routeAllowsAccount(ctx, spec.ID, acc.ID) {
+			return spec, true
 		}
 	}
 	return ModelSpec{}, false
 }
 
-// applyPersistedRoute overlays the control-plane route on the static model
+// applyPersistedRoute overlays the control-plane route on an observed model
 // shape. Media/voice flags remain catalog-owned, while provider and upstream
 // identity are operator-controlled and survive restarts in the model store.
 func (h *Handler) applyPersistedRoute(ctx context.Context, spec ModelSpec) ModelSpec {

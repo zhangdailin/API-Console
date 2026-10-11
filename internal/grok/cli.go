@@ -377,11 +377,13 @@ func (c *CLIClient) VerifyAccount(ctx context.Context, acc *store.Account) (stri
 // buildModelCatalogEntry accepts both the current snake_case Build response and
 // older camelCase response variants.
 type buildModelCatalogEntry struct {
-	ID      string `json:"id"`
-	Model   string `json:"model"`
-	ModelID string `json:"modelId"`
-	Hidden  bool   `json:"hidden"`
-	Meta    struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	ID          string `json:"id"`
+	Model       string `json:"model"`
+	ModelID     string `json:"modelId"`
+	Hidden      bool   `json:"hidden"`
+	Meta        struct {
 		Model   string `json:"model"`
 		ModelID string `json:"modelId"`
 		Hidden  bool   `json:"hidden"`
@@ -403,7 +405,7 @@ func (e buildModelCatalogEntry) profile() modelcatalog.Profile {
 	if e.Hidden || e.Meta.Hidden {
 		return modelcatalog.Profile{}
 	}
-	profile := modelcatalog.Profile{ModelID: util.FirstNonEmpty(e.ID, e.Model, e.ModelID, e.Meta.Model, e.Meta.ModelID), SupportsBackendSearch: e.SupportsBackendSearch}
+	profile := modelcatalog.Profile{Name: e.Name, Description: e.Description, ModelID: util.FirstNonEmpty(e.ID, e.Model, e.ModelID, e.Meta.Model, e.Meta.ModelID), SupportsBackendSearch: e.SupportsBackendSearch}
 	if e.ContextWindow > 0 {
 		profile.ContextWindow = clampCatalogInt(e.ContextWindow)
 	} else {
@@ -443,6 +445,10 @@ func (e buildModelCatalogEntry) profile() modelcatalog.Profile {
 	}
 	if profile.DefaultReasoningEffort == "" {
 		profile.DefaultReasoningEffort = util.FirstNonEmpty(e.ReasoningEffort, e.ReasoningEffortCamel)
+	}
+	if e.SupportsReasoningEffort != nil && !*e.SupportsReasoningEffort || e.SupportsReasoningCamel != nil && e.SupportsReasoningEffort == nil && !*e.SupportsReasoningCamel {
+		profile.ReasoningEfforts = nil
+		profile.DefaultReasoningEffort = ""
 	}
 	return modelcatalog.Normalize(profile)
 }

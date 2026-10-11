@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 
 	"orchids-api/internal/config"
+	"orchids-api/internal/modelcatalog"
 	"orchids-api/internal/testutil"
 )
 
@@ -50,14 +51,14 @@ func TestResolveModelRetiredIDs(t *testing.T) {
 // Build models resolve and keep their own id as the upstream model.
 func TestResolveModelAcceptsCurrentBuildModels(t *testing.T) {
 	for _, id := range []string{"grok-4.5", "grok-4.6"} {
-		spec, ok := ResolveModel(id)
+		spec, ok := ResolveModel(id, []modelcatalog.Profile{{ModelID: id}})
 		testutil.True(t, ok, "ResolveModel(%s) should succeed")
 		testutil.Equal(t, spec.UpstreamModel, id)
 	}
 }
 
 func TestGrok45RoutesToBuildCLI(t *testing.T) {
-	spec, ok := ResolveModel("grok-4.5")
+	spec, ok := ResolveModel("grok-4.5", []modelcatalog.Profile{{ModelID: "grok-4.5"}})
 	testutil.True(t, ok, "ResolveModel(grok-4.5) = false, want true")
 	testutil.False(t, !modelRoutedToCLI(spec, &config.Config{}), "grok-4.5 should route through the official Build CLI OAuth path")
 }

@@ -211,7 +211,6 @@ func (a *API) pollGrokDeviceAuthorization(ctx context.Context, id string, authen
 			OAuthAccessToken:  accessToken,
 			OAuthRefreshToken: refreshToken,
 			OAuthExpiresAt:    expiresAt,
-			AgentMode:         "grok-build-0.1",
 			Weight:            1,
 			Enabled:           true,
 		}

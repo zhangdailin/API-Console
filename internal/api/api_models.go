@@ -18,6 +18,14 @@ func (a *API) HandleModels(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		if hasAccountScopedModels(models) {
+			accounts, err := a.store.GetEnabledAccounts(r.Context())
+			if err != nil {
+				http.Error(w, "Failed to read model account entitlements", http.StatusServiceUnavailable)
+				return
+			}
+			models = filterAdminModelEntitlements(models, accounts)
+		}
 		// A bare array is the long-standing contract the bundled admin UI
 		// consumes. Asking for a page switches to the paged envelope that
 		// the newer admin client expects, without breaking the old shape.

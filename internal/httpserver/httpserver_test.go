@@ -1,15 +1,121 @@
 package httpserver
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"orchids-api/internal/middleware"
 	"orchids-api/internal/testutil"
 )
+
+type downstreamFailureWriter struct {
+	*httptest.ResponseRecorder
+	flushErr  error
+	deadlines int
+	writes    int
+}
+
+func (w *downstreamFailureWriter) SetWriteDeadline(time.Time) error {
+	w.deadlines++
+	return nil
+}
+func (w *downstreamFailureWriter) FlushError() error { return w.flushErr }
+func (w *downstreamFailureWriter) Write(p []byte) (int, error) {
+	w.writes++
+	return w.ResponseRecorder.Write(p)
+}
+
+func TestCheckedStreamFlushFailureStopsDeliveryAndMarksTrace(t *testing.T) {
+	failure := errors.New("client disappeared on flush")
+	target := &downstreamFailureWriter{ResponseRecorder: httptest.NewRecorder(), flushErr: failure}
+	trace := middleware.NewTracedResponseWriter(target)
+	w := &CheckedStreamWriter{Target: DeadlineResponseWriter{ResponseWriter: trace}}
+	if err := w.WriteSSE("demo", []byte(`{"ok":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	w.Flush()
+	if !errors.Is(w.Err, failure) || !trace.StreamFailed() || target.deadlines != 2 {
+		t.Fatalf("err=%v marked=%v deadlines=%d", w.Err, trace.StreamFailed(), target.deadlines)
+	}
+	if err := w.WriteSSE("demo", []byte(`{"late":true}`)); !errors.Is(err, failure) || target.writes != 1 {
+		t.Fatalf("late delivery continued: err=%v writes=%d", err, target.writes)
+	}
+}
+
+func TestDecodeJSONBodyRequiresOneCompleteValue(t *testing.T) {
+	for _, body := range []string{`{"a":1} {"b":2}`, `{"a":1} null`, `{"a":1} trailing`, ""} {
+		t.Run(body, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest("POST", "/", strings.NewReader(body))
+			var value map[string]interface{}
+			if DecodeJSONBody(rec, req, &value) || rec.Code != 400 {
+				t.Fatalf("invalid body accepted: %d", rec.Code)
+			}
+		})
+	}
+	var value map[string]interface{}
+	rec := httptest.NewRecorder()
+	if !DecodeJSONBody(rec, httptest.NewRequest("POST", "/", strings.NewReader("{\"a\":1} \r\n\t")), &value) {
+		t.Fatal("trailing whitespace rejected")
+	}
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Body = nil
+	if DecodeJSONBody(httptest.NewRecorder(), req, &value) {
+		t.Fatal("nil body accepted")
+	}
+}
+
+func TestDecodeJSONBodyEnforcesLimitAfterValidPrefix(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/", strings.NewReader("{}"+strings.Repeat(" ", MaxJSONBodyBytes)))
+	var value map[string]interface{}
+	if DecodeJSONBody(rec, req, &value) || rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized suffix accepted: %d", rec.Code)
+	}
+}
+
+func TestStreamThroughChatCancellationInterruptsIdleConsumer(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := httptest.NewRequest("POST", "/", nil).WithContext(ctx)
+	reading, done, producerDone := make(chan struct{}), make(chan error, 1), make(chan struct{})
+	go func() {
+		StreamThroughChat(req, func(w http.ResponseWriter, r *http.Request) {
+			defer close(producerDone)
+			w.WriteHeader(http.StatusOK)
+			<-r.Context().Done()
+		}, func(_ int, _ http.Header, reader io.Reader) {
+			close(reading)
+			_, err := io.ReadAll(reader)
+			done <- err
+		})
+	}()
+	select {
+	case <-reading:
+	case <-time.After(time.Second):
+		t.Fatal("consumer did not start")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) && err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("consumer remained blocked on cancellation")
+	}
+	select {
+	case <-producerDone:
+	case <-time.After(time.Second):
+		t.Fatal("producer was not canceled")
+	}
+}
 
 type shortWriter struct{ http.ResponseWriter }
 

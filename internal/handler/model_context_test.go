@@ -103,15 +103,14 @@ func TestPublicModelsPublishWorkBuddyContextWindow(t *testing.T) {
 	testutil.Equal(t, entries["legacy-model"].ContextLength, 0)
 }
 
-// The Grok window is not account-scoped; it comes from the same table the Codex
-// catalog publishes, so both surfaces agree.
-func TestPublicModelsPublishGrokContextWindow(t *testing.T) {
+// A Grok model name alone must not manufacture a context window.
+func TestPublicModelsOmitUnobservedGrokContextWindow(t *testing.T) {
 	h, s, _ := setupModelValidationHandler(t)
 
 	publishModel(t, s, &store.Model{Channel: "grok", ModelID: "grok-4.6", Verified: true})
 
 	entries := fetchPublicModels(t, h, "/grok/v1/models")
-	testutil.Equal(t, entries["grok-4.6"].ContextLength, 500000)
+	testutil.Equal(t, entries["grok-4.6"].ContextLength, 0)
 }
 
 // The Codex catalog used to fall back to a Grok-shaped 128k default for every
@@ -125,9 +124,8 @@ func TestCodexCatalogPrefersObservedContextWindow(t *testing.T) {
 	catalog := newCodexModelCatalog([]PublicModelResponse{observed, unobserved})
 
 	testutil.Equal(t, codexEntryFor(t, catalog, "qwen3.8-max").ContextWindow, 1000000)
-	// Nothing was observed for this one, so the historical default still applies
-	// and no wrong number is invented.
-	testutil.Equal(t, codexEntryFor(t, catalog, "qwen3.8-flash").ContextWindow, 128000)
+	// Nothing was observed for this one, so omit the unknown window.
+	testutil.Equal(t, codexEntryFor(t, catalog, "qwen3.8-flash").ContextWindow, 0)
 }
 
 func containsJSONField(body, field string) bool {

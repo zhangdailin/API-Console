@@ -62,7 +62,7 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}
-	if err := h.ensureModelCapability(r.Context(), modelID, store.CapabilityResponses); err != nil {
+	if err := h.ensureResolvedModelCapability(r.Context(), spec.ID, spec, store.CapabilityResponses); err != nil {
 		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", modelValidationMessage(modelID, err))
 		return
 	}
@@ -108,6 +108,14 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 	defer sess.Close()
 
 	payload["model"] = spec.UpstreamModel
+	if spec.AliasReasoningEffort != "" {
+		reasoning, _ := payload["reasoning"].(map[string]interface{})
+		if reasoning == nil {
+			reasoning = map[string]interface{}{}
+		}
+		reasoning["effort"] = spec.AliasReasoningEffort
+		payload["reasoning"] = reasoning
+	}
 	call := func() (*http.Response, error) {
 		if pinned {
 			return h.doCLIPinnedResponsesAt(r.Context(), sess, payload, spec.UpstreamModel, upstreamPath)

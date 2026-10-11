@@ -59,16 +59,14 @@ func TestDiscoverGrokModelsUsesOfficialBuildCatalogAndPersistsPerAccountSnapshot
 	for _, item := range items {
 		gotIDs = append(gotIDs, item.ID)
 	}
-	// The upstream catalog plus the entries derived from the account:
-	// 4.6 implies 4.5, and an OAuth Build account can serve Composer. The row for
-	// the catalog model is published under its bare public name.
-	wantIDs := "grok-4.6,future-private-model,grok-4.5,grok-composer-2.5-fast"
+	// Only the upstream rows are published, without credential-derived models.
+	wantIDs := "grok-4.6,future-private-model,grok-4.5"
 	testutil.Equal(t, strings.Join(gotIDs, ","), wantIDs)
 
 	persisted, err := s.GetAccount(ctx, acc.ID)
 	testutil.NoError(t, err, "GetAccount() error = %v")
 	testutil.Falsef(t, persisted.GrokProvider != "build" || persisted.GrokModelsSyncedAt.IsZero(), "provider/catalog not persisted: %+v", persisted)
-	testutil.Equal(t, strings.Join(persisted.GrokModels, ","), "grok-4.6,future-private-model,grok-4.5,grok-composer-2.5-fast")
+	testutil.Equal(t, strings.Join(persisted.GrokModels, ","), "grok-4.6,future-private-model,grok-4.5")
 }
 
 func TestDiscoverGrokModelsWithoutUpstreamCatalogPublishesNothing(t *testing.T) {

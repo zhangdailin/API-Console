@@ -48,7 +48,7 @@ type SearchItemHook func(delta map[string]interface{}) (identity string, value m
 // WriteStreamFromChatReader is the translation itself.
 func WriteStreamFromChatReader(w http.ResponseWriter, request CreateRequest, reader io.Reader, opts StreamOptions) {
 	httpserver.StreamResponseHeaders(w)
-	writer := &httpserver.CheckedStreamWriter{Target: w}
+	writer := &httpserver.CheckedStreamWriter{Target: httpserver.DeadlineResponseWriter{ResponseWriter: w}}
 	id := "resp_" + util.RandomHex(12)
 	created := time.Now().Unix()
 	items := []*chatResponseItem{}
@@ -79,7 +79,7 @@ func WriteStreamFromChatReader(w http.ResponseWriter, request CreateRequest, rea
 			writer.Err = err
 			return
 		}
-		_, _ = fmt.Fprintf(writer, "event: %s\ndata: %s\n\n", kind, data)
+		_ = writer.WriteSSE(kind, data)
 		writer.Flush()
 	}
 	response := func(status string) map[string]interface{} {
@@ -383,10 +383,10 @@ func WriteStreamFromChatReader(w http.ResponseWriter, request CreateRequest, rea
 	if details != nil {
 		v["incomplete_details"] = details
 	}
-	if opts.OnComplete != nil {
-		opts.OnComplete(v)
-	}
 	emit("response."+status, map[string]interface{}{"response": v})
 	_, _ = io.WriteString(writer, "data: [DONE]\n\n")
 	writer.Flush()
+	if writer.Err == nil && opts.OnComplete != nil {
+		opts.OnComplete(v)
+	}
 }

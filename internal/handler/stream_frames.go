@@ -5,9 +5,11 @@ import (
 	"io"
 	"log/slog"
 	"maps"
+	"net/http"
 	"slices"
 
 	"orchids-api/internal/adapter"
+	"orchids-api/internal/httpserver"
 	"orchids-api/internal/logutil"
 )
 
@@ -102,7 +104,7 @@ func (h *streamHandler) flushSSEWithLenLocked(event string, dataLen int, immedia
 	if force || immediate {
 		h.deferredFlushFrames = 0
 		h.deferredFlushBytes = 0
-		h.flusher.Flush()
+		h.flushStreamLocked()
 		return
 	}
 	h.deferredFlushFrames++
@@ -110,7 +112,13 @@ func (h *streamHandler) flushSSEWithLenLocked(event string, dataLen int, immedia
 	if h.deferredFlushFrames >= sseDeferredFlushFrameThreshold || h.deferredFlushBytes >= sseDeferredFlushByteThreshold {
 		h.deferredFlushFrames = 0
 		h.deferredFlushBytes = 0
-		h.flusher.Flush()
+		h.flushStreamLocked()
+	}
+}
+
+func (h *streamHandler) flushStreamLocked() {
+	if err := http.NewResponseController(h.w).Flush(); err != nil && err != http.ErrNotSupported {
+		h.markWriteErrorLocked("flush", err)
 	}
 }
 
@@ -159,7 +167,7 @@ func (h *streamHandler) writeStreamFrameLocked(event string, data []byte) error 
 	frame = append(frame, data...)
 	frame = append(frame, sseLineBreakBytes...)
 	h.sseFrameScratch = frame[:0]
-	n, err := h.w.Write(frame)
+	n, err := (httpserver.DeadlineResponseWriter{ResponseWriter: h.w}).Write(frame)
 	if err == nil && n != len(frame) {
 		err = io.ErrShortWrite
 	}
@@ -174,7 +182,7 @@ func (h *streamHandler) writeStreamFrameLocked(event string, data []byte) error 
 // SSE frame, whether a completed response must flush immediately, and whether a
 // per-frame diagnostics line follows.
 func (h *streamHandler) emitSSEFrameLocked(event string, data []byte, immediate, final bool) {
-	if !h.isStream {
+	if !h.isStream || h.requestFailed {
 		return
 	}
 	if h.responseFormat == adapter.FormatOpenAI {
@@ -186,8 +194,8 @@ func (h *streamHandler) emitSSEFrameLocked(event string, data []byte, immediate,
 		if written {
 			h.flushSSEWithLenLocked(event, len(data), immediate, final)
 		}
-		if final && event == "message_stop" {
-			if _, err := h.w.Write(sseDoneLineBytes); err != nil {
+		if final && event == "message_stop" && !h.requestFailed {
+			if _, err := (httpserver.DeadlineResponseWriter{ResponseWriter: h.w}).Write(sseDoneLineBytes); err != nil {
 				h.markWriteErrorLocked(event, err)
 				return
 			}

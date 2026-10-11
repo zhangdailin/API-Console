@@ -7,6 +7,7 @@ import (
 
 	"orchids-api/internal/adapter"
 	apperrors "orchids-api/internal/errors"
+	"orchids-api/internal/httpserver"
 	"orchids-api/internal/logutil"
 	"orchids-api/internal/middleware"
 	"orchids-api/internal/upstream"
@@ -276,12 +277,13 @@ func (h *streamHandler) writeStreamError(category, message string) {
 			slog.Error("Failed to marshal stream error", "error", err)
 			return
 		}
-		if err := writeOpenAIFrame(h.w, data); err != nil {
-			slog.Warn("Failed to write stream error", "error", err)
+		if err := h.writeStreamFrameLocked("", data); err != nil {
+			h.markWriteErrorLocked("error", err)
 			return
 		}
-		if _, err := h.w.Write(sseDoneLineBytes); err != nil {
-			slog.Warn("Failed to terminate stream after an error", "error", err)
+		if _, err := (httpserver.DeadlineResponseWriter{ResponseWriter: h.w}).Write(sseDoneLineBytes); err != nil {
+			h.markWriteErrorLocked("error_done", err)
+			return
 		}
 	} else {
 		data, err := marshalAnthropicErrorBytes(category, message)
@@ -289,12 +291,13 @@ func (h *streamHandler) writeStreamError(category, message string) {
 			slog.Error("Failed to marshal stream error", "error", err)
 			return
 		}
-		if err := writeSSEFrameBytes(h.w, "error", data); err != nil {
-			slog.Warn("Failed to write stream error", "error", err)
+		if err := h.writeStreamFrameLocked("error", data); err != nil {
+			h.markWriteErrorLocked("error", err)
+			return
 		}
 	}
 	if h.flusher != nil {
-		h.flusher.Flush()
+		h.flushStreamLocked()
 	}
 }
 

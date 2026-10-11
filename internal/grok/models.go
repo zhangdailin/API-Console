@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"orchids-api/internal/config"
-	"orchids-api/internal/modelpolicy"
+	"orchids-api/internal/modelcatalog"
 )
 
 // UpstreamKind selects which Grok upstream protocol serves a model.
@@ -29,57 +29,36 @@ type ModelSpec struct {
 	AliasReasoningEffort string
 }
 
-// SupportedModels is the deliberately small static route table. Build
-// OAuth capability snapshots remain authoritative; this table only describes the
-// routes this gateway serves itself.
-var SupportedModels = []ModelSpec{
-	{ID: "grok-composer-2.5-fast", Name: "Grok Composer 2.5 Fast", UpstreamModel: "grok-composer-2.5-fast", Upstream: UpstreamCLI},
-	{ID: "grok-4.5", Name: "Grok 4.5", UpstreamModel: "grok-4.5", Upstream: UpstreamCLI},
-	{ID: "grok-4.6", Name: "Grok 4.6", UpstreamModel: "grok-4.6", Upstream: UpstreamCLI},
-}
-
-var modelByID = func() map[string]ModelSpec {
-	out := make(map[string]ModelSpec, len(SupportedModels))
-	for _, m := range SupportedModels {
-		out[strings.ToLower(strings.TrimSpace(m.ID))] = m
-	}
-	return out
-}()
-
 func normalizeModelID(modelID string) string { return strings.ToLower(strings.TrimSpace(modelID)) }
 
-// ParseReasoningModelAlias resolves a supported <model>-<effort> alias. The
-// suffix is accepted only when the base model's provider contract advertises
-// that exact effort, so names such as grok-4.5-xhigh remain model-not-found.
-func ParseReasoningModelAlias(modelID string) (base, effort string, ok bool) {
+// ResolveModelAlias accepts only identifiers and effort menus observed upstream.
+// Exact IDs win even when their last component resembles an effort alias.
+func ResolveModelAlias(modelID string, catalogs ...[]modelcatalog.Profile) (ModelSpec, string, bool) {
 	id := normalizeModelID(modelID)
-	for _, candidate := range []string{"xhigh", "medium", "high", "low", "none"} {
-		if !strings.HasSuffix(id, "-"+candidate) {
+	profiles := modelcatalog.Aggregate(catalogs...)
+	makeSpec := func(p modelcatalog.Profile) ModelSpec {
+		return ModelSpec{ID: normalizeModelID(p.ModelID), Name: p.ModelID, UpstreamModel: p.ModelID, Upstream: UpstreamCLI}
+	}
+	for _, profile := range profiles {
+		if normalizeModelID(profile.ModelID) == id && id != "" {
+			return makeSpec(profile), "", true
+		}
+	}
+	for _, profile := range profiles {
+		if !profile.SupportsReasoningEffort {
 			continue
 		}
-		base = strings.TrimSuffix(id, "-"+candidate)
-		if modelpolicy.SupportsReasoningEffort(base, candidate) {
-			return base, candidate, true
+		for _, effort := range profile.ReasoningEfforts {
+			if id == normalizeModelID(profile.ModelID)+"-"+effort {
+				return makeSpec(profile), effort, true
+			}
 		}
-	}
-	return "", "", false
-}
-
-func ResolveModelAlias(modelID string) (ModelSpec, string, bool) {
-	id := normalizeModelID(modelID)
-	// Exact model IDs always win.
-	if m, exists := modelByID[id]; exists {
-		return m, "", true
-	}
-	if base, effort, exists := ParseReasoningModelAlias(id); exists {
-		m, found := modelByID[base]
-		return m, effort, found
 	}
 	return ModelSpec{}, "", false
 }
 
-func ResolveModel(modelID string) (ModelSpec, bool) {
-	m, _, ok := ResolveModelAlias(modelID)
+func ResolveModel(modelID string, catalogs ...[]modelcatalog.Profile) (ModelSpec, bool) {
+	m, _, ok := ResolveModelAlias(modelID, catalogs...)
 	return m, ok
 }
 

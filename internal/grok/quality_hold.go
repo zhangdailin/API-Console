@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"math"
 	"net/http"
 	"orchids-api/internal/chatwire"
@@ -402,14 +403,13 @@ type deferredResponseWriter struct {
 	body      bytes.Buffer
 	committed bool
 	discarded bool
-	flusher   http.Flusher
 }
 
 func newDeferredResponseWriter(target http.ResponseWriter) *deferredResponseWriter {
-	writer := &deferredResponseWriter{target: target, header: make(http.Header), status: http.StatusOK}
-	if flusher, ok := target.(http.Flusher); ok {
-		writer.flusher = flusher
+	if target != nil {
+		target = deadlineResponseWriter{ResponseWriter: target}
 	}
+	writer := &deferredResponseWriter{target: target, header: make(http.Header), status: http.StatusOK}
 	return writer
 }
 
@@ -468,14 +468,28 @@ func (d *deferredResponseWriter) Write(p []byte) (int, error) {
 // Flush is a no-op while held. After Commit it flushes the target so a released
 // SSE stream does not sit in the server's buffer.
 func (d *deferredResponseWriter) Flush() {
+	_ = d.FlushError()
+}
+
+func (d *deferredResponseWriter) FlushError() error {
 	if d == nil {
-		return
+		return nil
 	}
 	d.mu.Lock()
-	committed, discarded, flusher := d.committed, d.discarded, d.flusher
+	committed, discarded, target := d.committed, d.discarded, d.target
 	d.mu.Unlock()
-	if committed && !discarded && flusher != nil {
-		flusher.Flush()
+	if committed && !discarded && target != nil {
+		return http.NewResponseController(target).Flush()
+	}
+	return nil
+}
+
+func (d *deferredResponseWriter) MarkStreamFailure() {
+	d.mu.Lock()
+	committed, target := d.committed, d.target
+	d.mu.Unlock()
+	if committed {
+		middleware.MarkStreamFailure(target)
 	}
 }
 
@@ -496,7 +510,7 @@ func (d *deferredResponseWriter) Commit() error {
 	}
 	header, status, body := d.header, d.status, d.body.Bytes()
 	d.committed = true
-	target, flusher := d.target, d.flusher
+	target := d.target
 	d.mu.Unlock()
 
 	for key, values := range header {
@@ -507,12 +521,16 @@ func (d *deferredResponseWriter) Commit() error {
 	}
 	target.WriteHeader(status)
 	if len(body) > 0 {
-		if _, err := target.Write(body); err != nil {
+		n, err := target.Write(body)
+		if err != nil {
 			return err
 		}
+		if n != len(body) {
+			return io.ErrShortWrite
+		}
 	}
-	if flusher != nil {
-		flusher.Flush()
+	if err := http.NewResponseController(target).Flush(); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		return err
 	}
 	return nil
 }
@@ -597,7 +615,10 @@ func (p *parkedResponse) CommitTo(w http.ResponseWriter) error {
 	if len(p.body) == 0 {
 		return nil
 	}
-	_, err := w.Write(p.body)
+	n, err := (deadlineResponseWriter{ResponseWriter: w}).Write(p.body)
+	if err == nil && n != len(p.body) {
+		err = io.ErrShortWrite
+	}
 	return err
 }
 

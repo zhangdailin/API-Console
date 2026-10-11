@@ -6,11 +6,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"orchids-api/internal/channel"
@@ -109,7 +111,7 @@ type TracedResponseWriter struct {
 	tokenDetector  tokenSSEDetector
 	// streamFailed records that the handler already committed a 2xx status and
 	// then failed mid-stream, where the HTTP status can no longer say so.
-	streamFailed bool
+	streamFailed atomic.Bool
 }
 
 // NewTracedResponseWriter creates a new TracedResponseWriter.
@@ -134,12 +136,12 @@ func (w *TracedResponseWriter) ContentWriteAt() time.Time { return w.contentWrit
 // StreamFailed(); the HTTP status stays whatever was committed, because it
 // cannot be changed at that point.
 func (w *TracedResponseWriter) MarkStreamFailure() {
-	w.streamFailed = true
+	w.streamFailed.Store(true)
 	MarkStreamFailure(w.ResponseWriter)
 }
 
 // StreamFailed reports whether the response failed after committing a 2xx status.
-func (w *TracedResponseWriter) StreamFailed() bool { return w.streamFailed }
+func (w *TracedResponseWriter) StreamFailed() bool { return w.streamFailed.Load() }
 
 // streamFailureMarker is the capability a response writer exposes so a handler
 // can flag a mid-stream failure without importing the concrete writer type.
@@ -149,8 +151,16 @@ type streamFailureMarker interface{ MarkStreamFailure() }
 // handler was given. It is a no-op for writers that do not support it (a test
 // recorder, a direct call), so calling it is always safe.
 func MarkStreamFailure(w http.ResponseWriter) {
-	if marker, ok := w.(streamFailureMarker); ok && marker != nil {
-		marker.MarkStreamFailure()
+	for w != nil {
+		if marker, ok := w.(streamFailureMarker); ok {
+			marker.MarkStreamFailure()
+			return
+		}
+		unwrapper, ok := w.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			return
+		}
+		w = unwrapper.Unwrap()
 	}
 }
 
@@ -209,12 +219,19 @@ func (w *TracedResponseWriter) Write(b []byte) (int, error) {
 // Flush implements http.Flusher without losing the implicit HTTP 200 in the
 // request metrics. A Flush commits the response even when no body was written.
 func (w *TracedResponseWriter) Flush() {
+	_ = w.FlushError()
+}
+
+// FlushError keeps transport failures observable to protocol translators.
+func (w *TracedResponseWriter) FlushError() error {
 	if w.firstWriteAt.IsZero() {
 		w.firstWriteAt = time.Now()
 	}
-	if f, ok := w.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
+	err := http.NewResponseController(w.ResponseWriter).Flush()
+	if err != nil && !errors.Is(err, http.ErrNotSupported) {
+		w.MarkStreamFailure()
 	}
+	return err
 }
 
 // Unwrap lets http.ResponseController and capability checks reach the real

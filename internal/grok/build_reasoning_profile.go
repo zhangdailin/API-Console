@@ -2,14 +2,12 @@ package grok
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 
 	"encoding/json"
 
 	"orchids-api/internal/chatwire"
 	"orchids-api/internal/modelcatalog"
-	"orchids-api/internal/modelpolicy"
 	"orchids-api/internal/store"
 )
 
@@ -57,8 +55,7 @@ func buildCatalogProfile(acc *store.Account, upstreamModel string) (modelcatalog
 }
 
 // buildPayloadForAccount derives an attempt payload from immutable request
-// input, then applies the selected account's catalog profile. When old account
-// records have no profile, the static compatibility policy remains the fallback.
+// input, then applies only the selected account's observed catalog profile.
 func buildPayloadForAccount(immutable map[string]interface{}, acc *store.Account, upstreamModel string) (map[string]interface{}, error) {
 	payload, err := cloneBuildPayload(immutable)
 	if err != nil {
@@ -66,20 +63,6 @@ func buildPayloadForAccount(immutable map[string]interface{}, acc *store.Account
 	}
 	profile, found := buildCatalogProfile(acc, upstreamModel)
 	if !found {
-		reasoning, _ := payload["reasoning"].(map[string]interface{})
-		explicit := reasoning != nil && strings.TrimSpace(chatwire.ParseLooseStringAny(reasoning["effort"])) != ""
-		if explicit && strings.EqualFold(strings.TrimSpace(chatwire.ParseLooseStringAny(reasoning["effort"])), "none") &&
-			!modelpolicy.SupportsReasoningEffort(upstreamModel, "none") && modelpolicy.SupportsReasoningEffort(upstreamModel, "low") {
-			reasoning["effort"] = "low"
-		}
-		if !explicit && modelpolicy.SupportsReasoningEffort(upstreamModel, "low") {
-			if reasoning == nil {
-				reasoning = map[string]interface{}{}
-			}
-			reasoning["effort"] = "low"
-			payload["reasoning"] = reasoning
-		}
-		normalizeBuildReasoningEffort(payload, upstreamModel)
 		return payload, nil
 	}
 
@@ -90,11 +73,10 @@ func buildPayloadForAccount(immutable map[string]interface{}, acc *store.Account
 			if reasoning == nil {
 				reasoning = map[string]interface{}{}
 			}
-			if effortSupported(profile.ReasoningEfforts, "low") {
-				reasoning["effort"] = "low"
-			} else if profile.DefaultReasoningEffort != "" {
+			if profile.DefaultReasoningEffort != "" {
 				reasoning["effort"] = profile.DefaultReasoningEffort
 			}
+
 			payload["reasoning"] = reasoning
 		}
 		return payload, nil
@@ -138,10 +120,6 @@ func buildPayloadForAccount(immutable map[string]interface{}, acc *store.Account
 	reasoning["effort"] = normalized
 	payload["reasoning"] = reasoning
 	return payload, nil
-}
-
-func effortSupported(efforts []string, target string) bool {
-	return slices.ContainsFunc(efforts, func(effort string) bool { return strings.EqualFold(strings.TrimSpace(effort), target) })
 }
 
 func replacePayload(dst map[string]interface{}, src map[string]interface{}) {

@@ -32,6 +32,7 @@ func TestGrokPublicCatalogUsesConfiguredModelIDs(t *testing.T) {
 		&store.Model{Channel: "Grok", ModelID: "grok-4.7-offline", Status: store.ModelStatusOffline},
 	)
 	rec := httptest.NewRecorder()
+	observeTestGrokCatalog(t, s)
 	h.HandleModels(rec, httptest.NewRequest(http.MethodGet, "/grok/v1/models", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body)
@@ -59,6 +60,7 @@ func TestPublicModelsPublishExternalIDs(t *testing.T) {
 	)
 
 	rec := httptest.NewRecorder()
+	observeTestGrokCatalog(t, s)
 	h.HandleModels(rec, httptest.NewRequest(http.MethodGet, "http://example.com/grok/v1/models", nil))
 	testutil.Equal(t, rec.Code, http.StatusOK)
 	var payload struct {
@@ -114,4 +116,29 @@ func TestHandleModelsPublishesConservativeEnabledBuildProfile(t *testing.T) {
 	if got.ContextLength != 256000 || got.MaxInputTokens != 256000 || got.MaxOutputTokens != 64000 {
 		t.Fatalf("dynamic budgets=%+v", *got)
 	}
+}
+
+func TestGrokCatalogFiltersUnobservedDisabledAndBoundModels(t *testing.T) {
+	h, s, _ := setupModelValidationHandler(t)
+	ctx := context.Background()
+	active := &store.Account{AccountType: "grok", Enabled: true, GrokModels: []string{"future-model", "grok-composer-2.5-fast"}, GrokModelCatalog: []modelcatalog.Profile{{ModelID: "future-model", Name: "Upstream Future", ReasoningEfforts: []string{"balanced"}, DefaultReasoningEffort: "balanced"}}}
+	disabled := &store.Account{AccountType: "grok", Enabled: false, GrokModels: []string{"disabled-only"}}
+	testutil.NoError(t, s.CreateAccount(ctx, active))
+	testutil.NoError(t, s.CreateAccount(ctx, disabled))
+	publishModel(t, s, &store.Model{Channel: "grok", ModelID: "future-model"}, &store.Model{Channel: "grok", ModelID: "grok-composer-2.5-fast"}, &store.Model{Channel: "grok", ModelID: "disabled-only"}, &store.Model{Channel: "grok", ModelID: "bound-alias", UpstreamModel: "future-model", BoundAccountIDs: []int64{disabled.ID}})
+	rec := httptest.NewRecorder()
+	h.HandleModels(rec, httptest.NewRequest(http.MethodGet, "/grok/v1/models", nil))
+	testutil.Equal(t, rec.Code, http.StatusOK)
+	var payload PublicModelsListResponse
+	testutil.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+	testutil.Equal(t, len(payload.Data), 1)
+	testutil.Equal(t, payload.Data[0].ID, "future-model")
+	testutil.Equal(t, payload.Data[0].Name, "Upstream Future")
+	codex := newCodexModelCatalog(payload.Data)
+	testutil.Equal(t, codex.Models[0].SupportedReasoningLevels[0].Effort, "balanced")
+	active.Enabled = false
+	testutil.NoError(t, s.UpdateAccount(ctx, active))
+	rec = httptest.NewRecorder()
+	h.HandleModelByID(rec, httptest.NewRequest(http.MethodGet, "/grok/v1/models/future-model", nil))
+	testutil.Equal(t, rec.Code, http.StatusNotFound)
 }

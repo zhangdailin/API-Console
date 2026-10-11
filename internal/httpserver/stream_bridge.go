@@ -2,9 +2,12 @@ package httpserver
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"sync"
+
+	"orchids-api/internal/middleware"
 )
 
 // CheckedStreamWriter makes write failures visible to translators whose SSE
@@ -13,6 +16,17 @@ import (
 type CheckedStreamWriter struct {
 	Target io.Writer
 	Err    error
+	frame  []byte
+}
+
+func (w *CheckedStreamWriter) fail(err error) {
+	if err == nil || w.Err != nil {
+		return
+	}
+	w.Err = err
+	if target, ok := w.Target.(http.ResponseWriter); ok {
+		middleware.MarkStreamFailure(target)
+	}
 }
 
 // Write forwards the write and remembers a failure or a short write.
@@ -24,12 +38,35 @@ func (w *CheckedStreamWriter) Write(data []byte) (int, error) {
 	if err == nil && n != len(data) {
 		err = io.ErrShortWrite
 	}
-	w.Err = err
+	w.fail(err)
 	return n, err
+}
+
+// WriteSSE reuses frame storage until the synchronous Write has returned.
+func (w *CheckedStreamWriter) WriteSSE(event string, data []byte) error {
+	if w.Err != nil {
+		return w.Err
+	}
+	w.frame = AppendSSEFrame(w.frame[:0], event, data)
+	_, err := w.Write(w.frame)
+	if cap(w.frame) > 64<<10 {
+		w.frame = nil
+	}
+	return err
 }
 
 // Flush flushes the target when it supports it.
 func (w *CheckedStreamWriter) Flush() {
+	if w.Err != nil {
+		return
+	}
+	if target, ok := w.Target.(http.ResponseWriter); ok {
+		err := http.NewResponseController(target).Flush()
+		if !errors.Is(err, http.ErrNotSupported) {
+			w.fail(err)
+		}
+		return
+	}
 	if f, ok := w.Target.(http.Flusher); ok {
 		f.Flush()
 	}
@@ -67,6 +104,14 @@ func StreamThroughChat(req *http.Request, chat http.HandlerFunc, consume func(in
 	defer cancel()
 	reader, writer := io.Pipe()
 	defer reader.Close()
+	// Cancellation must interrupt consume even when the producer is waiting
+	// for upstream and is not writing to the pipe.
+	stop := context.AfterFunc(ctx, func() {
+		// Closing the write end interrupts both reads and writes while letting
+		// the consumer observe the cancellation cause instead of ErrClosedPipe.
+		_ = writer.CloseWithError(context.Cause(ctx))
+	})
+	defer stop()
 	streamWriter := newStreamingChatWriter(writer)
 	go func() {
 		defer writer.Close()
