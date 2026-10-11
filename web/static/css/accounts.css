@@ -2,19 +2,21 @@
 .accounts-table tbody tr:last-child td { border-bottom: 0; }
 
 .account-tier-tag {
-  display: inline-flex;
+  display: inline-block;
   align-items: center;
   gap: var(--space-1);
-  height: 22px;
-  padding: 0 var(--space-2);
+  min-height: 22px;
+  max-width: 100%;
+  padding: 2px var(--space-2);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-pill);
   background: var(--idle-soft);
   color: var(--text-soft);
   font-size: 0.72rem;
   font-weight: 600;
-  line-height: 1;
-  white-space: nowrap;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .account-tier-tag { color: var(--text-soft); }
@@ -56,6 +58,8 @@
 
 .accounts-table {
   width: 100%;
+  min-width: 1280px;
+  table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 0.82rem;
@@ -74,7 +78,7 @@
 
 .accounts-actions .accounts-action-cluster.is-danger { background: var(--bad-soft); }
 
-.account-cooldown-until { white-space: nowrap; }
+.account-cooldown-until { white-space: normal; line-height: 1.5; }
 
 .accounts-table .col-check { width: 40px; }
 
@@ -128,12 +132,18 @@
 
 .accounts-table .col-tier { width: 132px; }
 
-.accounts-table .col-quota { width: 148px; }
+.accounts-table .col-token { width: 240px; }
 
-.accounts-table .col-status { width: 140px; }
+.accounts-table .col-quota { width: 180px; }
+
+.accounts-table .col-quota > span { display: block; line-height: 1.5; }
+
+.accounts-table .col-quota > span:first-child { white-space: nowrap; }
+
+.accounts-table .col-status { width: 190px; }
 
 .accounts-table .col-tokens {
-  width: 118px;
+  width: 140px;
   text-align: right;
   font-family: var(--font-mono);
   font-size: 0.76rem;
@@ -148,13 +158,14 @@
   font-size: 0.74rem;
 }
 
-.accounts-table .col-actions { width: 190px; text-align: right; }
+.accounts-table .col-actions { width: 166px; text-align: right; }
 
 .account-identity {
   display: flex;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+  max-width: 100%;
 }
 
 .account-identity-primary {
@@ -288,4 +299,14 @@
 .accounts-table .col-usage { width: 150px; }
 
 .accounts-table .col-actions { width: 270px; }
+}
+
+@media (max-width: 640px) {
+  .accounts-panel .table-wrap { max-height: none; overflow: visible; }
+  .accounts-table.responsive-table { min-width: 0; table-layout: auto; }
+  .accounts-table .account-identity { width: 100%; }
+  .accounts-table .account-identity-sub { flex-wrap: wrap; }
+  .accounts-table .account-identity-token { max-width: 100%; }
+  .accounts-table .col-quota > span:first-child { white-space: normal; }
+  .accounts-row-actions { flex-wrap: wrap; }
 }

@@ -9,10 +9,9 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
-	"net/http/httptrace"
 	"orchids-api/internal/httpclient"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"encoding/json"
@@ -34,9 +33,8 @@ const (
 	defaultCLIBaseURL = "https://cli-chat-proxy.grok.com/v1"
 	// cli-chat-proxy rejects generic boolean token-auth headers. These values
 	// mirror the official Grok shell identity used with Build OAuth tokens.
-	defaultCLITokenAuth             = "xai-grok-cli"
-	defaultCLIClientMode            = "headless"
-	defaultCLIResponseHeaderTimeout = 30 * time.Second
+	defaultCLITokenAuth  = "xai-grok-cli"
+	defaultCLIClientMode = "headless"
 )
 
 var errCLIResponseHeaderTimeout = fmt.Errorf("grok upstream response header timeout")
@@ -52,7 +50,10 @@ type CLIClient struct {
 
 // NewCLIClient builds a CLI upstream client from configuration.
 func NewCLIClient(cfg *config.Config) *CLIClient {
-	client := &CLIClient{cfg: cfg, responseHeaderTimeout: defaultCLIResponseHeaderTimeout}
+	// The ingress budget still bounds all attempts together. This per-attempt
+	// guard also protects callers outside the ingress middleware, without an
+	// independent 30-second limit cutting short the configured generation wait.
+	client := &CLIClient{cfg: cfg, responseHeaderTimeout: cfg.FirstGenerationTimeout()}
 	// Shared browser client keeps the utls Chrome TLS fingerprint; the CLI
 	// upstream tolerates browser-like TLS even though headers are CLI identity.
 	client.httpClient = httpclient.GetSharedBrowserHTTPClientWithLimits("cli|"+httpclient.GenerateProxyKeyFromConfig(cfg), cfg.GrokRequestTimeout(), 0, httpclient.ProxyFuncFromConfig(cfg), cfg)
@@ -520,14 +521,19 @@ func (c *CLIClient) request(ctx context.Context, acc *store.Account, method, end
 	requestCtx := ctx
 	cancelRequest := func() {}
 	var headerTimer *time.Timer
-	var headerTimedOut atomic.Bool
+	var headerMu sync.Mutex
+	headerFinished, headerTimedOut := false, false
 	if method == http.MethodPost && strings.HasSuffix(strings.TrimRight(endpoint, "/"), "/responses") && c.responseHeaderTimeout > 0 {
 		var cancel context.CancelFunc
 		requestCtx, cancel = context.WithCancel(ctx)
 		cancelRequest = cancel
-		headerTimer = time.AfterFunc(c.responseHeaderTimeout, func() { headerTimedOut.Store(true); cancel() })
-		requestCtx = httptrace.WithClientTrace(requestCtx, &httptrace.ClientTrace{
-			GotFirstResponseByte: func() { headerTimer.Stop() },
+		headerTimer = time.AfterFunc(c.responseHeaderTimeout, func() {
+			headerMu.Lock()
+			defer headerMu.Unlock()
+			if !headerFinished {
+				headerTimedOut = true
+				cancel()
+			}
 		})
 	}
 	req, err := http.NewRequestWithContext(requestCtx, method, endpoint, bytes.NewReader(body))
@@ -547,11 +553,16 @@ func (c *CLIClient) request(ctx context.Context, acc *store.Account, method, end
 	resp, err := doUpstreamHTTP(req, func(req *http.Request) (*http.Response, error) {
 		return c.doCLIRequest(requestCtx, acc, req)
 	}, c.cfg.GrokStreamIdleTimeoutFor(), upstreamIdleBuildSemantic)
+	headerMu.Lock()
+	headerFinished = true
 	if headerTimer != nil {
 		headerTimer.Stop()
 	}
+	timedOut := headerTimedOut
+	headerMu.Unlock()
+	util.FinishHTTPPhases(req)
 	attempt.Response(resp, err)
-	if headerTimedOut.Load() {
+	if timedOut {
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()
 		}

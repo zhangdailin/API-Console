@@ -459,15 +459,21 @@ func (h *Handler) serveNativeChat(ctx context.Context, w http.ResponseWriter, re
 	}
 	provider, endpoint, model := ProviderBuild, h.cliBaseURL()+"/responses", spec.UpstreamModel
 	ctx = withReasoningDiagnostics(ctx, payload)
-	openNext := func(excluded []int64) (*chatAccountSession, error) {
-		return h.openCLIAccountSession(ctx, excluded, model)
-	}
 	immutable, err := cloneBuildPayload(payload)
 	if err != nil {
 		writeGrokUpstreamError(w, err)
 		return
 	}
+	policy := h.qualityHoldPolicy()
+	replayUnsafe := qualityRequestReplayUnsafe(req)
+	remaining := h.accountSwitchBudget()
+	used := make([]int64, 0, remaining)
+	openNext := func(_ []int64) (*chatAccountSession, error) {
+		return h.openCLIAccountSession(ctx, used, model)
+	}
 	request := func() (*http.Response, error) {
+		remaining--
+		used = append(used, sess.acc.ID)
 		// Apply the selected account's model menu on every attempt, including
 		// quality retries. Derive it from the original request so one account's
 		// defaults or aliases never become the next account's requested effort.
@@ -500,19 +506,15 @@ func (h *Handler) serveNativeChat(ctx context.Context, w http.ResponseWriter, re
 	// Quality hold: a withheld turn never reached the client, so the request can
 	// be retried on another account. The budget is separate from (and smaller
 	// than) the transport retry budget, because every held attempt costs a full
-	// upstream generation.
-	policy := h.qualityHoldPolicy()
-	replayUnsafe := qualityRequestReplayUnsafe(req)
-	used := make([]int64, 0, policy.MaxAttempts+defaultAccountSwitchBudget)
+	// upstream generation. Both kinds of retry consume the same account-attempt
+	// budget, so their limits cannot multiply.
 	var parked *parkedResponse
 	for attempt := 0; ; attempt++ {
-		if sess.acc != nil && sess.acc.ID != 0 {
-			used = append(used, sess.acc.ID)
+		limit := remaining
+		if replayUnsafe {
+			limit = 1
 		}
-		// Quality retries already switch to the next account below. Restrict this
-		// inner transport attempt to one account so the two bounded policies do not
-		// multiply into as many as 6×100 full upstream generations.
-		resp, err := h.retryWithAccountSwitchLimit(ctx, sess, 1500*time.Millisecond, request, openNext, nil, 1)
+		resp, err := h.retryWithAccountSwitchLimit(ctx, sess, 1500*time.Millisecond, request, openNext, nil, limit)
 		body, withheld := h.finishUpstreamChat(ctx, w, req, sess, logger, provider, endpoint, func() http.Header {
 			return h.cliHeaders(sess.acc, sess.token)
 		}, payload, resp, err)
@@ -522,13 +524,14 @@ func (h *Handler) serveNativeChat(ctx context.Context, w http.ResponseWriter, re
 		parked = body
 		action := boundQualityRetry(
 			decideQualityRetry(qualityWithhold, attempt, policy.MaxAttempts, policy.OnExhausted),
-			attempt+1 < policy.MaxAttempts && !replayUnsafe,
+			attempt+1 < policy.MaxAttempts && remaining > 0 && ctx.Err() == nil && !replayUnsafe,
 			policy.OnExhausted,
 		)
 		if action != qualityActionRetry {
 			h.deliverParkedQualityTurn(w, parked, action)
 			return
 		}
+		sess.Close()
 		next, switchErr := openNext(used)
 		if switchErr != nil {
 			// No other account can serve it: deliver the held turn instead of
@@ -572,10 +575,7 @@ func (h *Handler) retryWithAccountSwitch(ctx context.Context, sess *chatAccountS
 }
 
 func (h *Handler) retryWithAccountSwitchLimit(ctx context.Context, sess *chatAccountSession, switchPace time.Duration, doRequest func() (*http.Response, error), openNext func(used []int64) (*chatAccountSession, error), onSwitch func() error, hardLimit int) (*http.Response, error) {
-	maxAttempts := defaultAccountSwitchBudget
-	if h != nil && h.configSnapshot() != nil && h.configSnapshot().AccountSwitchCount > 0 {
-		maxAttempts = min(h.configSnapshot().AccountSwitchCount, maxAccountSwitchBudget)
-	}
+	maxAttempts := h.accountSwitchBudget()
 	if hardLimit > 0 && maxAttempts > hardLimit {
 		maxAttempts = hardLimit
 	}
@@ -583,6 +583,9 @@ func (h *Handler) retryWithAccountSwitchLimit(ctx context.Context, sess *chatAcc
 	used := make([]int64, 0)
 	attempt := 0
 	for {
+		if ctx.Err() != nil {
+			return nil, context.Cause(ctx)
+		}
 		attempt++
 		if sess.acc != nil && sess.acc.ID != 0 {
 			used = append(used, sess.acc.ID)
@@ -596,6 +599,9 @@ func (h *Handler) retryWithAccountSwitchLimit(ctx context.Context, sess *chatAcc
 		h.auditAttemptDiagnostic(ctx, sess.acc, provider, attempt, started, err, "account_attempt", resp, nil, "")
 		if err == nil {
 			return resp, nil
+		}
+		if ctx.Err() != nil {
+			return nil, context.Cause(ctx)
 		}
 		if markAllGrokAccountStatuses(err) {
 			h.markAccountStatus(ctx, sess.acc, err)
@@ -613,7 +619,7 @@ func (h *Handler) retryWithAccountSwitchLimit(ctx context.Context, sess *chatAcc
 			pace = 0
 		}
 		if !util.SleepWithContext(ctx, pace) {
-			return nil, ctx.Err()
+			return nil, context.Cause(ctx)
 		}
 		next, switchErr := openNext(used)
 		if switchErr != nil {
@@ -629,6 +635,13 @@ func (h *Handler) retryWithAccountSwitchLimit(ctx context.Context, sess *chatAcc
 			}
 		}
 	}
+}
+
+func (h *Handler) accountSwitchBudget() int {
+	if cfg := h.configSnapshot(); cfg != nil && cfg.AccountSwitchCount > 0 {
+		return min(cfg.AccountSwitchCount, maxAccountSwitchBudget)
+	}
+	return defaultAccountSwitchBudget
 }
 
 func (h *Handler) collectBuildChat(w http.ResponseWriter, req *chatwire.Request, body io.Reader) (outcome chatOutcome) {

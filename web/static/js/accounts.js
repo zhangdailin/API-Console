@@ -678,7 +678,7 @@ function renderAccounts() {
   const headers = [
     { label: "", className: "col-check" },
     { label: "ID", className: "col-id" },
-    { label: "账号" },
+    { label: "账号", className: "col-token" },
     { label: "等级", className: "col-tier" },
     ...(quotaColumnVisible ? [{ label: "配额", className: "col-quota" }] : []),
     { label: "状态", className: "col-status" },

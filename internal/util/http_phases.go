@@ -10,6 +10,7 @@ import (
 )
 
 type httpPhaseObserverKey struct{}
+type httpPhaseFinishKey struct{}
 type HTTPPhaseObserver func(map[string]int64)
 
 func WithHTTPPhaseObserver(ctx context.Context, observer HTTPPhaseObserver) context.Context {
@@ -27,6 +28,21 @@ func TraceHTTPPhases(req *http.Request) *http.Request {
 	started := time.Now()
 	starts := map[string]time.Time{}
 	values := map[string]int64{}
+	var published bool
+	publish := func() {
+		mu.Lock()
+		if published {
+			mu.Unlock()
+			return
+		}
+		published = true
+		snapshot := make(map[string]int64, len(values))
+		for k, v := range values {
+			snapshot[k] = v
+		}
+		mu.Unlock()
+		observer(snapshot)
+	}
 	start := func(key string) { mu.Lock(); starts[key] = time.Now(); mu.Unlock() }
 	end := func(key, name string) {
 		mu.Lock()
@@ -58,13 +74,18 @@ func TraceHTTPPhases(req *http.Request) *http.Request {
 		GotFirstResponseByte: func() {
 			mu.Lock()
 			values["response_headers_ms"] = time.Since(started).Milliseconds()
-			snapshot := make(map[string]int64, len(values))
-			for k, v := range values {
-				snapshot[k] = v
-			}
 			mu.Unlock()
-			observer(snapshot)
+			publish()
 		},
 	}
-	return req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
+	ctx := context.WithValue(req.Context(), httpPhaseFinishKey{}, publish)
+	return req.WithContext(httptrace.WithClientTrace(ctx, trace))
+}
+
+// FinishHTTPPhases publishes completed connection stages when an attempt fails
+// before headers. A successful header snapshot is never counted twice.
+func FinishHTTPPhases(req *http.Request) {
+	if finish, ok := req.Context().Value(httpPhaseFinishKey{}).(func()); ok {
+		finish()
+	}
 }

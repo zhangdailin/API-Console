@@ -2,6 +2,7 @@ package grok
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"orchids-api/internal/config"
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
+	"orchids-api/internal/util"
 )
 
 func headerTimeoutTestClient(t *testing.T, server *httptest.Server, timeout time.Duration) (*CLIClient, *store.Account) {
@@ -25,6 +27,43 @@ func headerTimeoutTestClient(t *testing.T, server *httptest.Server, timeout time
 		OAuthExpiresAt:   time.Now().Add(time.Hour),
 	}
 	return client, account
+}
+
+func TestCLIResponseWaitUsesConfiguredGenerationBudget(t *testing.T) {
+	for _, seconds := range []int{0, 180, -1} {
+		cfg := &config.Config{FirstTokenTimeoutSeconds: seconds}
+		client := NewCLIClient(cfg)
+		testutil.Equal(t, client.responseHeaderTimeout, cfg.FirstGenerationTimeout())
+	}
+}
+
+func TestCLIHeaderWaitHonorsSharedDeadlineAndRecordsPartialPhases(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		select {
+		case <-r.Context().Done():
+		case <-time.After(time.Second):
+		}
+	}))
+	defer server.Close()
+	client, account := headerTimeoutTestClient(t, server, time.Second)
+	ctx, cancel := util.WithFirstGenerationTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	var samples []map[string]int64
+	ctx = util.WithHTTPPhaseObserver(ctx, func(v map[string]int64) { samples = append(samples, v) })
+	_, err := client.request(ctx, account, http.MethodPost, server.URL+"/v1/responses", []byte(`{}`), nil)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("lost shared deadline cause: %v", err)
+	}
+	if len(samples) != 1 {
+		t.Fatalf("partial phase samples = %d, want 1", len(samples))
+	}
+	if _, ok := samples[0]["connection_wait_ms"]; !ok {
+		t.Fatal("completed connection wait was lost on timeout")
+	}
+	if _, ok := samples[0]["response_headers_ms"]; ok {
+		t.Fatal("fabricated response headers for timed out request")
+	}
 }
 
 func TestCLIResponsesHeaderTimeoutSwitchesAccount(t *testing.T) {

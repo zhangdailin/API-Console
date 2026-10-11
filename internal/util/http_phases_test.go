@@ -14,14 +14,21 @@ func TestHTTPPhasesWithoutCaptureAndReusedConnection(t *testing.T) {
 	client := server.Client()
 	for i := 0; i < 2; i++ {
 		var phases map[string]int64
-		ctx := WithHTTPPhaseObserver(context.Background(), func(v map[string]int64) { phases = v })
+		var samples int
+		ctx := WithHTTPPhaseObserver(context.Background(), func(v map[string]int64) { phases = v; samples++ })
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
-		resp, err := client.Do(TraceHTTPPhases(req))
+		req = TraceHTTPPhases(req)
+		resp, err := client.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
 		io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
+		FinishHTTPPhases(req)
+		FinishHTTPPhases(req)
+		if samples != 1 {
+			t.Fatalf("header snapshot counted %d times", samples)
+		}
 		if _, ok := phases["response_headers_ms"]; !ok {
 			t.Fatal("missing header measurement")
 		}

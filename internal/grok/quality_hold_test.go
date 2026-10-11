@@ -2,11 +2,13 @@ package grok
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"orchids-api/internal/chatwire"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -499,4 +501,110 @@ func TestServeNativeChatStreamsThroughWhenHoldDisabled(t *testing.T) {
 
 	testutil.Equal(t, rec.Code, http.StatusOK)
 	testutil.MustContain(t, rec.Body.String(), "status loop")
+}
+
+func TestNativeChatTransportAndQualityRetryShareBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		responses  []string
+		budget     int
+		unsafe     bool
+		wantCalls  int32
+		wantStatus int
+		wantAnswer string
+	}{
+		{"timeout switches account", []string{"timeout", "healthy"}, 3, false, 2, 200, "healthy answer"},
+		{"transport then quality then success", []string{"503", "degraded", "healthy"}, 3, false, 3, 200, "healthy answer"},
+		{"mixed failures exhaust total budget", []string{"503", "degraded", "503", "healthy"}, 3, false, 3, 502, ""},
+		{"one attempt bounds quality too", []string{"degraded", "healthy"}, 1, false, 1, 200, "status loop"},
+		{"hosted tool cannot replay", []string{"timeout", "healthy"}, 3, true, 1, 504, ""},
+		{"visible partial output cannot replay", []string{"partial", "healthy"}, 3, false, 1, 200, "partial answer"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			healthy := healthyUpstream(t)
+			defer healthy.Close()
+			degraded := degradedUpstream(t)
+			defer degraded.Close()
+			var calls atomic.Int32
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				n := int(calls.Add(1)) - 1
+				if n >= len(tc.responses) {
+					w.WriteHeader(500)
+					return
+				}
+				switch tc.responses[n] {
+				case "timeout":
+					_, _ = io.Copy(io.Discard, r.Body)
+					select {
+					case <-r.Context().Done():
+					case <-time.After(time.Second):
+					}
+				case "503":
+					w.WriteHeader(503)
+				case "degraded":
+					degraded.Config.Handler.ServeHTTP(w, r)
+				case "healthy":
+					healthy.Config.Handler.ServeHTTP(w, r)
+				case "partial":
+					w.Header().Set("Content-Type", "text/event-stream")
+					_, _ = io.WriteString(w, "data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"thinking\"}\n\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial answer\"}\n\n")
+				}
+			}))
+			defer upstream.Close()
+			h, database, _ := setupValidationHandler(t)
+			ctx := context.Background()
+			var first *store.Account
+			for i := 0; i < 4; i++ {
+				acc := &store.Account{AccountType: "grok", Enabled: true, CredentialType: "oauth", GrokProvider: ProviderBuild, Weight: 1,
+					OAuthAccessToken: fmt.Sprintf("jwt-user-%d", i), GrokModels: []string{"grok-4.5"}, GrokModelsSyncedAt: time.Now()}
+				testutil.NoError(t, database.CreateAccount(ctx, acc))
+				if first == nil {
+					first = acc
+				}
+			}
+			h.cfg = &config.Config{GrokCLIBaseURL: upstream.URL + "/v1", AccountSwitchCount: tc.budget}
+			h.cliClient = NewCLIClient(h.cfg)
+			h.cliClient.SetAccountStore(database)
+			h.cliClient.httpClient = upstream.Client()
+			h.cliClient.oauth.httpClient = upstream.Client()
+			h.cliClient.responseHeaderTimeout = 50 * time.Millisecond
+			sess, err := h.openCLIAccountSessionByID(ctx, first.ID, "grok-4.5")
+			testutil.NoError(t, err)
+			defer sess.Close()
+			spec, _, ok := ResolveModelAlias("grok-4.5")
+			testutil.True(t, ok)
+			effort := "high"
+			req := &chatwire.Request{Model: "grok-4.5", Stream: true, ReasoningEffort: &effort, Messages: []chatwire.Message{{Role: "user", Content: "hello"}}}
+			if tc.unsafe {
+				req.WebSearchOptions = map[string]interface{}{}
+			}
+			rec := httptest.NewRecorder()
+			h.serveNativeChat(ctx, rec, req, spec, sess, nil, true)
+			sess.Close()
+			testutil.Equal(t, calls.Load(), tc.wantCalls)
+			testutil.Equal(t, rec.Code, tc.wantStatus)
+			if tc.wantAnswer != "" {
+				testutil.MustContain(t, rec.Body.String(), tc.wantAnswer)
+			}
+			testutil.Equal(t, h.connTracker.GetCount(first.ID), int64(0))
+		})
+	}
+}
+
+func TestAccountRetryStopsOnSharedCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	h := &Handler{cfg: &config.Config{AccountSwitchCount: 3}}
+	sess := &chatAccountSession{acc: &store.Account{ID: 1}}
+	var attempts, switches int
+	_, err := h.retryWithAccountSwitch(ctx, sess, 0, func() (*http.Response, error) {
+		attempts++
+		cancel(context.DeadlineExceeded)
+		return nil, errCLIResponseHeaderTimeout
+	}, func([]int64) (*chatAccountSession, error) {
+		switches++
+		return nil, fmt.Errorf("must not switch")
+	}, nil)
+	testutil.Equal(t, err, context.DeadlineExceeded)
+	testutil.Equal(t, attempts, 1)
+	testutil.Equal(t, switches, 0)
 }
