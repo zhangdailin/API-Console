@@ -124,7 +124,7 @@ func (s *clineThinkingSplitter) feed(content string, final bool, emitReasoning, 
 }
 
 // consumeStream parses the SSE body and forwards deltas to the caller.
-func consumeStream(body io.Reader, _ bool, onMessage func(upstream.SSEMessage)) (streamResult, error) {
+func consumeStream(body io.Reader, toolsEnabled bool, onMessage func(upstream.SSEMessage)) (streamResult, error) {
 	scanner := bufio.NewScanner(body)
 	buffer := util.AcquireStreamBuffer()
 	defer util.ReleaseStreamBuffer(buffer)
@@ -132,9 +132,15 @@ func consumeStream(body io.Reader, _ bool, onMessage func(upstream.SSEMessage)) 
 	result := streamResult{}
 	tools := util.NewToolCallAccumulator()
 	var thinkingSplitter clineThinkingSplitter
+	var controlRecovery controlToolRecovery
+	controlRecovery.disabled = !toolsEnabled
 	sawFinish := false
 
-	emitText := func(text string) { upstream.EmitTextDelta(onMessage, text, &result.SawMeaningfulEvent) }
+	emitText := func(text string) {
+		if output, captured := controlRecovery.capture(text); !captured {
+			upstream.EmitTextDelta(onMessage, output, &result.SawMeaningfulEvent)
+		}
+	}
 
 	emitReasoning := func(reasoning string) {
 		if reasoning == "" {
@@ -153,8 +159,14 @@ func consumeStream(body io.Reader, _ bool, onMessage func(upstream.SSEMessage)) 
 		}
 	}
 
-	emitTools := func() {
+	emitTools := func() error {
+		text, err := controlRecovery.resolve()
+		if err != nil {
+			return err
+		}
+		upstream.EmitTextDelta(onMessage, text, &result.SawMeaningfulEvent)
 		upstream.EmitToolCalls(onMessage, tools.CompleteAll(), &result.SawMeaningfulEvent, &result.ToolCallCount)
+		return nil
 	}
 
 	for scanner.Scan() {
@@ -207,18 +219,23 @@ func consumeStream(body io.Reader, _ bool, onMessage func(upstream.SSEMessage)) 
 		if reasoning != "" {
 			emitReasoning(reasoning)
 		}
-		if delta.Content != "" {
-			thinkingSplitter.feed(delta.Content, false, emitReasoning, emitText)
-		}
 		for _, call := range delta.ToolCalls {
 			result.SawMeaningfulEvent = true
-			tools.Add(call.Index, call.ID, call.Function.Name, call.Function.Arguments)
+			state := tools.Add(call.Index, call.ID, call.Function.Name, call.Function.Arguments)
+			if toolsEnabled {
+				controlRecovery.observe(state)
+			}
+		}
+		if delta.Content != "" {
+			thinkingSplitter.feed(delta.Content, false, emitReasoning, emitText)
 		}
 		finishReason := strings.TrimSpace(chunk.Choices[0].FinishReason)
 		if finishReason != "" {
 			result.UpstreamFinishReason = finishReason
 			sawFinish = true
-			emitTools()
+			if err := emitTools(); err != nil {
+				return result, err
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -230,7 +247,9 @@ func consumeStream(body io.Reader, _ bool, onMessage func(upstream.SSEMessage)) 
 		return result, ErrStreamTruncated
 	}
 	thinkingSplitter.feed("", true, emitReasoning, emitText)
-	emitTools()
+	if err := emitTools(); err != nil {
+		return result, err
+	}
 	return result, nil
 }
 
