@@ -3,10 +3,13 @@ package opsagg
 import (
 	"context"
 	"orchids-api/internal/testutil"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/alicebob/miniredis/v2/server"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -195,13 +198,22 @@ func TestModelStatsFromBuckets_MixedMinutesAndMissingDuration(t *testing.T) {
 	buckets, err := agg.Range(ctx, "grok", at, at.Add(2*time.Minute))
 	testutil.Equal(t, err, nil)
 	testutil.Equal(t, len(buckets), 3)
-	before := mini.CommandCount()
+	var hashReads, listReads atomic.Int64
+	mini.Server().SetPreHook(func(_ *server.Peer, command string, _ ...string) bool {
+		switch {
+		case strings.EqualFold(command, "HGETALL"):
+			hashReads.Add(1)
+		case strings.EqualFold(command, "LRANGE"):
+			listReads.Add(1)
+		}
+		return false
+	})
 	stats, err := agg.ModelStatsFromBucketsChecked(ctx, "grok", buckets)
 	testutil.NoError(t, err, "ModelStatsFromBucketsChecked() error = %v")
 	// Three HGETALLs plus two LRANGEs per present (minute, model) pair:
 	// alpha; alpha+beta; alpha+gamma = five pairs, not 3*3 models.
-	got, want := mini.CommandCount()-before, 3+2*5
-	testutil.Falsef(t, got != want, "model stats Redis reads=%d, want %d (3 hashes + 10 lists)", got, want)
+	testutil.Equal(t, hashReads.Load(), int64(3))
+	testutil.Equal(t, listReads.Load(), int64(2*5))
 	testutil.Equal(t, len(stats), 3)
 	byName := make(map[string]ModelStats, len(stats))
 	for _, stat := range stats {
