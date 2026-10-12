@@ -76,6 +76,9 @@ func (r *Renderer) RenderIndex(w http.ResponseWriter, req *http.Request, cfg *co
 		ActiveTab:    activeTab,
 		AssetVersion: web.AssetVersion(),
 	}
+	if activeTab == "accounts" {
+		data.LoginProviders = accountLoginProviders
+	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 

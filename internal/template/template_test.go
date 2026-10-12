@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
@@ -12,6 +13,28 @@ import (
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
 )
+
+func TestAccountLoginTemplateRendersEveryProviderOnce(t *testing.T) {
+	renderer, err := NewRenderer()
+	testutil.NoError(t, err)
+	recorder := httptest.NewRecorder()
+	err = renderer.RenderIndex(recorder, httptest.NewRequest(http.MethodGet, "/?tab=accounts", nil), &config.Config{AdminPath: "/admin"}, nil)
+	testutil.NoError(t, err)
+	page := recorder.Body.String()
+	for _, provider := range []string{"workbuddy", "qoder", "cline", "grok"} {
+		if got := strings.Count(page, `data-login-provider="`+provider+`"`); got != 1 {
+			t.Fatalf("%s login buttons: got %d, want 1", provider, got)
+		}
+		if got := strings.Count(page, `data-login-group="`+provider+`"`); got != 1 {
+			t.Fatalf("%s login groups: got %d, want 1", provider, got)
+		}
+	}
+	for _, id := range []string{"workbuddyLoginStatus", "qoderLoginStatus", "clineLoginStatus", "grokDeviceLoginStatus", "workbuddyLoginLink", "qoderLoginLink", "clineLoginLink", "grokDeviceLoginLink"} {
+		if got := strings.Count(page, `id="`+id+`"`); got != 1 {
+			t.Fatalf("%s: got %d, want 1", id, got)
+		}
+	}
+}
 
 // TestRenderIndexShipsNoCompetingSidebarCount pins the fix for the sidebar that
 // read 5 on 账号管理 and 11 on 运维总览. Three rules used to write #footerAbnormal

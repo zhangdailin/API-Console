@@ -11,7 +11,7 @@ function setSidebarAccountStats(total, normal, abnormal) {
   if (footerAbnormal) footerAbnormal.textContent = String(abnormal || 0);
 }
 
-function normalizeSidebarAccountType(acc) { return String(acc?.account_type || "").toLowerCase(); }
+function normalizeSidebarAccountType(acc) { return String(acc?.account_type || "").trim().toLowerCase(); }
 
 function normalizeSidebarStatusCode(statusCode) {
   if (statusCode === null || statusCode === undefined) return "";
@@ -26,73 +26,85 @@ function isSidebarGrokOAuthAccount(acc) {
 
 function hasSidebarAccountCredential(acc) { return acc?.has_credential === true; }
 
-function getSidebarQuotaStats(acc) {
+function quotaProvenance(acc) {
+  return {
+    type: String(acc?.quota_type || ""),
+    source: String(acc?.quota_source || ""),
+    confidence: String(acc?.quota_confidence || ""),
+    limitKnown: acc?.quota_limit_known === true,
+    observed: acc?.quota_observed === true,
+    windowHours: Number(acc?.quota_window_hours || 0) || 0,
+    note: String(acc?.quota_note || ""),
+  };
+}
+
+// Sidebar health and account rows consume the same quota projection.
+function getQuotaStats(acc) {
   if (!acc) return null;
   const type = normalizeSidebarAccountType(acc);
-  if (type === "workbuddy") {
-    // The credit meter reports the remaining share of the current cycle, so the
-    // explicit quota_* fields are authoritative and usage_current must not be
-    // read as "used".
-    const limit = Math.max(0, Number(acc.quota_limit || 0));
-    const remaining = Math.max(0, Number(acc.quota_remaining || 0));
-    if (acc.quota_supported === true && limit > 0) {
-      return {
-        supported: true,
-        limit,
-        remaining,
-        unit: acc.quota_unit || "credits",
-        plan: acc.quota_plan || "",
-        resetAt: acc.quota_reset_at || "",
-        packageRemaining: Math.max(0, Number(acc.quota_package_remaining || 0)),
-      };
-    }
-    return null;
+  const empty = { supported: false, limit: 0, remaining: 0, used: 0, pctRemaining: 0 };
+  // Cline is normally unmetered; preserve an explicit server quota snapshot.
+  if (type === "cline" && !(acc.quota_supported === true && Number(acc.quota_limit) > 0)) {
+    return { ...empty, unmetered: true, note: String(acc.quota_note || "").trim(),
+      modelCount: Array.isArray(acc.cline_model_ids) ? acc.cline_model_ids.length : 0 };
   }
-  if (type === "qoder") {
-    // The channel reads the credit window from the gateway's own quota endpoint,
-    // so the explicit quota_* fields are authoritative and usage_current must not
-    // be read as a balance. Without a snapshot the answer is "unknown" rather
-    // than a fabricated zero.
+  if (type === "workbuddy" || type === "qoder") {
+    // Credit snapshots are authoritative; gateway token counts are not balances.
+    const qoder = type === "qoder";
     const limit = Math.max(0, Number(acc.quota_limit || 0));
     const remaining = Math.max(0, Number(acc.quota_remaining || 0));
-    if (acc.quota_supported === true) {
+    if (acc.quota_supported !== true || (!qoder && limit <= 0)) return { ...empty, unknown: true };
+    return {
+      supported: true, limit, remaining,
+      used: qoder ? Math.max(0, Number(acc.quota_used || 0)) : Math.max(0, limit - remaining),
+      pctRemaining: limit > 0 ? Math.min(100, Math.round((remaining / limit) * 100)) : 0,
+      unit: acc.quota_unit || "credits", plan: acc.quota_plan || "", resetAt: acc.quota_reset_at || "",
+      ...(qoder
+        ? { qoder: true, exhausted: acc.quota_exhausted === true, upgradeUrl: String(acc.quota_upgrade_url || "").trim() }
+        : { workbuddy: true, packageRemaining: Math.max(0, Number(acc.quota_package_remaining || 0)) }),
+    };
+  }
+  if (isSidebarGrokOAuthAccount(acc)) {
+    // Billing windows take precedence over inferred Free quotas and rate limits.
+    const weekly = acc.grok_billing?.weekly;
+    if (weekly?.has_usage === true && Number.isFinite(Number(weekly.usage_percent))) {
+      const used = Math.max(0, Math.min(100, Number(weekly.usage_percent)));
+      return { supported: true, limit: 100, remaining: 100 - used, used,
+        pctRemaining: 100 - used, weeklyPercent: true, resetAt: weekly.reset_at || "" };
+    }
+    const provenance = quotaProvenance(acc);
+    const limit = Math.max(0, Number(acc.quota_limit || 0));
+    const estimated = provenance.confidence === "estimated";
+    const confirmedFree = provenance.confidence === "confirmed" && provenance.source === "upstreamExhaustion";
+    if (limit > 0 && (estimated || confirmedFree)) {
+      const used = Math.max(0, Math.min(limit, Number(acc.quota_used || 0)));
+      const remaining = limit - used;
       return {
-        supported: true,
-        limit,
-        remaining,
-        unit: acc.quota_unit || "credits",
-        plan: acc.quota_plan || "",
-        resetAt: acc.quota_reset_at || "",
+        supported: true, limit, remaining, used,
+        pctRemaining: Math.max(0, Math.min(100, Math.round((remaining / limit) * 100))),
+        ...(estimated ? { estimated: true } : { confirmedFree: true }),
+        unit: acc.quota_unit || "tokens", windowHours: provenance.windowHours || 24,
+        source: provenance.source, confidence: provenance.confidence,
+        limitKnown: confirmedFree || provenance.limitKnown, observed: provenance.observed, note: provenance.note,
+        resetAt: confirmedFree ? acc.quota_reset_at || "" : "",
       };
     }
-    return null;
+    return { ...empty, quotaUnavailable: true };
   }
   const explicitLimit = Math.floor(acc.quota_limit || 0);
   const hasExplicitRemaining = acc.quota_remaining !== undefined && acc.quota_remaining !== null;
-  if (explicitLimit > 0 && hasExplicitRemaining) {
-    return {
-      supported: true,
-      limit: explicitLimit,
-      remaining: Math.max(0, Math.floor(acc.quota_remaining || 0)),
-      // The server labels an inferred window. Carrying the label here as well keeps a
-      // caller from rendering an estimate as a balance just because it took this
-      // shortcut instead of the channel-specific branch.
-      estimated: acc.quota_confidence === "estimated",
-      limitKnown: acc.quota_limit_known === true,
-    };
-  }
-
-  const limit = Math.floor(acc.usage_limit || 0);
+  const explicit = explicitLimit > 0 && hasExplicitRemaining;
+  const limit = explicit ? explicitLimit : Math.floor(acc.usage_limit || 0);
   if (limit <= 0) return null;
-  const current = Math.floor(acc.usage_current || 0);
-  const remaining = Math.max(0, current);
-  return { supported: true, limit, remaining };
+  const remaining = Math.max(0, Math.floor((explicit ? acc.quota_remaining : acc.usage_current) || 0));
+  return { supported: true, limit, remaining, used: Math.max(0, limit - remaining),
+    pctRemaining: Math.min(100, Math.round((remaining / limit) * 100)),
+    ...(explicit ? { estimated: acc.quota_confidence === "estimated", limitKnown: acc.quota_limit_known === true } : {}) };
 }
 
-function isQuotaOnlyStatus(acc) {
+function isQuotaOnlyStatus(acc, quota = getQuotaStats(acc)) {
   if (!acc) return false;
   const type = normalizeSidebarAccountType(acc);
-  const quota = getSidebarQuotaStats(acc);
   const statusCode = normalizeSidebarStatusCode(acc.status_code);
   // An exhausted allowance is a business limit on every channel, not a fault:
   // the credential is intact and the scheduler resumes the account when the
@@ -116,7 +128,7 @@ function isQuotaOnlyStatus(acc) {
 // the operations pages and broken on the accounts page.
 function isQuotaExhaustedQuota(acc, quota) {
   if (!acc) return false;
-  const stats = quota === undefined ? getSidebarQuotaStats(acc) : quota;
+  const stats = quota === undefined ? getQuotaStats(acc) : quota;
   if (acc.quota_exhausted === true && acc.quota_supported === true) return true;
   return Boolean(stats && stats.limit > 0 && stats.remaining <= 0);
 }

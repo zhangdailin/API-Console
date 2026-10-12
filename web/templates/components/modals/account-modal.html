@@ -12,39 +12,17 @@
         <input type="hidden" id="accountType" value="" />
         <input class="form-input" id="accountTypeDisplay" value="加载渠道…" readonly />
       </div>
-       <div class="form-group" id="workbuddyLoginGroup" hidden>
-         <label class="form-label">官方 WorkBuddy 登录（国际版）</label>
-         <button class="btn btn-secondary" id="workbuddyLoginButton" type="button" onclick="WorkBuddyLogin.start()">使用 WorkBuddy 官方网页登录</button>
-         <small class="helper-text">在 www.workbuddy.ai 完成登录并授权本管理站点；服务端只保存 access/refresh token，读取不到密码。授权完成后自动保存账号并同步模型目录与额度，refreshToken 由服务端自动轮换。登录只在点击按钮后开始；编辑已有账号时也可用它重新授权。该渠道只支持官方登录，不提供手填凭证。</small>
-         <div class="account-import-status" id="workbuddyLoginStatus" hidden></div>
-       </div>
-       <div class="form-group" id="qoderLoginGroup" hidden>
-         <label class="form-label">官方 Qoder 登录（设备授权流）</label>
-         <button class="btn btn-secondary" id="qoderLoginButton" type="button" onclick="QoderLogin.start()">使用 Qoder 官方网页登录</button>
-         <small class="helper-text">在 qoder.com 完成官方设备授权；服务端只保存 device access/refresh token，读取不到密码。授权完成后自动保存账号并同步模型目录，refreshToken 由服务端自动轮换。该渠道只支持官方登录，不提供 PAT（个人访问令牌）入口。</small>
-         <div class="account-import-status" id="qoderLoginStatus" hidden></div>
-         <div class="account-import-status" id="qoderLoginLink" hidden>
-           <a id="qoderLoginLinkText" href="#" target="_blank" rel="noopener noreferrer"></a>
-         </div>
-       </div>
-       <div class="form-group" id="clineLoginGroup" hidden>
-          <label class="form-label">官方 Cline 登录（WorkOS 设备授权）</label>
-          <button class="btn btn-secondary" id="clineLoginButton" type="button" onclick="ClineLogin.start()">使用 Cline 官方网页登录</button>
-          <small class="helper-text">在 WorkOS 官方页面完成 Cline 授权；服务端只保存 Cline access/refresh token，读取不到密码。授权完成后自动保存账号并同步模型目录，refreshToken 由服务端自动轮换。该渠道只支持官方登录，不提供手填凭证。</small>
-          <div class="account-import-status" id="clineLoginStatus" hidden></div>
-          <div class="account-import-status" id="clineLoginLink" hidden>
-            <a id="clineLoginLinkText" href="#" target="_blank" rel="noopener noreferrer"></a>
-          </div>
+      {{range .LoginProviders}}
+      <div class="form-group" id="{{.GroupID}}" data-login-group="{{.Key}}" hidden>
+        <label class="form-label">{{.Label}}</label>
+        <button class="btn btn-secondary" id="{{.ButtonID}}" type="button" data-login-provider="{{.Key}}">{{.ButtonText}}</button>
+        <small class="helper-text">{{.HelpText}}</small>
+        <div class="account-import-status" id="{{.StatusID}}" hidden></div>
+        <div class="account-import-status" id="{{.LinkID}}" hidden>
+          <a id="{{.LinkTextID}}" target="_blank" rel="noopener noreferrer"></a>
         </div>
-        <div class="form-group" id="grokDeviceLoginGroup" hidden>
-         <label class="form-label">官方 Grok 登录（Build CLI OAuth）</label>
-         <button class="btn btn-secondary" id="grokDeviceLoginButton" type="button" onclick="startGrokDeviceLogin()">使用 Grok 官方网页登录</button>
-         <small class="helper-text">浏览器将在 xAI 官方页面完成授权；本服务只保存 OAuth access/refresh token（且不回显），不读取本地文件、Cookie 或密码，也不保存 id_token。授权完成会自动保存账号。</small>
-         <div class="account-import-status" id="grokDeviceLoginStatus" hidden></div>
-         <div class="account-import-status" id="grokDeviceLoginLink" hidden>
-           <a id="grokDeviceLoginLinkText" target="_blank" rel="noopener noreferrer"></a>
-         </div>
-       </div>
+      </div>
+      {{end}}
       <div class="form-group">
         <label class="form-label">
           <label class="toggle">

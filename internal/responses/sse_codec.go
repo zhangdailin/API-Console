@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"strings"
 
 	"orchids-api/internal/util"
 )
@@ -13,12 +12,15 @@ import (
 const maxEventBytes = 8 << 20
 
 type SSEEvent struct {
-	Event    string
-	ID       string
-	Retry    string
-	Comments []string
-	Other    []string
-	data     []string
+	Event        string
+	ID           string
+	Retry        string
+	Comments     []string
+	Other        []string
+	data         []string
+	rawDataStart int
+	rawDataEnd   int
+	hasRawData   bool
 	// raw is the frame exactly as it arrived, including its line endings and the
 	// terminating blank line. writeTo prefers it so an untouched frame is
 	// byte-identical to the upstream: the relay passes the native Responses
@@ -27,7 +29,11 @@ type SSEEvent struct {
 	raw []byte
 }
 
+// Data returns a read-only view of the raw frame for a single data line.
 func (e SSEEvent) Data() []byte {
+	if e.hasRawData {
+		return e.raw[e.rawDataStart:e.rawDataEnd]
+	}
 	if len(e.data) == 0 {
 		return nil
 	}
@@ -47,7 +53,7 @@ func (e SSEEvent) Data() []byte {
 	return joined
 }
 
-func (e SSEEvent) HasData() bool { return len(e.data) > 0 }
+func (e SSEEvent) HasData() bool { return e.hasRawData || len(e.data) > 0 }
 
 func (e SSEEvent) writeTo(writer io.Writer) error {
 	if len(e.raw) > 0 {
@@ -56,6 +62,11 @@ func (e SSEEvent) writeTo(writer io.Writer) error {
 			err = io.ErrShortWrite
 		}
 		return err
+	}
+	if len(e.data) == 1 && len(e.Comments) == 0 && len(e.Other) == 0 && e.ID == "" && e.Retry == "" {
+		if framed, ok := writer.(interface{ WriteSSEString(string, string) error }); ok {
+			return framed.WriteSSEString(e.Event, e.data[0])
+		}
 	}
 	// A rewritten frame is still one write. In the pipe bridge each separate
 	// write is a producer/consumer rendezvous and a transport deadline update.
@@ -127,7 +138,7 @@ func ConsumeSSE(source io.Reader, handle func(SSEEvent) error) error {
 	firstLine := true
 	var rawFrame []byte
 	flush := func() error {
-		if len(event.data) == 0 && len(event.Comments) == 0 && len(event.Other) == 0 && event.Event == "" && event.ID == "" && event.Retry == "" {
+		if !event.HasData() && len(event.Comments) == 0 && len(event.Other) == 0 && event.Event == "" && event.ID == "" && event.Retry == "" {
 			rawFrame = rawFrame[:0]
 			return nil
 		}
@@ -139,14 +150,19 @@ func ConsumeSSE(source io.Reader, handle func(SSEEvent) error) error {
 		return handle(current)
 	}
 	for scanner.Scan() {
-		rawLine := scanner.Text()
+		rawLine := scanner.Bytes()
+		lineStart := len(rawFrame)
 		rawFrame = append(rawFrame, rawLine...)
-		line := strings.TrimSuffix(strings.TrimSuffix(rawLine, "\n"), "\r")
+		line := bytes.TrimSuffix(bytes.TrimSuffix(rawLine, []byte("\n")), []byte("\r"))
+		prefixLen := 0
 		if firstLine {
-			line = strings.TrimPrefix(line, "\uFEFF")
+			if bytes.HasPrefix(line, []byte("\xef\xbb\xbf")) {
+				line = line[3:]
+				prefixLen = 3
+			}
 			firstLine = false
 		}
-		if line == "" {
+		if len(line) == 0 {
 			if err := flush(); err != nil {
 				return err
 			}
@@ -156,25 +172,35 @@ func ConsumeSSE(source io.Reader, handle func(SSEEvent) error) error {
 		if eventBytes > maxEventBytes {
 			return fmt.Errorf("grok Build Responses SSE 单事件超过 %d MiB", maxEventBytes>>20)
 		}
-		field, value, found := strings.Cut(line, ":")
-		if found && strings.HasPrefix(value, " ") {
+		field, value, found := bytes.Cut(line, []byte(":"))
+		if found && len(value) > 0 && value[0] == ' ' {
 			value = value[1:]
 		}
 		switch {
-		case strings.HasPrefix(line, ":"):
-			event.Comments = append(event.Comments, line)
+		case line[0] == ':':
+			event.Comments = append(event.Comments, string(line))
 		case !found:
-			event.Other = append(event.Other, line)
-		case field == "event":
-			event.Event = value
-		case field == "data":
-			event.data = append(event.data, value)
-		case field == "id":
-			event.ID = value
-		case field == "retry":
-			event.Retry = value
+			event.Other = append(event.Other, string(line))
+		case bytes.Equal(field, []byte("event")):
+			event.Event = string(value)
+		case bytes.Equal(field, []byte("data")):
+			if !event.hasRawData && len(event.data) == 0 {
+				event.rawDataStart = lineStart + prefixLen + len(line) - len(value)
+				event.rawDataEnd = event.rawDataStart + len(value)
+				event.hasRawData = true
+			} else {
+				if event.hasRawData {
+					event.data = append(event.data, string(rawFrame[event.rawDataStart:event.rawDataEnd]))
+					event.hasRawData = false
+				}
+				event.data = append(event.data, string(value))
+			}
+		case bytes.Equal(field, []byte("id")):
+			event.ID = string(value)
+		case bytes.Equal(field, []byte("retry")):
+			event.Retry = string(value)
 		default:
-			event.Other = append(event.Other, line)
+			event.Other = append(event.Other, string(line))
 		}
 	}
 	if err := scanner.Err(); err != nil {

@@ -47,22 +47,6 @@ function sortAccounts() { accounts.sort((a, b) => b.id - a.id); }
 // Normalize account type
 function normalizeAccountType(acc) { return normalizeSidebarAccountType(acc); }
 
-// quotaProvenance reads where an account's quota number came from and how far it can
-// be trusted. The server publishes this next to every quota value (quota_type /
-// quota_source / quota_confidence / quota_limit_known), because "未知" alone cannot
-// distinguish a paid account whose numeric window upstream does not publish, an
-// account inferred as Free, and one that was never synced.
-function quotaProvenance(acc) {
-  return {
-    type: String(acc?.quota_type || ""),
-    source: String(acc?.quota_source || ""),
-    confidence: String(acc?.quota_confidence || ""),
-    limitKnown: acc?.quota_limit_known === true,
-    observed: acc?.quota_observed === true,
-    windowHours: Number(acc?.quota_window_hours || 0) || 0,
-    note: String(acc?.quota_note || ""),
-  };
-}
 
 // QUOTA_SOURCE_LABELS names each provenance signal for the operator tooltip: the raw
 // id is an implementation detail.
@@ -100,106 +84,6 @@ function quotaTooltip(acc, quota) {
   return parts.join(" · ");
 }
 
-function getQuotaStats(acc) {
-  if (!acc) return null;
-  const type = normalizeAccountType(acc);
-  if (type === "cline") {
-    // Cline publishes no numeric allowance: the recommended-models feed is a
-    // list and the inference cap is a rate limit written in prose. Returning
-    // null made the 配额 cell fall through to a bare dash, which reads as
-    // "nothing was ever read" rather than "this channel is unmetered".
-    return {
-      supported: false,
-      unmetered: true,
-      limit: 0,
-      remaining: 0,
-      used: 0,
-      pctRemaining: 0,
-      note: String(acc.quota_note || "").trim(),
-      modelCount: Array.isArray(acc.cline_model_ids) ? acc.cline_model_ids.length : 0,
-    };
-  }
-  if (type === "workbuddy" || type === "qoder") {
-    // Both channels use quota_* snapshots rather than generic usage columns.
-    // WorkBuddy derives spent credits from the meter; Qoder reports quota_used.
-    const base = getSidebarQuotaStats(acc);
-    if (!base) return { supported: false, unknown: true, limit: 0, remaining: 0, used: 0, pctRemaining: 0 };
-    const limit = Math.max(0, base.limit || 0);
-    const remaining = Math.max(0, base.remaining || 0);
-    const qoder = type === "qoder";
-    return {
-      ...base,
-      limit,
-      remaining,
-      used: qoder ? Math.max(0, Number(acc.quota_used || 0)) : Math.max(0, limit - remaining),
-      pctRemaining: limit > 0 ? Math.min(100, Math.round((remaining / limit) * 100)) : 0,
-      ...(qoder ? {
-        qoder: true,
-        // Gateway exhaustion is authoritative even before counters refresh.
-        exhausted: acc.quota_exhausted === true,
-        plan: base.plan || "",
-        upgradeUrl: String(acc.quota_upgrade_url || "").trim(),
-      } : { workbuddy: true, packageRemaining: base.packageRemaining || 0 }),
-      unit: base.unit || "credits",
-      resetAt: base.resetAt || "",
-    };
-  }
-  // Build billing and response throttling are different xAI products. Never
-  // use request/token rate-limit headers as a paid-plan balance.
-  if (type === "grok" && isSidebarGrokOAuthAccount(acc)) {
-    const weekly = acc.grok_billing && acc.grok_billing.weekly;
-    if (weekly && weekly.has_usage === true && Number.isFinite(Number(weekly.usage_percent))) {
-      const used = Math.max(0, Math.min(100, Number(weekly.usage_percent)));
-      return {
-        supported: true,
-        limit: 100,
-        remaining: Math.max(0, 100 - used),
-        used,
-        pctRemaining: Math.max(0, 100 - used),
-        weeklyPercent: true,
-        resetAt: weekly.reset_at || "",
-      };
-    }
-    // No upstream window. A Free account is the common case here, and saying "未知"
-    // for it throws away the one thing an operator wants to know: it is Free, and the
-    // window is roughly this big. The estimate is labelled as such (≈ plus the
-    // provenance in the tooltip) so it can never be read as an official balance.
-    const provenance = quotaProvenance(acc);
-    const estimatedLimit = Math.max(0, Number(acc.quota_limit || 0));
-    const estimated = provenance.confidence === "estimated";
-    const confirmedFree = provenance.confidence === "confirmed" && provenance.source === "upstreamExhaustion";
-    if (estimatedLimit > 0 && (estimated || confirmedFree)) {
-      // Confirmed Free is an upstream-reported balance, never labelled "≈".
-      const used = Math.max(0, Math.min(estimatedLimit, Number(acc.quota_used || 0)));
-      const remaining = Math.max(0, estimatedLimit - used);
-      return {
-        supported: true,
-        ...(estimated ? { estimated: true } : { confirmedFree: true }),
-        limit: estimatedLimit,
-        used,
-        remaining,
-        pctRemaining: Math.max(0, Math.min(100, Math.round((remaining / estimatedLimit) * 100))),
-        unit: acc.quota_unit || "tokens",
-        windowHours: provenance.windowHours || 24,
-        source: provenance.source,
-        confidence: provenance.confidence,
-        limitKnown: confirmedFree || provenance.limitKnown,
-        observed: provenance.observed,
-        note: provenance.note,
-        resetAt: confirmedFree ? acc.quota_reset_at || "" : "",
-      };
-    }
-    return { supported: false, limit: 0, remaining: 0, used: 0, pctRemaining: 0, quotaUnavailable: true };
-  }
-  const base = getSidebarQuotaStats(acc);
-  if (!base) return null;
-  if (base.unknown) return base;
-  const limit = Math.max(0, Math.floor(base.limit || 0));
-  const remaining = Math.max(0, Math.floor(base.remaining || 0));
-  const used = Math.max(0, limit - remaining);
-  const pctRemaining = limit > 0 ? Math.min(100, Math.round((remaining / limit) * 100)) : 0;
-  return { ...base, limit, remaining, used, pctRemaining };
-}
 
 function normalizeAccountSubscription(acc) {
   const raw = String(acc?.subscription || "").trim().toLowerCase();
@@ -218,9 +102,7 @@ function normalizeAccountSubscription(acc) {
   return raw;
 }
 
-function subscriptionBadge(acc) {
-  const type = normalizeAccountType(acc);
-  if (type === "qoder") {
+function qoderSubscriptionBadge(acc) {
     const plan = String(acc?.quota_plan || "").trim();
     if (!acc?.quota_supported) {
       // No snapshot yet: say so instead of showing a made-up level.
@@ -236,8 +118,9 @@ function subscriptionBadge(acc) {
       };
     }
     return { text: "未知", bg: "rgba(100, 116, 139, 0.12)", color: "#94a3b8", tip: "Qoder 未返回计划档位" };
-  }
-  if (type === "cline") {
+}
+
+function clineSubscriptionBadge(acc) {
     // The tier comes from the upstream plan endpoint, not from the catalog:
     // recommended-models lists four tiers in one payload, so "the free list is
     // non-empty" proves free access and says nothing about a paid plan held
@@ -262,15 +145,18 @@ function subscriptionBadge(acc) {
       return { text: "未同步", bg: "rgba(100, 116, 139, 0.12)", color: "#94a3b8", tip: "尚未读取到 Cline 模型目录；点「刷新」立即同步" };
     }
     return { text: "未同步", bg: "rgba(100, 116, 139, 0.12)", color: "#94a3b8", tip: `已读到 ${modelCount} 个免费模型，但尚未读到套餐档位；点「刷新」重新探测` };
-  }
-  if (type === "workbuddy") {
+}
+
+function workbuddySubscriptionBadge(acc) {
     const plan = String(acc?.quota_plan || "").trim();
     if (plan) {
       return { text: plan, bg: "rgba(52, 211, 153, 0.16)", color: "#34d399", tip: `WorkBuddy 计量包: ${plan}${acc?.quota_unit ? `（单位 ${acc.quota_unit}）` : ""}` };
     }
     // No meter snapshot yet: say so instead of showing a made-up level.
     return { text: "未同步", bg: "rgba(100, 116, 139, 0.12)", color: "#94a3b8", tip: "尚未读取到 WorkBuddy 计量包；点 Sync 刷新账号状态后重试" };
-  }
+}
+
+function defaultSubscriptionBadge(acc) {
   const level = normalizeAccountSubscription(acc);
   if (!level) {
     // Upstream published no plan name. When the quota projection inferred Free, saying
@@ -293,7 +179,7 @@ function subscriptionBadge(acc) {
     }
     return { text: "-", bg: "rgba(100, 116, 139, 0.12)", color: "#94a3b8", tip: "暂无订阅等级" };
   }
-  if (type !== "grok") { return { text: level, bg: "rgba(100, 116, 139, 0.12)", color: "#cbd5e1", tip: `订阅等级: ${level}` }; }
+  if (normalizeAccountType(acc) !== "grok") { return { text: level, bg: "rgba(100, 116, 139, 0.12)", color: "#cbd5e1", tip: `订阅等级: ${level}` }; }
   switch (level) {
     case "unknown":
       return { text: "未知", bg: "rgba(100, 116, 139, 0.12)", color: "#94a3b8", tip: "xAI 未返回可验证的 Grok 套餐等级" };
@@ -323,6 +209,16 @@ function subscriptionBadge(acc) {
   }
 }
 
+const ACCOUNT_SUBSCRIPTION_PRESENTERS = {
+  workbuddy: workbuddySubscriptionBadge,
+  qoder: qoderSubscriptionBadge,
+  cline: clineSubscriptionBadge,
+};
+
+function subscriptionBadge(acc) {
+  return (ACCOUNT_SUBSCRIPTION_PRESENTERS[normalizeAccountType(acc)] || defaultSubscriptionBadge)(acc);
+}
+
 function buildSubscriptionMarkup(acc) {
   const badge = subscriptionBadge(acc);
   return `<span class="tag account-tier-tag" title="${escapeHtml(badge.tip || "")}" style="background:${badge.bg};color:${badge.color};border:none;">${escapeHtml(badge.text)}</span>`;
@@ -331,29 +227,13 @@ function buildSubscriptionMarkup(acc) {
 function applyTokenLabels(type) {
   const normalized = String(type || "").trim().toLowerCase();
   const accountId = String(document.getElementById("accountId")?.value || "");
-  // WorkBuddy login stays available while editing so an expired authorization can
-  // be renewed by signing in again instead of deleting the account.
-  const workbuddyLoginGroup = document.getElementById("workbuddyLoginGroup");
-  if (workbuddyLoginGroup) workbuddyLoginGroup.hidden = normalized !== "workbuddy";
-  // Qoder is OAuth-only as well: an existing account can be re-authorized
-  // through the same browser flow, so the group stays visible while editing.
-  const qoderLoginGroup = document.getElementById("qoderLoginGroup");
-  if (qoderLoginGroup) qoderLoginGroup.hidden = normalized !== "qoder";
-  // Cline is OAuth-only for the same reason: the WorkOS device grant is the only
-  // way to obtain the credential, and an existing account is renewed by signing
-  // in again.
-  const clineLoginGroup = document.getElementById("clineLoginGroup");
-  if (clineLoginGroup) clineLoginGroup.hidden = normalized !== "cline";
+  const groups = Array.from(document.querySelectorAll('#accountForm [data-login-group]'));
+  groups.forEach(group => { group.hidden = group.dataset.loginGroup !== normalized; });
   const saveButton = document.querySelector('#accountForm button[type="submit"]');
   if (saveButton) {
-    // WorkBuddy, Qoder, Cline and Grok are created by their official login
-    // flows, so the form has nothing to submit for a new account of any of
-    // those types.
-    const loginOnlyChannel =
-      normalized === "workbuddy" || normalized === "qoder" || normalized === "cline" || normalized === "grok";
+    const loginOnlyChannel = groups.some(group => group.dataset.loginGroup === normalized);
     saveButton.hidden = loginOnlyChannel && !accountId;
   }
-  applyCredentialModeUI(normalized);
 }
 
 // Grok exposes a server-owned device-auth protocol. The lifecycle is shared
@@ -368,16 +248,20 @@ const grokDeviceLogin = globalThis.DeviceAuthLogin.create({
   linkId: 'grokDeviceLoginLink', linkTextId: 'grokDeviceLoginLinkText', pollInterval: 1500,
   isAllowedURL: (url) => url.protocol === 'https:' && (url.hostname === 'auth.x.ai' || url.hostname === 'accounts.x.ai'),
 });
+const ACCOUNT_LOGIN_DRIVERS = {
+  workbuddy: () => globalThis.WorkBuddyLogin,
+  qoder: () => globalThis.QoderLogin,
+  cline: () => globalThis.ClineLogin,
+  grok: () => grokDeviceLogin,
+};
+function startOfficialLogin(provider) {
+  const type = String(provider || '').trim().toLowerCase();
+  if (type !== document.getElementById('accountType')?.value) return;
+  return ACCOUNT_LOGIN_DRIVERS[type]?.()?.start();
+}
 function resetGrokDeviceLoginStatus() { grokDeviceLogin.reset(); }
 function stopGrokDeviceLogin() { grokDeviceLogin.stop(); }
 function startGrokDeviceLogin() { return grokDeviceLogin.start(); }
-
-function applyCredentialModeUI(type) {
-  const grokDeviceLoginGroup = document.getElementById("grokDeviceLoginGroup");
-  if (grokDeviceLoginGroup) grokDeviceLoginGroup.hidden = String(type || "").trim().toLowerCase() !== "grok";
-}
-
-
 
 function accountTypeLabel(type) { return window.OrchidsProviderRegistry?.label(type) || String(type || "").trim(); }
 
@@ -513,8 +397,8 @@ function evaluateAccountStatus(acc) {
   // A bare "401" or "429" hides the actionable cause (retired grant vs. a
   // partial write vs. upstream throttling), so the server's reason wins.
   const statusReason = String(acc.status_message || "").trim();
-  if (isQuotaOnlyStatus(acc)) {
-    const quota = getQuotaStats(acc);
+  const quota = getQuotaStats(acc);
+  if (isQuotaOnlyStatus(acc, quota)) {
     const limitText = quota && quota.limit > 0 ? quota.limit.toLocaleString() : '未知';
     const type = normalizeAccountType(acc);
     const providerName = accountTypeLabel(type);
@@ -542,17 +426,6 @@ function evaluateAccountStatus(acc) {
     const type = normalizeAccountType(acc);
     const tips = { grok: '缺少 Build OAuth 授权', workbuddy: '缺少 WorkBuddy 凭证（refreshToken / accessToken）', qoder: '缺少 Qoder 设备凭据，请重新使用官方网页登录', cline: '缺少 Cline WorkOS 凭据，请重新使用官方网页登录' };
     return { normal: false, text: type === 'grok' ? '待登录' : '待补全', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.16)', tip: tips[type] || '缺少账号凭据' };
-  }
-
-  const quota = getQuotaStats(acc);
-  // A drained allowance is the same business limit on every channel: the
-  // credential is intact, the row stays selectable, and the scheduler resumes it
-  // when the window resets. An exhausted Grok window used to show a red 配额已满
-  // fault and disagree with the sidebar counter.
-  if (isQuotaExhaustedQuota(acc, quota)) {
-    const providerName = accountTypeLabel(normalizeAccountType(acc));
-    const limitText = quota && quota.limit > 0 ? quota.limit.toLocaleString() : '未知';
-    return { normal: true, text: '额度不足', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.16)', tip: providerName + ' 额度已用尽或余额不足，调度器会暂时跳过该账号 (剩余 0 / ' + limitText + ')', quotaOnly: true };
   }
 
   return { normal: true, text: '正常', color: '#34d399', bg: 'rgba(52, 211, 153, 0.16)', tip: '状态正常' };
@@ -771,8 +644,8 @@ function renderAccounts() {
       const tdQuota = document.createElement("td");
       tdQuota.className = "col-quota";
       // One shared renderer for the desktop table and the mobile cards.
-      tdQuota.innerHTML = buildQuotaMarkup(acc);
       const quota = getQuotaStats(acc);
+      tdQuota.innerHTML = buildQuotaMarkup(acc, quota);
       if (normalizeAccountType(acc) === "workbuddy") {
         if (quota && quota.workbuddy) {
           tdQuota.title = [
@@ -1067,8 +940,7 @@ function accountIdentityPrimary(acc) {
 }
 
 // buildQuotaMarkup renders the remaining allowance for every channel.
-function buildQuotaMarkup(acc) {
-  const quota = getQuotaStats(acc);
+function buildQuotaMarkup(acc, quota = getQuotaStats(acc)) {
   if (quota && quota.confirmedFree) {
     // A real Free window reported by the upstream is a balance, not an estimate, so it
     // is rendered without "≈" while still naming what kind of window it is.
@@ -1214,48 +1086,19 @@ function openModal(account = null) {
   stopWorkBuddyLogin();
   stopQoderLogin();
   stopClineLogin();
-  const modal = document.getElementById("accountModal");
   const title = document.getElementById("modalTitle");
   const form = document.getElementById("accountForm");
   const typeEl = document.getElementById("accountType");
   stopGrokDeviceLogin(true);
   resetGrokDeviceLoginStatus();
 
-  const finalizeModal = () => {
-    applyTokenLabels(typeEl ? typeEl.value : getActiveAccountType());
-    ConsoleUI.modal("accountModal", true);
-  };
-
-  const applyValues = () => {
-    // Every branch below sets the modal type via setAccountModalType; the
-    // credential-mode UI must follow THAT type, never the ambient platform tab.
-    // (Reading the tab here left a Grok edit without its device-login button when
-    // the list was showing another channel.)
-    let modalType = "";
-    if (account) {
-      title.textContent = "编辑账号";
-      document.getElementById("accountId").value = account.id;
-      modalType = normalizeAccountType(account);
-      setAccountModalType(modalType);
-      document.getElementById("enabled").checked = account.enabled;
-    } else {
-      title.textContent = "添加账号";
-      form.reset();
-      document.getElementById("accountId").value = "";
-      // The platform the operator explicitly selected wins over the ambient list
-      // default and over any stale hidden field.
-      modalType = selectedPlatformAccountType(typeEl);
-      setAccountModalType(modalType);
-      document.getElementById("enabled").checked = true;
-    }
-    // The switch above is assigned, not clicked: without this its paint would depend on
-    // the stylesheet's :has() fallback, which browsers without :has() ignore.
-    if (typeof window.syncToggleStates === "function") window.syncToggleStates();
-    applyCredentialModeUI(modalType || normalizeAccountType({ account_type: typeEl?.value || getActiveAccountType() }));
-  };
-
-  applyValues();
-  finalizeModal();
+  if (!account) form.reset();
+  title.textContent = account ? "编辑账号" : "添加账号";
+  document.getElementById("accountId").value = account ? account.id : "";
+  document.getElementById("enabled").checked = account ? account.enabled : true;
+  setAccountModalType(account ? normalizeAccountType(account) : selectedPlatformAccountType(typeEl));
+  if (typeof window.syncToggleStates === "function") window.syncToggleStates();
+  ConsoleUI.modal("accountModal", true);
 }
 
 // WorkBuddy official login lifecycle. The login only ever starts from an
@@ -1366,6 +1209,10 @@ function exportAccounts() { window.location.href = "/api/export"; }
 document.addEventListener('DOMContentLoaded', async () => {
   await window.OrchidsProviderRegistry?.ready;
   initDOMCache();
+  document.getElementById('accountModal')?.addEventListener('click', (event) => {
+    const button = event.target.closest?.('[data-login-provider]');
+    if (button) startOfficialLogin(button.dataset.loginProvider);
+  });
   loadAccounts();
   const typeSelect = document.getElementById("accountType");
   if (typeSelect) { applyTokenLabels(typeSelect.value); }

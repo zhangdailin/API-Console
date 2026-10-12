@@ -47,8 +47,29 @@ func (w *CheckedStreamWriter) WriteSSE(event string, data []byte) error {
 	if w.Err != nil {
 		return w.Err
 	}
-	w.frame = AppendSSEFrame(w.frame[:0], event, data)
-	_, err := w.Write(w.frame)
+	return w.writeFrame(AppendSSEFrame(w.frame[:0], event, data))
+}
+
+// WriteSSEString avoids copying a rewritten SSE data line into a byte slice.
+func (w *CheckedStreamWriter) WriteSSEString(event, data string) error {
+	if w.Err != nil {
+		return w.Err
+	}
+	frame := w.frame[:0]
+	if event != "" {
+		frame = append(frame, sseEventPrefixBytes...)
+		frame = append(frame, event...)
+		frame = append(frame, sseNewlineBytes...)
+	}
+	frame = append(frame, sseDataPrefixBytes...)
+	frame = append(frame, data...)
+	frame = append(frame, sseFrameSuffixBytes...)
+	return w.writeFrame(frame)
+}
+
+func (w *CheckedStreamWriter) writeFrame(frame []byte) error {
+	w.frame = frame
+	_, err := w.Write(frame)
 	if cap(w.frame) > 64<<10 {
 		w.frame = nil
 	}

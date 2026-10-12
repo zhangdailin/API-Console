@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('./test-support.cjs');
 
-function load() {
+function load({ accountPage = true } = {}) {
   const makeElement = (tag) => ({
     tagName: tag,
     value: '',
@@ -50,7 +50,7 @@ function load() {
     clearTimeout: () => {},
     console,
   });
-  for (const file of ['common.js', 'accounts.js']) {
+  for (const file of accountPage ? ['common.js', 'accounts.js'] : ['common.js']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, 'static/js', file), 'utf8'), context);
   }
   return context;
@@ -231,4 +231,32 @@ test('an official weekly Build window still wins over the estimate', () => {
   assert.equal(quota.used, 42);
   assert.equal(quota.estimated, undefined);
   assert.match(context.buildQuotaMarkup(acc), /58%/, 'the reported window is shown as a percentage');
+});
+
+test('sidebar and account rows use the same quota even when older counters disagree', () => {
+  const sidebar = load({ accountPage: false });
+  const page = load();
+  const cases = [
+    { account: buildFreeAccount({ has_credential: true, quota_remaining: 0,
+      grok_billing: { weekly: { has_usage: true, usage_percent: 42 } } }), remaining: 58, exhausted: false },
+    { account: buildFreeAccount({ has_credential: true, status_code: '429',
+      grok_billing: { weekly: { has_usage: true, usage_percent: 100 } } }), remaining: 0, exhausted: true },
+    { account: buildFreeAccount({ has_credential: true, quota_limit: 0, quota_supported: false,
+      quota_confidence: '', usage_limit: 100, usage_current: 0 }), remaining: 0, exhausted: false },
+    { account: { account_type: 'cline', enabled: true, has_credential: true,
+      usage_limit: 100, usage_current: 0 }, remaining: 0, exhausted: false },
+    { account: { account_type: 'cline', enabled: true, has_credential: true,
+      quota_supported: true, quota_limit: 1000, quota_remaining: 0,
+      status_code: 'cline_quota_exhausted' }, remaining: 0, exhausted: true },
+    { account: { account_type: 'qoder', enabled: true, has_credential: true,
+      quota_supported: true, quota_limit: 0, quota_remaining: 0 }, remaining: 0, exhausted: true },
+  ];
+  for (const { account, remaining, exhausted } of cases) {
+    assert.deepEqual(JSON.parse(JSON.stringify(sidebar.getQuotaStats(account))),
+      JSON.parse(JSON.stringify(page.getQuotaStats(account))));
+    assert.equal(sidebar.getQuotaStats(account).remaining, remaining);
+    assert.equal(sidebar.isQuotaOnlyStatus(account), exhausted);
+    assert.equal(Boolean(page.evaluateAccountStatus(account).quotaOnly), exhausted);
+    assert.equal(sidebar.isSidebarAccountAbnormal(account), page.isAccountAbnormal(account));
+  }
 });

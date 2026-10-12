@@ -87,7 +87,15 @@ function loadUI({ deferTimers = false, accountsPayload = [] } = {}) {
         : node(selector),
       createElement: makeElement,
       createDocumentFragment: () => makeElement('fragment'),
-      querySelectorAll: (selector) => selector === '#platformFilters .tab-item' ? node('platformFilters').children : [],
+      querySelectorAll: (selector) => {
+        if (selector === '#platformFilters .tab-item') return node('platformFilters').children;
+        if (selector === '#accountForm [data-login-group]') return LOGIN_PLATFORMS.map(provider => {
+          const group = node(provider.group);
+          group.dataset.loginGroup = provider.key;
+          return group;
+        });
+        return [];
+      },
       addEventListener() {},
     },
     window: {
@@ -442,10 +450,22 @@ test('official-login cleanup stops each provider and hides its own status and li
   assert.deepEqual(calls, ['WorkBuddyLogin', 'QoderLogin', 'ClineLogin']);
 });
 
+test('shared login action only starts the provider shown in the account modal', () => {
+  const { context, node } = loadUI();
+  const starts = [];
+  context.WorkBuddyLogin = { start: () => starts.push('workbuddy') };
+  context.QoderLogin = { start: () => starts.push('qoder') };
+  context.ClineLogin = { start: () => starts.push('cline') };
+  node('accountType').value = 'qoder';
+  context.startOfficialLogin('workbuddy');
+  context.startOfficialLogin('qoder');
+  context.startOfficialLogin('unknown');
+  assert.deepEqual(starts, ['qoder']);
+});
+
 test('WorkBuddy without a meter snapshot says so instead of showing a fake quota', () => {
   const { context } = loadUI();
   const account = workBuddyAccount({ email: 'operator@example.com' });
-  assert.equal(context.getSidebarQuotaStats(account), null);
   const quota = context.getQuotaStats(account);
   assert.equal(quota.unknown, true);
   assert.match(context.buildQuotaMarkup(account), /WorkBuddy 计量接口未返回数据/);

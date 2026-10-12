@@ -20,7 +20,7 @@ func TestAccountModalOffersClineLogin(t *testing.T) {
 	for _, want := range []string{
 		`id="clineLoginGroup"`,
 		`id="clineLoginButton"`,
-		`ClineLogin.start()`,
+		`data-login-provider="cline"`,
 		`js/cline-auth.js`,
 	} {
 		testutil.CheckContain(t, page, want)

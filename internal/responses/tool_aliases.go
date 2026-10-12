@@ -8,6 +8,7 @@ import "io"
 func (e *SSEEvent) SetData(lines ...string) {
 	e.data = lines
 	e.raw = nil
+	e.hasRawData = false
 }
 
 // WriteTo renders the frame. An untouched frame is written back byte-for-byte
