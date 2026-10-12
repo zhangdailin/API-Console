@@ -870,10 +870,7 @@
     // question (a previous tab, or a previous filter) and is dropped when it lands.
     const ticket = listLoads.begin();
     try {
-      const response = await ConsoleAPI.request('/api/journal/records?' + params.toString(), { signal: ticket.signal });
-      if (!ticket.isCurrent()) return;
-      if (!response.ok) throw new Error('HTTP ' + response.status);
-      const payload = await response.json();
+      const payload = await ConsoleAPI.journal(params, { signal: ticket.signal });
       if (!ticket.isCurrent()) return;
       state.cursor = payload.next_cursor || '';
       state.records = append ? state.records.concat(payload.data || []) : payload.data || [];
@@ -1005,24 +1002,22 @@
     const button = el('logsDiagnosticsToggle');
     if (!button) return;
     let enabled = null;
+    const settingSave = ConsoleUI.submission();
     async function update(save) {
-      button.disabled = true;
-      try {
-        const response = await ConsoleAPI.request('/api/journal/diagnostics/settings', save ? {
-          method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ enabled: !enabled }),
-        } : { credentials: 'same-origin', cache: 'no-store' });
-        if (!response.ok) throw new Error('HTTP ' + response.status);
-        const payload = await response.json();
-        if (typeof payload.enabled !== 'boolean') throw new Error('Invalid setting');
-        enabled = payload.enabled;
-        button.setAttribute('aria-pressed', String(enabled));
-        button.textContent = enabled ? '诊断采集：已开启（点击关闭）' : '诊断采集：已关闭（点击开启）';
-        button.title = '对新请求生效，诊断内容最多保留 24 小时、512 个请求';
-      } catch (error) {
-        button.textContent = enabled == null ? '诊断采集：读取失败，点击重试' : '诊断采集：保存失败，点击重试';
-        button.title = error.message;
-      } finally { button.disabled = false; }
+      return settingSave.run(async () => {
+        try {
+          const payload = await ConsoleAPI.json('/api/journal/diagnostics/settings', save
+            ? ConsoleAPI.jsonOptions('PUT', { enabled: !enabled }) : { cache: 'no-store' });
+          if (typeof payload.enabled !== 'boolean') throw new Error('Invalid setting');
+          enabled = payload.enabled;
+          button.setAttribute('aria-pressed', String(enabled));
+          button.textContent = enabled ? '诊断采集：已开启（点击关闭）' : '诊断采集：已关闭（点击开启）';
+          button.title = '对新请求生效，诊断内容最多保留 24 小时、512 个请求';
+        } catch (error) {
+          button.textContent = enabled == null ? '诊断采集：读取失败，点击重试' : '诊断采集：保存失败，点击重试';
+          button.title = error.message;
+        }
+      }, [button]);
     }
     button.addEventListener('click', () => update(enabled != null));
     await update(false);

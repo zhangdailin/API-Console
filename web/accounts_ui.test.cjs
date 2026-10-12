@@ -463,6 +463,49 @@ test('shared login action only starts the provider shown in the account modal', 
   assert.deepEqual(starts, ['qoder']);
 });
 
+test('batch deletion reports partial failure and suppresses a second submission', async () => {
+  const { context } = loadUI();
+  const requests = [], notices = [];
+  let finishFirst;
+  context.confirm = () => true;
+  context.showToast = (...args) => notices.push(args);
+  context.loadAccounts = async () => {};
+  context.fetch = async url => {
+    requests.push(url);
+    if (url.endsWith('/1')) await new Promise(resolve => { finishFirst = resolve; });
+    return url.endsWith('/2') ? { ok: false, status: 403, text: async () => '{"error":{"message":"denied"}}' }
+      : { ok: true, status: 204 };
+  };
+  const pending = context.deleteAccountBatch([1, 2, 3], 'delete?');
+  await context.deleteAccountBatch([1, 2, 3], 'delete?');
+  assert.deepEqual(requests, ['/api/accounts/1']);
+  finishFirst();
+  await pending;
+  assert.deepEqual(requests, ['/api/accounts/1', '/api/accounts/2', '/api/accounts/3']);
+  assert.deepEqual(notices, [['删除完成：成功 2，失败 1', 'error']]);
+});
+
+test('account settings are submitted once and can retry after a failed response', async () => {
+  const { context, node } = loadUI();
+  node('accountId').value = '7';
+  node('accountType').value = 'cline';
+  node('enabled').checked = true;
+  context.showToast = () => {};
+  const requests = [];
+  let resolve;
+  context.fetch = async url => { requests.push(url); return new Promise(done => { resolve = done; }); };
+  const pending = context.saveAccount({ preventDefault() {} });
+  await context.saveAccount({ preventDefault() {} });
+  assert.equal(requests.length, 1);
+  resolve({ ok: false, status: 500, text: async () => '{"error":"unavailable"}' });
+  await pending;
+  assert.equal(node('#accountForm button[type="submit"]').disabled, false);
+  const retry = context.saveAccount({ preventDefault() {} });
+  assert.equal(requests.length, 2);
+  resolve({ ok: false, status: 500, text: async () => 'unavailable' });
+  await retry;
+});
+
 test('WorkBuddy without a meter snapshot says so instead of showing a fake quota', () => {
   const { context } = loadUI();
   const account = workBuddyAccount({ email: 'operator@example.com' });
@@ -492,12 +535,13 @@ test('WorkBuddy delegates to the shared browser driver without persisting tokens
 
 test('WorkBuddy keeps operator-facing server errors and original terminal messages', () => {
   const source = fs.readFileSync(path.join(__dirname, 'static/js/workbuddy-auth.js'), 'utf8');
+  const driver = fs.readFileSync(path.join(__dirname, 'static/js/device-auth.js'), 'utf8');
   for (const code of [
     'upstream_unreachable', 'upstream_rejected', 'origin_mismatch',
     'insecure_origin', 'store_unavailable', 'too_many_logins',
     'unsupported_media_type', 'transaction_failed',
   ]) {
-    assert.match(source, new RegExp(`${code}:`), `no message for ${code}`);
+    assert.match(code.startsWith('upstream_') ? source : driver, new RegExp(`${code}:`), `no message for ${code}`);
   }
   assert.match(source, /complete: 'WorkBuddy 官方登录完成，账号已保存'/);
   assert.match(source, /failed: 'WorkBuddy 授权失败，请重新发起登录。'/);
@@ -609,16 +653,16 @@ test('a rejected credential shows the reason, not the raw error envelope', () =>
     type: 'error',
   });
   assert.equal(
-    vm.runInContext(`extractAdminErrorDetail(${JSON.stringify(envelope)})`, context),
+    vm.runInContext(`ConsoleAPI.detail(${JSON.stringify(envelope)}, '')`, context),
     'account was rejected by the upstream and was not saved: 401 unauthorized',
     'JSON envelope must be unwrapped to its message',
   );
   assert.equal(
-    vm.runInContext('extractAdminErrorDetail("missing sso token")', context),
+    vm.runInContext('ConsoleAPI.detail("missing sso token", "")', context),
     'missing sso token',
     'a plain-text body is already the detail',
   );
-  assert.equal(vm.runInContext('extractAdminErrorDetail("")', context), '', 'an empty body stays empty');
+  assert.equal(vm.runInContext('ConsoleAPI.detail("", "")', context), '', 'an empty body stays empty');
 });
 
 test('the session fingerprint never exposes the credential', () => {

@@ -133,8 +133,8 @@ function renderConfigDirtyState() {
   }
 }
 
-function captureConfigBaseline() {
-  configBaseline = collectConfigState(CONFIG_TRACKED_FIELDS);
+function captureConfigBaseline(state = collectConfigState(CONFIG_TRACKED_FIELDS)) {
+  configBaseline = state;
   syncAllToggleStates();
   setConfigSaveError("");
   renderConfigDirtyState();
@@ -278,6 +278,7 @@ async function saveConfiguration() {
     data[key] = value;
   }
   const saveBtn = document.getElementById("cfgSaveBtn");
+  const submittedState = collectConfigState(CONFIG_TRACKED_FIELDS);
   configSaving = true;
   if (saveBtn) {
     saveBtn.disabled = true;
@@ -285,19 +286,11 @@ async function saveConfiguration() {
   }
 
   try {
-    const res = await ConsoleAPI.request("/api/config/save", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data)
-    });
-    if (!res.ok) throw new Error(await res.text());
-    const payload = await res.json();
-    if (payload.code !== 0) { throw new Error(payload.message || payload.msg || "保存失败"); }
+    await ConsoleAPI.json('/api/config/save', ConsoleAPI.jsonOptions('POST', data), { envelope: true });
     setConfigSaveError("");
     showToast("配置保存成功");
-    // What was just saved becomes the new comparison baseline: the bar goes
-    // clean because the fields now match the server.
-    captureConfigBaseline();
+    // Edits made while the request was pending have not reached the server.
+    captureConfigBaseline(submittedState);
   } catch (err) {
     // A failed save keeps every edit and the unsaved count, and says why.
     setConfigSaveError("保存失败：" + err.message);

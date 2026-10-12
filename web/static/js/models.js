@@ -12,6 +12,8 @@ let modelBatchInFlight = false;
 let modelDeleteOfflineInFlight = false;
 let modelRefreshResults = {};
 let modelRefreshConcurrency = 4;
+const modelSave = ConsoleUI.submission();
+const modelOperations = ConsoleUI.keyedSubmission();
 
 // ── small helpers ────────────────────────────────────────────────────────────
 
@@ -281,15 +283,17 @@ function statusBadgeHtml(m) {
 
 function toggleHtml(m) {
   const available = normalizeModelStatus(m.status) === "available";
+  const disabled = modelRowBusy(m.id) ? "disabled" : "";
   return `<label class="toggle${available ? " active" : ""}" title="${available ? "点击下线" : "点击启用"}">
-            <input type="checkbox" data-action="toggle-status" data-id="${encodeData(m.id)}" ${available ? "checked" : ""} />
+            <input type="checkbox" data-action="toggle-status" data-id="${encodeData(m.id)}" ${available ? "checked" : ""} ${disabled} />
             <span class="toggle-slider"></span>
           </label>`;
 }
 
 function actionButtonsHtml(m) {
-  return `<button type="button" class="btn btn-outline models-action-btn" data-action="edit" data-id="${encodeData(m.id)}">编辑</button>
-          <button type="button" class="btn btn-outline models-action-btn models-action-btn-danger" data-action="delete" data-id="${encodeData(m.id)}">删除</button>`;
+  const disabled = modelRowBusy(m.id) ? "disabled" : "";
+  return `<button type="button" class="btn btn-outline models-action-btn" data-action="edit" data-id="${encodeData(m.id)}" ${disabled}>编辑</button>
+          <button type="button" class="btn btn-outline models-action-btn models-action-btn-danger" data-action="delete" data-id="${encodeData(m.id)}" ${disabled}>删除</button>`;
 }
 
 // emptyModels is the "no model matched" panel both layouts fall back to.
@@ -453,7 +457,7 @@ function clearModelSelection() {
 }
 
 async function runModelBatch(action) {
-  if (modelBatchInFlight || !['enable', 'disable', 'delete', 'clear'].includes(action)) return;
+  if (modelBatchInFlight || modelDeleteOfflineInFlight || !['enable', 'disable', 'delete', 'clear'].includes(action)) return;
   const scopedIds = new Set(getChannelScopedModels().map(model => String(model.id)));
   const ids = Array.from(modelsSelectedIds).filter(id => scopedIds.has(id));
   if (ids.length === 0) return;
@@ -465,34 +469,28 @@ async function runModelBatch(action) {
   if (action === "delete" && !confirm(`确定删除选中的 ${ids.length} 个模型吗？此操作不可撤销。`)) return;
 
   modelBatchInFlight = true;
+  renderModels();
   const batchButtons = document.querySelectorAll('#modelsBatchBar button');
   batchButtons.forEach(button => { button.disabled = true; });
-  let done = 0;
-  let failed = 0;
-  for (const id of ids) {
-    try {
-      if (action === "delete") {
-        const response = await ConsoleAPI.request(`/api/models/${encodeURIComponent(id)}`, { method: "DELETE" });
-        if (!response.ok) throw new Error("HTTP " + response.status);
-      } else {
-        const current = models.find((m) => String(m.id) === String(id));
-        if (!current) throw new Error("模型已不在列表中");
-        const response = await ConsoleAPI.request(`/api/models/${encodeURIComponent(id)}`, {
-          method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...current, status: action === "enable" ? "available" : "offline" }) });
-        if (!response.ok) throw new Error("HTTP " + response.status);
-      }
-      done += 1;
-    } catch (error) {
-      failed += 1;
-      console.warn("batch model action failed", id, error);
+  const result = await ConsoleAPI.batch(ids, async id => {
+    if (modelOperations.busy(id)) throw new Error("模型正在操作，请稍后重试");
+    if (action === "delete") {
+      await ConsoleAPI.checked(`/api/models/${encodeURIComponent(id)}`, { method: "DELETE" });
+    } else {
+      const current = models.find((m) => String(m.id) === String(id));
+      if (!current) throw new Error("模型已不在列表中");
+      await ConsoleAPI.checked(`/api/models/${encodeURIComponent(id)}`, ConsoleAPI.jsonOptions('PUT', { ...current, status: action === "enable" ? "available" : "offline" }));
     }
-  }
+  });
+  const done = result.succeeded.length, failed = result.failed.length;
+  if (failed) console.warn('batch model action failed', result.failed);
   modelsSelectedIds.clear();
   showToast(failed === 0
     ? `已批量${labels[action]} ${done} 个模型`
     : `批量${labels[action]}完成：成功 ${done}，失败 ${failed}`, failed === 0 ? "success" : "error");
   try { await loadModels(); } finally {
     modelBatchInFlight = false;
+    renderModels();
     batchButtons.forEach(button => { button.disabled = false; });
   }
 }
@@ -548,6 +546,7 @@ function updateModelChannelOptions() {
 }
 
 function openModelModal(model = null) {
+  if (modelSave.busy || (model && modelRowBusy(model.id))) return;
   const modal = document.getElementById("modelModal");
   const title = document.getElementById("modelModalTitle");
   const form = document.getElementById("modelForm");
@@ -587,29 +586,34 @@ function closeModelModal() { ConsoleUI.modal("modelModal", false); }
 
 async function saveModel(event) {
   event.preventDefault();
+  return modelSave.run(async () => {
 
-  const id = document.getElementById("modelId").value;
-  const data = {
-    channel: document.getElementById("modelChannel").value,
-    model_id: document.getElementById("modelModelId").value,
-    name: document.getElementById("modelName").value,
-    sort_order: parseInt(document.getElementById("modelSortOrder").value, 10) || 0,
-    status: document.getElementById("modelStatus").value,
-    is_default: document.getElementById("modelIsDefault").checked,
-  };
+    const id = document.getElementById("modelId").value;
+    if (id && modelRowBusy(id)) { showToast("模型正在操作，请稍后重试", "error"); return; }
+    const data = {
+      channel: document.getElementById("modelChannel").value,
+      model_id: document.getElementById("modelModelId").value,
+      name: document.getElementById("modelName").value,
+      sort_order: parseInt(document.getElementById("modelSortOrder").value, 10) || 0,
+      status: document.getElementById("modelStatus").value,
+      is_default: document.getElementById("modelIsDefault").checked,
+    };
 
-  if (id) { data.id = id; }
+    if (id) { data.id = id; }
 
-  try {
-    const url = id ? `/api/models/${id}` : "/api/models";
-    const method = id ? "PUT" : "POST";
-    const res = await ConsoleAPI.request(url, {
-      method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
-    if (!res.ok) throw new Error(await res.text());
-    closeModelModal();
-    await loadModels();
-    showToast("保存成功");
-  } catch (err) { showToast(`保存失败: ${err.message}`, "error"); }
+    try {
+      const url = id ? `/api/models/${id}` : "/api/models";
+      const method = id ? "PUT" : "POST";
+      const persist = async () => {
+        await ConsoleAPI.checked(url, ConsoleAPI.jsonOptions(method, data));
+        closeModelModal();
+        await loadModels();
+        showToast("保存成功");
+      };
+      if (id) await modelOperation(id, persist);
+      else await persist();
+    } catch (err) { showToast(`保存失败: ${err.message}`, "error"); }
+  }, [document.querySelector('#modelForm button[type="submit"]')]);
 }
 
 function editModel(id) {
@@ -618,26 +622,41 @@ function editModel(id) {
 }
 
 async function toggleModelStatus(id, enabled) {
+  if (modelRowBusy(id)) return;
   const model = models.find((item) => item.id === id);
   if (!model) return;
 
-  try {
-    const updatedModel = { ...model, status: enabled ? "available" : "offline" };
-    const res = await ConsoleAPI.request(`/api/models/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(updatedModel) });
-    if (!res.ok) throw new Error(await res.text());
-    showToast(enabled ? "模型已启用" : "模型已禁用");
-    await loadModels();
-  } catch (err) { showToast(`操作失败: ${err.message}`, "error"); }
+  return modelOperation(id, async () => {
+    try {
+      const updatedModel = { ...model, status: enabled ? "available" : "offline" };
+      await ConsoleAPI.checked(`/api/models/${id}`, ConsoleAPI.jsonOptions('PUT', updatedModel));
+      showToast(enabled ? "模型已启用" : "模型已禁用");
+      await loadModels();
+    } catch (err) { showToast(`操作失败: ${err.message}`, "error"); }
+  });
 }
 
 async function deleteModel(id) {
+  if (modelRowBusy(id)) return;
   if (!confirm("确定要删除这个模型吗？")) return;
-  try {
-    const res = await ConsoleAPI.request(`/api/models/${id}`, { method: "DELETE" });
-    if (!res.ok) throw new Error(await res.text());
-    showToast("删除成功");
-    await loadModels();
-  } catch (err) { showToast(`删除失败: ${err.message}`, "error"); }
+  return modelOperation(id, async () => {
+    try {
+      await ConsoleAPI.checked(`/api/models/${id}`, { method: "DELETE" });
+      showToast("删除成功");
+      await loadModels();
+    } catch (err) { showToast(`删除失败: ${err.message}`, "error"); }
+  });
+}
+
+function modelRowBusy(id) {
+  return modelBatchInFlight || modelDeleteOfflineInFlight || modelOperations.busy(id);
+}
+
+function modelOperation(id, operation) {
+  return modelOperations.run(id, () => {
+    renderModels();
+    return operation();
+  }).finally(renderModels);
 }
 
 function updateRefreshButton() {
@@ -667,20 +686,7 @@ async function refreshModelsForCurrentChannel() {
   updateRefreshButton();
 
   try {
-    const res = await ConsoleAPI.request("/api/models/refresh", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ channel, concurrency: modelRefreshConcurrency }) });
-
-    const raw = await res.text();
-    let data = {};
-    if (raw) {
-      try {
-        data = JSON.parse(raw);
-      } catch (err) {
-        data = { message: raw };
-      }
-    }
-
-    if (!res.ok) { throw new Error(data.message || raw || "刷新失败"); }
+    const data = await ConsoleAPI.json('/api/models/refresh', ConsoleAPI.jsonOptions('POST', { channel, concurrency: modelRefreshConcurrency }));
 
     const normalized = normalizeModelRefreshResult(data, channel);
     if (normalized.channel) { modelRefreshResults[refreshChannelKey(normalized.channel)] = normalized; }
@@ -712,7 +718,7 @@ async function refreshModelsForCurrentChannel() {
 
 async function deleteOfflineModelsForCurrentChannel() {
   const channel = activeChannel();
-  if (!channel || modelDeleteOfflineInFlight) return;
+  if (!channel || modelDeleteOfflineInFlight || modelBatchInFlight) return;
 
   const targets = offlineModels();
   if (targets.length === 0) {
@@ -723,17 +729,17 @@ async function deleteOfflineModelsForCurrentChannel() {
   if (!confirm(`确定删除 ${channel} 渠道的 ${targets.length} 个已下线模型吗？`)) { return; }
 
   modelDeleteOfflineInFlight = true;
+  renderModels();
   updateRefreshButton();
   let deleted = 0;
   const failures = [];
   try {
-    for (const model of targets) {
-      try {
-        const res = await ConsoleAPI.request(`/api/models/${encodeURIComponent(model.id)}`, { method: "DELETE" });
-        if (!res.ok) throw new Error(await res.text());
-        deleted += 1;
-      } catch (err) { failures.push(`${model.model_id || model.id}: ${err.message || err}`); }
-    }
+    const result = await ConsoleAPI.batch(targets, model => {
+      if (modelOperations.busy(model.id)) throw new Error("模型正在操作，请稍后重试");
+      return ConsoleAPI.checked(`/api/models/${encodeURIComponent(model.id)}`, { method: 'DELETE' });
+    });
+    deleted = result.succeeded.length;
+    failures.push(...result.failed.map(({ item, error }) => `${item.model_id || item.id}: ${error.message || error}`));
     await loadModels();
     if (failures.length > 0) {
       showToast(`已删除 ${deleted} 个，失败 ${failures.length} 个`, "error");
@@ -741,6 +747,7 @@ async function deleteOfflineModelsForCurrentChannel() {
     } else { showToast(`已删除 ${deleted} 个已下线模型`); }
   } finally {
     modelDeleteOfflineInFlight = false;
+    renderModels();
     updateRefreshButton();
   }
 }

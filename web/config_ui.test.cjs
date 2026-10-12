@@ -32,7 +32,7 @@ function loadConfig(fetchImpl){
  vm.runInContext(fs.readFileSync(path.join(__dirname,'static/js/ui.js'),'utf8'),context);
  // Export the config helpers without changing the production asset.
  let src=fs.readFileSync(path.join(__dirname,'static/js/config.js'),'utf8');
- src+='\nglobalThis.probe={parseAnonymousAllowIPs,applyConfigurationPayload,loadConfiguration,saveConfiguration,Input:HTMLInputElement};\n';
+ src+='\nglobalThis.probe={parseAnonymousAllowIPs,applyConfigurationPayload,loadConfiguration,saveConfiguration,captureConfigBaseline,countConfigChanges,resetConfigChanges,Input:HTMLInputElement};\n';
  vm.runInContext(src,context);
  return {api:context.probe,node,context,notices};
 }
@@ -140,4 +140,50 @@ test('performance controls preserve explicit values and reject invalid save',asy
  assert.equal(node('cfg_first_token_timeout_seconds').value,'-1');
  node('cfg_workbuddy_default_max_tokens').value='0';
  await api.saveConfiguration(); assert.equal(calls,0);
+});
+
+test('saving config preserves newer edits as dirty and resets to the submitted snapshot', async () => {
+ let respond, saved;
+ const {api,node}=loadConfig((_url,options)=>{
+  saved=JSON.parse(options.body);
+  return new Promise(resolve=>{respond=resolve;});
+ });
+ api.applyConfigurationPayload({proxy_url:'http://original.example'});
+ api.captureConfigBaseline();
+ node('cfg_proxy_url').value='http://submitted.example';
+ const pending=api.saveConfiguration();
+ node('cfg_proxy_url').value='http://newer.example';
+ respond({ok:true,json:async()=>({code:0})});
+ await pending;
+ assert.equal(saved.proxy_url,'http://submitted.example');
+ assert.equal(node('cfg_proxy_url').value,'http://newer.example');
+ assert.equal(api.countConfigChanges(),1);
+ assert.equal(node('cfgDirtyState').classList.contains('hidden'),false);
+ assert.equal(node('cfgCleanState').classList.contains('hidden'),true);
+ api.resetConfigChanges();
+ assert.equal(node('cfg_proxy_url').value,'http://submitted.example');
+ assert.equal(api.countConfigChanges(),0);
+});
+
+test('failed config saves retain the old baseline and allow retry without duplicate submissions', async () => {
+ const requests=[];
+ const {api,node}=loadConfig((_url,options)=>new Promise(resolve=>requests.push({options,resolve})));
+ api.applyConfigurationPayload({proxy_url:'http://original.example'});
+ api.captureConfigBaseline();
+ node('cfg_proxy_url').value='http://submitted.example';
+ const first=api.saveConfiguration();
+ await api.saveConfiguration();
+ assert.equal(requests.length,1);
+ node('cfg_proxy_url').value='http://newer.example';
+ requests[0].resolve({ok:false,status:503,text:async()=> 'offline'});
+ await first;
+ assert.equal(api.countConfigChanges(),1);
+ api.resetConfigChanges();
+ assert.equal(node('cfg_proxy_url').value,'http://original.example');
+ node('cfg_proxy_url').value='http://retry.example';
+ const retry=api.saveConfiguration();
+ requests[1].resolve({ok:true,json:async()=>({code:0})});
+ await retry;
+ assert.equal(api.countConfigChanges(),0);
+ assert.equal(node('cfgSaveBtn').disabled,false);
 });

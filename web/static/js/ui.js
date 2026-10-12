@@ -14,9 +14,20 @@ globalThis.ConsoleAPI = (() => {
     }
     return response;
   }
-  async function json(url, options = {}, contract = {}) {
+  async function checked(url, options = {}) {
     const response = await request(url, options);
-    if (!response.ok) { throw new Error(detail(await response.text(), `HTTP ${response.status}`)); }
+    if (!response.ok) {
+      const error = new Error(detail(await response.text(), `HTTP ${response.status}`));
+      error.status = response.status;
+      throw error;
+    }
+    return response;
+  }
+  function jsonOptions(method, value, options = {}) {
+    return { ...options, method, headers: { ...options.headers, 'Content-Type': 'application/json' }, body: JSON.stringify(value) };
+  }
+  async function json(url, options = {}, contract = {}) {
+    const response = await checked(url, options);
     const contentType = response.headers?.get?.('content-type');
     if (contentType && !contentType.toLowerCase().includes('application/json')) { throw new Error('接口未返回 JSON，登录状态可能已失效'); }
     let value = await response.json();
@@ -27,7 +38,20 @@ globalThis.ConsoleAPI = (() => {
     if (contract.array && !Array.isArray(value)) throw new Error('接口列表格式无效');
     return value;
   }
-  return Object.freeze({ request, json, detail });
+  async function batch(items, operation) {
+    const succeeded = [], failed = [];
+    for (const item of items) {
+      try { await operation(item); succeeded.push(item); }
+      catch (error) { failed.push({ item, error }); }
+    }
+    return { succeeded, failed };
+  }
+  async function journal(params, options = {}) {
+    const payload = await json('/api/journal/records?' + params.toString(), options);
+    if (!payload || (payload.data != null && !Array.isArray(payload.data))) throw new Error('日志列表格式无效');
+    return { ...payload, data: payload.data || [] };
+  }
+  return Object.freeze({ request, checked, json, jsonOptions, batch, journal, detail });
 })();
 
 globalThis.ConsoleUI = (() => {
@@ -44,6 +68,33 @@ globalThis.ConsoleUI = (() => {
       return Object.freeze({ signal, isCurrent, accepts: error => isCurrent() && error?.name !== 'AbortError' });
     }
     return Object.freeze({ begin, cancel });
+  }
+  function submission() {
+    let busy = false;
+    async function run(operation, buttons = []) {
+      if (busy) return;
+      busy = true;
+      const controls = buttons.filter(Boolean).map(node => ({ node, disabled: node.disabled }));
+      controls.forEach(({ node }) => { node.disabled = true; });
+      try { return await operation(); }
+      finally {
+        busy = false;
+        controls.forEach(({ node, disabled }) => { node.disabled = disabled; });
+      }
+    }
+    return Object.freeze({ run, get busy() { return busy; } });
+  }
+  function keyedSubmission() {
+    const active = new Set();
+    const busy = id => active.has(String(id));
+    async function run(id, operation) {
+      if (busy(id)) return;
+      const key = String(id);
+      active.add(key);
+      try { return await operation(); }
+      finally { active.delete(key); }
+    }
+    return Object.freeze({ run, busy });
   }
   function make(tag, className, value) {
     const node = document.createElement(tag);
@@ -99,5 +150,5 @@ globalThis.ConsoleUI = (() => {
     });
     return table;
   }
-  return Object.freeze({ el, make, attach, setText, modal, pagination, responsiveTable, requestGate });
+  return Object.freeze({ el, make, attach, setText, modal, pagination, responsiveTable, requestGate, submission, keyedSubmission });
 })();

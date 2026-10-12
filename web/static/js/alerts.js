@@ -5,6 +5,8 @@
   const { el, make, attach } = ConsoleUI;
 
   const state = { rules: null, defaults: null, editable: true };
+  const ruleLoads = ConsoleUI.requestGate(), eventLoads = ConsoleUI.requestGate();
+  const ruleSave = ConsoleUI.submission();
 
   // FIELDS describes the policy. Each entry states the unit, the range and why the
   // threshold exists, because a number without its reason is a number an operator
@@ -165,11 +167,12 @@
 
   // --- load ------------------------------------------------------------------
   async function loadRules() {
+    if (ruleSave.busy) return;
+    const ticket = ruleLoads.begin();
     setState('读取中…');
     try {
-      const response = await ConsoleAPI.request('/api/ops/alerts/rules', { credentials: 'same-origin' });
-      if (!response.ok) throw new Error('HTTP ' + response.status);
-      const payload = await response.json();
+      const payload = await ConsoleAPI.json('/api/ops/alerts/rules', { signal: ticket.signal });
+      if (!ticket.isCurrent()) return;
       state.rules = payload.rules || {};
       state.defaults = payload.defaults || {};
       state.editable = payload.editable !== false;
@@ -181,35 +184,36 @@
       setState(state.editable ? '规则已加载' : '本部署未启用告警引擎（需要 Redis）', state.editable ? '' : 'is-warn');
       const note = el('alertsNote');
       if (note && payload.note) note.textContent = payload.note;
-    } catch (error) { setState('读取失败：' + (error.message || error), 'is-error'); }
+    } catch (error) { if (ticket.accepts(error)) setState('读取失败：' + (error.message || error), 'is-error'); }
   }
 
   async function saveRules() {
-    const rules = readForm();
-    const problem = validate(rules);
-    if (problem) {
-      showToast(problem, 'error');
-      return;
-    }
-    setState('保存中…');
-    try {
-      const response = await ConsoleAPI.request('/api/ops/alerts/rules', {
-        method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rules) });
-      if (!response.ok) throw new Error((await response.text()) || ('HTTP ' + response.status));
-      const payload = await response.json();
-      state.rules = payload.rules || rules;
-      renderFields();
-      renderPreview();
-      setState('已保存并生效');
-      showToast('告警规则已保存并生效');
-    } catch (error) {
-      setState('保存失败', 'is-error');
-      showToast('保存失败：' + (error.message || error), 'error');
-    }
+    if (!state.editable) return;
+    return ruleSave.run(async () => {
+      const rules = readForm();
+      const problem = validate(rules);
+      if (problem) {
+        showToast(problem, 'error');
+        return;
+      }
+      ruleLoads.cancel();
+      setState('保存中…');
+      try {
+        const payload = await ConsoleAPI.json('/api/ops/alerts/rules', ConsoleAPI.jsonOptions('PUT', rules));
+        state.rules = payload.rules || rules;
+        renderFields();
+        renderPreview();
+        setState('已保存并生效');
+        showToast('告警规则已保存并生效');
+      } catch (error) {
+        setState('保存失败', 'is-error');
+        showToast('保存失败：' + (error.message || error), 'error');
+      }
+    }, [el('alertsSave'), el('alertsReload'), el('alertsResetDefaults')]);
   }
 
   function resetDefaults() {
-    if (!state.defaults) return;
+    if (!state.defaults || ruleSave.busy) return;
     state.rules = Object.assign({}, state.defaults);
     renderFields();
     renderPreview();
@@ -230,12 +234,12 @@
     const table = el('alertsEvents');
     if (!table) return;
     const body = table.querySelector('tbody');
+    const ticket = eventLoads.begin();
     body.replaceChildren();
     try {
       const params = new URLSearchParams({ kind: 'system', action: 'alert_', limit: '20' });
-      const response = await ConsoleAPI.request('/api/journal/records?' + params.toString(), { credentials: 'same-origin' });
-      if (!response.ok) throw new Error('HTTP ' + response.status);
-      const payload = await response.json();
+      const payload = await ConsoleAPI.journal(params, { signal: ticket.signal });
+      if (!ticket.isCurrent()) return;
       const rows = (payload.data || []).filter((record) => {
         const action = (record.event || {}).action;
         return action === 'alert_fired' || action === 'alert_recovered';
@@ -256,7 +260,7 @@
         ].forEach((value) => tr.appendChild(make('td', '', String(value))));
         body.appendChild(tr);
       });
-    } catch (error) { eventMessage(body, '读取触发记录失败：' + (error.message || error)); }
+    } catch (error) { if (ticket.accepts(error)) eventMessage(body, '读取触发记录失败：' + (error.message || error)); }
   }
 
   // --- bind ------------------------------------------------------------------

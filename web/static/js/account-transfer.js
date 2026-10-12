@@ -55,7 +55,7 @@ async function confirmAccountImport() {
   document.getElementById('accountImportOpen').disabled = true;
   ConsoleUI.setText('accountImportSummary', '正在导入，请等待结果…');
   try {
-    const result = await ConsoleAPI.json('/api/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(accountImportData) });
+    const result = await ConsoleAPI.json('/api/import', ConsoleAPI.jsonOptions('POST', accountImportData));
     if (!result || !['total', 'imported', 'skipped', 'duplicates', 'invalid', 'failed'].every(name => Number.isInteger(result[name]) && result[name] >= 0) || result.imported + result.skipped !== result.total) throw new Error('结果格式无效');
     accountImportData = null;
     ConsoleUI.setText('accountImportSummary', `已处理 ${result.total} 个：导入 ${result.imported}，重复 ${result.duplicates}，无效 ${result.invalid}，写入失败 ${result.failed}。`);

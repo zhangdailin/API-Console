@@ -17,6 +17,8 @@ function initDOMCache() {
 
 // Load accounts from API
 const accountLoads = ConsoleUI.requestGate();
+const accountSave = ConsoleUI.submission();
+const accountDeletes = ConsoleUI.submission();
 async function loadAccounts() {
   const ticket = accountLoads.begin();
   try {
@@ -308,9 +310,6 @@ function setAccountModalType(type) {
   applyTokenLabels(normalized);
 }
 
-// extractAdminErrorDetail keeps update failures readable without exposing raw JSON.
-function extractAdminErrorDetail(raw) { return ConsoleAPI.detail(raw, ''); }
-
 // The console's channel strip, shared with 模型管理: the same channels, in the same
 // order, with the same names, so an operator moving between the two pages does not have
 // the strip reorder under them.
@@ -449,21 +448,16 @@ async function checkAccount(id, silent = false, actionText = "刷新") {
   const action = "check";
   let succeeded = false;
   try {
-    const res = await ConsoleAPI.request(`/api/accounts/${id}/${action}`);
-    if (!res.ok) { throw new Error(await res.text()); }
-    const updated = await res.json();
+    const updated = await ConsoleAPI.json(`/api/accounts/${id}/${action}`);
     accounts = accounts.map(a => (a.id === id ? updated : a));
     updateAccountHealth(id, true);
     succeeded = true;
     if (!silent) showToast(`账号 ${updated.name || updated.email || id} ${actionText}完成`, "success");
   } catch (err) {
     try {
-      const latestRes = await ConsoleAPI.request(`/api/accounts/${id}`);
-      if (latestRes.ok) {
-        const latest = await latestRes.json();
-        accounts = accounts.map(a => (a.id === id ? latest : a));
-        delete accountHealth[id];
-      } else { updateAccountHealth(id, false, err.message || String(err)); }
+      const latest = await ConsoleAPI.json(`/api/accounts/${id}`);
+      accounts = accounts.map(a => (a.id === id ? latest : a));
+      delete accountHealth[id];
     } catch (_) { updateAccountHealth(id, false, err.message || String(err)); }
     if (!silent) showToast(`账号 ${id} ${actionText}失败`, "error");
   } finally {
@@ -481,26 +475,25 @@ async function clearAbnormalAccounts() {
     return;
   }
   const scopeText = currentPlatform ? `当前 ${currentPlatformLabel()} 页面中的 ` : "";
-  if (confirm(`确定要清空 ${scopeText}${abnormal.length} 个异常账号吗？`)) {
-    for (const acc of abnormal) {
-      await ConsoleAPI.request(`/api/accounts/${acc.id}`, { method: "DELETE" });
-    }
-    loadAccounts();
-    showToast(`已清空${scopeText}异常账号`);
-  }
+  return deleteAccountBatch(abnormal.map(acc => acc.id), `确定要清空 ${scopeText}${abnormal.length} 个异常账号吗？`);
 }
 
 // Batch delete accounts
 async function batchDeleteAccounts() {
-  const selected = Array.from(document.querySelectorAll(".row-checkbox:checked")).map(cb => cb.dataset.id);
+  const selected = Array.from(document.querySelectorAll(".row-checkbox:checked")).map(cb => parseDataId(cb.dataset.id));
   if (selected.length === 0) return;
-  if (confirm(`确定要删除选中的 ${selected.length} 个账号吗？`)) {
-    for (const id of selected) {
-      await ConsoleAPI.request(`/api/accounts/${id}`, { method: "DELETE" });
-    }
-    loadAccounts();
-    showToast(`已成功删除 ${selected.length} 个账号`);
-  }
+  return deleteAccountBatch(selected, `确定要删除选中的 ${selected.length} 个账号吗？`);
+}
+
+function deleteAccountBatch(ids, prompt) {
+  return accountDeletes.run(async () => {
+    if (!confirm(prompt)) return;
+    const { succeeded, failed } = await ConsoleAPI.batch(ids, id =>
+      ConsoleAPI.checked(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }));
+    await loadAccounts();
+    showToast(failed.length ? `删除完成：成功 ${succeeded.length}，失败 ${failed.length}` : `已成功删除 ${succeeded.length} 个账号`, failed.length ? 'error' : 'success');
+    if (failed.length) console.warn('batch account deletion failed', failed);
+  }, [document.getElementById('batchDeleteBtn'), document.getElementById('clearAbnormalBtn')]).finally(updateSelectedCount);
 }
 
 // Render accounts table
@@ -1071,7 +1064,7 @@ function updateSelectedCount() {
   if (batchBtn) {
     // Disabled styling comes from the button's own state, not from inline colours
     // that fought the design system.
-    batchBtn.disabled = checked === 0;
+    batchBtn.disabled = accountDeletes.busy || checked === 0;
   }
 }
 
@@ -1083,6 +1076,7 @@ function toggleSelectAll(checked) {
 
 // Open modal
 function openModal(account = null) {
+  if (accountSave.busy) return;
   stopWorkBuddyLogin();
   stopQoderLogin();
   stopClineLogin();
@@ -1136,26 +1130,27 @@ function closeModal() {
 // Save settings for an existing account. New accounts use official login only.
 async function saveAccount(e) {
   e.preventDefault();
-  const id = document.getElementById("accountId").value;
-  const type = document.getElementById("accountType").value;
-  if (!id) {
-    const label = accountTypeLabel(type);
-    showToast(`请使用「使用 ${label} 官方网页登录」添加账号`, "error");
-    return;
-  }
-  const existing = accounts.find((account) => String(account.id) === String(id));
-  const data = { account_type: type, weight: existing ? (parseInt(existing.weight, 10) || 1) : 1, enabled: document.getElementById("enabled").checked };
-  if (type === "grok") {
-    data.credential_type = "oauth";
-    data.grok_provider = "build";
-  }
-  try {
-    const res = await ConsoleAPI.request(`/api/accounts/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
-    if (!res.ok) throw new Error(extractAdminErrorDetail(await res.text()));
-    closeModal();
-    loadAccounts();
-    showToast("保存成功");
-  } catch (err) { showToast("保存失败: " + err.message, "error"); }
+  return accountSave.run(async () => {
+    const id = document.getElementById("accountId").value;
+    const type = document.getElementById("accountType").value;
+    if (!id) {
+      const label = accountTypeLabel(type);
+      showToast(`请使用「使用 ${label} 官方网页登录」添加账号`, "error");
+      return;
+    }
+    const existing = accounts.find((account) => String(account.id) === String(id));
+    const data = { account_type: type, weight: existing ? (parseInt(existing.weight, 10) || 1) : 1, enabled: document.getElementById("enabled").checked };
+    if (type === "grok") {
+      data.credential_type = "oauth";
+      data.grok_provider = "build";
+    }
+    try {
+      await ConsoleAPI.checked(`/api/accounts/${id}`, ConsoleAPI.jsonOptions('PUT', data));
+      closeModal();
+      loadAccounts();
+      showToast("保存成功");
+    } catch (err) { showToast("保存失败: " + err.message, "error"); }
+  }, [document.querySelector('#accountForm button[type="submit"]')]);
 }
 
 // Edit account
@@ -1175,8 +1170,7 @@ async function refreshToken(id) {
 async function deleteAccount(id) {
   if (!confirm("确定要删除这个账号吗？")) return;
   try {
-    const res = await ConsoleAPI.request(`/api/accounts/${id}`, { method: "DELETE" });
-    if (!res.ok) throw new Error(await res.text());
+    await ConsoleAPI.checked(`/api/accounts/${id}`, { method: "DELETE" });
     showToast("删除成功");
     loadAccounts();
   } catch (err) { showToast("删除失败: " + err.message, "error"); }

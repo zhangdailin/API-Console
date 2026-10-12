@@ -5,7 +5,10 @@ const vm = require('node:vm');
 function setup(request) {
  const nodes = new Map(), calls = []; let reloads = 0;
  const el = id => { if (!nodes.has(id)) nodes.set(id, {value:'',disabled:false,textContent:'',children:[],style:{},classList:{toggle(){}},setAttribute(){},click(){this.clicked=true;},replaceChildren(){this.children=[];},appendChild(node){this.children.push(node);} }); return nodes.get(id); };
- const context = vm.createContext({document:{getElementById:el,createElement:()=>({textContent:''})},window:{OrchidsProviderRegistry:{get:key=>['workbuddy','qoder','cline','grok'].includes(key)?{label:key}:null}}, ConsoleUI:{modal:(id,open)=>{el(id).open=open;},setText:(id,value)=>{el(id).textContent=value;}}, ConsoleAPI:{json:async (...args)=>{calls.push(args);return request?request(...args):{total:1,imported:1,skipped:0,duplicates:0,invalid:0,failed:0};}},loadAccounts(){reloads++;}});
+ const context = vm.createContext({document:{getElementById:el,createElement:()=>({textContent:''})},window:{OrchidsProviderRegistry:{get:key=>['workbuddy','qoder','cline','grok'].includes(key)?{label:key}:null}},loadAccounts(){reloads++;}});
+ vm.runInContext(fs.readFileSync(__dirname+'/static/js/ui.js','utf8'),context);
+ context.ConsoleUI={...context.ConsoleUI,modal:(id,open)=>{el(id).open=open;},setText:(id,value)=>{el(id).textContent=value;}};
+ context.ConsoleAPI={...context.ConsoleAPI,json:async (...args)=>{calls.push(args);return request?request(...args):{total:1,imported:1,skipped:0,duplicates:0,invalid:0,failed:0};}};
  vm.runInContext(fs.readFileSync(__dirname+'/static/js/account-transfer.js','utf8'),context);
  const read = async (value, size=100) => {const input=el('accountImportFile');input.files=[{size,text:async()=>typeof value==='string'?value:JSON.stringify(value)}];await context.readAccountImport(input);};
  return {context,el,calls,read,get reloads(){return reloads;}};

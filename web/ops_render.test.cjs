@@ -199,7 +199,7 @@ test('an older alert response cannot repaint a changed time range', async () => 
 test('failed window refresh clears historical charts and matrix instead of showing the previous scope', async () => {
   let broken = false;
   const { node } = renderPage(realPayload, async (url) => {
-    if (broken && url.startsWith('/api/ops/overview')) return { ok: false, status: 503 };
+    if (broken && url.startsWith('/api/ops/overview')) return { ok: false, status: 503, text: async () => '' };
     return { ok: true, json: async () => url.startsWith('/api/journal/records') ? { data: [] } : realPayload };
   });
   await settle();
@@ -270,7 +270,7 @@ test('a failed fetch still explains itself instead of leaving the card blank', a
     setInterval: () => 0,
     setTimeout: (fn) => { fn(); return 0; },
     URLSearchParams,
-    fetch: async () => ({ ok: false, status: 401, json: async () => ({}) }),
+    fetch: async () => ({ ok: false, status: 401, text: async () => '', json: async () => ({}) }),
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, 'static/js/ops.js'), 'utf8'), context);
   await new Promise((resolve) => setImmediate(resolve));

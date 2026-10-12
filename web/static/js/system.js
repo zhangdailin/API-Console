@@ -7,6 +7,8 @@
   const terminalPhases = new Set(['complete', 'failed', 'rolled_back', 'recovery_failed']);
   const text = ConsoleUI.setText;
   const node = ConsoleUI.el;
+  const checkLoads = ConsoleUI.requestGate();
+  const operationLoads = ConsoleUI.requestGate();
   function render() {
     if (!data) return;
     const op = data.operation;
@@ -31,30 +33,39 @@
     if (busy && !pollTimer) pollTimer = setTimeout(poll, 1500);
   }
   async function check(force = false) {
+    if (pending) return;
+    const ticket = checkLoads.begin();
     const controller = new AbortController();
+    ticket.signal.addEventListener('abort', () => controller.abort(), { once: true });
     const timer = setTimeout(() => controller.abort(), 25000);
     try {
-      data = await ConsoleAPI.json('/api/system/check-updates' + (force ? '?force=true' : ''), { signal: controller.signal });
+      const result = await ConsoleAPI.json('/api/system/check-updates' + (force ? '?force=true' : ''), { signal: controller.signal });
+      if (!ticket.isCurrent()) return;
+      data = result;
       if (terminalPhases.has(data.operation?.phase)) { try { localStorage.removeItem('api-console-update-key'); } catch (_) {} }
       render();
     } catch (err) {
+      if (!ticket.isCurrent()) return;
       text('systemCheckState', '检查失败：' + err.message);
       if (data) { data.available = false; data.warning = '检查失败：' + err.message; render(); }
     } finally { clearTimeout(timer); }
   }
   async function poll() {
     pollTimer = null;
+    if (pending) { render(); return; }
+    const ticket = operationLoads.begin();
     try {
-      const result = await ConsoleAPI.json('/api/system/operation');
+      const result = await ConsoleAPI.json('/api/system/operation', { signal: ticket.signal });
+      if (!ticket.isCurrent()) return;
       if (data) data.operation = result.operation;
-      pending = false;
       if (terminalPhases.has(result.operation?.phase)) {
         try { localStorage.removeItem('api-console-update-key'); } catch (_) {}
         await check();
         return;
       }
       render();
-    } catch (_) {
+    } catch (err) {
+      if (!ticket.accepts(err)) return;
       text('systemProgress', '服务正在重启或暂时不可达，继续等待操作状态…');
       pollTimer = setTimeout(poll, 2500);
     }
@@ -62,20 +73,24 @@
   async function act(kind) {
     if (!data || pending || busyPhases.has(data.operation?.phase)) return;
     if (kind === 'rollback' && !confirm('恢复上一次升级前的程序并重启？这不会回退账号或配置数据。')) return;
+    checkLoads.cancel();
+    operationLoads.cancel();
     pending = true; render();
     let key;
     try { key = localStorage.getItem('api-console-update-key'); } catch (_) {}
     key ||= crypto.randomUUID();
     try { localStorage.setItem('api-console-update-key', key); } catch (_) {}
     try {
-      const result = await ConsoleAPI.json('/api/system/' + kind, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
-        body: JSON.stringify({ version: kind === 'update' ? data.release.tag_name : '' }),
-      });
+      const result = await ConsoleAPI.json('/api/system/' + kind, ConsoleAPI.jsonOptions('POST',
+        { version: kind === 'update' ? data.release.tag_name : '' }, { headers: { 'Idempotency-Key': key } }));
       data.operation = result.operation;
     } catch (err) {
       text('systemProgress', '提交结果待确认：' + err.message + '。正在读取后台状态，刷新页面不会取消已提交的任务。');
-    } finally { pending = false; if (!pollTimer) pollTimer = setTimeout(poll, 1000); }
+    } finally {
+      pending = false;
+      operationLoads.cancel();
+      if (!pollTimer) pollTimer = setTimeout(poll, 1000);
+    }
   }
   document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('[data-system-open]').forEach(button => button.addEventListener('click', () => {

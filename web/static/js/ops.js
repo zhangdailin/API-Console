@@ -968,9 +968,7 @@
       const params = assignParams(new URLSearchParams({ kind: 'system', action: 'alert_', limit: '50' }), {
         channel, since: range.since.toISOString(), until: range.until.toISOString(),
       });
-      const response = await ConsoleAPI.request('/api/journal/records?' + params.toString(), { signal: ticket.signal });
-      if (!response.ok) throw new Error('HTTP ' + response.status);
-      const payload = await response.json();
+      const payload = await ConsoleAPI.journal(params, { signal: ticket.signal });
       if (!current()) return;
       const rows = (payload.data || []).filter((record) => {
         const event = record.event || {};
@@ -1243,14 +1241,10 @@
     syncUrl();
     try {
       const params = assignParams(new URLSearchParams({ window: String(state.window) }), { channel: state.channel });
-      const [overviewResponse, runtimeResponse] = await Promise.all([
-        ConsoleAPI.request('/api/ops/overview?' + params.toString(), { signal: ticket.signal }),
-        ConsoleAPI.request('/api/ops/runtime', { signal: ticket.signal }).catch(() => null),
+      const [payload, runtimePayload] = await Promise.all([
+        ConsoleAPI.json('/api/ops/overview?' + params.toString(), { signal: ticket.signal }),
+        ConsoleAPI.json('/api/ops/runtime', { signal: ticket.signal }).catch(() => null),
       ]);
-      if (!overviewResponse.ok) throw new Error('HTTP ' + overviewResponse.status);
-      const payload = await overviewResponse.json();
-      const runtimePayload = runtimeResponse && runtimeResponse.ok
-        ? await runtimeResponse.json().catch(() => null) : null;
       // A queued filter change owns the screen; never paint the previous scope.
       if (!ticket.isCurrent() || scope.window !== state.window || scope.channel !== state.channel) return;
       state.overview = payload;

@@ -6,7 +6,7 @@ const vm = require('./test-support.cjs');
 
 const scripts = ['device-auth.js', 'workbuddy-auth.js'];
 
-function browser({ storedSession = null, popupBlocked = false } = {}) {
+function browser({ storedSession = null, popupBlocked = false, beginError = null } = {}) {
   const elements = new Map();
   const storage = new Map(storedSession ? [['workbuddy_login_v1', JSON.stringify(storedSession)]] : []);
   const requests = [];
@@ -46,7 +46,9 @@ function browser({ storedSession = null, popupBlocked = false } = {}) {
     },
     fetch: async (url, options) => {
       requests.push({ url, options });
-      if (options.method === 'POST') return { ok: true, json: async () => ({ id: 'login-1', verification_uri_complete: 'https://www.workbuddy.ai/authorize' }) };
+      if (options.method === 'POST') return beginError
+        ? { ok: false, text: async () => JSON.stringify({ code: beginError }) }
+        : { ok: true, json: async () => ({ id: 'login-1', verification_uri_complete: 'https://www.workbuddy.ai/authorize' }) };
       if (options.method === 'DELETE') return { ok: true };
       return { ok: true, json: async () => pollResult };
     },
@@ -88,4 +90,14 @@ test('WorkBuddy resumes stored sessions without POST and retains its completion 
   assert.deepEqual(ui.requests.map(({ url }) => url), ['/api/workbuddy/login/retained-1']);
   assert.deepEqual(ui.toasts, [['WorkBuddy 官方登录完成，账号已保存', 'success']]);
   assert.equal(ui.storage.has('workbuddy_login_v1'), false);
+});
+
+test('shared login errors retain provider names and specialized upstream messages', async () => {
+  for (const [code, message] of [['too_many_logins', /WorkBuddy 登录过多/], ['origin_mismatch', /同源/], ['upstream_unreachable', /www\.workbuddy\.ai/]]) {
+    const ui = browser({ beginError: code });
+    ui.context.WorkBuddyLogin.start();
+    await tick();
+    assert.match(ui.toasts[0][0], message);
+    assert.equal(ui.toasts[0][1], 'error');
+  }
 });

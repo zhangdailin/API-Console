@@ -1,7 +1,7 @@
 // Key management shares the configuration page's modal and DOM primitives.
 let keyPage = 1, keysLoading = false, keysLoaded = false;
 const keyLoads = ConsoleUI.requestGate();
-const keyBusy = new Set();
+const keyOperations = ConsoleUI.keyedSubmission();
 function keyStatus(key) {
   if (!key.enabled) return 'disabled';
   return key.expires_at && new Date(key.expires_at) <= new Date() ? 'expired' : 'enabled';
@@ -38,7 +38,7 @@ async function loadApiKeys() {
 function keyButton(label, action, id, danger = false) {
   const button = make('button', danger ? 'btn btn-danger-outline' : 'btn btn-outline', label);
   button.type = 'button'; button.dataset.action = action; button.dataset.id = String(id);
-  button.disabled = keyBusy.has(String(id));
+  button.disabled = keyOperations.busy(id);
   return button;
 }
 function bindApiKeyActions(container) {
@@ -98,11 +98,10 @@ async function getKeySecret(id, options = {}) {
   return result.key;
 }
 async function keyOperation(id, operation) {
-  const identity = String(id);
-  if (keyBusy.has(identity)) return;
-  keyBusy.add(identity); renderApiKeys();
-  try { await operation(); } catch (err) { showToast(err.message || '操作失败', 'error'); }
-  finally { keyBusy.delete(identity); renderApiKeys(); }
+  return keyOperations.run(id, async () => {
+    renderApiKeys();
+    try { await operation(); } catch (err) { showToast(err.message || '操作失败', 'error'); }
+  }).finally(renderApiKeys);
 }
 async function copyApiKey(id) {
   return keyOperation(id, async () => {
@@ -113,7 +112,7 @@ async function copyApiKey(id) {
 }
 async function toggleKeyStatus(id, enabled) {
   return keyOperation(id, async () => {
-    await ConsoleAPI.json('/api/keys/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) });
+    await ConsoleAPI.json('/api/keys/' + id, ConsoleAPI.jsonOptions('PATCH', { enabled }));
     await loadApiKeys();
   });
 }
@@ -150,7 +149,7 @@ async function createApiKey(event) {
   button.disabled = true; createdKeys = []; setText('createKeyError', '');
   try {
     for (const name of names) {
-      try { const result = await ConsoleAPI.json('/api/keys', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, ...policy }) }); createdKeys.push({ name, key: result.key }); }
+      try { const result = await ConsoleAPI.json('/api/keys', ConsoleAPI.jsonOptions('POST', { name, ...policy })); createdKeys.push({ name, key: result.key }); }
       catch (err) { createdKeys.push({ name, error: err.message }); }
     }
     if (!createdKeys.some(item => item.key)) { setText('createKeyError', createdKeys.map(item => item.name + ': ' + item.error).join('\n')); createdKeys = []; return; }
@@ -169,7 +168,7 @@ async function saveKeyPolicy(event) {
   event.preventDefault(); const button = document.getElementById('editKeySubmit'); if (button.disabled) return;
   let policy; try { policy = keyPolicy('editKey'); } catch (err) { setText('editKeyError', err.message); return; }
   button.disabled = true; setText('editKeyError', '');
-  try { await ConsoleAPI.json('/api/keys/' + document.getElementById('editKeyId').value, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(policy) }); closeModal('editKeyModal'); await loadApiKeys(); }
+  try { await ConsoleAPI.json('/api/keys/' + document.getElementById('editKeyId').value, ConsoleAPI.jsonOptions('PATCH', policy)); closeModal('editKeyModal'); await loadApiKeys(); }
   catch (err) { setText('editKeyError', err.message); } finally { button.disabled = false; }
 }
 function renderCreatedKeys() {
@@ -203,8 +202,7 @@ async function confirmDeleteKey() {
       const result = await ConsoleAPI.json('/api/keys/' + id + '/rotate', { method: 'POST' });
       createdKeys = [{ name: result.name, key: result.key }]; renderCreatedKeys(); openModal('showKeyModal');
     } else {
-      const response = await ConsoleAPI.request('/api/keys/' + id, { method: 'DELETE' });
-      if (!response.ok) throw new Error(ConsoleAPI.detail(await response.text(), '删除失败'));
+      await ConsoleAPI.checked('/api/keys/' + id, { method: 'DELETE' });
     }
     closeModal('deleteKeyModal'); keyConfirmation = null; await loadApiKeys();
   } catch (err) { setText('deleteKeyError', err.message); } finally { button.disabled = false; }

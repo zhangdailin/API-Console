@@ -47,3 +47,20 @@ test('copy fetches secret on demand without caching; show dialog clears secrets'
  await t.context.copyApiKey(7);assert.equal(t.context.copied,'sk-full-secret');assert.equal(calls[0][0],'/api/keys/7/secret');assert.equal(calls[0][1].cache,'no-store');assert.equal(calls[0][1].credentials,'same-origin');
  vm.runInContext('createdKeys=[{key:"sk-full-secret"}];',t.context);t.context.closeShowKeyModal();assert.equal(vm.runInContext('createdKeys.length',t.context),0);
 });
+
+test('shared per-key locks suppress duplicate operations and release after failure', async () => {
+ const calls=[];
+ const t=setup((url,options)=>new Promise(resolve=>calls.push({url,options,resolve})));
+ t.context.loadApiKeys=async()=>{};
+ const first=t.context.toggleKeyStatus(7,false);
+ await t.context.toggleKeyStatus('7',true);
+ await t.context.copyApiKey('7');
+ assert.equal(calls.length,1);
+ const independent=t.context.toggleKeyStatus(8,false);
+ assert.equal(calls.length,2);
+ calls[1].resolve(json({})); await independent;
+ calls[0].resolve({ok:false,status:503,text:async()=> 'offline'}); await first;
+ const retry=t.context.toggleKeyStatus('7',true);
+ assert.equal(calls.length,3);
+ calls[2].resolve(json({})); await retry;
+});

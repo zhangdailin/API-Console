@@ -27,7 +27,7 @@ globalThis.DeviceAuthLogin = (() => {
       popupWidth = 560,
       popupHeight = 760,
       pollInterval = 2000,
-      errorMessages = {},
+      errorMessages: providerErrors = {},
       statusPrefix = '正在申请登录会话…',
       authorizedStatus = null,
       openingStatus = '',
@@ -37,6 +37,16 @@ globalThis.DeviceAuthLogin = (() => {
       terminalMessages = TERMINAL_MESSAGES,
       isAllowedURL = (url) => url.protocol === 'https:',
     } = options;
+
+    const errorMessages = {
+      origin_mismatch: '登录请求必须来自本管理页面（同源）。若通过反向代理访问，请确认主机名一致后重试。',
+      insecure_origin: '请使用 HTTPS 打开管理页面后再登录（localhost 除外）。',
+      store_unavailable: '服务端账号存储不可用，请检查 Redis 配置后重试。',
+      too_many_logins: `待处理的 ${label} 登录过多，请先完成或取消其中一个。`,
+      unsupported_media_type: '请求格式不被接受，请刷新页面后重试。',
+      transaction_failed: '服务端创建登录事务失败，请重试。',
+      ...providerErrors,
+    };
 
     let active = null;
 
