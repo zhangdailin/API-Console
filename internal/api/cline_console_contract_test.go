@@ -42,13 +42,14 @@ func TestAccountsJSPinsClineOfficialLoginLifecycle(t *testing.T) {
 // TestCommonJSPinsTheCredentialVerdictAndQuotaGuard pins the current account read
 // contract: OAuth secrets stay server-side, while has_credential tells the UI
 // whether the account can be used, and the same verdict backs the quota-only
-// status guard. Both assertions read one file, so they share one pass.
+// status guard. Cline's unmetered projection is shared by these surfaces too.
 func TestCommonJSPinsTheCredentialVerdictAndQuotaGuard(t *testing.T) {
 	source, err := readConsoleScript("common.js")
 	testutil.NoError(t, err, "read common.js: %v")
 	for _, want := range []string{
 		`acc?.has_credential === true`,
 		`isQuotaOnlyStatus`,
+		`unmetered: true`,
 	} {
 		testutil.CheckContain(t, source, want)
 	}
@@ -68,9 +69,8 @@ func TestAccountsJSRendersTheClineRowCells(t *testing.T) {
 	source, err := readConsoleScript("accounts.js")
 	testutil.NoError(t, err, "read accounts.js: %v")
 	// 配额: an unmetered channel is now dropped from the Cline page rather than
-	// rendered as a permanent "未计量". The verdict itself stays in the source
-	// for every other surface that still renders the cell.
-	testutil.CheckContain(t, source, "unmetered: true")
+	// rendered as a permanent "未计量". common.js owns the shared quota verdict;
+	// accounts.js renders it on surfaces that still show the cell.
 	testutil.CheckContain(t, source, "未计量")
 	testutil.CheckContain(t, source, "clinePageOnly")
 	// 等级: the tier now comes from the upstream plan endpoint. What is pinned
