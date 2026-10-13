@@ -1201,7 +1201,8 @@ button.ops-error-row { width: 100%; border: 0; background: none; text-align: lef
 .ops-flow-gateway-rates > span { flex-direction: column; align-items: center; gap: 3px; }
 .ops-flow-gateway-rates b { color: var(--flow-accent); font-size: 1.35rem; }
 .ops-flow-detail { padding-top: 14px; font-size: .75rem; line-height: 1.7; color: var(--text-secondary); }
-.ops-flow-health { display: flex; justify-content: space-between; gap: 4px; font-size: .64rem; white-space: nowrap; color: var(--flow-secondary); }
+.ops-flow-health { display: flex; flex-wrap: wrap; justify-content: space-between; column-gap: 8px; row-gap: 2px; font-size: .64rem; color: var(--flow-secondary); }
+.ops-flow-health > span { white-space: nowrap; }
 .ops-flow-health .is-degraded { color: var(--warn); font-weight: 650; }
 .ops-flow-gateway > .ops-flow-health { flex-direction: column; align-items: center; gap: 2px; }
 .ops-flow-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }

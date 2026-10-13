@@ -197,8 +197,29 @@ func TestFlowSampleBoundAndPooledPercentile(t *testing.T) {
 		}
 	}
 	stats = tracker.Snapshot("cline").Nodes["gateway"]
-	if stats.Completed != 0 || stats.FailureRate != nil || stats.FirstGeneration.P95MS != nil {
-		t.Fatalf("stale data survived window: %+v", stats)
+	if stats.Completed != 0 || stats.FailureRate != nil || stats.FirstGeneration.Samples != 257 || *stats.FirstGeneration.P95MS != 1000 {
+		t.Fatalf("counts must expire before latency samples: %+v", stats)
+	}
+}
+
+func TestFlowLatencyWindowBoundaries(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	route := &flowRouteState{}
+	route.bucket(now.Add(-61 * time.Second)).FlowCounts = FlowCounts{Completed: 4, Failed: 1}
+	for i, age := range []time.Duration{61 * time.Second, 899 * time.Second, 900 * time.Second, -time.Second} {
+		route.samples[i] = flowLatencySample{at: now.Add(-age), firstGeneration: -1, firstVisible: -1, bodyTTFB: int64(i), duration: 1000}
+	}
+	var builder flowMetricBuilder
+	builder.add(route, now)
+	stats := builder.metrics()
+	if stats.Completed != 0 || stats.FailureRate != nil || stats.BodyTTFB.Samples != 2 || *stats.BodyTTFB.P50MS != 0 || *stats.BodyTTFB.P95MS != 1 || stats.FirstGeneration.P95MS != nil {
+		t.Fatalf("wrong independent windows or body TTFB distribution: %+v", stats)
+	}
+	var expired flowMetricBuilder
+	expired.add(route, now.Add(901*time.Second))
+	stats = expired.metrics()
+	if stats.BodyTTFB.Samples != 0 || stats.BodyTTFB.P95MS != nil || stats.Duration.P95MS != nil {
+		t.Fatalf("latency samples survived the 15-minute window: %+v", stats)
 	}
 }
 

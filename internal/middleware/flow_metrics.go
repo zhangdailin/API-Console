@@ -8,8 +8,9 @@ import (
 
 // Counters cover every completion; only latency samples have a retention cap.
 const (
-	flowWindowSeconds = 60
-	flowSampleLimit   = 256
+	flowWindowSeconds        = 60
+	flowLatencyWindowSeconds = 15 * 60
+	flowSampleLimit          = 256
 )
 
 type FlowCounts struct {
@@ -109,7 +110,7 @@ func (b *flowMetricBuilder) add(route *flowRouteState, now time.Time) {
 		}
 	}
 	for _, sample := range route.samples {
-		if sample.at.IsZero() || sample.at.Unix() <= now.Unix()-flowWindowSeconds || sample.at.After(now) {
+		if sample.at.IsZero() || sample.at.Unix() <= now.Unix()-flowLatencyWindowSeconds || sample.at.After(now) {
 			continue
 		}
 		if sample.firstGeneration >= 0 {

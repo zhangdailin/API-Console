@@ -62,14 +62,15 @@ func (route *flowRouteState) bucket(now time.Time) *flowBucket {
 }
 
 type FlowSnapshot struct {
-	Available       bool                   `json:"available"`
-	InstanceStarted string                 `json:"instance_started"`
-	SampledAt       string                 `json:"sampled_at"`
-	Routes          []FlowRoute            `json:"routes"`
-	RateSeconds     int                    `json:"rate_seconds"`
-	WindowSeconds   int                    `json:"window_seconds"`
-	SampleLimit     int                    `json:"sample_limit_per_route"`
-	Nodes           map[string]FlowMetrics `json:"nodes"`
+	Available            bool                   `json:"available"`
+	InstanceStarted      string                 `json:"instance_started"`
+	SampledAt            string                 `json:"sampled_at"`
+	Routes               []FlowRoute            `json:"routes"`
+	RateSeconds          int                    `json:"rate_seconds"`
+	WindowSeconds        int                    `json:"window_seconds"`
+	LatencyWindowSeconds int                    `json:"latency_window_seconds"`
+	SampleLimit          int                    `json:"sample_limit_per_route"`
+	Nodes                map[string]FlowMetrics `json:"nodes"`
 }
 
 func NewFlowTracker() *FlowTracker {
@@ -199,6 +200,7 @@ func (t *FlowTracker) Snapshot(scope string) FlowSnapshot {
 	snapshot.SampledAt = now.UTC().Format(time.RFC3339Nano)
 	snapshot.RateSeconds = flowRateSeconds
 	snapshot.WindowSeconds = flowWindowSeconds
+	snapshot.LatencyWindowSeconds = flowLatencyWindowSeconds
 	snapshot.SampleLimit = flowSampleLimit
 	snapshot.Nodes = make(map[string]FlowMetrics)
 	nodes := make(map[string]*flowMetricBuilder)

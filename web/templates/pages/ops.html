@@ -57,7 +57,7 @@
         </div>
         <div class="ops-flow-toolbar">
           <span><i class="ops-flow-status-dot" id="opsFlowDot"></i><span id="opsFlowStatus">连接实时流量…</span></span>
-          <span class="ops-hint">速率近 5 秒 · 延迟 / 失败近 60 秒 · 当前实例 · 点击节点查看详情</span>
+          <span class="ops-hint">速率近 5 秒 · 延迟近 15 分钟 · 失败近 60 秒 · 当前实例 · 点击节点查看详情</span>
         </div>
         <div class="ops-flow-scroll">
           <div class="ops-flow-map" aria-label="上游平台经网关连接下游 API 的实时流量拓扑">
@@ -117,7 +117,7 @@
         <div id="opsFlowDetail" class="ops-flow-detail">
           <strong id="opsFlowDetailTitle">点击节点查看性能指标</strong>
           <div id="opsFlowDetailFacts" class="ops-flow-facts"></div>
-          <details class="ops-flow-note"><summary>指标口径与范围</summary><p>只统计通过鉴权与准入的生成请求。输出 TPS 随上游用量上报更新，未上报显示 —，不是逐字生成速度。首生成包含推理与工具，首字仅统计可见文本；非流式正文 TTFB 单列。近 60 秒每条渠道 × 协议最多保留最近 256 个延迟样本，分位数合并原始样本计算。排队等待为网关实际等待，属于重试等待的一部分；HTTP 阶段可能重叠。账号容量随概览刷新，槽位可能包含其他实例，未扣模型级限制。</p></details>
+          <details class="ops-flow-note"><summary>指标口径与范围</summary><p>只统计通过鉴权与准入的生成请求。输出 TPS 随上游用量上报更新，未上报显示 —，不是逐字生成速度。延迟按近 15 分钟结束的请求统计，每条渠道 × 协议最多保留最近 256 个样本，分位数合并原始样本计算。节点有流式样本时显示首生成 P95，只有非流式样本时显示正文 TTFB P95，两类数据独立统计。首生成包含推理与工具，首字仅统计可见文本；正文 TTFB 不代表真实首生成。无近期样本可能是请求尚未结束、样本已过期或没有有效的输出时延。失败、重试、等待与 HTTP 阶段按近 60 秒结束的请求统计，样本数可能与延迟不同。排队等待为网关实际等待，属于重试等待的一部分；HTTP 阶段可能重叠。账号容量随概览刷新，槽位可能包含其他实例，未扣模型级限制。</p></details>
         </div>
       </article>
 

@@ -30,8 +30,27 @@
     return Number(value) < 1000 ? Math.round(value) + ' ms' : (Number(value) / 1000).toFixed(1) + ' s';
   }
   function percent(value) { return value == null ? '—' : (Number(value) * 100).toFixed(1) + '%'; }
-  function distribution(value) {
-    return value && value.samples > 0 ? 'P50 ' + ms(value.p50_ms) + ' / P95 ' + ms(value.p95_ms) + ' · ' + value.samples + ' 样本' : '— · 无样本';
+  function latencyWindow() {
+    return '近 ' + (snapshot?.latency_window_seconds ?? snapshot?.window_seconds ?? 900) / 60 + ' 分钟';
+  }
+  function distribution(value, missing) {
+    return value && value.samples > 0 ? 'P50 ' + ms(value.p50_ms) + ' / P95 ' + ms(value.p95_ms) + ' · ' + value.samples + ' 样本'
+      : '— · ' + latencyWindow() + (missing || '无样本');
+  }
+  function nodeLatency(stats, filtered) {
+    if (filtered) return { text: 'P95 范围外', title: '当前渠道筛选范围外' };
+    if (!stats) return { text: 'P95 待采集', title: '实时延迟数据尚未就绪' };
+    const valid = value => value?.samples > 0 && value.p95_ms != null && Number.isFinite(Number(value.p95_ms));
+    const generation = valid(stats.first_generation), body = valid(stats.body_ttfb);
+    const details = [];
+    if (generation) details.push('首生成 P95 ' + ms(stats.first_generation.p95_ms) + ' · ' + stats.first_generation.samples + ' 个流式样本');
+    if (body) details.push('正文 TTFB P95 ' + ms(stats.body_ttfb.p95_ms) + ' · ' + stats.body_ttfb.samples + ' 个非流式样本');
+    return {
+      text: generation ? '首生成 P95 ' + ms(stats.first_generation.p95_ms)
+        : body ? '正文 TTFB P95 ' + ms(stats.body_ttfb.p95_ms) : 'P95 无近期样本',
+      title: latencyWindow() + ' · ' + (details.join('；') || '没有有效的流式首生成或非流式正文 TTFB 样本，请求结束后计入') +
+        (generation && body ? '；节点优先显示首生成，两类样本独立统计' : ''),
+    };
   }
   function poolFact() {
     if (!upstreams.includes(selected) && selected !== 'gateway') return null;
@@ -53,7 +72,7 @@
   function renderDetail() {
     if (!selected) return;
     const rows = rowsFor(selected);
-    setText('opsFlowDetailTitle', names[selected] + (snapshot ? rows.length ? ' · 当前实例 · 近 60 秒结束的请求' : ' · 当前筛选范围外' : ' · 实时连接尚未就绪'));
+    setText('opsFlowDetailTitle', names[selected] + (snapshot ? rows.length ? ' · 当前实例 · 延迟' + latencyWindow() + ' · 错误与等待近 60 秒' : ' · 当前筛选范围外' : ' · 实时连接尚未就绪'));
     const container = el('opsFlowDetailFacts');
     if (!container) return;
     container.replaceChildren();
@@ -66,10 +85,10 @@
     ];
     if (stats) {
       facts.push(
-        ['首生成延迟', distribution(stats.first_generation)],
-        ['可见首字延迟', distribution(stats.first_visible)],
-        ['请求总时长', distribution(stats.duration)],
-        ['非流式正文 TTFB', distribution(stats.body_ttfb)],
+        ['首生成延迟', distribution(stats.first_generation, '无流式首生成样本')],
+        ['可见首字延迟', distribution(stats.first_visible, '无可见文本样本')],
+        ['请求总时长', distribution(stats.duration, '无结束请求样本')],
+        ['非流式正文 TTFB', distribution(stats.body_ttfb, '无非流式正文样本')],
         ['失败状态', percent(stats.failure_rate) + ' · ' + stats.failed + '/' + stats.completed + ' 失败 · 最终 429/529 ' + stats.rate_limited + ' · 流中断 ' + stats.stream_errors + ' · 超时 ' + stats.timeouts + ' · 取消 ' + stats.canceled],
         ['上游用量覆盖', stats.usage_reported + '/' + stats.completed + ' 个已结束请求'],
         ['重试与切号', stats.observed > 0 ? stats.retried + ' 个请求重试 · ' + stats.attempts + ' 次尝试 · ' + stats.account_switches + ' 次切号' : '— · 未采集'],
@@ -103,7 +122,10 @@
       const rate = rates(rows);
       const stats = metrics(key);
       const filtered = upstreams.includes(key) && scope() && scope() !== key;
-      setText('opsNodeLatency-' + key, stats && !filtered ? '首生成 P95 ' + ms(stats.first_generation?.p95_ms) : '首生成 P95 —');
+      const latency = nodeLatency(stats, filtered);
+      setText('opsNodeLatency-' + key, latency.text);
+      const latencyNode = el('opsNodeLatency-' + key);
+      if (latencyNode) latencyNode.title = latency.title;
       setText('opsNodeFailure-' + key, stats && !filtered ? '失败 ' + percent(stats.failure_rate) : '失败 —');
       const health = el('opsNodeFailure-' + key);
       if (health) health.classList.toggle('is-degraded', !!stats && !filtered && stats.failed > 0);
@@ -176,7 +198,7 @@
       const key = button.getAttribute('data-flow-node');
       const health = make('span', 'ops-flow-health');
       ['Latency', 'Failure'].forEach(metric => {
-        const value = make('span', '', metric === 'Latency' ? '首生成 P95 —' : '失败 —');
+        const value = make('span', '', metric === 'Latency' ? 'P95 待采集' : '失败 —');
         value.id = 'opsNode' + metric + '-' + key;
         health.appendChild(value);
       });

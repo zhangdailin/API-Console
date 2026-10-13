@@ -101,19 +101,23 @@ test('node health and details preserve missing samples, output rate and fresh ca
     observed:10,usage_reported:8,retried:2,attempts:12,account_switches:1,retry_wait_ms:2000,queue_wait_ms:1000,
     first_generation:{samples:8,p50_ms:100,p95_ms:1200}, first_visible:emptyDistribution, body_ttfb:emptyDistribution,
     duration:{samples:10,p50_ms:2000,p95_ms:4000}, http_phases:{dns_ms:{samples:2,avg_ms:10}}};
-  const payload = {available:true,instance_started:'one',routes:[{channel:'cline',protocol:'responses',active:2,started:12,completed:10,qps:.4,input_tps:40,output_tps:10,tps:50,usage_available:true}],
-    nodes:{cline:stats,responses:stats,gateway:stats,grok:{...stats,completed:0,failed:0,failure_rate:null,first_generation:emptyDistribution}}};
+  const payload = {available:true,instance_started:'one',latency_window_seconds:900,window_seconds:60,routes:[{channel:'cline',protocol:'responses',active:2,started:12,completed:10,qps:.4,input_tps:40,output_tps:10,tps:50,usage_available:true}],
+    nodes:{cline:stats,responses:stats,gateway:stats,grok:{...stats,completed:0,failed:0,failure_rate:null,first_generation:emptyDistribution,body_ttfb:{samples:1,p50_ms:2997,p95_ms:2997}}}};
   const send = value => streams.at(-1).listeners.flow({data:JSON.stringify(value)});
   send(payload);
   assert.equal(node('opsNodeTps-cline').textContent,'10.0', 'output TPS must exclude input tokens');
   assert.equal(node('opsNodeLatency-cline').textContent,'首生成 P95 1.2 s');
+  assert.equal(node('opsNodeLatency-grok').textContent,'正文 TTFB P95 3.0 s', 'nonstream latency must be shown even after 60-second counters expire');
+  assert(node('opsNodeLatency-grok').title.includes('近 15 分钟'));
+  assert(node('opsNodeLatency-grok').title.includes('1 个非流式样本'));
   assert.equal(node('opsNodeFailure-cline').textContent,'失败 20.0%');
   assert(node('opsNodeFailure-cline').classList.contains('is-degraded'));
   assert.equal(node('opsNodeFailure-grok').textContent,'失败 —', 'missing evidence must not be healthy zero');
   node('opsNode-cline').listeners.click();
   let detail = node('opsFlowDetailFacts').textContent;
   assert(detail.includes('P50 100 ms / P95 1.2 s · 8 样本'));
-  assert(detail.includes('可见首字延迟 — · 无样本'));
+  assert(detail.includes('可见首字延迟 — · 近 15 分钟无可见文本样本'));
+  assert(node('opsFlowDetailTitle').textContent.includes('延迟近 15 分钟 · 错误与等待近 60 秒'));
   assert(detail.includes('1 尚未输出 / 1 已开始输出'));
   assert(detail.includes('2 个请求重试 · 12 次尝试 · 1 次切号'));
   assert(detail.includes('重试 200 ms · 其中排队 100 ms'));
@@ -123,6 +127,18 @@ test('node health and details preserve missing samples, output rate and fresh ca
   assert(node('opsFlowDetailFacts').textContent.includes('5/20 可用池槽位占用（25.0%）'));
   clock+=31000; send(payload);
   assert(node('opsFlowDetailFacts').textContent.includes('容量快照未就绪或已过期'));
+  send({...payload,nodes:{...payload.nodes,cline:{...stats,body_ttfb:{samples:1,p50_ms:8287,p95_ms:8287}}}});
+  assert.equal(node('opsNodeLatency-cline').textContent,'首生成 P95 1.2 s', 'mixed requests keep distinct distributions and prefer streaming');
+  assert(node('opsNodeLatency-cline').title.includes('正文 TTFB P95 8.3 s'));
+  assert(node('opsFlowDetailFacts').textContent.includes('P50 8.3 s / P95 8.3 s · 1 样本'));
+  send({...payload,nodes:{...payload.nodes,cline:{...stats,first_generation:emptyDistribution,body_ttfb:{samples:1,p50_ms:0,p95_ms:0}}}});
+  assert.equal(node('opsNodeLatency-cline').textContent,'正文 TTFB P95 0 ms', 'measured zero is valid');
+  send({...payload,nodes:{...payload.nodes,cline:{...stats,first_generation:emptyDistribution}}});
+  assert.equal(node('opsNodeLatency-cline').textContent,'P95 无近期样本');
+  assert(node('opsNodeLatency-cline').title.includes('请求结束后计入'));
+  assert(node('opsFlowDetailFacts').textContent.includes('近 15 分钟无流式首生成样本'));
+  send({...payload,latency_window_seconds:undefined});
+  assert(node('opsNodeLatency-cline').title.includes('近 1 分钟'), 'older server metadata must not claim a 15-minute window');
   send({...payload,routes:[{...payload.routes[0],usage_available:false}]});
   assert.equal(node('opsNodeTps-cline').textContent,'—');
   const old=streams.at(-1);
@@ -130,6 +146,8 @@ test('node health and details preserve missing samples, output rate and fresh ca
   old.listeners.flow({data:JSON.stringify(payload)});
   assert.equal(node('opsFlowActive').textContent,'— 个进行中');
   assert.equal(node('opsNodeFailure-cline').textContent,'失败 —');
+  assert.equal(node('opsNodeLatency-cline').textContent,'P95 范围外');
+  assert.equal(node('opsNodeLatency-grok').textContent,'P95 待采集');
   send({available:false,routes:[]});
   assert.equal(node('opsFlowDetailFacts').textContent,'');
 });
