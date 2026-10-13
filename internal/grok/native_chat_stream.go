@@ -20,6 +20,8 @@ import (
 )
 
 type chatOutcome struct {
+	QualityChecked bool
+	QualityAttempt int
 	// Withheld marks a turn the quality hold refused to deliver. Nothing was
 	// written to the client, so the caller may retry it on another account.
 	Withheld bool

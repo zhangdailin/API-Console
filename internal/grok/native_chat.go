@@ -396,6 +396,22 @@ func (h *Handler) finishUpstreamChat(ctx context.Context, w http.ResponseWriter,
 		provider = ProviderForAccount(sess.acc)
 	}
 	holdEnabled := h.shouldHoldQualityTurn(req, provider)
+	qualityStarted := time.Now()
+	mode := "collected"
+	if req.Stream {
+		mode = "stream"
+	}
+	if holdEnabled {
+		h.auditQualityCheck(ctx, sess.acc, req, "checking", mode, qualityAttempt, qualityStarted, chatOutcome{})
+	}
+	finishQualityCheck := func(result *chatOutcome) {
+		result.QualityChecked, result.QualityAttempt = true, qualityAttempt
+		status := "passed"
+		if result.Err != nil {
+			status = "error"
+		}
+		h.auditQualityCheck(ctx, sess.acc, req, status, mode, qualityAttempt, qualityStarted, *result)
+	}
 
 	if req.Stream {
 		var hold *buildQualityHold
@@ -403,6 +419,12 @@ func (h *Handler) finishUpstreamChat(ctx context.Context, w http.ResponseWriter,
 			hold = newBuildQualityHold(w, h.qualityHoldPolicy(), nil)
 		}
 		result := h.streamBuildChatHolding(w, req, resp.Body, hold)
+		if hold != nil {
+			result.QualityChecked, result.QualityAttempt = true, qualityAttempt
+			if !result.Withheld {
+				finishQualityCheck(&result)
+			}
+		}
 		if result.Withheld && hold != nil {
 			result.WithheldReason = hold.reason
 		}
@@ -425,7 +447,9 @@ func (h *Handler) finishUpstreamChat(ctx context.Context, w http.ResponseWriter,
 	// body is only written once the guard has judged it.
 	deferred := newDeferredResponseWriter(w)
 	result := h.collectBuildChat(deferred, req, resp.Body)
+	result.QualityChecked, result.QualityAttempt = true, qualityAttempt
 	if result.Err != nil {
+		finishQualityCheck(&result)
 		h.applyBuildQualityGuard(ctx, sess.acc, req, result)
 		h.auditChatOutcome(ctx, sess.acc, req, result)
 		if commitErr := deferred.Commit(); commitErr != nil {
@@ -451,6 +475,7 @@ func (h *Handler) finishUpstreamChat(ctx context.Context, w http.ResponseWriter,
 		h.auditQualityDegraded(ctx, sess.acc, req, result, qualityWithheldTurn{Mode: "collected", Attempt: qualityAttempt, Guard: guard})
 		return parkWithOutcome(deferred, result), true
 	}
+	finishQualityCheck(&result)
 	h.applyBuildQualityGuard(ctx, sess.acc, req, result)
 	h.auditChatOutcome(ctx, sess.acc, req, result)
 	if commitErr := deferred.Commit(); commitErr != nil {
@@ -582,6 +607,7 @@ func (h *Handler) serveNativeChat(ctx context.Context, w http.ResponseWriter, re
 			return
 		}
 		sess.acc, sess.token, sess.poolCandidates, sess.release = next.acc, next.token, next.poolCandidates, next.release
+		h.auditQualityRetry(ctx, withheldAccount, sess.acc, req, attempt+2)
 	}
 }
 

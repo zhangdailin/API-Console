@@ -132,7 +132,7 @@ test('obsolete log failures preserve current records and pagination cursor',asyn
 });
 
 for(const [resolution,label,received] of [
-  ['retried','换号后正常交付',false],
+  ['retried','重试结束 · 未再触发拦截',false],
   ['delivered_degraded','已交付降级回答',true],
   ['rejected','已拒绝请求',false],
   ['undeliverable','无可交付内容',false],
@@ -186,28 +186,56 @@ test('credential guard results do not claim a withheld answer was never delivere
  assert.match(allText(api.ids.logsDetailBody),/未记录/);
 });
 
-test('the visible quality selector reloads immediately and cannot filter system logs',async()=>{
- const api=load(),calls=[];
- api.ids.filterQuality=element('select'); api.ids.filterQuality.value='';
- api.bind();
- api.context.fetch=async url=>{calls.push(url);return successResponse({data:[],next_cursor:''});};
- api.state.cursor='old-cursor';api.ids.filterQuality.value='delivered_degraded';
- await api.ids.filterQuality.listeners.change();
- await new Promise(resolve=>setImmediate(resolve));
- assert.equal(api.state.cursor,'');
- assert.match(calls[0],/quality=delivered_degraded/);
- assert.match(calls[0],/kind=request/);
- api.state.kind='system'; api.scopeNote();
- assert.equal(api.ids.filterQuality.disabled,true);
- await api.load(false);
- assert.doesNotMatch(calls[1],/quality=/);
- api.state.kind='request';api.scopeNote();
- assert.equal(api.ids.filterQuality.disabled,false);
- assert.equal(api.filters().get('quality'),'delivered_degraded');
+test('quality filtering is removed without removing the diagnostic toggle',()=>{
+ const html=fs.readFileSync(path.join(__dirname,'templates/pages/logs.html'),'utf8');
+ assert.doesNotMatch(html,/filterQuality|logs-quality-filter/);
+ assert.match(html,/logsDiagnosticsToggle/);
+ const api=load();api.context.window.location.search='?quality=any';api.bind();
+ assert.equal(api.filters().has('quality'),false);
 });
 
-test('the quality selector is outside the collapsed filters and has one identity',()=>{
- const html=fs.readFileSync(path.join(__dirname,'templates/pages/logs.html'),'utf8');
- assert.equal((html.match(/id="filterQuality"/g)||[]).length,1);
- assert(html.indexOf('id="filterQuality"')<html.indexOf('id="logsFilters"'));
+test('quality stages render directly as rows and as a chronological request timeline',()=>{
+ const api=load();
+ const quality=[
+  {kind:'request',action:'grok_quality_check',status:'checking',attempt:1,account_id:10,metadata:{mode:'stream'}},
+  {kind:'request',action:'grok_quality_degraded',status:'degraded',attempt:1,account_id:10,details:'no_reasoning',metadata:{guard:'parked'}},
+  {kind:'request',action:'grok_quality_retry',status:'retrying',attempt:2,account_id:11,metadata:{from_account_id:10,to_account_id:11}},
+  {kind:'request',action:'grok_quality_check',status:'checking',attempt:2,account_id:11,metadata:{mode:'stream'}},
+  {kind:'request',action:'grok_quality_check',status:'passed',attempt:2,account_id:11,metadata:{mode:'stream',visible_chars:100,reasoning_chars:200}},
+  {kind:'request',action:'grok_quality_resolution',status:'retried',account_id:11,metadata:{withheld_attempts:1}},
+ ];
+ api.state.records=quality.map(event=>({event}));api.renderRows(false);
+ const rows=allText(api.ids.logsRows);
+ for(const label of ['开始暂存与质量检查','Grok 质量拦截','切换账号重试','质量检查通过','重试结束 · 未再触发拦截'])assert(rows.includes(label),label);
+ api.renderDetail({event:{kind:'request',action:'grok_request',metadata:{quality_checked_attempts:2,quality_resolution:'retried',quality_withheld_attempts:1}},quality});
+ const detail=allText(api.ids.logsDetailBody);
+ const ordered=['开始暂存与质量检查','要求推理但没有任何推理内容','切换账号重试','质量检查通过'];
+ let position=detail.indexOf('检查尝试');
+ for(const label of ordered){const next=detail.indexOf(label,position);assert(next>position,label);position=next;}
+ assert.match(detail,/账号 #10 → #11/);
+ assert.match(detail,/检查尝试[\s\S]*2 次/);
+});
+
+test('a healthy quality check is shown without a fabricated interception or delivery verdict',()=>{
+ const api=load();
+ const record={event:{kind:'request',action:'grok_request',metadata:{quality_checked_attempts:1,quality_check_status:'passed'}},quality:[
+  {action:'grok_quality_check',status:'checking',attempt:1,account_id:8},
+  {action:'grok_quality_check',status:'passed',attempt:1,account_id:8},
+ ]};
+ api.state.records=[record];api.renderRows(false);api.renderDetail(record);
+ assert.match(allText(api.ids.logsRows),/质量检查通过/);
+ const detail=allText(api.ids.logsDetailBody);
+ assert.match(detail,/本次检查通过，未触发质量拦截/);
+ assert.doesNotMatch(detail,/客户端收到了被质量检查拦截的回答|当前日志窗口未找到/);
+});
+
+test('an in-progress or interrupted quality check remains visible without a parent request',()=>{
+ const api=load();
+ for(const [status,label] of [['checking','开始暂存与质量检查'],['error','质量检查中断']]){
+  const record={event:{kind:'request',action:'grok_quality_check',status,attempt:1,metadata:{reason:status==='error'?'upstream_error':''}}};
+  api.state.records=[record];api.renderRows(false);api.renderDetail(record);
+  assert(allText(api.ids.logsRows).includes(label));
+  assert(allText(api.ids.logsDetailBody).includes(label));
+  assert.doesNotMatch(allText(api.ids.logsDetailBody),/客户端没有收到被拦截的回答/);
+ }
 });

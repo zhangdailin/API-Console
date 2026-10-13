@@ -158,6 +158,15 @@ func (h *Handler) auditChatOutcome(ctx context.Context, acc *store.Account, req 
 	prompt, _ := usage["prompt_tokens_details"].(map[string]interface{})
 	completion, _ := usage["completion_tokens_details"].(map[string]interface{})
 	metadata := map[string]interface{}{"finish_reason": result.Finish, "visible_output": result.SawText}
+	if result.QualityChecked {
+		metadata["quality_checked_attempts"] = result.QualityAttempt
+		metadata["quality_check_status"] = "passed"
+		if result.Err != nil {
+			metadata["quality_check_status"] = "error"
+		} else if result.Withheld {
+			metadata["quality_check_status"] = "degraded"
+		}
+	}
 	if result.Withheld {
 		// The attempt was held back by the quality hold. The row keeps the
 		// upstream's own finish reason in the metadata and reports the attempt

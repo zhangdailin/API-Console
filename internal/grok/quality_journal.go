@@ -33,6 +33,53 @@ type qualityWithheldTurn struct {
 	Guard qualityGuardAction
 }
 
+// One start and one verdict per attempt, never one event per streamed chunk.
+func (h *Handler) auditQualityCheck(ctx context.Context, acc *store.Account, req *chatwire.Request, status, mode string, attempt int, started time.Time, outcome chatOutcome) {
+	middleware.AnnotateRequest(ctx, "quality_checked_attempts", attempt)
+	middleware.AnnotateRequest(ctx, "quality_check_status", status)
+	logger := h.auditLoggerSnapshot()
+	if logger == nil {
+		return
+	}
+	policy := h.qualityHoldPolicy()
+	accountID := int64(0)
+	if acc != nil {
+		accountID = acc.ID
+	}
+	metadata := map[string]interface{}{
+		"mode": mode, "max_attempts": policy.MaxAttempts,
+		"hold_timeout_ms": policy.HoldTimeout.Milliseconds(), "on_exhausted": policy.OnExhausted,
+		"visible_chars": outcome.Quality.VisibleChars, "reasoning_chars": outcome.Quality.ReasoningChars,
+		"encrypted_chars": outcome.Quality.EncryptedChars, "first_visible_ms": outcome.Quality.FirstVisibleMS,
+	}
+	if status == "error" {
+		metadata["reason"] = "upstream_error"
+	}
+	duration := int64(0)
+	if status != "checking" {
+		duration = time.Since(started).Milliseconds()
+	}
+	logger.Log(ctx, audit.Event{
+		Kind: audit.KindRequest, RequestID: middleware.GetRequestID(ctx), Action: "grok_quality_check",
+		APIKeyID: middleware.APIKeyID(ctx), AccountID: accountID, Model: req.Model, Channel: "grok",
+		Provider: ProviderForAccount(acc), Attempt: attempt, Status: status, Duration: duration,
+		ReasoningTokens: int(outcome.Quality.ReasoningTokens), Metadata: metadata,
+	})
+}
+
+func (h *Handler) auditQualityRetry(ctx context.Context, previous, next *store.Account, req *chatwire.Request, attempt int) {
+	logger := h.auditLoggerSnapshot()
+	if logger == nil {
+		return
+	}
+	logger.Log(ctx, audit.Event{
+		Kind: audit.KindRequest, RequestID: middleware.GetRequestID(ctx), Action: "grok_quality_retry",
+		APIKeyID: middleware.APIKeyID(ctx), AccountID: next.ID, Model: req.Model, Channel: "grok",
+		Provider: ProviderForAccount(next), Attempt: attempt, Status: "retrying",
+		Metadata: map[string]interface{}{"from_account_id": previous.ID, "to_account_id": next.ID},
+	})
+}
+
 // auditQualityDegraded records a withheld turn, in the server log and as a
 // request-scoped journal row.
 //
@@ -43,6 +90,7 @@ type qualityWithheldTurn struct {
 //
 // Nothing here is response content: the row carries counts and timings only.
 func (h *Handler) auditQualityDegraded(ctx context.Context, acc *store.Account, req *chatwire.Request, outcome chatOutcome, turn qualityWithheldTurn) {
+	middleware.AnnotateRequest(ctx, "quality_check_status", "degraded")
 	accountID := int64(0)
 	if acc != nil {
 		accountID = acc.ID

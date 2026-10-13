@@ -95,12 +95,14 @@ HTTP 成功、协议完成、可见输出与预算截断是不同口径。正常
 
 ## Grok 质量检查的日志与流水
 
-Grok 质量检查分两半：暂存（`quality_hold.go`）决定一轮回答能否交付，护栏（`quality_guard.go`）决定产生该回答的凭据是否停用。两者的每个结论都同时写入服务日志和流水，流水中的动作名均以 `grok_quality_` 开头，可用动作筛选 `quality` 一次查出。
+Grok 质量检查分两半：暂存（`quality_hold.go`）决定一轮回答能否交付，护栏（`quality_guard.go`）决定产生该回答的凭据是否停用。过程和结论写入流水，动作名均以 `grok_quality_` 开头。
 
-日志中心顶部的「Grok 质量检查」筛选按请求的最终质量结论列出记录。打开请求详情可查看每次拦截的原因、账号、字符与 token 计数，以及最终是否交付降级回答；缺少结论时显示「客户端交付结果未记录」，缺少逐次记录时显示实际找到的明细数量。系统日志中的质量护栏记录仅描述凭据处理，不能据此推断客户端最终收到了什么。此处的筛选不修改质量策略或历史日志。
+日志中心直接列出开始检查、通过或中断、拦截、换号重试和最终处理阶段，不需要专门的质量过滤控件。检查开始即写入记录，不必等整个请求结束；刷新日志中心即可看到已发生的阶段。打开请求或质量事件详情，按时间查看关联过程、原因、账号、字符与 token 计数。缺少结论时显示「客户端交付结果未记录」，缺少逐次记录时显示实际找到的明细数量。系统日志中的质量护栏记录仅描述凭据处理，不能据此推断客户端最终收到了什么。
 
 | 流水动作 | 类型 | 何时写入 | `status` | 关键字段 |
 |---|---|---|---|---|
+| `grok_quality_check` | request | 每轮开始检查、正常通过或异常中断 | `checking` / `passed` / `error` | `attempt`、`metadata.mode`、暂存与重试策略、计数及耗时 |
+| `grok_quality_retry` | request | 拦截后确实选中了下一账号 | `retrying` | `attempt`、`metadata.from_account_id`、`metadata.to_account_id` |
 | `grok_quality_degraded` | request | 每一轮被暂存拒绝的尝试 | `degraded` | `attempt`、`details` / `metadata.reason`（命中的检测器）、`metadata.mode`（stream / collected）、`metadata.guard`（护栏对该凭据的处理）、各项字符与 token 计数 |
 | `grok_quality_resolution` | request | 出现过被拒尝试的请求结束时，一次 | `retried` / `delivered_degraded` / `rejected` / `undeliverable` | `metadata.client_received_degraded`、`details` / `metadata.stopped`（停止重试的原因）、`metadata.withheld_attempts` |
 | `grok_quality_guard` | system | 护栏改变凭据状态时 | `parked` / `disabled` / `cleared` | `account_id`、`metadata.failures`、`metadata.cooldown_until`、`metadata.account_enabled` |
@@ -111,6 +113,6 @@ Grok 质量检查分两半：暂存（`quality_hold.go`）决定一轮回答能�
 
 判断客户端是否收到了降级回答，只看 `grok_quality_resolution`：`delivered_degraded` 表示按 fail-open 交付了最后一轮被拒内容，其余三种状态客户端都没有收到降级内容。`grok_quality_degraded` 描述的是客户端从未见到的尝试。
 
-正常回答不写任何 `grok_quality_*` 行。这些行只包含计数、耗时和标识，不包含回答正文或凭据。
+启用了质量检查的正常回答也写入开始与通过两条过程记录；未启用或不适用的请求不伪造检查过程。只在阶段变化时记录，不逐个 SSE 块记录。这些行只包含计数、耗时、策略和标识，不包含回答正文或凭据。`retried` 表示后续尝试未再被质量拦截，不保证请求最终成功，实际请求结果以请求日志的状态为准。
 
 对应的服务日志：`grok quality hold: turn withheld`（WARN）、`grok quality hold: request resolved`（重试成功为 INFO，其余为 WARN）、`grok quality guard: credential parked / disabled`（WARN）、`grok quality guard: credential cleared`（INFO），均带 `request_id` 与 `account_id`。

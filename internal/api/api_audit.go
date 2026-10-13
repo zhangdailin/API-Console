@@ -30,16 +30,13 @@ func writeAccountCheckBusy(w http.ResponseWriter) {
 
 // auditQueryFilter is the log centre's filter set.
 type auditQueryFilter struct {
-	kind    string
-	channel string
-	status  string
-	action  string
-	actor   string
-	model   string
-	outcome string
-	// quality narrows the request log to requests a quality check refused a
-	// turn of: "any", or the way the request ended.
-	quality   string
+	kind      string
+	channel   string
+	status    string
+	action    string
+	actor     string
+	model     string
+	outcome   string
 	since     time.Time
 	until     time.Time
 	accountID int64
@@ -126,7 +123,6 @@ func auditFilterFromQuery(r *http.Request) (auditQueryFilter, error) {
 		actor:     strings.ToLower(strings.TrimSpace(query.Get("actor"))),
 		model:     strings.ToLower(strings.TrimSpace(query.Get("model"))),
 		outcome:   strings.ToLower(strings.TrimSpace(query.Get("outcome"))),
-		quality:   strings.ToLower(strings.TrimSpace(query.Get("quality"))),
 		since:     since,
 		until:     until,
 		accountID: parse("account_id"),
@@ -170,6 +166,9 @@ func journalMaxID(r *http.Request, filter auditQueryFilter) string {
 // lists the requests the chart counted as rate limited. An operation has no HTTP class:
 // it either happened or it did not.
 func auditOutcomeClass(event audit.Event) string {
+	if isRequestQualityEvent(event) {
+		return ""
+	}
 	status := strings.ToLower(strings.TrimSpace(event.Status))
 	if event.Kind != audit.KindRequest {
 		switch status {
@@ -251,12 +250,6 @@ func (f auditQueryFilter) matches(event audit.Event) bool {
 	if !f.since.IsZero() && event.Timestamp.Before(f.since) || !f.until.IsZero() && event.Timestamp.After(f.until) {
 		return false
 	}
-	if f.quality != "" {
-		resolution := qualityResolutionOf(event)
-		if resolution == "" || f.quality != "any" && resolution != f.quality {
-			return false
-		}
-	}
 	if f.outcome != "" {
 		class := auditOutcomeClass(event)
 		if f.outcome == "failed" {
@@ -293,9 +286,6 @@ func (f auditQueryFilter) describe() map[string]interface{} {
 	if f.outcome != "" {
 		described["outcome"] = f.outcome
 		described["outcome_label"] = auditOutcomeLabel(f.outcome)
-	}
-	if f.quality != "" {
-		described["quality"] = f.quality
 	}
 	if !f.since.IsZero() {
 		described["since"] = f.since.UTC().Format(time.RFC3339)

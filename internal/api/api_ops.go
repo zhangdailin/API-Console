@@ -368,8 +368,7 @@ func (a *API) writeJournalList(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			continue
 		}
-		if event.Action == "grok_upstream_attempt" || isRequestQualityEvent(event) {
-			// Shown through its request's detail panel, not as its own row.
+		if event.Action == "grok_upstream_attempt" {
 			continue
 		}
 		if !filter.matches(event) {
@@ -418,7 +417,7 @@ func (a *API) writeJournalList(w http.ResponseWriter, r *http.Request) {
 			if len(attempts[event.RequestID]) == 0 {
 				missing[event.RequestID] = true
 			}
-			if event.Kind == audit.KindRequest && qualityResolutionOf(event) != "" && qualityChecksIncomplete(event, quality[event.RequestID]) {
+			if event.Kind == audit.KindRequest && !isRequestQualityEvent(event) && (qualityResolutionOf(event) != "" || metadataInt(event.Metadata, "quality_checked_attempts") > 0) && qualityChecksIncomplete(event, quality[event.RequestID]) {
 				missingQuality[event.RequestID] = true
 			}
 		}
@@ -498,26 +497,37 @@ func (a *API) writeJournalList(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// isRequestQualityEvent reports a quality-check row that belongs to a request:
-// one withheld attempt, or the conclusion of a request that had one. They are
-// shown inside the request that owns them, the way upstream attempts are. A
-// credential verdict is a system event and keeps a row of its own.
+// Quality stages remain visible as rows even before the request finishes, and
+// are also joined into its chronological timeline. Credential verdicts stay in
+// the system journal.
 func isRequestQualityEvent(event audit.Event) bool {
-	return event.Action == "grok_quality_degraded" || event.Action == "grok_quality_resolution"
+	switch event.Action {
+	case "grok_quality_check", "grok_quality_retry", "grok_quality_degraded", "grok_quality_resolution":
+		return true
+	}
+	return false
 }
 
 func qualityChecksIncomplete(event audit.Event, checks []audit.Event) bool {
-	var withheld int64
+	var withheld, started, finished int64
 	concluded := false
 	for _, check := range checks {
 		switch check.Action {
 		case "grok_quality_degraded":
 			withheld++
+			finished++
+		case "grok_quality_check":
+			if check.Status == "checking" {
+				started++
+			} else {
+				finished++
+			}
 		case "grok_quality_resolution":
 			concluded = true
 		}
 	}
-	return !concluded || withheld < metadataInt(event.Metadata, "quality_withheld_attempts")
+	expected := metadataInt(event.Metadata, "quality_checked_attempts")
+	return qualityResolutionOf(event) != "" && !concluded || withheld < metadataInt(event.Metadata, "quality_withheld_attempts") || started < expected || finished < expected
 }
 
 // qualityResolutionOf reads how a request that had a turn withheld ended, from

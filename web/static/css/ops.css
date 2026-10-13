@@ -608,9 +608,6 @@
 
 .logs-filter-note.is-error-text { color: var(--bad); }
 
-.logs-quality-filter { min-width: 0; max-width: 100%; flex-wrap: wrap; }
-.logs-quality-filter select { width: 230px; min-width: 0; max-width: 100%; }
-
 .logs-scope {
   display: flex;
   flex-wrap: wrap;

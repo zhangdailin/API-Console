@@ -15,16 +15,6 @@
         <p class="page-sub" id="logsTabNote">请求、操作、系统三本账共用一份审计流；某个请求的诊断包挂在该请求的详情里。</p>
       </div>
       <div class="page-actions">
-        <label class="ops-select logs-quality-filter"><span>Grok 质量检查</span>
-          <select id="filterQuality" class="compact-select">
-            <option value="">全部请求</option>
-            <option value="any">有质量拦截（全部）</option>
-            <option value="retried">换号后正常交付</option>
-            <option value="delivered_degraded">已交付降级回答</option>
-            <option value="rejected">已拒绝请求（502）</option>
-            <option value="undeliverable">无可交付内容（502）</option>
-          </select>
-        </label>
         <button class="btn" id="logsDiagnosticsToggle" type="button" aria-pressed="false" disabled>诊断采集：读取中…</button>
         <button class="btn" id="logsFiltersToggle" type="button" aria-expanded="false" aria-controls="logsFilters">筛选</button>
         <button class="btn" id="logsReload" type="button">刷新</button>

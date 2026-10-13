@@ -3,6 +3,7 @@ package grok
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -177,6 +178,16 @@ func TestQualityHoldJournalsAWithheldTurnAndItsRecovery(t *testing.T) {
 	}
 	testutil.Equal(t, withheldRequests, 1)
 	testutil.Equal(t, deliveredRequests, 1)
+	checks := journal.byAction("grok_quality_check")
+	testutil.Equal(t, len(checks), 3)
+	testutil.Equal(t, checks[0].Status, "checking")
+	testutil.Equal(t, checks[1].Status, "checking")
+	testutil.Equal(t, checks[2].Status, "passed")
+	retries := journal.byAction("grok_quality_retry")
+	testutil.Equal(t, len(retries), 1)
+	testutil.Equal(t, retries[0].Attempt, 2)
+	testutil.EqualAny(t, retries[0].Metadata["from_account_id"], degradedAcc.ID)
+	testutil.EqualAny(t, retries[0].Metadata["to_account_id"], retries[0].AccountID)
 
 	// The journal describes the turn; it must not contain it, nor a credential.
 	dump := journal.dump(t)
@@ -220,9 +231,7 @@ func TestQualityHoldJournalsWhatTheClientReceived(t *testing.T) {
 	}
 }
 
-// TestHealthyTurnWritesNoQualityRows keeps the journal quiet in normal
-// operation: quality rows mean something happened.
-func TestHealthyTurnWritesNoQualityRows(t *testing.T) {
+func TestHealthyTurnJournalsQualityCheckProcess(t *testing.T) {
 	h, journal, accounts := qualityLoggingHandler(t, func(base string) *config.Config {
 		return &config.Config{GrokCLIBaseURL: base}
 	}, "jwt-user-healthy")
@@ -235,6 +244,48 @@ func TestHealthyTurnWritesNoQualityRows(t *testing.T) {
 	requests := journal.byAction("grok_request")
 	testutil.Equal(t, len(requests), 1)
 	testutil.True(t, requests[0].Metadata["quality_withheld"] == nil, "a delivered turn must not be marked withheld")
+	checks := journal.byAction("grok_quality_check")
+	testutil.Equal(t, len(checks), 2)
+	testutil.Equal(t, checks[0].Status, "checking")
+	testutil.Equal(t, checks[1].Status, "passed")
+	testutil.EqualAny(t, requests[0].Metadata["quality_check_status"], "passed")
+	testutil.EqualAny(t, requests[0].Metadata["quality_checked_attempts"], 1)
+	testutil.MustNotContainAny(t, journal.dump(t), "healthy answer", "jwt-user-healthy")
+}
+
+func TestCollectedTurnJournalsQualityCheckProcess(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, verdict string
+	}{
+		{"healthy", `{"status":"completed","output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"considering the request"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"healthy answer"}]}],"usage":{"input_tokens":10,"output_tokens":12,"output_tokens_details":{"reasoning_tokens":8}}}`, "passed"},
+		{"interrupted", `{"output":`, "error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, journal, accounts := qualityLoggingHandler(t, func(base string) *config.Config {
+				return &config.Config{GrokCLIBaseURL: base}
+			}, "jwt-user-healthy")
+			effort := "high"
+			req := &chatwire.Request{Model: "grok-4.5", ReasoningEffort: &effort}
+			response := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(tc.body))}
+			rec := httptest.NewRecorder()
+			h.finishUpstreamChat(context.Background(), rec, req, &chatAccountSession{acc: accounts[0]}, nil, "build", "/responses", func() http.Header { return http.Header{} }, nil, response, nil, 1)
+			checks := journal.byAction("grok_quality_check")
+			testutil.Equal(t, len(checks), 2)
+			testutil.Equal(t, checks[0].Status, "checking")
+			testutil.Equal(t, checks[1].Status, tc.verdict)
+			testutil.EqualAny(t, checks[1].Metadata["mode"], "collected")
+			testutil.MustNotContainAny(t, journal.dump(t), "healthy answer", "considering the request", "jwt-user-healthy")
+		})
+	}
+}
+
+func TestDisabledQualityHoldDoesNotInventCheckProcess(t *testing.T) {
+	disabled := false
+	h, journal, accounts := qualityLoggingHandler(t, func(base string) *config.Config {
+		return &config.Config{GrokCLIBaseURL: base, QualityHoldEnabled: &disabled}
+	}, "jwt-user-healthy")
+	serveQualityTurn(t, h, accounts[0])
+	testutil.Equal(t, len(journal.byAction("grok_quality_check")), 0)
 }
 
 // TestQualityGuardJournalsEveryStateChange follows one credential through the

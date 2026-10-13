@@ -34,7 +34,6 @@
     { id: 'filterModel', param: 'model' },
     { id: 'filterStatus', param: 'status' },
     { id: 'filterOutcome', param: 'outcome' },
-    { id: 'filterQuality', param: 'quality' },
     { id: 'filterSince', param: 'since' },
     { id: 'filterUntil', param: 'until' },
     { id: 'filterActor', param: 'actor' },
@@ -42,24 +41,21 @@
   ];
 
   // FILTER_LABELS names each filter for the scope chips.
-  const FILTER_LABELS = { channel: '渠道', model: '模型', status: '状态', outcome: '结果', quality: '质量检查', actor: '操作者', action: '动作' };
+  const FILTER_LABELS = { channel: '渠道', model: '模型', status: '状态', outcome: '结果', actor: '操作者', action: '动作' };
 
   // Grok quality checks. A turn the hold refuses is "withheld"; the request then
   // ends one of four ways, and only one of them means the client received an
   // answer the check had refused. The ids are the server's; the page says what
   // they mean.
   const QUALITY_RESOLUTIONS = {
-    retried: { tone: 'is-info', label: '质量拦截 · 换号后正常交付', short: '换号后正常交付' },
+    retried: { tone: 'is-info', label: '重试结束 · 未再触发拦截' },
     delivered_degraded: { tone: 'is-error', label: '已交付降级回答', short: '已交付降级回答' },
     rejected: { tone: 'is-warn', label: '质量拦截 · 已拒绝请求', short: '已拒绝请求（502）' },
     undeliverable: { tone: 'is-warn', label: '质量拦截 · 无可交付内容', short: '无可交付内容（502）' },
-  };
-  const QUALITY_FILTER_LABELS = {
-    any: '有质量拦截（全部）',
-    retried: QUALITY_RESOLUTIONS.retried.short,
-    delivered_degraded: QUALITY_RESOLUTIONS.delivered_degraded.short,
-    rejected: QUALITY_RESOLUTIONS.rejected.short,
-    undeliverable: QUALITY_RESOLUTIONS.undeliverable.short,
+    checking: { tone: 'is-info', label: '开始暂存与质量检查' },
+    passed: { tone: 'is-ok', label: '质量检查通过' },
+    error: { tone: 'is-error', label: '质量检查中断' },
+    retrying: { tone: 'is-info', label: '切换账号重试' },
   };
   // The detector that refused a turn.
   const QUALITY_REASONS = {
@@ -68,6 +64,7 @@
     fake_encrypted_dump: '密文或大额推理计费后瞬间吐出全文',
     fast_reasoning_ratio_dump: '推理占输出八成以上且瞬间吐出',
     no_reasoning: '要求推理但没有任何推理内容',
+    upstream_error: '上游或响应处理出错，检查未形成结论',
   };
   // Why the gateway stopped retrying a withheld turn.
   const QUALITY_STOPPED = {
@@ -86,6 +83,7 @@
   const QUALITY_ON_EXHAUSTED = { fail_open: '放行（交付最后一次回答）', fail_closed: '拒绝（返回 502）' };
 
   function qualityReason(reason) { return QUALITY_REASONS[reason] || reason || '未注明'; }
+  function isQualityEvent(event) { return ['grok_quality_check', 'grok_quality_retry', 'grok_quality_degraded', 'grok_quality_resolution'].includes(event.action); }
 
   // The capture records a request as a fixed sequence of numbered sections. The
   // order is the request's own timeline, so the panel must not sort it.
@@ -136,8 +134,8 @@
     alert_fired: '告警触发',
     alert_recovered: '告警恢复',
     grok_quality_guard: 'Grok 质量护栏',
-    // These two are shown inside the request that owns them; the labels are for
-    // a record that reaches the page without its request.
+    grok_quality_check: 'Grok 质量检查',
+    grok_quality_retry: 'Grok 质量重试',
     grok_quality_degraded: 'Grok 质量拦截',
     grok_quality_resolution: 'Grok 质量检查结论',
   };
@@ -238,7 +236,7 @@
     quality_degraded: { tone: 'is-warn', label: '质量拦截' },
   };
 
-  const FILTER_HINTS = { request: '请求日志按渠道、模型和状态筛选；带"含诊断"的请求可以在详情里展开它的诊断内容。"质量检查"只列出 Grok 质量检查拦截过回答的请求。操作者与动作对请求无意义。', operation: '操作日志按操作者、动作和状态筛选；渠道与模型通常为空。', system: '系统日志按动作和状态筛选；渠道用于标注探测目标。Grok 质量护栏对凭据的冷却、停用与恢复记在这里，动作填 quality 可筛出。' };
+  const FILTER_HINTS = { request: '请求日志包含质量检查、拦截、重试和最终处理阶段；请求详情按时间串联质量过程。带"含诊断"的请求可以展开诊断内容。', operation: '操作日志按操作者、动作和状态筛选；渠道与模型通常为空。', system: '系统日志按动作和状态筛选；渠道用于标注探测目标。Grok 质量护栏对凭据的冷却、停用与恢复记在这里。' };
 
   // The diagnostics journal used to be a fourth tab. Its rows carry only
   // action=debug_bundle and a request id, so every line read 诊断 · 请求诊断包 with
@@ -330,6 +328,7 @@
 
   function resultBadge(record) {
     const event = record.event || {};
+    if (isQualityEvent(event) && QUALITY_RESOLUTIONS[event.status]) return badge(QUALITY_RESOLUTIONS[event.status], event.status);
     // An operation or a system event has no HTTP result class worth showing:
     // its own status (告警中, 凭据已冷却) says more than "失败" does.
     const known = STATUS_META[String(event.status || '').toLowerCase()];
@@ -348,7 +347,6 @@
   function filters() {
     const params = new URLSearchParams();
     FILTER_INPUTS.forEach((entry) => {
-      if (entry.param === 'quality' && state.kind !== 'request') return;
       const node = el(entry.id);
       const value = node && node.value ? node.value.trim() : '';
       if (value) params.set(entry.param, value);
@@ -407,8 +405,7 @@
       // The chip names the filter in Chinese: a raw query parameter is an
       // implementation detail, not something an operator reads.
       chips.push(scopeChip(FILTER_LABELS[entry.param] || entry.param,
-        entry.param === 'outcome' ? (RESULT_LABELS[value] || value)
-          : entry.param === 'quality' ? (QUALITY_FILTER_LABELS[value] || value) : value));
+        entry.param === 'outcome' ? (RESULT_LABELS[value] || value) : value));
     });
     items.replaceChildren(...chips);
     bar.hidden = chips.length === 0;
@@ -465,12 +462,12 @@
       } else if (event.model) { addBadge(action, event.model); }
       if (record.diagnostics || String(event.kind || '') === DIAGNOSTIC_INDEX_KIND) { addBadge(action, '含诊断', 'is-info'); }
       const quality = qualitySummary(record);
-      if (quality) {
+      if (quality && !isQualityEvent(event)) {
         // The list has to answer "did a quality check touch this request, and did
         // the client get a degraded answer" without opening the row.
         const meta = QUALITY_RESOLUTIONS[quality.resolution] || { tone: 'is-warn', label: '质量拦截' };
         const chip = make('span', 'logs-badge ' + meta.tone, meta.label);
-        chip.title = `Grok 质量检查拦截了 ${quality.withheld} 次回答` + (quality.received === null ? '；客户端交付结果未记录'
+        chip.title = `Grok 质量检查：${quality.checked} 次检查，${quality.withheld} 次拦截` + (quality.received === null ? '；客户端交付结果未记录'
           : quality.received ? '；客户端收到了被拦截的回答' : '；客户端没有收到被拦截的回答');
         action.appendChild(chip);
       }
@@ -654,7 +651,7 @@
     const reportedTokens = (event.input_tokens || 0) + (event.output_tokens || 0);
     if (reportedTokens > 0) {
       usageFacts.push(fact('Token', (event.input_tokens || 0) + ' in / ' + (event.output_tokens || 0) + ' out'));
-    } else if (isRequest && !probe) {
+    } else if (isRequest && !probe && !isQualityEvent(event)) {
       // Zero tokens and "this channel does not report usage" are different facts;
       // the row used to print "0 in / 0 out" for both. An operation has no tokens
       // at all, so it says nothing rather than something misleading.
@@ -666,7 +663,7 @@
     }
 
     if (event.details) {
-      panel.appendChild(sectionTitle(String(event.kind || '') === DIAGNOSTIC_INDEX_KIND ? '诊断内容摘要' : '变更摘要（凭据已脱敏）'));
+      panel.appendChild(sectionTitle(isQualityEvent(event) ? '质量阶段信息' : String(event.kind || '') === DIAGNOSTIC_INDEX_KIND ? '诊断内容摘要' : '变更摘要（凭据已脱敏）'));
       panel.appendChild(make('pre', '', event.details));
       if (event.redacted && event.redacted.length) { panel.appendChild(note('已脱敏字段：' + event.redacted.join('、'))); }
     }
@@ -710,29 +707,33 @@
     renderDiagnosticsSection(panel, record);
   }
 
-  // qualitySummary says how a request the quality checks touched ended, or null
-  // for a request no check refused. The request row carries the conclusion in its
-  // metadata; a record written without it falls back to the conclusion row.
+  // A quality event can exist before its request finishes. Prefer the request's
+  // annotations, then the retained timeline; never fabricate a passed check.
   function qualitySummary(record) {
     const event = (record && record.event) || {};
     if (String(event.kind || 'request') !== 'request') return null;
     const meta = event.metadata || {};
-    const checks = (record && record.quality) || [];
+    const checks = (record && record.quality) || (isQualityEvent(event) ? [event] : []);
     const conclusion = checks.find((check) => check.action === 'grok_quality_resolution');
     const conclusionMeta = (conclusion && conclusion.metadata) || {};
     const withheldRows = checks.filter((check) => check.action === 'grok_quality_degraded');
-    const resolution = String(meta.quality_resolution || (conclusion && conclusion.status) || '').toLowerCase();
-    if (!resolution && withheldRows.length === 0) return null;
+    const checkRows = checks.filter(check => check.action === 'grok_quality_check');
+    const lastStage = checks[checks.length - 1];
+    const resolution = String(meta.quality_resolution || (conclusion && conclusion.status)
+      || meta.quality_check_status || (lastStage && lastStage.status) || '').toLowerCase();
+    if (!resolution && checks.length === 0) return null;
     const reasons = meta.quality_reasons || conclusionMeta.reasons
       || withheldRows.map((row) => (row.metadata || {}).reason || row.details);
     return {
       resolution,
+      checked: Number(meta.quality_checked_attempts || checkRows.filter(check => check.status === 'checking').length || checkRows.length || withheldRows.length || 0),
       withheld: Number(meta.quality_withheld_attempts || conclusionMeta.withheld_attempts || withheldRows.length || 0),
       reasons: Array.isArray(reasons) ? reasons.filter(Boolean) : [],
       stopped: String(meta.quality_stopped || conclusionMeta.stopped || (conclusion && conclusion.details) || ''),
-      received: QUALITY_RESOLUTIONS[resolution] ? resolution === 'delivered_degraded' : null,
-      policy: conclusionMeta,
+      received: ['retried', 'delivered_degraded', 'rejected', 'undeliverable'].includes(resolution) ? resolution === 'delivered_degraded' : null,
+      policy: conclusion ? conclusionMeta : ((checkRows[checkRows.length - 1] || {}).metadata || {}),
       attempts: withheldRows,
+      timeline: checks,
     };
   }
 
@@ -742,40 +743,51 @@
   function renderQualitySection(panel, record) {
     const quality = qualitySummary(record);
     if (!quality) return;
-    panel.appendChild(sectionTitle('Grok 质量检查'));
+    panel.appendChild(sectionTitle('Grok 质量检查过程'));
 
     const meta = QUALITY_RESOLUTIONS[quality.resolution];
     const head = make('div', 'logs-detail-outcome');
     head.appendChild(badge(meta || { tone: 'is-warn', label: '质量拦截' }, quality.resolution || 'withheld'));
-    head.appendChild(make('span', 'logs-detail-raw', quality.received === null ? '客户端交付结果未记录'
-      : quality.received ? '客户端收到了被质量检查拦截的回答' : '客户端没有收到被拦截的回答'));
+    const phaseMessages = { checking: '响应暂存并检查中', passed: '本次检查通过，未触发质量拦截', error: '检查中断，未形成质量结论', retrying: '已选择下一账号，继续尝试' };
+    head.appendChild(make('span', 'logs-detail-raw', phaseMessages[quality.resolution] || (quality.received === null ? '客户端交付结果未记录'
+      : quality.received ? '客户端收到了被质量检查拦截的回答' : '客户端没有收到被拦截的回答')));
     panel.appendChild(head);
 
     const facts = [fact('被拦截的回答', quality.withheld + ' 次')];
+    if (quality.checked) facts.push(fact('检查尝试', quality.checked + ' 次'));
     if (quality.stopped) facts.push(fact('停止重试的原因', QUALITY_STOPPED[quality.stopped] || quality.stopped, { title: quality.stopped }));
     if (quality.policy.on_exhausted) facts.push(fact('重试用尽时', QUALITY_ON_EXHAUSTED[quality.policy.on_exhausted] || quality.policy.on_exhausted));
     if (quality.policy.max_attempts) facts.push(fact('质量重试上限', quality.policy.max_attempts + ' 次'));
     panel.appendChild(factsGrid(facts));
 
-    if (quality.attempts.length === 0) {
+    if (quality.timeline.length === 0) {
       // The conclusion is on the request row; the per-attempt rows are older and
       // can have left the retained window.
       if (quality.reasons.length) panel.appendChild(note('命中的检测：' + quality.reasons.map(qualityReason).join('；')));
       panel.appendChild(note('当前日志窗口未找到逐次拦截明细。'));
       return;
     }
-    const list = make('ul', 'logs-attempts');
-    quality.attempts.forEach((attempt) => {
+    const list = make('ol', 'logs-attempts');
+    quality.timeline.forEach((attempt) => {
       const detail = attempt.metadata || {};
       const reason = detail.reason || attempt.details || '';
-      const li = make('li', 'logs-attempt is-failed');
-      const line = make('div', '', `第 ${text(attempt.attempt, '?')} 次 · 账号 #${text(attempt.account_id, '?')} · ${detail.mode === 'collected' ? '非流式' : '流式'}`);
+      const failed = attempt.action === 'grok_quality_degraded' || attempt.status === 'error';
+      const li = make('li', 'logs-attempt' + (failed ? ' is-failed' : ''));
+      const parts = [attempt.action === 'grok_quality_resolution' ? '最终处理' : `第 ${text(attempt.attempt, '?')} 次`, `账号 #${text(attempt.account_id, '?')}`];
+      if (attempt.timestamp) parts.unshift(formatTime(attempt.timestamp));
+      if (detail.mode) parts.push(detail.mode === 'collected' ? '非流式' : '流式');
+      const line = make('div', '', parts.join(' · '));
+      const stage = QUALITY_RESOLUTIONS[attempt.status] || (failed ? { tone: 'is-warn', label: '质量拦截' } : { tone: 'is-info', label: actionLabel(attempt.action) });
+      line.appendChild(badge(stage, attempt.status));
       const guard = QUALITY_GUARD[detail.guard];
-      line.appendChild(guard ? badge(guard, detail.guard) : make('span', 'logs-badge is-idle', '凭据未处罚'));
+      if (guard) line.appendChild(badge(guard, detail.guard));
       li.appendChild(line);
-      const why = make('div', 'logs-attempt-reason', qualityReason(reason));
-      why.title = reason;
-      li.appendChild(why);
+      if (reason && attempt.action !== 'grok_quality_resolution') {
+        const why = make('div', 'logs-attempt-reason', qualityReason(reason));
+        why.title = reason;
+        li.appendChild(why);
+      }
+      if (attempt.action === 'grok_quality_retry') li.appendChild(note(`账号 #${text(detail.from_account_id, '?')} → #${text(detail.to_account_id, attempt.account_id || '?')}`));
       // Counts only: the journal never holds the withheld text itself.
       const counts = [
         '可见 ' + (detail.visible_chars || 0) + ' 字符',
@@ -784,7 +796,7 @@
         '推理计费 ' + (attempt.reasoning_tokens || 0) + ' token',
       ];
       if (detail.first_visible_ms != null && detail.first_visible_ms >= 0) counts.push('首字 ' + detail.first_visible_ms + ' ms');
-      li.appendChild(note(counts.join(' · ')));
+      if (attempt.action === 'grok_quality_degraded' || attempt.action === 'grok_quality_check' && attempt.status !== 'checking') li.appendChild(note(counts.join(' · ')));
       list.appendChild(li);
     });
     panel.appendChild(list);
@@ -992,8 +1004,6 @@
   }
 
   function scopeNote() {
-    const quality = el('filterQuality');
-    if (quality) quality.disabled = state.kind !== 'request';
     const hint = el('logsFilterScope');
     if (hint) hint.textContent = FILTER_HINTS[state.kind] || '';
     // The second column holds a channel only for inference traffic; an operation has
@@ -1148,8 +1158,6 @@
     });
     const toggle = el('logsFiltersToggle');
     if (toggle) toggle.addEventListener('click', () => toggleFilters());
-    const quality = el('filterQuality');
-    if (quality) quality.addEventListener('change', () => { state.cursor = ''; syncUrl(); load(false); });
     const form = el('logsFilters');
     if (form) form.addEventListener('submit', (event) => { event.preventDefault(); state.cursor = ''; syncUrl(); load(false); });
     const reload = el('logsReload');
