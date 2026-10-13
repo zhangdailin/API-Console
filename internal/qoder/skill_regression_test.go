@@ -17,10 +17,10 @@ import (
 func TestSkillFinishReadsTail(t *testing.T) {
 	for _, done := range []string{"data: [DONE]\n\n", envelope(`[DONE]`)} {
 		prefix := envelope(`{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}`) + done
-		result, err := consumeStreamObserved(strings.NewReader(prefix+envelope(`{"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":7}}`)+"event:finish\ndata: {}\n\n"), false, nil, nil)
+		result, err := consumeStreamObserved(strings.NewReader(prefix+envelope(`{"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":7}}`)+"event:finish\ndata: {}\n\n"), nil, nil)
 		testutil.NoError(t, err)
 		testutil.Equal(t, result.Usage["inputTokens"], 11)
-		_, err = consumeStreamObserved(strings.NewReader(prefix+"event:error\ndata: failure\n\n"), false, nil, nil)
+		_, err = consumeStreamObserved(strings.NewReader(prefix+"event:error\ndata: failure\n\n"), nil, nil)
 		testutil.False(t, err == nil, "late error lost")
 	}
 }

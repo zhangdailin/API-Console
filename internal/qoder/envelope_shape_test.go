@@ -41,7 +41,7 @@ func TestStreamReportsAQueueRefusalAsBusy(t *testing.T) {
 				"statusCode":      "401",
 			})
 			testutil.NoError(t, err)
-			_, streamErr := consumeStreamObserved(strings.NewReader("data: "+string(frame)+"\n\n"), true, nil, nil)
+			_, streamErr := consumeStreamObserved(strings.NewReader("data: "+string(frame)+"\n\n"), nil, nil)
 			testutil.False(t, streamErr == nil, "expected an error")
 			testutil.CheckContain(t, streamErr.Error(), "gateway is busy")
 			testutil.CheckNotContain(t, streamErr.Error(), "rejected the credential")

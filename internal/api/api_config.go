@@ -151,7 +151,7 @@ func (a *API) HandleConfigSave(w http.ResponseWriter, r *http.Request) {
 	current := a.config.Load()
 	newCfg, err := buildConfigFromPatch(r, current)
 	if err != nil {
-		if errors.Is(err, errRetiredCacheSetting) {
+		if errors.Is(err, errRetiredCacheSetting) || errors.Is(err, errFixedRuntimeSetting) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -193,6 +193,8 @@ func configPayload(cfg *config.Config) (map[string]interface{}, error) {
 	return payload, nil
 }
 
+var errFixedRuntimeSetting = errors.New("generation and authentication policy is fixed")
+
 var errRetiredCacheSetting = errors.New("local token cache settings are retired; cache_strategy still controls upstream cache_control")
 
 func buildConfigFromPatch(r *http.Request, current *config.Config) (*config.Config, error) {
@@ -223,6 +225,11 @@ func buildConfigFromPatch(r *http.Request, current *config.Config) (*config.Conf
 	for _, retired := range []string{"enable_token_cache", "token_cache_ttl", "token_cache_strategy", "cache_token_count", "cache_ttl"} {
 		if _, present := patch[retired]; present {
 			return nil, fmt.Errorf("%w: %s", errRetiredCacheSetting, retired)
+		}
+	}
+	for _, fixed := range []string{"anonymous_allow_ips", "request_timeout", "concurrency_timeout", "first_token_timeout_seconds", "shared_stream_idle_timeout_seconds", "workbuddy_default_max_tokens", "shared_refusal_wait_budget_ms", "qoder_queue_wait_budget_ms", "qoder_queue_retry_interval_ms", "grok_build_timeout_seconds", "grok_stream_idle_seconds", "grok_build_stream_idle_seconds", "max_retries", "retry_delay", "account_switch_count", "retry_429_interval", "quality_hold_enabled", "quality_hold_max_attempts", "quality_hold_timeout_ms", "quality_hold_on_exhausted"} {
+		if _, present := patch[fixed]; present {
+			return nil, fmt.Errorf("%w: %s is no longer configurable", errFixedRuntimeSetting, fixed)
 		}
 	}
 	if v, ok := patch["admin_password"]; ok {
@@ -264,17 +271,11 @@ func normalizeConfigPatchValue(key string, value interface{}) interface{} {
 	}
 
 	switch key {
-	case "enable_token_refresh", "enable_usage_refresh", "enable_token_count",
-		"auto_refresh_token", "kiro_use_builtin_proxy",
-		"antigravity_use_builtin_proxy",
-		"enable_context_compress", "debug_enabled", "qoder_http2_enabled", "cline_http2_enabled", "workbuddy_http2_enabled":
+	case "debug_enabled", "qoder_http2_enabled", "cline_http2_enabled", "workbuddy_http2_enabled":
 		if b, ok := parseBoolish(value); ok {
 			return b
 		}
-	case "retry_delay", "request_timeout", "refresh_interval",
-		"redis_db", "redis_pool_size", "token_refresh_interval", "load_balancer_cache_ttl", "concurrency_limit",
-		"concurrency_timeout", "max_retries", "credential_retries",
-		"shared_refusal_wait_budget_ms", "qoder_queue_retry_interval_ms", "upstream_max_conns_per_host", "upstream_max_idle_conns_per_host", "diagnostics_sample_every", "diagnostics_max_concurrent", "stream_flush_interval_ms":
+	case "redis_db", "redis_pool_size", "concurrency_limit", "upstream_max_conns_per_host", "upstream_max_idle_conns_per_host", "diagnostics_sample_every", "diagnostics_max_concurrent", "stream_flush_interval_ms":
 		if i, ok := parseIntish(value); ok {
 			return i
 		}
@@ -363,9 +364,6 @@ func (a *API) persistConfig(ctx context.Context, current, newCfg *config.Config)
 		return fmt.Errorf("admin password must not be empty")
 	}
 	config.ApplyHardcoded(storedCfg)
-	if _, err := middleware.NewAnonymousAllowlist(storedCfg.AnonymousAllowIPs); err != nil {
-		return fmt.Errorf("anonymous_allow_ips: %w", err)
-	}
 	if err := config.ValidateProxyConfig(storedCfg); err != nil {
 		return fmt.Errorf("proxy config: %w", err)
 	}

@@ -57,7 +57,7 @@ func TestConsumeStreamNormalizesSplitCommandEscalation(t *testing.T) {
 		envelope(`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"justification\":\"Query network configuration\"}"}}]},"finish_reason":"tool_calls"}]}`) +
 		"event:finish\ndata: {}\n\n"
 	var calls []upstream.SSEMessage
-	result, err := consumeStreamObserved(strings.NewReader(body), true, func(event upstream.SSEMessage) {
+	result, err := consumeStreamObserved(strings.NewReader(body), func(event upstream.SSEMessage) {
 		if event.Type == "model.tool-call" {
 			calls = append(calls, event)
 		}

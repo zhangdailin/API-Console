@@ -20,7 +20,7 @@ func TestQoderDiagnosticAttemptsCaptureSSEAndModel(t *testing.T) {
 	defer srv.Close()
 	client := NewFromAccount(signedTestAccount(), nil)
 	ctx, capture := debug.WithCapture(context.Background(), "latency-test")
-	_, err := client.attemptChat(ctx, chatURL(srv.URL), EncodeBody([]byte(`{"messages":[],"tools":[],"session_id":"private-session","parameters":{"context_length":200000}}`)), modelEntry{Key: "qfmodel", Source: "system"}, "request", RuntimeFields{Key: "secret-key", EncryptUserInfo: "secret-info"}, client.currentCredentials(), false, func(upstream.SSEMessage) {})
+	_, err := client.attemptChat(ctx, chatURL(srv.URL), EncodeBody([]byte(`{"messages":[],"tools":[],"session_id":"private-session","parameters":{"context_length":200000}}`)), modelEntry{Key: "qfmodel", Source: "system"}, "request", RuntimeFields{Key: "secret-key", EncryptUserInfo: "secret-info"}, client.currentCredentials(), func(upstream.SSEMessage) {})
 	testutil.NoError(t, err)
 	found := false
 	for _, section := range capture.Bundle().Sections {

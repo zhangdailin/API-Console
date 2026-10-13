@@ -69,7 +69,7 @@ func TestUpstreamReliabilityHandlerQoderRetryBudget(t *testing.T) {
 	}
 }
 
-func TestQoderInteractiveBudgetDoesNotRetryClosedQueue(t *testing.T) {
+func TestQoderQueueWaitStopsAtRequestDeadline(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -77,15 +77,19 @@ func TestQoderInteractiveBudgetDoesNotRetryClosedQueue(t *testing.T) {
 		io.WriteString(w, `{"code":"10605","message":"gateway busy retryAfterSeconds=30"}`)
 	}))
 	defer server.Close()
-	cfg := &config.Config{RequestTimeout: 10, MaxRetries: 3, RetryDelay: 1, QoderInferenceURL: server.URL, QoderOpenAPIBaseURL: server.URL, QoderOAuthBaseURL: server.URL, QoderQueueWaitBudgetMs: -1}
+	cfg := &config.Config{RequestTimeout: 10, MaxRetries: 3, RetryDelay: 1, QoderInferenceURL: server.URL, QoderOpenAPIBaseURL: server.URL, QoderOAuthBaseURL: server.URL}
 	acc := &store.Account{ID: 1, AccountType: "qoder", QoderAccessToken: "access", QoderRefreshToken: "refresh", QoderExpiresAt: time.Now().Add(48 * time.Hour), QoderUserID: "uid", QoderMachineID: "11111111-2222-4333-8444-555555555555", QoderModelIDs: []string{"Qwen3.7-Max"}}
 	h := NewWithLoadBalancer(cfg, nil)
 	h.client = qoder.NewFromAccount(acc, cfg)
 	defer h.Close()
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "http://x/qoder/v1/chat/completions", strings.NewReader(`{"model":"Qwen3.7-Max","messages":[{"role":"user","content":"hi"}],"stream":true}`))
-	h.HandleMessages(rec, req)
-	if calls.Load() != 1 || rec.Code != 429 || rec.Header().Get("Retry-After") == "" {
-		t.Fatalf("closed queue retried or not retryable: calls=%d status=%d headers=%v", calls.Load(), rec.Code, rec.Header())
+	ctx, cancel := context.WithTimeout(req.Context(), 500*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	h.HandleMessages(rec, req.WithContext(ctx))
+	if calls.Load() != 1 || rec.Code < 400 || time.Since(started) > 2*time.Second {
+		t.Fatalf("queue ignored request deadline: calls=%d status=%d elapsed=%v", calls.Load(), rec.Code, time.Since(started))
 	}
+
 }

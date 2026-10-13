@@ -20,7 +20,7 @@ func TestAPIKeyConcurrencyRejectsSecondActiveRequest(t *testing.T) {
 		<-release
 		w.WriteHeader(http.StatusNoContent)
 	}, nil)
-	wrapped := APIKeyAuthWithRequest(func(*http.Request) bool { return true }, func(context.Context, string) (*APIKeyPrincipal, error) {
+	wrapped := APIKeyAuth(func(context.Context, string) (*APIKeyPrincipal, error) {
 		return &APIKeyPrincipal{ID: 7, MaxConcurrent: 1}, nil
 	}, next)
 
@@ -49,7 +49,7 @@ func TestAPIKeyConcurrencyUsesSharedAtomicTracker(t *testing.T) {
 		<-release
 		w.WriteHeader(http.StatusNoContent)
 	}, tracker)
-	wrapped := APIKeyAuthWithRequest(func(*http.Request) bool { return true }, func(context.Context, string) (*APIKeyPrincipal, error) {
+	wrapped := APIKeyAuth(func(context.Context, string) (*APIKeyPrincipal, error) {
 		return &APIKeyPrincipal{ID: 9, MaxConcurrent: 1}, nil
 	}, next)
 

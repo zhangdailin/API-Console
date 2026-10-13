@@ -86,13 +86,7 @@ type AccountUpdater interface {
 // NewFromAccount builds a client for one account. cfg supplies endpoints, proxy
 // and timeout settings; the account supplies the credentials.
 func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
-	timeout := 5 * time.Minute
-	if cfg != nil && cfg.RequestTimeout > 0 {
-		timeout = time.Duration(cfg.RequestTimeout) * time.Second
-		if timeout < 30*time.Second {
-			timeout = 30 * time.Second
-		}
-	}
+	timeout := cfg.UpstreamRequestTimeout()
 	proxyFunc := http.ProxyFromEnvironment
 	proxyKey := "direct"
 	http2 := false
@@ -109,7 +103,7 @@ func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
 		control:        httpclient.GetSharedHTTPClient(proxyKey, authRequestTimeout, proxyFunc),
 		stream:         httpclient.GetSharedHTTPClientWithLimits(proxyKey+"|qoder-chat", 0, proxyFunc, http2, cfg),
 		requestTimeout: timeout,
-		streamIdle:     cfg.SharedStreamIdleTimeout(),
+		streamIdle:     config.SharedStreamIdleTimeout,
 		entropy:        cryptoSource{},
 	}
 	if acc != nil {
@@ -233,11 +227,10 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 		logger.LogUpstreamRequest(url, map[string]string{"provider": "qoder", "model": model.Key}, body)
 	}
 
-	toolsEnabled := !req.NoTools && len(normalizeToolDefinitions(req, model)) > 0
 	prepTrace.Mark("body_ready_ms")
 	prepTrace.Finish(nil)
 	prepTrace = nil
-	return c.runChat(ctx, url, body, model, requestID, fields, toolsEnabled, onMessage)
+	return c.runChat(ctx, url, body, model, requestID, fields, onMessage)
 }
 
 // runChat performs one upstream attempt. The shared request handler owns
@@ -254,7 +247,7 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 //
 // Anything that has already emitted content is returned immediately: a replay
 // would duplicate the answer, and a usage-only frame would double-count billing.
-func (c *Client) runChat(ctx context.Context, url string, body []byte, model modelEntry, requestID string, fields RuntimeFields, toolsEnabled bool, onMessage func(upstream.SSEMessage)) error {
+func (c *Client) runChat(ctx context.Context, url string, body []byte, model modelEntry, requestID string, fields RuntimeFields, onMessage func(upstream.SSEMessage)) error {
 	// Authentication repair has its own one-shot budget; only transient
 	// failures consume the transient retry counter.
 	transientRetries := 0
@@ -269,7 +262,7 @@ func (c *Client) runChat(ctx context.Context, url string, body []byte, model mod
 
 	for {
 		attemptCredentials := c.currentCredentials()
-		result, err := c.attemptChat(ctx, url, body, model, requestID, fields, attemptCredentials, toolsEnabled, emit)
+		result, err := c.attemptChat(ctx, url, body, model, requestID, fields, attemptCredentials, emit)
 		if err == nil {
 			// A quota notice travels with the attempt's result whichever way the
 			// attempt settled, but it is only recorded on a settled stream: the

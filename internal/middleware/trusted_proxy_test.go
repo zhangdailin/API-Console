@@ -48,51 +48,14 @@ func TestTrustedProxyMiddlewareRejectsInvalidNetwork(t *testing.T) {
 	testutil.Error(t, err)
 }
 
-// An anonymous allowlist lets the named sources through without a key and nobody
-// else; an empty list is the reference behaviour (everyone needs a key).
-func TestAnonymousAllowlistAllowsOnlyNamedSources(t *testing.T) {
-	empty, err := NewAnonymousAllowlist(nil)
-	testutil.NoError(t, err, "NewAnonymousAllowlist(nil): %v")
-	testutil.False(t, !empty.Empty(), "a nil list is not empty")
-	request := httptest.NewRequest(http.MethodPost, "http://example.com/v1/chat/completions", nil)
-	request.RemoteAddr = "203.0.113.20:4444"
-	testutil.False(t, empty.Allows(request), "an empty allowlist allowed a caller")
-
-	list, err := NewAnonymousAllowlist([]string{"203.0.113.20", "198.51.100.0/24", "2001:db8::1"})
-	testutil.NoError(t, err, "NewAnonymousAllowlist: %v")
-	cases := []struct {
-		remote string
-		want   bool
-	}{
-		{"203.0.113.20:1111", true},
-		{"203.0.113.21:1111", false},
-		{"198.51.100.40:1111", true},
-		{"198.51.101.40:1111", false},
-		{"[2001:db8::1]:1111", true},
-		{"[2001:db8::2]:1111", false},
-		{"not-an-address", false},
-	}
-	for _, tc := range cases {
-		req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/chat/completions", nil)
-		req.RemoteAddr = tc.remote
-		testutil.Equal(t, list.Allows(req), tc.want)
-	}
-
-	// A malformed entry is an error, so a typo cannot silently widen the list.
-	_, err = NewAnonymousAllowlist([]string{"10.0.0.0/8", "nonsense"})
-	testutil.Error(t, err)
-}
-
 // A forwarded client address is only honoured when the peer is a trusted proxy,
-// which is what the allowlist must decide on.
-func TestAnonymousAllowlistUsesTheTrustedClientAddress(t *testing.T) {
-	list, err := NewAnonymousAllowlist([]string{"203.0.113.20"})
-	testutil.NoError(t, err, "NewAnonymousAllowlist: %v")
+// while untrusted peers cannot change their attributed source.
+func TestTrustedProxyResolvesOnlyTrustedClientAddress(t *testing.T) {
 	wrap, err := TrustedProxyMiddleware([]string{"127.0.0.1/32"})
 	testutil.NoError(t, err, "TrustedProxyMiddleware: %v")
-	var allowed bool
+	var resolved string
 	handler := wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		allowed = list.Allows(r)
+		resolved = ClientIP(r)
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -101,14 +64,14 @@ func TestAnonymousAllowlistUsesTheTrustedClientAddress(t *testing.T) {
 	trusted.RemoteAddr = "127.0.0.1:5555"
 	trusted.Header.Set("X-Forwarded-For", "203.0.113.20")
 	handler.ServeHTTP(httptest.NewRecorder(), trusted)
-	testutil.True(t, allowed, "a trusted proxy's forwarded client address was not honoured")
+	testutil.Equal(t, resolved, "203.0.113.20")
 
 	// The same header from an untrusted peer is cleared, so the peer itself decides.
 	untrusted := httptest.NewRequest(http.MethodPost, "http://example.com/v1/chat/completions", nil)
 	untrusted.RemoteAddr = "203.0.113.9:5555"
 	untrusted.Header.Set("X-Forwarded-For", "203.0.113.20")
 	handler.ServeHTTP(httptest.NewRecorder(), untrusted)
-	testutil.False(t, allowed, "an untrusted peer spoofed its way onto the allowlist")
+	testutil.Equal(t, resolved, "203.0.113.9")
 }
 
 // Behind Cloudflare the original client is named by CF-Connecting-IP, and only a

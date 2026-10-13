@@ -81,10 +81,6 @@ func init() {
 	}()
 }
 
-func GenerateSessionToken() (string, error) {
-	return GenerateSessionTokenForPassword("")
-}
-
 // GenerateSessionTokenForPassword rejects logins using stale replica credentials.
 func GenerateSessionTokenForPassword(password string) (string, error) {
 	bytes := make([]byte, sessionTokenLength)
@@ -153,9 +149,9 @@ func rememberSession(token string, expiry time.Time) {
 
 // hasSession reads one session table under the store lock and forgets an entry
 // whose TTL has already passed.
-func (s *SessionStore) hasSession(table map[string]time.Time, token string) bool {
+func (s *SessionStore) hasSession(token string) bool {
 	s.mu.RLock()
-	expiry, exists := table[token]
+	expiry, exists := s.sessions[token]
 	s.mu.RUnlock()
 
 	if !exists {
@@ -169,7 +165,7 @@ func (s *SessionStore) hasSession(table map[string]time.Time, token string) bool
 }
 
 func memoryHasSession(token string) bool {
-	return globalSessionStore.hasSession(globalSessionStore.sessions, token)
+	return globalSessionStore.hasSession(token)
 }
 
 func forgetSession(token string) {
@@ -183,13 +179,9 @@ func cleanupExpiredSessions() {
 	defer globalSessionStore.mu.Unlock()
 
 	now := time.Now()
-	for _, sessions := range []map[string]time.Time{
-		globalSessionStore.sessions,
-	} {
-		for token, expiry := range sessions {
-			if now.After(expiry) {
-				delete(sessions, token)
-			}
+	for token, expiry := range globalSessionStore.sessions {
+		if now.After(expiry) {
+			delete(globalSessionStore.sessions, token)
 		}
 	}
 }

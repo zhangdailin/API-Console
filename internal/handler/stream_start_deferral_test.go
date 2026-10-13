@@ -47,7 +47,7 @@ func (m *recoveringRefusalUpstream) SendRequestWithPayload(_ context.Context, _ 
 }
 
 func TestSharedRefusalRecoversInsideSingleRequest(t *testing.T) {
-	cfg := &config.Config{RequestTimeout: 10, MaxRetries: 3, RetryDelay: 1}
+	cfg := &config.Config{RequestTimeout: 30, MaxRetries: 3, RetryDelay: 1}
 	h := NewWithLoadBalancer(cfg, nil)
 	stub := &recoveringRefusalUpstream{}
 	h.client = stub
@@ -137,7 +137,7 @@ func TestTerminalOnlyResponseStillOpensTheStream(t *testing.T) {
 // retry hint, and never a 503 claiming the upstream service is down while the
 // same upstream answers most requests. Nothing is opened as an SSE stream.
 func TestSharedRefusalBeforeOutputUsesRetryWindow(t *testing.T) {
-	cfg := &config.Config{DebugEnabled: false, RequestTimeout: 10, MaxRetries: 3, RetryDelay: 1}
+	cfg := &config.Config{DebugEnabled: false, RequestTimeout: 30, MaxRetries: 3, RetryDelay: 1}
 	h := NewWithLoadBalancer(cfg, nil)
 	stub := &sharedRefusalUpstream{}
 	h.client = stub
@@ -215,15 +215,4 @@ func TestSharedRefusalWaitBudgetIsBounded(t *testing.T) {
 	got = wallClock(windows + 1)
 	testutil.Falsef(t, got < edgeOriginTimeout, "refusing the third window gives up %v of headroom; it should be the edge that forces the bound", edgeOriginTimeout-got)
 
-	// The configured form wins, and an operator raising it must actually get the
-	// longer window rather than being clamped back to the constant.
-	testutil.Equal(t, SharedRefusalWaitBudget(0), sharedRefusalTotalWaitBudget)
-	testutil.Equal(t, SharedRefusalWaitBudget(150000), 150*time.Second)
-	testutil.False(t, !sharedRefusalWaitAllowedWithin(90*time.Second, 30*time.Second, SharedRefusalWaitBudget(150000)), "a raised budget must admit the window the default refuses")
-
-	// Raising it is legal — there is no edge proxy in every deployment — but it
-	// has to be flagged, because otherwise it is silent here and only visible to
-	// the caller as a 520 from the edge.
-	testutil.False(t, SharedRefusalBudgetExceedsEdge(SharedRefusalWaitBudget(0)), "the built-in default must fit inside the edge, so it must not warn")
-	testutil.False(t, !SharedRefusalBudgetExceedsEdge(SharedRefusalWaitBudget(90000)), "a 90s budget must be flagged: it is the setting that produced the 520")
 }

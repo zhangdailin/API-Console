@@ -129,7 +129,7 @@ func TestRunChatRetriesATransientFaultLocally(t *testing.T) {
 	client := newRetryTestClient(t, server.URL)
 	var got []upstream.SSEMessage
 	err := client.runChat(context.Background(), chatURL(server.URL), EncodeBody([]byte(`{}`)), modelEntry{Key: "k"},
-		"req-1", RuntimeFields{Key: "k"}, false, func(m upstream.SSEMessage) { got = append(got, m) })
+		"req-1", RuntimeFields{Key: "k"}, func(m upstream.SSEMessage) { got = append(got, m) })
 	testutil.NoError(t, err, "runChat() error = %v, want the retry to succeed")
 	testutil.Equal(t, hits, 2)
 	testutil.True(t, sawFinishMessage(got), "no finish frame: %+v")
@@ -149,7 +149,7 @@ func TestRunChatDoesNotReplayAContentRefusal(t *testing.T) {
 
 	client := newRetryTestClient(t, server.URL)
 	err := client.runChat(context.Background(), chatURL(server.URL), EncodeBody([]byte(`{}`)), modelEntry{Key: "k"},
-		"req-1", RuntimeFields{Key: "k"}, false, func(upstream.SSEMessage) {})
+		"req-1", RuntimeFields{Key: "k"}, func(upstream.SSEMessage) {})
 	testutil.Falsef(t, !errors.Is(err, ErrContentPolicy), "error = %v, want the content-policy sentinel", err)
 	testutil.Equal(t, hits, 1)
 }
@@ -168,7 +168,7 @@ func TestRunChatReportsAnEmptyStream(t *testing.T) {
 
 	client := newRetryTestClient(t, server.URL)
 	err := client.runChat(context.Background(), chatURL(server.URL), EncodeBody([]byte(`{}`)), modelEntry{Key: "k"},
-		"req-1", RuntimeFields{Key: "k"}, false, func(upstream.SSEMessage) {})
+		"req-1", RuntimeFields{Key: "k"}, func(upstream.SSEMessage) {})
 	testutil.Falsef(t, !errors.Is(err, ErrEmptyStream), "error = %v, want the empty-stream sentinel", err)
 	testutil.Equal(t, hits, 1)
 }
@@ -187,7 +187,7 @@ func TestRunChatStopsAtABusyVerdict(t *testing.T) {
 
 	client := newRetryTestClient(t, server.URL, withRetryTestCredential("token"))
 	err := client.runChat(context.Background(), chatURL(server.URL), EncodeBody([]byte(`{}`)), modelEntry{Key: "k"},
-		"req-1", RuntimeFields{Key: "k"}, false, func(upstream.SSEMessage) {})
+		"req-1", RuntimeFields{Key: "k"}, func(upstream.SSEMessage) {})
 	testutil.Falsef(t, !errors.Is(err, ErrBusy), "error = %v, want the busy verdict", err)
 	testutil.Equal(t, hits, 1)
 }

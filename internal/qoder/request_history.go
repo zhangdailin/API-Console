@@ -15,7 +15,7 @@ import (
 // Tool results must survive as `tool` messages: rewriting them into text breaks
 // the assistant/tool pairing and the upstream then rejects the history as
 // malformed.
-func buildMessages(req upstream.UpstreamRequest) ([]chatMessage, string, error) {
+func buildMessages(req upstream.UpstreamRequest) ([]chatMessage, string) {
 	systemParts := make([]string, 0, len(req.System)+1)
 	out := make([]chatMessage, 0, len(req.Messages)+1)
 
@@ -78,7 +78,7 @@ func buildMessages(req upstream.UpstreamRequest) ([]chatMessage, string, error) 
 		}
 		out = append(out, chatMessage{Role: "user", Content: text})
 	}
-	return out, systemText, nil
+	return out, systemText
 }
 
 // normalRole folds the roles the gateway accepts. An unknown role becomes user
@@ -182,7 +182,7 @@ func convertBlockMessage(role string, msg prompt.Message, toolCallIDs map[string
 			}
 			// A result whose call never appeared in this history would leave a
 			// dangling tool message, which the upstream rejects. The pairing is
-			// tracked so it can be reported instead of silently dropped.
+			// tracked so orphaned results can be omitted.
 			if !toolCallIDs[toolID] {
 				continue
 			}
@@ -218,16 +218,14 @@ func blockImageURL(block prompt.ContentBlock) string {
 }
 
 // normalizeToolDefinitions renders the OpenAI function envelope for the
-// request's tool declarations. The `model` argument is unused and kept only so
-// the call sites read uniformly with the other request builders: normalization
-// is model independent and lives in internal/util, shared with the WorkBuddy
-// and Cline channels.
+// request's tool declarations. Normalization is model independent and lives in
+// internal/util, shared with the WorkBuddy and Cline channels.
 //
 // The NoTools / no-declaration guard stays here rather than in the shared
 // helper: Qoder distinguishes "no tools" (nil, so the gateway sees an empty
 // array via the chatBody fallback below) from "tools present", while WorkBuddy
 // always keeps a non-nil slice.
-func normalizeToolDefinitions(req upstream.UpstreamRequest, model modelEntry) []interface{} {
+func normalizeToolDefinitions(req upstream.UpstreamRequest) []interface{} {
 	if req.NoTools || len(req.Tools) == 0 {
 		return nil
 	}

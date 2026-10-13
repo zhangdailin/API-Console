@@ -11,16 +11,15 @@ import (
 // The exact status_message stored for production Qoder account 22.
 const sharedRefusalMessage = `qoder upstream rejected the credential: {"code":"10605","message":"{\"isQueued\":true,\"modelKey\":\"qfmodel\",\"queueCount\":0,\"queueType\":\"p3\",\"retryAfterSeconds\":30,\"serviceAvailable\":false,\"waitTime\":30}"}`
 
-func TestQoderExplicitQueueRetryInterval(t *testing.T) {
-	wait := sharedRefusalWaitForChannel(30*time.Second, 1, "qoder", 15000)
-	testutil.Equal(t, wait, 15*time.Second)
-	budget := SharedRefusalWaitBudget(15000)
-	testutil.False(t, !sharedRefusalWaitAllowedWithin(0, wait, budget), "first retry must fit the 15s budget")
-	testutil.False(t, sharedRefusalWaitAllowedWithin(wait, wait, budget), "a second wait must not exceed the total budget")
-	testutil.Equal(t, sharedRefusalSleepForChannel(wait, "qoder", 15000), wait)
-	testutil.Equal(t, sharedRefusalWaitForChannel(30*time.Second, 1, "qoder", 0), 30*time.Second)
-	testutil.Equal(t, sharedRefusalWaitForChannel(30*time.Second, 1, "workbuddy", 15000), sharedRefusalWait(30*time.Second, 1))
-	testutil.Equal(t, sharedRefusalWaitForChannel(0, 1, "qoder", 15000), 0)
+func TestQoderQueueUsesFixedProbeInterval(t *testing.T) {
+	wait := sharedRefusalWaitForChannel(30*time.Second, 1, "qoder", "upstream_queue")
+	testutil.Equal(t, wait, 5*time.Second)
+	testutil.True(t, sharedRefusalWaitAllowedWithin(55*time.Second, wait, sharedRefusalTotalWaitBudget))
+	testutil.False(t, sharedRefusalWaitAllowedWithin(time.Minute, wait, sharedRefusalTotalWaitBudget))
+	testutil.Equal(t, sharedRefusalSleepForChannel(wait, "qoder", "upstream_queue"), wait)
+	testutil.Equal(t, sharedRefusalWaitForChannel(30*time.Second, 1, "qoder", "rate_limit"), 30*time.Second)
+	testutil.Equal(t, sharedRefusalWaitForChannel(30*time.Second, 1, "workbuddy", "upstream_queue"), sharedRefusalWait(30*time.Second, 1))
+	testutil.Equal(t, sharedRefusalWaitForChannel(0, 1, "qoder", "upstream_queue"), time.Duration(0))
 }
 
 // TestSharedRefusalClassIsRecognised pins the signal the retry loop uses. A

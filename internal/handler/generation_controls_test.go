@@ -53,8 +53,8 @@ func TestGenerationControlsOmittedAndInvalid(t *testing.T) {
 
 func TestQoderSharedRefusalPreservesFullHintOnlyForQoder(t *testing.T) {
 	for _, retry := range []int{1, 2, 3, 4} {
-		testutil.Equal(t, sharedRefusalWaitForChannel(30*time.Second, retry, "Qoder"), 30*time.Second)
-		testutil.Equal(t, sharedRefusalWaitForChannel(30*time.Second, retry, "workbuddy"), sharedRefusalWait(30*time.Second, retry))
+		testutil.Equal(t, sharedRefusalWaitForChannel(30*time.Second, retry, "Qoder", "rate_limit"), 30*time.Second)
+		testutil.Equal(t, sharedRefusalWaitForChannel(30*time.Second, retry, "workbuddy", "rate_limit"), sharedRefusalWait(30*time.Second, retry))
 	}
 }
 

@@ -53,10 +53,10 @@ func NewCLIClient(cfg *config.Config) *CLIClient {
 	// The ingress budget still bounds all attempts together. This per-attempt
 	// guard also protects callers outside the ingress middleware, without an
 	// independent 30-second limit cutting short the configured generation wait.
-	client := &CLIClient{cfg: cfg, responseHeaderTimeout: cfg.FirstGenerationTimeout()}
+	client := &CLIClient{cfg: cfg, responseHeaderTimeout: config.FirstGenerationTimeout}
 	// Shared browser client keeps the utls Chrome TLS fingerprint; the CLI
 	// upstream tolerates browser-like TLS even though headers are CLI identity.
-	client.httpClient = httpclient.GetSharedBrowserHTTPClientWithLimits("cli|"+httpclient.GenerateProxyKeyFromConfig(cfg), cfg.GrokRequestTimeout(), 0, httpclient.ProxyFuncFromConfig(cfg), cfg)
+	client.httpClient = httpclient.GetSharedBrowserHTTPClientWithLimits("cli|"+httpclient.GenerateProxyKeyFromConfig(cfg), cfg.UpstreamRequestTimeout(), 0, httpclient.ProxyFuncFromConfig(cfg), cfg)
 	client.oauth = NewCLIOAuth(cfg, client.httpClient)
 	client.egress = egress.NewManager(cfg)
 	return client
@@ -558,7 +558,7 @@ func (c *CLIClient) request(ctx context.Context, acc *store.Account, method, end
 	req = attempt.TraceRequest(req)
 	resp, err := doUpstreamHTTP(req, func(req *http.Request) (*http.Response, error) {
 		return c.doCLIRequest(requestCtx, acc, req)
-	}, c.cfg.GrokStreamIdleTimeoutFor(), upstreamIdleBuildSemantic)
+	}, config.GrokStreamIdleTimeout, upstreamIdleBuildSemantic)
 	headerMu.Lock()
 	headerFinished = true
 	if headerTimer != nil {

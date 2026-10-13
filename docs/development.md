@@ -38,7 +38,7 @@ go test -race -count=1 -p 1 -timeout 15m ./...
 
 上次仅评估了移出生产验证脚本的建议，当前文件仍在仓库。不能通过删整个 scripts 目录精简仓库而不同时修 CI / release 引用。
 
-文件大小检查遍历 git ls-files，工作树中已删但尚未暂存的文件可能导致读取失败，需区别于代码行数违规。豁免是整文件跳过，不证明豁免文件增长受到检查。
+文件大小检查遍历 git ls-files，跳过工作树中已删除的文件。新增文件需纳入 Git 后才能被此门槛检查。豁免是整文件跳过，不限制其增长；缺失或已降至 700 行以内的豁免会报错，拆分后须同步移除 PowerShell 与 Shell 两份清单。
 
 ## 4. 测试证据层级
 
@@ -56,7 +56,15 @@ go test -race -count=1 -p 1 -timeout 15m ./...
 
 检查显式零与字段省略、工具身份与参数聚合、多工具索引、推理签名、SSE 终止、流后错误、跨 Key 所有权、历史 TTL、压缩状态隔离以及不能重放的副作用请求。
 
-共享实现放在 chatwire / responses / httpclient / httpserver；Grok shim 保持兼容薄层。错误策略应追到 accountpolicy 与持久 writer，不能只改公开文案。
+共享实现放在 chatwire / responses / httpclient / httpserver；Grok 的生产适配保持兼容薄层，纯测试适配放在 *_test.go。错误策略应追到 accountpolicy 与持久 writer，不能只改公开文案。
+
+### 清理前的证据
+
+可用 `staticcheck ./cmd/... ./internal/... ./web` 和 `deadcode -test ./cmd/... ./internal/... ./web` 定位候选，再核对源码、调用方及平台构建。只在生产不可达、但仍由测试验证的协议转换可移入 `*_test.go`；不能因此删除协议断言。登录失败预算、凭据双重脱敏、费用幂等结算、兼容数据读取和加密域名不能仅凭重复或旧名删除。
+
+Windows 本地检查使用 `GOARCH=amd64`。跨平台静态分析 Linux 代码时同时设 `GOOS=linux`、`CGO_ENABLED=0`；这只能证明分析和编译，不代表在 Linux 执行了测试。工作区的 `docs/verification/` 是被忽略的本地材料，默认检查使用上述正式包范围，避免历史临时 Go 文件混入。
+
+浏览器指纹客户端仍通过 `golang.org/x/net/http2.Transport` 接入 uTLS 握手。静态检查的弃用提示需要结合 TLS 指纹、ALPN、代理与流期限合同评估，不能直接替换成标准 transport 来消除提示。
 
 ## 6. 性能验证
 

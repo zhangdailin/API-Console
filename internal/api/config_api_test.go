@@ -92,8 +92,7 @@ func TestHandleConfigSaveAcceptsCodeFreeMaxStylePayload(t *testing.T) {
 		"admin_password":"changed-secret",
 		"cache_strategy":"disabled",
 		"proxy_url":"socks5://user:pass@127.0.0.1:1080",
-		"proxy_bypass":"example.com, internal.local",
-		"qoder_queue_retry_interval_ms":"15000"
+		"proxy_bypass":"example.com, internal.local"
 	}`
 	req := httptest.NewRequest(http.MethodPost, "/api/config/save", strings.NewReader(body))
 	rec := httptest.NewRecorder()
@@ -112,14 +111,13 @@ func TestHandleConfigSaveAcceptsCodeFreeMaxStylePayload(t *testing.T) {
 	testutil.False(t, cfg == nil, "config not stored")
 	testutil.Equal(t, cfg.AdminPass, "changed-secret")
 	testutil.Equal(t, cfg.CacheStrategy, "disabled")
-	testutil.Equal(t, cfg.QoderQueueRetryIntervalMs, 15000)
 	testutil.Equal(t, cfg.ProxyURL, "socks5://user:pass@127.0.0.1:1080")
 	testutil.Falsef(t, len(cfg.ProxyBypass) != 2 || cfg.ProxyBypass[0] != "example.com" || cfg.ProxyBypass[1] != "internal.local", "ProxyBypass=%v want [example.com internal.local]", cfg.ProxyBypass)
 
 	saved, err := s.GetSetting(context.Background(), "config")
 	testutil.NoError(t, err, "GetSetting(config) error = %v")
 	testutil.MustContain(t, saved, `"admin_pass":"changed-secret"`)
-	testutil.MustContain(t, saved, `"qoder_queue_retry_interval_ms":15000`)
+	testutil.MustNotContain(t, saved, "qoder_queue_retry_interval_ms")
 }
 
 func TestHandleConfigSavePublishesImmutableSnapshot(t *testing.T) {
@@ -214,19 +212,24 @@ func TestPersistConfigConcurrentReadersSeeCompleteSnapshots(t *testing.T) {
 
 // A signing endpoint is validated where it is typed: the value decides whether
 // account page metadata leaves the host, so an invalid one must not be stored.
-func TestPersistConfigValidatesAnonymousAllowIPs(t *testing.T) {
-	a, s, cleanup := newTestAPI(t)
-	defer cleanup()
-	ctx := context.Background()
-
-	broken := &config.Config{AdminPass: "test-secret", AnonymousAllowIPs: []string{"10.0.0.0/8", "not-an-address"}}
-	err := a.persistConfig(ctx, nil, broken)
-	testutil.Error(t, err)
-	saved, err := s.GetSetting(ctx, "config")
-	testutil.Falsef(t, err != nil || strings.Contains(saved, "not-an-address"), "the rejected value reached the store: %q err=%v", saved, err)
-
-	valid := &config.Config{AdminPass: "test-secret", AnonymousAllowIPs: []string{"203.0.113.20", "198.51.100.0/24"}}
-	testutil.NoError(t, a.persistConfig(ctx, nil, valid), "a valid allowlist was rejected: %v")
+func TestHandleConfigSaveRejectsRemovedSettingsWithoutChangingState(t *testing.T) {
+	for _, field := range []string{"anonymous_allow_ips", "request_timeout", "concurrency_timeout", "first_token_timeout_seconds", "shared_stream_idle_timeout_seconds", "workbuddy_default_max_tokens", "shared_refusal_wait_budget_ms", "qoder_queue_wait_budget_ms", "qoder_queue_retry_interval_ms", "grok_build_timeout_seconds", "grok_stream_idle_seconds", "grok_build_stream_idle_seconds", "max_retries", "retry_delay", "account_switch_count", "retry_429_interval", "quality_hold_enabled", "quality_hold_max_attempts", "quality_hold_timeout_ms", "quality_hold_on_exhausted"} {
+		t.Run(field, func(t *testing.T) {
+			api, s, _ := setupConfigAPI(t)
+			before := api.ConfigSnapshot()
+			ctx := context.Background()
+			testutil.NoError(t, s.SetSetting(ctx, "config", "unchanged"))
+			req := httptest.NewRequest(http.MethodPost, "/api/config/save", strings.NewReader(`{"`+field+`":null}`))
+			rec := httptest.NewRecorder()
+			api.HandleConfigSave(rec, req)
+			testutil.Equal(t, rec.Code, http.StatusBadRequest)
+			testutil.MustContain(t, rec.Body.String(), field)
+			testutil.Equal(t, api.ConfigSnapshot(), before)
+			saved, err := s.GetSetting(ctx, "config")
+			testutil.NoError(t, err)
+			testutil.Equal(t, saved, "unchanged")
+		})
+	}
 }
 
 func TestPersistConfigRejectsMalformedProxy(t *testing.T) {

@@ -13,7 +13,7 @@
 
 推理和模型接口使用管理后台创建的 Key：`Authorization: Bearer <API_KEY>` 或 `x-api-key: <API_KEY>`，同时提供时 Bearer 优先。管理接口使用管理员会话或既有管理 token，不接受推理 Key 替代管理员。
 
-anonymous_allow_ips 空值要求所有来源使用 Key，名单配置损坏也要求 Key。inference_auth_enabled=false 不会关闭鉴权。
+所有来源均要求托管 Key；已删除免鉴权来源机制，旧 anonymous_allow_ips 和 inference_auth_enabled=false 不会关闭鉴权。
 
 ### 1.1 编程客户端与 CC Switch
 

@@ -203,10 +203,7 @@ func buildChatBodyProfile(req upstream.UpstreamRequest, model modelEntry, sessio
 	if err := req.ValidateProtocolControls("qoder"); err != nil {
 		return nil, err
 	}
-	messages, systemText, err := buildMessages(req)
-	if err != nil {
-		return nil, err
-	}
+	messages, systemText := buildMessages(req)
 
 	// Preserve explicit client controls; use the reference output budget only
 	// when the caller omitted it.
@@ -241,7 +238,7 @@ func buildChatBodyProfile(req upstream.UpstreamRequest, model modelEntry, sessio
 		thinking := false
 		parameters.EnableThinking = &thinking
 	}
-	tools := normalizeToolDefinitions(req, model)
+	tools := normalizeToolDefinitions(req)
 	toolChoice, parallelTools := normalizeToolControls(req, len(tools) > 0)
 
 	body := chatBody{

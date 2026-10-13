@@ -205,11 +205,6 @@ func (h *Handler) SetConfig(cfg *config.Config) {
 	h.configMu.Lock()
 	h.config = cfg
 	h.configMu.Unlock()
-	// Surface an over-long shared-refusal budget once per config load. The value
-	// is legal and can be right for a deployment with no edge proxy, but with a
-	// 100s edge in front it turns a would-be 429 into a 520 for the caller, and
-	// that is indistinguishable from an upstream outage in the access logs.
-	WarnIfSharedRefusalBudgetExceedsEdge(SharedRefusalWaitBudget(cfg.SharedRefusalWaitBudgetMs))
 	if h.clientCache != nil {
 		h.clientCache.SetConfig(cfg)
 	}
@@ -567,7 +562,7 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	// Token count (for the leading usage display)
 	inputTokens := breakdown.Total
 
-	upstreamCtx, cancelUpstream := util.WithAttemptTimeout(r.Context(), time.Duration(cfg.RequestTimeout)*time.Second)
+	upstreamCtx, cancelUpstream := util.WithAttemptTimeout(r.Context(), cfg.UpstreamRequestTimeout())
 	defer cancelUpstream()
 	r = r.WithContext(upstreamCtx)
 	sh := newStreamHandler(cfg, w, logger, noThinking, isStream, responseFormat)

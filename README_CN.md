@@ -175,7 +175,7 @@ curl http://127.0.0.1:3002/workbuddy/v1/responses \
 
 - **配置优先级** — Redis 中 `<redis_prefix>settings:config` 可覆盖文件配置，修改后应核对后台实际值。
 - **凭据备份** — Redis 数据与凭据加密密钥（默认 `data/credential.key`）须一起备份；密钥丢失后无法解密既有凭据。
-- **API 鉴权** — 模型及推理接口要求托管 Key；`inference_auth_enabled=false` 不会关闭鉴权，只有 `anonymous_allow_ips` 显式允许的来源可免 Key。
+- **API 鉴权** — 模型及推理接口要求托管 Key；所有来源（包括 loopback 和可信代理转发）均须提供 Key，已删除免鉴权来源机制。
 - **网络访问** — 设置强管理密码，生产环境关闭 `debug_enabled`，限制 `/metrics` 和后端端口，并只信任实际反向代理地址。
 - **监控口径** — 延迟百分位来自保留样本，采集健康及诊断覆盖单独展示，缺失数据不会表示为健康的零流量。
 

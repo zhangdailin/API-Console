@@ -95,14 +95,7 @@ type Client struct {
 // NewFromAccount builds a client for the given account. cfg supplies proxy and
 // timeout settings only; the account supplies the credentials.
 func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
-	timeout := 5 * time.Minute
-	if cfg != nil && cfg.RequestTimeout > 0 {
-		timeout = time.Duration(cfg.RequestTimeout) * time.Second
-		if timeout < 30*time.Second {
-			timeout = 30 * time.Second
-		}
-	}
-
+	timeout := cfg.UpstreamRequestTimeout()
 	proxyFunc := http.ProxyFromEnvironment
 	proxyKey := "direct"
 	baseURL := DefaultBaseURL
@@ -123,8 +116,8 @@ func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
 		httpClient:       httpclient.GetSharedHTTPClientWithLimits(proxyKey+"|workbuddy-chat", timeout, proxyFunc, cfg != nil && cfg.WorkBuddyHTTP2Enabled, cfg),
 		baseURL:          baseURL,
 		requestTimeout:   timeout,
-		streamIdle:       cfg.SharedStreamIdleTimeout(),
-		defaultMaxTokens: cfg.WorkBuddyOutputBudget(),
+		streamIdle:       config.SharedStreamIdleTimeout,
+		defaultMaxTokens: config.WorkBuddyDefaultMaxTokens,
 		account:          accountSnapshot,
 		creds:            ResolveCredentials(acc),
 	}

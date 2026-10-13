@@ -13,7 +13,7 @@ import (
 func TestCaptureUsageAndTimings(t *testing.T) {
 	body := envelope(`{"choices":[{"index":0,"delta":{"content":"测试123123"},"finish_reason":"stop"}],"usage":{"prompt_tokens":27260,"completion_tokens":48,"total_tokens":27308,"billable":false,"credits":0.4885985714285714,"prompt_tokens_details":{"cacheable_tokens":27254,"cached_tokens":0}}}`) + "event:finish\ndata:{\"firstTokenDuration\":1556,\"totalDuration\":2577,\"serverDuration\":89}\n\n"
 	var text strings.Builder
-	r, e := consumeStreamObserved(strings.NewReader(body), true, func(m upstream.SSEMessage) {
+	r, e := consumeStreamObserved(strings.NewReader(body), func(m upstream.SSEMessage) {
 		if m.Type == "model.text-delta" {
 			if v, ok := m.Event["delta"].(string); ok {
 				text.WriteString(v)
@@ -43,6 +43,6 @@ func TestReasoningItemSurvivesToolHistory(t *testing.T) {
 func TestReasoningOnlyHistoryIsNotDropped(t *testing.T) {
 	var msg prompt.Message
 	testutil.NoError(t, json.Unmarshal([]byte(`{"role":"assistant","content":"","reasoning_item":{"opaque":"signature"}}`), &msg))
-	messages, _, err := buildMessages(upstream.UpstreamRequest{Messages: []prompt.Message{msg}})
-	testutil.Falsef(t, err != nil || len(messages) != 1 || len(messages[0].ReasoningItem) == 0, "reasoning-only history lost: %#v %v", messages, err)
+	messages, _ := buildMessages(upstream.UpstreamRequest{Messages: []prompt.Message{msg}})
+	testutil.Falsef(t, len(messages) != 1 || len(messages[0].ReasoningItem) == 0, "reasoning-only history lost: %#v", messages)
 }

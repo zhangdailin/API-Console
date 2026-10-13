@@ -112,6 +112,8 @@ type TracedResponseWriter struct {
 	// streamFailed records that the handler already committed a 2xx status and
 	// then failed mid-stream, where the HTTP status can no longer say so.
 	streamFailed atomic.Bool
+	// The admitted flow tracker observes the existing content detector once.
+	flowProgress func()
 }
 
 // NewTracedResponseWriter creates a new TracedResponseWriter.
@@ -210,6 +212,9 @@ func (w *TracedResponseWriter) Write(b []byte) (int, error) {
 		}
 		if payload && w.contentWriteAt.IsZero() {
 			w.contentWriteAt = now
+			if w.flowProgress != nil && w.StatusCode < 400 {
+				w.flowProgress()
+			}
 		}
 	}
 	w.BytesWritten += int64(n)
@@ -267,10 +272,12 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 			defer box.mu.Unlock()
 			if box.httpPhases == nil {
 				box.httpPhases = map[string]int64{}
+				box.httpPhaseCounts = map[string]int64{}
 			}
 			box.httpPhaseSamples++
 			for k, v := range phases {
 				box.httpPhases[k] += v
+				box.httpPhaseCounts[k]++
 			}
 		})
 		r = r.WithContext(requestCtx)

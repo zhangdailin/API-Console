@@ -47,7 +47,7 @@ func TestNormalizeToolDefinitionsMatchesSharedHelper(t *testing.T) {
 		nil,
 	}
 
-	qoderGot := normalizeToolDefinitions(upstream.UpstreamRequest{Tools: declarations}, modelEntry{Key: "k"})
+	qoderGot := normalizeToolDefinitions(upstream.UpstreamRequest{Tools: declarations})
 	workbuddyGot := util.NormalizeToolDefinitions(declarations)
 
 	qoderJSON, err := json.Marshal(qoderGot)
@@ -58,9 +58,9 @@ func TestNormalizeToolDefinitionsMatchesSharedHelper(t *testing.T) {
 	testutil.Equal(t, len(qoderGot), 4)
 
 	// The NoTools / empty guard is Qoder's own behavior, not the shared helper's.
-	got := normalizeToolDefinitions(upstream.UpstreamRequest{NoTools: true, Tools: declarations}, modelEntry{Key: "k"})
+	got := normalizeToolDefinitions(upstream.UpstreamRequest{NoTools: true, Tools: declarations})
 	testutil.Falsef(t, got != nil, "NoTools must return nil, got %#v", got)
-	got = normalizeToolDefinitions(upstream.UpstreamRequest{}, modelEntry{Key: "k"})
+	got = normalizeToolDefinitions(upstream.UpstreamRequest{})
 	testutil.Falsef(t, got != nil, "no declarations must return nil, got %#v", got)
 	// The shared helper itself stays non-nil so WorkBuddy's empty case is unchanged.
 	got = util.NormalizeToolDefinitions(nil)

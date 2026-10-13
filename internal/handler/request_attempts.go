@@ -353,37 +353,17 @@ func (e *messageExecution) run() {
 		// window unreachable (a 30s hint plus up to 5s of jitter spent 35s
 		// against a 60s budget that had already paid 30s).
 		sharedRefusalWait := time.Duration(0)
-		qoderIntervalMs := 0
-		if e.cfg != nil && errClass.Category == "upstream_queue" {
-			qoderIntervalMs = e.cfg.QoderQueueRetryIntervalMs
-		}
 		if retryDelayForAttempt > 0 && sharedRefusal {
-			// A configured Qoder interval overrides its provider hint. Other
-			// channels keep their existing early-probe policy.
-			sharedRefusalWait = sharedRefusalWaitForChannel(retryDelayForAttempt, attempt+1, e.targetChannel, qoderIntervalMs)
+			sharedRefusalWait = sharedRefusalWaitForChannel(retryDelayForAttempt, attempt+1, e.targetChannel, errClass.Category)
 		}
-		// configSnapshot reports nil for a nil handler, so the knob is read
-		// defensively: losing the setting must fall back to the built-in
-		// bound, not panic inside the retry loop.
-		budgetMs := 0
-		if e.cfg != nil {
-			budgetMs = e.cfg.SharedRefusalWaitBudgetMs
-		}
-		waitBudget := SharedRefusalWaitBudget(budgetMs)
-		queueDisabled := false
-		if e.targetChannel == "qoder" && errClass.Category == "upstream_queue" && e.cfg != nil {
-			if specific := e.cfg.QoderQueueBudget(); specific >= 0 {
-				waitBudget = specific
-				queueDisabled = specific == 0
-			}
-		}
+		waitBudget := config.SharedRefusalWaitBudget
 		// A shared refusal is a gate on the upstream's side, not this account's
 		// throttle, so the wait is spent on the same account and can repeat.
 		// Bound the total by the shortest deadline in front of this process,
 		// which is the edge proxy's origin timeout, not the caller's patience:
 		// answering past the edge's limit does not give the caller the work,
 		// it gives it a 520 from the edge.
-		if sharedRefusal && (queueDisabled || (sharedRefusalWait > 0 && !sharedRefusalWaitAllowedWithin(sharedRefusalWaited, sharedRefusalWait, waitBudget))) {
+		if sharedRefusal && (sharedRefusalWait > 0 && !sharedRefusalWaitAllowedWithin(sharedRefusalWaited, sharedRefusalWait, waitBudget)) {
 			slog.Warn("Shared upstream refusal exceeded the wait budget; answering now",
 				"trace_id", e.traceID,
 				"waited", sharedRefusalWaited,
@@ -396,7 +376,7 @@ func (e *messageExecution) run() {
 			return
 		}
 		if sharedRefusalWait > 0 {
-			retryDelayForAttempt = sharedRefusalSleepForChannel(sharedRefusalWait, e.targetChannel, qoderIntervalMs)
+			retryDelayForAttempt = sharedRefusalSleepForChannel(sharedRefusalWait, e.targetChannel, errClass.Category)
 		}
 		// Holding this account's concurrency slot through the wait starves the
 		// pool: the slot is reserved for the whole request, so ten requests

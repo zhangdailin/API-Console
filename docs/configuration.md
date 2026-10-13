@@ -50,7 +50,6 @@ Windows 用 `Copy-Item config.example.json config.json`。JSON 是推荐格式�
 | `deployment_instance_id` | 示例为空 | 多实例设置不同身份 |
 | `media_dir` | `data/tmp` | 保留的运行目录字段，不证明存在媒体生成接口 |
 | `trusted_proxies` | 空 | 只填实际代理 IP / CIDR |
-| `anonymous_allow_ips` | 空 | 默认全部推理客户端需 Key；名单损坏时关闭匿名豁免 |
 | `debug_enabled` | false | 诊断开关；pprof 路由还受启动注册和管理鉴权约束 |
 | `verbose_diagnostics` | false | 仅 debug_enabled 同时为 true 才生效 |
 
@@ -62,29 +61,19 @@ Windows 用 `Copy-Item config.example.json config.json`。JSON 是推荐格式�
 
 备份必须包含 Redis、有效密钥来源和配置。多实例共享相同密钥。更名时不能随意更改密钥、加密派生域或 Redis 前缀。
 
-## 5. 请求、重试与并发
+## 5. 并发与连接容量
 
-以下为源码默认与上限，单位不可互换。非正整数通常选择默认值，并非禁用。
+生成期限、输出缺省及重试预算已固化，见本文末尾。以下保留部署容量参数：
 
-| 字段 | 默认 | 上限 / 行为 |
-|---|---:|---|
-| `max_retries` | 3 | 20 |
-| `retry_delay` | 1000 毫秒 | 60000 毫秒 |
-| `account_switch_count` | 20 | 100 |
-| `request_timeout` | 7200 秒 | 86400 秒 |
-| `concurrency_timeout` | 已归一化 request_timeout | 86400 秒；入口请求期限 |
-| `retry_429_interval` | 60 秒 | 3600 秒 |
-| `shared_refusal_wait_budget_ms` | 60000 毫秒 | 86400000 毫秒；共享拒绝等待预算 |
-| `qoder_queue_retry_interval_ms` | 0 | 0 保留上游提示，正值覆盖间隔 |
-| `concurrency_limit` | 100 | 1000000；进程总准入，满时立即拒绝 |
-| `provider_concurrency_limits` | 未配置 | 显式通道入口的本进程并发；非正关闭该限制 |
-| `stream_flush_interval_ms` | 有效值 2 毫秒 | 最大 20；负值关闭合并刷新 |
-| `upstream_max_conns_per_host` | 由传输层处理 | HTTP 连接配额，不等同账号槽；浏览器 HTTP/2 同时限制在途请求，等待可取消 |
-| `upstream_max_idle_conns_per_host` | 由传输层处理 | 标准 HTTP 空闲连接复用；浏览器 HTTP/2 每主机复用连接，闲置 90 秒回收 |
+| 字段 | 默认 / 行为 |
+|---|---|
+| `concurrency_limit` | 100，最大 1000000；进程满时立即拒绝 |
+| `provider_concurrency_limits` | 四通道各自的本进程入口容量，非正关闭该限制 |
+| `stream_flush_interval_ms` | 默认 2 毫秒、最大 20；负值关闭合并刷新 |
+| `upstream_max_conns_per_host` | HTTP 连接配额；浏览器 HTTP/2 同时限制在途请求 |
+| `upstream_max_idle_conns_per_host` | 空闲连接复用容量 |
 
-另有 Key 并发和账号并发限制，它们与进程准入叠加。总超时、入口超时、上游 HTTP 期限、流空闲及边缘代理超时是不同层次，最终由最先触发者决定。
-
-共享拒绝预算较大不保证边缘代理愿意一直等待。上游提示的等待、网络尝试时间和抖动也影响真实墙钟耗时。
+Key 和账号并发限制与入口容量叠加。上游 HTTP、流空闲、首生成、父上下文及边缘代理期限互相独立，最先触发者结束请求；固定预算不保证边缘代理可以等待同样长的时间。
 
 ## 6. 自动刷新：不能混淆两个周期
 
@@ -119,12 +108,8 @@ Grok 默认 base 为 `https://cli-chat-proxy.grok.com/v1`，CLI 版本当前默�
 | 字段 | 生效方式 |
 |---|---|
 | `grok_build_rps` | 非正 / 非有限关闭节奏；正值夹取 0.01–1000，按账号 / 团队范围执行 |
-| `grok_build_timeout_seconds` | 正值优先，最大 86400；未设时回退 request_timeout；示例文件显式为 600 |
-| `grok_build_stream_idle_seconds` | 优先于旧 grok_stream_idle_seconds；有效范围 30–600 秒，缺省 120 |
 | `grok_egress_enabled` | 默认未启用，开启后没有健康节点则失败，不静默直连 |
 | `grok_egress_nodes` | name、url、weight、scope、proxied；URL 支持 http / socks5 / socks5h，scope 用 cli / all |
-| `quality_hold_enabled` | 指针字段保留显式 false，与省略不同 |
-| `quality_hold_max_attempts` / `quality_hold_timeout_ms` / `quality_hold_on_exhausted` | 质量暂存尝试、等待与预算耗尽策略；详见协议文档 |
 
 Grok 返回上游提供的思考内容：Chat 使用 `reasoning_content`，Messages 使用 `thinking` 内容块，原生 Responses 保留 reasoning 事件与输出项。思考与正文分别传输；思考项身份、`encrypted_content` 和 `reasoning_tokens` 保留，用于续接与计费。
 
@@ -145,18 +130,29 @@ Grok 语义空闲按有效生成事件衡量，keepalive 不延长时钟；下�
 改配置后按顺序核对：保存 HTTP 和管理 code 信封 → 当前有效值 → 是否需重启 → 重启后进程值 → 账号观察及真实请求。更多见 [故障排查](troubleshooting.md)。
 
 
-## 生成与排队预算
+## 固定生成策略
 
-`first_token_timeout_seconds` 默认 60，-1 关闭。它限制本请求跨重试、切号、排队的首生成等待；收到文本、推理或工具生成后停止，完整生成仍受 `request_timeout`、入口 `concurrency_timeout` 及渠道流空闲期限限制。首生成包含推理，并非用户看到首字的时间。原生上游非流式 JSON 不提供增量进度，收到成功响应头后释放这个流式看门狗；其完整正文仍有总期限。已有父期限取更早者。
+配置页只保留后台凭据和代理控件；免鉴权来源及生成预算与延迟控件已删除。所有渠道的模型、推理、压缩和响应资源入口均要求托管 API Key，包括 loopback、IPv6 和可信代理转发的请求。`anonymous_allow_ips` 及旧 `inference_auth_enabled=false` 不能放行请求；管理令牌不能替代推理 Key。
 
-`shared_stream_idle_timeout_seconds` 控制 WorkBuddy、Qoder、Cline 的语义流空闲，默认 300，范围 30–600 秒。心跳、角色、纯用量不算生成进展，下游处理时间不计入上游空闲。Grok 保留专属流空闲配置。
+固定值集中在 [inference_limits.go](../internal/config/inference_limits.go)：
 
-Grok 生成请求的单次首响应等待也使用 `first_token_timeout_seconds`，不再另设固定 30 秒限制；关闭首生成限制时仍受完整请求期限约束。Chat 入口的传输切号与质量重试共用 `account_switch_count` 总尝试上限，质量重试另受 `quality_hold_max_attempts` 限制。只有尚未交付输出且不含可能产生副作用的上游托管工具时，才允许传输重试。
+| 策略 | 固定值 |
+|---|---:|
+| 跨重试首生成期限 | 180 秒 |
+| 入口及上游完整请求期限 | 7200 秒 |
+| WorkBuddy / Qoder / Cline 语义流空闲 | 300 秒 |
+| Grok 语义流空闲 | 120 秒 |
+| WorkBuddy 未提供上限时的输出预算 | 8192 Token |
+| 共享拒绝排队睡眠预算 | 60 秒 |
+| Qoder 已分类队列闸门探测间隔 | 5 秒 |
+| 共享生成重试上限 | 20 次重试，认证重放占同一尝试预算 |
 
-`qoder_queue_wait_budget_ms` 为 Qoder 的排队睡眠预算：0 继承 `shared_refusal_wait_budget_ms`，-1 禁止网关等待，正值单独设定。交互业务可选 3000ms；遇到上游 15/30 秒等待提示将直接返回 429 和 Retry-After。它减少失败等待，也减少请求在网关内等到队列恢复的机会；不保证模型恢复或吞吐增加。`qoder_queue_retry_interval_ms=0` 保留上游提示，正值覆盖间隔。此预算只计算排队睡眠，HTTP 往返由首生成及完整期限限制。
+首生成包括文本、推理和工具进展，不等同可见首字；生成进展后停止该计时。成功非流 JSON 的响应头释放流式看门狗，完整正文仍受总期限约束。心跳、角色和纯用量不刷新语义空闲，父取消始终有效。内部目录读取保留更短的操作期限，不开放为用户配置。
 
-**Qoder 免费档共享排队闸门的推荐配置。** Qoder 免费档把**所有账号**挡在同一个上游队列闸门后（业务码 10605：`isQueued=true`、`serviceAvailable=false`、`retryAfterSeconds=30`），因此失败不是账号级限流，**切号无效**，请求只能等闸门重新开放。默认值（`max_retries=3`、`shared_refusal_wait_budget_ms=15000`、`first_token_timeout_seconds=60`、`qoder_queue_retry_interval_ms=0`）会在约 24 秒内耗尽重试并返回 429，而闸门窗口是 30 秒，于是几乎必然失败。生产实测推荐：`max_retries=20`、`first_token_timeout_seconds=180`、`shared_refusal_wait_budget_ms=60000`、`qoder_queue_retry_interval_ms=5000`。用 5 秒间隔探测，60 秒预算内约可重试 12 次（约 79 秒墙钟），既覆盖一个完整 30 秒窗口，又留在 60 秒边缘安全上限内，不会被 100 秒源站超时的边缘代理截断成 520。不要为了等更久把预算抬过 60 秒：那只会换来边缘代理的 520，而不是更长的等待。
+Qoder 队列闸门仍在同一个账号上有界等待，不因共享队列拒绝切号。60 秒只计排队睡眠，网络往返和其他上游处理时间仍消耗首生成及完整期限。普通账号限流保留上游 Retry-After 与账号冷却逻辑。
 
-`workbuddy_default_max_tokens` 默认 8192，可配置 1–131072，实际可用上限仍以账号模型目录及上游接受范围为准。仅未指定输出上限时使用；显式 `max_tokens`、`max_completion_tokens`、Responses `max_output_tokens` 按原协议优先级保留。推理模型的思考可能占用同一个输出预算。提高默认上限允许更长输出，不会预先生成这么多 Token，实际生成可能增加用量。
+Grok 的传输切号总上限固定为 20；质量暂存固定开启，最多 6 次、每轮 30 秒、8 MiB，耗尽后交付最后结果。仅尚未交付且无上游副作用的请求可重放；这些限制不能被配置文件或管理 API 覆盖。
 
-上述字段可在管理页“生成预算与延迟”调整。保存后新请求读取首生成和排队预算，账号客户端通过指纹失效重新读取输出及流空闲配置；现有请求保留旧快照。全局并发容量及其处理超时在启动时装配，修改 `concurrency_timeout` 后需重启。
+客户端显式 `max_tokens`、`max_completion_tokens`、Responses `max_output_tokens` 及协议停止序列继续按原协议处理，未将客户端参数改成固定值。
+
+旧文件与 Redis 中的预算、延迟、重试及质量配置字段会被忽略，下一次正常配置保存不再写回它们；管理 API 显式提交这些字段或 `anonymous_allow_ips` 返回 400。不需要为了升级删除 Redis 或凭据主密钥。

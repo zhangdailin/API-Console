@@ -134,18 +134,10 @@ func APIKeyAllowsModel(ctx context.Context, model string) bool {
 	return false
 }
 
-// APIKeyAuthWithRequest protects model and inference endpoints with a managed
-// key. It accepts OpenAI-style Bearer auth and Anthropic's x-api-key header.
-// require returns whether a key is required for this request; a deployment that
-// must keep a known source reachable without a key names that source here, while
-// every other caller still needs one.
-func APIKeyAuthWithRequest(require func(*http.Request) bool, validate APIKeyValidator, next http.HandlerFunc) http.HandlerFunc {
+// APIKeyAuth requires a managed key on every model and inference request.
+// OpenAI Bearer auth and Anthropic x-api-key headers share the same validator.
+func APIKeyAuth(validate APIKeyValidator, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if require != nil && !require(r) {
-			ctx := context.WithValue(r.Context(), apiKeyFingerprintContextKey{}, "anonymous")
-			next(w, r.WithContext(ctx))
-			return
-		}
 		token := apiKeyToken(r)
 		if token == "" {
 			writeAPIKeyError(w, http.StatusUnauthorized, "Missing API key", "invalid_api_key")

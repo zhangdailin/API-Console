@@ -80,7 +80,7 @@ func TestQuotaExceededFrameReachesTheAttemptResult(t *testing.T) {
 	stream := "data:" + notice + "\n\n" + "data:" + answer + "\n\n" + "event:finish\n\n"
 
 	var text strings.Builder
-	res, err := consumeStreamObserved(strings.NewReader(stream), false, func(m upstream.SSEMessage) {
+	res, err := consumeStreamObserved(strings.NewReader(stream), func(m upstream.SSEMessage) {
 		if m.Type == "model.text-delta" {
 			if delta, ok := m.Event["delta"].(string); ok {
 				text.WriteString(delta)

@@ -1150,6 +1150,7 @@
       // A queued filter change owns the screen; never paint the previous scope.
       if (!ticket.isCurrent() || scope.window !== state.window || scope.channel !== state.channel) return;
       state.overview = payload;
+      if (typeof CustomEvent !== 'undefined') window.dispatchEvent(new CustomEvent('ops:pool', { detail: payload.matrix }));
       renderKpis(payload);
       renderTrends(payload);
       renderDistributions(payload);
@@ -1170,6 +1171,7 @@
       if (!ticket.accepts(error) || scope.window !== state.window || scope.channel !== state.channel) return;
       // A failed filter change has no valid historical scope to display.
       state.overview = null;
+      if (typeof CustomEvent !== 'undefined') window.dispatchEvent(new CustomEvent('ops:pool', { detail: null }));
       if (!state.overview) {
         renderResources({ available: false, note: '运行时指标尚未读取成功。' });
         ['opsConcurrency', 'opsErrorMix', 'opsHistogram', 'opsSwitchTrend', 'opsThroughput', 'opsErrorTrend'].forEach((id) => {

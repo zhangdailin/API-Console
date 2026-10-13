@@ -44,10 +44,10 @@ func TestRegisterRoutes_WorkBuddyEndpoints(t *testing.T) {
 	// authorization service.
 	cfg := &config.Config{
 		AdminUser: "admin", AdminPass: "secret", AdminToken: "admintoken", AdminPath: "/admin",
-		WorkBuddyBaseURL:  auth.URL,
-		AnonymousAllowIPs: []string{"192.0.2.1"},
+		WorkBuddyBaseURL: auth.URL,
 	}
-	mux, _, _ := newRouteMux(t, "routes:", cfg)
+	mux, s, _ := newRouteMux(t, "routes:", cfg)
+	token := createRouteTestKey(t, s)
 
 	// The login endpoints must not be usable without an admin session.
 	unauth := httptest.NewRecorder()
@@ -94,7 +94,7 @@ func TestRegisterRoutes_WorkBuddyEndpoints(t *testing.T) {
 	unknownBody := unknown.Body.String()
 	testutil.MustContain(t, unknownBody, "404 page not found")
 
-	// Both provider bases reject untrusted clients; allowlisted controls must
+	// Both provider bases reject untrusted clients; authenticated controls must
 	// reach the API handler so auth cannot conceal a registration regression.
 	for _, target := range []string{
 		"/workbuddy/v1/messages",
@@ -122,6 +122,7 @@ func TestRegisterRoutes_WorkBuddyEndpoints(t *testing.T) {
 		testutil.Equal(t, channelRec.Code, http.StatusUnauthorized)
 		allowedReq := httptest.NewRequest(method, target, strings.NewReader(`{"model":"hy3","messages":[]}`))
 		allowedReq.RemoteAddr = "192.0.2.1:12345"
+		allowedReq.Header.Set("Authorization", "Bearer "+token)
 		allowedRec := httptest.NewRecorder()
 		mux.ServeHTTP(allowedRec, allowedReq)
 		testutil.Falsef(t, allowedRec.Code == http.StatusUnauthorized || allowedRec.Code == http.StatusForbidden, "%s did not get through inference auth: %d %s", target, allowedRec.Code, allowedRec.Body.String())
@@ -129,11 +130,12 @@ func TestRegisterRoutes_WorkBuddyEndpoints(t *testing.T) {
 		testutil.Falsef(t, !json.Valid(allowedRec.Body.Bytes()), "%s returned no API JSON envelope: %d %s", target, allowedRec.Code, allowedRec.Body.String())
 		testutil.Falsef(t, allowedRec.Body.String() == unknownBody || strings.Contains(allowedRec.Body.String(), "404 page not found"), "%s answered like an unregistered route: %d %s", target, allowedRec.Code, allowedRec.Body.String())
 	}
-	// The same allowlisted request to a missing /v1 path must now expose its
+	// The same authenticated request to a missing /v1 path must now expose its
 	// real 404, instead of the authentication response used above.
 	missingReq := httptest.NewRequest(http.MethodPost, "/v1/definitely-not-registered", strings.NewReader("{}"))
 	missingReq.RemoteAddr = "192.0.2.1:12345"
+	missingReq.Header.Set("Authorization", "Bearer "+token)
 	missingRec := httptest.NewRecorder()
 	mux.ServeHTTP(missingRec, missingReq)
-	testutil.Falsef(t, missingRec.Code != http.StatusNotFound || missingRec.Body.String() != unknownBody, "missing allowlisted /v1 route = %d %s, want plain 404", missingRec.Code, missingRec.Body.String())
+	testutil.Falsef(t, missingRec.Code != http.StatusNotFound || missingRec.Body.String() != unknownBody, "missing authenticated /v1 route = %d %s, want plain 404", missingRec.Code, missingRec.Body.String())
 }

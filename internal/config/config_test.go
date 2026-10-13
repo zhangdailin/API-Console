@@ -60,8 +60,8 @@ func TestApplyHardcodedOverridesValues(t *testing.T) {
 	ApplyHardcoded(&cfg)
 
 	testutil.Equal(t, cfg.MaxRetries, 20)
-	testutil.Equal(t, cfg.RequestTimeout, 999)
-	testutil.Equal(t, cfg.ConcurrencyTimeout, cfg.RequestTimeout)
+	testutil.Equal(t, cfg.RequestTimeout, int(InferenceRequestTimeout.Seconds()))
+	testutil.Equal(t, cfg.RetryDelay, 1000)
 }
 
 func TestApplyDefaultsPreservesConfigurableFields(t *testing.T) {
@@ -91,7 +91,9 @@ func TestLegacyInferenceAuthOptOutIsIgnored(t *testing.T) {
 	var cfg Config
 	testutil.NoError(t, json.Unmarshal([]byte(`{"inference_auth_enabled":false}`), &cfg))
 	ApplyDefaults(&cfg)
-	testutil.False(t, cfg.AnonymousAllowIPs != nil, "legacy opt-out must not introduce an anonymous allowlist")
+	raw, err := json.Marshal(cfg)
+	testutil.NoError(t, err)
+	testutil.MustNotContain(t, string(raw), "inference_auth_enabled")
 }
 
 func TestValidateProxyConfigRejectsMalformedProxy(t *testing.T) {
@@ -123,22 +125,15 @@ func TestProxyValidationRejectsInvalidAddressesWithoutLeakingCredentials(t *test
 	}
 }
 
-func TestIndependentGenerationAndQueueBudgets(t *testing.T) {
-	c := &Config{RequestTimeout: 7200, FirstTokenTimeoutSeconds: 15, WorkBuddyDefaultMaxTokens: 16384, QoderQueueWaitBudgetMs: -1}
-	ApplyHardcoded(c)
-	if c.FirstGenerationTimeout().Seconds() != 15 || c.WorkBuddyOutputBudget() != 16384 || c.QoderQueueBudget() != 0 {
-		t.Fatal("explicit settings lost")
-	}
-	c.QoderQueueWaitBudgetMs = 0
-	if c.QoderQueueBudget() != -1 {
-		t.Fatal("inheritance lost")
-	}
-	c.QoderQueueWaitBudgetMs = 3000
-	if c.QoderQueueBudget().Milliseconds() != 3000 {
-		t.Fatal("queue budget lost")
-	}
-	c.FirstTokenTimeoutSeconds = -1
-	if c.FirstGenerationTimeout() != 0 {
-		t.Fatal("cannot disable")
-	}
+func TestRemovedGenerationSettingsCannotOverrideFixedPolicy(t *testing.T) {
+	var cfg Config
+	testutil.NoError(t, json.Unmarshal([]byte(`{"anonymous_allow_ips":["0.0.0.0/0"],"first_token_timeout_seconds":-1,"workbuddy_default_max_tokens":1,"shared_stream_idle_timeout_seconds":1,"qoder_queue_wait_budget_ms":-1,"request_timeout":1,"max_retries":999,"quality_hold_enabled":false}`), &cfg))
+	ApplyHardcoded(&cfg)
+	testutil.Equal(t, cfg.RequestTimeout, int(InferenceRequestTimeout.Seconds()))
+	testutil.Equal(t, cfg.MaxRetries, GenerationMaxRetries)
+	testutil.Equal(t, FirstGenerationTimeout.Seconds(), float64(180))
+	testutil.Equal(t, WorkBuddyDefaultMaxTokens, 8192)
+	raw, err := json.Marshal(cfg)
+	testutil.NoError(t, err)
+	testutil.MustNotContainAny(t, string(raw), "anonymous_allow_ips", "first_token_timeout_seconds", "workbuddy_default_max_tokens", "shared_stream_idle_timeout_seconds", "qoder_queue_wait_budget_ms", "request_timeout", "max_retries", "quality_hold_enabled")
 }

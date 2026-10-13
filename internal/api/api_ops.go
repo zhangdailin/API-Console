@@ -675,8 +675,19 @@ func (a *API) opsMatrix(ctx context.Context, channels []string, since, until tim
 		}
 	}
 	counts := map[int64]int64{}
+	capacityAvailable := false
 	if a.connTracker != nil {
-		counts = a.connTracker.GetCounts(ids)
+		if checked, ok := a.connTracker.(interface {
+			GetCountsChecked(context.Context, []int64) (map[int64]int64, error)
+		}); ok {
+			counts, err = checked.GetCountsChecked(ctx, ids)
+			if err != nil {
+				return nil, err
+			}
+			capacityAvailable = true
+		} else {
+			counts = a.connTracker.GetCounts(ids)
+		}
 	}
 	now := time.Now()
 	// The rate is per minute of the requested window, not per bucket that exists.
@@ -708,6 +719,12 @@ func (a *API) opsMatrix(ctx context.Context, channels []string, since, until tim
 			"accounts_needing_login": needingLogin,
 			"model_cooldowns":        modelCooldowns,
 			"models":                 []opsagg.ModelStats{},
+		}
+		row["capacity_available"] = false
+		if capacityAvailable {
+			for key, value := range opsPoolCapacity(accounts, counts, channel) {
+				row[key] = value
+			}
 		}
 		if a.opsAggregator != nil && a.opsAggregator.Enabled() {
 			buckets, err := a.opsAggregator.Range(ctx, channel, since, until)

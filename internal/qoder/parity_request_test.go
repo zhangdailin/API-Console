@@ -19,8 +19,7 @@ func TestToolHistoryRetainsIndexAndReasoningWhitespace(t *testing.T) {
 	var messages []prompt.Message
 	err := json.Unmarshal([]byte(`[{"role":"assistant","content":"","reasoning_content":" thinking\n","reasoning_item":{"type":"reasoning","summary":[]},"tool_calls":[{"id":"call-a","index":0,"type":"function","function":{"name":"Bash","arguments":"{\"command\":\"dir\"}"}}]},{"role":"tool","tool_call_id":"call-a","content":"file.txt"}]`), &messages)
 	testutil.NoError(t, err)
-	got, _, err := buildMessages(upstream.UpstreamRequest{Messages: messages})
-	testutil.NoError(t, err)
+	got, _ := buildMessages(upstream.UpstreamRequest{Messages: messages})
 	testutil.Falsef(t, len(got) != 2 || got[0].Reasoning != " thinking\n" || len(got[0].ReasoningItem) == 0 || len(got[0].ToolCalls) != 1, "history lost: %+v", got)
 	call := got[0].ToolCalls[0]
 	testutil.Falsef(t, call.Index == nil || *call.Index != 0 || call.Function.Arguments != `{"command":"dir"}` || got[1].ToolCallID != call.ID || got[1].Content != "file.txt", "tool pairing changed: %+v", got)

@@ -33,6 +33,7 @@ type requestObservation struct {
 	retryWaitMS, queueWaitMS     int64
 	httpPhaseSamples             int64
 	httpPhases                   map[string]int64
+	httpPhaseCounts              map[string]int64
 	finalEvent                   *audit.Event
 	journal                      audit.Logger
 	// annotations are facts a handler learned about the request as a whole,

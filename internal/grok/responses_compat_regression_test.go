@@ -65,7 +65,7 @@ func TestGrok47ResponsesCompatibilityBeforeToolExecution(t *testing.T) {
 			h.cliClient.SetAccountStore(s)
 			h.cliClient.httpClient = upstream.Client()
 			h.cliClient.oauth.httpClient = upstream.Client()
-			wrapped := middleware.APIKeyAuthWithRequest(func(*http.Request) bool { return true }, func(context.Context, string) (*middleware.APIKeyPrincipal, error) {
+			wrapped := middleware.APIKeyAuth(func(context.Context, string) (*middleware.APIKeyPrincipal, error) {
 				return &middleware.APIKeyPrincipal{}, nil
 			}, h.HandleResponses)
 			request := func(previous, effort string) *httptest.ResponseRecorder {

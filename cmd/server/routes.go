@@ -56,7 +56,6 @@ func registerRoutes(
 		return cfg
 	}
 	modelRefreshHandler := modelrefresh.NewRefreshHandler(currentConfig, s)
-	var anonymousCache middleware.AnonymousAllowlistCache
 	providerAdmission := middleware.ProviderAdmission(func() map[string]int {
 		current := currentConfig()
 		if current == nil {
@@ -76,30 +75,7 @@ func registerRoutes(
 		return time.Duration(min(ms, 20)) * time.Millisecond
 	})
 	inferenceAuth := func(next http.HandlerFunc) http.HandlerFunc {
-		authenticated := middleware.APIKeyAuthWithRequest(
-			// A key is required on every provider inference route; `inference_auth_enabled: false`
-			// used to open every
-			// inference route to anonymous callers and is now advisory only. The one
-			// exception is an explicit anonymous_allow_ips source, which a deployment
-			// names when it cannot yet update that client.
-			func(r *http.Request) bool {
-				cfg := currentConfig()
-				if cfg == nil {
-					return true
-				}
-				allowlist, err := anonymousCache.Get(cfg.AnonymousAllowIPs)
-				if err != nil {
-					// A malformed entry makes the list unusable: require keys rather
-					// than silently opening the routes.
-					slog.Warn("anonymous_allow_ips is invalid; requiring a key from everyone", "error", err)
-					return true
-				}
-				if allowlist.Allows(r) {
-					slog.Debug("anonymous inference request allowed by anonymous_allow_ips", "client_ip", middleware.ClientIP(r))
-					return false
-				}
-				return true
-			},
+		authenticated := middleware.APIKeyAuth(
 			func(ctx context.Context, token string) (*middleware.APIKeyPrincipal, error) {
 				key, err := s.AuthorizeApiKey(ctx, token)
 				switch {
@@ -124,12 +100,12 @@ func registerRoutes(
 			// concurrency must not hold budget) and before the handler runs, so a
 			// key whose limit cannot cover the request is answered 402 instead.
 			middleware.APIKeyConcurrencyWithTracker(
-				middleware.APIKeyBillingReservation(middleware.InferenceBudget(currentConfig)(flowTracker.Track(next)), s, middleware.DefaultBillingReservationTTL),
+				middleware.APIKeyBillingReservation(middleware.InferenceBudget(flowTracker.Track(coalesceFlush(next))), s, middleware.DefaultBillingReservationTTL),
 				accountTracker,
 			),
 		)
 		// Admit once, before Redis authentication/billing work.
-		return limiter.Limit(providerAdmission(coalesceFlush(authenticated)))
+		return limiter.Limit(providerAdmission(authenticated))
 	}
 	// All inference routes bind a provider by path, with or without /v1.
 	channelPrefixes := channel.GenericPrefixes()

@@ -105,7 +105,7 @@ func filterTags(tags []string) []string {
 }
 
 // attemptChat performs one upstream attempt and consumes its stream.
-func (c *Client) attemptChat(ctx context.Context, url string, body []byte, model modelEntry, requestID string, fields RuntimeFields, creds Credentials, toolsEnabled bool, emit func(upstream.SSEMessage)) (result streamResult, attemptErr error) {
+func (c *Client) attemptChat(ctx context.Context, url string, body []byte, model modelEntry, requestID string, fields RuntimeFields, creds Credentials, emit func(upstream.SSEMessage)) (result streamResult, attemptErr error) {
 	reqCtx, cancel := util.WithAttemptTimeout(ctx, c.requestTimeout)
 	defer cancel()
 
@@ -187,7 +187,7 @@ func (c *Client) attemptChat(ctx context.Context, url string, body []byte, model
 
 	monitored, progress := httpclient.MonitorProgressIdle(resp.Body, c.streamIdle, cancel, "qoder")
 	resp.Body = monitored
-	result, err = consumeStreamObserved(resp.Body, toolsEnabled, func(m upstream.SSEMessage) {
+	result, err = consumeStreamObserved(resp.Body, func(m upstream.SSEMessage) {
 		progress()
 		if emit != nil {
 			emit(m)

@@ -138,24 +138,6 @@ func (r *deviceLoginRegistry[T]) pending(id string) bool {
 	return login != nil && login.status == "pending"
 }
 
-// deviceCode returns the transaction's device code, or an empty string.
-func (r *deviceLoginRegistry[T]) deviceCode(id string) string {
-	if r == nil {
-		return ""
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	txn := r.logins[id]
-	if txn == nil {
-		return ""
-	}
-	login := r.shared(txn)
-	if login == nil {
-		return ""
-	}
-	return login.deviceCode
-}
-
 // update runs fn on the stored transaction under the lock, for channel state that
 // is not part of the shared bookkeeping. Grok widens its poll interval here when
 // the upstream asks it to slow down.

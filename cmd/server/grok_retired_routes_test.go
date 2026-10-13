@@ -10,8 +10,9 @@ import (
 )
 
 func TestRegisterRoutes_GrokConversationSurfacesAreRetired(t *testing.T) {
-	cfg := &config.Config{AdminUser: "admin", AdminPass: "secret", AdminToken: "admintoken", AdminPath: "/admin", AnonymousAllowIPs: []string{"192.0.2.1"}}
-	mux, _, _ := newRouteMux(t, "retired-grok-routes:", cfg)
+	cfg := &config.Config{AdminUser: "admin", AdminPass: "secret", AdminToken: "admintoken", AdminPath: "/admin"}
+	mux, s, _ := newRouteMux(t, "retired-grok-routes:", cfg)
+	token := createRouteTestKey(t, s)
 
 	for _, path := range []string{
 		"/api/grok/tools/v1/models", "/api/grok/tools/v1/responses", "/api/grok/models",
@@ -24,12 +25,13 @@ func TestRegisterRoutes_GrokConversationSurfacesAreRetired(t *testing.T) {
 
 	// Both legacy admin aliases are unregistered, including when an admin
 	// credential is supplied. /v1 is guarded by inference auth, so use the
-	// configured anonymous test source to observe its actual route result.
+	// managed test key to observe its actual route result.
 	for _, prefix := range []string{"/api/v1/admin", "/v1/admin"} {
 		for _, suffix := range []string{"/verify", "/storage", "/config"} {
 			path := prefix + suffix
 			req := httptest.NewRequest(http.MethodGet, path, nil)
 			req.RemoteAddr = "192.0.2.1:1234"
+			req.Header.Set("Authorization", "Bearer "+token)
 			req.Header.Set("X-Admin-Token", cfg.AdminToken)
 			rec := httptest.NewRecorder()
 			mux.ServeHTTP(rec, req)
@@ -84,7 +86,8 @@ func TestRegisterRoutes_GrokConversationSurfacesAreRetired(t *testing.T) {
 	}
 	for _, path := range []string{"/grok/v1/files/image/missing.jpg", "/v1/files/video/missing.mp4"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
-		req.RemoteAddr = "192.0.2.1:1234" // bypass the key guard to test routing
+		req.RemoteAddr = "192.0.2.1:1234"
+		req.Header.Set("Authorization", "Bearer "+token) // test routing with a managed key
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 		testutil.CheckEqual(t, rec.Code, http.StatusNotFound)

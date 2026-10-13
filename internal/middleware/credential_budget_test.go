@@ -18,9 +18,9 @@ func TestCredentialBackendFailureDoesNotLockOutValidLogins(t *testing.T) {
 	if !valid || !allowed || err != nil {
 		t.Fatal("healthy authentication remained locked out after recovery")
 	}
-	limiter.CheckCredentials("source", func() bool { return false })
-	_, allowed = limiter.CheckCredentials("source", func() bool { t.Fatal("exhausted budget verified credentials"); return true })
-	if allowed {
+	limiter.CheckCredentialsWithError("source", func() (bool, error) { return false, nil })
+	_, allowed, err = limiter.CheckCredentialsWithError("source", func() (bool, error) { t.Fatal("exhausted budget verified credentials"); return true, nil })
+	if allowed || err != nil {
 		t.Fatal("incorrect passwords did not spend the failure budget")
 	}
 }

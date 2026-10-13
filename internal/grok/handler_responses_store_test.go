@@ -41,7 +41,7 @@ func TestBuildStoredResponseLifecycleAndOwnerIsolation(t *testing.T) {
 	configureStoredResponseTestHandler(t, h, s, upstream)
 
 	call := func(token, method, path, body string, handler http.HandlerFunc) *httptest.ResponseRecorder {
-		wrapped := middleware.APIKeyAuthWithRequest(func(*http.Request) bool { return true }, func(context.Context, string) (*middleware.APIKeyPrincipal, error) {
+		wrapped := middleware.APIKeyAuth(func(context.Context, string) (*middleware.APIKeyPrincipal, error) {
 			return &middleware.APIKeyPrincipal{}, nil
 		}, handler)
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -82,7 +82,7 @@ func TestBuildPreviousResponsePinsCreatingAccount(t *testing.T) {
 	configureStoredResponseTestHandler(t, h, s, upstream)
 	testutil.NoError(t, s.CreateAccount(context.Background(), buildTestAccount(t, "user-2", "team-2")))
 
-	wrapped := middleware.APIKeyAuthWithRequest(func(*http.Request) bool { return true }, func(context.Context, string) (*middleware.APIKeyPrincipal, error) {
+	wrapped := middleware.APIKeyAuth(func(context.Context, string) (*middleware.APIKeyPrincipal, error) {
 		return &middleware.APIKeyPrincipal{}, nil
 	}, h.HandleResponses)
 	request := func(body string) *httptest.ResponseRecorder {

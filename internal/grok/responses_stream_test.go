@@ -1,5 +1,8 @@
 package grok
 
+// Cross-protocol regression helpers. Production Grok Responses forwards the
+// native Build response and does not pass through these Chat adapters.
+
 import (
 	"io"
 	"net/http"

@@ -1150,7 +1150,7 @@ button.ops-error-row { width: 100%; border: 0; background: none; text-align: lef
 .ops-flow-status-dot { margin-right: 8px; }
 .ops-flow-status-dot.is-live { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 10%, transparent), 0 0 12px color-mix(in srgb, var(--ok) 30%, transparent); }
 .ops-flow-scroll { overflow-x: auto; margin-top: 16px; border: 1px solid var(--flow-border); border-radius: 16px; background: var(--flow-bg); }
-.ops-flow-map { position: relative; height: 500px; min-width: 1040px; isolation: isolate; background: radial-gradient(ellipse at 50% 50%, var(--flow-haze), transparent 50%), radial-gradient(var(--flow-grid) 1px, transparent 1px); background-size: auto, 24px 24px; }
+.ops-flow-map { position: relative; height: 600px; min-width: 1040px; isolation: isolate; background: radial-gradient(ellipse at 50% 50%, var(--flow-haze), transparent 50%), radial-gradient(var(--flow-grid) 1px, transparent 1px); background-size: auto, 24px 24px; }
 .ops-flow-map::before { content: ""; position: absolute; inset: 0; pointer-events: none; z-index: -1; background: linear-gradient(transparent 49%, var(--flow-scan) 50%, transparent 51%); background-size: 100% 96px; }
 .ops-flow-heading { position: absolute; top: 20px; color: var(--flow-secondary); font-size: .7rem; font-weight: 600; letter-spacing: .16em; }
 .ops-flow-heading-left { left: 2%; }
@@ -1176,8 +1176,8 @@ button.ops-error-row { width: 100%; border: 0; background: none; text-align: lef
 .ops-flow-node:hover, .ops-flow-node:focus-visible, .ops-flow-node.is-selected { border-color: var(--flow-color); outline: 2px solid color-mix(in srgb, var(--flow-color) 20%, transparent); }
 .ops-flow-node.is-flowing { border-color: color-mix(in srgb, var(--flow-color) 55%, var(--flow-border)); box-shadow: inset 0 1px #ffffff08, 0 0 22px color-mix(in srgb, var(--flow-color) 13%, transparent); }
 .ops-flow-node.is-flowing .ops-flow-node-dot { background: var(--flow-color); box-shadow: 0 0 8px var(--flow-color); }
-.ops-flow-upstream { left: 2%; width: 23%; top: var(--node-y); height: 96px; }
-.ops-flow-downstream { left: 75%; width: 23%; top: var(--node-y); height: 110px; }
+.ops-flow-upstream { left: 2%; width: 23%; top: var(--node-y); height: 114px; }
+.ops-flow-downstream { left: 75%; width: 23%; top: var(--node-y); height: 138px; }
 .ops-flow-gateway { left: 40%; width: 20%; top: 50%; min-height: 210px; flex-direction: column; gap: 8px; text-align: center; border-color: var(--flow-gateway-border); background: radial-gradient(ellipse at top, var(--flow-gateway-from), var(--flow-gateway-to) 80%); }
 .ops-flow-orbit { position: absolute; width: 62px; height: 62px; top: 8px; border-radius: 50%; border: 1px dashed color-mix(in srgb, var(--flow-accent) 27%, transparent); pointer-events: none; }
 .ops-flow-gateway.is-flowing .ops-flow-orbit { border-color: color-mix(in srgb, var(--flow-accent) 54%, transparent); animation: ops-flow-orbit 12s linear infinite; }
@@ -1193,7 +1193,7 @@ button.ops-error-row { width: 100%; border: 0; background: none; text-align: lef
 .ops-flow-node code { background: transparent; padding: 0; font-size: .64rem; color: var(--flow-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ops-flow-current, #opsFlowActive { color: var(--flow-secondary); font-size: .68rem; }
 .ops-flow-gateway-label { color: var(--flow-accent); font-size: .62rem; letter-spacing: .2em; }
-.ops-flow-rates { display: flex; align-items: baseline; gap: 18px; }
+.ops-flow-rates { display: flex; align-items: baseline; gap: 12px; }
 .ops-flow-rates > span { display: flex; align-items: baseline; gap: 5px; }
 .ops-flow-rates b { color: var(--flow-title); font-size: 1.05rem; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -.03em; }
 .ops-flow-rates small { color: var(--flow-muted); font-size: .57rem; letter-spacing: .04em; }
@@ -1201,6 +1201,19 @@ button.ops-error-row { width: 100%; border: 0; background: none; text-align: lef
 .ops-flow-gateway-rates > span { flex-direction: column; align-items: center; gap: 3px; }
 .ops-flow-gateway-rates b { color: var(--flow-accent); font-size: 1.35rem; }
 .ops-flow-detail { padding-top: 14px; font-size: .75rem; line-height: 1.7; color: var(--text-secondary); }
+.ops-flow-health { display: flex; justify-content: space-between; gap: 4px; font-size: .64rem; white-space: nowrap; color: var(--flow-secondary); }
+.ops-flow-health .is-degraded { color: var(--warn); font-weight: 650; }
+.ops-flow-gateway > .ops-flow-health { flex-direction: column; align-items: center; gap: 2px; }
+.ops-flow-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.ops-flow-fact { padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--surface-2); }
+.ops-flow-fact-label, .ops-flow-fact-value { display: block; }
+.ops-flow-fact-label { color: var(--text-muted); font-size: .68rem; }
+.ops-flow-fact-value { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.ops-flow-note { margin: 12px 0 0; font-size: .68rem; color: var(--text-muted); }
+.ops-flow-note summary { cursor: pointer; }
+.ops-flow-note p { margin: 8px 0 0; }
+@media (max-width: 900px) { .ops-flow-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .ops-flow-facts { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 900px) { .ops-flow-card { padding: 16px; } }
 @media (prefers-reduced-motion: reduce) {
  .ops-flow-wire.is-flowing .ops-flow-packet, .ops-flow-wire.is-flowing .ops-flow-glow, .ops-flow-gateway.is-flowing, .ops-flow-gateway.is-flowing .ops-flow-orbit { animation: none; }

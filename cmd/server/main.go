@@ -165,7 +165,6 @@ func main() {
 		os.Exit(1)
 	}
 	grokHandler.SetCompactionCipher(compactionCipher)
-	logAnonymousAllowlist(cfg)
 	apiHandler.SetConfigChangeHook(func(next *config.Config) {
 		configureRuntimeLogging(next)
 		h.SetConfig(next)
@@ -254,7 +253,7 @@ func main() {
 
 	// Register routes
 	mux := http.NewServeMux()
-	limiter := middleware.NewConcurrencyLimiter(cfg.ConcurrencyLimit, time.Duration(cfg.ConcurrencyTimeout)*time.Second)
+	limiter := middleware.NewConcurrencyLimiter(cfg.ConcurrencyLimit, config.InferenceRequestTimeout)
 	updater := registerRoutes(mux, cfg, s, h, grokHandler, apiHandler, limiter, accountTracker, tmplRenderer)
 	trustedProxy, err := middleware.TrustedProxyMiddleware(cfg.TrustedProxies)
 	if err != nil {
@@ -347,22 +346,6 @@ func logReachability(id channel.ID, probe *provider.Probe, cfg *config.Config) {
 		}
 		slog.Info(probe.Subject+" reachable", "endpoint", probe.Endpoint)
 	}()
-}
-
-// logAnonymousAllowlist states which sources may call the inference routes
-// without a key. It is a deviation from the reference implementation, so a
-// deployment that uses it should see it in the log rather than infer it.
-func logAnonymousAllowlist(cfg *config.Config) {
-	if cfg == nil || len(cfg.AnonymousAllowIPs) == 0 {
-		return
-	}
-	list, err := middleware.NewAnonymousAllowlist(cfg.AnonymousAllowIPs)
-	if err != nil || list.Empty() {
-		slog.Error("anonymous_allow_ips is not usable; every caller must present a key", "error", err)
-		return
-	}
-	slog.Warn("anonymous inference access is allowed for the configured sources; every other caller still needs a key",
-		"anonymous_allow_ips", cfg.AnonymousAllowIPs)
 }
 
 func configureRuntimeLogging(cfg *config.Config) {

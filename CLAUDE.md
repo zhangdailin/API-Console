@@ -108,12 +108,12 @@ server is answered by the channel through `provider.Admin`.
 
 These are load-bearing. A change that "simplifies" any of them is a bug.
 
-1. **Inference authentication is always required.** An API key is mandatory on
-   `/v1` and `/{channel}/v1` routes. `inference_auth_enabled: false` is advisory
-   only and does **not** open the routes. The single exception is a source listed
-   in `anonymous_allow_ips`; a malformed entry must make the whole list unusable
-   and require a key rather than open the routes
-   (`cmd/server/routes.go`, `inferenceAuth`).
+1. **Inference authentication is always required.** Every provider model,
+   inference, compaction and response-resource route requires a managed API key,
+   including loopback and requests forwarded by trusted proxies. Removed
+   `anonymous_allow_ips` and `inference_auth_enabled` settings cannot bypass it.
+   Generation budgets and delays are fixed in `internal/config/inference_limits.go`;
+   explicit client output-token controls remain protocol data.
 2. **Credentials never reach clients or logs.** Not in error bodies, not in
    admin responses, not in logs or diagnostics. Redaction is enforced by
    `internal/errors` public messages, `audit.Redact` and the
@@ -150,7 +150,7 @@ These are load-bearing. A change that "simplifies" any of them is a bug.
   `internal/upstream/emit.go`, `internal/api/device_login_registry.go` (generic),
   `internal/api/api_channel_login.go` (one login flow for every channel),
   `provider.Admin` (per-channel verification, quota projection, redaction),
-  `internal/util/snapshot.go`, `internal/util/http_body.go`.
+  `internal/util/snapshot.go`, `internal/httpclient/http_body.go`.
 - Real-upstream verification records are local operational material and must not
   be committed. `docs/verification/` is ignored by Git. Local mocks
   passing does not mean an upstream accepted a request; when changing request

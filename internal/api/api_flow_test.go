@@ -41,7 +41,7 @@ func TestOpsFlowPushesStartAndFinish(t *testing.T) {
 		t.Fatalf("stream ended: %v", scanner.Err())
 		return middleware.FlowSnapshot{}
 	}
-	if initial := read(); len(initial.Routes) != 3 || initial.Routes[0].Active != 0 {
+	if initial := read(); len(initial.Routes) != 3 || initial.Routes[0].Active != 0 || initial.RateSeconds != 5 || initial.WindowSeconds != 60 || initial.SampleLimit != 256 || initial.Nodes["workbuddy"].FailureRate != nil || initial.Nodes["workbuddy"].FirstGeneration.P95MS != nil {
 		t.Fatalf("initial: %+v", initial)
 	}
 	release, done := make(chan struct{}), make(chan struct{})
@@ -54,7 +54,9 @@ func TestOpsFlowPushesStartAndFinish(t *testing.T) {
 	}
 	close(release)
 	<-done
-	if ended := read().Routes[0]; ended.Active != 0 || ended.Completed != 1 {
+	ended := read()
+	stats := ended.Nodes["gateway"]
+	if ended.Routes[0].Active != 0 || ended.Routes[0].Completed != 1 || stats.Completed != 1 || stats.Waiting != 0 || stats.FailureRate == nil || *stats.FailureRate != 0 {
 		t.Fatalf("finish: %+v", ended)
 	}
 }

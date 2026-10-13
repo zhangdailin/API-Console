@@ -81,7 +81,7 @@ func TestEnsureModelEnabled_AllowsVerifiedDynamicGrokModel(t *testing.T) {
 	testutil.NoError(t, h.ensureModelEnabled(context.Background(), "grok-5"), "ensureModelEnabled() error = %v")
 }
 
-func TestEnsureModelCapability_RejectsPersistedCapabilityMismatch(t *testing.T) {
+func TestEnsureResolvedModelCapability_RejectsPersistedCapabilityMismatch(t *testing.T) {
 	h, s, _ := setupValidationHandler(t)
 
 	if err := s.CreateModel(context.Background(), &store.Model{
@@ -91,8 +91,8 @@ func TestEnsureModelCapability_RejectsPersistedCapabilityMismatch(t *testing.T) 
 	}); err != nil {
 		t.Fatalf("CreateModel() error = %v", err)
 	}
-	testutil.NoError(t, h.ensureModelCapability(context.Background(), "grok-5", store.CapabilityResponses), "Responses capability error = %v")
-	err := h.ensureModelCapability(context.Background(), "grok-5", store.CapabilityChat)
+	testutil.NoError(t, h.ensureResolvedModelCapability(context.Background(), "grok-5", ModelSpec{ID: "grok-5", Upstream: UpstreamCLI}, store.CapabilityResponses), "Responses capability error = %v")
+	err := h.ensureResolvedModelCapability(context.Background(), "grok-5", ModelSpec{ID: "grok-5", Upstream: UpstreamCLI}, store.CapabilityChat)
 	testutil.Error(t, err)
 }
 

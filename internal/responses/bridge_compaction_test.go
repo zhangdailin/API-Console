@@ -116,7 +116,7 @@ func TestBridgeCompactionOwnerIsolationAndFailures(t *testing.T) {
 		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"summary"},"finish_reason":"stop"}]}`)
 	}
 	call := func(token, body string, h http.HandlerFunc) *httptest.ResponseRecorder {
-		wrapped := middleware.APIKeyAuthWithRequest(func(*http.Request) bool { return true }, func(context.Context, string) (*middleware.APIKeyPrincipal, error) {
+		wrapped := middleware.APIKeyAuth(func(context.Context, string) (*middleware.APIKeyPrincipal, error) {
 			return &middleware.APIKeyPrincipal{}, nil
 		}, h)
 		r := httptest.NewRequest(http.MethodPost, "/qoder/v1/responses", strings.NewReader(body))

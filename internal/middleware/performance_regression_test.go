@@ -15,17 +15,6 @@ func TestNestedAdmissionUsesOneGlobalSlot(t *testing.T) {
 	handler(rec, httptest.NewRequest("POST", "/grok/v1/responses", nil))
 	testutil.Equal(t, rec.Code, 204)
 }
-func TestAllowlistCacheRejectsInvalidReplacement(t *testing.T) {
-	var cache AnonymousAllowlistCache
-	list, err := cache.Get([]string{"127.0.0.1"})
-	testutil.False(t, err != nil || list.Empty(), "first config")
-	same, _ := cache.Get([]string{"127.0.0.1"})
-	testutil.False(t, same != list, "unchanged list reparsed")
-	_, err = cache.Get([]string{"invalid"})
-	testutil.Error(t, err)
-	empty, err := cache.Get(nil)
-	testutil.False(t, err != nil || !empty.Empty(), "empty list allowed old source")
-}
 func TestProviderAdmissionSeparatesBudgetsAndReleases(t *testing.T) {
 	wrap := ProviderAdmission(func() map[string]int { return map[string]int{"grok": 1, "cline": 1} })
 	entered := make(chan struct{})

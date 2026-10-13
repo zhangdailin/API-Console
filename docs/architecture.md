@@ -32,6 +32,10 @@ API-Console 是 Go 服务与内嵌管理网页组成的多通道网关。Redis �
 | `internal/selfupdate` | 发行发现、下载验证、替换和独立回退守护 |
 | `web` / `internal/template` | 内嵌静态资源、模板、主题及页面交互 |
 
+共享推理辅助逻辑按职责分在 `model_resolution.go`（模型与档位校验）、`account_selection.go`（选择与并发槽）、`account_stats.go`（幂等用量写入）和 `refusal_wait.go`（拒绝等待预算）。Grok 的 `handler.go` 保留依赖装配，模型、账号策略、审计和额度写入分别在 `handler_models.go`、`handler_account_policy.go`、`handler_audit.go` 和 `handler_quota.go`。
+
+质量暂存分为 `quality_hold_policy.go` 的判定与重放策略、`quality_hold_buffer.go` 的提交缓冲和 `quality_hold.go` 的每轮状态编排。仅用于跨协议回归的 Grok Chat→Responses 适配器位于 `*_test.go`；生产 Responses 仍走原生 Build 响应路径。
+
 ## 3. 启动与配置链
 
 1. 读取 `-config` 指定文件，未指定时寻找 config.json / config.yaml / config.yml。

@@ -609,3 +609,9 @@ func TestAccountRetryStopsOnSharedCancellation(t *testing.T) {
 	testutil.Equal(t, attempts, 1)
 	testutil.Equal(t, switches, 0)
 }
+
+// classifyQualityHold exposes just the verdict for table-driven policy tests.
+func classifyQualityHold(sig qualityStreamSignals, minOutput int64) qualityVerdict {
+	verdict, _ := classifyQualityHoldReason(sig, minOutput)
+	return verdict
+}

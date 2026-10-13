@@ -10,7 +10,7 @@ import (
 )
 
 func TestLeaseUsesBuildConfiguredDeadline(t *testing.T) {
-	manager := NewManager(&config.Config{GrokEgressEnabled: true, GrokEgressNodes: []config.EgressNodeConfig{{Name: "limits-direct", Scope: "all"}}, GrokBuildTimeout: 900})
+	manager := NewManager(&config.Config{GrokEgressEnabled: true, GrokEgressNodes: []config.EgressNodeConfig{{Name: "limits-direct", Scope: "all"}}, RequestTimeout: 900})
 	lease, err := manager.Acquire(context.Background(), "cli", "test")
 	testutil.NoError(t, err)
 	defer lease.Release()

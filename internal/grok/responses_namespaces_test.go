@@ -123,7 +123,7 @@ func TestNativeResponsesNamespacesAndContinuation(t *testing.T) {
 					req.Header.Set("Authorization", "Bearer "+owner)
 					req.Header.Set("Content-Type", "application/json")
 					rec := httptest.NewRecorder()
-					middleware.APIKeyAuthWithRequest(func(*http.Request) bool { return true }, func(context.Context, string) (*middleware.APIKeyPrincipal, error) {
+					middleware.APIKeyAuth(func(context.Context, string) (*middleware.APIKeyPrincipal, error) {
 						return &middleware.APIKeyPrincipal{}, nil
 					}, handler)(rec, req)
 					return rec
@@ -218,7 +218,7 @@ func TestNativeNamespaceStreamFailureDoesNotSaveOwnership(t *testing.T) {
 	defer upstream.Close()
 	h, s, _ := setupValidationHandler(t)
 	configureStoredResponseTestHandler(t, h, s, upstream)
-	wrapped := middleware.APIKeyAuthWithRequest(func(*http.Request) bool { return true }, func(context.Context, string) (*middleware.APIKeyPrincipal, error) {
+	wrapped := middleware.APIKeyAuth(func(context.Context, string) (*middleware.APIKeyPrincipal, error) {
 		return &middleware.APIKeyPrincipal{}, nil
 	}, h.HandleResponses)
 	req := httptest.NewRequest("POST", "/grok/responses", strings.NewReader(`{"model":"grok-4.6","stream":true,"input":"hello","tools":[{"type":"namespace","name":"functions","tools":[{"type":"function","name":"read","parameters":{"type":"object"}}]}]}`))
@@ -230,7 +230,7 @@ func TestNativeNamespaceStreamFailureDoesNotSaveOwnership(t *testing.T) {
 		t.Fatal(rec.Body.String())
 	}
 	var lookupStatus int
-	check := middleware.APIKeyAuthWithRequest(func(*http.Request) bool { return true }, func(context.Context, string) (*middleware.APIKeyPrincipal, error) {
+	check := middleware.APIKeyAuth(func(context.Context, string) (*middleware.APIKeyPrincipal, error) {
 		return &middleware.APIKeyPrincipal{}, nil
 	}, func(w http.ResponseWriter, r *http.Request) {
 		_, err := h.getStoredResponse(r, "resp_partial", responses.OwnerHash(r.Context()))

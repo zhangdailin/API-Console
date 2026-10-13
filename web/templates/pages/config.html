@@ -7,21 +7,18 @@
 <body>
   {{template "sidebar.html" .}}
 
-
   <main class="main-content config-page">
     <section class="header-section" id="configHeader">
       <div>
         <h1>配置管理</h1>
-        <p>按分组管理后台凭据、代理网络及生成预算与延迟；改动后底部保存栏会显示未保存数量。</p>
+        <p>按分组管理后台凭据与代理网络；改动后底部保存栏会显示未保存数量。</p>
       </div>
     </section>
-
 
     <div id="configTabs" class="platform-tabs config-tabs-shell config-tabs-switch">
       <button type="button" class="tab-item active" onclick="switchConfigTab('basic')">基础配置</button>
       <button type="button" class="tab-item" onclick="switchConfigTab('auth')">API Key 管理</button>
     </div>
-
 
     <div id="basicConfig" class="config-section-shell config-body">
       <div class="config-layout">
@@ -30,7 +27,6 @@
           <a class="config-nav-link active" href="#groupOverview" data-nav-group="groupOverview">概览</a>
           <a class="config-nav-link" href="#groupAuth" data-nav-group="groupAuth">认证与密钥</a>
           <a class="config-nav-link" href="#groupProxy" data-nav-group="groupProxy">代理</a>
-          <a class="config-nav-link" href="#groupPerformance" data-nav-group="groupPerformance">生成预算与延迟</a>
         </nav>
 
         <div class="config-cards">
@@ -41,7 +37,7 @@
               <span class="mini-badge">只读</span>
             </div>
             <p class="settings-card-note">
-              这一页把配置拆成认证与密钥、代理、生成预算与延迟三组；密钥类字段带「密钥」标记。
+              这一页把配置拆成认证与密钥、代理两组；密钥类字段带「密钥」标记。
               改动任意字段后，底部保存栏显示未保存数量，保存成功才成为新的对比基准。
             </p>
             <div class="settings-card-body">
@@ -58,7 +54,6 @@
 
             </div>
           </section>
-
 
           <section class="settings-card" id="groupAuth">
             <div class="settings-card-head">
@@ -80,20 +75,8 @@
                 </div>
               </div>
 
-              <div class="form-row">
-                <div class="form-row-label">
-                  <label class="form-label" for="cfg_anonymous_allow_ips">免鉴权来源</label>
-                  <span class="helper-text">每行一个 IP 或 CIDR，名单内的来源可以不带 API Key 调用接口；留空则所有人必须带 Key。仅用于暂时无法升级的调用方。</span>
-                </div>
-                <div class="form-row-control">
-                  <textarea id="cfg_anonymous_allow_ips" class="form-input" rows="3"
-                    placeholder="每行一个 IP 或 CIDR，例如 203.0.113.20 或 198.51.100.0/24"></textarea>
-                </div>
-              </div>
-
             </div>
           </section>
-
 
           <section class="settings-card" id="groupProxy">
             <div class="settings-card-head">
@@ -125,10 +108,8 @@
               </div>
             </div>
           </section>
-<section class="settings-card" id="groupPerformance"><div class="settings-card-head"><h2 class="settings-card-title">生成预算与延迟</h2></div><div class="settings-card-body"><div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_shared_stream_idle_timeout_seconds">共享渠道流空闲（秒）</label><span class="helper-text">有效范围 30–600 秒，默认 300；心跳不计生成进展，下游处理不计入上游空闲。</span></div><div class="form-row-control"><input type="number" step="1" min="30" max="600" id="cfg_shared_stream_idle_timeout_seconds" class="form-input" value="300"></div></div><div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_workbuddy_default_max_tokens">WorkBuddy 默认输出 Token</label><span class="helper-text">仅客户端未指定时生效；推理也可能占用输出预算。</span></div><div class="form-row-control"><input type="number" step="1" id="cfg_workbuddy_default_max_tokens" class="form-input" value="8192"></div></div><div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_first_token_timeout_seconds">首生成超时（秒）</label><span class="helper-text">包含重试和排队；首个推理、文本或工具生成后停止计时。-1 关闭。</span></div><div class="form-row-control"><input type="number" step="1" id="cfg_first_token_timeout_seconds" class="form-input" value="60"></div></div><div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_request_timeout">上游完整请求超时（秒）</label><span class="helper-text">长任务可保留较大期限；首生成超时与流空闲独立控制。</span></div><div class="form-row-control"><input type="number" step="1" id="cfg_request_timeout" class="form-input" value="7200"></div></div><div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_concurrency_timeout">入口完整处理超时（秒）</label><span class="helper-text">现有全局并发为立即准入，不在网关排队。</span></div><div class="form-row-control"><input type="number" step="1" id="cfg_concurrency_timeout" class="form-input" value="7200"></div></div><div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_qoder_queue_wait_budget_ms">Qoder 排队等待预算（毫秒）</label><span class="helper-text">0 继承共享预算；-1 不等待，保留上游 Retry-After。交互请求可设 3000。</span></div><div class="form-row-control"><input type="number" step="1" id="cfg_qoder_queue_wait_budget_ms" class="form-input" value="0"></div></div><div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_qoder_queue_retry_interval_ms">Qoder 排队重试间隔（毫秒）</label><span class="helper-text">0 使用上游提示；显式间隔可能增加上游请求数。</span></div><div class="form-row-control"><input type="number" step="1" id="cfg_qoder_queue_retry_interval_ms" class="form-input" value="0"></div></div></div></section>
         </div>
       </div>
-
 
       <div class="sticky-actions config-save-bar" id="cfgSaveBar">
         <div class="config-save-state">
@@ -142,7 +123,6 @@
         </div>
       </div>
     </div>
-
 
     <div id="authConfig" class="settings-card config-auth-card" style="display: none;">
       <div class="settings-card-head">

@@ -32,7 +32,7 @@ function loadConfig(fetchImpl){
  vm.runInContext(fs.readFileSync(path.join(__dirname,'static/js/ui.js'),'utf8'),context);
  // Export the config helpers without changing the production asset.
  let src=fs.readFileSync(path.join(__dirname,'static/js/config.js'),'utf8');
- src+='\nglobalThis.probe={parseAnonymousAllowIPs,applyConfigurationPayload,loadConfiguration,saveConfiguration,captureConfigBaseline,countConfigChanges,resetConfigChanges,Input:HTMLInputElement};\n';
+ src+='\nglobalThis.probe={applyConfigurationPayload,loadConfiguration,saveConfiguration,captureConfigBaseline,countConfigChanges,resetConfigChanges,Input:HTMLInputElement};\n';
  vm.runInContext(src,context);
  return {api:context.probe,node,context,notices};
 }
@@ -41,21 +41,10 @@ function loadConfig(fetchImpl){
 // would fail on the prototype rather than on the value.
 const plain=v=>Array.from(v);
 
-test('anonymous_allow_ips is parsed into a trimmed list, and an empty box means nobody',()=>{
- const {api,node}=loadConfig();
- node('cfg_anonymous_allow_ips').value=' 203.0.113.20 \n\n198.51.100.0/24\n';
- assert.deepStrictEqual(plain(api.parseAnonymousAllowIPs()),['203.0.113.20','198.51.100.0/24']);
- node('cfg_anonymous_allow_ips').value='   \n ';
- assert.deepStrictEqual(plain(api.parseAnonymousAllowIPs()),[]);
- node('cfg_anonymous_allow_ips').value='';
- assert.deepStrictEqual(plain(api.parseAnonymousAllowIPs()),[]);
-});
-
 test('configuration payload hydrates security and proxy controls without simulated cache fields',()=>{
  const {api,node}=loadConfig();
  api.applyConfigurationPayload({admin_password:'secret',anonymous_allow_ips:['203.0.113.1'],proxy_url:'http://proxy.example:8080',proxy_bypass:['example.com'],shared_stream_idle_timeout_seconds:300,workbuddy_default_max_tokens:8192,first_token_timeout_seconds:60,request_timeout:7200,concurrency_timeout:7200,qoder_queue_wait_budget_ms:0,qoder_queue_retry_interval_ms:0});
  assert.equal(node('cfg_admin_pass').value,'secret');
- assert.equal(node('cfg_anonymous_allow_ips').value,'203.0.113.1');
  assert.equal(node('cfg_proxy_url').value,'http://proxy.example:8080');
  assert.equal(node('cfg_proxy_bypass').value,'example.com');
 });
@@ -72,7 +61,7 @@ test('save sends security and proxy settings but no local cache settings',async(
  node('cfg_anonymous_allow_ips').value='203.0.113.1';
  node('cfg_proxy_bypass').value='example.com';
  await api.saveConfiguration();
- same(saved,{admin_password:'changed',anonymous_allow_ips:['203.0.113.1'],proxy_url:'http://proxy.example:8080',proxy_bypass:['example.com'],shared_stream_idle_timeout_seconds:300,workbuddy_default_max_tokens:8192,first_token_timeout_seconds:60,request_timeout:7200,concurrency_timeout:7200,qoder_queue_wait_budget_ms:0,qoder_queue_retry_interval_ms:0});
+ same(saved,{admin_password:'changed',proxy_url:'http://proxy.example:8080',proxy_bypass:['example.com']});
 });
 
 test('configuration page omits simulated cache section, stats and clear actions',()=>{
@@ -133,13 +122,11 @@ for (const scenario of [
 }
 
 
-test('performance controls preserve explicit values and reject invalid save',async()=>{
- let calls=0; const {api,node}=loadConfig(()=>{calls++; return Promise.resolve({ok:true,json:()=>({code:0})});});
- api.applyConfigurationPayload({workbuddy_default_max_tokens:16384,first_token_timeout_seconds:-1,qoder_queue_wait_budget_ms:3000});
- assert.equal(node('cfg_workbuddy_default_max_tokens').value,'16384');
- assert.equal(node('cfg_first_token_timeout_seconds').value,'-1');
- node('cfg_workbuddy_default_max_tokens').value='0';
- await api.saveConfiguration(); assert.equal(calls,0);
+test('configuration page removes anonymous and generation customization',()=>{
+ const html=fs.readFileSync(path.join(__dirname,'templates/pages/config.html'),'utf8');
+ const js=fs.readFileSync(path.join(__dirname,'static/js/config.js'),'utf8');
+ assert.doesNotMatch(html,/cfg_anonymous_allow_ips|groupPerformance|生成预算与延迟|cfg_first_token_timeout_seconds/);
+ assert.doesNotMatch(js,/PERFORMANCE_FIELDS|parseAnonymousAllowIPs|anonymous_allow_ips|qoder_queue|first_token_timeout_seconds/);
 });
 
 test('saving config preserves newer edits as dirty and resets to the submitted snapshot', async () => {

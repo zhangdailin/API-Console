@@ -302,7 +302,7 @@ func readSSE(reader io.Reader, fn func(sseFrame) bool) error {
 	return nil
 }
 
-func consumeStreamObserved(body io.Reader, _ bool, onMessage func(upstream.SSEMessage), onFrame func()) (streamResult, error) {
+func consumeStreamObserved(body io.Reader, onMessage func(upstream.SSEMessage), onFrame func()) (streamResult, error) {
 	result := streamResult{}
 	tools := util.NewToolCallAccumulator()
 	emitText := func(text string) { upstream.EmitTextDelta(onMessage, text, &result.SawMeaningfulEvent) }

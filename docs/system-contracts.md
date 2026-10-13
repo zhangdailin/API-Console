@@ -31,7 +31,7 @@ WorkBuddy、Qoder、Cline 走共享 Handler、提供者工厂和能力适配；G
 2. **轮换凭据不能覆盖更新结果。** 专用凭据补丁核对预期 refresh token；相同新令牌允许幂等重入，陈旧身份拒绝写入。普通账号编辑和计数器各有写入职责。
 3. **已交付输出限制重放。** 共享 Handler 发生部分输出后不重新生成；Grok 质量重试先暂存输出，并检查安全重放与预算，有副作用工具请求受保护。
 4. **流的 HTTP 成功不等于协议成功。** 各提供者与桥接层有自己的终止合同；不得把 EOF、keepalive 或已发出的 200 自动解释为成功完成。
-5. **资源访问要检查所有者。** 响应 GET、DELETE、续接和子资源沿 Key 指纹查询所有权；匿名请求使用共同的 `anonymous` 身份，不能声称匿名调用彼此隔离。默认进程内 Store 不是 Redis 故障替身；多副本需注入共享 Store。
+5. **资源访问要检查所有者。** 响应 GET、DELETE、续接和子资源沿 Key 指纹查询所有权；公开资源路由必须先完成托管 Key 鉴权，内部无 Key 的测试上下文不代表匿名访问能力。默认进程内 Store 不是 Redis 故障替身；多副本需注入共享 Store。
 6. **额度、权益和凭据分开判定。** 模型拒绝、排队、内容拒绝与永久 OAuth 拒绝不能互相替代；限流头不等于余额，目录成功不等于所有模型可生成。
 7. **采集失败不能制造健康零数据。** 聚合未启用、读取失败、样本不足与真实零流量分别表达；概览读取失败会返回 5xx，不保证每个失败分支都是 503。P95 来自保留样本，不是全请求精确分位数。
 8. **共享 Redis 不代表所有状态共享。** 账号事件、刷新 Hub、部分缓存、进程/通道准入、runtime 与告警触发集合有本进程边界。告警规则持久化不等于触发状态持久化。
@@ -75,7 +75,7 @@ WorkBuddy、Qoder、Cline 走共享 Handler、提供者工厂和能力适配；G
 | 令牌轮换后，旧客户端为何不会打断正在运行的请求？ | credential_patch → account_changes → client_cache |
 | 第二个副本能否即时收到账号变更？ | accountevents 的进程边界与缓存 TTL |
 | 收到 200 后流中途失败，能否重新生成并记作成功？ | handler / 提供者终止 → trace / observability |
-| 知道 response ID 能否用另一把 Key 读取或取消？匿名例外是什么？ | OwnerHash → response Store → resource / subresource |
+| 知道 response ID 能否用另一把 Key 读取或取消？入口如何强制 Key 鉴权？ | OwnerHash → response Store → resource / subresource |
 | 一个账号目录刷新失败时，哪些模型可以被裁剪？ | discovery → reconcile → redis_models |
 | P95 的分母、样本、时间桶边界及保留限制是什么？ | opsagg → api_ops → operations.md |
 | Redis 桶或账号读取失败，会不会触发告警恢复？ | alerting BuildSnapshot → StartLoop → Engine |

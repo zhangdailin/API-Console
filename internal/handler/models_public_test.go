@@ -22,11 +22,9 @@ func TestHandleModels_FiltersAPIKeyModelAllowlist(t *testing.T) {
 		&store.Model{Channel: "Grok", ModelID: "grok-imagine-image"},
 	)
 
-	wrapper := middleware.APIKeyAuthWithRequest(
-		func(*http.Request) bool { return true },
-		func(context.Context, string) (*middleware.APIKeyPrincipal, error) {
-			return &middleware.APIKeyPrincipal{AllowedModels: []string{"grok-4.6"}}, nil
-		},
+	wrapper := middleware.APIKeyAuth(func(context.Context, string) (*middleware.APIKeyPrincipal, error) {
+		return &middleware.APIKeyPrincipal{AllowedModels: []string{"grok-4.6"}}, nil
+	},
 		h.HandleModels,
 	)
 	req := httptest.NewRequest(http.MethodGet, "http://example.com/grok/v1/models", nil)

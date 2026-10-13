@@ -67,13 +67,7 @@ type AccountUpdater interface {
 // NewFromAccount builds a client for one account. cfg supplies endpoints, proxy
 // and timeout settings; the account supplies the credentials.
 func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
-	timeout := 5 * time.Minute
-	if cfg != nil && cfg.RequestTimeout > 0 {
-		timeout = time.Duration(cfg.RequestTimeout) * time.Second
-		if timeout < 30*time.Second {
-			timeout = 30 * time.Second
-		}
-	}
+	timeout := cfg.UpstreamRequestTimeout()
 	proxyFunc := http.ProxyFromEnvironment
 	proxyKey := "direct"
 	if cfg != nil {
@@ -89,7 +83,7 @@ func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
 		control:            httpclient.GetSharedHTTPClient(proxyKey, authRequestTimeout, proxyFunc),
 		stream:             httpclient.GetSharedHTTPClientWithLimits(proxyKey+"|cline-chat", 0, proxyFunc, cfg != nil && cfg.ClineHTTP2Enabled, cfg),
 		requestTimeout:     timeout,
-		streamIdle:         cfg.SharedStreamIdleTimeout(),
+		streamIdle:         config.SharedStreamIdleTimeout,
 	}
 	if cfg != nil {
 		client.apiBase = util.FirstNonEmptyURL(cfg.ClineAPIBaseURL, client.apiBase)

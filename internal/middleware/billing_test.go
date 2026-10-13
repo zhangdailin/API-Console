@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -265,12 +264,6 @@ func TestAPIKeyBillingReservationRejectsOversizedBody(t *testing.T) {
 		testutil.False(t, called)
 		testutil.Equal(t, len(ledger.held), 0)
 	}
-}
-
-func readAllBody(r *http.Request) ([]byte, error) {
-	var raw bytes.Buffer
-	_, err := raw.ReadFrom(r.Body)
-	return raw.Bytes(), err
 }
 
 // TestSettleAPIKeyBillingRules pins the pricing policy in one place.

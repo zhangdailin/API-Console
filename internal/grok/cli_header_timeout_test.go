@@ -29,12 +29,9 @@ func headerTimeoutTestClient(t *testing.T, server *httptest.Server, timeout time
 	return client, account
 }
 
-func TestCLIResponseWaitUsesConfiguredGenerationBudget(t *testing.T) {
-	for _, seconds := range []int{0, 180, -1} {
-		cfg := &config.Config{FirstTokenTimeoutSeconds: seconds}
-		client := NewCLIClient(cfg)
-		testutil.Equal(t, client.responseHeaderTimeout, cfg.FirstGenerationTimeout())
-	}
+func TestCLIResponseWaitUsesFixedGenerationBudget(t *testing.T) {
+	client := NewCLIClient(&config.Config{})
+	testutil.Equal(t, client.responseHeaderTimeout, config.FirstGenerationTimeout)
 }
 
 func TestCLIHeaderWaitHonorsSharedDeadlineAndRecordsPartialPhases(t *testing.T) {

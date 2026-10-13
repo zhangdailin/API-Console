@@ -3,7 +3,6 @@ package grok
 import (
 	"strings"
 
-	"orchids-api/internal/config"
 	"orchids-api/internal/modelcatalog"
 )
 
@@ -56,13 +55,3 @@ func ResolveModelAlias(modelID string, catalogs ...[]modelcatalog.Profile) (Mode
 	}
 	return ModelSpec{}, "", false
 }
-
-func ResolveModel(modelID string, catalogs ...[]modelcatalog.Profile) (ModelSpec, bool) {
-	m, _, ok := ResolveModelAlias(modelID, catalogs...)
-	return m, ok
-}
-
-// modelRoutedToCLI reports whether a resolved model uses Build CLI. The
-// configured model table and dynamically discovered Build models explicitly
-// carry UpstreamCLI; legacy config model lists no longer affect routing.
-func modelRoutedToCLI(spec ModelSpec, _ *config.Config) bool { return spec.Upstream == UpstreamCLI }

@@ -13,23 +13,21 @@ import (
 func TestAPIKeyAuth(t *testing.T) {
 	tests := []struct {
 		name       string
-		enabled    bool
 		token      string
 		valid      bool
 		validate   error
 		wantCode   int
 		wantCalled bool
 	}{
-		{name: "disabled", enabled: false, wantCode: http.StatusNoContent, wantCalled: true},
-		{name: "missing", enabled: true, wantCode: http.StatusUnauthorized},
-		{name: "invalid", enabled: true, token: "bad", wantCode: http.StatusUnauthorized},
-		{name: "backend unavailable", enabled: true, token: "key", validate: errors.New("redis down"), wantCode: http.StatusServiceUnavailable},
-		{name: "valid", enabled: true, token: "key", valid: true, wantCode: http.StatusNoContent, wantCalled: true},
+		{name: "missing", wantCode: http.StatusUnauthorized},
+		{name: "invalid", token: "bad", wantCode: http.StatusUnauthorized},
+		{name: "backend unavailable", token: "key", validate: errors.New("redis down"), wantCode: http.StatusServiceUnavailable},
+		{name: "valid", token: "key", valid: true, wantCode: http.StatusNoContent, wantCalled: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			called := false
-			h := APIKeyAuthWithRequest(func(*http.Request) bool { return tt.enabled }, func(_ context.Context, token string) (*APIKeyPrincipal, error) {
+			h := APIKeyAuth(func(_ context.Context, token string) (*APIKeyPrincipal, error) {
 				testutil.Equal(t, token, tt.token)
 				if !tt.valid {
 					return nil, tt.validate
@@ -53,7 +51,7 @@ func TestAPIKeyAuth(t *testing.T) {
 
 func TestAPIKeyAuthAcceptsAnthropicHeader(t *testing.T) {
 	called := false
-	h := APIKeyAuthWithRequest(func(*http.Request) bool { return true }, func(_ context.Context, token string) (*APIKeyPrincipal, error) {
+	h := APIKeyAuth(func(_ context.Context, token string) (*APIKeyPrincipal, error) {
 		if token == "anthropic-key" {
 			return &APIKeyPrincipal{}, nil
 		}
@@ -71,7 +69,7 @@ func TestAPIKeyAuthAcceptsAnthropicHeader(t *testing.T) {
 
 func TestAPIKeyAuthAddsNonSecretFingerprint(t *testing.T) {
 	const token = "sk-sensitive"
-	h := APIKeyAuthWithRequest(func(*http.Request) bool { return true }, func(_ context.Context, got string) (*APIKeyPrincipal, error) {
+	h := APIKeyAuth(func(_ context.Context, got string) (*APIKeyPrincipal, error) {
 		if got == token {
 			return &APIKeyPrincipal{}, nil
 		}
@@ -103,7 +101,7 @@ func TestAPIKeyAuthEnforcesDenialsAndModelPolicy(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := APIKeyAuthWithRequest(func(*http.Request) bool { return true }, func(context.Context, string) (*APIKeyPrincipal, error) {
+			h := APIKeyAuth(func(context.Context, string) (*APIKeyPrincipal, error) {
 				return tt.principal, nil
 			}, func(w http.ResponseWriter, r *http.Request) {
 				if !APIKeyAllowsModel(r.Context(), "grok-4.5") {

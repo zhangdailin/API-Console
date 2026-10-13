@@ -60,8 +60,8 @@ func clearInProcessSessions() {
 func TestGenerateSessionTokenWithoutBackend(t *testing.T) {
 	resetSessionState(t)
 
-	token, err := GenerateSessionToken()
-	testutil.NoError(t, err, "GenerateSessionToken() error = %v")
+	token, err := GenerateSessionTokenForPassword("")
+	testutil.NoError(t, err, "GenerateSessionTokenForPassword() error = %v")
 	testutil.Equal(t, len(token), sessionTokenLength*2)
 	testutil.False(t, !ValidateSessionToken(token), "a token generated in-process must validate")
 	testutil.False(t, ValidateSessionToken("not-a-session"), "an unknown token must not validate")
@@ -75,8 +75,8 @@ func TestDurableSessionSurvivesProcessRestart(t *testing.T) {
 	backend := &fakeSessionBackend{}
 	SetSessionBackend(backend)
 
-	token, err := GenerateSessionToken()
-	testutil.NoError(t, err, "GenerateSessionToken() error = %v")
+	token, err := GenerateSessionTokenForPassword("")
+	testutil.NoError(t, err, "GenerateSessionTokenForPassword() error = %v")
 	testutil.Equal(t, backend.saveCalls, 1)
 
 	// Simulate the restart: the new process has an empty in-process map.
@@ -89,8 +89,8 @@ func TestDurableSessionSurvivesProcessRestart(t *testing.T) {
 func TestValidateFailsClosedWhenBackendFails(t *testing.T) {
 	resetSessionState(t)
 
-	token, err := GenerateSessionToken()
-	testutil.NoError(t, err, "GenerateSessionToken() error = %v")
+	token, err := GenerateSessionTokenForPassword("")
+	testutil.NoError(t, err, "GenerateSessionTokenForPassword() error = %v")
 
 	// The process holds a local session; adding an unavailable backend must
 	// not let that local mirror bypass the durable revocation check.
@@ -114,8 +114,8 @@ func TestBackendConfirmedSessionRequiresRevocationCheck(t *testing.T) {
 	backend := &fakeSessionBackend{}
 	SetSessionBackend(backend)
 
-	token, err := GenerateSessionToken()
-	testutil.NoError(t, err, "GenerateSessionToken() error = %v")
+	token, err := GenerateSessionTokenForPassword("")
+	testutil.NoError(t, err, "GenerateSessionTokenForPassword() error = %v")
 
 	// Restart: the in-process mirror is gone and only the backend knows the
 	// session. A successful read does not authorize later offline validation.
@@ -134,8 +134,8 @@ func TestBackendConfirmedSessionRequiresRevocationCheck(t *testing.T) {
 func TestValidateRejectsSessionMissingFromBackend(t *testing.T) {
 	resetSessionState(t)
 
-	token, err := GenerateSessionToken()
-	testutil.NoError(t, err, "GenerateSessionToken() error = %v")
+	token, err := GenerateSessionTokenForPassword("")
+	testutil.NoError(t, err, "GenerateSessionTokenForPassword() error = %v")
 
 	// A session the backend never saw (for example one that was revoked while
 	// the process was down) must be rejected even when the in-process mirror
@@ -150,8 +150,8 @@ func TestInvalidateSessionTokenClearsBothStores(t *testing.T) {
 	backend := &fakeSessionBackend{}
 	SetSessionBackend(backend)
 
-	token, err := GenerateSessionToken()
-	testutil.NoError(t, err, "GenerateSessionToken() error = %v")
+	token, err := GenerateSessionTokenForPassword("")
+	testutil.NoError(t, err, "GenerateSessionTokenForPassword() error = %v")
 
 	InvalidateSessionToken(token)
 
@@ -173,7 +173,7 @@ func TestExpiredInProcessSessionIsRejected(t *testing.T) {
 func TestGenerateSessionTokenRequiresDurableWrite(t *testing.T) {
 	resetSessionState(t)
 	SetSessionBackend(&fakeSessionBackend{saveErr: errors.New("redis read-only")})
-	token, err := GenerateSessionToken()
+	token, err := GenerateSessionTokenForPassword("")
 	testutil.Error(t, err)
 	testutil.Equal(t, token, "")
 }

@@ -197,7 +197,7 @@ Response resources, input history, cancellation, token estimation, and compactio
 
 - **Configuration precedence** — Redis configuration at `<redis_prefix>settings:config` can override the local configuration file. Check effective values in the console after making changes.
 - **Credential backups** — Back up Redis together with the credential encryption key, normally `data/credential.key`. Losing the key prevents existing account credentials from being decrypted.
-- **API authentication** — Model and inference endpoints require a managed API key. `inference_auth_enabled=false` does not disable authentication; only explicitly allowed `anonymous_allow_ips` sources are exempt.
+- **API authentication** — Model and inference endpoints require a managed API key. All sources, including loopback and trusted-proxy clients, require a key; removed anonymous-source settings cannot bypass authentication.
 - **Network access** — Use a strong admin password, disable `debug_enabled` in production, restrict `/metrics` and the backend port, and trust only your actual reverse proxy addresses.
 - **Monitoring scope** — Latency percentiles use retained samples. Collection health and diagnostic coverage are exposed separately so missing data is not presented as healthy zero traffic.
 

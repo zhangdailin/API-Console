@@ -65,7 +65,7 @@ func TestCookieConfigMutationRequiresSameOriginJSON(t *testing.T) {
 	a, _, _ := setupConfigAPI(t)
 	auth.SetSessionBackend(nil)
 	t.Cleanup(auth.ClearLocalSessions)
-	token, err := auth.GenerateSessionToken()
+	token, err := auth.GenerateSessionTokenForPassword("")
 	testutil.NoError(t, err)
 	h := middleware.SessionAuthDynamic(func() (string, string) { return "pass", "static" }, a.HandleConfigSave)
 	for _, tc := range []struct {

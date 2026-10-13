@@ -96,7 +96,7 @@ func TestConsumeStreamKeepsTextToolMarkup(t *testing.T) {
 		"event:finish\ndata: {}\n\n"
 
 	var events []upstream.SSEMessage
-	result, err := consumeStreamObserved(strings.NewReader(body), true, func(message upstream.SSEMessage) {
+	result, err := consumeStreamObserved(strings.NewReader(body), func(message upstream.SSEMessage) {
 		events = append(events, message)
 	}, nil)
 	testutil.NoError(t, err, "consumeStreamObserved() error = %v")
@@ -112,7 +112,7 @@ func TestConsumeStreamDoesNotParseTextFallbackWithoutTools(t *testing.T) {
 	body := envelope(`{"choices":[{"delta":{"content":"Tool calls: []"},"finish_reason":"stop"}]}`) +
 		"event:finish\ndata: {}\n\n"
 	var events []upstream.SSEMessage
-	_, err := consumeStreamObserved(strings.NewReader(body), false, func(message upstream.SSEMessage) {
+	_, err := consumeStreamObserved(strings.NewReader(body), func(message upstream.SSEMessage) {
 		events = append(events, message)
 	}, nil)
 	testutil.NoError(t, err, "consumeStreamObserved() error = %v")
@@ -126,7 +126,7 @@ func TestConsumeStreamInvalidTextToolFallbackRemainsText(t *testing.T) {
 	body := envelope(`{"choices":[{"delta":{"content":"Tool calls: [{not-json}]"},"finish_reason":"stop"}]}`) +
 		"event:finish\ndata: {}\n\n"
 	var text strings.Builder
-	result, err := consumeStreamObserved(strings.NewReader(body), true, func(message upstream.SSEMessage) {
+	result, err := consumeStreamObserved(strings.NewReader(body), func(message upstream.SSEMessage) {
 		if message.Type == "model.text-delta" {
 			text.WriteString(message.Event["delta"].(string))
 		}
@@ -140,7 +140,7 @@ func TestConsumeStreamKeepsParallelToolMarkup(t *testing.T) {
 	body := envelope(`{"choices":[{"delta":{"content":"Tool calls: [{\"id\":\"a\",\"function\":{\"name\":\"read\",\"arguments\":{\"path\":\"a\"}}},{\"id\":\"b\",\"function\":{\"name\":\"read\",\"arguments\":\"{\\\"path\\\":\\\"b\\\"}\"}}]"},"finish_reason":"stop"}]}`) +
 		"event:finish\ndata: {}\n\n"
 	var calls []upstream.SSEMessage
-	result, err := consumeStreamObserved(strings.NewReader(body), true, func(message upstream.SSEMessage) {
+	result, err := consumeStreamObserved(strings.NewReader(body), func(message upstream.SSEMessage) {
 		if message.Type == "model.tool-call" {
 			calls = append(calls, message)
 		}
@@ -156,7 +156,7 @@ func TestConsumeStreamNativeToolKeepsSeparateProse(t *testing.T) {
 		envelope(`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"read","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`) +
 		"event:finish\ndata: {}\n\n"
 	var events []upstream.SSEMessage
-	result, err := consumeStreamObserved(strings.NewReader(body), true, func(message upstream.SSEMessage) {
+	result, err := consumeStreamObserved(strings.NewReader(body), func(message upstream.SSEMessage) {
 		events = append(events, message)
 	}, nil)
 	testutil.NoError(t, err)
@@ -175,7 +175,7 @@ func TestConsumeStreamLongSplitWhitespacePrefixStaysLinearAndFlushes(t *testing.
 	body.WriteString(envelope(`{"choices":[{"delta":{"content":"ordinary text"},"finish_reason":"stop"}]}`))
 	body.WriteString("event:finish\ndata: {}\n\n")
 	var text strings.Builder
-	result, err := consumeStreamObserved(strings.NewReader(body.String()), true, func(message upstream.SSEMessage) {
+	result, err := consumeStreamObserved(strings.NewReader(body.String()), func(message upstream.SSEMessage) {
 		if message.Type == "model.text-delta" {
 			text.WriteString(message.Event["delta"].(string))
 		}
@@ -192,7 +192,7 @@ func TestConsumeStreamOversizedTextFallbackDegradesToText(t *testing.T) {
 	testutil.NoError(t, err)
 	body := envelope(string(inner)) + "event:finish\ndata: {}\n\n"
 	textBytes := 0
-	result, err := consumeStreamObserved(strings.NewReader(body), true, func(message upstream.SSEMessage) {
+	result, err := consumeStreamObserved(strings.NewReader(body), func(message upstream.SSEMessage) {
 		if message.Type == "model.text-delta" {
 			textBytes += len(message.Event["delta"].(string))
 		}
