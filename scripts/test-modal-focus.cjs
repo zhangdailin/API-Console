@@ -27,10 +27,22 @@ async function until(test) {for(let i=0;i<100;i++){const value=await test();if(v
   const url='http://127.0.0.1:'+server.address().port+'/admin/?tab=accounts';
   const defaultBrowser = process.platform === 'win32' ? path.join(process.env['ProgramFiles(x86)'] || 'C:/Program Files (x86)', 'Microsoft/Edge/Application/msedge.exe') : '/usr/bin/google-chrome';
   const chrome=spawn(process.env.CHROME_BIN || defaultBrowser,['--headless','--no-sandbox','--disable-gpu','--remote-debugging-port=0','--user-data-dir='+profile,'about:blank'],{stdio:['ignore','ignore','pipe'],windowsHide:true});
+  const browserClosed = new Promise(resolve => chrome.once('close', resolve));
+  const waitForBrowserClose = async timeout => {
+    let timer;
+    try {
+      return await Promise.race([
+        browserClosed.then(() => true),
+        new Promise(resolve => { timer = setTimeout(() => resolve(false), timeout); })
+      ]);
+    } finally { clearTimeout(timer); }
+  };
   let chromeOutput='';chrome.stderr.on('data',data=>chromeOutput+=data);
+  let browserStartError;
+  chrome.once('error', error => { browserStartError = error; });
   let socket;
   try{
-    const endpoint=await until(()=>chromeOutput.match(/ws:\/\/[^\s]+/)?.[0]);
+    const endpoint=await until(()=>{if(browserStartError)throw browserStartError;return chromeOutput.match(/ws:\/\/[^\s]+/)?.[0];});
     socket=new WebSocket(endpoint);await new Promise((resolve,reject)=>{socket.onopen=resolve;socket.onerror=reject;});
     let sequence=0;const pending=new Map();const browserErrors=[];
     socket.onmessage=({data})=>{const m=JSON.parse(data);if(m.method==="Runtime.exceptionThrown")browserErrors.push(m.params.exceptionDetails.text);const item=pending.get(m.id);if(item){pending.delete(m.id);m.error?item.reject(new Error(JSON.stringify(m.error))):item.resolve(m.result);}};
@@ -79,7 +91,30 @@ async function until(test) {for(let i=0;i<100;i++){const value=await test();if(v
     await key('Escape');
     assert.equal(await evaluate('document.activeElement.id'),'trigger');
     assert.deepEqual(browserErrors,[]);
-    console.log('PASS: modal focus entry, Tab/Shift+Tab containment, inert background, guarded Escape, secret cleanup and focus restoration');
-
-  }finally{socket?.close();chrome.kill();server.closeAllConnections();await new Promise(r=>server.close(r));await new Promise(r=>(chrome.exitCode!==null||chrome.signalCode!==null)?r():chrome.once('exit',r));fs.rmSync(profile,{recursive:true,force:true});}
+  } finally {
+    let closed = false;
+    try {
+      // Ask Chromium to finish its profile writes before stopping its processes.
+      if (socket?.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({id: 0, method: 'Browser.close'}));
+      }
+      closed = await waitForBrowserClose(5000);
+      if (!closed) {
+        chrome.kill('SIGKILL');
+        closed = await waitForBrowserClose(5000);
+      }
+    } finally {
+      socket?.close();
+      server.closeAllConnections();
+      await new Promise(resolve => server.close(resolve));
+    }
+    if (!closed) throw new Error('Browser did not stop before profile cleanup');
+    const resolvedProfile = path.resolve(profile);
+    assert.equal(path.dirname(resolvedProfile), path.resolve(os.tmpdir()));
+    assert.ok(path.basename(resolvedProfile).startsWith('console-modal-test-'));
+    // Chromium helpers can release profile files after the main process exits.
+    // Retry transient ENOTEMPTY/EBUSY/EPERM errors; permanent failures still fail CI.
+    await fs.promises.rm(resolvedProfile, {recursive: true, force: true, maxRetries: 10, retryDelay: 100});
+  }
+  console.log('PASS: modal focus entry, Tab/Shift+Tab containment, inert background, guarded Escape, secret cleanup and focus restoration');
 })().catch(err=>{console.error(err);process.exitCode=1;});
