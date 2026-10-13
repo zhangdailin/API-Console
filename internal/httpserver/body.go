@@ -17,6 +17,11 @@ const MaxJSONBodyBytes = 32 << 20
 // response on failure: 415 for a non-JSON content type, 413 for an oversized
 // body and 400 for malformed JSON.
 func DecodeJSONBody(w http.ResponseWriter, r *http.Request, v interface{}) bool {
+	return DecodeJSONBodyLimit(w, r, v, MaxJSONBodyBytes)
+}
+
+// DecodeJSONBodyLimit lets small public endpoints use a stricter allocation bound.
+func DecodeJSONBodyLimit(w http.ResponseWriter, r *http.Request, v interface{}, limit int64) bool {
 	if r == nil || r.Body == nil {
 		WriteError(w, http.StatusBadRequest, "invalid request")
 		return false
@@ -29,7 +34,7 @@ func DecodeJSONBody(w http.ResponseWriter, r *http.Request, v interface{}) bool 
 		}
 	}
 	if r.Body != nil {
-		r.Body = http.MaxBytesReader(w, r.Body, MaxJSONBodyBytes)
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
 	}
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(v); err != nil {

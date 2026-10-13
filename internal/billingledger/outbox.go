@@ -111,10 +111,7 @@ func (l *Ledger) queue(e entry) error {
 		err = closeErr
 	}
 	if err == nil {
-		err = os.Rename(file.Name(), filepath.Join(l.dir, name))
-	}
-	if err == nil {
-		err = l.syncDir()
+		err = persistPendingFile(file.Name(), filepath.Join(l.dir, name), l.dir)
 	}
 	if err != nil {
 		l.diskErr = err
@@ -123,15 +120,6 @@ func (l *Ledger) queue(e entry) error {
 	l.pending[name] = e
 	l.diskErr = nil
 	return nil
-}
-
-func (l *Ledger) syncDir() error {
-	dir, err := os.Open(l.dir)
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	return dir.Sync()
 }
 
 func (l *Ledger) remove(e entry) error {
@@ -144,7 +132,7 @@ func (l *Ledger) remove(e entry) error {
 	if err := os.Remove(filepath.Join(l.dir, name)); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if err := l.syncDir(); err != nil {
+	if err := syncRemovedEntry(l.dir); err != nil {
 		return err
 	}
 	delete(l.pending, name)

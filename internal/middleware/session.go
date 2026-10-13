@@ -231,6 +231,9 @@ func SessionAuthDynamic(credentials func() (adminPass, adminToken string), next 
 
 		cookie, err := r.Cookie("session_token")
 		if err == nil && auth.ValidateSessionToken(cookie.Value) {
+			if !CheckAdminCookieWrite(w, r) {
+				return
+			}
 			audited(w, r)
 			return
 		}
@@ -249,10 +252,19 @@ func SessionAuthDynamic(credentials func() (adminPass, adminToken string), next 
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
-		valid, allowed := limiter.CheckCredentials(ClientIP(r), func() bool {
+		valid, allowed, credentialErr := limiter.CheckCredentialsWithError(ClientIP(r), func() (bool, error) {
+			var credentialErr error
+			_, adminPass, credentialErr = auth.CurrentAdminCredentials(r.Context(), "", adminPass)
+			if credentialErr != nil {
+				return false, credentialErr
+			}
 			_, pass, ok := r.BasicAuth()
-			return matchesHeader(adminPass) || (ok && strings.TrimSpace(adminPass) != "" && util.SecureCompare(pass, adminPass))
+			return matchesHeader(adminPass) || (ok && strings.TrimSpace(adminPass) != "" && util.SecureCompare(pass, adminPass)), nil
 		})
+		if credentialErr != nil {
+			http.Error(w, "Admin authentication unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		if !allowed {
 			w.Header().Set("Retry-After", "180")
 			http.Error(w, "Too many login attempts, try again later", http.StatusTooManyRequests)

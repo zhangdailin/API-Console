@@ -264,7 +264,7 @@ func finishBrowserLogin[T any](
 	account *store.Account,
 	markReplace func(*store.Account),
 ) {
-	existing, err := a.findDuplicateAccountByCredential(ctx, account, 0)
+	existing, err := a.saveNewAccountUnlessDuplicate(ctx, account)
 	if err != nil {
 		registry.finish(id, "failed", channel+" authorization succeeded but the account could not be saved", 0)
 		return
@@ -279,10 +279,6 @@ func finishBrowserLogin[T any](
 			return
 		}
 		registry.finish(id, "complete", channel+" account credentials refreshed", account.ID)
-		return
-	}
-	if err := a.store.CreateAccount(ctx, account); err != nil {
-		registry.finish(id, "failed", channel+" authorization succeeded but the account could not be saved", 0)
 		return
 	}
 	registry.finish(id, "complete", channel+" account added", account.ID)

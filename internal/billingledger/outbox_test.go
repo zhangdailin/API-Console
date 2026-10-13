@@ -88,3 +88,16 @@ func TestOutboxDiskFailureDoesNotClaimSettlement(t *testing.T) {
 	testutil.Equal(t, backend.used, int64(0))
 	testutil.Error(t, ledger.Ready())
 }
+
+func TestHealthyOutboxSettlementLeavesNoDebt(t *testing.T) {
+	backend := &testStore{seen: map[string]int64{}}
+	dir := t.TempDir()
+	ledger, err := New(backend, dir)
+	testutil.NoError(t, err)
+	testutil.NoError(t, ledger.SettleApiKeyBilling(t.Context(), 1, EventID(time.Now(), "healthy"), 20))
+	testutil.Equal(t, backend.used, int64(20))
+	testutil.NoError(t, ledger.Ready())
+	files, err := os.ReadDir(dir)
+	testutil.NoError(t, err)
+	testutil.Equal(t, len(files), 0)
+}

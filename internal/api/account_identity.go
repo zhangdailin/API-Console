@@ -94,11 +94,11 @@ func (a *API) findDuplicateAccountByCredential(ctx context.Context, acc *store.A
 func (a *API) saveNewAccountUnlessDuplicate(ctx context.Context, acc *store.Account) (*store.Account, error) {
 	storeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	existing, err := a.findDuplicateAccountByCredential(storeCtx, acc, 0)
-	if err == nil && existing == nil {
-		err = a.store.CreateAccount(storeCtx, acc)
-	}
-	return existing, err
+	key, identity := normalizedAccountCredentialKey(acc), stableProviderIdentityKey(acc)
+	return a.store.CreateAccountUnlessDuplicate(storeCtx, acc, func(existing *store.Account) bool {
+		return key != "" && normalizedAccountCredentialKey(existing) == key ||
+			identity != "" && stableProviderIdentityKey(existing) == identity
+	})
 }
 
 // stableProviderIdentityKey survives OAuth token rotation. A channel issues a

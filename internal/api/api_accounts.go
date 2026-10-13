@@ -115,18 +115,12 @@ func (a *API) HandleAccounts(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if existing, err := a.findDuplicateAccountByCredential(r.Context(), &acc, 0); err != nil {
+		if existing, err := a.saveNewAccountUnlessDuplicate(r.Context(), &acc); err != nil {
 			slog.Error("Failed to detect duplicate account token", "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		} else if existing != nil {
 			http.Error(w, duplicateAccountError(existing).Error(), http.StatusConflict)
-			return
-		}
-
-		if err := a.store.CreateAccount(r.Context(), &acc); err != nil {
-			slog.Error("Failed to create account", "error", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 

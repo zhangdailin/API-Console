@@ -17,7 +17,7 @@ async function until(test) {for(let i=0;i<100;i++){const value=await test();if(v
     if(pathname==='/admin/'){res.setHeader('Content-Type','text/html; charset=utf-8');res.end(html);return;}
     if(pathname.startsWith('/admin/js/')||pathname.startsWith('/admin/css/')){
       const file=path.resolve(root,pathname.slice('/admin/'.length));
-      if(!file.startsWith(root+'/')){res.writeHead(404).end();return;}
+      if(!file.startsWith(root+path.sep)){res.writeHead(404).end();return;}
       res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':'text/css');
       try{res.end(fs.readFileSync(file));}catch{res.writeHead(404).end();}return;
     }
@@ -25,7 +25,8 @@ async function until(test) {for(let i=0;i<100;i++){const value=await test();if(v
   });
   await new Promise(r=>server.listen(0,'127.0.0.1',r));
   const url='http://127.0.0.1:'+server.address().port+'/admin/?tab=accounts';
-  const chrome=spawn(process.env.CHROME_BIN || '/usr/bin/google-chrome',['--headless','--no-sandbox','--disable-gpu','--remote-debugging-port=0','--user-data-dir='+profile,'about:blank'],{stdio:['ignore','ignore','pipe']});
+  const defaultBrowser = process.platform === 'win32' ? path.join(process.env['ProgramFiles(x86)'] || 'C:/Program Files (x86)', 'Microsoft/Edge/Application/msedge.exe') : '/usr/bin/google-chrome';
+  const chrome=spawn(process.env.CHROME_BIN || defaultBrowser,['--headless','--no-sandbox','--disable-gpu','--remote-debugging-port=0','--user-data-dir='+profile,'about:blank'],{stdio:['ignore','ignore','pipe'],windowsHide:true});
   let chromeOutput='';chrome.stderr.on('data',data=>chromeOutput+=data);
   let socket;
   try{

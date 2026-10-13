@@ -29,6 +29,12 @@ Windows 用 `Copy-Item config.example.json config.json`。JSON 是推荐格式�
 
 ## 3. 基础、安全与存储字段
 
+密码登录、Basic Auth 和密码请求头每次读取 Redis 中的权威管理凭据；共享配置读取失败、损坏或撤权后丢失时返回 503，不回退到副本启动时的旧密码。旧副本保存配置时会原子核对管理凭据，凭据已在其他副本变更则拒绝保存，避免普通设置修改复活旧密码。此时需要重启旧副本以重新加载配置。
+
+使用会话 Cookie 的 POST、PUT、PATCH、DELETE 等写请求必须带与当前服务协议和 Host 一致的 `Origin`，有正文时必须使用 `application/json`；读取请求不受此限制。命令行可以使用显式管理令牌或 Basic Auth。反向代理应传递正确的 Host，并在 `trusted_proxies` 中声明实际代理，HTTPS 终止代理需设置 `X-Forwarded-Proto: https`。
+
+`/api/login` 只接受一个 JSON 文档，正文最多 8 KiB，用户名最多 256 字节、密码最多 4096 字节；超限正文返回 413，字段或 JSON 格式错误返回 400，非 JSON 类型返回 415。进程同时最多解析 32 个登录请求，容量满返回 503；失败预算耗尽时不读取正文。
+
 | 字段 | 默认 / 示例 | 说明 |
 |---|---|---|
 | `port` | `3002` | 字符串端口，监听 `:port`，不是只绑定 loopback |

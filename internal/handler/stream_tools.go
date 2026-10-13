@@ -142,13 +142,13 @@ func (h *streamHandler) shouldAcceptToolCall(call toolCall) bool {
 	h.mu.Unlock()
 	if disallowToolCalls {
 		if h.config != nil && h.config.DebugEnabled {
-			slog.Debug("tool call suppressed by no-tools gate", "tool", call.name, "input", call.input)
+			slog.Debug("tool call suppressed by no-tools gate", "input_bytes", len(call.input))
 		}
 		return false
 	}
 	if !allowedTool {
 		if h.config != nil && h.config.DebugEnabled {
-			slog.Debug("tool call suppressed because it is not declared in the current request", "tool", call.name, "input", call.input)
+			slog.Debug("tool call suppressed because it is not declared in the current request", "input_bytes", len(call.input))
 		}
 		return false
 	}
@@ -161,7 +161,7 @@ func (h *streamHandler) shouldAcceptToolCall(call toolCall) bool {
 		}
 		h.mu.Unlock()
 		if h.config != nil && h.config.DebugEnabled {
-			slog.Debug("invalid tool call suppressed", "tool", call.name, "input", call.input)
+			slog.Debug("invalid tool call suppressed", "input_bytes", len(call.input))
 		}
 		return false
 	}

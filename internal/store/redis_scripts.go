@@ -17,6 +17,9 @@ var (
    if previous then old = cjson.decode(previous) end
    if type(old) ~= "table" then old = {} end
    if type(next) ~= "table" then next = {} end
+   if ARGV[2] and previous and (old.admin_pass ~= ARGV[2] or (old.admin_user or "") ~= ARGV[3]) then
+     return redis.error_reply("admin configuration changed; reload before saving")
+   end
    if old.admin_pass ~= next.admin_pass or old.admin_user ~= next.admin_user then
      redis.call("SETNX", KEYS[2], "1")
      redis.call("INCR", KEYS[2])

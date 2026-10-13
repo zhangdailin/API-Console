@@ -52,6 +52,34 @@ func TestTerminalTailHonorsOriginalRequestCancellation(t *testing.T) {
 	}
 }
 
+func TestTerminalTailHasIndependentDeadline(t *testing.T) {
+	for _, channel := range []string{"workbuddy", "cline"} {
+		t.Run(channel, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+				w.(http.Flusher).Flush()
+				<-r.Context().Done()
+			}))
+			defer server.Close()
+			cfg := &config.Config{WorkBuddyBaseURL: server.URL, ClineAPIBaseURL: server.URL}
+			var client generationClient
+			if channel == "workbuddy" {
+				client = workbuddy.NewFromAccount(&store.Account{WorkBuddyAccessToken: "test-access", WorkBuddyExpiresAt: time.Now().Add(time.Hour)}, cfg)
+			} else {
+				client = cline.NewFromAccount(&store.Account{ClineAccessToken: "test-access", ClineExpiresAt: time.Now().Add(time.Hour), ClineModelIDs: []string{`{"id":"model-a"}`}}, cfg)
+			}
+			parent, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			started := time.Now()
+			err := client.SendRequestWithPayload(parent, upstream.UpstreamRequest{Model: "model-a", Messages: []prompt.Message{{Role: "user", Content: prompt.MessageContent{Text: "hi"}}}}, nil, nil)
+			if err != nil || time.Since(started) > 2*time.Second || parent.Err() != nil {
+				t.Fatalf("terminal tail must stop within cleanup budget while preserving completion: error=%v elapsed=%v parent=%v", err, time.Since(started), parent.Err())
+			}
+		})
+	}
+}
+
 type countingTail struct{ bytes, remaining int }
 
 func (b *countingTail) Read(p []byte) (int, error) {

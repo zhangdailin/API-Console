@@ -55,8 +55,15 @@ func (rl *RateLimiter) Allow(ip string) bool {
 // CheckCredentials serializes password attempts per source. Only failures
 // consume tokens, so authenticated polling cannot exhaust the login budget.
 func (rl *RateLimiter) CheckCredentials(ip string, verify func() bool) (valid, allowed bool) {
+	valid, allowed, _ = rl.CheckCredentialsWithError(ip, func() (bool, error) { return verify(), nil })
+	return valid, allowed
+}
+
+// Backend failures are not incorrect passwords and must not spend the budget.
+func (rl *RateLimiter) CheckCredentialsWithError(ip string, verify func() (bool, error)) (valid, allowed bool, err error) {
 	if rl == nil {
-		return verify(), true
+		valid, err = verify()
+		return valid, true, err
 	}
 	value, _ := rl.entries.LoadOrStore(ip, &limiterEntry{tokens: float64(rl.maxAttempts), lastVisit: time.Now()})
 	entry := value.(*limiterEntry)
@@ -66,13 +73,13 @@ func (rl *RateLimiter) CheckCredentials(ip string, verify func() bool) (valid, a
 	entry.tokens = min(float64(rl.maxAttempts), entry.tokens+now.Sub(entry.lastVisit).Seconds()*float64(rl.maxAttempts)/rl.window.Seconds())
 	entry.lastVisit = now
 	if entry.tokens < 1 {
-		return false, false
+		return false, false, nil
 	}
-	valid = verify()
-	if !valid {
+	valid, err = verify()
+	if !valid && err == nil {
 		entry.tokens--
 	}
-	return valid, true
+	return valid, true, err
 }
 
 func (rl *RateLimiter) processExistingEntry(entry *limiterEntry) bool {

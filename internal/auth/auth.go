@@ -47,6 +47,19 @@ func durableSessionBackend() SessionBackend {
 	return sessionBackend
 }
 
+// CurrentAdminCredentials reads shared credentials on every password entrance.
+// A replica's startup snapshot must never restore a revoked password.
+func CurrentAdminCredentials(ctx context.Context, user, password string) (string, string, error) {
+	if backend, ok := durableSessionBackend().(interface {
+		AdminCredentials(context.Context, string, string) (string, string, error)
+	}); ok {
+		ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		return backend.AdminCredentials(ctx, user, password)
+	}
+	return user, password, nil
+}
+
 type SessionStore struct {
 	mu       sync.RWMutex
 	sessions map[string]time.Time

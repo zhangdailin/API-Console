@@ -174,10 +174,14 @@ func (a *API) HandleImport(w http.ResponseWriter, r *http.Request) {
 		if acc.Weight <= 0 {
 			acc.Weight = 1
 		}
-		if err := a.store.CreateAccount(r.Context(), &acc); err != nil {
+		if duplicate, err := a.saveNewAccountUnlessDuplicate(r.Context(), &acc); err != nil {
 			slog.Warn("Failed to import account", "index", index+1, "channel", acc.AccountType)
 			result.Failed++
 			skip(index, "storage_error")
+		} else if duplicate != nil {
+			result.Duplicates++
+			skip(index, "duplicate_account")
+			remember(duplicate)
 		} else {
 			result.Imported++
 			remember(&acc)

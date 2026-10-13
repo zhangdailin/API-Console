@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"orchids-api/internal/util"
 	"strings"
@@ -19,6 +20,28 @@ import (
 type redisSessionBackend struct {
 	client *redis.Client
 	prefix string
+}
+
+func (b *redisSessionBackend) AdminCredentials(ctx context.Context, user, password string) (string, string, error) {
+	raw, err := b.client.Get(ctx, b.prefix+"settings:config").Result()
+	if err == redis.Nil {
+		generation, checkErr := b.client.Exists(ctx, b.prefix+"admin:session_generation").Result()
+		if checkErr != nil || generation != 0 {
+			return "", "", fmt.Errorf("persisted admin credentials unavailable")
+		}
+		return user, password, nil // The file config is authoritative until the first save.
+	}
+	if err != nil {
+		return "", "", err
+	}
+	var cfg struct {
+		User     string `json:"admin_user"`
+		Password string `json:"admin_pass"`
+	}
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil || strings.TrimSpace(cfg.Password) == "" {
+		return "", "", fmt.Errorf("invalid persisted admin credentials")
+	}
+	return cfg.User, cfg.Password, nil
 }
 
 // NewRedisSessionBackend returns a durable session store, or nil when no Redis

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"orchids-api/internal/httpclient"
+	"orchids-api/internal/httpserver"
 	"strconv"
 	"strings"
 
@@ -17,8 +18,18 @@ import (
 	"orchids-api/internal/util"
 )
 
+var loginAdmission = make(chan struct{}, 32)
+
 func (a *API) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	select {
+	case loginAdmission <- struct{}{}:
+		defer func() { <-loginAdmission }()
+	default:
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "Login capacity exhausted", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -26,11 +37,6 @@ func (a *API) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
 	adminUser := a.adminUser
 	adminPass := a.adminPass
 	if cfg := a.config.Load(); cfg != nil {
@@ -38,12 +44,33 @@ func (a *API) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		adminPass = cfg.AdminPass
 	}
 
-	valid, allowed := a.loginLimiter.CheckCredentials(middleware.ClientIP(r), func() bool {
-		return strings.TrimSpace(adminPass) != "" && util.SecureCompare(req.Username, adminUser) && util.SecureCompare(req.Password, adminPass)
+	decoded := false
+	valid, allowed, credentialErr := a.loginLimiter.CheckCredentialsWithError(middleware.ClientIP(r), func() (bool, error) {
+		if !httpserver.DecodeJSONBodyLimit(w, r, &req, 8<<10) {
+			return false, nil
+		}
+		if len(req.Username) > 256 || len(req.Password) > 4096 {
+			http.Error(w, "Login field exceeds the allowed length", http.StatusBadRequest)
+			return false, nil
+		}
+		decoded = true
+		var credentialErr error
+		adminUser, adminPass, credentialErr = auth.CurrentAdminCredentials(r.Context(), adminUser, adminPass)
+		if credentialErr != nil {
+			return false, credentialErr
+		}
+		return strings.TrimSpace(adminPass) != "" && util.SecureCompare(req.Username, adminUser) && util.SecureCompare(req.Password, adminPass), nil
 	})
 	if !allowed {
 		w.Header().Set("Retry-After", "180")
 		http.Error(w, "Too many login attempts, try again later", http.StatusTooManyRequests)
+		return
+	}
+	if !decoded {
+		return // The bounded decoder already wrote the error.
+	}
+	if credentialErr != nil {
+		http.Error(w, "Admin authentication unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	if !valid {
@@ -81,8 +108,14 @@ func (a *API) HandleLogin(w http.ResponseWriter, r *http.Request) {
 func (a *API) AdminAuthenticationLimiter() *middleware.RateLimiter { return a.loginLimiter }
 
 func (a *API) HandleLogout(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
 	cookie, err := r.Cookie("session_token")
 	if err == nil {
+		if !middleware.CheckAdminCookieWrite(w, r) {
+			return
+		}
 		auth.InvalidateSessionToken(cookie.Value)
 	}
 
@@ -341,7 +374,14 @@ func (a *API) persistConfig(ctx context.Context, current, newCfg *config.Config)
 	if err != nil {
 		return err
 	}
-	if err := a.store.SetSetting(ctx, "config", string(data)); err != nil {
+	base := current
+	if base == nil {
+		base = a.config.Load()
+	}
+	if base == nil {
+		return fmt.Errorf("current configuration unavailable")
+	}
+	if err := a.store.SaveConfigForCredentials(ctx, string(data), base.AdminPass, base.AdminUser); err != nil {
 		return err
 	}
 	if current == nil || current.AdminPass != storedCfg.AdminPass || current.AdminUser != storedCfg.AdminUser {
