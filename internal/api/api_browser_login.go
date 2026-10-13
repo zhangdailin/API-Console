@@ -20,13 +20,12 @@ import (
 
 // Shared plumbing for the browser/device login flows.
 //
-// Qoder and WorkBuddy both authenticate by opening an official page and polling
-// for the result, and both expose the console the same three endpoints: POST to
-// start, GET to observe, DELETE to abandon. The routing, the error envelope, the
-// optional start body, the origin check and the cancellation handshake are
-// therefore identical, and each channel used to carry its own copy. What differs
-// is only what each channel's client is called and how its payload is shaped,
-// which stays in that channel's file.
+// Every channel authenticates by opening an official page and polling for the
+// result, and exposes the console the same three endpoints: POST to start, GET
+// to observe, DELETE to abandon. The routing, the error envelope, the optional
+// start body, the origin check and the cancellation handshake are therefore
+// identical and live here. What differs is the upstream exchange, which each
+// channel supplies through provider.Login.
 
 // authorizationFailure describes how one channel's start failures are reported.
 type authorizationFailure struct {
@@ -196,7 +195,11 @@ func awaitLoginPoll[T any](ctx context.Context, registry *deviceLoginRegistry[T]
 
 // pollBrowserLogin owns the exchange/verify/persist state machine. Provider
 // adapters keep private grants out of the response and preserve their builders.
-func pollBrowserLogin[T, C any](a *API, ctx context.Context, registry *deviceLoginRegistry[T], id, channel string, pending error,
+//
+// buildVerifies says that building the account already proved the credential,
+// so a failed build is reported as a failed verification rather than a failed
+// save.
+func pollBrowserLogin[T, C any](a *API, ctx context.Context, registry *deviceLoginRegistry[T], id, channel string, pending error, buildVerifies bool,
 	exchange func(context.Context, *T) (C, error), build func(*T, C) (*store.Account, error), markReplace func(*store.Account)) {
 	for {
 		login, ok := awaitLoginPoll(ctx, registry, id, channel)
@@ -221,9 +224,9 @@ func pollBrowserLogin[T, C any](a *API, ctx context.Context, registry *deviceLog
 		if err != nil {
 			logMessage := channel + " authorization succeeded but the account could not be stored"
 			message := channel + " authorization succeeded but the account could not be saved: " + truncateLoginReason(err)
-			if channel == "WorkBuddy" {
-				logMessage = "WorkBuddy authorization succeeded but verification failed"
-				message = "WorkBuddy authorization succeeded but the account could not be verified"
+			if buildVerifies {
+				logMessage = channel + " authorization succeeded but verification failed"
+				message = channel + " authorization succeeded but the account could not be verified"
 			}
 			slog.Warn(logMessage, "login_id", id, "error", err)
 			registry.finish(id, "failed", message, 0)
@@ -268,7 +271,9 @@ func finishBrowserLogin[T any](
 	}
 	if existing != nil {
 		account.ID = existing.ID
-		markReplace(account)
+		if markReplace != nil {
+			markReplace(account)
+		}
 		if err := a.store.UpdateAccount(ctx, account); err != nil {
 			registry.finish(id, "failed", channel+" authorization succeeded but the account could not be updated", 0)
 			return

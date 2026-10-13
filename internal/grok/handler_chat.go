@@ -93,7 +93,6 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer sess.Close()
-	req.Account = sess.acc
 	h.serveNativeChat(r.Context(), w, &req, spec, sess, logger, true)
 }
 

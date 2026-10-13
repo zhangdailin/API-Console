@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"orchids-api/internal/modelpolicy"
+	"orchids-api/internal/provider"
 	"orchids-api/internal/store"
-	"orchids-api/internal/workbuddy"
 )
 
 // The bundled admin UI consumes GET /api/models as a bare array, which stays
@@ -69,7 +69,7 @@ func filterAdminModelEntitlements(models []*store.Model, accounts []*store.Accou
 			status := strings.TrimSpace(account.StatusCode)
 			freeOnly := status == "402" || status == store.AccountStatusWorkBuddyQuotaExhausted ||
 				(account.UsageLimit > 0 && account.UsageCurrent <= 0)
-			if freeOnly && !workbuddy.IsFreeModelInCatalog(account.WorkBuddyModelIDs, modelID) {
+			if freeOnly && !provider.IsFreeModel(account.AccountType, account, modelID) {
 				continue
 			}
 			out = append(out, model)

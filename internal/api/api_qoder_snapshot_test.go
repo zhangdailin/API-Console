@@ -43,10 +43,9 @@ func TestQoderLoginRetainsRotationsAndProfileSnapshot(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	a := &API{}
-	acc, err := a.buildQoderAccountFromCredentialsWithFactory(t.Context(), "test", "machine-id", qoder.Credentials{
+	acc, err := qoder.BuildLoginAccount(t.Context(), qoderLoginConfig(server.URL), "test", "machine-id", qoder.Credentials{
 		AccessToken: "access-1", RefreshToken: "refresh-1", AccessExpiresAt: time.Now().Add(30 * time.Second), Name: "poll-name",
-	}, qoderLoginConfig(server.URL), qoder.NewFromAccount)
+	})
 	testutil.NoError(t, err)
 	testutil.Falsef(t, refreshes != 1, "refresh calls = %d; catalog/quota should reuse the renewed one-hour credential", refreshes)
 	wantAccess := fmt.Sprintf("access-%d", refreshes+1)
@@ -80,7 +79,7 @@ func TestVerifyQoderRetainsRotationDuringWholeAccountSave(t *testing.T) {
 	s, _ := newTestStore(t, "qoder-rotated-verify:")
 	acc := &store.Account{AccountType: "qoder", Name: "qoder-verify", QoderAccessToken: "access-1", QoderRefreshToken: "refresh-1", QoderExpiresAt: time.Now().Add(time.Minute), QoderMachineID: "machine-id", Enabled: true}
 	testutil.NoError(t, s.CreateAccount(t.Context(), acc))
-	status, code, err := verifyQoderAccountWithStore(t.Context(), acc, qoderLoginConfig(server.URL), s)
+	status, code, err := qoder.VerifyAccount(t.Context(), acc, qoderLoginConfig(server.URL), s)
 	testutil.Falsef(t, err != nil || status != "" || code != 0, "verify = %q %d %v", status, code, err)
 	testutil.Falsef(t, refreshes != 1 || acc.QoderAccessToken != "access-2" || acc.QoderRefreshToken != "refresh-2" || acc.QoderUserID != "new-uid" || acc.QoderOrganizationID != "new-org", "verified snapshot %+v, refreshes=%d", acc, refreshes)
 	testutil.NoError(t, s.UpdateAccount(context.Background(), acc))
@@ -105,7 +104,7 @@ func TestVerifyQoderQuotaFailurePreservesKnownExhaustion(t *testing.T) {
 	}{{"quota-snapshot", true, ""}, {"status-code", false, store.AccountStatusQoderQuotaExhausted}} {
 		t.Run(tc.name, func(t *testing.T) {
 			acc := &store.Account{AccountType: "qoder", QoderAccessToken: "access", QoderRefreshToken: "refresh", QoderMachineID: "machine", QoderUserID: "uid", StatusCode: tc.status, QoderQuota: store.QoderQuotaSnapshot{Exhausted: tc.quota}}
-			status, code, err := verifyQoderAccountWithStore(t.Context(), acc, qoderLoginConfig(server.URL), nil)
+			status, code, err := qoder.VerifyAccount(t.Context(), acc, qoderLoginConfig(server.URL), nil)
 			testutil.Falsef(t, err != nil || code != 0 || !strings.EqualFold(status, store.AccountStatusQoderQuotaExhausted), "quota outage = %q %d %v; want exhausted", status, code, err)
 		})
 	}

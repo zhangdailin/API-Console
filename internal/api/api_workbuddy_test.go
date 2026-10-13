@@ -47,7 +47,7 @@ func TestNormalizeWorkBuddyCredentials_RejectsEmptyInput(t *testing.T) {
 	t.Parallel()
 
 	acc := &store.Account{AccountType: "workbuddy"}
-	testutil.False(t, NormalizeWorkBuddyCredentials(acc), "NormalizeWorkBuddyCredentials() = true, want false for an empty credential")
+	testutil.False(t, workbuddy.NormalizeCredentials(acc), "workbuddy.NormalizeCredentials() = true, want false for an empty credential")
 }
 
 func TestRedactWorkBuddyOutput_HidesDurableSecrets(t *testing.T) {
@@ -62,8 +62,8 @@ func TestRedactWorkBuddyOutput_HidesDurableSecrets(t *testing.T) {
 		RefreshToken:          "legacy-refresh",
 		ClientCookie:          "legacy-client-cookie",
 	}
-	out := RedactWorkBuddyOutput(acc)
-	testutil.False(t, out == nil, "RedactWorkBuddyOutput() = nil")
+	out := workbuddy.RedactOutput(acc)
+	testutil.False(t, out == nil, "workbuddy.RedactOutput() = nil")
 	testutil.Equal(t, out.WorkBuddyRefreshToken, "")
 	testutil.Equal(t, out.RefreshToken, "")
 	testutil.Equal(t, out.Token, "")
@@ -75,23 +75,23 @@ func TestRedactWorkBuddyOutput_HidesDurableSecrets(t *testing.T) {
 func TestWorkBuddyCredentialKey_UsesDurableToken(t *testing.T) {
 	t.Parallel()
 
-	key := WorkBuddyCredentialKey(&store.Account{
+	key := workbuddy.CredentialKey(&store.Account{
 		AccountType:           "workbuddy",
 		WorkBuddyAccessToken:  "access",
 		WorkBuddyRefreshToken: "refresh",
 	})
 	testutil.Equal(t, key, "workbuddy:refresh")
 
-	accessOnly := WorkBuddyCredentialKey(&store.Account{WorkBuddyAccessToken: "access-only"})
+	accessOnly := workbuddy.CredentialKey(&store.Account{WorkBuddyAccessToken: "access-only"})
 	testutil.Equal(t, accessOnly, "workbuddy:access-only")
 
-	testutil.Equal(t, WorkBuddyCredentialKey(&store.Account{}), "")
+	testutil.Equal(t, workbuddy.CredentialKey(&store.Account{}), "")
 }
 
 func TestVerifyWorkBuddyAccount_RequiresCredential(t *testing.T) {
 	t.Parallel()
 
-	_, httpStatus, err := verifyWorkBuddyAccountWithStore(context.Background(), &store.Account{AccountType: "workbuddy"}, &config.Config{}, nil)
+	_, httpStatus, err := workbuddy.VerifyAccount(context.Background(), &store.Account{AccountType: "workbuddy"}, &config.Config{}, nil)
 	testutil.False(t, err == nil, "expected an error for a credential-less account")
 	testutil.Equal(t, httpStatus, 400)
 }
@@ -108,7 +108,7 @@ func TestPreserveWorkBuddyCredentialsOnEdit_KeepsServerSideState(t *testing.T) {
 	}
 	edited := &store.Account{AccountType: "workbuddy"}
 
-	PreserveWorkBuddyCredentialsOnEdit(edited, existing)
+	workbuddy.PreserveCredentialsOnEdit(edited, existing)
 
 	testutil.Equal(t, edited.WorkBuddyAccessToken, "stored-access")
 	testutil.Equal(t, edited.WorkBuddyRefreshToken, "stored-refresh")
@@ -271,7 +271,7 @@ func TestResolveCredentials_MatchesClientResolution(t *testing.T) {
 	t.Parallel()
 
 	acc := &store.Account{ClientCookie: workBuddyAuthDocument}
-	apiCreds := resolveWorkBuddyCredentials(acc)
+	apiCreds := workbuddy.ResolveCredentials(acc)
 	clientCreds := workbuddy.ResolveCredentials(acc)
 
 	testutil.Equal(t, apiCreds.AccessToken, clientCreds.AccessToken)

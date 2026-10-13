@@ -300,7 +300,7 @@ func convertBlockMessage(role string, msg prompt.Message, pendingToolCalls map[s
 			out = append(out, ChatMessage{
 				Role:       "tool",
 				ToolCallID: toolID,
-				Content:    util.StringifyToolResult(block.Content),
+				Content:    prompt.StringifyToolResult(block.Content),
 			})
 		}
 	}

@@ -22,12 +22,19 @@ import (
 type chatOutcome struct {
 	// Withheld marks a turn the quality hold refused to deliver. Nothing was
 	// written to the client, so the caller may retry it on another account.
-	Withheld    bool
-	Usage       map[string]interface{}
-	UsageSource audit.UsageSource
-	Finish      string
-	FirstToken  time.Time
-	Err         error
+	Withheld bool
+	// WithheldReason names the detector that refused the turn (see the
+	// qualityReason constants). It is empty for a delivered turn.
+	WithheldReason string
+	// DeliveredDegraded marks a withheld turn that was delivered after all,
+	// because the retry budget ran out and the policy fails open. It is the one
+	// withheld turn the client received, and therefore the one that is billed.
+	DeliveredDegraded bool
+	Usage             map[string]interface{}
+	UsageSource       audit.UsageSource
+	Finish            string
+	FirstToken        time.Time
+	Err               error
 	// Quality carries what the quality guard needs to tell a healthy turn from
 	// a degraded one (see quality_guard.go).
 	Quality qualitySignals

@@ -4,14 +4,15 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
+	"orchids-api/internal/channel"
 	"orchids-api/internal/config"
-	"orchids-api/internal/grok"
-	"orchids-api/internal/store"
+	"orchids-api/internal/provider"
 	"orchids-api/internal/util"
 )
 
@@ -121,8 +122,13 @@ func (a *API) startGrokDeviceAuthorization(w http.ResponseWriter, r *http.Reques
 	a.grokLogins.cleanup(time.Now())
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	authenticator := grok.NewDeviceAuthenticator(a.config.Load())
-	details, err := authenticator.Start(ctx)
+	flow := loginFlow(channel.Grok)
+	if flow == nil || flow.Start == nil {
+		http.Error(w, "Grok device authorization is not available", http.StatusNotFound)
+		return
+	}
+	cfg := a.config.Load()
+	challenge, err := flow.Start(ctx, cfg)
 	if err != nil {
 		slog.Warn("Grok device authorization could not be started", "error", err)
 		http.Error(w, "failed to start Grok device authorization", http.StatusBadGateway)
@@ -135,12 +141,12 @@ func (a *API) startGrokDeviceAuthorization(w http.ResponseWriter, r *http.Reques
 	}
 	pollContext, pollCancel := context.WithCancel(context.Background())
 	login := &deviceLogin{
-		deviceCode: details.DeviceCode,
-		userCode:   details.UserCode,
-		verifyURI:  details.VerificationURI,
-		verifyFull: details.VerificationURIComplete,
-		expiresAt:  time.Now().Add(time.Duration(details.ExpiresIn) * time.Second),
-		interval:   time.Duration(details.Interval) * time.Second,
+		deviceCode: challenge.DeviceCode,
+		userCode:   challenge.UserCode,
+		verifyURI:  challenge.VerifyURI,
+		verifyFull: challenge.VerifyFull,
+		expiresAt:  challenge.ExpiresAt,
+		interval:   challenge.Interval,
 		cancel:     pollCancel,
 		status:     "pending",
 	}
@@ -149,7 +155,7 @@ func (a *API) startGrokDeviceAuthorization(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "too many pending Grok device logins", http.StatusTooManyRequests)
 		return
 	}
-	go a.pollGrokDeviceAuthorization(pollContext, id, authenticator)
+	go a.pollGrokDeviceAuthorization(pollContext, id, cfg, challenge)
 	util.WriteJSON(w, newDeviceLoginResponse(id, login))
 }
 
@@ -171,7 +177,16 @@ func (a *API) cancelGrokDeviceAuthorization(w http.ResponseWriter, id string) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (a *API) pollGrokDeviceAuthorization(ctx context.Context, id string, authenticator *grok.DeviceAuthenticator) {
+// pollGrokDeviceAuthorization exchanges the device code until the operator
+// finishes, then stores the account. cfg and challenge are the ones the
+// transaction started with: a live reload must not start a login on one host
+// and poll another.
+func (a *API) pollGrokDeviceAuthorization(ctx context.Context, id string, cfg *config.Config, challenge provider.LoginChallenge) {
+	flow := loginFlow(channel.Grok)
+	if flow == nil || flow.Exchange == nil || flow.Build == nil {
+		a.grokLogins.finish(id, "failed", "Grok authorization failed", 0)
+		return
+	}
 	for {
 		login, ok := a.grokLogins.pollable(id)
 		if !ok {
@@ -186,12 +201,16 @@ func (a *API) pollGrokDeviceAuthorization(ctx context.Context, id string, authen
 			return
 		case <-time.After(login.interval):
 		}
+		// The device code is read from the transaction on every poll: a finished
+		// transaction has dropped it, and must not be exchanged again.
+		current := challenge
+		current.DeviceCode = login.deviceCode
 		requestCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		accessToken, refreshToken, identityToken, expiresAt, err := authenticator.Exchange(requestCtx, login.deviceCode)
+		grant, err := flow.Exchange(requestCtx, cfg, current)
 		cancel()
 		if err != nil {
-			if slowDown, pending := grok.IsDeviceAuthorizationPending(err); pending {
-				if slowDown {
+			if flow.ErrPending != nil && errors.Is(err, flow.ErrPending) {
+				if flow.SlowDown != nil && flow.SlowDown(err) {
 					a.grokLogins.update(id, func(login *deviceLogin) {
 						if login != nil && login.status == "pending" {
 							login.interval += 5 * time.Second
@@ -204,19 +223,12 @@ func (a *API) pollGrokDeviceAuthorization(ctx context.Context, id string, authen
 			a.grokLogins.finish(id, "failed", "Grok authorization failed", 0)
 			return
 		}
-		acc := &store.Account{
-			Name:              "grok-device-login",
-			AccountType:       "grok",
-			CredentialType:    "oauth",
-			OAuthAccessToken:  accessToken,
-			OAuthRefreshToken: refreshToken,
-			OAuthExpiresAt:    expiresAt,
-			Weight:            1,
-			Enabled:           true,
+		acc, err := flow.Build(ctx, cfg, id, current, grant)
+		if err != nil {
+			slog.Warn("Grok device authorization produced no account", "login_id", id, "error", err)
+			a.grokLogins.finish(id, "failed", "Grok authorization failed", 0)
+			return
 		}
-		grok.ApplyCLIOAuthIdentity(acc)
-		grok.ApplyCLIOAuthIdentityToken(acc, identityToken)
-		normalizeGrokTokenInput(acc)
 		existing, err := a.saveNewAccountUnlessDuplicate(ctx, acc)
 		if err != nil {
 			slog.Warn("Grok device authorization could not save account", "login_id", id, "error", err)
@@ -224,32 +236,12 @@ func (a *API) pollGrokDeviceAuthorization(ctx context.Context, id string, authen
 			return
 		}
 		if existing != nil {
-			// A fresh device grant may rotate the durable refresh token. Update the
-			// matching xAI identity in place and enrich legacy generic rows with the
-			// email obtained from id_token, while retaining operator settings and
-			// accumulated runtime state already held on the row.
-			existing.OAuthAccessToken = acc.OAuthAccessToken
-			existing.OAuthRefreshToken = acc.OAuthRefreshToken
-			existing.OAuthExpiresAt = acc.OAuthExpiresAt
-			existing.CredentialType = "oauth"
-			existing.GrokProvider = grok.ProviderBuild
-			existing.AgentMode = acc.AgentMode
-			if acc.UserID != "" {
-				existing.UserID = acc.UserID
+			// A fresh device grant may rotate the durable refresh token. The
+			// channel updates the matching identity in place, retaining operator
+			// settings and accumulated runtime state already held on the row.
+			if flow.Merge != nil {
+				flow.Merge(existing, acc)
 			}
-			if acc.Email != "" {
-				existing.Email = acc.Email
-				if existing.Name == "" || strings.EqualFold(existing.Name, "grok-device-login") {
-					existing.Name = acc.Email
-				}
-			}
-			if acc.TeamID != "" {
-				existing.TeamID = acc.TeamID
-			}
-			existing.StatusCode = ""
-			existing.StatusMessage = ""
-			existing.LastAttempt = time.Time{}
-			existing.ClearVerifiedAt = true
 			updateCtx, updateCancel := context.WithTimeout(ctx, 20*time.Second)
 			if err := a.store.UpdateAccount(updateCtx, existing); err != nil {
 				updateCancel()

@@ -33,6 +33,29 @@ type requestObservation struct {
 	httpPhases                   map[string]int64
 	finalEvent                   *audit.Event
 	journal                      audit.Logger
+	// annotations are facts a handler learned about the request as a whole,
+	// after the row that will become its journal entry was already built.
+	annotations map[string]interface{}
+}
+
+// AnnotateRequest adds one fact to the request's journal row.
+//
+// A request is journalled as a single row, assembled when it finishes from the
+// last per-attempt row its handler wrote. Something that is only known across
+// attempts — that an earlier turn was withheld, and how the request ended — has
+// no attempt row to live on, so it is recorded here and merged into the
+// metadata of that single row. Outside a traced request it is a no-op.
+func AnnotateRequest(ctx context.Context, key string, value interface{}) {
+	box, ok := ctx.Value(requestObservationKey{}).(*requestObservation)
+	if !ok || key == "" {
+		return
+	}
+	box.mu.Lock()
+	defer box.mu.Unlock()
+	if box.annotations == nil {
+		box.annotations = make(map[string]interface{}, 4)
+	}
+	box.annotations[key] = value
 }
 
 var requestJournal audit.Logger
@@ -289,6 +312,9 @@ func finishRequestJournal(r *http.Request, w *TracedResponseWriter, duration tim
 		metadata["queue_wait_ms"] = box.queueWaitMS
 		metadata["upstream_attempts"] = box.attempts
 		metadata["account_switches"] = box.switches
+		for key, value := range box.annotations {
+			metadata[key] = value
+		}
 		box.mu.Unlock()
 	}
 	e.Metadata = metadata

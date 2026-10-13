@@ -124,7 +124,7 @@ func TestHandleClineLogin_PollPersistsOAuthAccount(t *testing.T) {
 		ID string `json:"id"`
 	}
 	testutil.NoError(t, json.Unmarshal(start.Body.Bytes(), &started), "decode start: %v")
-	a.clineLogins.update(started.ID, func(login *clineLoginTransaction) { login.interval = time.Millisecond })
+	a.clineLogins.update(started.ID, func(login *browserLogin) { login.interval = time.Millisecond })
 
 	var stored *store.Account
 	deadline := time.Now().Add(5 * time.Second)

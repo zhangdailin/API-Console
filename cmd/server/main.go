@@ -20,7 +20,7 @@ import (
 	"orchids-api/internal/audit"
 	"orchids-api/internal/auth"
 	"orchids-api/internal/buildinfo"
-	"orchids-api/internal/cline"
+	"orchids-api/internal/channel"
 	"orchids-api/internal/config"
 	"orchids-api/internal/debug"
 	"orchids-api/internal/grok"
@@ -30,28 +30,20 @@ import (
 	"orchids-api/internal/middleware"
 	"orchids-api/internal/opsagg"
 	"orchids-api/internal/provider"
-	"orchids-api/internal/qoder"
+	_ "orchids-api/internal/provider/all" // links every channel into the binary
 	"orchids-api/internal/secureblob"
 	"orchids-api/internal/selfupdate"
 	"orchids-api/internal/store"
 	"orchids-api/internal/template"
-	"orchids-api/internal/workbuddy"
 )
-
-// wiredOps is the per-minute aggregator created during startup. It is what the
-// overview endpoints and the alert evaluator read; it stays nil on a deployment
-// without Redis, and the API reports "no sample" in that case.
-var wiredOps *opsagg.Aggregator
-
-// alertEngine evaluates the alert rules after startup. A nil engine (no Redis)
-// simply reports no alerts.
-var alertEngine *alerting.Engine
 
 // accountChangeEmitter adapts the store's change description to the notification
 // bus. The store publishes only after a successful write; the bus decides what
 // kind of change it was.
 type accountChangeEmitter struct {
 	bus *accountevents.Bus
+	// store resolves the after-state of a mutation the emitter was told about.
+	store *store.Store
 }
 
 // Publish implements store.ChangeEmitter. It resolves the after-state on its own
@@ -62,8 +54,8 @@ func (e accountChangeEmitter) Publish(change store.AccountChange) {
 		return
 	}
 	var current *store.Account
-	if wiredStore != nil {
-		if loaded, err := wiredStore.GetAccount(context.Background(), change.AccountID); err == nil {
+	if e.store != nil {
+		if loaded, err := e.store.GetAccount(context.Background(), change.AccountID); err == nil {
 			current = loaded
 		}
 	}
@@ -73,14 +65,6 @@ func (e accountChangeEmitter) Publish(change store.AccountChange) {
 		Origin:    change.Origin,
 	})
 }
-
-// wiredStore is the account store created during startup; the change emitter uses
-// it to resolve the after-state of a mutation it was told about.
-var wiredStore *store.Store
-
-// wiredAuditLogger is the journal created at startup, used by the background
-// loops that record system events.
-var wiredAuditLogger audit.Logger
 
 func main() {
 	if handled, err := selfupdate.RunWatchdogCLI(os.Args[1:]); handled {
@@ -190,6 +174,16 @@ func main() {
 		grokHandler.SetConnTracker(accountTracker)
 	}
 
+	// These three exist only with Redis. Without it they stay nil, the overview
+	// reports "no sample" and the alert loop reports no alerts.
+	var (
+		// opsAggregator holds the per-minute buckets the overview endpoints and
+		// the alert evaluator both read.
+		opsAggregator *opsagg.Aggregator
+		alertEngine   *alerting.Engine
+		// auditJournal is where the background loops record system events.
+		auditJournal audit.Logger
+	)
 	if redisClient := s.RedisClient(); redisClient != nil {
 		auditLogger := audit.NewRedisLogger(redisClient, s.RedisPrefix(), 10000)
 		apiHandler.SetAuditHealthReporter(auditLogger.Health)
@@ -205,9 +199,8 @@ func main() {
 		// Per-minute buckets back the operations overview. The trace middleware
 		// reports one observation per finished request, so the counters cannot
 		// double count an upstream retry.
-		opsAggregator := opsagg.New(redisClient, s.RedisPrefix())
+		opsAggregator = opsagg.New(redisClient, s.RedisPrefix())
 		middleware.SetDetailedOutcomeRecorder(opsAggregator.Observe)
-		wiredOps = opsAggregator
 		apiHandler.SetOpsAggregator(opsAggregator)
 		apiHandler.SetRefreshConcurrencyReporter(refresh.Hub.Len)
 		// Alert transitions are journalled as system events, which is what makes a
@@ -221,7 +214,7 @@ func main() {
 		}
 		alertEngine = alerting.NewEngine(alertRules, alerting.AuditRecorder(auditLogger))
 		apiHandler.SetAlertEngine(alertEngine)
-		wiredAuditLogger = auditLogger
+		auditJournal = auditLogger
 		// One account change, three caches: the pool snapshot, the cached upstream
 		// clients and the refresh scheduler's due set. The store announces a change
 		// only after it has been persisted, and the bus coalesces bursts by account
@@ -231,8 +224,7 @@ func main() {
 		accountBus.Subscribe(lb)
 		accountBus.Subscribe(h)
 		accountBus.Subscribe(refresh.Kick)
-		wiredStore = s
-		s.SetChangeEmitter(accountChangeEmitter{bus: accountBus})
+		s.SetChangeEmitter(accountChangeEmitter{bus: accountBus, store: s})
 		slog.Info("Operations aggregation wired",
 			"bucket_prefix", s.RedisPrefix()+"ops:agg:",
 			"request_recorder", true,
@@ -241,36 +233,6 @@ func main() {
 		defer auditLogger.Close()
 		slog.Debug("Audit logger initialized", "backend", "redis")
 	}
-
-	// Every channel's upstream client is built through the provider table.
-	h.SetClientFactory(func(acc *store.Account, c *config.Config) handler.UpstreamClient {
-		if factory, ok := provider.Get(acc.AccountType); ok {
-			if client, ok := factory(acc, c).(handler.UpstreamClient); ok {
-				// WorkBuddy rotates its refresh token on every renewal; give the
-				// client the store so the rotated credential survives the call.
-				if wb, ok := client.(interface {
-					SetAccountStore(workbuddy.AccountUpdater)
-				}); ok {
-					wb.SetAccountStore(s)
-				}
-				// Qoder also rotates its refresh token upstream; give the client
-				// the store so the rotated credential survives the call.
-				if qd, ok := client.(interface {
-					SetAccountStore(qoder.AccountUpdater)
-				}); ok {
-					qd.SetAccountStore(s)
-				}
-				// Cline rotates its refresh token on every renewal as well.
-				if cl, ok := client.(interface {
-					SetAccountStore(cline.AccountUpdater)
-				}); ok {
-					cl.SetAccountStore(s)
-				}
-				return client
-			}
-		}
-		return nil
-	})
 
 	// Initialize template renderer
 	tmplRenderer, err := template.NewRenderer()
@@ -320,13 +282,12 @@ func main() {
 	modelrefresh.StartCatalogRefreshLoop(ctx, apiHandler.ConfigSnapshot, s)
 	// Alert evaluation runs beside the refresh loop: it reads the same metric
 	// buckets the overview shows, so an alert and the page never disagree.
-	alerting.StartLoop(ctx, wiredOps, s, alertEngine, wiredAuditLogger)
-	logReachability("WorkBuddy backend", "workbuddy", workbuddy.DefaultBaseURL,
-		func() reachableClient { return workbuddy.NewFromAccount(nil, cfg) })
-	logReachability("Qoder control plane", "qoder", qoder.DefaultOpenAPIBaseURL,
-		func() reachableClient { return qoder.NewFromAccount(nil, cfg) })
-	logReachability("Cline API", "cline", cline.DefaultAPIBase,
-		func() reachableClient { return cline.NewFromAccount(nil, cfg) })
+	alerting.StartLoop(ctx, opsAggregator, s, alertEngine, auditJournal)
+	for _, spec := range provider.All() {
+		if spec.Probe != nil {
+			logReachability(spec.ID, spec.Probe, cfg)
+		}
+	}
 
 	// Graceful shutdown
 	idleConnsClosed := make(chan struct{})
@@ -359,30 +320,22 @@ func main() {
 	slog.Info("Server shutdown gracefully")
 }
 
-// reachableClient is the shape shared by the per-provider startup probes.
-type reachableClient interface {
-	ProbeReachability(ctx context.Context) error
-	Close()
-}
-
 // logReachability reports at startup whether this process can reach a provider
 // backend. A blocked egress path breaks both the login and every inference
 // request, so the cause should be visible in the boot log instead of surfacing
 // as a per-request 502.
-func logReachability(subject, channel, endpoint string, newClient func() reachableClient) {
+func logReachability(id channel.ID, probe *provider.Probe, cfg *config.Config) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 
-		client := newClient()
-		defer client.Close()
-		if err := client.ProbeReachability(ctx); err != nil {
-			slog.Warn(subject+" is not reachable; the "+channel+" channel will fail until egress is fixed",
-				"endpoint", endpoint, "error", err,
+		if err := probe.Run(ctx, cfg); err != nil {
+			slog.Warn(probe.Subject+" is not reachable; the "+string(id)+" channel will fail until egress is fixed",
+				"endpoint", probe.Endpoint, "error", err,
 				"hint", "configure HTTP_PROXY/HTTPS_PROXY or the proxy settings in config.json if this host needs one")
 			return
 		}
-		slog.Info(subject+" reachable", "endpoint", endpoint)
+		slog.Info(probe.Subject+" reachable", "endpoint", probe.Endpoint)
 	}()
 }
 

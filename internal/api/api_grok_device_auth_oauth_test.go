@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"orchids-api/internal/config"
-	"orchids-api/internal/grok"
+	"orchids-api/internal/provider"
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
 )
@@ -78,7 +78,7 @@ func TestGrokDeviceLogin_SecondLoginForSameAccountUpdatesInPlace(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		a.pollGrokDeviceAuthorization(pollCtx, "dup", grok.NewDeviceAuthenticator(cfg))
+		a.pollGrokDeviceAuthorization(pollCtx, "dup", cfg, provider.LoginChallenge{})
 		close(done)
 	}()
 	select {

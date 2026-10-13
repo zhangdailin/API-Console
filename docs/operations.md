@@ -92,3 +92,23 @@ HTTP 成功、协议完成、可见输出与预算截断是不同口径。正常
 请求日志的 `first_token_ms` 为首生成（包括推理和工具；非流式采用正文首写的 TTFB 近似），`first_visible_token_ms` 是流式文本首字。另有 `retry_wait_ms`、`queue_wait_ms`、`upstream_attempts`、`account_switches`。普通日志也采集 `upstream_http_phase_samples` 及 `upstream_http_phases_sum` 的 DNS、TCP、TLS、取连接、响应头耗时。各阶段可能重叠，累计值不能相加当作请求总耗时；复用连接及自定义传输可能缺阶段，缺失不能解释为零。不会保存请求正文、凭据、代理地址或模型输出。
 
 这些数值测量源站内的链路。公网客户端的 DNS、TLS、CDN 等时间须另测，并按 `X-Orchids-Request-ID` 关联 Caddy 与请求日志。源站之外的额外等待不能仅凭一个样本归因模型或网关。
+
+## Grok 质量检查的日志与流水
+
+Grok 质量检查分两半：暂存（`quality_hold.go`）决定一轮回答能否交付，护栏（`quality_guard.go`）决定产生该回答的凭据是否停用。两者的每个结论都同时写入服务日志和流水，流水中的动作名均以 `grok_quality_` 开头，可用动作筛选 `quality` 一次查出。
+
+| 流水动作 | 类型 | 何时写入 | `status` | 关键字段 |
+|---|---|---|---|---|
+| `grok_quality_degraded` | request | 每一轮被暂存拒绝的尝试 | `degraded` | `attempt`、`details` / `metadata.reason`（命中的检测器）、`metadata.mode`（stream / collected）、`metadata.guard`（护栏对该凭据的处理）、各项字符与 token 计数 |
+| `grok_quality_resolution` | request | 出现过被拒尝试的请求结束时，一次 | `retried` / `delivered_degraded` / `rejected` / `undeliverable` | `metadata.client_received_degraded`、`details` / `metadata.stopped`（停止重试的原因）、`metadata.withheld_attempts` |
+| `grok_quality_guard` | system | 护栏改变凭据状态时 | `parked` / `disabled` / `cleared` | `account_id`、`metadata.failures`、`metadata.cooldown_until`、`metadata.account_enabled` |
+
+被拒尝试自身的 `grok_request` 行以 `status=quality_degraded` 记录，并带 `metadata.quality_withheld` 与 `metadata.quality_reason`；`metadata.finish_reason` 保留上游原始结束原因。
+
+`reason` 取值：`burst_dump`、`cipher_drool`、`fake_encrypted_dump`、`fast_reasoning_ratio_dump`、`no_reasoning`。`stopped` 取值：`attempts_exhausted`、`account_budget_exhausted`、`replay_unsafe`、`client_gone`、`no_other_account`。
+
+判断客户端是否收到了降级回答，只看 `grok_quality_resolution`：`delivered_degraded` 表示按 fail-open 交付了最后一轮被拒内容，其余三种状态客户端都没有收到降级内容。`grok_quality_degraded` 描述的是客户端从未见到的尝试。
+
+正常回答不写任何 `grok_quality_*` 行。这些行只包含计数、耗时和标识，不包含回答正文或凭据。
+
+对应的服务日志：`grok quality hold: turn withheld`（WARN）、`grok quality hold: request resolved`（重试成功为 INFO，其余为 WARN）、`grok quality guard: credential parked / disabled`（WARN）、`grok quality guard: credential cleared`（INFO），均带 `request_id` 与 `account_id`。

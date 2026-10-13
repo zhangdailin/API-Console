@@ -24,12 +24,6 @@ import (
 	"orchids-api/internal/testutil"
 )
 
-// accountUpdater is structurally identical to every provider's own AccountUpdater
-// interface, so one assertion covers the SetAccountStore seam for all of them.
-type accountUpdater interface {
-	UpdateAccount(ctx context.Context, acc *store.Account) error
-}
-
 // channelE2E drives one channel through the real route table, handler and client
 // running on a live listener.
 type channelE2E struct {
@@ -99,16 +93,9 @@ func newChannelE2E(t *testing.T, redisPrefix, managedKey string, cfg *config.Con
 	}
 
 	h.SetClientFactory(func(acc *store.Account, c *config.Config) handler.UpstreamClient {
-		factory, ok := provider.Get(acc.AccountType)
-		testutil.True(t, ok, "no provider registered for %q")
-		client, ok := factory(acc, c).(handler.UpstreamClient)
-		testutil.True(t, ok, "provider %q returned an unusable client")
-		if setter, ok := client.(interface {
-			SetAccountStore(accountUpdater)
-		}); ok {
-			setter.SetAccountStore(s)
-		}
-		return client
+		spec, ok := provider.Lookup(acc.AccountType)
+		testutil.True(t, ok && spec.NewClient != nil, "no inference client registered for %q")
+		return spec.NewClient(acc, c, s)
 	})
 
 	// A real listener is used so request contexts live for the whole handler, as

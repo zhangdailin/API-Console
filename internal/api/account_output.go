@@ -6,11 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"orchids-api/internal/cline"
-	"orchids-api/internal/grok"
-	"orchids-api/internal/qoder"
 	"orchids-api/internal/store"
-	"orchids-api/internal/util"
 )
 
 // Account rendering for the management API: the projection a caller sees, never
@@ -99,40 +95,11 @@ func normalizeAccountOutputWithUsage(acc *store.Account, usage map[int64]int64) 
 	// it ran before the channel projection cleared them, so an upstream error that
 	// echoed a Qoder token published it in status_message.
 	out.StatusMessage = redactAccountSecrets(acc.StatusMessage, acc)
-	if strings.EqualFold(out.AccountType, "grok") {
-		grok.NormalizeProvider(&out)
-		// The tier column must agree with the quota column. A Build Free account
-		// has no plan name from the identity endpoint (recorded as "unknown"), yet
-		// the same Free inference that produces its quota window already proves it
-		// is Free — and only Free. Reporting "unknown" there told an operator nothing
-		// about an account the gateway had already characterised.
-		if verdict := grok.InferFreeProfile(&out); verdict.Inferred {
-			switch strings.ToLower(strings.TrimSpace(out.Subscription)) {
-			case "", "unknown", "free":
-				out.Subscription = "free"
-			}
-		}
-		out.RefreshToken = ""
-		// The administrator explicitly opted in to seeing the short-lived OAuth
-		// access token in the authenticated management UI. Never return the
-		// durable refresh token through normal account endpoints.
-		out.OAuthRefreshToken = ""
-	}
-	if strings.EqualFold(out.AccountType, "workbuddy") {
-		// The durable refresh token never leaves the server; the access token
-		// stays visible so the account table can prove a credential exists.
-		out = *RedactWorkBuddyOutput(&out)
-	}
-	if strings.EqualFold(out.AccountType, "qoder") {
-		// The durable refresh token and the derived runtime material never leave
-		// the server; the access token stays visible so the account table can
-		// prove a credential exists.
-		out = *RedactQoderOutput(&out)
-	}
-	if strings.EqualFold(out.AccountType, "cline") {
-		// The durable refresh token never leaves the server; the access token
-		// stays visible so the account table can prove a credential exists.
-		out = *RedactClineOutput(&out)
+	// The channel clears every credential it must never return. The final
+	// marshal deletes the credential keys again whatever the channel did, so a
+	// channel that forgot one still cannot publish it.
+	if admin := adminFor(out.AccountType); admin != nil && admin.Project != nil {
+		admin.Project(&out)
 	}
 	return &accountOutput{
 		Account:            &out,
@@ -146,7 +113,7 @@ func normalizeAccountOutputWithUsage(acc *store.Account, usage map[int64]int64) 
 // estimate as the list. A failed measurement falls back to the plain projection
 // rather than reporting zero usage as if it had been counted.
 func (a *API) normalizeAccountOutputObserved(ctx context.Context, acc *store.Account) *accountOutput {
-	observed, ok := a.observedTokensByAccount(ctx, time.Now().Add(-grok.FreeBuildUsageWindow))
+	observed, ok := a.observedTokensByAccount(ctx, time.Now().Add(-observedUsageWindow()))
 	if !ok {
 		return normalizeAccountOutput(acc)
 	}
@@ -203,22 +170,8 @@ func accountSessionFingerprint(acc *store.Account) string {
 	if acc == nil {
 		return ""
 	}
-	switch strings.ToLower(strings.TrimSpace(acc.AccountType)) {
-	case "grok":
-		if strings.EqualFold(strings.TrimSpace(acc.CredentialType), "oauth") {
-			return util.Fingerprint(util.FirstNonEmpty(acc.OAuthAccessToken, acc.OAuthRefreshToken))
-		}
-		return util.Fingerprint(util.FirstNonEmpty(acc.ClientCookie, acc.RefreshToken, acc.Token))
-	case "workbuddy":
-		creds := resolveWorkBuddyCredentials(acc)
-		return util.Fingerprint(util.FirstNonEmpty(creds.AccessToken, creds.RefreshToken))
-	case "qoder":
-		creds := qoder.ResolveCredentials(acc)
-		return util.Fingerprint(util.FirstNonEmpty(creds.RefreshToken, creds.AccessToken))
-	case "cline":
-		creds := cline.ResolveCredentials(acc)
-		return util.Fingerprint(util.FirstNonEmpty(creds.RefreshToken, creds.AccessToken))
-	default:
-		return ""
+	if admin := adminFor(acc.AccountType); admin != nil && admin.Fingerprint != nil {
+		return admin.Fingerprint(acc)
 	}
+	return ""
 }

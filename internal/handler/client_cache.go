@@ -293,25 +293,20 @@ func (h *Handler) buildAccountClient(acc *store.Account) UpstreamClient {
 	if h != nil && h.clientFactory != nil {
 		return h.clientFactory(acc, cfg)
 	}
-	// The constructor table lives in internal/provider, which is the same seam
-	// cmd/server uses. Repeating it here meant a fourth provider would have to
-	// be added in two places that could disagree.
-	factory, ok := provider.Get(acc.AccountType)
-	if !ok {
-		return nil
-	}
-	client, ok := factory(acc, cfg).(UpstreamClient)
-	if !ok {
+	// The channel registry is the same seam cmd/server uses, so a channel is
+	// built here exactly as it is in production.
+	spec, ok := provider.Lookup(acc.AccountType)
+	if !ok || spec.NewClient == nil {
 		return nil
 	}
 	// A rotating credential has to be written back: WorkBuddy rotates its token
 	// on every renewal, Qoder on its refresh, and Cline the same. Without the
 	// store the client would keep using a credential the pool already replaced.
-	if setter, wants := client.(interface{ SetAccountStore(*store.Store) }); wants &&
-		h != nil && h.loadBalancer != nil && h.loadBalancer.Store != nil {
-		setter.SetAccountStore(h.loadBalancer.Store)
+	var accountStore *store.Store
+	if h != nil && h.loadBalancer != nil {
+		accountStore = h.loadBalancer.Store
 	}
-	return client
+	return spec.NewClient(acc, cfg, accountStore)
 }
 
 func (h *Handler) Close() {

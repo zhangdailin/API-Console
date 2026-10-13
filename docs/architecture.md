@@ -15,9 +15,11 @@ API-Console 是 Go 服务与内嵌管理网页组成的多通道网关。Redis �
 | `internal/channel` | 四通道定义、前缀、默认通道和浏览器注册表来源 |
 | `internal/middleware` | 鉴权、并发、预算、可信代理、请求跟踪、审计与流刷新 |
 | `internal/handler` | WorkBuddy / Qoder / Cline 共用推理编排 |
-| `internal/provider` | 共用通道的客户端工厂与能力接口 |
-| `internal/workbuddy`、`qoder`、`cline` | 各自授权、目录、请求构造和流解析 |
-| `internal/grok` | Build OAuth、原生 Responses、Chat / Messages 转换及会话状态 |
+| `internal/provider` | 通道端口：`Spec` 契约（客户端、能力、探活、目录、账号维护）与注册表；不导入任何通道实现 |
+| `internal/provider/all` | 唯一的通道链接清单；二进制与测试通过空白导入它来注册四个通道 |
+| `internal/workbuddy`、`qoder`、`cline` | 各自授权、目录、请求构造和流解析；`spec.go` 向端口注册本通道 |
+| `internal/grok` | Build OAuth、原生 Responses、Chat / Messages 转换及会话状态；`spec.go` 注册目录与账号维护 |
+| `internal/archtest` | 分层规则测试：端口不依赖实现、通道互不依赖、调用方只经端口访问通道 |
 | `internal/chatwire` | Chat 请求、内容块、工具声明与宽松标量解析 |
 | `internal/responses` | Responses 类型、SSE、标准工具校验、资源、压缩与桥接输出 |
 | `internal/httpclient` / `httpserver` | HTTP 传输、正文限制、超时、错误与流写出 |
@@ -100,8 +102,48 @@ flowchart TD
 
 请求最终结果和上游尝试分别记录。采集失败不会把请求本身改成成功，也不应被页面解释为零流量。监控的采样、窗口、健康及告警边界见 [运维监控](operations.md)。
 
-## 9. 修改入口
+## 9. 分层与通道端口
 
-新增通道不仅需要改目录：还需授权、客户端、能力、错误策略、模型发现、路由、前端注册表和测试。共享线格式修改应落在 chatwire / responses，HTTP 通用逻辑放在 httpclient / httpserver，避免继续扩展 Grok 兼容包装。
+```mermaid
+flowchart TD
+    M[cmd/server 装配] --> E[入口：handler · grok · api · refresh · modelrefresh]
+    M --> L[internal/provider/all 链接清单]
+    E --> P[internal/provider 端口与注册表]
+    L --> I[实现：workbuddy · qoder · cline · grok]
+    I --> P
+    P --> D[store · config · upstream · channel]
+```
+
+依赖方向只能向下。通道是一个完整单元：`internal/channel` 声明它存在（名称、前缀、主题），通道自己的包在 `spec.go` 中用 `provider.Register` 声明它如何工作。`Spec` 的每个字段都是可选能力，调用方必须把 `nil` 视为“无事可做”：
+
+| 字段 | 使用方 | 含义 |
+|---|---|---|
+| `NewClient` | 共享 Handler | 构造推理客户端并交付存储，上游轮换的凭据才能回写；Grok 使用自有 Handler，因此为空 |
+| `Capabilities` | 共享 Handler 的账号选择 | 模型是否支持、是否免费、上下文窗口、是否按模型冷却 |
+| `Probe` | 启动流程 | 无凭据的可达性探测，出口受阻时在启动日志中可见 |
+| `Catalog` | `internal/modelrefresh` | 读取上游目录、投影已存快照、记录观察结果 |
+| `Admin` | `internal/api` | 账号去重标识、表单写入校验、导入校验、输出脱敏、额度展示、凭据校验与登录流程 |
+| `Maintain` | `internal/refresh` | 按通道自身节奏维护单个账号的凭据、目录与额度 |
+
+目录有两种形态，由 `Catalog.Kind` 区分而不是由通道名区分：`CatalogRows` 发布本次观察到的行，读取失败时才回退到已存快照；`CatalogAccountView` 先把观察结果写入账号，再始终发布账号当前保存的视图。`upstreamCatalogSources` 白名单仍是 `internal/modelrefresh` 中的显式常量，不从注册表推导：它是阻止本地目录进入模型管理的独立闸门。
+
+管理端不了解任何通道的凭据字段、端点或额度规则。`internal/api` 拥有 HTTP 面、状态机和响应形状；凭据是什么、存放在哪些字段、哪些字段可以离开服务器，由通道在 `admin.go` 与 `login.go` 中通过 `provider.Admin` 回答。三个浏览器登录共用同一套流程（`api_channel_login.go`），通道只提供 `Start` / `Exchange` / `Build` 三个上游步骤；设备码与通道私有材料保存在 `LoginChallenge` 的服务端部分，不会进入响应。
+
+两处按通道名写死的逻辑是刻意保留的独立闸门，不应改为从注册表推导：`internal/modelrefresh` 的 `upstreamCatalogSources`，以及导出时清除“非本通道凭据字段”的 `redactForeignCredentials`。
+
+`internal/archtest` 在每次测试中检查这些规则，没有例外：只有 `internal/provider/all` 与 `cmd/server` 可以直接导入通道实现。
+
+## 10. 修改入口
+
+新增通道的步骤：
+
+1. 在 `internal/channel` 增加定义，并运行 `go run ./cmd/providerregistry` 重新生成前端注册表。
+2. 新建通道包，实现授权、请求构造与流解析，并在 `spec.go` 中注册 `provider.Spec`。
+3. 在 `internal/provider/all` 增加一行导入。
+4. 在 `internal/modelrefresh` 的 `upstreamCatalogSources` 中加入该通道的目录来源。
+5. 在 `cmd/server/routes.go` 注册登录路由，并在 `redactForeignCredentials` 中加入该通道的凭据字段。
+6. 补充错误策略及测试；`internal/provider` 的测试会检查新通道是否实现了完整的 `Admin`。
+
+启动装配、共享 Handler、刷新调度、模型发现和管理端账号接口都遍历注册表，不需要为新通道修改。共享线格式修改应落在 chatwire / responses，HTTP 通用逻辑放在 httpclient / httpserver，避免继续扩展 Grok 兼容包装。
 
 旧命名迁移涉及模块导入、release 的 ldflags、在线升级产物匹配、服务路径及数据加密域。改展示名不自动授权数据迁移。详见 [部署手册](deployment.md)。

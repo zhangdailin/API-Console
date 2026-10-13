@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"orchids-api/internal/provider"
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
 )
@@ -59,8 +60,11 @@ func TestPersistAccountCatalogSnapshotZeroIDPreservesAutoBehavior(t *testing.T) 
 	testutil.Falsef(t, !reflect.DeepEqual(acc.ClineModelIDs, []string{"m"}) || acc.ClineModelsSyncedAt.IsZero(), "zero-ID automatic snapshot was not mutated: %+v", acc)
 	// Manual discovery keeps its pre-existing zero-ID guard.
 	manual := &store.Account{}
-	persistQoderCatalogSnapshot(context.Background(), nil, manual, nil)
-	persistWorkBuddyCatalogSnapshot(context.Background(), nil, manual, nil)
-	persistClineCatalogSnapshot(context.Background(), nil, manual, nil)
+	for _, channel := range []string{"qoder", "workbuddy", "cline"} {
+		spec, ok := provider.Lookup(channel)
+		testutil.True(t, ok, "channel %q is not registered")
+		observation := provider.Observation{Record: provider.RecordSnapshot([]string{"m"}, spec.Catalog.SetSnapshot)}
+		testutil.NoError(t, persistObservation(context.Background(), nil, manual, observation, time.Now()))
+	}
 	testutil.Falsef(t, !manual.QoderModelsSyncedAt.IsZero() || !manual.WorkBuddyModelsSyncedAt.IsZero() || !manual.ClineModelsSyncedAt.IsZero(), "zero-ID manual discovery mutated the account: %+v", manual)
 }

@@ -1,4 +1,4 @@
-package refresh
+package qoder
 
 import (
 	"context"
@@ -10,11 +10,12 @@ import (
 	"github.com/alicebob/miniredis/v2"
 
 	"orchids-api/internal/config"
+	"orchids-api/internal/provider"
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
 )
 
-func TestRefreshQoderQuotaClearsFalseAgentExhaustion(t *testing.T) {
+func TestRefreshQuotaClearsFalseAgentExhaustion(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
@@ -41,7 +42,7 @@ func TestRefreshQoderQuotaClearsFalseAgentExhaustion(t *testing.T) {
 	}
 	testutil.NoError(t, s.CreateAccount(context.Background(), acc), "CreateAccount() error=%v")
 	cfg := &config.Config{QoderOpenAPIBaseURL: upstream.URL, QoderOAuthBaseURL: upstream.URL, QoderInferenceURL: upstream.URL}
-	refreshQoderQuota(context.Background(), cfg, s, acc)
+	refreshQuota(context.Background(), provider.Env{Config: cfg, Store: s}, acc)
 
 	after, err := s.GetAccount(context.Background(), acc.ID)
 	testutil.NoError(t, err, "GetAccount() error=%v")
@@ -50,11 +51,20 @@ func TestRefreshQoderQuotaClearsFalseAgentExhaustion(t *testing.T) {
 	testutil.Equal(t, after.UsageCurrent, 218)
 }
 
-func TestGrokCLIBillingNeedsSyncUsesSlowCadence(t *testing.T) {
-	now := time.Now()
-	testutil.False(t, grokCLIBillingNeedsSync(&store.Account{GrokBilling: store.GrokBillingSnapshot{SyncedAt: now.Add(-time.Minute)}}, now), "fresh CLI billing was polled on credential tick")
-	testutil.False(t, !grokCLIBillingNeedsSync(&store.Account{GrokBilling: store.GrokBillingSnapshot{SyncedAt: now.Add(-time.Hour)}}, now), "stale CLI billing was not polled")
-}
+// TestProviderClientHoldsTheStoreOnlyWhenGiven pins the reason the port hands
+// the store to the constructor: a client built without it keeps a rotated
+// refresh token in memory only, and the pool then presents a retired one.
+func TestProviderClientHoldsTheStoreOnlyWhenGiven(t *testing.T) {
+	mini := miniredis.RunT(t)
+	s, err := store.New(store.Options{RedisAddr: mini.Addr(), RedisPrefix: "qoder-port:"})
+	testutil.NoError(t, err, "store.New() error = %v")
+	t.Cleanup(func() { _ = s.Close() })
 
-// TestPlanGrokRefreshCycle_SkipsAccountHoldingALease covers the write-back
-// guard: an account already refreshing is merged, never scheduled twice.
+	acc := &store.Account{AccountType: "qoder", QoderAccessToken: "access", QoderRefreshToken: "refresh"}
+	withStore, ok := newProviderClient(acc, &config.Config{}, s).(*Client)
+	testutil.True(t, ok, "the port must return this package's client")
+	testutil.True(t, withStore.accountStore != nil, "a client built with a store must hold it")
+
+	withoutStore := newProviderClient(acc, &config.Config{}, nil).(*Client)
+	testutil.True(t, withoutStore.accountStore == nil, "a nil store must not become a non-nil interface")
+}

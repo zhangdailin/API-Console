@@ -2,7 +2,6 @@ package grok
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"io"
 	"math"
@@ -16,7 +15,6 @@ import (
 
 	"orchids-api/internal/audit"
 	"orchids-api/internal/middleware"
-	"orchids-api/internal/store"
 )
 
 // Quality hold: withhold, retry, then deliver.
@@ -258,6 +256,18 @@ func qualityIsCipherDrool(sig qualityStreamSignals, minOutput int64) bool {
 	return sig.Terminal && sig.VisibleTokens >= minOutput
 }
 
+// The reasons a held turn is withheld. They name the detector that fired, so a
+// journal row says why a turn was refused instead of only that it was.
+const (
+	qualityReasonBurstDump          = "burst_dump"
+	qualityReasonCipherDrool        = "cipher_drool"
+	qualityReasonFakeEncryptedDump  = "fake_encrypted_dump"
+	qualityReasonFastReasoningRatio = "fast_reasoning_ratio_dump"
+	// qualityReasonNoReasoning is an answer with no thinking of any kind for a
+	// request that asked for it.
+	qualityReasonNoReasoning = "no_reasoning"
+)
+
 // classifyQualityHold decides whether a held turn may be released.
 //
 // The dump detectors run first, so plaintext thinking cannot veto a one-shot
@@ -266,24 +276,37 @@ func qualityIsCipherDrool(sig qualityStreamSignals, minOutput int64) bool {
 // until visible text has streamed for two seconds or the turn ends, and a turn
 // with no thinking at all waits for enough visible output.
 func classifyQualityHold(sig qualityStreamSignals, minOutput int64) qualityVerdict {
+	verdict, _ := classifyQualityHoldReason(sig, minOutput)
+	return verdict
+}
+
+// classifyQualityHoldReason is classifyQualityHold together with the detector
+// that produced a withhold. The reason is empty for every other verdict.
+func classifyQualityHoldReason(sig qualityStreamSignals, minOutput int64) (qualityVerdict, string) {
 	if minOutput <= 0 {
 		minOutput = qualityHoldMinOutputDefault
 	}
-	if qualityIsBurstDump(sig) || qualityIsCipherDrool(sig, minOutput) ||
-		qualityIsFakeEncryptedDump(sig) || qualityIsFastReasoningRatioDump(sig) {
-		return qualityWithhold
+	switch {
+	case qualityIsBurstDump(sig):
+		return qualityWithhold, qualityReasonBurstDump
+	case qualityIsCipherDrool(sig, minOutput):
+		return qualityWithhold, qualityReasonCipherDrool
+	case qualityIsFakeEncryptedDump(sig):
+		return qualityWithhold, qualityReasonFakeEncryptedDump
+	case qualityIsFastReasoningRatioDump(sig):
+		return qualityWithhold, qualityReasonFastReasoningRatio
 	}
 	if sig.HasThinking {
 		if sig.HasReasoningDelta {
-			return qualityDeliver
+			return qualityDeliver, ""
 		}
 		if sig.Terminal {
-			return qualityDeliver
+			return qualityDeliver, ""
 		}
 		if sig.VisibleTokens >= minOutput && sig.FirstVisible && sig.VisibleFlushMS >= qualityFakeEncFlushMS {
-			return qualityDeliver
+			return qualityDeliver, ""
 		}
-		return qualityWait
+		return qualityWait, ""
 	}
 	output := sig.VisibleTokens
 	if output <= 0 {
@@ -291,21 +314,21 @@ func classifyQualityHold(sig qualityStreamSignals, minOutput int64) qualityVerdi
 	}
 	enough := output >= minOutput
 	if sig.ReasoningStarted && !sig.Terminal && !sig.HoldExpired {
-		return qualityWait
+		return qualityWait, ""
 	}
 	if sig.Terminal || sig.HoldExpired {
 		if output <= 0 {
-			return qualityWait
+			return qualityWait, ""
 		}
 		if enough {
-			return qualityWithhold
+			return qualityWithhold, qualityReasonNoReasoning
 		}
-		return qualityDeliver
+		return qualityDeliver, ""
 	}
 	if enough {
-		return qualityWithhold
+		return qualityWithhold, qualityReasonNoReasoning
 	}
-	return qualityWait
+	return qualityWait, ""
 }
 
 // decideQualityRetry caps withhold recovery at maxAttempts. The last attempt is
@@ -572,6 +595,9 @@ type parkedResponse struct {
 	header http.Header
 	status int
 	body   []byte
+	// outcome is the accounting of the turn that was parked. It is what gets
+	// journalled and billed if this turn ends up being the one delivered.
+	outcome chatOutcome
 }
 
 // Park removes the held response from the writer without sending it. Later
@@ -639,6 +665,9 @@ type buildQualityHold struct {
 	// expired flips once the hold timeout has passed, which lets the classifier
 	// stop waiting and judge what actually arrived.
 	expired bool
+	// reason names the detector that withheld the turn. It is empty until a
+	// withhold verdict, and is what the journal row reports.
+	reason string
 }
 
 func newBuildQualityHold(w http.ResponseWriter, policy qualityHoldPolicy, outcome *chatOutcome) *buildQualityHold {
@@ -695,7 +724,10 @@ func (c *buildQualityHold) step(terminal bool) (verdict qualityVerdict, waiting 
 		c.expired = true
 	}
 	sig := c.signals(terminal)
-	result := classifyQualityHold(sig, c.policy.MinOutput)
+	result, reason := classifyQualityHoldReason(sig, c.policy.MinOutput)
+	if result == qualityWithhold {
+		c.reason = reason
+	}
 	return result, result == qualityWait
 }
 
@@ -741,43 +773,4 @@ func (h *Handler) shouldHoldQualityTurn(req *chatwire.Request, provider string) 
 		return false
 	}
 	return qualityExpectsReasoning(req, req.ReasoningReplay)
-}
-
-// auditQualityDegraded records a withheld turn.
-//
-// The credential penalty is logged and persisted by the guard, but an operator
-// asking "why did this request take two accounts" needs a request-scoped row. A
-// healthy turn never writes one, so the journal stays quiet in normal operation.
-func (h *Handler) auditQualityDegraded(ctx context.Context, acc *store.Account, req *chatwire.Request, outcome chatOutcome, mode string) {
-	if h == nil || h.auditLogger == nil {
-		return
-	}
-	accountID := int64(0)
-	if acc != nil {
-		accountID = acc.ID
-	}
-	model := ""
-	if req != nil {
-		model = req.Model
-	}
-	usageSource := outcome.UsageSource
-	if usageSource == "" {
-		usageSource = audit.UsageSourceNone
-	}
-	h.auditLogger.Log(ctx, audit.Event{
-		Kind: audit.KindRequest, RequestID: middleware.GetRequestID(ctx), Action: "grok_quality_degraded",
-		APIKeyID: middleware.APIKeyID(ctx), AccountID: accountID, Model: model, Channel: "grok",
-		Provider: ProviderForAccount(acc), Status: "degraded", UsageSource: usageSource,
-		InputTokens:     responses.InterfaceToInt(outcome.Usage["prompt_tokens"]),
-		OutputTokens:    responses.InterfaceToInt(outcome.Usage["completion_tokens"]),
-		ReasoningTokens: int(outcome.Quality.ReasoningTokens),
-		Metadata: map[string]interface{}{
-			"mode":             mode,
-			"visible_chars":    outcome.Quality.VisibleChars,
-			"reasoning_chars":  outcome.Quality.ReasoningChars,
-			"encrypted_chars":  outcome.Quality.EncryptedChars,
-			"first_visible_ms": outcome.Quality.FirstVisibleMS,
-			"withheld":         true,
-		},
-	})
 }

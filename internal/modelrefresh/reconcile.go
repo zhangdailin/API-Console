@@ -7,7 +7,7 @@ import (
 
 	"orchids-api/internal/channel"
 	"orchids-api/internal/config"
-	"orchids-api/internal/grok"
+	"orchids-api/internal/provider"
 	"orchids-api/internal/store"
 	"orchids-api/internal/util"
 )
@@ -97,6 +97,12 @@ func applyModelRefreshWithPrune(ctx context.Context, s *store.Store, channel str
 	defaultModelID := chooseRefreshedDefaultModel(channel, existingByID, candidates)
 	result.DefaultModelID = defaultModelID
 
+	// The channel's catalog port says how its rows are shaped and scoped. A
+	// channel without one publishes plain rows.
+	var catalog *provider.Catalog
+	if spec, ok := provider.Lookup(channel); ok {
+		catalog = spec.Catalog
+	}
 	records := make([]*store.Model, 0, len(candidates))
 	for _, model := range candidates {
 		record := &store.Model{
@@ -106,23 +112,17 @@ func applyModelRefreshWithPrune(ctx context.Context, s *store.Store, channel str
 			BillingTier: strings.ToLower(strings.TrimSpace(model.BillingTier)), BillingSource: strings.ToLower(strings.TrimSpace(model.BillingSource)),
 			Origin: "discovery",
 		}
-		if strings.EqualFold(strings.TrimSpace(channel), "grok") {
-			store.ApplyGrokRouteDefaults(record)
-			record.Provider, record.UpstreamModel = grok.ProviderBuild, model.ID
-			if strings.Contains(strings.ToLower(model.ID), "video") {
-				record.Capabilities = []string{store.CapabilityVideo}
-			} else {
-				record.Capabilities = []string{store.CapabilityChat, store.CapabilityMessages, store.CapabilityResponses}
-			}
+		if catalog != nil && catalog.ShapeRecord != nil {
+			catalog.ShapeRecord(record)
 		}
 		records = append(records, record)
 	}
 	reconcileOptions := store.ModelReconcileOptions{
 		Prune: allowPrune && shouldDeleteMissingModelsOnRefresh(channel, source),
 	}
-	if strings.EqualFold(strings.TrimSpace(channel), "grok") && source == "grok_build_models" && allowPrune {
+	if catalog != nil && catalog.ProviderScope != "" && source == catalog.Source && allowPrune {
 		reconcileOptions.Prune = true
-		reconcileOptions.ProviderScope = grok.ProviderBuild
+		reconcileOptions.ProviderScope = catalog.ProviderScope
 	}
 	applied, err := s.ReconcileDiscoveredModels(ctx, channel, records, reconcileOptions)
 	if err != nil {

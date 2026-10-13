@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"orchids-api/internal/channel"
 	"orchids-api/internal/config"
+	"orchids-api/internal/provider"
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
 	"orchids-api/internal/workbuddy"
@@ -71,20 +73,45 @@ func testJWT(uid, email string) string {
 	return header + "." + payload + ".signature"
 }
 
+// stubWorkBuddyLoginClient points the WorkBuddy login flow at a stub upstream.
+// Only the login is redirected: the API's own configuration is left alone, as
+// it would be for an operator who never set a base URL.
 func stubWorkBuddyLoginClient(t *testing.T, baseURL string) {
 	t.Helper()
-	newWorkBuddyLoginClientMu.Lock()
-	previous := newWorkBuddyLoginClient
-	newWorkBuddyLoginClient = func(acc *store.Account, cfg *config.Config) *workbuddy.Client {
-		configured := *cfg
+	registered := registeredLoginFlow(channel.WorkBuddy)
+	testutil.True(t, registered != nil, "WorkBuddy must register a login flow")
+	redirect := func(cfg *config.Config) *config.Config {
+		configured := config.Config{}
+		if cfg != nil {
+			configured = *cfg
+		}
 		configured.WorkBuddyBaseURL = baseURL
-		return workbuddy.NewFromAccount(acc, &configured)
+		return &configured
 	}
-	newWorkBuddyLoginClientMu.Unlock()
+	stub := *registered
+	stub.Start = func(ctx context.Context, cfg *config.Config) (provider.LoginChallenge, error) {
+		return registered.Start(ctx, redirect(cfg))
+	}
+	stub.Exchange = func(ctx context.Context, cfg *config.Config, challenge provider.LoginChallenge) (provider.LoginGrant, error) {
+		return registered.Exchange(ctx, redirect(cfg), challenge)
+	}
+	stub.Build = func(ctx context.Context, cfg *config.Config, loginID string, challenge provider.LoginChallenge, grant provider.LoginGrant) (*store.Account, error) {
+		return registered.Build(ctx, redirect(cfg), loginID, challenge, grant)
+	}
+
+	resolveLoginFlowMu.Lock()
+	previous := resolveLoginFlow
+	resolveLoginFlow = func(id channel.ID) *provider.Login {
+		if id == channel.WorkBuddy {
+			return &stub
+		}
+		return previous(id)
+	}
+	resolveLoginFlowMu.Unlock()
 	t.Cleanup(func() {
-		newWorkBuddyLoginClientMu.Lock()
-		newWorkBuddyLoginClient = previous
-		newWorkBuddyLoginClientMu.Unlock()
+		resolveLoginFlowMu.Lock()
+		resolveLoginFlow = previous
+		resolveLoginFlowMu.Unlock()
 	})
 }
 
@@ -217,7 +244,7 @@ func TestHandleWorkBuddyLogin_StartReturnsOfficialLoginURL(t *testing.T) {
 	testutil.Equal(t, parsed.Host, "www.workbuddy.ai")
 	testutil.Equal(t, parsed.Path, "/login")
 	testutil.Equal(t, parsed.Query().Get("state"), "state-123")
-	testutil.Equal(t, parsed.Query().Get("version"), workbuddyClientVersion)
+	testutil.Equal(t, parsed.Query().Get("version"), workbuddy.LoginClientVersion)
 
 	// The pending transaction must be pollable. The upstream state is part of
 	// the official login URL the browser needs, but the transport-level fields

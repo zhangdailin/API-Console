@@ -20,23 +20,12 @@ func normalizedAccountCredentialKey(acc *store.Account) string {
 	if acc == nil {
 		return ""
 	}
-
-	accountType := strings.ToLower(strings.TrimSpace(acc.AccountType))
-	var token string
-
-	switch accountType {
-	case "grok":
-		token = strings.TrimSpace(util.FirstNonEmpty(acc.OAuthRefreshToken, acc.OAuthAccessToken))
-	case "workbuddy":
-		return WorkBuddyCredentialKey(acc)
-	case "qoder":
-		return QoderCredentialKey(acc)
-	case "cline":
-		return ClineCredentialKey(acc)
-	default:
-		token = strings.TrimSpace(util.FirstNonEmpty(acc.RefreshToken, acc.ClientCookie, acc.Token))
+	if admin := adminFor(acc.AccountType); admin != nil && admin.CredentialKey != nil {
+		return admin.CredentialKey(acc)
 	}
 
+	accountType := strings.ToLower(strings.TrimSpace(acc.AccountType))
+	token := strings.TrimSpace(util.FirstNonEmpty(acc.RefreshToken, acc.ClientCookie, acc.Token))
 	if token == "" || accountType == "" {
 		return ""
 	}
@@ -112,39 +101,16 @@ func (a *API) saveNewAccountUnlessDuplicate(ctx context.Context, acc *store.Acco
 	return existing, err
 }
 
-// stableProviderIdentityKey survives OAuth token rotation. WorkBuddy and Qoder
-// issue a new durable token during a fresh login, so token-only deduplication
-// would create a second row for the same upstream user and leave the old row
-// holding a consumed refresh token.
+// stableProviderIdentityKey survives OAuth token rotation. A channel issues a
+// new durable token during a fresh login, so token-only deduplication would
+// create a second row for the same upstream user and leave the old row holding
+// a consumed refresh token.
 func stableProviderIdentityKey(acc *store.Account) string {
 	if acc == nil {
 		return ""
 	}
-	switch strings.ToLower(strings.TrimSpace(acc.AccountType)) {
-	case "grok":
-		if grokAccountIsOAuth(acc) {
-			if userID := strings.TrimSpace(acc.UserID); userID != "" {
-				return "grok:oauth:user:" + userID
-			}
-			if email := strings.ToLower(strings.TrimSpace(acc.Email)); email != "" {
-				return "grok:oauth:email:" + email
-			}
-		}
-	case "workbuddy":
-		if uid := strings.TrimSpace(acc.WorkBuddyUID); uid != "" {
-			return "workbuddy:uid:" + uid
-		}
-	case "qoder":
-		if uid := strings.TrimSpace(acc.QoderUserID); uid != "" {
-			return "qoder:uid:" + uid
-		}
-		if machineID := strings.TrimSpace(acc.QoderMachineID); machineID != "" {
-			return "qoder:machine:" + machineID
-		}
-	case "cline":
-		if email := strings.ToLower(strings.TrimSpace(acc.ClineEmail)); email != "" {
-			return "cline:email:" + email
-		}
+	if admin := adminFor(acc.AccountType); admin != nil && admin.IdentityKey != nil {
+		return admin.IdentityKey(acc)
 	}
 	return ""
 }

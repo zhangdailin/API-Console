@@ -25,6 +25,7 @@ import (
 	"orchids-api/internal/logutil"
 	"orchids-api/internal/middleware"
 	"orchids-api/internal/prompt"
+	"orchids-api/internal/provider"
 	"orchids-api/internal/store"
 	"orchids-api/internal/upstream"
 	"orchids-api/internal/util"
@@ -76,9 +77,9 @@ type Handler struct {
 	statsClosed    bool
 }
 
-type UpstreamClient interface {
-	SendRequestWithPayload(ctx context.Context, req upstream.UpstreamRequest, onMessage func(upstream.SSEMessage), logger *debug.Logger) error
-}
+// UpstreamClient is the inference contract a channel implements. It is declared
+// by the channel port; the alias keeps the pipeline's own name for it.
+type UpstreamClient = provider.Client
 
 type ClaudeRequest struct {
 	MaxTokens           *int                   `json:"max_tokens,omitempty"`

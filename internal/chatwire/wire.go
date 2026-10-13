@@ -11,8 +11,6 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
-
-	"orchids-api/internal/store"
 )
 
 // Request is the OpenAI Chat Completions request body.
@@ -55,8 +53,6 @@ type Request struct {
 	// "messages", "responses"). Several planes behave differently per entrance,
 	// and it is carried on the request rather than derived again later.
 	SourceOperation string `json:"-"`
-	// Account is the pooled credential the request was dispatched to.
-	Account *store.Account `json:"-"`
 }
 
 type Message struct {

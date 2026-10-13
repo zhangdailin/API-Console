@@ -3,59 +3,18 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
-	"orchids-api/internal/cline"
-	"orchids-api/internal/config"
 	apperrors "orchids-api/internal/errors"
-	"orchids-api/internal/grok"
-	"orchids-api/internal/modelcatalog"
-	"orchids-api/internal/qoder"
+	"orchids-api/internal/provider"
 	"orchids-api/internal/refreshqueue"
 	"orchids-api/internal/store"
 	"orchids-api/internal/util"
 )
-
-func verifyGrokAccount(ctx context.Context, acc *store.Account, cfg *config.Config, accountStore *store.Store) error {
-	if acc == nil {
-		return fmt.Errorf("missing grok account")
-	}
-	// Build CLI OAuth accounts verify against the CLI proxy with a Bearer token.
-	if grokAccountIsOAuth(acc) {
-		if !grokAccountHasOAuthCredentials(acc) {
-			return fmt.Errorf("missing oauth token")
-		}
-		cliClient := grok.NewCLIClient(cfg)
-		cliClient.SetAccountStore(accountStore)
-		result := grok.RefreshBuildAccount(ctx, cliClient, acc, grok.BuildRefreshOptions{
-			Verify: true, VerifyTimeout: 20 * time.Second,
-			Billing: true,
-			Models:  true, ModelsTimeout: 15 * time.Second,
-		})
-		if result.VerifyErr != nil {
-			if result.VerifyStatus != "" {
-				return fmt.Errorf("%s: %w", result.VerifyStatus, result.VerifyErr)
-			}
-			return result.VerifyErr
-		}
-		if result.BillingErr != nil {
-			slog.Warn("Grok CLI billing sync failed; leaving quota unavailable", "account_id", acc.ID, "error", result.BillingErr)
-		}
-		if result.ModelsErr != nil {
-			slog.Warn("Grok CLI model catalog sync failed; keeping last catalog", "account_id", acc.ID, "error", result.ModelsErr)
-		}
-		return nil
-	}
-
-	// The website cookie plane was retired: only Build OAuth
-	// credentials can be verified now.
-	return fmt.Errorf("only Grok Build OAuth accounts are supported")
-}
 
 func httpStatusFromAccountStatus(status string) int {
 	switch strings.TrimSpace(status) {
@@ -74,104 +33,12 @@ func httpStatusFromAccountStatus(status string) int {
 	}
 }
 
-func normalizeGrokTokenInput(acc *store.Account) {
-	if acc == nil || !strings.EqualFold(acc.AccountType, "grok") {
-		return
-	}
-	acc.CredentialType = "oauth"
-	acc.GrokProvider = grok.ProviderBuild
-	acc.OAuthAccessToken = strings.TrimSpace(acc.OAuthAccessToken)
-	acc.OAuthRefreshToken = strings.TrimSpace(acc.OAuthRefreshToken)
-	// Non-Build Grok credentials must never survive an account write.
-	acc.Token = ""
-	acc.ClientCookie = ""
-	acc.RefreshToken = ""
-}
-
-// grokAccountIsOAuth reports whether a Grok account is a Build CLI OAuth account.
-func grokAccountIsOAuth(acc *store.Account) bool {
-	return acc != nil && strings.EqualFold(strings.TrimSpace(acc.CredentialType), "oauth")
-}
-
-// grokAccountHasOAuthCredentials reports whether an OAuth account carries at
-// least one usable token after normalization.
-func grokAccountHasOAuthCredentials(acc *store.Account) bool {
-	if !grokAccountIsOAuth(acc) {
-		return false
-	}
-	return strings.TrimSpace(acc.OAuthAccessToken) != "" || strings.TrimSpace(acc.OAuthRefreshToken) != ""
-}
-
-// preserveGrokOAuthCredentials keeps existing OAuth secrets when the admin UI
-// submits empty fields (secrets are redacted on read and therefore absent on
-// ordinary edit/save).
-func preserveGrokOAuthCredentials(acc, existing *store.Account) {
-	if acc == nil || existing == nil || !grokAccountIsOAuth(acc) {
-		return
-	}
-	if strings.TrimSpace(acc.OAuthAccessToken) == "" {
-		acc.OAuthAccessToken = existing.OAuthAccessToken
-	}
-	if strings.TrimSpace(acc.OAuthRefreshToken) == "" {
-		acc.OAuthRefreshToken = existing.OAuthRefreshToken
-	}
-	if acc.OAuthExpiresAt.IsZero() && !existing.OAuthExpiresAt.IsZero() {
-		acc.OAuthExpiresAt = existing.OAuthExpiresAt
-	}
-	if strings.TrimSpace(acc.TeamID) == "" {
-		acc.TeamID = existing.TeamID
-	}
-}
-
-// preserveGrokRuntimeStateOnAdminEdit keeps provider-observed Build state out of
-// the generic account edit surface. OAuth secrets are preserved separately.
-func preserveGrokRuntimeStateOnAdminEdit(acc, existing *store.Account) {
-	if acc == nil || existing == nil || !strings.EqualFold(acc.AccountType, "grok") {
-		return
-	}
-	acc.Token = existing.Token
-	acc.Subscription = existing.Subscription
-	acc.UsageCurrent = existing.UsageCurrent
-	acc.UsageTotal = existing.UsageTotal
-	acc.UsageLimit = existing.UsageLimit
-	acc.StatusCode = existing.StatusCode
-	acc.StatusMessage = existing.StatusMessage
-	acc.LastAttempt = existing.LastAttempt
-	acc.VerifiedAt = existing.VerifiedAt
-	acc.QuotaResetAt = existing.QuotaResetAt
-	acc.GrokModels = append([]string(nil), existing.GrokModels...)
-	acc.GrokModelCatalog = modelcatalog.CloneProfiles(existing.GrokModelCatalog)
-	acc.GrokModelsSyncedAt = existing.GrokModelsSyncedAt
-	acc.GrokBilling = existing.GrokBilling
-	acc.GrokRateLimits = existing.GrokRateLimits
-}
-
 func buildQuotaResponseFields(acc *store.Account) map[string]interface{} {
 	return buildQuotaResponseFieldsWithUsage(acc, 0, false)
 }
 
-// applyQuotaProvenance records where a quota number came from and how far it should
-// be trusted, next to the number itself.
-//
-// Without it a table can only say "unknown", which conflates three different facts — a
-// paid account whose numeric window upstream does not publish, a Free account whose
-// window has to be estimated, and an account that was never synced. quota_type is
-// paid/free/unknown, quota_source names the signal, quota_confidence is
-// confirmed/observed/estimated, and quota_limit_known is false whenever the limit is
-// an estimate that the upstream has not confirmed.
-func applyQuotaProvenance(fields map[string]interface{}, quotaType, source, confidence, note string, limitKnown, observed bool) {
-	fields["quota_type"] = quotaType
-	fields["quota_source"] = source
-	fields["quota_confidence"] = confidence
-	fields["quota_limit_known"] = limitKnown
-	fields["quota_observed"] = observed
-	if note != "" {
-		fields["quota_note"] = note
-	}
-}
-
 // buildQuotaResponseFieldsWithUsage projects an account's allowance. observedTokens
-// is the usage this gateway measured inside grok.FreeBuildUsageWindow and
+// is the usage this gateway measured inside observedUsageWindow and
 // usageObserved says whether that measurement actually ran; both are used only by the
 // Free estimate, which must never present unmeasured usage as if it were measured.
 func buildQuotaResponseFieldsWithUsage(acc *store.Account, observedTokens int64, usageObserved bool) map[string]interface{} {
@@ -183,7 +50,7 @@ func buildQuotaResponseFieldsWithUsage(acc *store.Account, observedTokens int64,
 		"quota_unit":      "credits",
 		"quota_supported": true,
 	}
-	applyQuotaProvenance(fields, "unknown", "unknown", "", "", false, false)
+	provider.QuotaProvenance(fields, "unknown", "unknown", "", "", false, false)
 	if acc == nil {
 		return fields
 	}
@@ -217,7 +84,7 @@ func (a *API) HandleAccounts(w http.ResponseWriter, r *http.Request) {
 		// is nothing to describe.
 		var observed map[int64]int64
 		if len(accounts) > 0 {
-			if measured, ok := a.observedTokensByAccount(r.Context(), time.Now().Add(-grok.FreeBuildUsageWindow)); ok {
+			if measured, ok := a.observedTokensByAccount(r.Context(), time.Now().Add(-observedUsageWindow())); ok {
 				observed = measured
 			}
 		}
@@ -240,31 +107,13 @@ func (a *API) HandleAccounts(w http.ResponseWriter, r *http.Request) {
 		if !validateAccountType(w, acc.AccountType) {
 			return
 		}
-		if strings.EqualFold(acc.AccountType, "grok") {
-			normalizeGrokTokenInput(&acc)
-			if !grokAccountIsOAuth(&acc) {
-				http.Error(w, "Grok accounts must be added through the Build OAuth device login (/api/grok/device-auth)", http.StatusBadRequest)
+		// The channel decides what a submitted account must carry, and whether
+		// it can be created from the form at all.
+		if admin := adminFor(acc.AccountType); admin != nil && admin.PrepareCreate != nil {
+			if err := admin.PrepareCreate(&acc); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			if grokAccountIsOAuth(&acc) && !grokAccountHasOAuthCredentials(&acc) {
-				http.Error(w, "missing oauth token", http.StatusBadRequest)
-				return
-			}
-		} else if strings.EqualFold(acc.AccountType, "workbuddy") {
-			if !NormalizeWorkBuddyCredentials(&acc) {
-				http.Error(w, "missing WorkBuddy credential: paste the access token or refresh token from the WorkBuddy desktop session", http.StatusBadRequest)
-				return
-			}
-		} else if strings.EqualFold(acc.AccountType, "qoder") {
-			// Qoder is OAuth-only: an account is created by the browser device
-			// flow (/api/qoder/login), never by pasting a personal access token.
-			http.Error(w, "Qoder accounts must be added using the official browser login (/api/qoder/login)", http.StatusBadRequest)
-			return
-		} else if strings.EqualFold(acc.AccountType, "cline") {
-			// Cline is OAuth-only for the same reason: the WorkOS device grant is
-			// the only way to obtain the credential.
-			http.Error(w, "Cline accounts must be added using the official browser login (/api/cline/login)", http.StatusBadRequest)
-			return
 		}
 		if existing, err := a.findDuplicateAccountByCredential(r.Context(), &acc, 0); err != nil {
 			slog.Error("Failed to detect duplicate account token", "error", err)
@@ -492,69 +341,13 @@ func (a *API) HandleAccountByID(w http.ResponseWriter, r *http.Request) {
 		if !validateAccountType(w, acc.AccountType) {
 			return
 		}
-		if strings.EqualFold(acc.AccountType, "grok") {
-			normalizeGrokTokenInput(&acc)
-			// Admin UI redacts OAuth secrets on read; empty inbound fields mean
-			// "keep existing", not "clear credentials".
-			preserveGrokOAuthCredentials(&acc, existing)
-			preserveGrokRuntimeStateOnAdminEdit(&acc, existing)
-			if grokAccountIsOAuth(&acc) && !grokAccountHasOAuthCredentials(&acc) {
-				http.Error(w, "missing oauth token", http.StatusBadRequest)
+		// Secrets are redacted on read, so an ordinary edit arrives without
+		// them. The channel restores what the form could not have sent and marks
+		// a credential that was actually replaced.
+		if admin := adminFor(acc.AccountType); admin != nil && admin.PrepareUpdate != nil {
+			if err := admin.PrepareUpdate(&acc, existing); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
-			}
-		} else if strings.EqualFold(acc.AccountType, "workbuddy") {
-			// The read path redacts the refresh token, so an ordinary edit
-			// arrives without it; keep the stored credential unless a new one
-			// was actually submitted.
-			submitted := resolveWorkBuddyCredentials(&acc)
-			PreserveWorkBuddyCredentialsOnEdit(&acc, existing)
-			if resolveWorkBuddyCredentials(&acc).RefreshToken == "" && resolveWorkBuddyCredentials(&acc).AccessToken == "" {
-				http.Error(w, "missing WorkBuddy credential", http.StatusBadRequest)
-				return
-			}
-			NormalizeWorkBuddyCredentials(&acc)
-			existingCreds := resolveWorkBuddyCredentials(existing)
-			acc.ReplaceWorkBuddyCredentials = submitted.HasCredential() &&
-				(submitted.AccessToken != existingCreds.AccessToken || submitted.RefreshToken != existingCreds.RefreshToken)
-			if acc.ReplaceWorkBuddyCredentials {
-				acc.ClearVerifiedAt = true
-			}
-		} else if strings.EqualFold(acc.AccountType, "qoder") {
-			submitted := qoder.ResolveCredentials(&acc)
-			submittedMachineID := strings.TrimSpace(acc.QoderMachineID)
-			PreserveQoderCredentialsOnEdit(&acc, existing)
-			if !NormalizeQoderCredentials(&acc) {
-				http.Error(w, "missing Qoder credential: sign in again with the browser login", http.StatusBadRequest)
-				return
-			}
-			if strings.TrimSpace(acc.QoderMachineID) == "" {
-				http.Error(w, "missing Qoder device identity: sign in again", http.StatusBadRequest)
-				return
-			}
-			existingCreds := qoder.ResolveCredentials(existing)
-			acc.ReplaceQoderCredentials = submitted.HasCredential() &&
-				(submitted.AccessToken != existingCreds.AccessToken ||
-					submitted.RefreshToken != existingCreds.RefreshToken ||
-					(submittedMachineID != "" && submittedMachineID != strings.TrimSpace(existing.QoderMachineID)))
-			if acc.ReplaceQoderCredentials {
-				acc.ClearVerifiedAt = true
-			}
-		} else if strings.EqualFold(acc.AccountType, "cline") {
-			// The read path redacts the refresh token, so an ordinary edit
-			// arrives without it; keep the stored credential unless a new one
-			// was actually submitted.
-			submitted := cline.ResolveCredentials(&acc)
-			PreserveClineCredentialsOnEdit(&acc, existing)
-			if !NormalizeClineCredentials(&acc) {
-				http.Error(w, "missing Cline credential: sign in again with the browser login", http.StatusBadRequest)
-				return
-			}
-			existingCreds := cline.ResolveCredentials(existing)
-			acc.ReplaceClineCredentials = submitted.HasCredential() &&
-				(submitted.AccessToken != existingCreds.AccessToken ||
-					submitted.RefreshToken != existingCreds.RefreshToken)
-			if acc.ReplaceClineCredentials {
-				acc.ClearVerifiedAt = true
 			}
 		}
 

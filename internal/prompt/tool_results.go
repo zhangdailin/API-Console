@@ -1,12 +1,9 @@
-package util
+package prompt
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
-
-	"encoding/json"
-
-	"orchids-api/internal/prompt"
 )
 
 // StringifyToolResult renders a tool result the way every provider's message
@@ -19,7 +16,7 @@ func StringifyToolResult(value interface{}) string {
 		return ""
 	case string:
 		return typed
-	case []prompt.ContentBlock:
+	case []ContentBlock:
 		parts := make([]string, 0, len(typed))
 		for _, block := range typed {
 			if block.Type == "text" && strings.TrimSpace(block.Text) != "" {

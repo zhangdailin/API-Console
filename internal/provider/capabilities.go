@@ -1,10 +1,6 @@
 package provider
 
-import (
-	"strings"
-
-	"orchids-api/internal/store"
-)
+import "orchids-api/internal/store"
 
 // Capabilities is what the shared inference pipeline needs to know about a
 // channel's catalog. It exists so internal/handler can ask a channel whether a
@@ -24,24 +20,15 @@ type Capabilities interface {
 	HonorsModelCooldown() bool
 }
 
-// capabilities maps an account type to its channel capabilities. Grok is absent
-// on purpose: it has its own handler and never goes through this seam.
-var capabilities = map[string]Capabilities{}
-
-// RegisterCapabilities publishes the capability set one provider implements.
-// Each provider calls it from an init-like registration so this package — which
-// every provider already feeds — stays the single place the mapping lives.
-func RegisterCapabilities(accountType string, caps Capabilities) {
-	if caps == nil {
-		return
-	}
-	capabilities[strings.ToLower(strings.TrimSpace(accountType))] = caps
-}
-
-// CapabilitiesFor returns the capability set for an account type, or nil when
-// the channel has not registered one.
+// CapabilitiesFor returns the capability set a channel registered, or nil when
+// it registered none. Grok registers none on purpose: it has its own handler
+// and never asks these questions through this seam.
 func CapabilitiesFor(accountType string) Capabilities {
-	return capabilities[strings.ToLower(strings.TrimSpace(accountType))]
+	spec, ok := Lookup(accountType)
+	if !ok {
+		return nil
+	}
+	return spec.Capabilities
 }
 
 // SupportsModel reports whether the channel advertises the model for the

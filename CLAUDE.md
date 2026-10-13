@@ -62,7 +62,9 @@ internal/httpclient   HTTP transport: proxies, client pool, browser fingerprint
 internal/handler  shared pipeline for WorkBuddy / Qoder / Cline
 internal/grok     Grok Build native Messages / Chat Completions / Responses
 internal/channel  provider identity, prefixes, metadata (single source of truth)
-internal/provider     provider client construction and channel capabilities
+internal/provider     channel port: the Spec contract and registry (imports no channel)
+internal/provider/all the one list of channel imports; link it to register all four
+internal/archtest     tests that enforce the package layering
 internal/modelrefresh model directory discovery and reconciliation
 internal/refresh      scheduled credential and quota refresh
 internal/alerting     alert rules, evaluation, snapshot assembly
@@ -85,8 +87,22 @@ Only Grok speaks Responses natively. The other three channels expose only
 in `docs/coding-protocol-capabilities.md`.
 
 Upstream calls go through one interface
-(`internal/handler.UpstreamClient.SendRequestWithPayload`) with a callback that
-emits SSE events. Shared streaming emitters live in `internal/upstream/emit.go`.
+(`internal/provider.Client.SendRequestWithPayload`, aliased as
+`handler.UpstreamClient`) with a callback that emits SSE events. Shared
+streaming emitters live in `internal/upstream/emit.go`.
+
+A channel is one `provider.Spec`, registered from the `spec.go` of its own
+package: client construction, catalog capabilities, startup probe, catalog read,
+account maintenance and the admin facet (`admin.go`, `login.go`). Startup, the
+shared handler, the refresh scheduler, model discovery and the management API
+iterate the registry. Do not switch on a channel name in a consumer and do not
+import a channel package from one — add a `Spec` field instead.
+`internal/archtest` fails the build of that mistake: only
+`internal/provider/all` and `cmd/server` may import a channel.
+
+`internal/api` owns the HTTP surface, the state machines and the response
+shape. What a credential is, which fields hold it and which may leave the
+server is answered by the channel through `provider.Admin`.
 
 ## Invariants — do not weaken these
 
@@ -101,7 +117,10 @@ These are load-bearing. A change that "simplifies" any of them is a bug.
 2. **Credentials never reach clients or logs.** Not in error bodies, not in
    admin responses, not in logs or diagnostics. Redaction is enforced by
    `internal/errors` public messages, `audit.Redact` and the
-   `attempt_diagnostics` scrubber.
+   `attempt_diagnostics` scrubber. Account responses are stripped twice on
+   purpose: the channel's `Admin.Project`, then the key deletion in
+   `accountOutput.MarshalJSON`. Export uses `redactForeignCredentials`, which
+   names every channel's fields explicitly and must stay that way.
 3. **The credential encryption key is data.** `data/credential.key` (or
    `ORCHIDS_CREDENTIAL_ENCRYPTION_KEY`) must be backed up together with Redis;
    losing it makes stored credentials undecryptable. It is never written to
@@ -129,7 +148,8 @@ These are load-bearing. A change that "simplifies" any of them is a bug.
   benchmark.
 - Reuse the existing abstractions instead of adding a parallel one:
   `internal/upstream/emit.go`, `internal/api/device_login_registry.go` (generic),
-  `internal/api/quota_projection.go` and `account_refresh.go` (map dispatch),
+  `internal/api/api_channel_login.go` (one login flow for every channel),
+  `provider.Admin` (per-channel verification, quota projection, redaction),
   `internal/util/snapshot.go`, `internal/util/http_body.go`.
 - Real-upstream verification records are local operational material and must not
   be committed. `docs/verification/` is ignored by Git. Local mocks

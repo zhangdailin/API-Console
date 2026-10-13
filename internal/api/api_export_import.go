@@ -53,31 +53,11 @@ func (a *API) HandleExport(w http.ResponseWriter, r *http.Request) {
 func normalizePortableAccount(acc *store.Account) string {
 	acc.AccountType = strings.ToLower(strings.TrimSpace(acc.AccountType))
 	defer func() { acc.Token = ""; acc.RefreshToken = ""; acc.ClientCookie = "" }()
-	switch acc.AccountType {
-	case "workbuddy":
-		if !NormalizeWorkBuddyCredentials(acc) || strings.TrimSpace(acc.WorkBuddyRefreshToken) == "" {
-			return "missing_refresh_token"
-		}
-	case "qoder":
-		if !NormalizeQoderCredentials(acc) || strings.TrimSpace(acc.QoderRefreshToken) == "" {
-			return "missing_refresh_token"
-		}
-		if strings.TrimSpace(acc.QoderMachineID) == "" {
-			return "missing_device_identity"
-		}
-	case "cline":
-		if !NormalizeClineCredentials(acc) || strings.TrimSpace(acc.ClineRefreshToken) == "" {
-			return "missing_refresh_token"
-		}
-	case "grok":
-		normalizeGrokTokenInput(acc)
-		if strings.TrimSpace(acc.OAuthRefreshToken) == "" {
-			return "missing_refresh_token"
-		}
-	default:
+	admin := adminFor(acc.AccountType)
+	if admin == nil || admin.PrepareImport == nil {
 		return "unsupported_channel"
 	}
-	return ""
+	return admin.PrepareImport(acc)
 }
 
 // redactForeignCredentials clears the credential fields of channels other than
@@ -88,7 +68,7 @@ func normalizePortableAccount(acc *store.Account) string {
 // export marshals the stored record instead of going through that marshaler, so
 // it needs the same guarantee expressed as data. It matters because a legacy row
 // can hold a value in a slot its own channel never writes — the reason
-// RedactQoderOutput clears the generic slots at all — and without this the export
+// a channel's output projection clears the generic slots at all — and without this the export
 // would publish it.
 //
 // Generic credential slots are cleared before this function is called.
@@ -99,7 +79,7 @@ func redactForeignCredentials(acc *store.Account) {
 	channel := strings.ToLower(strings.TrimSpace(acc.AccountType))
 	// Grok's OAuth pair is restored above for an OAuth account specifically, so
 	// an SSO row is treated like any other row that has no claim to it.
-	if !(channel == "grok" && grokAccountIsOAuth(acc)) {
+	if !(channel == "grok" && strings.EqualFold(strings.TrimSpace(acc.CredentialType), "oauth")) {
 		acc.OAuthAccessToken = ""
 		acc.OAuthRefreshToken = ""
 		acc.OAuthExpiresAt = time.Time{}

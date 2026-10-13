@@ -14,6 +14,7 @@ import (
 
 	"orchids-api/internal/config"
 	apperrors "orchids-api/internal/errors"
+	"orchids-api/internal/qoder"
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
 )
@@ -148,7 +149,7 @@ func TestHandleQoderLogin_CancelStopsBlockedPollAndDoesNotPersist(t *testing.T) 
 	testutil.Falsef(t, err != nil || response.ID == "", "start response = %q", start.Body.String())
 	// Speed up only this transaction; production keeps the normal two-second
 	// cadence.
-	a.qoderLogins.update(response.ID, func(login *qoderLoginTransaction) { login.interval = time.Millisecond })
+	a.qoderLogins.update(response.ID, func(login *browserLogin) { login.interval = time.Millisecond })
 
 	select {
 	case <-pollStarted:
@@ -185,7 +186,7 @@ func TestHandleQoderLogin_PreservesDisabledPreference(t *testing.T) {
 	}
 	err := json.Unmarshal(start.Body.Bytes(), &response)
 	testutil.Falsef(t, err != nil || response.ID == "", "start response = %q", start.Body.String())
-	a.qoderLogins.update(response.ID, func(login *qoderLoginTransaction) { login.interval = time.Millisecond })
+	a.qoderLogins.update(response.ID, func(login *browserLogin) { login.interval = time.Millisecond })
 
 	deadline := time.Now().Add(5 * time.Second)
 	var final deviceLoginResponse
@@ -257,7 +258,7 @@ func TestHandleQoderLogin_CompletesAndPersistsAccount(t *testing.T) {
 
 	// The account response must never carry the durable credential or the
 	// derived runtime material.
-	redacted := RedactQoderOutput(acc)
+	redacted := qoder.RedactOutput(acc)
 	testutil.False(t, redacted.QoderRefreshToken != "" || redacted.QoderRuntimeKey != "", "RedactQoderOutput left a secret in place")
 	testutil.NotEqual(t, redacted.QoderAccessToken, "")
 }
@@ -444,7 +445,7 @@ func TestVerifyQoderAccountDoesNotReportForbidden(t *testing.T) {
 		QoderOpenAPIBaseURL: upstream.URL,
 		QoderInferenceURL:   upstream.URL,
 	}
-	status, httpStatus, err := verifyQoderAccountWithStore(t.Context(), acc, cfg, s)
+	status, httpStatus, err := qoder.VerifyAccount(t.Context(), acc, cfg, s)
 	testutil.NoError(t, err, "verifyQoderAccount() error = %v, want success")
 	testutil.Equal(t, status, "")
 	testutil.Equal(t, httpStatus, 0)

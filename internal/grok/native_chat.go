@@ -16,6 +16,7 @@ import (
 
 	"orchids-api/internal/audit"
 	"orchids-api/internal/debug"
+	"orchids-api/internal/store"
 	"orchids-api/internal/util"
 )
 
@@ -364,7 +365,10 @@ func consoleUsage(v map[string]interface{}) map[string]interface{} {
 // nothing reached the client, and the caller may retry it on another account. The
 // parked body is returned so the last attempt can still be delivered when the
 // retry budget runs out (the default fail-open policy).
-func (h *Handler) finishUpstreamChat(ctx context.Context, w http.ResponseWriter, req *chatwire.Request, sess *chatAccountSession, logger *debug.Logger, name, url string, headers func() http.Header, payload map[string]interface{}, resp *http.Response, err error) (*parkedResponse, bool) {
+//
+// qualityAttempt is the 1-based position of this attempt among the request's
+// quality attempts; it only labels the journal rows.
+func (h *Handler) finishUpstreamChat(ctx context.Context, w http.ResponseWriter, req *chatwire.Request, sess *chatAccountSession, logger *debug.Logger, name, url string, headers func() http.Header, payload map[string]interface{}, resp *http.Response, err error, qualityAttempt int) (*parkedResponse, bool) {
 	if err != nil {
 		h.auditChatOutcome(ctx, sess.acc, req, chatOutcome{Finish: "error", Err: err})
 		slog.Error(name+" chat upstream failed", "url", url, "status", upstreamStatus(err), "error", err)
@@ -399,18 +403,21 @@ func (h *Handler) finishUpstreamChat(ctx context.Context, w http.ResponseWriter,
 			hold = newBuildQualityHold(w, h.qualityHoldPolicy(), nil)
 		}
 		result := h.streamBuildChatHolding(w, req, resp.Body, hold)
-		h.applyBuildQualityGuard(ctx, sess.acc, result)
+		if result.Withheld && hold != nil {
+			result.WithheldReason = hold.reason
+		}
+		guard := h.applyBuildQualityGuard(ctx, sess.acc, req, result)
 		h.auditChatOutcome(ctx, sess.acc, req, result)
 		if result.Withheld && hold != nil {
-			h.auditQualityDegraded(ctx, sess.acc, req, result, "stream")
-			return hold.writer.Park(), true
+			h.auditQualityDegraded(ctx, sess.acc, req, result, qualityWithheldTurn{Mode: "stream", Attempt: qualityAttempt, Guard: guard})
+			return parkWithOutcome(hold.writer, result), true
 		}
 		return nil, false
 	}
 
 	if !holdEnabled {
 		result := h.collectBuildChat(w, req, resp.Body)
-		h.applyBuildQualityGuard(ctx, sess.acc, result)
+		h.applyBuildQualityGuard(ctx, sess.acc, req, result)
 		h.auditChatOutcome(ctx, sess.acc, req, result)
 		return nil, false
 	}
@@ -418,9 +425,9 @@ func (h *Handler) finishUpstreamChat(ctx context.Context, w http.ResponseWriter,
 	// body is only written once the guard has judged it.
 	deferred := newDeferredResponseWriter(w)
 	result := h.collectBuildChat(deferred, req, resp.Body)
-	h.applyBuildQualityGuard(ctx, sess.acc, result)
-	h.auditChatOutcome(ctx, sess.acc, req, result)
 	if result.Err != nil {
+		h.applyBuildQualityGuard(ctx, sess.acc, req, result)
+		h.auditChatOutcome(ctx, sess.acc, req, result)
 		if commitErr := deferred.Commit(); commitErr != nil {
 			slog.Debug("held error response commit failed", "error", commitErr)
 		}
@@ -432,12 +439,20 @@ func (h *Handler) finishUpstreamChat(ctx context.Context, w http.ResponseWriter,
 		started: time.Now(),
 		outcome: &result,
 	}
+	// The hold's verdict comes first: the guard has to know the turn was
+	// withheld, and the request row has to say so instead of looking like a
+	// delivered answer.
 	if verdict, _ := hold.step(true); verdict == qualityWithhold {
 		result.Withheld = true
+		result.WithheldReason = hold.reason
 		result.Quality.Terminal = true
-		h.auditQualityDegraded(ctx, sess.acc, req, result, "collected")
-		return deferred.Park(), true
+		guard := h.applyBuildQualityGuard(ctx, sess.acc, req, result)
+		h.auditChatOutcome(ctx, sess.acc, req, result)
+		h.auditQualityDegraded(ctx, sess.acc, req, result, qualityWithheldTurn{Mode: "collected", Attempt: qualityAttempt, Guard: guard})
+		return parkWithOutcome(deferred, result), true
 	}
+	h.applyBuildQualityGuard(ctx, sess.acc, req, result)
+	h.auditChatOutcome(ctx, sess.acc, req, result)
 	if commitErr := deferred.Commit(); commitErr != nil {
 		slog.Debug("held response commit failed", "error", commitErr)
 	}
@@ -509,6 +524,8 @@ func (h *Handler) serveNativeChat(ctx context.Context, w http.ResponseWriter, re
 	// upstream generation. Both kinds of retry consume the same account-attempt
 	// budget, so their limits cannot multiply.
 	var parked *parkedResponse
+	// reasons lists the detector behind each withheld attempt, in order.
+	var reasons []string
 	for attempt := 0; ; attempt++ {
 		limit := remaining
 		if replayUnsafe {
@@ -517,18 +534,41 @@ func (h *Handler) serveNativeChat(ctx context.Context, w http.ResponseWriter, re
 		resp, err := h.retryWithAccountSwitchLimit(ctx, sess, 1500*time.Millisecond, request, openNext, nil, limit)
 		body, withheld := h.finishUpstreamChat(ctx, w, req, sess, logger, provider, endpoint, func() http.Header {
 			return h.cliHeaders(sess.acc, sess.token)
-		}, payload, resp, err)
+		}, payload, resp, err, attempt+1)
 		if !withheld {
+			if attempt > 0 {
+				// Earlier turns were withheld and this one was not: the client
+				// never saw a degraded answer.
+				h.auditQualityResolution(ctx, sess.acc, req, qualityResolutionRetried, "", reasons, policy)
+			}
 			return
 		}
 		parked = body
+		reason := ""
+		if parked != nil {
+			reason = parked.outcome.WithheldReason
+		}
+		reasons = append(reasons, reason)
+		// The account that produced the withheld turn; the session moves on below.
+		withheldAccount := sess.acc
 		action := boundQualityRetry(
 			decideQualityRetry(qualityWithhold, attempt, policy.MaxAttempts, policy.OnExhausted),
 			attempt+1 < policy.MaxAttempts && remaining > 0 && ctx.Err() == nil && !replayUnsafe,
 			policy.OnExhausted,
 		)
 		if action != qualityActionRetry {
-			h.deliverParkedQualityTurn(w, parked, action)
+			stopped := qualityStopAttemptsExhausted
+			switch {
+			case replayUnsafe:
+				stopped = qualityStopReplayUnsafe
+			case ctx.Err() != nil:
+				stopped = qualityStopClientGone
+			case remaining <= 0:
+				stopped = qualityStopAccountBudget
+			}
+			resolution := h.deliverParkedQualityTurn(w, parked, action)
+			h.auditDeliveredQualityTurn(ctx, withheldAccount, req, parked, resolution)
+			h.auditQualityResolution(ctx, withheldAccount, req, resolution, stopped, reasons, policy)
 			return
 		}
 		sess.Close()
@@ -536,28 +576,59 @@ func (h *Handler) serveNativeChat(ctx context.Context, w http.ResponseWriter, re
 		if switchErr != nil {
 			// No other account can serve it: deliver the held turn instead of
 			// failing a request the upstream completed.
-			h.deliverParkedQualityTurn(w, parked, qualityActionDeliverLast)
+			resolution := h.deliverParkedQualityTurn(w, parked, qualityActionDeliverLast)
+			h.auditDeliveredQualityTurn(ctx, withheldAccount, req, parked, resolution)
+			h.auditQualityResolution(ctx, withheldAccount, req, resolution, qualityStopNoOtherAccount, reasons, policy)
 			return
 		}
 		sess.acc, sess.token, sess.poolCandidates, sess.release = next.acc, next.token, next.poolCandidates, next.release
 	}
 }
 
-// deliverParkedQualityTurn finishes a request whose attempts were all withheld.
-// Fail-open (the default) writes the last held response so the caller still gets
-// the answer the upstream produced; fail-closed reports the degradation instead.
-func (h *Handler) deliverParkedQualityTurn(w http.ResponseWriter, parked *parkedResponse, action qualityRetryAction) {
+// deliverParkedQualityTurn finishes a request whose attempts were all withheld
+// and reports what the client received. Fail-open (the default) writes the last
+// held response so the caller still gets the answer the upstream produced;
+// fail-closed reports the degradation instead.
+func (h *Handler) deliverParkedQualityTurn(w http.ResponseWriter, parked *parkedResponse, action qualityRetryAction) string {
 	if action == qualityActionReject {
 		writeGrokErrorCode(w, http.StatusBadGateway, "quality_degraded", "every candidate account returned a degraded response")
-		return
+		return qualityResolutionRejected
 	}
 	if parked.isEmpty() {
 		writeGrokErrorCode(w, http.StatusBadGateway, "quality_degraded", "the upstream response was withheld and could not be delivered")
-		return
+		return qualityResolutionUndeliverable
 	}
 	if err := parked.CommitTo(w); err != nil {
 		slog.Debug("withheld response delivery failed", "error", err)
 	}
+	return qualityResolutionDeliveredDegraded
+}
+
+// parkWithOutcome parks a held response together with the accounting of the
+// turn that produced it.
+func parkWithOutcome(writer *deferredResponseWriter, outcome chatOutcome) *parkedResponse {
+	parked := writer.Park()
+	if parked != nil {
+		parked.outcome = outcome
+	}
+	return parked
+}
+
+// auditDeliveredQualityTurn writes the request row for a withheld turn that the
+// client received after all.
+//
+// A withheld attempt is not billed when it is journalled: the client has not
+// seen it, and settlement is first-call-wins, so charging it would both bill a
+// turn that may never be delivered and discard the cost of the one that is.
+// When the retry budget runs out and the policy fails open, this turn becomes
+// the answer, and this is where it is billed.
+func (h *Handler) auditDeliveredQualityTurn(ctx context.Context, acc *store.Account, req *chatwire.Request, parked *parkedResponse, resolution string) {
+	if resolution != qualityResolutionDeliveredDegraded || parked == nil {
+		return
+	}
+	outcome := parked.outcome
+	outcome.DeliveredDegraded = true
+	h.auditChatOutcome(ctx, acc, req, outcome)
 }
 
 const (

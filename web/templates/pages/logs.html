@@ -54,6 +54,16 @@
           <option value="stream_error">流中断</option>
         </select>
       </label>
+      <label class="ops-select"><span>质量检查</span>
+        <select id="filterQuality" class="compact-select">
+          <option value="">不限</option>
+          <option value="any">有质量拦截（全部）</option>
+          <option value="retried">换号后正常交付</option>
+          <option value="delivered_degraded">已交付降级回答</option>
+          <option value="rejected">已拒绝请求（502）</option>
+          <option value="undeliverable">无可交付内容（502）</option>
+        </select>
+      </label>
       <label class="ops-select"><span>起始</span><input id="filterSince" placeholder="2026-09-13T00:00:00Z" /></label>
       <label class="ops-select"><span>结束</span><input id="filterUntil" placeholder="2026-09-13T01:00:00Z" /></label>
       <label class="ops-select"><span>操作者</span><input id="filterActor" placeholder="admin-session" /></label>

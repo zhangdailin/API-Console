@@ -14,13 +14,15 @@
 //	api_models.go          model list/read
 //	api_config.go          config read/save, login/logout, config patching
 //	api_export_import.go   account export and import
+//	channel_port.go        how this package reaches a channel
+//	api_channel_login.go   the browser login every channel shares
 //	api_device_login.go    Grok device-authorization flow
 //	api_audit.go           audit journal query and filter helpers
 //	api_ops.go             operations overview, runtime metrics, channels
 //
-// Per-channel behaviour that used to be a switch inside a handler is a lookup
-// over named functions: quota_projection.go, account_refresh.go and
-// device_login_registry.go. Adding a channel touches one map, not every handler.
+// Nothing here knows a channel's credential fields, endpoints or allowance
+// rules. Each channel implements provider.Admin in its own package, and the
+// handlers ask it: adding a channel does not touch this package.
 package api
 
 import (
@@ -34,11 +36,13 @@ import (
 
 	"orchids-api/internal/alerting"
 	"orchids-api/internal/audit"
+	"orchids-api/internal/channel"
 	"orchids-api/internal/config"
 	"orchids-api/internal/debug"
 	"orchids-api/internal/loadbalancer"
 	"orchids-api/internal/middleware"
 	"orchids-api/internal/opsagg"
+	"orchids-api/internal/provider"
 	"orchids-api/internal/store"
 )
 
@@ -66,9 +70,9 @@ type API struct {
 	// so codes and credentials can never cross authentication flows; the storage
 	// and bookkeeping behind them is shared (see deviceLoginRegistry).
 	grokLogins      *deviceLoginRegistry[deviceLogin]
-	workbuddyLogins *deviceLoginRegistry[workbuddyLogin]
-	qoderLogins     *deviceLoginRegistry[qoderLoginTransaction]
-	clineLogins     *deviceLoginRegistry[clineLoginTransaction]
+	workbuddyLogins *deviceLoginRegistry[browserLogin]
+	qoderLogins     *deviceLoginRegistry[browserLogin]
+	clineLogins     *deviceLoginRegistry[browserLogin]
 
 	// opsAggregator and alerts back the operations overview. They are optional:
 	// a Redis-less deployment simply reports "no sample" instead of failing.
@@ -114,11 +118,13 @@ func (a *API) refreshAccountState(ctx context.Context, acc *store.Account) (stri
 		return "", http.StatusBadRequest, fmt.Errorf("account is nil")
 	}
 
-	refresher := accountRefreshers[strings.ToLower(strings.TrimSpace(acc.AccountType))]
-	if refresher == nil {
+	admin := adminFor(acc.AccountType)
+	if admin == nil || admin.Verify == nil {
 		return "", http.StatusBadRequest, fmt.Errorf("unsupported account type %q", acc.AccountType)
 	}
-	return refresher(a, ctx, acc)
+	return verifyThroughChannel(strings.ToLower(strings.TrimSpace(acc.AccountType)), admin.ErrMissingCredential, func() (string, int, error) {
+		return admin.Verify(ctx, provider.Env{Config: a.config.Load(), Store: a.store}, acc)
+	})
 }
 
 type ExportData struct {
@@ -154,15 +160,9 @@ func New(s *store.Store, adminUser, adminPass string, cfg *config.Config) *API {
 		checkNextAllowed: map[int64]time.Time{},
 		checkSem:         make(chan struct{}, 2),
 		grokLogins:       newDeviceLoginRegistry(identityDeviceLogin, nil, "Grok authorization expired"),
-		workbuddyLogins: newDeviceLoginRegistry(
-			func(login *workbuddyLogin) *deviceLogin { return &login.deviceLogin }, nil,
-			"WorkBuddy authorization expired"),
-		qoderLogins: newDeviceLoginRegistry(
-			func(login *qoderLoginTransaction) *deviceLogin { return &login.deviceLogin },
-			deviceLoginReadyWithoutCode, "Qoder authorization expired"),
-		clineLogins: newDeviceLoginRegistry(
-			func(login *clineLoginTransaction) *deviceLogin { return &login.deviceLogin }, nil,
-			"Cline authorization expired"),
+		workbuddyLogins:  newBrowserLoginRegistry(channel.WorkBuddy),
+		qoderLogins:      newBrowserLoginRegistry(channel.Qoder),
+		clineLogins:      newBrowserLoginRegistry(channel.Cline),
 	}
 	if cfg != nil {
 		a.config.Store(cfg.Clone())

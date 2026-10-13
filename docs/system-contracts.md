@@ -10,7 +10,7 @@ WorkBuddy、Qoder、Cline 走共享 Handler、提供者工厂和能力适配；G
 
 共享 Chat 线格式放在 `internal/chatwire`，Responses 协议放在 `internal/responses`，通用 HTTP 逻辑放在 `internal/httpclient` / `httpserver`。调用方直接使用所属包的实现。
 
-证据：[架构](architecture.md)、[启动装配](../cmd/server/main.go)、[路由](../cmd/server/routes.go)、[提供者能力装配](../internal/provider/capabilities_wire.go)。
+证据：[架构](architecture.md)、[启动装配](../cmd/server/main.go)、[路由](../cmd/server/routes.go)、[通道端口](../internal/provider/provider.go)。
 
 ## 2. 必须连起来理解的链路
 
