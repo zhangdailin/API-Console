@@ -115,4 +115,8 @@ Grok 质量检查分两半：暂存（`quality_hold.go`）决定一轮回答能�
 
 启用了质量检查的正常回答也写入开始与通过两条过程记录；未启用或不适用的请求不伪造检查过程。只在阶段变化时记录，不逐个 SSE 块记录。这些行只包含计数、耗时、策略和标识，不包含回答正文或凭据。`retried` 表示后续尝试未再被质量拦截，不保证请求最终成功，实际请求结果以请求日志的状态为准。
 
+Chat 请求省略推理强度时，质量检查采用本次选中账号实际发送的模型默认推理强度；换号后重新采用下一账号的默认值，不修改客户端原始请求。非流式响应（`metadata.mode=collected`）无法观测上游出字时序，`metadata.first_visible_ms=-1` 表示未知，不以本地 JSON 解析耗时触发极速输出检测。开始检查、尚无正文的阶段同样不伪造首字时间；非流式仍保留不依赖出字时序的质量判断，流式请求继续使用实际观测的时序。
+
+账号管理直接显示 Grok 的质量冷却、连续退化次数、原因与冷却截止时间，侧栏异常统计采用相同的冷却判断。质量原因单独保存为 `quality_reason`，不借用 HTTP 状态说明，也不因普通账号刷新清空；历史记录没有原因时显示「原因未记录」。冷却到期不再显示为正在冷却，但保留失败计数供复检；账号禁用时不承诺自动恢复。页面读取这些字段不恢复账号、不清除质量处罚。
+
 对应的服务日志：`grok quality hold: turn withheld`（WARN）、`grok quality hold: request resolved`（重试成功为 INFO，其余为 WARN）、`grok quality guard: credential parked / disabled`（WARN）、`grok quality guard: credential cleared`（INFO），均带 `request_id` 与 `account_id`。

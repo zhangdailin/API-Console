@@ -52,6 +52,9 @@ func (h *Handler) auditQualityCheck(ctx context.Context, acc *store.Account, req
 		"visible_chars": outcome.Quality.VisibleChars, "reasoning_chars": outcome.Quality.ReasoningChars,
 		"encrypted_chars": outcome.Quality.EncryptedChars, "first_visible_ms": outcome.Quality.FirstVisibleMS,
 	}
+	if outcome.Quality.VisibleChars <= 0 {
+		metadata["first_visible_ms"] = int64(-1)
+	}
 	if status == "error" {
 		metadata["reason"] = "upstream_error"
 	}

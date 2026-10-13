@@ -55,6 +55,7 @@ func (o accountOutput) MarshalJSON() ([]byte, error) {
 	}
 	if o.Account != nil {
 		merged["status_message"] = redactAccountSecrets(o.Account.StatusMessage, o.Account)
+		merged["quality_reason"] = redactAccountSecrets(o.Account.QualityReason, o.Account)
 	}
 	return json.Marshal(merged)
 }
@@ -95,6 +96,7 @@ func normalizeAccountOutputWithUsage(acc *store.Account, usage map[int64]int64) 
 	// it ran before the channel projection cleared them, so an upstream error that
 	// echoed a Qoder token published it in status_message.
 	out.StatusMessage = redactAccountSecrets(acc.StatusMessage, acc)
+	out.QualityReason = redactAccountSecrets(acc.QualityReason, acc)
 	// The channel clears every credential it must never return. The final
 	// marshal deletes the credential keys again whatever the channel did, so a
 	// channel that forgot one still cannot publish it.

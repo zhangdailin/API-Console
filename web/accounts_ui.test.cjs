@@ -1024,3 +1024,62 @@ test('credential verdict drives sidebar counters and channel-specific row badges
     assert.equal(badge.normal, false);
   }
 });
+
+test('Grok quality cooldown is visible even with no HTTP error and exhausted quota', () => {
+  const { context } = loadUI();
+  const account = { id: 41, account_type: 'grok', enabled: true, has_credential: true,
+    status_code: '', quality_failures: 1, quality_cooldown_until: '2099-01-01T00:00:00Z',
+    quality_reason: 'no_reasoning', quota_supported: true, quota_limit: 100, quota_remaining: 0 };
+  const badge = context.evaluateAccountStatus(account);
+  assert.equal(badge.normal, false);
+  assert.equal(badge.text, '质量冷却');
+  assert.equal(context.isSidebarAccountAbnormal(account), true);
+  assert.match(context.buildCooldownMarkup(account), /2099|01\/01/);
+  const detail = context.buildQualityMarkup(account);
+  assert.match(detail, /连续退化 1 次/);
+  assert.match(detail, /缺少推理输出/);
+});
+
+test('expired quality cooldown retains history without reporting an active fault', () => {
+  const { context } = loadUI();
+  const account = { id: 41, account_type: 'grok', enabled: true, has_credential: true,
+    quality_failures: 1, quality_cooldown_until: '2000-01-01T00:00:00Z' };
+  assert.equal(context.evaluateAccountStatus(account).normal, true);
+  assert.equal(context.isSidebarAccountAbnormal(account), false);
+  assert.equal(context.buildCooldownMarkup(account), '');
+  assert.match(context.buildQualityMarkup(account), /冷却已结束/);
+  assert.match(context.buildQualityMarkup(account), /原因未记录/);
+});
+
+test('HTTP authentication failures retain priority while quality details remain visible', () => {
+  const { context } = loadUI();
+  const account = { id: 41, account_type: 'grok', enabled: true, has_credential: true,
+    status_code: '401', quality_failures: 1, quality_cooldown_until: '2099-01-01T00:00:00Z' };
+  assert.equal(context.evaluateAccountStatus(account).text, '未授权');
+  assert.match(context.buildQualityMarkup(account), /连续退化 1 次/);
+  assert.match(context.buildCooldownMarkup(account), /冷却至/);
+  assert.doesNotMatch(context.buildCooldownMarkup(account), /预计.*恢复/);
+});
+
+test('disabled accounts show quality history but never promise automatic recovery', () => {
+  const { context } = loadUI();
+  const account = { id: 54, account_type: 'grok', enabled: false, has_credential: true,
+    quality_failures: 2, quality_cooldown_until: '2099-01-01T00:00:00Z', quality_reason: 'burst_dump' };
+  assert.equal(context.evaluateAccountStatus(account).text, '禁用');
+  assert.equal(context.buildCooldownMarkup(account), '');
+  assert.match(context.buildQualityMarkup(account), /连续退化 2 次/);
+  assert.match(context.buildQualityMarkup(account), /不自动恢复/);
+  const reenabled = { ...account, enabled: true };
+  assert.equal(context.evaluateAccountStatus(reenabled).text, '质量冷却', 'failure count is not proof of a disabled account');
+});
+
+test('quality details ignore unrelated providers and do not render arbitrary reason text', () => {
+  const { context } = loadUI();
+  const account = { id: 41, account_type: 'grok', enabled: true, has_credential: true,
+    quality_failures: 1, quality_cooldown_until: '2099-01-01T00:00:00Z', quality_reason: '<script>secret-reason</script>' };
+  assert.doesNotMatch(context.buildQualityMarkup(account), /secret-reason|<script>/);
+  const other = { ...account, account_type: 'cline' };
+  assert.equal(context.evaluateAccountStatus(other).text, '正常');
+  assert.equal(context.isSidebarAccountAbnormal(other), false);
+  assert.equal(context.buildQualityMarkup(other), '');
+});

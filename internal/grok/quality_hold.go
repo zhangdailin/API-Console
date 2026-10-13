@@ -154,7 +154,7 @@ type qualityStreamSignals struct {
 	// FirstVisible marks that visible text has arrived at all.
 	FirstVisible bool
 	// VisibleFlushMS is how long the visible text took to arrive after the turn
-	// started. Negative means it has not arrived.
+	// started. Negative means its arrival timing was not observed.
 	VisibleFlushMS int64
 	Terminal       bool
 	HoldExpired    bool
@@ -692,10 +692,8 @@ func (c *buildQualityHold) signals(terminal bool) qualityStreamSignals {
 		ReasoningTokens: quality.ReasoningTokens,
 		EncryptedBytes:  quality.EncryptedChars,
 		UsageReported:   c.outcome.UsageSource == audit.UsageSourceUpstream,
-		// FirstVisibleMS is zero until visible text arrives, so the flag needs
-		// the character count too: an encrypted blob alone is not "visible text
-		// arrived", and treating it as such withheld healthy turns before their
-		// answer had a chance to stream.
+		// Timing-based detectors require observed text arrival, not just a
+		// character count. Completed JSON bodies keep FirstVisibleMS at -1.
 		FirstVisible:     quality.VisibleChars > 0 && quality.FirstVisibleMS >= 0,
 		VisibleFlushMS:   quality.FirstVisibleMS,
 		Terminal:         terminal || quality.Terminal,

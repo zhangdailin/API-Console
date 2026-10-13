@@ -3,6 +3,7 @@ package grok
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	"orchids-api/internal/audit"
 	"orchids-api/internal/chatwire"
 	"orchids-api/internal/config"
+	"orchids-api/internal/modelcatalog"
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
 )
@@ -288,6 +290,93 @@ func TestDisabledQualityHoldDoesNotInventCheckProcess(t *testing.T) {
 	testutil.Equal(t, len(journal.byAction("grok_quality_check")), 0)
 }
 
+func TestQualityHoldUsesAccountDefaultReasoning(t *testing.T) {
+	for _, streaming := range []bool{true, false} {
+		for _, requested := range []string{"omitted", "", "none"} {
+			t.Run(fmt.Sprintf("stream=%t/effort=%s", streaming, requested), func(t *testing.T) {
+				h, journal, accounts := qualityLoggingHandler(t, func(base string) *config.Config {
+					return &config.Config{GrokCLIBaseURL: base}
+				}, "jwt-user-healthy")
+				if !streaming {
+					upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Set("Content-Type", "application/json")
+						io.WriteString(w, `{"id":"resp_healthy","status":"completed","output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"considering the request"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"healthy answer"}]}],"usage":{"input_tokens":10,"output_tokens":12,"output_tokens_details":{"reasoning_tokens":8}}}`)
+					}))
+					t.Cleanup(upstream.Close)
+					h.SetConfig(&config.Config{GrokCLIBaseURL: upstream.URL + "/v1"})
+				}
+				acc := accounts[0]
+				acc.GrokModelCatalog = []modelcatalog.Profile{{
+					ModelID: "grok-4.5", SupportsReasoningEffort: true,
+					ReasoningEfforts: []string{"low", "high"}, DefaultReasoningEffort: "high",
+				}}
+				testutil.NoError(t, h.lb.Store.UpdateAccount(context.Background(), acc), "UpdateAccount: %v")
+				req := &chatwire.Request{Model: "grok-4.5", Stream: streaming, Messages: []chatwire.Message{{Role: "user", Content: "hello"}}}
+				if requested != "omitted" {
+					req.ReasoningEffort = &requested
+				}
+				sess, err := h.openCLIAccountSessionByID(context.Background(), acc.ID, req.Model)
+				testutil.NoError(t, err, "open account: %v")
+				defer sess.Close()
+				spec, ok := h.resolveConversationModel(context.Background(), req.Model)
+				testutil.True(t, ok, "model did not resolve")
+				rec := httptest.NewRecorder()
+				h.serveNativeChat(context.Background(), rec, req, spec, sess, nil, true)
+				testutil.Equal(t, rec.Code, http.StatusOK)
+				checks := journal.byAction("grok_quality_check")
+				if requested == "none" {
+					testutil.Equal(t, len(checks), 0)
+				} else {
+					testutil.Equal(t, len(checks), 2)
+					testutil.Equal(t, checks[0].Status, "checking")
+					testutil.Equal(t, checks[1].Status, "passed")
+				}
+				if requested == "omitted" {
+					testutil.True(t, req.ReasoningEffort == nil, "account default must not mutate client input")
+				} else {
+					testutil.Equal(t, *req.ReasoningEffort, requested)
+				}
+			})
+		}
+	}
+}
+
+func TestQualityHoldDefaultReasoningWithholdsAndRetries(t *testing.T) {
+	h, journal, accounts := qualityLoggingHandler(t, func(base string) *config.Config {
+		return &config.Config{GrokCLIBaseURL: base}
+	}, "jwt-user-degraded", "jwt-user-healthy")
+	for i, acc := range accounts {
+		effort := []string{"high", "low"}[i]
+		acc.GrokModelCatalog = []modelcatalog.Profile{{
+			ModelID: "grok-4.5", SupportsReasoningEffort: true,
+			ReasoningEfforts: []string{"low", "high"}, DefaultReasoningEffort: effort,
+		}}
+		testutil.NoError(t, h.lb.Store.UpdateAccount(context.Background(), acc), "UpdateAccount: %v")
+	}
+	req := &chatwire.Request{Model: "grok-4.5", Stream: true, Messages: []chatwire.Message{{Role: "user", Content: "hello"}}}
+	sess, err := h.openCLIAccountSessionByID(context.Background(), accounts[0].ID, req.Model)
+	testutil.NoError(t, err, "open account: %v")
+	defer sess.Close()
+	spec, ok := h.resolveConversationModel(context.Background(), req.Model)
+	testutil.True(t, ok, "model did not resolve")
+	rec := httptest.NewRecorder()
+	h.serveNativeChat(context.Background(), rec, req, spec, sess, nil, true)
+	testutil.Equal(t, rec.Code, http.StatusOK)
+	testutil.MustContain(t, rec.Body.String(), "healthy answer")
+	testutil.MustNotContain(t, rec.Body.String(), "status loop")
+	testutil.True(t, req.ReasoningEffort == nil, "retry must not reuse the first account's default")
+	testutil.Equal(t, len(journal.byAction("grok_quality_degraded")), 1)
+	testutil.Equal(t, len(journal.byAction("grok_quality_retry")), 1)
+	resolution := journal.byAction("grok_quality_resolution")
+	testutil.Equal(t, len(resolution), 1)
+	testutil.Equal(t, resolution[0].Status, "retried")
+	requests := journal.byAction("grok_request")
+	testutil.Equal(t, len(requests), 2)
+	testutil.EqualAny(t, requests[0].Metadata["reasoning_effort"], "high")
+	testutil.EqualAny(t, requests[1].Metadata["reasoning_effort"], "low")
+	testutil.EqualAny(t, requests[1].Metadata["quality_check_status"], "passed")
+}
+
 // TestQualityGuardJournalsEveryStateChange follows one credential through the
 // guard: parked, cleared by a healthy turn, parked again, then disabled.
 func TestQualityGuardJournalsEveryStateChange(t *testing.T) {
@@ -303,7 +392,9 @@ func TestQualityGuardJournalsEveryStateChange(t *testing.T) {
 	healthy := chatOutcome{Quality: qualitySignals{ExpectReasoning: true, Terminal: true, VisibleChars: 400, SawReasoning: true, ReasoningChars: 200}}
 
 	testutil.Equal(t, h.applyBuildQualityGuard(ctx, acc, req, degraded), qualityGuardParked)
+	testutil.Equal(t, acc.QualityReason, qualityReasonNoReasoning)
 	testutil.Equal(t, h.applyBuildQualityGuard(ctx, acc, req, healthy), qualityGuardCleared)
+	testutil.Equal(t, acc.QualityReason, "")
 	// A healthy turn with nothing to clear is not an event.
 	testutil.Equal(t, h.applyBuildQualityGuard(ctx, acc, req, healthy), qualityGuardNone)
 	testutil.Equal(t, h.applyBuildQualityGuard(ctx, acc, req, degraded), qualityGuardParked)

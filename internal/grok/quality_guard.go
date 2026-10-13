@@ -59,7 +59,8 @@ type qualitySignals struct {
 	// one.
 	ReasoningTokens int64
 	// FirstVisibleMS is when the first visible text arrived, measured from the
-	// start of the turn. Negative means it never arrived.
+	// start of the turn. Negative means no arrival time was observed, including
+	// completed JSON responses that expose no upstream streaming timestamps.
 	FirstVisibleMS int64
 	// Terminal is true when the response reached a terminal event.
 	Terminal bool
@@ -131,6 +132,7 @@ func (h *Handler) applyQualityGuard(ctx context.Context, acc *store.Account, sig
 	}
 	action := qualityGuardParked
 	acc.QualityFailures++
+	acc.QualityReason = reason
 	acc.QualityCooldownUntil = time.Now().UTC().Add(qualityCooldown)
 	if acc.QualityFailures >= qualityDisableThreshold {
 		action = qualityGuardDisabled
@@ -148,7 +150,7 @@ func (h *Handler) applyQualityGuard(ctx context.Context, acc *store.Account, sig
 	// that does not include the quality fields, so going through it parked the
 	// credential only in memory. The Enabled change from a second offence still
 	// travels through UpdateAccount.
-	if err := h.lb.Store.UpdateAccountQuality(ctx, acc.ID, acc.QualityFailures, acc.QualityCooldownUntil); err != nil {
+	if err := h.lb.Store.UpdateAccountQuality(ctx, acc.ID, acc.QualityFailures, acc.QualityCooldownUntil, reason); err != nil {
 		slog.Warn("grok quality guard: failed to persist the account verdict", "account_id", acc.ID, "error", err)
 	}
 	if acc.ID != 0 {
@@ -170,7 +172,8 @@ func (h *Handler) clearQualityGuard(ctx context.Context, acc *store.Account) qua
 		"request_id", middleware.GetRequestID(ctx), "account_id", acc.ID, "previous_failures", acc.QualityFailures)
 	acc.QualityFailures = 0
 	acc.QualityCooldownUntil = time.Time{}
-	if err := h.lb.Store.UpdateAccountQuality(ctx, acc.ID, 0, time.Time{}); err != nil {
+	acc.QualityReason = ""
+	if err := h.lb.Store.UpdateAccountQuality(ctx, acc.ID, 0, time.Time{}, ""); err != nil {
 		slog.Warn("grok quality guard: failed to clear the account verdict", "account_id", acc.ID, "error", err)
 	}
 	return qualityGuardCleared

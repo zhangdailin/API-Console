@@ -80,6 +80,15 @@
 
 .account-cooldown-until { white-space: normal; line-height: 1.5; }
 
+.account-quality-detail {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .accounts-table .col-check { width: 40px; }
 
 .accounts-toolbar {

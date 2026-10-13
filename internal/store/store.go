@@ -83,6 +83,8 @@ type Account struct {
 	QualityFailures int `json:"quality_failures,omitempty"`
 	// QualityCooldownUntil parks a credential whose responses are degraded.
 	QualityCooldownUntil time.Time `json:"quality_cooldown_until,omitempty"`
+	// QualityReason belongs to the quality verdict, not the HTTP status message.
+	QualityReason string `json:"quality_reason,omitempty"`
 	// StatusMessage explains StatusCode in operator terms. A bare "401" cannot
 	// distinguish "the upstream retired this grant, re-login required" from
 	// "our record lost the credential", and those need different actions.
@@ -350,7 +352,7 @@ type ClineCredentialPatch struct {
 type accountStore interface {
 	CreateAccount(ctx context.Context, acc *Account) error
 	UpdateAccount(ctx context.Context, acc *Account) error
-	UpdateAccountQuality(ctx context.Context, id int64, failures int, cooldownUntil time.Time) error
+	UpdateAccountQuality(ctx context.Context, id int64, failures int, cooldownUntil time.Time, reason string) error
 	UpdateWorkBuddyCredentials(ctx context.Context, id int64, patch WorkBuddyCredentialPatch) error
 	UpdateQoderAccount(ctx context.Context, id int64, patch QoderAccountPatch) error
 	UpdateClineCredentials(ctx context.Context, id int64, patch ClineCredentialPatch) error
@@ -494,11 +496,11 @@ func (s *Store) CreateAccount(ctx context.Context, acc *Account) error {
 
 // UpdateAccountQuality records a quality verdict (failures + park window) for one
 // account without rewriting the rest of it.
-func (s *Store) UpdateAccountQuality(ctx context.Context, id int64, failures int, cooldownUntil time.Time) error {
+func (s *Store) UpdateAccountQuality(ctx context.Context, id int64, failures int, cooldownUntil time.Time, reason string) error {
 	if s == nil || s.accounts == nil {
 		return fmt.Errorf("account store not configured")
 	}
-	return s.accounts.UpdateAccountQuality(ctx, id, failures, cooldownUntil)
+	return s.accounts.UpdateAccountQuality(ctx, id, failures, cooldownUntil, reason)
 }
 
 func (s *Store) UpdateAccount(ctx context.Context, acc *Account) error {

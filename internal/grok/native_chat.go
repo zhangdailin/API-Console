@@ -391,6 +391,17 @@ func (h *Handler) finishUpstreamChat(ctx context.Context, w http.ResponseWriter,
 		}
 	}
 	h.syncGrokQuota(sess.acc, resp.Header)
+	// Account defaults are applied to the upstream payload, not client input.
+	// Use this attempt's effective effort for quality checks without freezing a
+	// default into the original request that later account retries will reuse.
+	if req.ReasoningEffort == nil || strings.TrimSpace(*req.ReasoningEffort) == "" {
+		reasoning, _ := payload["reasoning"].(map[string]interface{})
+		if effort, ok := reasoning["effort"].(string); ok && strings.TrimSpace(effort) != "" {
+			attemptReq := *req
+			attemptReq.ReasoningEffort = &effort
+			req = &attemptReq
+		}
+	}
 	provider := ProviderBuild
 	if sess.acc != nil {
 		provider = ProviderForAccount(sess.acc)
@@ -753,7 +764,6 @@ func (h *Handler) collectBuildChat(w http.ResponseWriter, req *chatwire.Request,
 		writeGrokUpstreamError(w, outcome.Err)
 		return
 	}
-	outcomeStarted := time.Now()
 	text := consoleExtractMessageText(raw)
 	refusal := responses.ExtractRefusal(raw)
 	filter := stopFilter{sequences: req.Stop}
@@ -802,10 +812,9 @@ func (h *Handler) collectBuildChat(w http.ResponseWriter, req *chatwire.Request,
 		EncryptedChars:  int64(len(encryptedReasoning)),
 		ToolCalls:       len(toolCalls),
 		Terminal:        true,
-		FirstVisibleMS:  -1,
-	}
-	if len(text) > 0 {
-		outcome.Quality.FirstVisibleMS = time.Since(outcomeStarted).Milliseconds()
+		// A completed JSON body exposes no upstream text-arrival timing.
+		// Parsing latency must not trigger stream-only dump detectors.
+		FirstVisibleMS: -1,
 	}
 	upstreamUsage := consoleUsage(raw)
 	if details, _ := upstreamUsage["completion_tokens_details"].(map[string]interface{}); details != nil {
