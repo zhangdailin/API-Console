@@ -14,7 +14,7 @@ function element(tag='div'){
     appendChild(child){child.parentNode=this;this.children.push(child);return child},
     replaceChildren(){this.children.forEach((c)=>{c.parentNode=null});this.children=[]},
     remove(){const parent=this.parentNode;if(!parent)return;const i=parent.children.indexOf(this);if(i>=0)parent.children.splice(i,1);this.parentNode=null},
-    setAttribute(){},removeAttribute(){},addEventListener(){},
+    listeners:{},setAttribute(){},removeAttribute(){},addEventListener(name,fn){this.listeners[name]=fn},
     querySelectorAll(selector){
       const wanted=String(selector).replace(/\s+/g,'');
       const matches=(n)=>wanted==='tr'
@@ -47,6 +47,7 @@ function load(){
       createElement:(tag)=>element(tag),
       getElementById:(id)=>ids[id]||null,
       addEventListener(){},
+      querySelectorAll:()=>[],
       body:element('body'),
     },
     window:{location:{search:''}},
@@ -54,7 +55,7 @@ function load(){
   });
   let src=fs.readFileSync(path.join(__dirname,'static/js/logs.js'),'utf8');
   src=src.replace(/  if \(document\.readyState === 'loading'\)[\s\S]*?\r?\n  \}\r?\n\}\)\(\);\s*$/,
-    'globalThis.review={state,load,renderRows,renderDetail};\n})();');
+    'globalThis.review={state,load,renderRows,renderDetail,filters,bind,scopeNote};\n})();');
   vm.runInContext(src,context);
   return {...context.review,context,ids};
 }
@@ -128,4 +129,85 @@ test('obsolete log failures preserve current records and pagination cursor',asyn
   pending[0].reject(new Error('old failure')); await old;
   assert.equal(api.state.cursor,'current-cursor'); assert.equal(api.state.records[0].event.kind,'operation');
   assert.match(allText(api.ids.logsRows),/更新配置/); assert.doesNotMatch(allText(api.ids.logsRows),/old failure/);
+});
+
+for(const [resolution,label,received] of [
+  ['retried','换号后正常交付',false],
+  ['delivered_degraded','已交付降级回答',true],
+  ['rejected','已拒绝请求',false],
+  ['undeliverable','无可交付内容',false],
+]){
+ test('quality results show '+resolution+' in both the list and detail',()=>{
+  const api=load();
+  const record={event:{kind:'request',action:'grok_request',channel:'grok',request_id:'quality-'+resolution,status:'success',metadata:{quality_resolution:resolution,quality_withheld_attempts:1,quality_reasons:['no_reasoning']}}};
+  api.state.records=[record]; api.renderRows(false); api.renderDetail(record);
+  assert.match(allText(api.ids.logsRows),new RegExp(label));
+  const detail=allText(api.ids.logsDetailBody);
+  assert.match(detail,/Grok 质量检查/);
+  assert.match(detail,new RegExp(label));
+  assert.match(detail,received?/客户端收到了被质量检查拦截的回答/:/客户端没有收到被拦截的回答/);
+  assert.match(detail,/要求推理但没有任何推理内容/);
+  assert.match(detail,/当前日志窗口未找到逐次拦截明细/);
+ });
+}
+
+test('quality details include each detector, account penalty, counts and retry policy',()=>{
+ const api=load();
+ const reasons=['burst_dump','cipher_drool','fake_encrypted_dump','fast_reasoning_ratio_dump','no_reasoning'];
+ const record={event:{kind:'request',action:'grok_request',channel:'grok',request_id:'quality-detail'},quality:[
+  ...reasons.map((reason,index)=>({action:'grok_quality_degraded',attempt:index+1,account_id:10+index,reasoning_tokens:80,metadata:{reason,mode:index===0?'collected':'stream',guard:index===0?'disabled':'parked',visible_chars:8,reasoning_chars:100,encrypted_chars:256,first_visible_ms:150}})),
+  {action:'grok_quality_resolution',status:'rejected',metadata:{withheld_attempts:5,stopped:'attempts_exhausted',max_attempts:6,on_exhausted:'fail_closed'}},
+ ]};
+ api.renderDetail(record);
+ const detail=allText(api.ids.logsDetailBody);
+ for(const label of ['长时间等待后一次性吐出短回答','只有密文推理、推理计费为零','密文或大额推理计费后瞬间吐出全文','推理占输出八成以上且瞬间吐出','要求推理但没有任何推理内容','账号 #10','非流式','凭据已停用','凭据已冷却','可见 8 字符','推理计费 80 token','首字 150 ms','已达质量重试次数上限','拒绝（返回 502）'])assert(detail.includes(label),label);
+});
+
+test('partial quality histories disclose missing attempts without inferring client delivery',()=>{
+ const api=load();
+ api.renderDetail({event:{kind:'request',action:'grok_request',metadata:{quality_withheld_attempts:3}},quality:[{action:'grok_quality_degraded',attempt:2,metadata:{reason:'future_detector'}}]});
+ const detail=allText(api.ids.logsDetailBody);
+ assert.match(detail,/客户端交付结果未记录/);
+ assert.doesNotMatch(detail,/客户端没有收到被拦截的回答/);
+ assert.match(detail,/当前显示 1 \/ 3 次拦截/);
+ assert.match(detail,/future_detector/);
+});
+
+test('credential guard results do not claim a withheld answer was never delivered',()=>{
+ const api=load();
+ api.renderDetail({event:{kind:'system',action:'grok_quality_guard',status:'disabled',metadata:{failures:2,disable_threshold:2,account_enabled:false,withheld:true}}});
+ const detail=allText(api.ids.logsDetailBody);
+ assert.match(detail,/Grok 质量护栏/);
+ assert.match(detail,/凭据已停用/);
+ assert.match(detail,/2 \/ 2 次停用/);
+ assert.match(detail,/交付前被暂存拦截/);
+ assert.doesNotMatch(detail,/客户端未收到/);
+ api.renderDetail({event:{kind:'system',action:'grok_quality_guard',status:'parked'}});
+ assert.match(allText(api.ids.logsDetailBody),/未记录/);
+});
+
+test('the visible quality selector reloads immediately and cannot filter system logs',async()=>{
+ const api=load(),calls=[];
+ api.ids.filterQuality=element('select'); api.ids.filterQuality.value='';
+ api.bind();
+ api.context.fetch=async url=>{calls.push(url);return successResponse({data:[],next_cursor:''});};
+ api.state.cursor='old-cursor';api.ids.filterQuality.value='delivered_degraded';
+ await api.ids.filterQuality.listeners.change();
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(api.state.cursor,'');
+ assert.match(calls[0],/quality=delivered_degraded/);
+ assert.match(calls[0],/kind=request/);
+ api.state.kind='system'; api.scopeNote();
+ assert.equal(api.ids.filterQuality.disabled,true);
+ await api.load(false);
+ assert.doesNotMatch(calls[1],/quality=/);
+ api.state.kind='request';api.scopeNote();
+ assert.equal(api.ids.filterQuality.disabled,false);
+ assert.equal(api.filters().get('quality'),'delivered_degraded');
+});
+
+test('the quality selector is outside the collapsed filters and has one identity',()=>{
+ const html=fs.readFileSync(path.join(__dirname,'templates/pages/logs.html'),'utf8');
+ assert.equal((html.match(/id="filterQuality"/g)||[]).length,1);
+ assert(html.indexOf('id="filterQuality"')<html.indexOf('id="logsFilters"'));
 });

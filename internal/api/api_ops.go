@@ -408,8 +408,7 @@ func (a *API) writeJournalList(w http.ResponseWriter, r *http.Request) {
 	// never moves the cursor, so nothing it reads is skipped by the next page.
 	if len(records) > 0 && len(entries) > 0 {
 		missing := map[string]bool{}
-		// A request row that says a turn was withheld owns quality rows; when none
-		// were found in the window they are behind it too.
+		// A conclusion can be in the page while earlier withheld attempts are not.
 		missingQuality := map[string]bool{}
 		for _, record := range records {
 			event := record["event"].(audit.Event)
@@ -419,7 +418,7 @@ func (a *API) writeJournalList(w http.ResponseWriter, r *http.Request) {
 			if len(attempts[event.RequestID]) == 0 {
 				missing[event.RequestID] = true
 			}
-			if event.Kind == audit.KindRequest && len(quality[event.RequestID]) == 0 && qualityResolutionOf(event) != "" {
+			if event.Kind == audit.KindRequest && qualityResolutionOf(event) != "" && qualityChecksIncomplete(event, quality[event.RequestID]) {
 				missingQuality[event.RequestID] = true
 			}
 		}
@@ -505,6 +504,20 @@ func (a *API) writeJournalList(w http.ResponseWriter, r *http.Request) {
 // credential verdict is a system event and keeps a row of its own.
 func isRequestQualityEvent(event audit.Event) bool {
 	return event.Action == "grok_quality_degraded" || event.Action == "grok_quality_resolution"
+}
+
+func qualityChecksIncomplete(event audit.Event, checks []audit.Event) bool {
+	var withheld int64
+	concluded := false
+	for _, check := range checks {
+		switch check.Action {
+		case "grok_quality_degraded":
+			withheld++
+		case "grok_quality_resolution":
+			concluded = true
+		}
+	}
+	return !concluded || withheld < metadataInt(event.Metadata, "quality_withheld_attempts")
 }
 
 // qualityResolutionOf reads how a request that had a turn withheld ended, from

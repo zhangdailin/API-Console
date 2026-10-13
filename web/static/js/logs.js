@@ -348,6 +348,7 @@
   function filters() {
     const params = new URLSearchParams();
     FILTER_INPUTS.forEach((entry) => {
+      if (entry.param === 'quality' && state.kind !== 'request') return;
       const node = el(entry.id);
       const value = node && node.value ? node.value.trim() : '';
       if (value) params.set(entry.param, value);
@@ -469,7 +470,8 @@
         // the client get a degraded answer" without opening the row.
         const meta = QUALITY_RESOLUTIONS[quality.resolution] || { tone: 'is-warn', label: '质量拦截' };
         const chip = make('span', 'logs-badge ' + meta.tone, meta.label);
-        chip.title = `Grok 质量检查拦截了 ${quality.withheld} 次回答` + (quality.received ? '；客户端收到了被拦截的回答' : '；客户端没有收到被拦截的回答');
+        chip.title = `Grok 质量检查拦截了 ${quality.withheld} 次回答` + (quality.received === null ? '；客户端交付结果未记录'
+          : quality.received ? '；客户端收到了被拦截的回答' : '；客户端没有收到被拦截的回答');
         action.appendChild(chip);
       }
       // "accounts:120" is an account row; an operation's target is read far more
@@ -728,7 +730,7 @@
       withheld: Number(meta.quality_withheld_attempts || conclusionMeta.withheld_attempts || withheldRows.length || 0),
       reasons: Array.isArray(reasons) ? reasons.filter(Boolean) : [],
       stopped: String(meta.quality_stopped || conclusionMeta.stopped || (conclusion && conclusion.details) || ''),
-      received: resolution === 'delivered_degraded',
+      received: QUALITY_RESOLUTIONS[resolution] ? resolution === 'delivered_degraded' : null,
       policy: conclusionMeta,
       attempts: withheldRows,
     };
@@ -745,9 +747,8 @@
     const meta = QUALITY_RESOLUTIONS[quality.resolution];
     const head = make('div', 'logs-detail-outcome');
     head.appendChild(badge(meta || { tone: 'is-warn', label: '质量拦截' }, quality.resolution || 'withheld'));
-    head.appendChild(make('span', 'logs-detail-raw', quality.received
-      ? '客户端收到了被质量检查拦截的回答'
-      : '客户端没有收到被拦截的回答'));
+    head.appendChild(make('span', 'logs-detail-raw', quality.received === null ? '客户端交付结果未记录'
+      : quality.received ? '客户端收到了被质量检查拦截的回答' : '客户端没有收到被拦截的回答'));
     panel.appendChild(head);
 
     const facts = [fact('被拦截的回答', quality.withheld + ' 次')];
@@ -760,7 +761,7 @@
       // The conclusion is on the request row; the per-attempt rows are older and
       // can have left the retained window.
       if (quality.reasons.length) panel.appendChild(note('命中的检测：' + quality.reasons.map(qualityReason).join('；')));
-      panel.appendChild(note('逐次拦截明细已不在日志留存范围内。'));
+      panel.appendChild(note('当前日志窗口未找到逐次拦截明细。'));
       return;
     }
     const list = make('ul', 'logs-attempts');
@@ -787,6 +788,7 @@
       list.appendChild(li);
     });
     panel.appendChild(list);
+    if (quality.attempts.length < quality.withheld) panel.appendChild(note(`当前显示 ${quality.attempts.length} / ${quality.withheld} 次拦截，部分明细未在当前日志窗口中找到。`));
   }
 
   // renderQualityGuardSection explains a credential verdict in the system log:
@@ -800,10 +802,10 @@
     const facts = [
       fact('处理结果', (QUALITY_GUARD[event.status] || { label: text(event.status, '—') }).label, { title: String(event.status || '') }),
       fact('连续降级次数', text(meta.failures, '0') + ' / ' + text(meta.disable_threshold, '?') + ' 次停用'),
-      fact('账号是否仍启用', meta.account_enabled === false ? '否，已停用' : '是'),
+      fact('账号是否仍启用', typeof meta.account_enabled !== 'boolean' ? '未记录' : meta.account_enabled ? '是' : '否，已停用'),
     ];
     if (meta.cooldown_until) facts.push(fact('冷却至', formatTime(meta.cooldown_until), { title: String(meta.cooldown_until) }));
-    facts.push(fact('该回答是否被拦截', meta.withheld ? '是，客户端未收到' : '否，已流式交付后才判定'));
+    facts.push(fact('该回答是否被拦截', typeof meta.withheld !== 'boolean' ? '未记录' : meta.withheld ? '是，交付前被暂存拦截' : '否'));
     if (event.request_id) facts.push(fact('触发请求', event.request_id, { wide: true, title: '在请求日志中按该请求 ID 可找到这次请求' }));
     panel.appendChild(factsGrid(facts));
   }
@@ -990,6 +992,8 @@
   }
 
   function scopeNote() {
+    const quality = el('filterQuality');
+    if (quality) quality.disabled = state.kind !== 'request';
     const hint = el('logsFilterScope');
     if (hint) hint.textContent = FILTER_HINTS[state.kind] || '';
     // The second column holds a channel only for inference traffic; an operation has
@@ -1144,6 +1148,8 @@
     });
     const toggle = el('logsFiltersToggle');
     if (toggle) toggle.addEventListener('click', () => toggleFilters());
+    const quality = el('filterQuality');
+    if (quality) quality.addEventListener('change', () => { state.cursor = ''; syncUrl(); load(false); });
     const form = el('logsFilters');
     if (form) form.addEventListener('submit', (event) => { event.preventDefault(); state.cursor = ''; syncUrl(); load(false); });
     const reload = el('logsReload');
@@ -1194,6 +1200,8 @@
     }
     button.addEventListener('click', () => update(enabled != null));
     await update(false);
+    // The initial disabled state is only for loading, including a failed read.
+    button.disabled = false;
   }
 
   if (document.readyState === 'loading') {

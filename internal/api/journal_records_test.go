@@ -147,3 +147,60 @@ func TestJournalRowCarriesItsPricingBreakdown(t *testing.T) {
 	_, ok = pricingBreakdownForJournal(audit.Event{Action: "grok_request", Model: "future-model"})
 	testutil.False(t, ok, "an unpriced row grew a breakdown")
 }
+
+func TestJournalRecordsRecoversPartialQualityHistory(t *testing.T) {
+	s, _ := newTestStore(t, "journal-quality-lookback:")
+	t.Cleanup(func() { _ = s.Close() })
+	a := &API{store: s}
+	events := []audit.Event{{Kind: audit.KindRequest, Action: "grok_quality_degraded", RequestID: "quality-1", Attempt: 1, Status: "degraded", Metadata: map[string]interface{}{"reason": "no_reasoning"}}}
+	for i := 0; i < 40; i++ {
+		events = append(events, audit.Event{Kind: audit.KindOperation, Action: "config_update", Status: "ok"})
+	}
+	events = append(events,
+		audit.Event{Kind: audit.KindRequest, Action: "grok_quality_degraded", RequestID: "quality-1", Attempt: 2, Status: "degraded", Metadata: map[string]interface{}{"reason": "burst_dump"}},
+		audit.Event{Kind: audit.KindRequest, Action: "grok_quality_resolution", RequestID: "quality-1", Status: "retried", Metadata: map[string]interface{}{"withheld_attempts": 2}},
+		audit.Event{Kind: audit.KindRequest, Action: "grok_request", RequestID: "quality-1", Channel: "grok", Status: "success", Metadata: map[string]interface{}{"quality_resolution": "retried", "quality_withheld_attempts": 2}},
+	)
+	seedJournal(t, a, events)
+	payload := journalRequest(t, a, "?kind=request&quality=any&limit=1")
+	rows := payload["data"].([]interface{})
+	testutil.Equal(t, len(rows), 1)
+	row := rows[0].(map[string]interface{})
+	checks := row["quality"].([]interface{})
+	testutil.Equal(t, len(checks), 3)
+	testutil.EqualAny(t, checks[0].(map[string]interface{})["attempt"], float64(1))
+	testutil.EqualAny(t, checks[1].(map[string]interface{})["attempt"], float64(2))
+	testutil.EqualAny(t, checks[2].(map[string]interface{})["action"], "grok_quality_resolution")
+	testutil.EqualAny(t, payload["next_cursor"], row["id"])
+}
+
+func TestJournalRecordsFiltersQualityResolution(t *testing.T) {
+	s, _ := newTestStore(t, "journal-quality-filter:")
+	t.Cleanup(func() { _ = s.Close() })
+	a := &API{store: s}
+	for _, resolution := range []string{"retried", "delivered_degraded", "rejected", "undeliverable"} {
+		seedJournal(t, a, []audit.Event{
+			{Kind: audit.KindRequest, Action: "grok_quality_resolution", RequestID: resolution, Channel: "grok", Status: resolution},
+			{Kind: audit.KindRequest, Action: "grok_request", RequestID: resolution, Channel: "grok", Status: "success", Metadata: map[string]interface{}{"quality_resolution": resolution}},
+		})
+	}
+	seedJournal(t, a, []audit.Event{{Kind: audit.KindRequest, Action: "grok_request", RequestID: "healthy", Channel: "grok", Status: "success"}})
+	for _, resolution := range []string{"any", "retried", "delivered_degraded", "rejected", "undeliverable"} {
+		t.Run(resolution, func(t *testing.T) {
+			payload := journalRequest(t, a, "?kind=request&quality="+resolution)
+			rows := payload["data"].([]interface{})
+			want := 1
+			if resolution == "any" {
+				want = 4
+			}
+			testutil.Equal(t, len(rows), want)
+			for _, raw := range rows {
+				event := raw.(map[string]interface{})["event"].(map[string]interface{})
+				testutil.EqualAny(t, event["action"], "grok_request")
+				if resolution != "any" {
+					testutil.EqualAny(t, event["request_id"], resolution)
+				}
+			}
+		})
+	}
+}
