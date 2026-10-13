@@ -219,13 +219,13 @@ func TestPersistConfigValidatesAnonymousAllowIPs(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	broken := &config.Config{AnonymousAllowIPs: []string{"10.0.0.0/8", "not-an-address"}}
+	broken := &config.Config{AdminPass: "test-secret", AnonymousAllowIPs: []string{"10.0.0.0/8", "not-an-address"}}
 	err := a.persistConfig(ctx, nil, broken)
 	testutil.Error(t, err)
 	saved, err := s.GetSetting(ctx, "config")
 	testutil.Falsef(t, err != nil || strings.Contains(saved, "not-an-address"), "the rejected value reached the store: %q err=%v", saved, err)
 
-	valid := &config.Config{AnonymousAllowIPs: []string{"203.0.113.20", "198.51.100.0/24"}}
+	valid := &config.Config{AdminPass: "test-secret", AnonymousAllowIPs: []string{"203.0.113.20", "198.51.100.0/24"}}
 	testutil.NoError(t, a.persistConfig(ctx, nil, valid), "a valid allowlist was rejected: %v")
 }
 

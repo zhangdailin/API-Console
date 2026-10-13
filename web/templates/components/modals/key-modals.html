@@ -94,7 +94,7 @@
 </div>
 <div class="modal-actions">
 <button type="button" class="btn btn-outline" onclick="copyAllKeys()">复制全部成功项</button>
-<button type="button" class="btn btn-primary" onclick="closeShowKeyModal()">完成</button>
+<button type="button" class="btn btn-primary" data-modal-close onclick="closeShowKeyModal()">完成</button>
 </div>
 </div>
 </div>
@@ -111,7 +111,7 @@
 </p>
 </div>
 <div class="modal-actions">
-<button type="button" class="btn btn-outline" onclick="closeDeleteKeyModal()">取消</button>
+<button type="button" class="btn btn-outline" data-modal-close onclick="closeDeleteKeyModal()">取消</button>
 <button id="deleteKeyConfirm" type="button" class="btn btn-danger" onclick="confirmDeleteKey()">
 </button>
 </div>

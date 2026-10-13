@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"orchids-api/internal/billingledger"
 	"strconv"
 	"strings"
 	"time"
@@ -264,13 +266,15 @@ func (s *redisStore) SettleApiKeyBilling(ctx context.Context, id int64, eventID 
 	if amount < 0 {
 		return fmt.Errorf("billing settlement amount must not be negative")
 	}
-	result, err := settleApiKeyBillingScript.Run(
-		ctx,
-		s.client,
-		[]string{s.apiKeyBillingReservationsKey(id), s.apiKeyBillingUsedKey(id), s.apiKeyBillingSettledKey(id)},
-		eventID,
-		amount,
-	).Int64()
+	expiry, err := billingledger.EventExpiry(eventID, time.Now())
+	if err != nil {
+		return err
+	}
+	digest := sha256.Sum256([]byte(eventID))
+	receipt := fmt.Sprintf("%s:receipt:%x", s.apiKeyBillingSettledKey(id), digest)
+	result, err := settleApiKeyBillingScript.Run(ctx, s.client,
+		[]string{s.apiKeyBillingReservationsKey(id), s.apiKeyBillingUsedKey(id), receipt, s.apiKeyBillingSettledKey(id), s.apiKeysKey(id)},
+		eventID, amount, expiry.UnixMilli(), int64(billingledger.Retention/time.Second)).Int64()
 	if err != nil {
 		return err
 	}

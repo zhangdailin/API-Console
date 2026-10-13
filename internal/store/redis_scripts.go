@@ -9,6 +9,22 @@ import "github.com/redis/go-redis/v9"
 // billing and stat updates safe without a distributed lock.
 
 var (
+	// Config and session generation change atomically across every replica.
+	saveConfigWithSessionRevocationScript = redis.NewScript(`
+   local next = cjson.decode(ARGV[1])
+   local previous = redis.call("GET", KEYS[1])
+   local old = {}
+   if previous then old = cjson.decode(previous) end
+   if type(old) ~= "table" then old = {} end
+   if type(next) ~= "table" then next = {} end
+   if old.admin_pass ~= next.admin_pass or old.admin_user ~= next.admin_user then
+     redis.call("SETNX", KEYS[2], "1")
+     redis.call("INCR", KEYS[2])
+   end
+   redis.call("SET", KEYS[1], ARGV[1])
+   return 1
+ `)
+
 	consumeApiKeyRPMScript = redis.NewScript(`
 		local value = redis.call("GET", KEYS[2])
 		if not value then return redis.error_reply("api key not found") end
@@ -118,12 +134,17 @@ var (
 	// the event in the same Lua transaction makes a retry after an ambiguous
 	// network timeout safe: Redis either applied all three mutations or none.
 	settleApiKeyBillingScript = redis.NewScript(`
-		local prior = redis.call("HGET", KEYS[3], ARGV[1])
+		if redis.call("EXISTS", KEYS[5]) == 0 then return redis.error_reply("api key not found") end
+        local now = redis.call("TIME")
+        if tonumber(ARGV[3]) <= tonumber(now[1])*1000 then return redis.error_reply("billing event expired") end
+        local prior = redis.call("GET", KEYS[3])
 		if prior then
 			if prior ~= tostring(ARGV[2]) then return -1 end
 			return 0
 		end
-		redis.call("HSET", KEYS[3], ARGV[1], tostring(ARGV[2]))
+		redis.call("SET", KEYS[3], tostring(ARGV[2]), "PXAT", ARGV[3])
+        -- Retire the legacy unbounded hash without refreshing its lifetime.
+        if redis.call("TTL", KEYS[4]) == -1 then redis.call("EXPIRE", KEYS[4], ARGV[4]) end
 		redis.call("HDEL", KEYS[1], ARGV[1])
 		redis.call("INCRBY", KEYS[2], tonumber(ARGV[2]))
 		return 1

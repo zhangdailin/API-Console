@@ -66,6 +66,9 @@ jobs:
       # ceiling is a maintenance budget rather than a style rule, and the
       # existing oversized files are exempted by name inside the script, so the
       # exemption list can only shrink as files are split.
+      - name: Test deployment rollback
+        run: python3 scripts/deploy_orchids_test.py
+
       - name: Check file sizes
         run: ./scripts/check-file-size.sh
 
@@ -104,6 +107,7 @@ jobs:
       - name: Run web asset tests
         run: |
           node --test web/*.test.cjs
+          node scripts/test-modal-focus.cjs
           ./scripts/check-provider-registry.sh
 
   race:

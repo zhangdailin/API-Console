@@ -262,11 +262,12 @@ async function saveConfiguration() {
   if (configSaving) return;
   const proxyBypassRaw = document.getElementById("cfg_proxy_bypass").value;
   const data = {
-    admin_password: document.getElementById("cfg_admin_pass").value,
     anonymous_allow_ips: parseAnonymousAllowIPs(),
     proxy_url: document.getElementById("cfg_proxy_url").value.trim(),
     proxy_bypass: parseProxyBypass(proxyBypassRaw),
   };
+	const password = document.getElementById("cfg_admin_pass").value;
+	if (password.trim()) data.admin_password = password;
 
   for (const key of Object.keys(PERFORMANCE_FIELDS)) {
     const input = document.getElementById("cfg_" + key);

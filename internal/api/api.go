@@ -50,6 +50,7 @@ type API struct {
 	importMu     sync.Mutex
 	configMu     sync.Mutex
 	configHookMu sync.RWMutex
+	flowTracker  *middleware.FlowTracker
 	connTracker  loadbalancer.ConnTracker
 	store        *store.Store
 	adminUser    string
@@ -199,3 +200,6 @@ func (a *API) notifyConfigChanged(cfg *config.Config) {
 		hook(cfg)
 	}
 }
+
+// SetFlowTracker wires the inference flow counters before the server starts.
+func (a *API) SetFlowTracker(tracker *middleware.FlowTracker) { a.flowTracker = tracker }

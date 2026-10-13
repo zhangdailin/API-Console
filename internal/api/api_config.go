@@ -22,12 +22,6 @@ func (a *API) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ip := middleware.ClientIP(r)
-	if a.loginLimiter != nil && !a.loginLimiter.Allow(ip) {
-		http.Error(w, "Too many login attempts, try again later", http.StatusTooManyRequests)
-		return
-	}
-
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -44,12 +38,20 @@ func (a *API) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		adminPass = cfg.AdminPass
 	}
 
-	if !util.SecureCompare(req.Username, adminUser) || !util.SecureCompare(req.Password, adminPass) {
+	valid, allowed := a.loginLimiter.CheckCredentials(middleware.ClientIP(r), func() bool {
+		return strings.TrimSpace(adminPass) != "" && util.SecureCompare(req.Username, adminUser) && util.SecureCompare(req.Password, adminPass)
+	})
+	if !allowed {
+		w.Header().Set("Retry-After", "180")
+		http.Error(w, "Too many login attempts, try again later", http.StatusTooManyRequests)
+		return
+	}
+	if !valid {
 		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 		return
 	}
 
-	token, err := auth.GenerateSessionToken()
+	token, err := auth.GenerateSessionTokenForPassword(adminPass)
 	if err != nil {
 		slog.Error("Failed to generate session token", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -74,6 +76,9 @@ func (a *API) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
 }
+
+// AdminAuthenticationLimiter is shared by login, Basic and header passwords.
+func (a *API) AdminAuthenticationLimiter() *middleware.RateLimiter { return a.loginLimiter }
 
 func (a *API) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie("session_token")
@@ -164,8 +169,13 @@ func buildConfigFromPatch(r *http.Request, current *config.Config) (*config.Conf
 		base = &copyCfg
 	}
 
-	baseMap, err := configPayload(base)
+	// Merge into the internal configuration, never the redacted public view.
+	rawBase, err := json.Marshal(base)
 	if err != nil {
+		return nil, err
+	}
+	baseMap := map[string]interface{}{}
+	if err := json.Unmarshal(rawBase, &baseMap); err != nil {
 		return nil, err
 	}
 
@@ -184,6 +194,14 @@ func buildConfigFromPatch(r *http.Request, current *config.Config) (*config.Conf
 	}
 	if v, ok := patch["admin_password"]; ok {
 		patch["admin_pass"] = v
+	}
+	delete(patch, "admin_password")
+	if v, ok := patch["admin_pass"]; ok {
+		if v == nil {
+			delete(patch, "admin_pass")
+		} else if password, ok := v.(string); ok && strings.TrimSpace(password) == "" {
+			delete(patch, "admin_pass")
+		}
 	}
 
 	for key, value := range patch {
@@ -308,6 +326,9 @@ func (a *API) persistConfig(ctx context.Context, current, newCfg *config.Config)
 	}
 
 	storedCfg := newCfg.Clone()
+	if strings.TrimSpace(storedCfg.AdminPass) == "" {
+		return fmt.Errorf("admin password must not be empty")
+	}
 	config.ApplyHardcoded(storedCfg)
 	if _, err := middleware.NewAnonymousAllowlist(storedCfg.AnonymousAllowIPs); err != nil {
 		return fmt.Errorf("anonymous_allow_ips: %w", err)
@@ -322,6 +343,9 @@ func (a *API) persistConfig(ctx context.Context, current, newCfg *config.Config)
 	}
 	if err := a.store.SetSetting(ctx, "config", string(data)); err != nil {
 		return err
+	}
+	if current == nil || current.AdminPass != storedCfg.AdminPass || current.AdminUser != storedCfg.AdminUser {
+		auth.ClearLocalSessions()
 	}
 	// Runtime configs are immutable after publication. Replacing the pointer is
 	// atomic; mutating the previously published object would race with request

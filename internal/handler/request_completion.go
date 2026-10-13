@@ -150,9 +150,9 @@ func (h *Handler) finishMessages(w http.ResponseWriter, r *http.Request, sh *str
 		// Settle the reservation taken before the request and price the same
 		// event, so the journal answers "what did this cost" and the key's
 		// balance moves exactly once. An estimated row is never charged.
-		if result, priced := middleware.SettleAPIKeyBilling(
+		if result, _ := middleware.SettleAPIKeyBilling(
 			r.Context(), nil, req.Model, usageSource, int64(sh.inputTokens), int64(sh.cachedInputTokens), int64(sh.outputTokens),
-		); priced {
+		); result.Model != "" {
 			event.CostInUSDTicks = result.CostInUSDTicks
 			event.PricingModel = result.Model
 			event.PricingVersion = pricing.Version

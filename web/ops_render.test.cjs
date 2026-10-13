@@ -208,7 +208,6 @@ test('failed window refresh clears historical charts and matrix instead of showi
   node('opsWindow').value = '60';
   node('opsWindow').listeners.change();
   await settle();
-  assert.equal(node('opsGaugeValue').textContent, '—');
   assert.equal(node('opsMatrix').querySelector('tbody').children.length, 1);
   assert.match(node('opsThroughput').children[0].textContent, /读取失败/);
 });
@@ -331,8 +330,7 @@ test('throughput with real token usage draws TPS and closes the QPS area', async
   assert.match(area.d, /^M[\d.]+,[\d.]+ L/);
   assert.ok(area.d.endsWith(' Z'), 'QPS area not closed');
   assert.match(node('opsThroughputHint').textContent, /右轴 TPS/);
-  const spark = node('opsSpark').children[0].children.find(child => child.class === 'series-success');
-  assert.match(spark.d, /^M[\d.]+,[\d.]+ L/, 'hero sparkline also needs values');
+
 });
 
 test('throughput without usage keeps TPS absent and explains why', async () => {
@@ -341,41 +339,4 @@ test('throughput without usage keeps TPS absent and explains why', async () => {
   const svg = node('opsThroughput').children[0];
   assert.equal(svg.children.some(child => child.class === 'series-tps'), false);
   assert.match(node('opsThroughputHint').textContent, /未上报用量/);
-});
-
-
-test('live window buttons update success percentage, counts and full success trend together', async () => {
-  const payload = { ...realPayload, totals: { requests: 1000, success: 999 }, series: [
-    { minute: '2026-09-12T14:00:00Z', requests: 20, success: 5, failed: 15 },
-    { minute: '2026-09-12T14:30:00Z', requests: 10, success: 10, failed: 0 },
-    { minute: '2026-09-12T14:47:00Z', requests: 6, success: 4, failed: 2 },
-    { minute: '2026-09-12T14:48:00Z', requests: 4, success: 1, failed: 3 },
-  ] };
-  const { node, liveButtons } = renderPage(payload);
-  await settle();
-  const cases = [[1,'25.0%',4,1], [5,'50.0%',10,2], [30,'75.0%',20,3], [60,'50.0%',40,4]];
-  for (const [minutes, rate, count, samples] of cases) {
-    const selected = liveButtons.find(button => Number(button.getAttribute('data-live')) === minutes);
-    selected.listeners.click();
-    assert.equal(node('opsGaugeValue').textContent, rate);
-    assert.equal(selected.classList.contains('is-active'), true);
-    const text = node('opsGaugeSub').children.map(child => child.textContent).join(' ');
-    assert.match(text, new RegExp(minutes + ' 分钟桶 ' + count + ' 次请求'));
-    assert.match(node('opsSuccessTrendHint').textContent, new RegExp(minutes + ' 分钟桶'));
-    const svg = node('opsSpark').children[0];
-    const dots = svg.children.filter(child => child.id === 'circle');
-    assert.equal(dots.length, samples, 'idle minutes must have no success sample');
-    assert.ok(svg.children.some(child => /100%/.test(child.textContent)), 'percentage axis missing');
-    assert.ok(dots.every(dot => /次成功/.test(dot.children[0].textContent)), 'point tooltips missing');
-  }
-});
-
-test('idle live window shows no percentage and no invented curve', async () => {
-  const { node, liveButtons } = renderPage({ ...realPayload, series: [] });
-  await settle();
-  for (const button of liveButtons) {
-    button.listeners.click();
-    assert.equal(node('opsGaugeValue').textContent, '待机');
-    assert.match(node('opsSpark').children[0].textContent, /暂无成功率样本/);
-  }
 });

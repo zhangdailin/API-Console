@@ -47,6 +47,8 @@ func registerRoutes(
 	tmplRenderer *template.Renderer,
 ) *selfupdate.Manager {
 	mux := http.NewServeMux()
+	flowTracker := middleware.NewFlowTracker()
+	apiHandler.SetFlowTracker(flowTracker)
 	currentConfig := func() *config.Config {
 		if current := apiHandler.ConfigSnapshot(); current != nil {
 			return current
@@ -122,7 +124,7 @@ func registerRoutes(
 			// concurrency must not hold budget) and before the handler runs, so a
 			// key whose limit cannot cover the request is answered 402 instead.
 			middleware.APIKeyConcurrencyWithTracker(
-				middleware.APIKeyBillingReservation(middleware.InferenceBudget(currentConfig)(next), s, middleware.DefaultBillingReservationTTL),
+				middleware.APIKeyBillingReservation(middleware.InferenceBudget(currentConfig)(flowTracker.Track(next)), s, middleware.DefaultBillingReservationTTL),
 				accountTracker,
 			),
 		)
@@ -186,7 +188,7 @@ func registerRoutes(
 		return middleware.SessionAuthDynamic(func() (string, string) {
 			current := currentConfig()
 			return current.AdminPass, current.AdminToken
-		}, h)
+		}, h, apiHandler.AdminAuthenticationLimiter())
 	}
 
 	// Admin routes under /api/* only (no dual prefix)
@@ -223,6 +225,7 @@ func registerRoutes(
 	mux.HandleFunc("/api/ops/overview", sessionAuth(apiHandler.HandleOpsOverview))
 	mux.HandleFunc("/api/ops/alerts/rules", sessionAuth(apiHandler.HandleOpsAlertRules))
 	mux.HandleFunc("/api/ops/runtime", sessionAuth(apiHandler.HandleOpsRuntime))
+	mux.HandleFunc("/api/ops/flow", sessionAuth(apiHandler.HandleOpsFlow))
 	// Journal: one filtered endpoint for request, operation, and system entries,
 	// with the upstream attempts of each request joined in.
 	mux.HandleFunc("/api/journal/records", sessionAuth(apiHandler.HandleJournalRecords))
@@ -270,7 +273,7 @@ func registerRoutes(
 		mux.HandleFunc("/debug/pprof/", middleware.SessionAuthDynamic(func() (string, string) {
 			current := currentConfig()
 			return current.AdminPass, current.AdminToken
-		}, http.DefaultServeMux.ServeHTTP))
+		}, http.DefaultServeMux.ServeHTTP, apiHandler.AdminAuthenticationLimiter()))
 		slog.Debug("pprof enabled", "path", "/debug/pprof/")
 	}
 	rootMux.Handle("/", mux)

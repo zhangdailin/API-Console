@@ -1,0 +1,417 @@
+<!DOCTYPE html><html lang="zh-CN" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light"><title>API Console · 全量审计 · 2026-10-13</title><style>
+  :root {
+    --transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  [data-theme="light"] {
+    --bg-page: #f8fafc;
+    --bg-surface: #ffffff;
+    --bg-subtle: #f1f5f9;
+    --border: #e2e8f0;
+    --border-hover: #cbd5e1;
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --text-muted: #94a3b8;
+    --accent: #4f46e5;
+    --accent-light: #e0e7ff;
+    --code-bg: #0f172a;
+    --code-text: #e2e8f0;
+  }
+
+  [data-theme="dark"] {
+    --bg-page: #0b0f19;
+    --bg-surface: #111827;
+    --bg-subtle: #1f2937;
+    --border: rgba(255, 255, 255, 0.08);
+    --border-hover: rgba(255, 255, 255, 0.16);
+    --text-primary: #f9fafb;
+    --text-secondary: #9ca3af;
+    --text-muted: #6b7280;
+    --accent: #6366f1;
+    --accent-light: rgba(99, 102, 241, 0.15);
+    --code-bg: #030712;
+    --code-text: #e5e7eb;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif;
+    background: var(--bg-page);
+    color: var(--text-primary);
+    line-height: 1.6;
+    transition: background-color 0.25s, color 0.25s;
+    min-height: 100vh;
+    display: flex;
+  }
+
+  /* Console Sidebar */
+  .sidebar {
+    width: 250px; background: var(--bg-surface); border-right: 1px solid var(--border);
+    position: sticky; top: 0; height: 100vh; overflow-y: auto; flex-shrink: 0;
+    display: flex; flex-direction: column;
+  }
+  .sidebar-header {
+    padding: 1.25rem 1.25rem 0.75rem; border-bottom: 1px solid var(--border);
+    display: flex; align-items: flex-start; justify-content: space-between;
+  }
+  .sidebar-header h1 { font-size: 1.05rem; font-weight: 800; }
+  .sidebar-header .sub { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.2rem; }
+  .theme-toggle-btn {
+    background: var(--bg-subtle); border: 1px solid var(--border); color: var(--text-primary);
+    border-radius: 6px; width: 30px; height: 30px; display: flex; align-items: center;
+    justify-content: center; cursor: pointer; font-size: 0.9rem;
+  }
+
+  .sidebar-nav { padding: 0.75rem 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .sidebar-nav a {
+    display: block; padding: 0.5rem 1.25rem; color: var(--text-secondary); text-decoration: none;
+    font-size: 0.825rem; font-weight: 500; transition: var(--transition); border-left: 2px solid transparent;
+  }
+  .sidebar-nav a:hover { color: var(--text-primary); background: var(--bg-subtle); }
+  .sidebar-nav a.active {
+    color: var(--accent); font-weight: 700; border-left-color: var(--accent); background: var(--accent-light);
+  }
+  .sidebar-footer { padding: 1rem 1.25rem; border-top: 1px solid var(--border); font-size: 0.75rem; color: var(--text-muted); }
+
+  /* Main Viewport */
+  .main { flex: 1; min-width: 0; padding: 2.5rem 3rem 6rem; max-width: 1280px; margin: 0 auto; }
+
+  .page-header { margin-bottom: 2.25rem; border-bottom: 1px solid var(--border); padding-bottom: 1.25rem; }
+  .page-header h2 { font-size: 2.25rem; font-weight: 800; letter-spacing: -0.03em; }
+  .page-header .meta { display: flex; gap: 1rem; margin-top: 0.5rem; font-size: 0.85rem; color: var(--text-secondary); }
+
+  .section-title {
+    font-size: 1.3rem; font-weight: 800; margin: 2.75rem 0 1rem;
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+
+  .card {
+    background: var(--bg-surface); border: 1px solid var(--border);
+    border-radius: 12px; margin-bottom: 1.5rem; overflow: hidden;
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  }
+  .card-header {
+    padding: 0.85rem 1.25rem; background: var(--bg-subtle); border-bottom: 1px solid var(--border);
+    font-weight: 700; font-size: 0.875rem;
+  }
+  .card-body { padding: 1.25rem 1.5rem; font-size: 0.925rem; line-height: 1.7; color: var(--text-secondary); }
+
+  /* Score Dashboard */
+  .score-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; }
+  .score-item {
+    background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 10px;
+    padding: 1.25rem; display: flex; flex-direction: column; gap: 0.4rem;
+  }
+  .score-item .label { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted); }
+  .score-item .bar-row { display: flex; align-items: center; gap: 0.75rem; margin: 0.2rem 0; }
+  .score-item .bar-track { flex: 1; height: 6px; background: var(--border); border-radius: 999px; overflow: hidden; }
+  .score-item .bar-fill { height: 100%; border-radius: 999px; }
+  .score-item .bar-fill.s { background: #10b981; }
+  .score-item .bar-fill.a { background: #3b82f6; }
+  .score-item .bar-fill.b { background: #f59e0b; }
+  .score-item .bar-fill.c, .score-item .bar-fill.d, .score-item .bar-fill.f { background: #ef4444; }
+  .score-item .value { font-size: 1.35rem; font-weight: 800; font-family: ui-monospace, monospace; color: var(--text-primary); }
+  .score-item .grade { font-size: 0.95rem; font-weight: 800; }
+  .score-item .small { font-size: 0.775rem; color: var(--text-muted); }
+
+  .overall-row {
+    grid-column: 1 / -1; background: var(--accent-light); border-color: var(--accent);
+    padding: 1.5rem; border-radius: 12px;
+  }
+  .overall-row .value { font-size: 2.25rem; color: var(--accent); }
+
+  /* Stats Row */
+  .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.75rem; margin-bottom: 2rem; }
+  .stat-card {
+    background: var(--bg-surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 1.25rem; text-align: center;
+  }
+  .stat-card .num { font-size: 1.85rem; font-weight: 800; line-height: 1.2; color: var(--text-primary); }
+  .stat-card .desc { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: var(--text-muted); margin-top: 0.2rem; }
+
+  /* Tables */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+  th { text-align: left; padding: 0.75rem 1rem; font-weight: 700; font-size: 0.75rem; text-transform: uppercase; color: var(--text-muted); border-bottom: 1px solid var(--border); background: var(--bg-subtle); }
+  td { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); color: var(--text-secondary); }
+
+  /* Finding Item */
+  .finding {
+    background: var(--bg-surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 1.5rem; margin-bottom: 1.25rem;
+  }
+  .finding.severity-critical { border-left: 4px solid #ef4444; }
+  .finding.severity-high { border-left: 4px solid #f59e0b; }
+  .finding.severity-medium { border-left: 4px solid #6366f1; }
+  .finding.severity-low { border-left: 4px solid #94a3b8; }
+  .finding.severity-info { border-left: 4px solid #38bdf8; }
+
+  .finding-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
+  .finding-header h4 { font-size: 1.15rem; font-weight: 700; color: var(--text-primary); flex: 1; }
+  .badge { padding: 0.2rem 0.55rem; border-radius: 4px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; }
+  .badge-critical { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+  .badge-high { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+  .badge-medium { background: rgba(99, 102, 241, 0.15); color: #6366f1; }
+  .badge-low { background: var(--bg-subtle); color: var(--text-muted); }
+  .badge-info { background: rgba(56, 189, 248, 0.15); color: #0284c7; }
+
+  .finding-meta { display: flex; gap: 1.25rem; flex-wrap: wrap; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem; }
+  .evidence {
+    background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1rem 1.25rem; font-family: ui-monospace, monospace; font-size: 0.85rem;
+    color: var(--code-text); margin: 0.75rem 0; overflow-x: auto; white-space: pre-wrap; word-break: break-all;
+  }
+  .fix-box {
+    background: var(--accent-light); border: 1px solid var(--accent);
+    border-radius: 8px; padding: 1rem 1.25rem; margin: 0.75rem 0;
+  }
+  .fix-label { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: var(--accent); margin-bottom: 0.25rem; }
+
+  .check-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0.4rem; margin-top: 1rem; }
+  .check-item { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem; font-size: 0.85rem; color: var(--text-secondary); }
+  .win-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+  .win-card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; }
+
+  @media (max-width: 900px) {
+    body { flex-direction: column; }
+    .sidebar { width: 100%; height: auto; position: static; }
+    .main { padding: 1.5rem; }
+  }
+
+html{scroll-behavior:smooth} a{color:var(--accent)} p+p{margin-top:.7rem} li{margin:.4rem 0} ul,ol{padding-left:1.3rem}.small{font-size:.8rem}.main{max-width:1460px}.page-header .meta{flex-wrap:wrap}.finding p{margin:.5rem 0}.finding-meta{color:var(--text-secondary)}.finding-header h4{min-width:210px}.toolbar{display:flex;flex-wrap:wrap;gap:.65rem;align-items:center;padding:1rem;border:1px solid var(--border);border-radius:10px;background:var(--bg-surface);margin:1rem 0}.toolbar input,.toolbar select{background:var(--bg-subtle);color:var(--text-primary);border:1px solid var(--border-hover);border-radius:7px;padding:.65rem;font:inherit;min-width:0}.toolbar input{flex:1;min-width:180px}button{font:inherit}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--accent);outline-offset:3px}.check-list{grid-template-columns:1fr}.check-item{align-items:flex-start}.finding[hidden]{display:none}.lede{font-size:1.07rem}.muted{color:var(--text-secondary)}.check-pass{color:#10b981;font-weight:700}.sidebar-footer{overflow-wrap:anywhere}.sidebar-nav a{padding-top:.35rem;padding-bottom:.35rem}.section-title{scroll-margin-top:1rem}code{overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}.table-wrap table{min-width:680px}td:first-child{min-width:115px}td{vertical-align:top}.evidence{word-break:normal;overflow-wrap:anywhere}summary{cursor:pointer;font-weight:700}.pill{background:var(--accent-light);padding:.25rem .65rem;border-radius:30px;font-size:.8rem}.findings-empty{padding:1rem}.map-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:.8rem}.map-grid div{background:var(--bg-subtle);padding:1rem;border-radius:8px}.stage{font-weight:700;color:var(--text-primary)}[data-theme="light"]{--text-muted:#64748b}[data-theme="dark"]{--text-muted:#9ca3af}
+@media(max-width:900px){.sidebar-nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));max-height:220px;overflow:auto}.sidebar-footer{display:none}.main{padding:1rem;width:100%}.page-header h2{font-size:1.8rem}.finding{padding:1rem}.card-body{padding:1rem}.score-grid{grid-template-columns:1fr}.check-list{grid-template-columns:1fr}}
+@media print{body{display:block;background:white;color:black}.sidebar,.toolbar,.theme-toggle-btn{display:none}.main{max-width:none;padding:0}.card,.finding{break-inside:avoid;box-shadow:none}.finding[hidden]{display:block}.table-wrap{overflow:visible}.table-wrap table{min-width:0}.evidence{background:#f1f5f9;color:#111827}a{color:inherit}}
+</style></head><body>
+<nav class="sidebar" aria-label="报告目录"><div class="sidebar-header"><div><h1>API Console</h1><div class="sub">全量审计 · Aurora</div></div><button type="button" class="theme-toggle-btn" id="themeToggle" aria-label="切换浅色主题" title="切换深浅主题">☀</button></div><div class="sidebar-nav"><a href="#executive-summary">审计结论</a><a href="#score-dashboard">评分看板</a><a href="#project-map">项目地图与验证</a><a href="#coverage">覆盖矩阵</a><a href="#statistics">问题统计</a><a href="#top-risks">优先风险</a><a href="#findings">详细问题</a><a href="#architecture">架构与模块边界</a><a href="#security">安全与认证</a><a href="#stability">稳定性与故障处理</a><a href="#performance">性能与扩展</a><a href="#testing">测试质量</a><a href="#maintainability">可维护性</a><a href="#design">工程设计</a><a href="#release">发布与回滚</a><a href="#documentation">文档准确性</a><a href="#configuration">配置安全</a><a href="#observability">日志、指标与实时监控</a><a href="#data-integrity">数据完整性</a><a href="#privacy">隐私与数据保留</a><a href="#accessibility">无障碍与交互</a><a href="#supply-chain">供应链与可复现性</a><a href="#cost">费用与资源经济性</a><a href="#ai-safety">AI 与工具边界</a><a href="#fallback">降级与错误兜底</a><a href="#testing-authenticity">测试真实性</a><a href="#type-safety">类型与输入边界</a><a href="#frontend-state">前端状态</a><a href="#backend-api">服务端 API</a><a href="#dependency-weight">依赖与构建负担</a><a href="#code-consistency">代码一致性</a><a href="#comment-coverage">注释与契约说明</a><a href="#concurrency">并发与取消</a><a href="#principles">工程原则分析</a><a href="#fix-order">建议修复顺序</a><a href="#quick-wins">可快速完成的改进</a></div><div class="sidebar-footer">审计：Codex<br>技能：fuck-my-shit-mountain<br>26 个审计维度 · 中文<br>独立 HTML · 无外部资源</div></nav>
+<main class="main"><header class="page-header"><span class="pill">仓库审计 / full / Aurora</span><h2>API Console 全量审计</h2><div class="meta"><span>2026-10-13 15:45（亚洲/上海）</span><span>基线 a56ea5a2d539 + 未提交改动</span><span>第一方代码 · 测试 · 文档 · 发布</span></div></header>
+<h3 class="section-title" id="executive-summary">审计结论</h3>
+<div class="card"><div class="card-body"><p class="lede"><strong>共确认 11 项问题：3 项高风险、7 项中风险、1 项低风险。</strong>优先修复空密码认证、费用预算绕过与失败结算漏记。</p><p>现有全量 Go、race 和 205 项前端测试均通过；额外隔离验证仍复现了关键边界缺陷。测试通过说明现有用例运行正常，不代表这些缺陷已被修复。本次仅审计与生成报告，没有修改应用源码，也没有部署或操作生产数据。</p><p>“全量”指覆盖全部 26 个技能审计维度和当前工作树，而非逐行证明 11 万行 Go 代码都不存在问题。采用风险导向检查：认证、计费、持久化、并发、协议转换、界面及发布为重点，其余模块代表性抽样；供应链覆盖为 Low，其余为 Medium。</p><p>这是一份代码与本地行为报告，不是线上入侵检测、支付金额核对、合规证明或发布认证。报告没有确认生产当前存在空密码、已被攻击或已经损失费用。</p></div></div>
+<h3 class="section-title" id="score-dashboard">评分看板</h3>
+<div class="score-grid">
+<div class="score-item"><div class="label">安全</div><div class="bar-row"><div class="bar-track"><div class="bar-fill" style="width:54.0%;background:var(--accent)"></div></div><span class="value">5.4</span><span class="grade">B</span></div><div class="small">覆盖 Medium · F1 可造成空口令管理访问；F5/F10 影响凭据生命周期。推理 Key、秘密投影和加密提供有效保护。</div></div>
+<div class="score-item"><div class="label">稳定性</div><div class="bar-row"><div class="bar-track"><div class="bar-fill" style="width:62.0%;background:var(--accent)"></div></div><span class="value">6.2</span><span class="grade">B</span></div><div class="small">覆盖 Medium · 正常测试充分，但 F3 的失败状态处理及 F9 的回滚身份需要修复。</div></div>
+<div class="score-item"><div class="label">性能</div><div class="bar-row"><div class="bar-track"><div class="bar-fill" style="width:70.0%;background:var(--accent)"></div></div><span class="value">7.0</span><span class="grade">A</span></div><div class="small">覆盖 Medium · 池、租约和聚合采样有边界；F6 逐请求幂等历史会累积，未做真实负载压测。</div></div>
+<div class="score-item"><div class="label">测试</div><div class="bar-row"><div class="bar-track"><div class="bar-fill" style="width:75.0%;background:var(--accent)"></div></div><span class="value">7.5</span><span class="grade">A</span></div><div class="small">覆盖 Medium · 全量套件与 race 通过，额外复现仍发现正文大小、取消、焦点和配置语义缺口。</div></div>
+<div class="score-item"><div class="label">可维护性</div><div class="bar-row"><div class="bar-track"><div class="bar-fill" style="width:72.0%;background:var(--accent)"></div></div><span class="value">7.2</span><span class="grade">A</span></div><div class="small">覆盖 Medium · 分层、注册表与共享 UI 已成体系；F4 显示读写模型职责混用。文档需修正 F11。</div></div>
+<div class="score-item"><div class="label">设计</div><div class="bar-row"><div class="bar-track"><div class="bar-fill" style="width:70.0%;background:var(--accent)"></div></div><span class="value">7.0</span><span class="grade">A</span></div><div class="small">覆盖 Medium · Lua 幂等及配置不可变设计合理，调用层未正确利用持久化保证（F3/F4）。</div></div>
+<div class="score-item"><div class="label">发布</div><div class="bar-row"><div class="bar-track"><div class="bar-fill" style="width:70.0%;background:var(--accent)"></div></div><span class="value">7.0</span><span class="grade">A</span></div><div class="small">覆盖 Medium · 构建摘要、版本元数据和回滚机制具备；F9 证明回滚文件集合不完整，供应链检查有限。</div></div>
+<div class="score-item overall-row"><div class="label">综合评分 · 越高越好</div><div class="value">6.8 / 10 <span class="grade">B</span></div><div class="small">7 个已评估评分维度等权算术平均，保留一位小数。评分是证据范围内的判断，不能抵消高风险问题。单项评分与 26 个审计维度不是一一对应。</div></div></div>
+<h3 class="section-title" id="project-map">项目地图与验证</h3>
+<div class="card"><div class="card-body"><div class="map-grid"><div><span class="stage">入口与认证</span><p>cmd/server 装配路由 → 可信代理与追踪 → 进程/通道准入 → API Key、并发与费用预留。</p></div><div><span class="stage">协议与上游</span><p>WorkBuddy / Cline / Qoder 经共享 handler；Grok 使用原生 Build Responses。对客户端提供 Chat、Responses 与 Messages。</p></div><div><span class="stage">状态与存储</span><p>Redis 保存账号、模型、Key、配置、会话、响应、计费与运维数据；本地密钥文件负责解密凭据；响应与诊断存在正文保留。</p></div><div><span class="stage">界面与运维</span><p>Go embed 的 HTML/CSS/JS；历史分钟聚合、告警和实时 SSE 拓扑分开；SSE 当前为单实例观测。</p></div><div><span class="stage">后台任务</span><p>账号刷新、凭据轮转、模型发现、账号冷却与连接租约；Store 合并及乐观更新维护数据边界。</p></div><div><span class="stage">交付与回滚</span><p>Go/Node CI、race、依赖检查；二进制与 Docker 发布；shell 部署和在线更新 watchdog 是两条不同路径。</p></div></div></div></div>
+<div class="card"><div class="card-body"><p>基线：a56ea5a2d539954c7fc1251fbfd196e00d8d38e5。工作树存在 8 个已修改文件和 6 个未跟踪的新功能文件，全部纳入审计；没有将历史 .audit 目录视为当前源码。</p><p>初始技能 inventory 达到 8,000 文件上限，被缓存与旧审计备份污染，因此以 Git 已跟踪 + 未忽略未跟踪文件清单替代：795 个第一方文件，325 个非测试 Go 文件。排除 .git、.audit、依赖缓存、二进制、临时部署产物、私有 .tools 和真实配置/密钥。</p><details><summary>基线与原有工作树改动</summary><pre class="evidence"> M cmd/server/routes.go
+ M internal/api/api.go
+ M internal/middleware/observability.go
+ M web/observability_regression.test.cjs
+ M web/ops_render.test.cjs
+ M web/static/css/ops.css
+ M web/static/js/ops.js
+ M web/templates/pages/ops.html
+?? internal/api/api_flow.go
+?? internal/api/api_flow_test.go
+?? internal/middleware/flow.go
+?? internal/middleware/flow_test.go
+?? web/ops_flow.test.cjs
+?? web/static/js/ops-flow.js
+</pre><p>第一方文件内容清单摘要 SHA-256：0baea4ebb86e84dd8aa810f38ff758e46fe0c143defe40736d95c7d2b10c2bfc</p></details></div></div>
+<div class="card"><div class="table-wrap"><table><thead><tr><th>验证类别</th><th>执行命令 / 方法</th><th>实际结果与限制</th></tr></thead><tbody><tr><td>项目清单</td><td><code>git ls-files --cached --others --exclude-standard -z</code></td><td>795 个第一方文件；696 个 Go（其中 371 个测试）；21 个 Node 测试文件；Go 共 113,003 行，其中测试 46,802 行。</td></tr><tr><td>常规测试</td><td><code>go test ./... -cover -count=1 -p 1</code></td><td>通过：43 个有测试的包；另有 8 个无测试文件的包。记录包级覆盖率，不将简单平均冒充全仓库覆盖率。</td></tr><tr><td>竞态检测</td><td><code>CGO_ENABLED=1 go test -race -count=1 -p 1 -timeout 15m ./...</code></td><td>通过：43 个有测试的包，未报告数据竞争。</td></tr><tr><td>前端测试</td><td><code>node --test web/*.test.cjs</code></td><td>205 通过，0 失败，0 跳过。</td></tr><tr><td>静态检查</td><td><code>go vet ./...；gofmt -l（全部清单 Go 文件）</code></td><td>通过；未修改格式。</td></tr><tr><td>契约检查</td><td><code>./scripts/check-provider-registry.sh；./scripts/check-file-size.sh</code></td><td>通过。文件大小脚本按项目豁免列表执行，不能解读为所有文件实际都小于 700 行。</td></tr><tr><td>依赖一致性</td><td><code>go mod verify；go mod tidy -diff</code></td><td>通过；清单/锁文件未修改，读取依赖元数据期间补充了模块缓存。不是最新漏洞扫描。</td></tr><tr><td>边界复现</td><td><code>go test -overlay /tmp/api-console-audit-overlay.json ./internal/api ./internal/middleware ./internal/store -run ^TestAudit -count=1 -p 1 -v</code></td><td>8 个测试通过，断言的是风险确实存在：F1–F6、F8、F10。测试文件在 /tmp，未加入应用源码。</td></tr><tr><td>浏览器</td><td><code>node /tmp/api-console-audit-modal.cjs</code></td><td>Chrome 真实 DOM 与键盘验证 F7。组件隔离页面复用仓库真实 JS/CSS/HTML。</td></tr><tr><td>回滚模拟</td><td><code>python3 /tmp/api-console-audit-rollback.py</code></td><td>隔离临时目录及服务命令替身复现 F9；没有执行真实服务重启。</td></tr><tr><td>秘密检查</td><td><code>第一方清单中定向匹配私钥块 / GitHub Token / AWS Access Key 形状</code></td><td>该有限扫描未命中；不覆盖所有秘密类型、Git 历史、忽略文件或真实配置，不声称无秘密泄露。</td></tr></tbody></table></div></div>
+<div class="card"><div class="card-header">验证解释</div><div class="card-body"><p>全量 Go 与 race 运行明确移除 WB_LIVE、QODER_PROBE、TLS_PROBE_HOST、TLS_PROBE_H2_LOCAL，使用本地测试路径。8 项临时复现只运行 TestAudit 前缀用例，使用隔离的 Store/miniredis 或本地 handler，不访问真实上游。</p><p>“REPRODUCED / PASS”表示用例成功观察到当前风险。没有对应用打补丁，不应把这些结果解释为修复后回归通过。报告生成后检查 HTML 结构、枚举、问题统计、目录链接以及浏览器主题与检索交互。</p></div></div>
+<h3 class="section-title" id="coverage">覆盖矩阵</h3>
+<div class="card"><div class="table-wrap"><table><thead><tr><th>维度</th><th>覆盖置信度</th><th>已检查证据</th><th>排除与限制</th></tr></thead><tbody><tr><td><a href="#architecture">架构与模块边界</a><br><small>architecture</small></td><td>Medium</td><td>cmd/server/routes.go；internal/provider/provider.go；internal/archtest/layering_test.go；docs/architecture.md</td><td>关键入口与代表模块已追踪；没有逐行覆盖全部 325 个非测试 Go 文件。</td></tr><tr><td><a href="#security">安全与认证</a><br><small>security</small></td><td>Medium</td><td>middleware/session.go、trusted_proxy.go；api/api_config.go；auth/auth.go；本地认证复现</td><td>未测试公网防火墙、真实管理密码、Cloudflare 链路或攻击强度；没有生产渗透测试。</td></tr><tr><td><a href="#stability">稳定性与故障处理</a><br><small>stability</small></td><td>Medium</td><td>middleware/billing.go；httpclient/http_pool.go；selfupdate/watchdog.go；全量 Go 与 race</td><td>真实断网、进程崩溃和跨实例故障未演练。</td></tr><tr><td><a href="#performance">性能与扩展</a><br><small>performance</small></td><td>Medium</td><td>httpclient/http_pool.go；loadbalancer/conn_tracker.go；opsagg/opsagg.go；Redis 事件保留复现</td><td>未跑生产规模压测、真实 Redis 内存测量或火焰图；不宣称吞吐提升/下降百分比。</td></tr><tr><td><a href="#testing">测试质量</a><br><small>testing</small></td><td>Medium</td><td>371 个 Go 测试文件、21 个 Node 测试文件；现有套件与 8 个临时复现测试</td><td>live 上游测试显式未启用；UI 原有测试多为 VM/DOM 替身，不能替代浏览器覆盖。</td></tr><tr><td><a href="#maintainability">可维护性</a><br><small>maintainability</small></td><td>Medium</td><td>provider 端口、api_config.go、ui.js、billing.go；项目文件大小检查</td><td>没有用文件长度直接判定缺陷；历史热点仅抽样。</td></tr><tr><td><a href="#design">工程设计</a><br><small>design</small></td><td>Medium</td><td>provider/provider.go；store/redis_scripts.go；api/api_config.go；rubrics/principles.md</td><td>按可达风险应用原则，不把参数数量或分支数量当作严重度。</td></tr><tr><td><a href="#release">发布与回滚</a><br><small>release</small></td><td>Medium</td><td>.github/workflows/ci.yml、release.yml、docker.yml；Dockerfile；scripts/deploy-orchids.sh；selfupdate/release.go</td><td>未触发远程 CI、发布、容器构建或线上部署；shell 回滚用隔离替身验证。</td></tr><tr><td><a href="#documentation">文档准确性</a><br><small>documentation</small></td><td>Medium</td><td>README.md、CLAUDE.md、docs/architecture.md、configuration.md、api-reference.md、deployment.md；deploy/README.md</td><td>对关键操作和边界抽样比对，未检查所有外链可达性。</td></tr><tr><td><a href="#configuration">配置安全</a><br><small>configuration</small></td><td>Medium</td><td>config/config.go、credential_key.go；api/api_config.go；config_api_test.go</td><td>未读取生产配置/密钥；未穷举所有配置组合。</td></tr><tr><td><a href="#observability">日志、指标与实时监控</a><br><small>observability</small></td><td>Medium</td><td>middleware/trace.go、observability.go、flow.go；api/api_flow.go；audit/audit.go；opsagg/opsagg.go</td><td>未对真实上游 usage 上报时序做新一轮生成；不评估生产告警阈值。</td></tr><tr><td><a href="#data-integrity">数据完整性</a><br><small>data-integrity</small></td><td>Medium</td><td>store/redis_scripts.go、redis_store.go、credential_patch.go；middleware/billing.go</td><td>miniredis 不能覆盖真实 Redis 故障切换、持久化恢复和集群语义。</td></tr><tr><td><a href="#privacy">隐私与数据保留</a><br><small>privacy</small></td><td>Medium</td><td>store/credential_cipher.go、redis_ephemeral.go；api/account_output.go、api_export_import.go；debug/capture.go</td><td>没有读取真实账号、诊断包、Redis 转储；不做法律合规结论。</td></tr><tr><td><a href="#accessibility">无障碍与交互</a><br><small>accessibility</small></td><td>Medium</td><td>web/static/js/ui.js；Key 弹窗模板；Chrome 键盘复现；前序浅深主题与响应式实测</td><td>新增 Chrome 检查为隔离真实组件；未用屏幕阅读器、axe 或覆盖所有页面/浏览器。</td></tr><tr><td><a href="#supply-chain">供应链与可复现性</a><br><small>supply-chain</small></td><td>Low</td><td>go.mod/go.sum；CI/release/Docker workflows；go mod verify；selfupdate/release.go</td><td>govulncheck/staticcheck/gitleaks 不在 PATH，未安装；未查当前漏洞库、远程 Actions 设置或签名状态。</td></tr><tr><td><a href="#cost">费用与资源经济性</a><br><small>cost</small></td><td>Medium</td><td>pricing/pricing.go；middleware/billing.go；store/redis_scripts.go；预算边界复现</td><td>不验证官方当前价格；表中的价格快照只作为代码逻辑。未调用付费上游，未知模型未定价策略另需业务确认。</td></tr><tr><td><a href="#ai-safety">AI 与工具边界</a><br><small>ai-safety</small></td><td>Medium</td><td>responses/store.go、resource.go；grok/handler_responses.go、quality_hold.go；chatwire 输入边界</td><td>本项目是协议网关，未发现本地模型输出执行系统命令的链路；不覆盖供应商模型安全性、RAG 或模型效果评测。</td></tr><tr><td><a href="#fallback">降级与错误兜底</a><br><small>fallback</small></td><td>Medium</td><td>auth/auth.go；middleware/billing.go；responses/store.go；config.Load</td><td>故障组合抽样，不把必要且有日志的降级一概视为错误。</td></tr><tr><td><a href="#testing-authenticity">测试真实性</a><br><small>testing-authenticity</small></td><td>Medium</td><td>middleware/billing_test.go；api/config_api_test.go；web/test-support.cjs；临时 overlay 测试</td><td>没有做全仓库 mutation testing；假 Redis 与替身服务不等于生产故障演练。</td></tr><tr><td><a href="#type-safety">类型与输入边界</a><br><small>type-safety</small></td><td>Medium</td><td>chatwire 解析边界；httpserver/body.go；api/api_config.go；api/api_keys.go</td><td>动态 JSON 协议转换只做关键路径抽样；没有形式化验证。</td></tr><tr><td><a href="#frontend-state">前端状态</a><br><small>frontend-state</small></td><td>Medium</td><td>ui.js requestGate/submission；config.js；ops-flow.js；request_isolation 与 submission tests</td><td>没有全页面端到端录制；本次不引入前端框架。</td></tr><tr><td><a href="#backend-api">服务端 API</a><br><small>backend-api</small></td><td>Medium</td><td>cmd/server/routes.go；middleware/session.go；api_config.go；responses/resource.go</td><td>所有路由已清点，正文/错误分支风险导向抽样；不保证每个 handler 所有组合都执行。</td></tr><tr><td><a href="#dependency-weight">依赖与构建负担</a><br><small>dependency-weight</small></td><td>Medium</td><td>go.mod 10 个直接依赖、14 个间接依赖；HTTP/Redis/指标导入；Dockerfile</td><td>未做替换依赖后的二进制体积基准或许可证专项审计。</td></tr><tr><td><a href="#code-consistency">代码一致性</a><br><small>code-consistency</small></td><td>Medium</td><td>CLAUDE.md；gofmt 全部 696 个 Go 文件；config 与 billing 读写惯例</td><td>不做风格重构；未逐条评估所有英文/中文历史注释。</td></tr><tr><td><a href="#comment-coverage">注释与契约说明</a><br><small>comment-coverage</small></td><td>Medium</td><td>provider/provider.go；auth/auth.go；billing.go；store/redis_scripts.go；store/store_response.go</td><td>仅评估安全/计费/存储关键注释；未以缺失 getter 注释计风险。</td></tr><tr><td><a href="#concurrency">并发与取消</a><br><small>concurrency</small></td><td>Medium</td><td>loadbalancer/conn_tracker.go；refreshqueue/credentials.go；store 事务；FlowTracker；全量 race</td><td>竞态检测只覆盖运行到的路径；未验证多主机长时压力、真实 Redis failover 或所有刷新交错。</td></tr></tbody></table></div></div>
+<h3 class="section-title" id="statistics">问题统计</h3>
+<div class="stats-row">
+<div class="stat-card" data-stat="Total" data-count="11" data-confirmed="11" data-suspected="0"><div class="num">11</div><div class="desc">合计 · Total</div><div class="small">确认 11 / 疑似 0</div></div>
+<div class="stat-card" data-stat="Critical" data-count="0" data-confirmed="0" data-suspected="0"><div class="num">0</div><div class="desc">严重 · Critical</div><div class="small">确认 0 / 疑似 0</div></div>
+<div class="stat-card" data-stat="High" data-count="3" data-confirmed="3" data-suspected="0"><div class="num">3</div><div class="desc">高风险 · High</div><div class="small">确认 3 / 疑似 0</div></div>
+<div class="stat-card" data-stat="Medium" data-count="7" data-confirmed="7" data-suspected="0"><div class="num">7</div><div class="desc">中风险 · Medium</div><div class="small">确认 7 / 疑似 0</div></div>
+<div class="stat-card" data-stat="Low" data-count="1" data-confirmed="1" data-suspected="0"><div class="num">1</div><div class="desc">低风险 · Low</div><div class="small">确认 1 / 疑似 0</div></div>
+<div class="stat-card" data-stat="Info" data-count="0" data-confirmed="0" data-suspected="0"><div class="num">0</div><div class="desc">信息 · Info</div><div class="small">确认 0 / 疑似 0</div></div>
+</div><p>所有问题状态均为 Confirmed（确认）、问题置信度为 High；这与维度覆盖完整程度不同。跨维度引用只计一次。未确认的猜测没有计入问题数。</p>
+<h3 class="section-title" id="top-risks">优先风险</h3>
+<div class="card"><div class="card-body"><ol><li><a href="#finding-F1">F1</a> <strong>密码“留空不修改”实际清空密码，空口令可访问管理 API</strong> — 管理员正常操作即可意外关闭管理口令保护；随后能访问管理端口的未授权调用方可读取配置、导出账号或执行其他管理操作。</li><li><a href="#finding-F2">F2</a> <strong>超过 8 MiB 的合法请求可绕过已耗尽的费用预算</strong> — 配置了消费上限的 Key 可继续发起付费推理；请求没有 BillingReservation，后续结算也不会更新该 Key 的账本。默认不限额 Key 不属于此问题的触发对象。</li><li><a href="#finding-F3">F3</a> <strong>结算失败仍标记已结算，取消或 Redis 故障后永久漏记费用</strong> — 已经观察到的可计费用量留在日志，却不进入 Key 消费余额；预留过期后容量重新可用，预算与真实消费发生偏差。</li></ol></div></div>
+<h3 class="section-title" id="findings">详细问题</h3>
+<div class="toolbar"><label for="findingSearch">搜索问题</label><input id="findingSearch" type="search" placeholder="输入编号、模块、文件或关键词"><label for="severityFilter">级别</label><select id="severityFilter"><option value="">全部级别</option><option value="High">高风险</option><option value="Medium">中风险</option><option value="Low">低风险</option></select><button type="button" id="resetFilters">重置</button><span id="filterCount" class="small" role="status" aria-live="polite">11 / 11 项</span></div><p id="noMatches" class="findings-empty" hidden>没有匹配的问题，可清空关键词或切换级别。</p>
+<article class="finding severity-high" data-finding="F1" id="finding-F1" data-severity="High"><div class="finding-header"><h4>F1 · 密码“留空不修改”实际清空密码，空口令可访问管理 API</h4><span class="badge badge-high" data-field="severity">High</span><span class="badge" data-field="status">Confirmed</span></div><div class="finding-meta"><span>主维度：<span data-field="category">security</span></span><span>问题置信度：<span data-field="confidence">High</span></span><span>影响范围：<span data-field="affectedArea">配置保存 → 管理认证</span></span></div>
+<div class="problem"><strong>问题</strong><p data-field="problem">空字符串被当成新密码发布到运行时。启动时生成随机密码的保护没有覆盖热更新入口；Basic Auth 分支也没有要求配置密码非空。</p></div><div class="evidence" data-field="evidence">web/templates/pages/config.html:77：密码输入提示“留空则不修改”。
+web/static/js/config.js:265：无条件提交 admin_password。
+internal/api/api_config.go:185、302–330：buildConfigFromPatch 覆盖 admin_pass；persistConfig 仅 ApplyHardcoded，不拒绝空密码。
+internal/middleware/session.go:244–246：SessionAuthDynamic 对 Basic Auth 的口令与空 adminPass 比较并放行。
+本地复现 TestAuditBlankPasswordAndTokenLoss：保存空值后，无 Cookie、任意用户名、空密码的受保护请求进入 handler（204）。</div>
+<p><strong>用户影响：</strong><span data-field="userVisibleImpact">管理员正常操作即可意外关闭管理口令保护；随后能访问管理端口的未授权调用方可读取配置、导出账号或执行其他管理操作。</span></p>
+<p><strong>触发条件与失败过程：</strong><span data-field="failureScenario">前置条件：管理员按页面提示清空密码输入框并保存，且管理 API 对攻击者可达。配置保存成功后，攻击者发送空密码 Basic Auth 即可通过认证。此次审计没有在生产环境执行该操作。</span></p>
+<div class="fix-box"><div class="fix-label">最小修复</div><div data-field="minimalFix">后端将省略或空白密码解释为保留当前密码；若支持清除，必须显式禁止管理员密码清除。认证层额外拒绝空配置口令。前端空值不提交，三处语义保持一致。</div></div>
+<p><strong>回归验证建议：</strong><span data-field="regressionTestSuggestion">集成测试：从已设置密码的配置提交空字符串、空白、null 和省略字段；确认旧密码不变且空 Basic Auth 始终返回 401。使用实际配置保存与认证中间件串联验证。</span></p>
+<p><strong>工作量估计：</strong><span data-field="estimatedEffort">0.5–1 天，含配置与认证回归。</span></p>
+</article>
+<article class="finding severity-high" data-finding="F2" id="finding-F2" data-severity="High"><div class="finding-header"><h4>F2 · 超过 8 MiB 的合法请求可绕过已耗尽的费用预算</h4><span class="badge badge-high" data-field="severity">High</span><span class="badge" data-field="status">Confirmed</span></div><div class="finding-meta"><span>主维度：<span data-field="category">cost</span></span><span>问题置信度：<span data-field="confidence">High</span></span><span>影响范围：<span data-field="affectedArea">推理费用预留 / 请求体边界</span></span></div>
+<div class="problem"><strong>问题</strong><p data-field="problem">费用检查和推理解析的正文上限不同。攻击者可以控制字段位置，让估算器看不到本来可定价的 model，而推理层仍能正常读取它。</p></div><div class="evidence" data-field="evidence">internal/middleware/billing.go:30、208–218、279–298：readBillingBody 仅提供 8 MiB 前缀给估算器；不能定价则直接 next；完整正文仍交给推理 handler。
+internal/pricing/pricing.go:126–133：前缀未读到 model 时返回未定价。
+internal/httpserver/body.go:14：JSON 推理读取上限为 32 MiB；internal/handler/handler.go:162、286：共享 handler 上限为 50 MiB。
+TestAuditLargeBodyBudgetBypass：在 model 前放置超过 8 MiB 的 JSON 空白，已耗尽预算的 Key 仍进入 handler，完整 JSON 可解码，且没有预留。</div>
+<p><strong>用户影响：</strong><span data-field="userVisibleImpact">配置了消费上限的 Key 可继续发起付费推理；请求没有 BillingReservation，后续结算也不会更新该 Key 的账本。默认不限额 Key 不属于此问题的触发对象。</span></p>
+<p><strong>触发条件与失败过程：</strong><span data-field="failureScenario">前置条件：持有有效但预算已耗尽的 Key、允许使用可定价模型。向支持的推理路径发送 8–32 MiB 的合法 JSON，将 model 放在估算前缀之后。空白可在解析后消失，因此无须真的向上游发送超大提示词。</span></p>
+<div class="fix-box"><div class="fix-label">最小修复</div><div data-field="minimalFix">统一费用检查和推理层的大小边界；预算受限请求遇到未完整解析的正文时明确返回 413 或校验失败，不能视为未定价并放行。若支持大正文，完整流式提取模型并校验 JSON 后再做预算准入。</div></div>
+<p><strong>回归验证建议：</strong><span data-field="regressionTestSuggestion">保留本次边界复现，并覆盖 model 位于首部/尾部、8 MiB 边界两侧、带图像的大请求，以及耗尽预算下正常小请求应返回 402。验证不产生真实上游调用。</span></p>
+<p><strong>工作量估计：</strong><span data-field="estimatedEffort">0.5–1.5 天，取决于大正文兼容策略。</span></p>
+</article>
+<article class="finding severity-high" data-finding="F3" id="finding-F3" data-severity="High"><div class="finding-header"><h4>F3 · 结算失败仍标记已结算，取消或 Redis 故障后永久漏记费用</h4><span class="badge badge-high" data-field="severity">High</span><span class="badge" data-field="status">Confirmed</span></div><div class="finding-meta"><span>主维度：<span data-field="category">data-integrity</span></span><span>问题置信度：<span data-field="confidence">High</span></span><span>影响范围：<span data-field="affectedArea">请求完成 / 费用账本状态机</span></span></div>
+<div class="problem"><strong>问题</strong><p data-field="problem">“已尝试结算”被当成“已持久化结算”。取消的上下文会使 Redis 写入失败；一次临时错误也会让内存状态永久阻止重试。现有注释以可能重复扣费为理由不重试，与 Redis 幂等脚本的保证不一致。</p></div><div class="evidence" data-field="evidence">internal/middleware/billing.go:60–72、168–181：claim 先置 settled=true，再调用 SettleApiKeyBilling；失败只记录警告，后续调用直接返回旧结果。
+internal/handler/request_completion.go:153–155、internal/grok/handler.go:216–217：使用请求上下文结算。
+internal/store/redis_scripts.go:117–131：Redis 结算脚本已按 eventID 原子去重，支持相同金额重试。
+TestAuditCancelledSettlementIsNotRetried 使用实际 Store 和 miniredis：取消上下文后结算，改用有效上下文重试，BillingUsedUSDTicks 仍为 0。</div>
+<p><strong>用户影响：</strong><span data-field="userVisibleImpact">已经观察到的可计费用量留在日志，却不进入 Key 消费余额；预留过期后容量重新可用，预算与真实消费发生偏差。</span></p>
+<p><strong>触发条件与失败过程：</strong><span data-field="failureScenario">流式请求完成/结束处理时客户端断开、超时取消，或者 Redis 短暂不可用。用量存在但账本写入失败，held.Settled() 已为 true，清理和再次结算都无法补记。未验证真实 Redis 故障下的金额规模。</span></p>
+<div class="fix-box"><div class="fix-label">最小修复</div><div data-field="minimalFix">使用带短超时的 context.WithoutCancel 处理必须完成的结算；区分处理中、持久化成功与可重试失败。复用 Redis eventID 幂等写入，增加有界重试或持久化补偿队列，并暴露未结算状态。</div></div>
+<p><strong>回归验证建议：</strong><span data-field="regressionTestSuggestion">以真实 Store/miniredis 验证取消上下文、首写失败后成功、写已落地但响应丢失、并发重复结算；最终账本必须恰好记一次。不要只用忽略 context 的 stub。</span></p>
+<p><strong>工作量估计：</strong><span data-field="estimatedEffort">1–2 天，含状态机、异常重试和账本回归。</span></p>
+</article>
+<article class="finding severity-medium" data-finding="F4" id="finding-F4" data-severity="Medium"><div class="finding-header"><h4>F4 · 保存无关配置会清空部署管理的静态 Admin Token</h4><span class="badge badge-medium" data-field="severity">Medium</span><span class="badge" data-field="status">Confirmed</span></div><div class="finding-meta"><span>主维度：<span data-field="category">configuration</span></span><span>问题置信度：<span data-field="confidence">High</span></span><span>影响范围：<span data-field="affectedArea">配置投影与写入模型复用</span></span></div>
+<div class="problem"><strong>问题</strong><p data-field="problem">用于对外输出的脱敏结构被复用为内部更新结构。未显示的字段在重建对象时丢失，而不是保持原值。</p></div><div class="evidence" data-field="evidence">internal/api/api_config.go:130–159：configPayload 为响应隐藏 admin_token。
+internal/api/api_config.go:160–206：buildConfigFromPatch 使用该响应作为配置基础，重新解码为 Config，却未恢复 AdminToken。
+cmd/server/routes.go:181–187、319–324：管理 API 和 UI 读取运行时 AdminToken。
+TestAuditUnrelatedConfigDropsAdminToken：仅修改 cache_strategy 后，新配置中的 AdminToken 为空。</div>
+<p><strong>用户影响：</strong><span data-field="userVisibleImpact">依赖静态管理 Token 的脚本或运维客户端突然返回 401；空值被写入 Redis 后还能覆盖部署文件中的原值，重启不一定恢复。Cookie 会话通常仍能使用。</span></p>
+<p><strong>触发条件与失败过程：</strong><span data-field="failureScenario">部署设置了 admin_token，管理员在控制台保存代理或其他普通配置，即使没有修改认证相关项也会触发。</span></p>
+<div class="fix-box"><div class="fix-label">最小修复</div><div data-field="minimalFix">从完整内部配置克隆并应用允许的 patch，输出脱敏另做投影；至少在写入前保留 current.AdminToken，并防止其他部署专属字段发生同类丢失。</div></div>
+<p><strong>回归验证建议：</strong><span data-field="regressionTestSuggestion">使用非空静态 Token 保存无关字段；断言内存与 Redis 中 Token 都保持不变，并以该 Token 调用受保护接口仍成功。</span></p>
+<p><strong>工作量估计：</strong><span data-field="estimatedEffort">2–4 小时。</span></p>
+</article>
+<article class="finding severity-medium" data-finding="F5" id="finding-F5" data-severity="Medium"><div class="finding-header"><h4>F5 · 管理员改密不会撤销旧会话，泄露会话仍可持续访问</h4><span class="badge badge-medium" data-field="severity">Medium</span><span class="badge" data-field="status">Confirmed</span></div><div class="finding-meta"><span>主维度：<span data-field="category">security</span></span><span>问题置信度：<span data-field="confidence">High</span></span><span>影响范围：<span data-field="affectedArea">管理会话生命周期</span></span></div>
+<div class="problem"><strong>问题</strong><p data-field="problem">系统没有将改密与旧会话撤销关联，也没有全局会话版本机制。改密只能阻止后续用旧密码登录，不能切断已经取得的会话。</p></div><div class="evidence" data-field="evidence">internal/auth/auth.go:16、105–135：会话有效期 7 天，校验不绑定密码版本。
+internal/middleware/session.go:227–230：有效 Cookie 优先通过认证。
+internal/api/api_config.go:302–330：改密仅保存配置并通知消费者，不撤销会话。
+TestAuditPasswordRotationKeepsSession：生成会话、修改密码后，原会话仍验证成功。</div>
+<p><strong>用户影响：</strong><span data-field="userVisibleImpact">发生管理员凭据/浏览器会话泄露后，运维人员仅修改密码无法终止入侵者现有管理访问。此问题需要攻击者已经持有有效会话，不构成初次认证绕过。</span></p>
+<p><strong>触发条件与失败过程：</strong><span data-field="failureScenario">攻击者先登录或取得 Cookie；管理员检测异常后改密。攻击者继续携带原 Cookie 访问管理 API，在会话到期前仍可操作。</span></p>
+<div class="fix-box"><div class="fix-label">最小修复</div><div data-field="minimalFix">引入持久化会话版本或全局撤销时间，改密时提升版本并使旧会话失效；明确是否保留当前操作会话，同时提供“退出所有会话”。</div></div>
+<p><strong>回归验证建议：</strong><span data-field="regressionTestSuggestion">两个浏览器会话跨两个网关实例登录，修改密码后旧会话必须拒绝；Redis 不可用时的本地回退也不能绕过撤销策略。</span></p>
+<p><strong>工作量估计：</strong><span data-field="estimatedEffort">0.5–1.5 天，跨实例与降级逻辑增加工作量。</span></p>
+</article>
+<article class="finding severity-medium" data-finding="F6" id="finding-F6" data-severity="Medium"><div class="finding-header"><h4>F6 · 结算去重 Hash 无保留期限，长寿命 Key 会持续积累事件</h4><span class="badge badge-medium" data-field="severity">Medium</span><span class="badge" data-field="status">Confirmed</span></div><div class="finding-meta"><span>主维度：<span data-field="category">performance</span></span><span>问题置信度：<span data-field="confidence">High</span></span><span>影响范围：<span data-field="affectedArea">Redis 费用幂等记录</span></span></div>
+<div class="problem"><strong>问题</strong><p data-field="problem">账本累计总额和逐请求幂等记录采用不同数据结构，但后者没有独立于账期的生命周期。默认无周期时，所有事件会保留到重置/删除 Key。</p></div><div class="evidence" data-field="evidence">internal/store/redis_scripts.go:120–131：每次结算 HSET eventID，没有 TTL 或裁剪。
+internal/store/redis_scripts.go:134–159：仅重置/周期滚动路径删除该集合。
+internal/store/store_api_keys.go:33–36：billing_period_days=0 允许生命周期累计。
+TestAuditSettledHistoryNoRetention：200 个不同事件结算后推进 miniredis 时间一年，仍保留 200 个字段。</div>
+<p><strong>用户影响：</strong><span data-field="userVisibleImpact">高预算且长期使用的 Key 会扩大 Redis 内存与备份体积；1 请求/秒对应每日 86,400 条新增字段，实际字节消耗未压测。不能用直接清空记录来解决，否则会破坏幂等保证。</span></p>
+<p><strong>触发条件与失败过程：</strong><span data-field="failureScenario">为长期服务配置较大消费上限、billing_period_days=0，并持续产生大量小额请求或定期提高额度。费用尚未耗尽时事件数量持续增加。</span></p>
+<div class="fix-box"><div class="fix-label">最小修复</div><div data-field="minimalFix">定义最大重试/补偿窗口，按时间桶保存幂等事件并过期；累计消费单独持久化。清理窗口必须覆盖最长请求及补偿时间，保留防止晚到重复结算的约束。</div></div>
+<p><strong>回归验证建议：</strong><span data-field="regressionTestSuggestion">时间推进测试覆盖窗口内重复请求不重扣、窗口边界行为和过期清理；结合真实 Redis 测量十万条以上事件的内存。</span></p>
+<p><strong>工作量估计：</strong><span data-field="estimatedEffort">1–2 天，需先确定重试和对账窗口。</span></p>
+</article>
+<article class="finding severity-medium" data-finding="F7" id="finding-F7" data-severity="Medium"><div class="finding-header"><h4>F7 · 创建 Key 弹窗打开后焦点仍在背景，Tab 可操作遮罩后的控件</h4><span class="badge badge-medium" data-field="severity">Medium</span><span class="badge" data-field="status">Confirmed</span></div><div class="finding-meta"><span>主维度：<span data-field="category">accessibility</span></span><span>问题置信度：<span data-field="confidence">High</span></span><span>影响范围：<span data-field="affectedArea">管理控制台对话框 / 键盘流程</span></span></div>
+<div class="problem"><strong>问题</strong><p data-field="problem">视觉模态没有对应的焦点迁移、背景隔离、焦点约束与关闭后恢复。aria-modal 属性本身不会实现这些行为。</p></div><div class="evidence" data-field="evidence">web/static/js/ui.js:113–119：ConsoleUI.modal 仅切换 class/display/aria-hidden。
+web/static/js/config.js:13、web/static/js/api-keys.js:137–140：创建 Key 使用该函数。
+web/templates/components/modals/key-modals.html:1：声明 aria-modal=true。
+Chrome 本地真实 DOM 复现：打开 createKeyModal 后焦点仍在触发按钮；按 Tab 后进入背景按钮，弹窗仍 display:flex。</div>
+<p><strong>用户影响：</strong><span data-field="userVisibleImpact">键盘或辅助技术用户可能在弹窗显示时操作背景页面，难以定位表单；声明的无障碍语义与真实交互不一致。</span></p>
+<p><strong>触发条件与失败过程：</strong><span data-field="failureScenario">通过键盘激活创建 Key 按钮并继续按 Tab。此次使用仓库实际 ui.js 与 Key 模板的隔离页面验证，未声称测试了所有浏览器或屏幕阅读器。</span></p>
+<div class="fix-box"><div class="fix-label">最小修复</div><div data-field="minimalFix">统一对话框生命周期：记住触发元素、打开时聚焦首个合适控件、背景 inert、处理 Tab/Shift+Tab 与 Escape、关闭恢复焦点；也可迁移到原生 dialog.showModal。</div></div>
+<p><strong>回归验证建议：</strong><span data-field="regressionTestSuggestion">真实浏览器覆盖打开、正反向 Tab、关闭恢复、异步提交期间禁用状态，并对账号、Key、系统窗口复用流程验证。</span></p>
+<p><strong>工作量估计：</strong><span data-field="estimatedEffort">0.5–1 天。</span></p>
+</article>
+<article class="finding severity-medium" data-finding="F8" id="finding-F8" data-severity="Medium"><div class="finding-header"><h4>F8 · 实时 TPS 将估算 Token 当作已上报用量，缺失状态被掩盖</h4><span class="badge badge-medium" data-field="severity">Medium</span><span class="badge" data-field="status">Confirmed</span></div><div class="finding-meta"><span>主维度：<span data-field="category">observability</span></span><span>问题置信度：<span data-field="confidence">High</span></span><span>影响范围：<span data-field="affectedArea">实时流量拓扑 / 用量来源</span></span></div>
+<div class="problem"><strong>问题</strong><p data-field="problem">流量模块注释称使用权威累计用量，但读取的观察对象混合了上游值与估算值，API 没有传递来源差异。</p></div><div class="evidence" data-field="evidence">internal/handler/request_completion.go:100–102、internal/grok/handler.go:195–205：允许产生 UsageSourceEstimated 事件。
+internal/middleware/observability.go:97、110：只要 token 数大于 0 就把 box.usage 置 true，没有保留是否来自上游。
+internal/middleware/flow.go:103–139、175–176：将该状态作为可用用量累积 TPS。
+TestAuditEstimatedUsageBecomesLiveTPS：estimated 输入 100 / 输出 50 被暴露为 usage_available=true、TPS=30。</div>
+<p><strong>用户影响：</strong><span data-field="userVisibleImpact">上游未返回 usage 时，控制台仍显示确定的 TPS；用户无法区分真实报告和估算，影响对吞吐及上游行为的判断。</span></p>
+<p><strong>触发条件与失败过程：</strong><span data-field="failureScenario">上游流没有最终 usage，handler 用文本长度或本地规则估算 token 并记录完成事件，流量拓扑直接显示该估算速率。五秒窗口中 QPS 与 TPS 错峰本身不是此缺陷。</span></p>
+<div class="fix-box"><div class="fix-label">最小修复</div><div data-field="minimalFix">在观察对象保留 usage source，实时权威 TPS 只计上游报告；若希望保留估算，单独标识“估算”，不能共用 available=true。继续明确 TPS 是五秒内收到的用量增量，不是逐 Token 生成速率。</div></div>
+<p><strong>回归验证建议：</strong><span data-field="regressionTestSuggestion">分别注入 upstream、estimated、none 用量，验证值和来源标识；再覆盖重试与最终事件重复上报，防止来源修复引入双计数。</span></p>
+<p><strong>工作量估计：</strong><span data-field="estimatedEffort">0.5 天。</span></p>
+</article>
+<article class="finding severity-medium" data-finding="F9" id="finding-F9" data-severity="Medium"><div class="finding-header"><h4>F9 · 部署失败回滚仅恢复二进制，构建与部署记录仍指向失败版本</h4><span class="badge badge-medium" data-field="severity">Medium</span><span class="badge" data-field="status">Confirmed</span></div><div class="finding-meta"><span>主维度：<span data-field="category">release</span></span><span>问题置信度：<span data-field="confidence">High</span></span><span>影响范围：<span data-field="affectedArea">主机部署脚本 / 回滚身份</span></span></div>
+<div class="problem"><strong>问题</strong><p data-field="problem">回滚恢复的文件集合不完整，运行程序身份与运维记录不再一致。在线 selfupdate 的独立 watchdog 与此 shell 脚本不同，不能混为同一个路径。</p></div><div class="evidence" data-field="evidence">scripts/deploy-orchids.sh:102–114：重启前覆盖 build-info 与 deploy-info。
+scripts/deploy-orchids.sh:160–166：失败时仅复制旧 binary 并重启，没有恢复两份元数据。
+本地脚本复现：在临时目录用隔离 systemctl/curl/date 替身触发健康失败；旧二进制恢复，build-info 仍为新版本，deploy-info 仍含新 SHA。</div>
+<p><strong>用户影响：</strong><span data-field="userVisibleImpact">值班人员可能把旧版本当作新版本排障，误判修复是否上线；后续依赖部署清单进行审计或备份的操作也会读到错误身份。</span></p>
+<p><strong>触发条件与失败过程：</strong><span data-field="failureScenario">新版产物架构与校验和合格，但服务健康检查失败，脚本进入回滚路径。复现没有启动/停止真实服务，也没有替换生产文件。</span></p>
+<div class="fix-box"><div class="fix-label">最小修复</div><div data-field="minimalFix">将二进制及对应元数据一起备份和恢复；回滚成功后重新校验运行身份，并在记录中区分当前版本、失败目标和回滚时间。</div></div>
+<p><strong>回归验证建议：</strong><span data-field="regressionTestSuggestion">在临时目录模拟成功、健康失败、回滚失败；成功回滚后断言二进制 SHA、build-info、deploy-info 一致，失败时留下可诊断的明确状态。</span></p>
+<p><strong>工作量估计：</strong><span data-field="estimatedEffort">2–4 小时。</span></p>
+</article>
+<article class="finding severity-medium" data-finding="F10" id="finding-F10" data-severity="Medium"><div class="finding-header"><h4>F10 · 管理密码的 Header/Basic Auth 入口绕过登录限速</h4><span class="badge badge-medium" data-field="severity">Medium</span><span class="badge" data-field="status">Confirmed</span></div><div class="finding-meta"><span>主维度：<span data-field="category">security</span></span><span>问题置信度：<span data-field="confidence">High</span></span><span>影响范围：<span data-field="affectedArea">管理 API 多种认证方式</span></span></div>
+<div class="problem"><strong>问题</strong><p data-field="problem">登录保护只覆盖 /api/login，其他等价的密码验证入口没有共享失败计数和限速。</p></div><div class="evidence" data-field="evidence">internal/api/api_config.go:25–29：HandleLogin 使用按 IP 的 loginLimiter。
+internal/middleware/session.go:232–247：每个管理 API 都接受 adminPass 的 Header/Basic Auth 比较，不经过 loginLimiter。
+TestAuditAdminHeaderBypassesLoginLimiter：同源 100 次错误 Basic Auth 均未触发 429，下一次正确口令仍直接成功。</div>
+<p><strong>用户影响：</strong><span data-field="userVisibleImpact">可达管理 API 的调用者可以绕开登录页的限速持续在线猜测密码。强随机密码会显著降低成功概率，未发现或尝试真实弱口令。</span></p>
+<p><strong>触发条件与失败过程：</strong><span data-field="failureScenario">攻击者对受保护的轻量 GET 接口反复携带猜测的 Basic Auth / X-Admin-Token 密码，避免访问已有速率限制的登录接口。</span></p>
+<div class="fix-box"><div class="fix-label">最小修复</div><div data-field="minimalFix">所有基于管理员密码的认证入口共用按来源与身份的失败限速；或移除 API 对管理员密码的兼容认证，只保留会话及独立高熵管理 Token。区分有效高频轮询与失败尝试。</div></div>
+<p><strong>回归验证建议：</strong><span data-field="regressionTestSuggestion">集成请求超过阈值后确认 /api/login、Basic、Bearer 密码、X-Admin-Token 密码共享防护；可信代理地址解析和正常会话轮询保持正确。</span></p>
+<p><strong>工作量估计：</strong><span data-field="estimatedEffort">0.5–1 天。</span></p>
+</article>
+<article class="finding severity-low" data-finding="F11" id="finding-F11" data-severity="Low"><div class="finding-header"><h4>F11 · 部署验收文档仍使用已删除的统一模型路径</h4><span class="badge badge-low" data-field="severity">Low</span><span class="badge" data-field="status">Confirmed</span></div><div class="finding-meta"><span>主维度：<span data-field="category">documentation</span></span><span>问题置信度：<span data-field="confidence">High</span></span><span>影响范围：<span data-field="affectedArea">主机部署操作手册</span></span></div>
+<div class="problem"><strong>问题</strong><p data-field="problem">部署目录中的快速验收步骤没有随统一入口的删除更新。</p></div><div class="evidence" data-field="evidence">deploy/README.md:23：要求用托管 Key 检查 /v1/models。
+cmd/server/routes.go:130–133：模型路由只注册各 provider 的 prefixes。
+cmd/server/routes.go:241–245：未匹配的非根路径返回 404。
+docs/api-reference.md 与 CLAUDE.md 则正确说明必须带通道前缀。</div>
+<p><strong>用户影响：</strong><span data-field="userVisibleImpact">按该步骤操作会把正常部署的 404 误认为模型服务异常，增加排障时间或引发不必要回退。</span></p>
+<p><strong>触发条件与失败过程：</strong><span data-field="failureScenario">运维人员在更新后执行文档中的 /v1/models 探测，即使 Key 和账号配置正确也无法匹配路由。</span></p>
+<div class="fix-box"><div class="fix-label">最小修复</div><div data-field="minimalFix">改成明确的 /workbuddy/v1/models、/cline/v1/models 等已配置通道路径，并说明模型目录检查不代表真实生成成功。</div></div>
+<p><strong>回归验证建议：</strong><span data-field="regressionTestSuggestion">逐条将部署手册的请求路径与路由注册表核对；已有本地路由测试验证通道模型列表，文档修正不需要额外真实生成。</span></p>
+<p><strong>工作量估计：</strong><span data-field="estimatedEffort">15–30 分钟。</span></p>
+</article>
+<h3 class="section-title" id="architecture">架构与模块边界</h3>
+<div class="card"><div class="card-header">架构与模块边界 · 覆盖 Medium</div><div class="card-body"><p>通道通过 Spec 注册；分层测试通过；Grok 原生与共享 handler 的分工有明确文档。配置响应投影复用导致 F4，应局部拆分读写模型。</p><p>已检查证据：cmd/server/routes.go；internal/provider/provider.go；internal/archtest/layering_test.go；docs/architecture.md</p><p>限制：关键入口与代表模块已追踪；没有逐行覆盖全部 325 个非测试 Go 文件。</p><p>关联问题：<a href="#finding-F4">F4</a>。根因只在详细问题中统计一次。</p><div class="check-list"><div class="check-item"><span class="check-pass">✓</span><span>已完成上述文件/命令的核对；运行验证仅限“项目地图与验证”明确列出的检查，未执行的部分已列入限制。</span></div></div></div></div>
+<h3 class="section-title" id="security">安全与认证</h3>
+<div class="card"><div class="card-header">安全与认证 · 覆盖 Medium</div><div class="card-body"><p>推理默认强制 API Key，匿名地址列表解析失败要求认证；会话使用随机 token，Redis 存摘要。发现空密码、会话撤销及登录限速边界。</p><p>已检查证据：middleware/session.go、trusted_proxy.go；api/api_config.go；auth/auth.go；本地认证复现</p><p>限制：未测试公网防火墙、真实管理密码、Cloudflare 链路或攻击强度；没有生产渗透测试。</p><p>关联问题：<a href="#finding-F1">F1</a>、<a href="#finding-F5">F5</a>、<a href="#finding-F10">F10</a>。根因只在详细问题中统计一次。</p><div class="check-list"><div class="check-item"><span class="check-pass">✓</span><span>已完成上述文件/命令的核对；运行验证仅限“项目地图与验证”明确列出的检查，未执行的部分已列入限制。</span></div></div></div></div>
+<h3 class="section-title" id="stability">稳定性与故障处理</h3>
+<div class="card"><div class="card-header">稳定性与故障处理 · 覆盖 Medium</div><div class="card-body"><p>连接池有数量边界和外部超时；准入释放使用 defer。取消请求结算与部署回滚仍有已复现缺口。</p><p>已检查证据：middleware/billing.go；httpclient/http_pool.go；selfupdate/watchdog.go；全量 Go 与 race</p><p>限制：真实断网、进程崩溃和跨实例故障未演练。</p><p>关联问题：<a href="#finding-F3">F3</a>、<a href="#finding-F9">F9</a>。根因只在详细问题中统计一次。</p><div class="check-list"><div class="check-item"><span class="check-pass">✓</span><span>已完成上述文件/命令的核对；运行验证仅限“项目地图与验证”明确列出的检查，未执行的部分已列入限制。</span></div></div></div></div>
+<h3 class="section-title" id="performance">性能与扩展</h3>
+<div class="card"><div class="card-header">性能与扩展 · 覆盖 Medium</div><div class="card-body"><p>HTTP 连接池最多 512 个；运维采样列表设置裁剪和 TTL。账本去重记录缺少独立保留窗口。</p><p>已检查证据：httpclient/http_pool.go；loadbalancer/conn_tracker.go；opsagg/opsagg.go；Redis 事件保留复现</p><p>限制：未跑生产规模压测、真实 Redis 内存测量或火焰图；不宣称吞吐提升/下降百分比。</p><p>关联问题：<a href="#finding-F6">F6</a>。根因只在详细问题中统计一次。</p><div class="check-list"><div class="check-item"><span class="check-pass">✓</span><span>已完成上述文件/命令的核对；运行验证仅限“项目地图与验证”明确列出的检查，未执行的部分已列入限制。</span></div></div></div></div>
+<h3 class="section-title" id="testing">测试质量</h3>
+<div class="card"><div class="card-header">测试质量 · 覆盖 Medium</div><div class="card-body"><p>43 个有测试的 Go 包通过常规和 race 运行；205 个前端测试通过。本次边界复现补出了当前套件未覆盖的问题，不能用通过数代表没有缺陷。</p><p>已检查证据：371 个 Go 测试文件、21 个 Node 测试文件；现有套件与 8 个临时复现测试</p><p>限制：live 上游测试显式未启用；UI 原有测试多为 VM/DOM 替身，不能替代浏览器覆盖。</p><p>关联问题：<a href="#finding-F1">F1</a>、<a href="#finding-F2">F2</a>、<a href="#finding-F3">F3</a>、<a href="#finding-F7">F7</a>、<a href="#finding-F8">F8</a>。根因只在详细问题中统计一次。</p><div class="check-list"><div class="check-item"><span class="check-pass">✓</span><span>已完成上述文件/命令的核对；运行验证仅限“项目地图与验证”明确列出的检查，未执行的部分已列入限制。</span></div></div></div></div>
+<h3 class="section-title" id="maintainability">可维护性</h3>
+<div class="card"><div class="card-header">可维护性 · 覆盖 Medium</div><div class="card-body"><p>模块分层和通用 UI 原语已有基础。F4 是投影职责混用的具体变更成本；F3 的内存状态与持久化状态应明确区分。</p><p>已检查证据：provider 端口、api_config.go、ui.js、billing.go；项目文件大小检查</p><p>限制：没有用文件长度直接判定缺陷；历史热点仅抽样。</p><p>关联问题：<a href="#finding-F3">F3</a>、<a href="#finding-F4">F4</a>。根因只在详细问题中统计一次。</p><div class="check-list"><div class="check-item"><span class="check-pass">✓</span><span>已完成上述文件/命令的核对；运行验证仅限“项目地图与验证”明确列出的检查，未执行的部分已列入限制。</span></div></div></div></div>
+<h3 class="section-title" id="design">工程设计</h3>
+<div class="card"><div class="card-header">工程设计 · 覆盖 Medium</div><div class="card-body"><p>配置快照不可变、Redis Lua 幂等是有效设计；错误地合并“脱敏输出/内部状态”及“尝试/成功”造成实际故障。</p><p>已检查证据：provider/provider.go；store/redis_scripts.go；api/api_config.go；rubrics/principles.md</p><p>限制：按可达风险应用原则，不把参数数量或分支数量当作严重度。</p><p>关联问题：<a href="#finding-F3">F3</a>、<a href="#finding-F4">F4</a>。根因只在详细问题中统计一次。</p><div class="check-list"><div class="check-item"><span class="check-pass">✓</span><span>已完成上述文件/命令的核对；运行验证仅限“项目地图与验证”明确列出的检查，未执行的部分已列入限制。</span></div></div></div></div>
+<h3 class="section-title" id="release">发布与回滚</h3>
+<div class="card"><div class="card-header">发布与回滚 · 覆盖 Medium</div><div class="card-body"><p>发布执行 Go/前端测试并生成 SHA；容器以 UID 10001 运行；在线更新限制下载域与大小。shell 回滚元数据不一致。</p><p>已检查证据：.github/workflows/ci.yml、release.yml、docker.yml；Dockerfile；scripts/deploy-orchids.sh；selfupdate/release.go</p><p>限制：未触发远程 CI、发布、容器构建或线上部署；shell 回滚用隔离替身验证。</p><p>关联问题：<a href="#finding-F9">F9</a>、<a href="#finding-F11">F11</a>。根因只在详细问题中统计一次。</p><div class="check-list"><div class="check-item"><span class="check-pass">✓</span><span>已完成上述文件/命令的核对；运行验证仅限“项目地图与验证”明确列出的检查，未执行的部分已列入限制。</span></div></div></div></div>
+<h3 class="section-title" id="documentation">文档准确性</h3>
+<div class="card"><div class="card-header">文档准确性 · 覆盖 Medium</div><div class="card-body"><p>主文档明确 provider 前缀、配置优先级与备份密钥；子目录验收命令仍指向旧路径，密码 UI 文案与行为冲突。</p><p>已检查证据：README.md、CLAUDE.md、docs/architecture.md、configuration.md、api-reference.md、deployment.md；deploy/README.md</p><p>限制：对关键操作和边界抽样比对，未检查所有外链可达性。</p><p>关联问题：<a href="#finding-F1">F1</a>、<a href="#finding-F11">F11</a>。根因只在详细问题中统计一次。</p><div class="check-list"><div class="check-item"><span class="check-pass">✓</span><span>已完成上述文件/命令的核对；运行验证仅限“项目地图与验证”明确列出的检查，未执行的部分已列入限制。</span></div></div></div></div>
+<h3 class="section-title" id="configuration">配置安全</h3>
+<div class="card"><div class="card-header">配置安全 · 覆盖 Medium</div><div class="card-body"><p>启动默认口令生成、代理校验与不可变快照存在；热更新缺少空密码保护，且脱敏字段会丢失。</p><p>已检查证据：config/config.go、credential_key.go；api/api_config.go；config_api_test.go</p><p>限制：未读取生产配置/密钥；未穷举所有配置组合。</p><p>关联问题：<a href="#finding-F1">F1</a>、<a href="#finding-F4">F4</a>。根因只在详细问题中统计一次。</p><div class="check-list"><div class="check-item"><span class="check-pass">✓</span><span>已完成上述文件/命令的核对；运行验证仅限“项目地图与验证”明确列出的检查，未执行的部分已列入限制。</span></div></div></div></div>
+<h3 class="section-title" id="observability">日志、指标与实时监控</h3>
+<div class="card"><div class="card-header">日志、指标与实时监控 · 覆盖 Medium</div><div class="card-body"><p>SSE 有 no-transform、订阅清理与写期限；五秒 QPS 数开始、TPS 数到达用量，错峰是口径结果。估算来源却被表示为已知用量。</p><p>已检查证据：middleware/trace.go、observability.go、flow.go；api/api_flow.go；audit/audit.go；opsagg/opsagg.go</p><p>限制：未对真实上游 usage 上报时序做新一轮生成；不评估生产告警阈值。</p><p>关联问题：<a href="#finding-F8">F8</a>。根因只在详细问题中统计一次。</p><div class="check-list"><div class="check-item"><span class="check-pass">✓</span><span>已完成上述文件/命令的核对；运行验证仅限“项目地图与验证”明确列出的检查，未执行的部分已列入限制。</span></div></div></div></div>
+<h3 class="section-title" id="data-integrity">数据完整性</h3>
+<div class="card"><div class="card-header">数据完整性 · 覆盖 Medium</div><div class="card-body"><p>账本 Lua 原子幂等、账号更新使用 WATCH/事务与凭据版本检查；取消后永久失去结算机会违反已消费应入账的不变量。</p><p>已检查证据：store/redis_scripts.go、redis_store.go、credential_patch.go；middleware/billing.go</p><p>限制：miniredis 不能覆盖真实 Redis 故障切换、持久化恢复和集群语义。</p><p>关联问题：<a href="#finding-F3">F3</a>、<a href="#finding-F6">F6</a>。根因只在详细问题中统计一次。</p><div class="check-list"><div class="check-item"><span class="check-pass">✓</span><span>已完成上述文件/命令的核对；运行验证仅限“项目地图与验证”明确列出的检查，未执行的部分已列入限制。</span></div></div></div></div>
+<h3 class="section-title" id="privacy">隐私与数据保留</h3>
+<div class="card"><div class="card-header">隐私与数据保留 · 覆盖 Medium</div><div class="card-body"><p>账号凭据 AES-GCM 加密、读取投影去秘密、导出明确包含恢复凭据；诊断脱敏并限量/TTL，响应 store=true 会保存 Body/InputItems，默认保留 30 天，备份仍须单独治理。未确认新的独立泄露缺陷。</p><p>已检查证据：store/credential_cipher.go、redis_ephemeral.go；api/account_output.go、api_export_import.go；debug/capture.go</p><p>限制：没有读取真实账号、诊断包、Redis 转储；不做法律合规结论。</p><p>在上述检查范围内，没有达到独立问题门槛的新发现；不代表该维度完全无风险。</p><div class="check-list"><div class="check-item"><span class="check-pass">✓</span><span>已完成上述文件/命令的核对；运行验证仅限“项目地图与验证”明确列出的检查，未执行的部分已列入限制。</span></div></div></div></div>
+<h3 class="section-title" id="accessibility">无障碍与交互</h3>
+<div class="card"><div class="card-header">无障碍与交互 · 覆盖 Medium</div><div class="card-body"><p>语义标签、aria-modal 和按钮已存在，但缺少焦点行为。前序拓扑桌面/手机主题检查有效，不能推及所有对话框。</p><p>已检查证据：web/static/js/ui.js；Key 弹窗模板；Chrome 键盘复现；前序浅深主题与响应式实测</p><p>限制：新增 Chrome 检查为隔离真实组件；未用屏幕阅读器、axe 或覆盖所有页面/浏览器。</p><p>关联问题：<a href="#finding-F7">F7</a>。根因只在详细问题中统计一次。</p><div class="check-list"><div class="check-item"><span class="check-pass">✓</span><span>已完成上述文件/命令的核对；运行验证仅限“项目地图与验证”明确列出的检查，未执行的部分已列入限制。</span></div></div></div></div>
+<h3 class="section-title" id="supply-chain">供应链与可复现性</h3>
+<div class="card"><div class="card-header">供应链与可复现性 · 覆盖 Low</div><div class="card-body"><p>模块摘要与清单一致；CI 配置有定期 govulncheck。Actions 多用版本标签，基础镜像未固定 digest，记为残余风险；没有证据可声称依赖无漏洞或供应链被入侵。</p><p>已检查证据：go.mod/go.sum；CI/release/Docker workflows；go mod verify；selfupdate/release.go</p><p>限制：govulncheck/staticcheck/gitleaks 不在 PATH，未安装；未查当前漏洞库、远程 Actions 设置或签名状态。</p><p>在上述检查范围内，没有达到独立问题门槛的新发现；不代表该维度完全无风险。</p><div class="check-list"><div class="check-item"><span class="check-pass">✓</span><span>已完成上述文件/命令的核对；运行验证仅限“项目地图与验证”明确列出的检查，未执行的部分已列入限制。</span></div></div></div></div>
+<h3 class="section-title" id="cost">费用与资源经济性</h3>
+<div class="card"><div class="card-header">费用与资源经济性 · 覆盖 Medium</div><div class="card-body"><p>整数 USD ticks 避免浮点累计；预留在认证/并发之后，但大正文可绕过、失败结算可漏记。预算字段通过管理 API 生效，前端创建默认不限额。</p><p>已检查证据：pricing/pricing.go；middleware/billing.go；store/redis_scripts.go；预算边界复现</p><p>限制：不验证官方当前价格；表中的价格快照只作为代码逻辑。未调用付费上游，未知模型未定价策略另需业务确认。</p><p>关联问题：<a href="#finding-F2">F2</a>、<a href="#finding-F3">F3</a>、<a href="#finding-F6">F6</a>。根因只在详细问题中统计一次。</p><div class="check-list"><div class="check-item"><span class="check-pass">✓</span><span>已完成上述文件/命令的核对；运行验证仅限“项目地图与验证”明确列出的检查，未执行的部分已列入限制。</span></div></div></div></div>
+<h3 class="section-title" id="ai-safety">AI 与工具边界</h3>
+<div class="card"><div class="card-header">AI 与工具边界 · 覆盖 Medium</div><div class="card-body"><p>响应所有权绑定已认证 Key 指纹；Grok 质量重试区分可安全重放工具请求。认证/预算边界仍是核心控制，F2 可影响模型消费。</p><p>已检查证据：responses/store.go、resource.go；grok/handler_responses.go、quality_hold.go；chatwire 输入边界</p><p>限制：本项目是协议网关，未发现本地模型输出执行系统命令的链路；不覆盖供应商模型安全性、RAG 或模型效果评测。</p><p>关联问题：<a href="#finding-F2">F2</a>。根因只在详细问题中统计一次。</p><div class="check-list"><div class="check-item"><span class="check-pass">✓</span><span>已完成上述文件/命令的核对；运行验证仅限“项目地图与验证”明确列出的检查，未执行的部分已列入限制。</span></div></div></div></div>
+<h3 class="section-title" id="fallback">降级与错误兜底</h3>
+<div class="card"><div class="card-header">降级与错误兜底 · 覆盖 Medium</div><div class="card-body"><p>会话后端失败可回退到已知会话；未知会话仍拒绝。预算估算失败放行、结算失败返回已定价成功值得优先修复。</p><p>已检查证据：auth/auth.go；middleware/billing.go；responses/store.go；config.Load</p><p>限制：故障组合抽样，不把必要且有日志的降级一概视为错误。</p><p>关联问题：<a href="#finding-F2">F2</a>、<a href="#finding-F3">F3</a>、<a href="#finding-F5">F5</a>。根因只在详细问题中统计一次。</p><div class="check-list"><div class="check-item"><span class="check-pass">✓</span><span>已完成上述文件/命令的核对；运行验证仅限“项目地图与验证”明确列出的检查，未执行的部分已列入限制。</span></div></div></div></div>
+<h3 class="section-title" id="testing-authenticity">测试真实性</h3>
+<div class="card"><div class="card-header">测试真实性 · 覆盖 Medium</div><div class="card-body"><p>billing stub 的结算方法忽略 context，本次实际 Store 用例能补充取消语义。已有大量行为/协议测试，不应一概判定为过度 mock。</p><p>已检查证据：middleware/billing_test.go；api/config_api_test.go；web/test-support.cjs；临时 overlay 测试</p><p>限制：没有做全仓库 mutation testing；假 Redis 与替身服务不等于生产故障演练。</p><p>关联问题：<a href="#finding-F3">F3</a>、<a href="#finding-F7">F7</a>。根因只在详细问题中统计一次。</p><div class="check-list"><div class="check-item"><span class="check-pass">✓</span><span>已完成上述文件/命令的核对；运行验证仅限“项目地图与验证”明确列出的检查，未执行的部分已列入限制。</span></div></div></div></div>
+<h3 class="section-title" id="type-safety">类型与输入边界</h3>
+<div class="card"><div class="card-header">类型与输入边界 · 覆盖 Medium</div><div class="card-body"><p>Go 编译/vet 通过，第一方检索未见 unsafe 使用；Key 数值策略有边界表。Config 经 map 重建造成敏感字段语义丢失，是更具体的边界风险。</p><p>已检查证据：chatwire 解析边界；httpserver/body.go；api/api_config.go；api/api_keys.go</p><p>限制：动态 JSON 协议转换只做关键路径抽样；没有形式化验证。</p><p>关联问题：<a href="#finding-F1">F1</a>、<a href="#finding-F4">F4</a>。根因只在详细问题中统计一次。</p><div class="check-list"><div class="check-item"><span class="check-pass">✓</span><span>已完成上述文件/命令的核对；运行验证仅限“项目地图与验证”明确列出的检查，未执行的部分已列入限制。</span></div></div></div></div>
+<h3 class="section-title" id="frontend-state">前端状态</h3>
+<div class="card"><div class="card-header">前端状态 · 覆盖 Medium</div><div class="card-body"><p>请求序号与 AbortController 避免旧响应覆盖新状态；提交保护防重复；流量 SSE 在隐藏/断开时处理旧状态。密码空值语义与模态生命周期仍不完整。</p><p>已检查证据：ui.js requestGate/submission；config.js；ops-flow.js；request_isolation 与 submission tests</p><p>限制：没有全页面端到端录制；本次不引入前端框架。</p><p>关联问题：<a href="#finding-F1">F1</a>、<a href="#finding-F7">F7</a>。根因只在详细问题中统计一次。</p><div class="check-list"><div class="check-item"><span class="check-pass">✓</span><span>已完成上述文件/命令的核对；运行验证仅限“项目地图与验证”明确列出的检查，未执行的部分已列入限制。</span></div></div></div></div>
+<h3 class="section-title" id="backend-api">服务端 API</h3>
+<div class="card"><div class="card-header">服务端 API · 覆盖 Medium</div><div class="card-body"><p>推理和管理认证分离；资源查询检查 owner；多层正文上限不一致导致预算绕过，Header 认证绕过登录限速。</p><p>已检查证据：cmd/server/routes.go；middleware/session.go；api_config.go；responses/resource.go</p><p>限制：所有路由已清点，正文/错误分支风险导向抽样；不保证每个 handler 所有组合都执行。</p><p>关联问题：<a href="#finding-F2">F2</a>、<a href="#finding-F10">F10</a>。根因只在详细问题中统计一次。</p><div class="check-list"><div class="check-item"><span class="check-pass">✓</span><span>已完成上述文件/命令的核对；运行验证仅限“项目地图与验证”明确列出的检查，未执行的部分已列入限制。</span></div></div></div></div>
+<h3 class="section-title" id="dependency-weight">依赖与构建负担</h3>
+<div class="card"><div class="card-header">依赖与构建负担 · 覆盖 Medium</div><div class="card-body"><p>标准 Go 与无打包器管理界面，miniredis 用于测试；Redis、uTLS、Prometheus 等有实际调用。没有足够证据要求移除某个依赖。</p><p>已检查证据：go.mod 10 个直接依赖、14 个间接依赖；HTTP/Redis/指标导入；Dockerfile</p><p>限制：未做替换依赖后的二进制体积基准或许可证专项审计。</p><p>在上述检查范围内，没有达到独立问题门槛的新发现；不代表该维度完全无风险。</p><div class="check-list"><div class="check-item"><span class="check-pass">✓</span><span>已完成上述文件/命令的核对；运行验证仅限“项目地图与验证”明确列出的检查，未执行的部分已列入限制。</span></div></div></div></div>
+<h3 class="section-title" id="code-consistency">代码一致性</h3>
+<div class="card"><div class="card-header">代码一致性 · 覆盖 Medium</div><div class="card-body"><p>gofmt、vet、provider registry 检查通过；API 返回形状存在历史差异但客户端有显式适配。已证实的不一致归入 F1/F4，避免重复计数。</p><p>已检查证据：CLAUDE.md；gofmt 全部 696 个 Go 文件；config 与 billing 读写惯例</p><p>限制：不做风格重构；未逐条评估所有英文/中文历史注释。</p><p>关联问题：<a href="#finding-F1">F1</a>、<a href="#finding-F4">F4</a>。根因只在详细问题中统计一次。</p><div class="check-list"><div class="check-item"><span class="check-pass">✓</span><span>已完成上述文件/命令的核对；运行验证仅限“项目地图与验证”明确列出的检查，未执行的部分已列入限制。</span></div></div></div></div>
+<h3 class="section-title" id="comment-coverage">注释与契约说明</h3>
+<div class="card"><div class="card-header">注释与契约说明 · 覆盖 Medium</div><div class="card-body"><p>结算层注释声称重试可能双扣，而 Lua 脚本明确实现原子幂等；修复 F3 时应一并修正契约。StoredResponse 首部“不保留正文”的描述也应随 Body/InputItems 更新，避免错误隐私假设。</p><p>已检查证据：provider/provider.go；auth/auth.go；billing.go；store/redis_scripts.go；store/store_response.go</p><p>限制：仅评估安全/计费/存储关键注释；未以缺失 getter 注释计风险。</p><p>关联问题：<a href="#finding-F3">F3</a>。根因只在详细问题中统计一次。</p><div class="check-list"><div class="check-item"><span class="check-pass">✓</span><span>已完成上述文件/命令的核对；运行验证仅限“项目地图与验证”明确列出的检查，未执行的部分已列入限制。</span></div></div></div></div>
+<h3 class="section-title" id="concurrency">并发与取消</h3>
+<div class="card"><div class="card-header">并发与取消 · 覆盖 Medium</div><div class="card-body"><p>Redis 准入使用租约与心跳；内存 FlowTracker 用锁且通知不阻塞；全量 race 无报告。F3 属于逻辑状态/取消安全问题，race 通过不能排除。</p><p>已检查证据：loadbalancer/conn_tracker.go；refreshqueue/credentials.go；store 事务；FlowTracker；全量 race</p><p>限制：竞态检测只覆盖运行到的路径；未验证多主机长时压力、真实 Redis failover 或所有刷新交错。</p><p>关联问题：<a href="#finding-F3">F3</a>。根因只在详细问题中统计一次。</p><div class="check-list"><div class="check-item"><span class="check-pass">✓</span><span>已完成上述文件/命令的核对；运行验证仅限“项目地图与验证”明确列出的检查，未执行的部分已列入限制。</span></div></div></div></div>
+<h3 class="section-title" id="principles">工程原则分析</h3>
+<div class="card"><div class="table-wrap"><table><thead><tr><th>原则</th><th>已有有效实践</th><th>已证实的改进点</th></tr></thead><tbody><tr><td>4.4 / 4.5 边界尽早验证</td><td>推理 Key 强制认证、匿名地址列表解析失败拒绝匿名。</td><td><a href="#finding-F1">F1</a>、<a href="#finding-F2">F2</a>：热更新和费用解析应在准入前拒绝不安全状态。</td></tr><tr><td>5.1 不可变状态 / 2.2 高内聚</td><td>配置使用 atomic.Pointer 发布新快照，provider 契约封装通道差异。</td><td><a href="#finding-F4">F4</a>：脱敏读模型不应作为完整写模型。</td></tr><tr><td>6.1 错误处理 / 10.3 取消安全</td><td>Redis 结算已有幂等 eventID，资源释放多用 defer。</td><td><a href="#finding-F3">F3</a>：必须区分尝试与持久化成功，并正确利用幂等能力。</td></tr><tr><td>10.2 资源有界</td><td>HTTP 池、诊断保留、分钟采样与质量暂存有显式上限。</td><td><a href="#finding-F6">F6</a>：去重历史也需要保留策略。</td></tr><tr><td>8.1 测试行为</td><td>真实路由、miniredis、协议转换和 race 测试提供行为证据。</td><td><a href="#finding-F1">F1</a>、<a href="#finding-F2">F2</a>、<a href="#finding-F3">F3</a>、<a href="#finding-F7">F7</a>、<a href="#finding-F8">F8</a>：补充用户操作、解析边界、取消语义及真实 DOM。</td></tr></tbody></table></div></div>
+<h3 class="section-title" id="fix-order">建议修复顺序</h3>
+<div class="card"><div class="card-body"><ol><li><strong>第一批：认证与计费。</strong><a href="#finding-F1">F1</a>、<a href="#finding-F2">F2</a>、<a href="#finding-F3">F3</a>。先固定隔离回归用例，再修补边界和状态机；处理 F1 时覆盖省略/空值/别名，处理 F3 时覆盖有歧义的持久化结果。</li><li><strong>第二批：管理身份。</strong><a href="#finding-F4">F4</a>、<a href="#finding-F5">F5</a>、<a href="#finding-F10">F10</a>。修复 Token 保留，并统一改密撤销与失败认证限速。</li><li><strong>第三批：运维数据与可恢复性。</strong><a href="#finding-F8">F8</a>、<a href="#finding-F9">F9</a>、<a href="#finding-F6">F6</a>。先纠正可观察数据与回滚记录，再实施账本保留窗口。</li><li><strong>第四批：界面与说明。</strong><a href="#finding-F7">F7</a>、<a href="#finding-F11">F11</a>。统一模态焦点、修正文档请求路径。</li></ol><p>工作量为单人粗估，部分可合并验证；不是排期承诺。本次没有获得修复实施请求，因此应用源码和线上服务保持原状。后续修复仍需独立验证并按目标环境部署。</p></div></div>
+<h3 class="section-title" id="quick-wins">可快速完成的改进</h3>
+<div class="win-grid"><div class="win-card"><strong><a href="#finding-F1">F1</a> · 后端拒绝危险空值</strong><p>当天优先补上空密码保留/拒绝规则及认证层非空防线；不要只改输入框提示。</p></div><div class="win-card"><strong><a href="#finding-F4">F4</a> · 保持部署字段</strong><p>配置 patch 基于完整内部快照，避免静态 Token 被无关设置清空。</p></div><div class="win-card"><strong><a href="#finding-F9">F9</a> · 恢复版本记录</strong><p>将 build-info 与 deploy-info 纳入回滚文件集合并校验摘要。</p></div><div class="win-card"><strong><a href="#finding-F11">F11</a> · 修正验收路径</strong><p>把 /v1/models 示例替换为实际 provider 路径，明确健康与业务探测的区别。</p></div></div>
+<footer class="small muted" style="margin-top:2rem"><p>报告范围：当前工作树；全部 26 维度均有覆盖说明。限制：未做实时供应商调用、生产故障演练、当前漏洞库扫描、屏幕阅读器测试及全代码逐行审查。HTML 为独立离线文件，未加载外部脚本、字体或遥测。枚举说明：Confirmed=确认，High/Medium/Low 分别表示高/中/低；问题置信度与覆盖置信度独立。</p><p id="validation-note">交付验证：report_lint.py --modes full 通过；Chrome 桌面 1440px / 手机 390px 的浅深主题、11 项问题检索、3 项高风险筛选、空结果/重置与目录锚点检查通过。无页面水平溢出。原有应用文件保持不变。</p></footer></main>
+<script>
+(()=>{const root=document.documentElement;const toggle=document.getElementById('themeToggle');function theme(value){root.dataset.theme=value;toggle.textContent=value==='dark'?'☀':'☾';toggle.setAttribute('aria-label',value==='dark'?'切换浅色主题':'切换深色主题');try{localStorage.setItem('api-console-audit-theme',value)}catch{}}let stored;try{stored=localStorage.getItem('api-console-audit-theme')}catch{}if(stored==='dark'||stored==='light')theme(stored);toggle.addEventListener('click',()=>theme(root.dataset.theme==='dark'?'light':'dark'));
+const cards=Array.from(document.querySelectorAll('[data-finding]')),q=document.getElementById('findingSearch'),severity=document.getElementById('severityFilter');function filter(){let count=0;const term=q.value.trim().toLocaleLowerCase();cards.forEach(c=>{const show=(!term||c.textContent.toLocaleLowerCase().includes(term))&&(!severity.value||c.dataset.severity===severity.value);c.hidden=!show;if(show)count++});document.getElementById('filterCount').textContent=count+' / '+cards.length+' 项';document.getElementById('noMatches').hidden=count!==0}q.addEventListener('input',filter);severity.addEventListener('change',filter);document.getElementById('resetFilters').addEventListener('click',()=>{q.value='';severity.value='';filter()});document.addEventListener('click',event=>{const a=event.target.closest('a[href^="#finding-"]');if(a){q.value='';severity.value='';filter()}});
+const links=Array.from(document.querySelectorAll('.sidebar-nav a'));if('IntersectionObserver'in window){const observer=new IntersectionObserver(entries=>{const active=entries.find(e=>e.isIntersecting);if(active)links.forEach(a=>a.classList.toggle('active',a.hash==='#'+active.target.id))},{rootMargin:'-10% 0px -60% 0px'});links.forEach(a=>{const section=document.getElementById(a.hash.slice(1));if(section)observer.observe(section)})}
+})();
+</script></body></html>

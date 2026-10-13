@@ -3,9 +3,13 @@ package middleware
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"orchids-api/internal/billingledger"
 	"strings"
 	"sync"
 	"time"
@@ -25,8 +29,7 @@ const DefaultBillingReservationTTL = 30 * time.Minute
 const billingReleaseTimeout = 5 * time.Second
 
 // maxBillingBodyBytes bounds the request body buffered for cost estimation.
-// Bodies beyond it are still delivered to the handler in full; only the
-// reservation is computed from the prefix that was read.
+// Budgeted requests exceeding it are rejected before any upstream work.
 const maxBillingBodyBytes = 8 << 20
 
 // BillingReservation is the hold one request took against its client key. The
@@ -39,6 +42,7 @@ type BillingReservation struct {
 
 	mu      sync.Mutex
 	settled bool
+	pending bool
 	priced  pricing.Result
 }
 
@@ -54,18 +58,11 @@ func (r *BillingReservation) Settled() bool {
 	return r.settled
 }
 
-// claim marks the reservation settled exactly once. The second caller gets the
-// first caller's pricing result and the false return, which is what makes
-// settlement idempotent per event id.
-func (r *BillingReservation) claim(result pricing.Result) (pricing.Result, bool) {
+// Pending includes ambiguous writes. Cleanup must not release their holds.
+func (r *BillingReservation) Pending() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.settled {
-		return r.priced, false
-	}
-	r.settled = true
-	r.priced = result
-	return result, true
+	return r.pending
 }
 
 type apiKeyBillingReservationContextKey struct{}
@@ -123,7 +120,9 @@ type SettleOption func(*settleOptions)
 
 // SettleAPIKeyBilling computes the official cost of one finished request and
 // books it against the reservation taken before the request ran, returning the
-// pricing result for the audit row.
+// pricing result for the audit row. The boolean is false for an unpriced row
+// or a settlement still pending; a nonempty Result.Model preserves the audit
+// price even when the ledger write has not been confirmed.
 //
 // Rules:
 //   - Only upstream-reported usage is billable. An estimated row returns false
@@ -165,18 +164,31 @@ func SettleAPIKeyBilling(
 		// but there is no capacity to convert into usage.
 		return result, true
 	}
-	claimed, first := reservation.claim(result)
-	if !first {
-		return claimed, true
+	reservation.mu.Lock()
+	defer reservation.mu.Unlock()
+	if reservation.settled {
+		return reservation.priced, true
 	}
-	if err := settler.SettleApiKeyBilling(ctx, reservation.KeyID, reservation.EventID, result.CostInUSDTicks); err != nil {
-		// The hold is intentionally left claimed: retrying a settlement that may
-		// have reached Redis would charge the key twice. The hold expires with its
-		// TTL instead, and the audit row still records the cost.
-		slog.Warn("failed to settle API key billing",
-			"error", err, "key_id", reservation.KeyID, "event_id", reservation.EventID,
-			"amount_ticks", result.CostInUSDTicks)
+	if reservation.pending {
+		result = reservation.priced
 	}
+	reservation.pending, reservation.priced = true, result
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), billingReleaseTimeout)
+		err = settler.SettleApiKeyBilling(settleCtx, reservation.KeyID, reservation.EventID, result.CostInUSDTicks)
+		cancel()
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		AnnotateRequest(ctx, "billing_status", "pending")
+		slog.Error("API key settlement pending reconciliation", "error", err, "key_id", reservation.KeyID, "event_id", reservation.EventID, "amount_ticks", result.CostInUSDTicks)
+		return result, false
+	}
+	reservation.settled, reservation.pending = true, false
+	AnnotateRequest(ctx, "billing_status", "settled")
 	return result, true
 }
 
@@ -205,9 +217,21 @@ func APIKeyBillingReservation(next http.HandlerFunc, reserver APIKeyBillingReser
 			next(w, r)
 			return
 		}
-		body := readBillingBody(r)
+		body, err := readBillingBody(r)
+		if err != nil {
+			status, code := http.StatusBadRequest, "invalid_request_body"
+			if errors.Is(err, errBillingBodyTooLarge) {
+				status, code = http.StatusRequestEntityTooLarge, "request_too_large"
+			}
+			writeAPIKeyError(w, status, err.Error(), code)
+			return
+		}
 		if len(body) == 0 {
 			next(w, r)
+			return
+		}
+		if !json.Valid(body) {
+			writeAPIKeyError(w, http.StatusBadRequest, "Invalid JSON request body", "invalid_request_body")
 			return
 		}
 		reservation, priced := pricing.EstimateTextReservationFromBody(body)
@@ -217,12 +241,17 @@ func APIKeyBillingReservation(next http.HandlerFunc, reserver APIKeyBillingReser
 			next(w, r)
 			return
 		}
-		// A hold without a stable identity could never be settled or released
-		// again, so an unmetered request is preferable to a leaked reservation.
-		eventID := GetRequestID(r.Context())
-		if eventID == "" {
-			next(w, r)
-			return
+		requestID := GetRequestID(r.Context())
+		if requestID == "" {
+			requestID = GenerateTraceID()
+		}
+		eventID := billingledger.EventID(time.Now(), requestID)
+		if durable, ok := apiKeyBillingStore.(interface{ Ready() error }); ok {
+			if err := durable.Ready(); err != nil {
+				slog.Error("Billing admission unavailable", "error", err)
+				writeAPIKeyError(w, http.StatusServiceUnavailable, "API key billing check unavailable", "billing_unavailable")
+				return
+			}
 		}
 		allowed, err := reserver.ReserveApiKeyBilling(r.Context(), principal.ID, eventID, reservation.CostInUSDTicks, time.Now().UTC().Add(ttl))
 		if err != nil {
@@ -239,7 +268,7 @@ func APIKeyBillingReservation(next http.HandlerFunc, reserver APIKeyBillingReser
 		held := &BillingReservation{KeyID: principal.ID, EventID: eventID, Amount: reservation.CostInUSDTicks}
 		ctx := WithBillingReservation(r.Context(), held)
 		defer func() {
-			if held.Settled() {
+			if held.Settled() || held.Pending() {
 				return
 			}
 			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), billingReleaseTimeout)
@@ -273,26 +302,23 @@ func billingRequestPath(path string) bool {
 	return false
 }
 
-// readBillingBody buffers the request body for estimation and restores it for
-// the handler. A body larger than the cap is re-served in full through a
-// MultiReader and estimated from the prefix that was read.
-func readBillingBody(r *http.Request) []byte {
+var errBillingBodyTooLarge = errors.New("Budgeted inference request exceeds the 8 MiB body limit")
+
+// readBillingBody restores accepted bytes and rejects incomplete estimation.
+func readBillingBody(r *http.Request) ([]byte, error) {
 	if r == nil || r.Body == nil {
-		return nil
+		return nil, nil
 	}
-	raw, err := io.ReadAll(io.LimitReader(r.Body, maxBillingBodyBytes+1))
+	original := r.Body
+	defer original.Close()
+	raw, err := io.ReadAll(io.LimitReader(original, maxBillingBodyBytes+1))
 	if err != nil {
-		_ = r.Body.Close()
-		r.Body = io.NopCloser(bytes.NewReader(raw))
-		r.ContentLength = int64(len(raw))
-		return nil
+		return nil, fmt.Errorf("Could not read request body")
 	}
 	if len(raw) > maxBillingBodyBytes {
-		r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(raw), r.Body))
-		return raw[:maxBillingBodyBytes]
+		return nil, errBillingBodyTooLarge
 	}
-	_ = r.Body.Close()
 	r.Body = io.NopCloser(bytes.NewReader(raw))
 	r.ContentLength = int64(len(raw))
-	return raw
+	return raw, nil
 }

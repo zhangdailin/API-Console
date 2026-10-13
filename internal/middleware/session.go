@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"encoding/json"
 
@@ -216,7 +217,11 @@ func apiKeyToken(r *http.Request) string {
 	return strings.TrimSpace(r.Header.Get("x-api-key"))
 }
 
-func SessionAuthDynamic(credentials func() (adminPass, adminToken string), next http.HandlerFunc) http.HandlerFunc {
+func SessionAuthDynamic(credentials func() (adminPass, adminToken string), next http.HandlerFunc, limiters ...*RateLimiter) http.HandlerFunc {
+	limiter := &RateLimiter{maxAttempts: 5, window: 15 * time.Minute}
+	if len(limiters) > 0 && limiters[0] != nil {
+		limiter = limiters[0]
+	}
 	// Every admin entrance — browser session, static token, basic auth — passes
 	// through here, which makes it the one place that can journal administrative
 	// changes without each handler remembering to.
@@ -232,17 +237,28 @@ func SessionAuthDynamic(credentials func() (adminPass, adminToken string), next 
 
 		authHeader := r.Header.Get("Authorization")
 		adminHeader := r.Header.Get("X-Admin-Token")
-		secrets := [...]string{adminToken, adminPass}
-		for _, secret := range secrets {
-			if secret != "" && (util.SecureCompare(authHeader, "Bearer "+secret) ||
-				util.SecureCompare(authHeader, secret) || util.SecureCompare(adminHeader, secret)) {
-				audited(w, r)
-				return
-			}
+		matchesHeader := func(secret string) bool {
+			return strings.TrimSpace(secret) != "" && (util.SecureCompare(authHeader, "Bearer "+secret) ||
+				util.SecureCompare(authHeader, secret) || util.SecureCompare(adminHeader, secret))
 		}
-
-		_, pass, ok := r.BasicAuth()
-		if ok && util.SecureCompare(pass, adminPass) {
+		if matchesHeader(adminToken) {
+			audited(w, r)
+			return
+		}
+		if authHeader == "" && adminHeader == "" {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		valid, allowed := limiter.CheckCredentials(ClientIP(r), func() bool {
+			_, pass, ok := r.BasicAuth()
+			return matchesHeader(adminPass) || (ok && strings.TrimSpace(adminPass) != "" && util.SecureCompare(pass, adminPass))
+		})
+		if !allowed {
+			w.Header().Set("Retry-After", "180")
+			http.Error(w, "Too many login attempts, try again later", http.StatusTooManyRequests)
+			return
+		}
+		if valid {
 			audited(w, r)
 			return
 		}

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -112,7 +113,7 @@ func TestAPIKeyBillingReservationSettles(t *testing.T) {
 
 	testutil.True(t, handlerRun, "handler must run for a reservation that fits")
 	testutil.Equal(t, seenBody, billingChatBody)
-	testutil.Falsef(t, seenHeld == nil || seenHeld.KeyID != 7 || seenHeld.EventID != "req-1" || seenHeld.Amount <= 0, "reservation in context = %#v", seenHeld)
+	testutil.Falsef(t, seenHeld == nil || seenHeld.KeyID != 7 || !strings.HasSuffix(seenHeld.EventID, ":req-1") || seenHeld.Amount <= 0, "reservation in context = %#v", seenHeld)
 	testutil.Falsef(t, !settleOK || settled.Model != "grok-4.6", "settle = %#v, %v", settled, settleOK)
 	// 1000 input at 20000 ticks + 500 output at 60000 ticks.
 	want := int64(1000*20000 + 500*60000)
@@ -136,7 +137,7 @@ func TestAPIKeyBillingReservationReleasesUnsettledRequest(t *testing.T) {
 	handler(recorder, billingRequest(http.MethodPost, "/grok/v1/messages", billingChatBody, principal, "req-release"))
 
 	testutil.Equal(t, len(ledger.releases), 1)
-	testutil.Equal(t, ledger.releases[0], "req-release")
+	testutil.True(t, strings.HasSuffix(ledger.releases[0], ":req-release"))
 	testutil.Equal(t, ledger.used, 0)
 	testutil.Equal(t, len(ledger.held), 0)
 }
@@ -249,30 +250,21 @@ func TestAPIKeyBillingReservationReleasesAfterClientDisconnect(t *testing.T) {
 
 type cancelKey struct{}
 
-// TestAPIKeyBillingReservationRestoresOversizedBody checks that a body past the
-// estimation cap still reaches the handler byte for byte.
-func TestAPIKeyBillingReservationRestoresOversizedBody(t *testing.T) {
-	ledger := &stubBillingLedger{limit: 1_000_000_000_000}
-	principal := &APIKeyPrincipal{ID: 31, BillingLimitUSDTicks: 1_000_000_000_000}
-
-	var size int
-	handler := APIKeyBillingReservation(func(w http.ResponseWriter, r *http.Request) {
-		raw, err := readAllBody(r)
-		testutil.CheckNoError(t, err, "handler could not read the body: %v")
-		size = len(raw)
-		res := BillingReservationFrom(r.Context())
-		testutil.CheckFalse(t, res == nil, "oversized body was not reserved")
-		// Settle so the successful reservation stays observable after the
-		// middleware's deferred cleanup.
-		SettleAPIKeyBilling(r.Context(), ledger, "grok-4.6", audit.UsageSourceUpstream, 10, 0, 10)
-	}, ledger, time.Minute)
-
-	body := `{"model":"grok-4.6","max_tokens":8,"messages":[{"role":"user","content":"` +
-		strings.Repeat("x", maxBillingBodyBytes+1024) + `"}]}`
-	handler(httptest.NewRecorder(), billingRequest(http.MethodPost, "/grok/v1/chat/completions", body, principal, "req-big"))
-
-	testutil.Equal(t, size, len(body))
-	testutil.Equal(t, len(ledger.settles), 1)
+// Large whitespace before the model cannot bypass an exhausted budget.
+func TestAPIKeyBillingReservationRejectsOversizedBody(t *testing.T) {
+	for _, body := range []string{
+		`{"model":"grok-4.6","messages":[{"role":"user","content":"` + strings.Repeat("x", maxBillingBodyBytes) + `"}]}`,
+		`{` + strings.Repeat(" ", maxBillingBodyBytes) + `"model":"grok-4.6","messages":[]}`,
+	} {
+		ledger := &stubBillingLedger{limit: 1, used: 1}
+		called := false
+		handler := APIKeyBillingReservation(func(http.ResponseWriter, *http.Request) { called = true }, ledger, time.Minute)
+		out := httptest.NewRecorder()
+		handler(out, billingRequest("POST", "/grok/v1/chat/completions", body, &APIKeyPrincipal{ID: 1, BillingLimitUSDTicks: 1}, "oversize"))
+		testutil.Equal(t, out.Code, http.StatusRequestEntityTooLarge)
+		testutil.False(t, called)
+		testutil.Equal(t, len(ledger.held), 0)
+	}
 }
 
 func readAllBody(r *http.Request) ([]byte, error) {
@@ -342,10 +334,10 @@ func TestSettleAPIKeyBillingRules(t *testing.T) {
 		ledger := &stubBillingLedger{limit: 1_000_000_000_000, settleErr: context.DeadlineExceeded}
 		ctx := reserved(t, ledger)
 		result, priced := SettleAPIKeyBilling(ctx, ledger, "grok-4.6", audit.UsageSourceUpstream, 1000, 0, 500)
-		testutil.Falsef(t, !priced || result.CostInUSDTicks == 0, "result=%#v priced=%v", result, priced)
-		// The hold stays claimed so a retry cannot charge twice.
+		testutil.Falsef(t, priced || result.CostInUSDTicks == 0, "result=%#v priced=%v", result, priced)
+		// Failure stays pending and is retryable with the same identity.
 		res := BillingReservationFrom(ctx)
-		testutil.False(t, res == nil || !res.Settled(), "a failed settlement must still claim the reservation")
+		testutil.False(t, res == nil || res.Settled() || !res.Pending(), "failed settlement must remain pending")
 	})
 }
 
@@ -353,32 +345,13 @@ func TestSettleAPIKeyBillingRules(t *testing.T) {
 // where a settle call may race the request's own cleanup.
 func TestBillingReservationConcurrentSettleIsIdempotent(t *testing.T) {
 	held := &BillingReservation{KeyID: 1, EventID: "event", Amount: 10}
-	const workers = 8
-	claimed := make(chan bool, workers)
-	done := make(chan struct{})
-	for i := 0; i < workers; i++ {
-		go func() {
-			_, first := held.claim(pricing.Result{Model: "grok-4.6", CostInUSDTicks: 5})
-			claimed <- first
-			<-done
-		}()
+	ledger := &stubBillingLedger{}
+	ctx := WithBillingReservation(context.Background(), held)
+	var done sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		done.Go(func() { SettleAPIKeyBilling(ctx, ledger, "grok-4.6", audit.UsageSourceUpstream, 100, 0, 50) })
 	}
-	winners := 0
-	for i := 0; i < workers; i++ {
-		if <-claimed {
-			winners++
-		}
-	}
-	close(done)
-	testutil.Equal(t, winners, 1)
-}
-
-func TestBillingRequestPathMatching(t *testing.T) {
-	priced := []string{"/grok/v1/chat/completions", "/grok/messages", "/grok/responses", "/qoder/responses/compact", "/cline/messages", "/workbuddy/v1/chat/completions"}
-	for _, path := range priced {
-		testutil.True(t, billingRequestPath(path), "billingRequestPath(%q) = false, want true")
-	}
-	for _, path := range []string{"/grok/v1/models", "/api/keys", "/grok/v1/tts", "/grok/v1/images/generations", "/", "/v1/responses", "/messages", "/workbuddy/messages/count_tokens", "/workbuddy/responses/id/cancel", "/grok/responses/id/input_items"} {
-		testutil.Falsef(t, billingRequestPath(path), "billingRequestPath(%q) = true, want false", path)
-	}
+	done.Wait()
+	testutil.True(t, held.Settled())
+	testutil.Equal(t, len(ledger.settles), 1)
 }

@@ -28,7 +28,7 @@ INSTALL_DIR="/opt/orchids-2api"
 SERVICE="orchids-2api"
 BINARY_NAME="orchids-server"
 HEALTH_PATH="/admin"
-HEALTH_TIMEOUT=20
+HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-20}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -86,80 +86,113 @@ if [ -n "$CHECKSUM" ]; then
   echo "checksum ok: $actual"
 fi
 
-# 3. Install atomically, keeping the previous binary.
+# 3. Snapshot the binary and its metadata before publishing any new files.
 cd "$INSTALL_DIR"
 stamp="$(date -u +%Y%m%d-%H%M%S)"
 backup="${BINARY_NAME}.backup-${stamp}"
-cp -f "$BINARY_NAME" "$backup" 2>/dev/null || true
+metadata="${backup}.metadata"
+if [ -e "$backup" ] || [ -e "$metadata" ]; then
+  echo "backup already exists: $backup" >&2
+  exit 5
+fi
+mkdir -m 0700 "$metadata"
+if [ -f "$BINARY_NAME" ]; then cp -p "$BINARY_NAME" "$backup"; fi
+for suffix in build-info.txt deploy-info.txt; do
+  if [ -f "${BINARY_NAME}.${suffix}" ]; then
+    cp -p "${BINARY_NAME}.${suffix}" "${metadata}/${suffix}"
+  fi
+done
+installed_sha="$(sha256sum "$ARTIFACT" | awk '{print $1}')"
+
+healthy() {
+  local deadline code
+  deadline=$(( $(date +%s) + HEALTH_TIMEOUT ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    if systemctl is-active --quiet "$SERVICE"; then
+      code="$(curl --connect-timeout 2 --max-time 3 -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3002${HEALTH_PATH}" || true)"
+      case "$code" in 200|301|302) return 0 ;; esac
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+rollback() {
+  trap - ERR
+  set +e
+  local restored=1 suffix rollback_sha="unavailable" rollback_status="failed"
+  echo "deployment failed; restoring $backup and its metadata" >&2
+  if [ -f "$backup" ]; then
+    install -m 0755 "$backup" "${BINARY_NAME}.rollback" && mv -f "${BINARY_NAME}.rollback" "$BINARY_NAME" || restored=0
+    rollback_sha="$(sha256sum "$BINARY_NAME" | awk '{print $1}')"
+    [ "$rollback_sha" = "$(sha256sum "$backup" | awk '{print $1}')" ] || restored=0
+  else
+    restored=0
+    rm -f "$BINARY_NAME"
+  fi
+  for suffix in build-info.txt deploy-info.txt; do
+    if [ -f "${metadata}/${suffix}" ]; then
+      cp -p "${metadata}/${suffix}" "${BINARY_NAME}.${suffix}.incoming" && mv -f "${BINARY_NAME}.${suffix}.incoming" "${BINARY_NAME}.${suffix}" || restored=0
+    else
+      rm -f "${BINARY_NAME}.${suffix}" || restored=0
+    fi
+  done
+  if [ "$restored" -eq 1 ] && systemctl restart "$SERVICE" && healthy; then
+    rollback_status="healthy"
+  fi
+  {
+    echo "failed_sha256=${installed_sha}"
+    echo "rolled_back_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "current_sha256=${rollback_sha}"
+    echo "rollback_status=${rollback_status}"
+  } > "${BINARY_NAME}.last-failed-deploy.txt.incoming"
+  mv -f "${BINARY_NAME}.last-failed-deploy.txt.incoming" "${BINARY_NAME}.last-failed-deploy.txt"
+  if [ "$rollback_status" = healthy ]; then
+    echo "previous binary and metadata restored; rollback health verified" >&2
+    exit 6
+  fi
+  echo "rollback did not recover a healthy service" >&2
+  exit 7
+}
+trap rollback ERR
+
 install -m 0755 "$ARTIFACT" "${BINARY_NAME}.incoming"
 mv -f "${BINARY_NAME}.incoming" "$BINARY_NAME"
-installed_sha="$(sha256sum "$BINARY_NAME" | awk '{print $1}')"
-echo "installed ${installed_sha} (previous kept as $backup)"
-
-# 3b. Record what is installed. The pipeline's build-info is authoritative when it
-#     is supplied; otherwise the deploy-info file is the only honest source, and
-#     it always names the checksum that is on disk right now.
-if [ -n "$BUILD_INFO" ] && [ -f "$BUILD_INFO" ]; then
-  cp -f "$BUILD_INFO" "${BINARY_NAME}.build-info.txt"
+if [ -n "$BUILD_INFO" ]; then
+  cp -f "$BUILD_INFO" "${BINARY_NAME}.build-info.txt.incoming"
+  mv -f "${BINARY_NAME}.build-info.txt.incoming" "${BINARY_NAME}.build-info.txt"
+else
+  # Metadata from the previous artifact cannot describe a manual build.
+  rm -f "${BINARY_NAME}.build-info.txt"
 fi
 {
   echo "sha256=${installed_sha}"
   echo "deployed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "artifact=${ARTIFACT}"
-  if [ -n "$BUILD_INFO" ] && [ -f "$BUILD_INFO" ]; then
+  if [ -n "$BUILD_INFO" ]; then
     echo "build_info=installed from $(basename "$BUILD_INFO")"
   else
-    echo "build_info=not supplied (manual build; build-info file left untouched)"
+    echo "build_info=not supplied"
   fi
-} > "${BINARY_NAME}.deploy-info.txt"
+} > "${BINARY_NAME}.deploy-info.txt.incoming"
+mv -f "${BINARY_NAME}.deploy-info.txt.incoming" "${BINARY_NAME}.deploy-info.txt"
+systemctl restart "$SERVICE"
+healthy
+trap - ERR
 
-# 3c. Retain only the newest stamped backups. Each deploy copies the ~32MB
-#     binary aside, so without a retention policy they accumulate until the
-#     root filesystem is full — which is how one host reached 95% and started
-#     failing redis writes. Only backups this script created (the
-#     "<name>.backup-<timestamp>" shape) are pruned; hand-named backups such as
-#     "<name>.backup-<label>-<date>" are left alone. Override with
-#     BACKUP_RETAIN=<n>.
+echo "deployed and healthy: ${installed_sha}"
+# Prune only stamped binary backups and their companion snapshots after health
+# succeeds. Never prune the rollback target while a deployment is in progress.
 retain="${BACKUP_RETAIN:-3}"
-pruned=0
-while :; do
-  count="$(ls -1d "${BINARY_NAME}".backup-[0-9]* 2>/dev/null | wc -l)"
-  [ "$count" -le "$retain" ] && break
-  victim="$(ls -1dt "${BINARY_NAME}".backup-[0-9]* 2>/dev/null | tail -1)"
-  [ -z "$victim" ] && break
-  rm -f -- "$victim" || break
-  pruned=$((pruned + 1))
+if ! [[ "$retain" =~ ^[1-9][0-9]*$ ]]; then retain=3; fi
+backups=()
+for candidate in "${BINARY_NAME}".backup-[0-9]*; do
+  if [ -f "$candidate" ] && [[ "$candidate" =~ \.backup-[0-9]{8}-[0-9]{6}$ ]]; then backups+=("$candidate"); fi
 done
-if [ "$pruned" -gt 0 ]; then
-  echo "pruned ${pruned} old backup(s); keeping the newest ${retain}"
+if [ "${#backups[@]}" -gt "$retain" ]; then
+  mapfile -t ordered < <(printf '%s\n' "${backups[@]}" | sort -r)
+  for (( i=retain; i<${#ordered[@]}; i++ )); do
+    rm -f -- "${ordered[$i]}"
+    rm -rf -- "${ordered[$i]}.metadata"
+  done
 fi
-
-# 4. Restart and verify; roll back on failure.
-systemctl restart "$SERVICE"
-deadline=$(( $(date +%s) + HEALTH_TIMEOUT ))
-healthy=0
-while [ "$(date +%s)" -lt "$deadline" ]; do
-  if systemctl is-active --quiet "$SERVICE"; then
-    # 200 (health page) and 302 (redirect to login) both prove the HTTP server
-    # is answering; anything else keeps waiting until the deadline.
-    code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3002${HEALTH_PATH}" || echo 000)"
-    case "$code" in
-      200|301|302) healthy=1; break ;;
-    esac
-  fi
-  sleep 1
-done
-
-if [ "$healthy" -eq 1 ]; then
-  echo "deployed and healthy"
-  echo "  build-info:  $(cat "${BINARY_NAME}.build-info.txt" 2>/dev/null | tr '\n' ' ')"
-  echo "  deploy-info: $(cat "${BINARY_NAME}.deploy-info.txt" 2>/dev/null | tr '\n' ' ')"
-  exit 0
-fi
-
-echo "service did not become healthy; rolling back to $backup" >&2
-cp -f "$backup" "$BINARY_NAME"
-systemctl restart "$SERVICE"
-sleep 5
-systemctl is-active "$SERVICE" || true
-exit 6

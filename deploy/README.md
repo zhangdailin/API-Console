@@ -20,4 +20,4 @@ bash scripts/deploy-orchids.sh --help
 1. 服务监听 `:3002`，必须用防火墙或等效网络策略阻止绕过反向代理直接访问。合并 Caddy 配置时不要覆盖其他站点。
 2. `trusted_proxies` 只信任本地真实代理 IP；不要把任意互联网来源设为可信代理。
 3. Redis 中 `<redis_prefix>settings:config` 可覆盖 `config.json`；修改配置后检查管理端实际值。备份 Redis 及凭据加密密钥，避免更新或回滚后无法解密账号。
-4. 部署后检查 `/health`，再用托管 API Key 检查 `/v1/models`。限制 `/metrics` 的外部访问。
+4. 部署后检查 `/health`，再用托管 API Key 检查已配置 provider 的 `/workbuddy/v1/models`（可将 `workbuddy` 替换为 `cline`、`qoder` 或 `grok`）。模型列表仅验证路由、鉴权和目录；生成能力需另行发送对应 provider 的推理请求验证。限制 `/metrics` 的外部访问。

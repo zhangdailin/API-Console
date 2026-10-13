@@ -51,18 +51,41 @@ func (b *redisSessionBackend) SaveSession(ctx context.Context, token string, exp
 		// accepted, leaving a session that is valid here and nowhere else.
 		return fmt.Errorf("refusing to persist an already expired session")
 	}
-	return b.client.Set(ctx, b.key(token), "1", ttl).Err()
+	return saveSessionScript.Run(ctx, b.client, []string{b.key(token), b.prefix + "admin:session_generation", b.prefix + "settings:config"}, ttl.Milliseconds(), "").Err()
 }
+
+var saveSessionScript = redis.NewScript(`
+ local cfg = redis.call("GET", KEYS[3])
+ if ARGV[2] ~= "" and cfg then
+   local current = cjson.decode(cfg)
+   if current.admin_pass ~= ARGV[2] then return redis.error_reply("admin credentials changed") end
+ end
+ local generation = redis.call("GET", KEYS[2]) or "1"
+ redis.call("SET", KEYS[1], generation, "PX", ARGV[1])
+ return 1
+`)
+
+func (b *redisSessionBackend) SaveSessionForPassword(ctx context.Context, token string, expiry time.Time, password string) error {
+	ttl := time.Until(expiry)
+	if ttl <= 0 {
+		return fmt.Errorf("refusing to persist an already expired session")
+	}
+	return saveSessionScript.Run(ctx, b.client, []string{b.key(token), b.prefix + "admin:session_generation", b.prefix + "settings:config"}, ttl.Milliseconds(), password).Err()
+}
+
+var validateSessionScript = redis.NewScript(`
+ local session = redis.call("GET", KEYS[1])
+ local generation = redis.call("GET", KEYS[2]) or "1"
+ if session and session == generation then return 1 end
+ return 0
+`)
 
 func (b *redisSessionBackend) HasSession(ctx context.Context, token string) (bool, error) {
 	if b == nil || b.client == nil {
 		return false, nil
 	}
-	exists, err := b.client.Exists(ctx, b.key(token)).Result()
-	if err != nil {
-		return false, err
-	}
-	return exists > 0, nil
+	valid, err := validateSessionScript.Run(ctx, b.client, []string{b.key(token), b.prefix + "admin:session_generation"}).Int()
+	return valid == 1, err
 }
 
 func (b *redisSessionBackend) DeleteSession(ctx context.Context, token string) {

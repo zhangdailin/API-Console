@@ -106,7 +106,6 @@
       key.value = secret; await loadCatalog();
     } catch (error) { if (current === session && ticket.accepts(error)) setText('keyCatalogStatus', '密钥读取失败，请关闭后重试。'); }
   };
-  document.addEventListener('keydown', event => { if (event.key === 'Escape') closeKeyImport(); });
   window.addEventListener('pagehide', () => { key.value = ''; session++; secretLoads.cancel(); catalogLoads.cancel(); });
   update();
 })();

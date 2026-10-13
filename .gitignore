@@ -52,6 +52,7 @@ Thumbs.db
 # Runtime data
 debug-logs/
 data/tmp/
+data/billing-pending/
 /data/credential.key
 internal/grok/data/
 /config.json

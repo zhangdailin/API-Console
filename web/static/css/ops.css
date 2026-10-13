@@ -1097,3 +1097,112 @@ button.ops-error-row { width: 100%; border: 0; background: none; text-align: lef
 
 .ops-spark.ops-success-trend, .ops-spark.ops-success-trend svg { height: 140px; }
 .ops-chart .series-success { fill: none; stroke: var(--ok); stroke-width: 2; }
+
+/* The live map is an inset control room, with light trails only on real traffic. */
+.ops-top:has(.ops-flow-card) { grid-template-columns: minmax(0, 1fr); }
+.ops-flow-card {
+  --flow-bg: var(--surface-2);
+  --flow-border: var(--border-color);
+  --flow-grid: color-mix(in srgb, var(--border-color) 70%, transparent);
+  --flow-haze: color-mix(in srgb, var(--accent) 7%, transparent);
+  --flow-scan: color-mix(in srgb, var(--border-color) 25%, transparent);
+  --flow-node-from: var(--surface-1);
+  --flow-node-to: var(--surface-1);
+  --flow-node-shadow: inset 0 1px #ffffff80, 0 6px 24px #0f172a08;
+  --flow-title: var(--text-main);
+  --flow-secondary: var(--text-secondary);
+  --flow-muted: var(--text-muted);
+  --flow-accent: var(--accent);
+  --flow-gateway-from: var(--accent-soft);
+  --flow-gateway-to: var(--surface-1);
+  --flow-gateway-border: var(--accent-line);
+  --flow-workbuddy: #b96b25;
+  --flow-cline: #3b70c7;
+  --flow-qoder: #148363;
+  --flow-grok: #8051c2;
+  --flow-messages: #b16a4c;
+  overflow: hidden;
+}
+:root[data-theme="dark"] .ops-flow-card {
+  --flow-bg: #080f1c;
+  --flow-border: #293b53;
+  --flow-grid: #26354988;
+  --flow-haze: #0d374538;
+  --flow-scan: #1a2b3944;
+  --flow-node-from: #142136f2;
+  --flow-node-to: #0d1729f5;
+  --flow-node-shadow: inset 0 1px #ffffff06, 0 8px 24px #0002;
+  --flow-title: #edf5ff;
+  --flow-secondary: #8da6c3;
+  --flow-muted: #849db8;
+  --flow-accent: #2dd4bf;
+  --flow-gateway-from: #143446;
+  --flow-gateway-to: #101d31;
+  --flow-gateway-border: #216977;
+  --flow-workbuddy: #fbbf72;
+  --flow-cline: #77a7ff;
+  --flow-qoder: #45dfb1;
+  --flow-grok: #c6a0ff;
+  --flow-messages: #ecad92;
+}
+.ops-flow-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; font-size: .8rem; color: var(--text-secondary); }
+.ops-flow-status-dot, .ops-flow-node-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--flow-muted); }
+.ops-flow-status-dot { margin-right: 8px; }
+.ops-flow-status-dot.is-live { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 10%, transparent), 0 0 12px color-mix(in srgb, var(--ok) 30%, transparent); }
+.ops-flow-scroll { overflow-x: auto; margin-top: 16px; border: 1px solid var(--flow-border); border-radius: 16px; background: var(--flow-bg); }
+.ops-flow-map { position: relative; height: 500px; min-width: 1040px; isolation: isolate; background: radial-gradient(ellipse at 50% 50%, var(--flow-haze), transparent 50%), radial-gradient(var(--flow-grid) 1px, transparent 1px); background-size: auto, 24px 24px; }
+.ops-flow-map::before { content: ""; position: absolute; inset: 0; pointer-events: none; z-index: -1; background: linear-gradient(transparent 49%, var(--flow-scan) 50%, transparent 51%); background-size: 100% 96px; }
+.ops-flow-heading { position: absolute; top: 20px; color: var(--flow-secondary); font-size: .7rem; font-weight: 600; letter-spacing: .16em; }
+.ops-flow-heading-left { left: 2%; }
+.ops-flow-heading-center { left: 40%; width: 20%; text-align: center; }
+.ops-flow-heading-right { left: 75%; }
+.ops-flow-wires { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.ops-flow-wire { --flow-color: var(--flow-accent); }
+#opsWire-workbuddy, #opsNode-workbuddy { --flow-color: var(--flow-workbuddy); }
+#opsWire-cline, #opsNode-cline { --flow-color: var(--flow-cline); }
+#opsWire-qoder, #opsNode-qoder { --flow-color: var(--flow-qoder); }
+#opsWire-grok, #opsNode-grok { --flow-color: var(--flow-grok); }
+#opsWire-messages, #opsNode-messages { --flow-color: var(--flow-messages); }
+.ops-flow-wire path { fill: none; stroke: var(--flow-color); stroke-width: 1.8; vector-effect: non-scaling-stroke; }
+.ops-flow-wire > path:first-child { opacity: .7; }
+.ops-flow-wire .ops-flow-packet, .ops-flow-wire .ops-flow-glow { opacity: 0; stroke: var(--flow-color); stroke-linecap: round; }
+.ops-flow-wire .ops-flow-packet { stroke-width: 3; stroke-dasharray: 3 42; filter: drop-shadow(0 0 4px var(--flow-color)); }
+.ops-flow-wire .ops-flow-glow { stroke-width: 7; stroke-dasharray: 12 140; filter: blur(4px); }
+.ops-flow-wire.is-flowing .ops-flow-packet { opacity: 1; animation: ops-flow-travel 1.1s linear infinite; }
+.ops-flow-wire.is-flowing .ops-flow-glow { opacity: .6; animation: ops-flow-tail 2.2s linear infinite; }
+@keyframes ops-flow-travel { to { stroke-dashoffset: -90; } }
+@keyframes ops-flow-tail { to { stroke-dashoffset: -304; } }
+.ops-flow-node { --flow-color: var(--flow-accent); position: absolute; box-sizing: border-box; transform: translateY(-50%); display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--flow-border); border-radius: 12px; background: linear-gradient(135deg, var(--flow-node-from), var(--flow-node-to)); color: var(--flow-title); text-align: left; font-family: inherit; cursor: pointer; box-shadow: var(--flow-node-shadow); transition: border-color .2s, box-shadow .2s; }
+.ops-flow-node:hover, .ops-flow-node:focus-visible, .ops-flow-node.is-selected { border-color: var(--flow-color); outline: 2px solid color-mix(in srgb, var(--flow-color) 20%, transparent); }
+.ops-flow-node.is-flowing { border-color: color-mix(in srgb, var(--flow-color) 55%, var(--flow-border)); box-shadow: inset 0 1px #ffffff08, 0 0 22px color-mix(in srgb, var(--flow-color) 13%, transparent); }
+.ops-flow-node.is-flowing .ops-flow-node-dot { background: var(--flow-color); box-shadow: 0 0 8px var(--flow-color); }
+.ops-flow-upstream { left: 2%; width: 23%; top: var(--node-y); height: 96px; }
+.ops-flow-downstream { left: 75%; width: 23%; top: var(--node-y); height: 110px; }
+.ops-flow-gateway { left: 40%; width: 20%; top: 50%; min-height: 210px; flex-direction: column; gap: 8px; text-align: center; border-color: var(--flow-gateway-border); background: radial-gradient(ellipse at top, var(--flow-gateway-from), var(--flow-gateway-to) 80%); }
+.ops-flow-orbit { position: absolute; width: 62px; height: 62px; top: 8px; border-radius: 50%; border: 1px dashed color-mix(in srgb, var(--flow-accent) 27%, transparent); pointer-events: none; }
+.ops-flow-gateway.is-flowing .ops-flow-orbit { border-color: color-mix(in srgb, var(--flow-accent) 54%, transparent); animation: ops-flow-orbit 12s linear infinite; }
+.ops-flow-gateway.is-flowing { animation: ops-flow-breathe 2.4s ease-in-out infinite; }
+@keyframes ops-flow-orbit { to { rotate: 360deg; } }
+@keyframes ops-flow-breathe { 50% { box-shadow: 0 0 48px color-mix(in srgb, var(--flow-accent) 13%, transparent), inset 0 0 28px color-mix(in srgb, var(--flow-accent) 3%, transparent); } }
+.ops-flow-icon { width: 38px; height: 38px; flex: 0 0 38px; border-radius: 11px; display: grid; place-items: center; font-size: 18px; font-weight: 700; color: var(--flow-color); background: color-mix(in srgb, var(--flow-color) 11%, transparent); border: 1px solid color-mix(in srgb, var(--flow-color) 15%, transparent); }
+.ops-flow-icon-gateway { width: 48px; height: 48px; flex-basis: 48px; margin-bottom: 3px; }
+.ops-flow-icon-gateway svg { width: 27px; height: 27px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
+.ops-flow-node-body { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 5px; }
+.ops-flow-node-body > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ops-flow-node strong { font-size: .88rem; font-weight: 650; color: var(--flow-title); }
+.ops-flow-node code { background: transparent; padding: 0; font-size: .64rem; color: var(--flow-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ops-flow-current, #opsFlowActive { color: var(--flow-secondary); font-size: .68rem; }
+.ops-flow-gateway-label { color: var(--flow-accent); font-size: .62rem; letter-spacing: .2em; }
+.ops-flow-rates { display: flex; align-items: baseline; gap: 18px; }
+.ops-flow-rates > span { display: flex; align-items: baseline; gap: 5px; }
+.ops-flow-rates b { color: var(--flow-title); font-size: 1.05rem; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -.03em; }
+.ops-flow-rates small { color: var(--flow-muted); font-size: .57rem; letter-spacing: .04em; }
+.ops-flow-gateway-rates { padding-top: 12px; margin-top: 2px; border-top: 1px solid var(--flow-border); }
+.ops-flow-gateway-rates > span { flex-direction: column; align-items: center; gap: 3px; }
+.ops-flow-gateway-rates b { color: var(--flow-accent); font-size: 1.35rem; }
+.ops-flow-detail { padding-top: 14px; font-size: .75rem; line-height: 1.7; color: var(--text-secondary); }
+@media (max-width: 900px) { .ops-flow-card { padding: 16px; } }
+@media (prefers-reduced-motion: reduce) {
+ .ops-flow-wire.is-flowing .ops-flow-packet, .ops-flow-wire.is-flowing .ops-flow-glow, .ops-flow-gateway.is-flowing, .ops-flow-gateway.is-flowing .ops-flow-orbit { animation: none; }
+ .ops-flow-node { transition: none; }
+}

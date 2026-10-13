@@ -110,13 +110,88 @@ globalThis.ConsoleUI = (() => {
     const node = el(id);
     if (node) node.textContent = value == null ? '' : String(value);
   }
+  const dialogs = [];
+  let inertBackground = [], previousOverflow;
+  const focusableSelector = 'button:not([disabled]), a[href], input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  function focusable(node) {
+    return Array.from(node.querySelectorAll?.(focusableSelector) || []).filter(control =>
+      !control.closest('[inert]') && !control.hidden && control.getClientRects().length > 0 && control.tabIndex >= 0);
+  }
+  function focusDialog(node) {
+    const controls = focusable(node);
+    const first = controls.find(control => control.hasAttribute('autofocus')) ||
+      controls.find(control => control.matches('input, select, textarea')) || controls[0] || node;
+    if (first === node && !node.hasAttribute?.('tabindex')) node.setAttribute('tabindex', '-1');
+    first.focus?.({ preventScroll: true });
+  }
+  function syncDialogBackground() {
+    inertBackground.forEach(({ node, inert }) => { node.inert = inert; });
+    inertBackground = [];
+    const current = dialogs.at(-1);
+    if (!current) {
+      if (document.body && previousOverflow !== undefined) document.body.style.overflow = previousOverflow;
+      previousOverflow = undefined;
+      return;
+    }
+    if (document.body && previousOverflow === undefined) {
+      previousOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+    }
+    // Inert siblings along the entire ancestor path, including nested dialogs.
+    for (let branch = current.node; branch?.parentElement; branch = branch.parentElement) {
+      for (const sibling of branch.parentElement.children) {
+        if (sibling === branch || sibling.matches('script, style, link')) continue;
+        inertBackground.push({ node: sibling, inert: sibling.inert });
+        sibling.inert = true;
+      }
+      if (branch.parentElement === document.body) break;
+    }
+  }
   function modal(id, open) {
     const node = el(id);
     if (!node) return;
+    const index = dialogs.findIndex(dialog => dialog.node === node);
+    const previous = index < 0 ? null : dialogs[index];
     node.classList.toggle('active', open);
     node.style.display = open ? 'flex' : 'none';
     node.setAttribute('aria-hidden', String(!open));
+    if (open) {
+      if (previous) return;
+      dialogs.push({ node, opener: document.activeElement });
+      syncDialogBackground();
+      focusDialog(node);
+    } else if (previous) {
+      const wasTop = index === dialogs.length - 1;
+      dialogs.splice(index, 1);
+      syncDialogBackground();
+      if (wasTop) {
+        if (previous.opener?.isConnected && !previous.opener.closest('[inert]')) previous.opener.focus?.({ preventScroll: true });
+        else if (dialogs.length) focusDialog(dialogs.at(-1).node);
+      }
+    }
   }
+  document.addEventListener?.('keydown', event => {
+    const current = dialogs.at(-1);
+    if (!current) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      // Run the page's close handler so busy guards and credential cleanup apply.
+      current.node.querySelector('[data-modal-close], .modal-close')?.click();
+    } else if (event.key === 'Tab') {
+      const controls = focusable(current.node);
+      const index = controls.indexOf(document.activeElement);
+      if (!controls.length) { event.preventDefault(); focusDialog(current.node); }
+      else if ((event.shiftKey && index <= 0) || (!event.shiftKey && (index < 0 || index === controls.length - 1))) {
+        event.preventDefault();
+        controls[event.shiftKey ? controls.length - 1 : 0].focus();
+      }
+    }
+  }, true);
+  document.addEventListener?.('focusin', event => {
+    const current = dialogs.at(-1);
+    if (current && !current.node.contains(event.target)) focusDialog(current.node);
+  });
   function pagination(container, current, total, select) {
     if (!container) return;
     container.replaceChildren();

@@ -54,7 +54,6 @@ func resetSessionState(t *testing.T) {
 func clearInProcessSessions() {
 	globalSessionStore.mu.Lock()
 	globalSessionStore.sessions = make(map[string]time.Time)
-	globalSessionStore.localOnly = make(map[string]time.Time)
 	globalSessionStore.mu.Unlock()
 }
 
@@ -86,21 +85,18 @@ func TestDurableSessionSurvivesProcessRestart(t *testing.T) {
 	testutil.False(t, !ValidateSessionToken(token), "a durable session must still validate after the in-process map is dropped")
 }
 
-// A backend outage must not sign out a session the process can still vouch for.
-// The process keeps its own mirror of every session it issued, so an
-// unreachable backend degrades to the previous in-process behaviour rather than
-// locking the operator out mid-session.
-func TestValidateFallsBackToInProcessWhenBackendFails(t *testing.T) {
+// A backend outage must not bypass distributed session revocation.
+func TestValidateFailsClosedWhenBackendFails(t *testing.T) {
 	resetSessionState(t)
 
 	token, err := GenerateSessionToken()
 	testutil.NoError(t, err, "GenerateSessionToken() error = %v")
 
-	// The durable write above succeeded, so the process holds a local mirror;
-	// only the backend's read path is broken now.
+	// The process holds a local session; adding an unavailable backend must
+	// not let that local mirror bypass the durable revocation check.
 	SetSessionBackend(&fakeSessionBackend{hasErr: errors.New("redis unavailable")})
 
-	testutil.False(t, !ValidateSessionToken(token), "a backend outage must not sign out a session this process issued")
+	testutil.False(t, ValidateSessionToken(token), "a backend outage must not bypass revocation")
 }
 
 // A session this process never issued stays unvalidatable while the backend is
@@ -112,11 +108,8 @@ func TestValidateStillFailsClosedForUnknownTokensDuringAnOutage(t *testing.T) {
 	testutil.False(t, ValidateSessionToken("token-from-a-previous-process"), "an unknown token must not validate while the backend is unreachable")
 }
 
-// The backend has to confirm a recovered session once so a later outage can
-// still accept it. Without that record the first Redis blip after a deploy signs
-// the operator out again — exactly the deployment instability the durable store
-// was added to remove.
-func TestBackendConfirmedSessionSurvivesALaterOutage(t *testing.T) {
+// Even previously confirmed sessions require a fresh revocation check.
+func TestBackendConfirmedSessionRequiresRevocationCheck(t *testing.T) {
 	resetSessionState(t)
 	backend := &fakeSessionBackend{}
 	SetSessionBackend(backend)
@@ -125,12 +118,12 @@ func TestBackendConfirmedSessionSurvivesALaterOutage(t *testing.T) {
 	testutil.NoError(t, err, "GenerateSessionToken() error = %v")
 
 	// Restart: the in-process mirror is gone and only the backend knows the
-	// session. Confirming it here is what makes the next outage survivable.
+	// session. A successful read does not authorize later offline validation.
 	clearInProcessSessions()
 	testutil.False(t, !ValidateSessionToken(token), "the durable session must validate after a restart")
 
 	backend.hasErr = errors.New("redis unavailable")
-	testutil.False(t, !ValidateSessionToken(token), "a session the backend confirmed must survive a later backend outage")
+	testutil.False(t, ValidateSessionToken(token), "a cached session cannot bypass revocation during an outage")
 
 	// Revocation still wins: an authoritative negative clears the record.
 	backend.hasErr = nil
@@ -177,28 +170,12 @@ func TestExpiredInProcessSessionIsRejected(t *testing.T) {
 	testutil.False(t, memoryHasSession("expired-token"), "an expired session should be evicted from the in-process map")
 }
 
-func TestGenerateSessionTokenKeepsWorkingWhenPersistenceFails(t *testing.T) {
+func TestGenerateSessionTokenRequiresDurableWrite(t *testing.T) {
 	resetSessionState(t)
 	SetSessionBackend(&fakeSessionBackend{saveErr: errors.New("redis read-only")})
-
 	token, err := GenerateSessionToken()
-	testutil.NoError(t, err, "GenerateSessionToken() error = %v, want a usable local session")
-	testutil.False(t, !ValidateSessionToken(token), "the local session must still validate when persistence fails")
-}
-
-// A session whose durable write failed is usable only until the process
-// restarts; it must never be treated as if it had been persisted.
-func TestLocalOnlySessionDoesNotSurviveProcessRestart(t *testing.T) {
-	resetSessionState(t)
-	SetSessionBackend(&fakeSessionBackend{saveErr: errors.New("redis read-only")})
-
-	token, err := GenerateSessionToken()
-	testutil.NoError(t, err, "GenerateSessionToken() error = %v")
-	testutil.False(t, !ValidateSessionToken(token), "the local session must validate before the restart")
-
-	clearInProcessSessions()
-
-	testutil.False(t, ValidateSessionToken(token), "a session that was never persisted must not survive a restart")
+	testutil.Error(t, err)
+	testutil.Equal(t, token, "")
 }
 
 func TestCleanupExpiredSessionsKeepsLiveSession(t *testing.T) {
@@ -206,13 +183,9 @@ func TestCleanupExpiredSessionsKeepsLiveSession(t *testing.T) {
 
 	rememberSession("live-token", time.Now().Add(time.Hour))
 	rememberSession("expired-token", time.Now().Add(-time.Second))
-	rememberLocalOnlySession("live-local-token", time.Now().Add(time.Hour))
-	rememberLocalOnlySession("expired-local-token", time.Now().Add(-time.Second))
 
 	cleanupExpiredSessions()
 
 	testutil.False(t, !memoryHasSession("live-token"), "cleanup must keep a live session")
 	testutil.False(t, memoryHasSession("expired-token"), "cleanup must drop an expired session")
-	testutil.False(t, !localOnlyHasSession("live-local-token"), "cleanup must keep a live local-only session")
-	testutil.False(t, localOnlyHasSession("expired-local-token"), "cleanup must drop an expired local-only session")
 }

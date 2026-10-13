@@ -10,6 +10,7 @@ import (
 
 	"encoding/json"
 
+	"orchids-api/internal/billingledger"
 	"orchids-api/internal/config"
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
@@ -23,6 +24,7 @@ func TestHandleKeysCreateBillingLimitEnforcesReservation(t *testing.T) {
 	a := New(s, "admin", "pass", &config.Config{})
 	ctx := t.Context()
 
+	event := billingledger.EventID(time.Now(), "event-a")
 	const limit int64 = 5_000_000_000 // 0.50 USD
 	createReq := httptest.NewRequest(http.MethodPost, "/api/keys",
 		strings.NewReader(fmt.Sprintf(`{"name":"metered","billing_limit_usd_ticks":%d}`, limit)))
@@ -44,18 +46,18 @@ func TestHandleKeysCreateBillingLimitEnforcesReservation(t *testing.T) {
 
 	// Reserving inside the limit succeeds; the request that would cross it does
 	// not.
-	ok, err := s.ReserveApiKeyBilling(ctx, created.ID, "event-a", limit-1, time.Now().UTC().Add(time.Hour))
+	ok, err := s.ReserveApiKeyBilling(ctx, created.ID, event, limit-1, time.Now().UTC().Add(time.Hour))
 	testutil.Falsef(t, err != nil || !ok, "reservation inside the limit = %v, %v", ok, err)
 	ok, err = s.ReserveApiKeyBilling(ctx, created.ID, "event-b", 2, time.Now().UTC().Add(time.Hour))
 	testutil.NoError(t, err, "ReserveApiKeyBilling() error = %v")
 	testutil.False(t, ok, "a reservation crossing the limit must be refused")
 	// Idempotency: the same event id and amount is the same request, not a
 	// second hold.
-	ok, err = s.ReserveApiKeyBilling(ctx, created.ID, "event-a", limit-1, time.Now().UTC().Add(time.Hour))
+	ok, err = s.ReserveApiKeyBilling(ctx, created.ID, event, limit-1, time.Now().UTC().Add(time.Hour))
 	testutil.Falsef(t, err != nil || !ok, "idempotent re-reserve = %v, %v", ok, err)
 
 	// Settling the request books its cost, and the budget is then exhausted.
-	testutil.NoError(t, s.SettleApiKeyBilling(ctx, created.ID, "event-a", limit-1), "SettleApiKeyBilling() error = %v")
+	testutil.NoError(t, s.SettleApiKeyBilling(ctx, created.ID, event, limit-1), "SettleApiKeyBilling() error = %v")
 	ok, err = s.ReserveApiKeyBilling(ctx, created.ID, "event-c", 2, time.Now().UTC().Add(time.Hour))
 	testutil.NoError(t, err, "ReserveApiKeyBilling() error = %v")
 	testutil.False(t, ok, "a settled key with no headroom must refuse further reservations")

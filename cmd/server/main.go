@@ -7,10 +7,12 @@ import (
 	"log/slog"
 	"net/http"
 	_ "net/http/pprof"
+	"orchids-api/internal/billingledger"
 	"orchids-api/internal/modelrefresh"
 	"orchids-api/internal/refresh"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -195,7 +197,15 @@ func main() {
 		middleware.SetRequestAuditLogger(auditLogger)
 		// Client-key billing settles against the same store that took the
 		// reservation. Wiring it once keeps every channel's settle path identical.
-		middleware.SetAPIKeyBillingStore(s)
+		billingLedger, err := billingledger.New(s, filepath.Join(filepath.Dir(resolvedConfigPath), "data", "billing-pending"))
+		if err != nil {
+			slog.Error("Failed to open billing settlement outbox", "error", err)
+			os.Exit(1)
+		}
+		billingCtx, stopBilling := context.WithCancel(context.Background())
+		defer stopBilling()
+		go billingLedger.Run(billingCtx)
+		middleware.SetAPIKeyBillingStore(billingLedger)
 		// Per-minute buckets back the operations overview. The trace middleware
 		// reports one observation per finished request, so the counters cannot
 		// double count an upstream retry.

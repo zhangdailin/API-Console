@@ -647,6 +647,10 @@ func (s *redisStore) SetSetting(ctx context.Context, key, value string) error {
 	if key == "" {
 		return nil
 	}
+	if key == "config" {
+		return saveConfigWithSessionRevocationScript.Run(ctx, s.client,
+			[]string{s.settingsKey(key), s.prefix + "admin:session_generation"}, value).Err()
+	}
 	return s.client.Set(ctx, s.settingsKey(key), value, 0).Err()
 }
 

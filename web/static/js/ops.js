@@ -1,4 +1,4 @@
-// Operations monitoring dashboard: header status, health gauge, six KPI cards,
+// Operations monitoring dashboard: header status, live flow topology, KPI cards,
 // host/runtime resources, per-platform concurrency, throughput and switch trends,
 // latency distribution, error mix/trend, alert events and the channel × model
 // matrix. Every figure that has no sample says so instead of rendering a healthy
@@ -10,7 +10,6 @@
     window: 180,
     channel: '',
     model: '',
-    liveWindow: 1,
     refreshSeconds: 15,
     countdown: 15,
     timer: null,
@@ -627,103 +626,6 @@
     return liveBuckets(Math.max(1, Math.min(1440, minutes)));
   }
 
-  function renderHero(payload) {
-    state.overview = payload;
-    if (payload.available === false) {
-      ['Qps', 'Tps'].forEach((metric) => ['Now', 'Peak', 'Avg'].forEach((period) => setText('opsLive' + metric + period, '未采集')));
-      setText('opsGaugeValue', '—');
-      setText('opsGaugeLabel', '未采集');
-      setText('opsGaugeState', '指标不可用');
-      setText('opsGaugeSub', '等待有效数据');
-      setText('opsHeroHint', '当前未获得指标数据');
-      setText('opsSuccessTrendHint', '成功率趋势 · 未采集');
-      const gauge = el('opsGaugeRing');
-      if (gauge) gauge.style.background = 'var(--surface-3)';
-      const spark = el('opsSpark');
-      if (spark) emptyNote(spark, '指标未采集');
-      return;
-    }
-    const buckets = liveBuckets(state.liveWindow);
-    // rateSeries turns the minute buckets into one line of points: per-second
-    // rates, because the bucket still in progress covers fewer than 60 seconds.
-    function rateSeries(tokenSum) {
-      return buckets.map((point) => ({ label: fmtMinute(point.minute), value: tokenSum(point) / point.seconds }));
-    }
-    const qpsPoints = rateSeries((point) => point.requests);
-    const tpsPoints = rateSeries((point) => (point.input_tokens || 0) + (point.output_tokens || 0));
-    const seconds = buckets.reduce((sum, point) => sum + point.seconds, 0);
-    const requests = buckets.reduce((sum, point) => sum + point.requests, 0);
-    const tokens = buckets.reduce((sum, point) => sum + (point.input_tokens || 0) + (point.output_tokens || 0), 0);
-    const hasUsage = requests === 0 || tokens > 0 || buckets.some((point) => point.usage_samples > 0);
-    // Three live figures per metric: the bucket in progress, the busiest bucket,
-    // and the mean over the elapsed seconds. All three read 未采集 rather than 0.00
-    // when no bucket was collected: an idle console is not a zero-rate console.
-    function liveFigures(prefix, points, total, digits) {
-      const peak = points.reduce((max, point) => Math.max(max, point.value), 0);
-      const latest = points.length ? points[points.length - 1].value : 0;
-      const avg = seconds ? total / seconds : 0;
-      const shown = (value) => (points.length ? value.toFixed(digits) : '未采集');
-      setText(prefix + 'Now', shown(latest));
-      setText(prefix + 'Peak', shown(peak));
-      setText(prefix + 'Avg', shown(avg));
-    }
-    liveFigures('opsLiveQps', qpsPoints, requests, 2);
-    // The token rate is withheld entirely when nothing reported usage: a partial
-    // TPS would read as the whole window's and quietly understate the traffic.
-    liveFigures('opsLiveTps', hasUsage ? tpsPoints : [], tokens, 1);
-    setText('opsHeroHint', `最近 ${state.liveWindow} 个分钟桶 · 当前分钟按已过时间计算 · 15 秒刷新`);
-
-    // Health: the SLA of the window, with the traffic level deciding whether the
-    // console is "serving" or "standby".
-    const real = requests;
-    const success = buckets.reduce((sum, point) => sum + (point.success || 0), 0);
-    const failed = buckets.reduce((sum, point) => sum + (point.failed || 0), 0);
-    const attemptFailures = buckets.reduce((sum, point) => sum + (point.attempt_failures || 0), 0);
-    const rate = real > 0 ? Math.min(success / real, 1) : 0;
-    const gauge = el('opsGaugeRing');
-    const score = real > 0 ? rate * 100 : 0;
-    const tone = real === 0 ? 'var(--idle)' : rate >= 0.95 ? 'var(--ok)' : rate >= 0.8 ? 'var(--warn)' : 'var(--bad)';
-    if (gauge) {
-      // Painted inline: the ring's fill angle is data, not a style rule.
-      gauge.style.background = `conic-gradient(${tone} ${score.toFixed(1)}%, var(--surface-3) 0)`;
-    }
-    setText('opsGaugeValue', real === 0 ? '待机' : (rate * 100).toFixed(1) + '%');
-    setText('opsGaugeLabel', real === 0 ? '无流量' : rate >= 0.95 ? '健康' : rate >= 0.8 ? '降级' : '异常');
-    setText('opsGaugeState', real === 0 ? '待机' : '服务中');
-    // The gauge's sub-line carries the two failure figures, so
-    // the health number can be reconciled with the error cards at a glance.
-    const gaugeSub = el('opsGaugeSub');
-    if (gaugeSub) {
-      gaugeSub.replaceChildren();
-      [
-        `${state.liveWindow} 分钟桶 ${fmtInt(real)} 次请求`,
-        `最终失败 ${fmtInt(failed)}`,
-        `上游尝试失败 ${fmtInt(attemptFailures)}`,
-      ].forEach((part) => gaugeSub.appendChild(make('span', '', part)));
-      if (failed > 0) {
-        // A click target on the number an operator would reach for anyway.
-        const link = make('button', 'ops-inline-link', '查看失败请求 →');
-        link.type = 'button';
-        link.id = 'opsHeroUpstreamErrors';
-        link.addEventListener('click', () => drilldownToLogs({ outcome: 'failed', since: buckets[0].minute, until: payload.until }));
-        gaugeSub.appendChild(link);
-      }
-    }
-
-    setText('opsSuccessTrendHint', `成功率趋势 · ${state.liveWindow} 分钟桶 · 无请求的分钟留空`);
-    const trend = el('opsSpark');
-    if (trend) lineChart(trend, {
-      points: buckets.map(point => ({
-        label: fmtMinute(point.minute),
-        value: point.requests > 0 ? Math.min((point.success || 0) / point.requests, 1) * 100 : null,
-        tooltip: `${fmtMinute(point.minute)} · ${point.requests > 0 ? (((point.success || 0) / point.requests) * 100).toFixed(1) : '—'}% · ${point.success || 0} / ${point.requests} 次成功`,
-      })),
-      maxValue: 100, axisFormat: value => value.toFixed(0) + '%',
-      className: 'series-success', pointColor: 'var(--ok)', tooltips: true,
-      height: 140, emptyText: '此时间范围没有请求，暂无成功率样本。',
-    });
-  }
-
   // --- resource row ----------------------------------------------------------
 
   function renderResources(payload) {
@@ -1249,7 +1151,6 @@
       if (!ticket.isCurrent() || scope.window !== state.window || scope.channel !== state.channel) return;
       state.overview = payload;
       renderKpis(payload);
-      renderHero(payload);
       renderTrends(payload);
       renderDistributions(payload);
       renderConcurrency(payload);
@@ -1270,7 +1171,6 @@
       // A failed filter change has no valid historical scope to display.
       state.overview = null;
       if (!state.overview) {
-        renderHero({ available: false });
         renderResources({ available: false, note: '运行时指标尚未读取成功。' });
         ['opsConcurrency', 'opsErrorMix', 'opsHistogram', 'opsSwitchTrend', 'opsThroughput', 'opsErrorTrend'].forEach((id) => {
           const node = el(id);
@@ -1344,26 +1244,9 @@
       if (window.location) window.location.href = pagePath() + '?tab=alerts';
     });
 
-    // One place marks the selected window, so the chips and the state cannot drift:
-    // 重置 used to set the state to 1 minute and leave "1h" lit as the selection.
-    function selectLiveWindow(minutes) {
-      document.querySelectorAll('#opsLiveTabs .ops-chip').forEach((chip) => {
-        chip.classList.toggle('is-active', (Number(chip.getAttribute('data-live')) || 1) === minutes);
-      });
-      state.liveWindow = minutes;
-      if (state.overview) renderHero(state.overview);
-    }
-
-    document.querySelectorAll('#opsLiveTabs .ops-chip').forEach((button) => {
-      button.addEventListener('click', () => {
-        selectLiveWindow(Number(button.getAttribute('data-live')) || 1);
-      });
-    });
-
     attachHandler('opsTrendReset', 'click', () => {
-      selectLiveWindow(1);
       if (state.overview) renderTrends(state.overview);
-      showToast('已重置实时与趋势视图');
+      showToast('已重置趋势视图');
     });
     attachHandler('opsTrendDownload', 'click', () => {
       const header = 'minute,requests,success,failed,input_tokens,output_tokens\n';

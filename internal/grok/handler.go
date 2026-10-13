@@ -213,8 +213,8 @@ func (h *Handler) auditChatOutcome(ctx context.Context, acc *store.Account, req 
 	// cost of the answer that is eventually delivered. The one exception is the
 	// withheld turn that is delivered after all, which is billed then.
 	if !result.Withheld || result.DeliveredDegraded {
-		if cost, priced := middleware.SettleAPIKeyBilling(ctx, nil, req.Model, usageSource,
-			int64(event.InputTokens), int64(event.CachedInputTokens), int64(event.OutputTokens)); priced {
+		if cost, _ := middleware.SettleAPIKeyBilling(ctx, nil, req.Model, usageSource,
+			int64(event.InputTokens), int64(event.CachedInputTokens), int64(event.OutputTokens)); cost.Model != "" {
 			event.CostInUSDTicks = cost.CostInUSDTicks
 			event.PricingModel = cost.Model
 			event.PricingVersion = pricing.Version

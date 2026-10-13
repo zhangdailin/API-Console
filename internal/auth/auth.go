@@ -33,9 +33,8 @@ var (
 )
 
 // SetSessionBackend installs the durable session store. Passing nil keeps the
-// in-process map, which is also the fallback whenever the backend cannot be
-// reached, so a persistence outage degrades to the previous behaviour instead
-// of locking the operator out.
+// in-process map. With a backend configured, authentication fails closed when
+// revocation cannot be checked; a cached session must never undo revocation.
 func SetSessionBackend(backend SessionBackend) {
 	sessionBackendMu.Lock()
 	sessionBackend = backend
@@ -51,24 +50,12 @@ func durableSessionBackend() SessionBackend {
 type SessionStore struct {
 	mu       sync.RWMutex
 	sessions map[string]time.Time
-	// localOnly holds sessions minted while the durable write failed. They stay
-	// valid for this process so a transient persistence error cannot break the
-	// login that just succeeded, and they are deliberately not trusted after a
-	// restart.
-	localOnly map[string]time.Time
-	// backendOnly holds sessions this process never issued but the durable store
-	// confirmed. They are the process's proof that a restart recovered a live
-	// operator cookie, so a later backend read failure can still accept it
-	// instead of signing the operator out mid-session.
-	backendOnly map[string]time.Time
 }
 
 // globalSessionStore mirrors every session this process issued. It is the
 // authoritative store when no durable backend is configured.
 var globalSessionStore = &SessionStore{
-	sessions:    make(map[string]time.Time),
-	localOnly:   make(map[string]time.Time),
-	backendOnly: make(map[string]time.Time),
+	sessions: make(map[string]time.Time),
 }
 
 func init() {
@@ -82,6 +69,11 @@ func init() {
 }
 
 func GenerateSessionToken() (string, error) {
+	return GenerateSessionTokenForPassword("")
+}
+
+// GenerateSessionTokenForPassword rejects logins using stale replica credentials.
+func GenerateSessionTokenForPassword(password string) (string, error) {
 	bytes := make([]byte, sessionTokenLength)
 	if _, err := rand.Read(bytes); err != nil {
 		return "", fmt.Errorf("failed to generate session token: %w", err)
@@ -90,13 +82,21 @@ func GenerateSessionToken() (string, error) {
 	expiry := time.Now().Add(sessionTTL)
 
 	if backend := durableSessionBackend(); backend != nil {
-		if err := backend.SaveSession(context.Background(), token, expiry); err != nil {
-			slog.Warn("Failed to persist admin session; keeping it for this process only", "error", err)
-			rememberSession(token, expiry)
-			rememberLocalOnlySession(token, expiry)
-			return token, nil
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		var err error
+		if guarded, ok := backend.(interface {
+			SaveSessionForPassword(context.Context, string, time.Time, string) error
+		}); ok && password != "" {
+			err = guarded.SaveSessionForPassword(ctx, token, expiry, password)
+		} else {
+			err = backend.SaveSession(ctx, token, expiry)
+		}
+		if err != nil {
+			return "", fmt.Errorf("persist admin session: %w", err)
 		}
 	}
+
 	rememberSession(token, expiry)
 
 	return token, nil
@@ -106,31 +106,18 @@ func ValidateSessionToken(token string) bool {
 	if strings.TrimSpace(token) == "" {
 		return false
 	}
-	if localOnlyHasSession(token) {
-		return true
-	}
 	if backend := durableSessionBackend(); backend != nil {
-		valid, err := backend.HasSession(context.Background(), token)
-		if err == nil {
-			if valid {
-				// Remember that this process positively confirmed the session.
-				// Without it, the next backend blip would reject a cookie the
-				// backend itself handed back after the restart.
-				rememberBackendSession(token)
-				return true
-			}
-			// The backend is reachable and does not know this token. That is an
-			// authoritative negative — it is what makes logout, revocation and an
-			// expired TTL take effect — so it is not a reason to fall back.
-			forgetSession(token)
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		valid, err := backend.HasSession(ctx, token)
+		if err != nil {
+			slog.Warn("Admin session revocation check unavailable", "error", err)
 			return false
 		}
-		// A backend outage must not sign out a session this process can still
-		// vouch for: it either issued the token itself, or the backend confirmed
-		// it earlier in this process's life. A token with neither record still
-		// fails closed, so an outage never becomes an open door.
-		slog.Warn("Admin session backend unavailable; using the in-process store", "error", err)
-		return backendHasSession(token) || memoryHasSession(token)
+		if !valid {
+			forgetSession(token)
+		}
+		return valid
 	}
 	return memoryHasSession(token)
 }
@@ -151,24 +138,8 @@ func rememberSession(token string, expiry time.Time) {
 	globalSessionStore.mu.Unlock()
 }
 
-func rememberLocalOnlySession(token string, expiry time.Time) {
-	globalSessionStore.mu.Lock()
-	globalSessionStore.localOnly[token] = expiry
-	globalSessionStore.mu.Unlock()
-}
-
-// rememberBackendSession records a session the durable store confirmed. Its
-// lifetime is bounded by the session TTL because the backend does not report the
-// remaining time; the next successful backend read extends the record.
-func rememberBackendSession(token string) {
-	globalSessionStore.mu.Lock()
-	globalSessionStore.backendOnly[token] = time.Now().Add(sessionTTL)
-	globalSessionStore.mu.Unlock()
-}
-
 // hasSession reads one session table under the store lock and forgets an entry
-// whose TTL has already passed. All three tables share this rule; they differ
-// only in which map they live in.
+// whose TTL has already passed.
 func (s *SessionStore) hasSession(table map[string]time.Time, token string) bool {
 	s.mu.RLock()
 	expiry, exists := table[token]
@@ -184,23 +155,13 @@ func (s *SessionStore) hasSession(table map[string]time.Time, token string) bool
 	return true
 }
 
-func backendHasSession(token string) bool {
-	return globalSessionStore.hasSession(globalSessionStore.backendOnly, token)
-}
-
 func memoryHasSession(token string) bool {
 	return globalSessionStore.hasSession(globalSessionStore.sessions, token)
-}
-
-func localOnlyHasSession(token string) bool {
-	return globalSessionStore.hasSession(globalSessionStore.localOnly, token)
 }
 
 func forgetSession(token string) {
 	globalSessionStore.mu.Lock()
 	delete(globalSessionStore.sessions, token)
-	delete(globalSessionStore.localOnly, token)
-	delete(globalSessionStore.backendOnly, token)
 	globalSessionStore.mu.Unlock()
 }
 
@@ -211,8 +172,6 @@ func cleanupExpiredSessions() {
 	now := time.Now()
 	for _, sessions := range []map[string]time.Time{
 		globalSessionStore.sessions,
-		globalSessionStore.localOnly,
-		globalSessionStore.backendOnly,
 	} {
 		for token, expiry := range sessions {
 			if now.After(expiry) {
@@ -220,4 +179,12 @@ func cleanupExpiredSessions() {
 			}
 		}
 	}
+}
+
+// ClearLocalSessions revokes sessions in deployments without a shared backend.
+// Redis config writes rotate the durable generation in the same transaction.
+func ClearLocalSessions() {
+	globalSessionStore.mu.Lock()
+	clear(globalSessionStore.sessions)
+	globalSessionStore.mu.Unlock()
 }

@@ -1,6 +1,6 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const same=(a,b)=>assert.equal(JSON.stringify(a),JSON.stringify(b));
+const same=(a,b)=>assert.deepEqual(JSON.parse(JSON.stringify(a)),JSON.parse(JSON.stringify(b)));
 const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('./test-support.cjs');
@@ -186,4 +186,14 @@ test('failed config saves retain the old baseline and allow retry without duplic
  await retry;
  assert.equal(api.countConfigChanges(),0);
  assert.equal(node('cfgSaveBtn').disabled,false);
+});
+
+
+test('blank admin password is omitted when saving unrelated settings',async()=>{
+ let saved;
+ const {api,node}=loadConfig((_url,options)=>{saved=JSON.parse(options.body);return Promise.resolve({ok:true,json:()=>Promise.resolve({code:0})});});
+ api.applyConfigurationPayload({admin_password:'existing'});
+ node('cfg_admin_pass').value='   ';
+ await api.saveConfiguration();
+ assert.equal(Object.hasOwn(saved,'admin_password'),false);
 });

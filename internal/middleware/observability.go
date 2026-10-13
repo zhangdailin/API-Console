@@ -21,6 +21,8 @@ type requestObservation struct {
 	mu                                      sync.Mutex
 	input, cached, output, reasoning, total int64
 	usage                                   bool
+	reportedInput, reportedOutput           int64
+	reportedUsage                           bool
 	// costTicks sums every priced row the request produced, and priced marks that
 	// at least one of them carried a price.
 	costTicks                    int64
@@ -93,6 +95,11 @@ func (l observedAuditLogger) Log(ctx context.Context, e audit.Event) {
 			if e.AccountID != 0 {
 				box.account = e.AccountID
 			}
+			if e.UsageSource == audit.UsageSourceUpstream {
+				box.reportedInput += int64(e.InputTokens)
+				box.reportedOutput += int64(e.OutputTokens)
+				box.reportedUsage = true
+			}
 			// Native Responses reports its usage on the completed upstream attempt.
 			if e.UsageSource == audit.UsageSourceUpstream || e.InputTokens > 0 || e.OutputTokens > 0 {
 				box.input += int64(e.InputTokens)
@@ -103,6 +110,11 @@ func (l observedAuditLogger) Log(ctx context.Context, e audit.Event) {
 				box.usage = true
 			}
 		} else if e.Action == "chat_request" || e.Action == "grok_request" {
+			if e.UsageSource == audit.UsageSourceUpstream {
+				box.reportedInput = max(box.reportedInput, int64(e.InputTokens))
+				box.reportedOutput = max(box.reportedOutput, int64(e.OutputTokens))
+				box.reportedUsage = true
+			}
 			copy := e
 			box.finalEvent, box.journal = &copy, l.next
 			deferJournal = true
@@ -117,6 +129,9 @@ func (l observedAuditLogger) Log(ctx context.Context, e audit.Event) {
 			}
 		}
 		box.mu.Unlock()
+		if observer, ok := ctx.Value(flowUsageKey{}).(func()); ok {
+			observer()
+		}
 	}
 	if deferJournal {
 		return
