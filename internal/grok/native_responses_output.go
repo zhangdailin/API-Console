@@ -16,10 +16,6 @@ import (
 )
 
 func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader, contentType, model string, mappings ...responses.ToolNamespaces) (responseID string, captured []byte, result chatOutcome) {
-	return copyNativeResponseWithVisibility(w, body, contentType, model, false, mappings...)
-}
-
-func copyNativeResponseWithVisibility(w http.ResponseWriter, body io.Reader, contentType, model string, hideReasoning bool, mappings ...responses.ToolNamespaces) (responseID string, captured []byte, result chatOutcome) {
 	var namespaces responses.ToolNamespaces
 	if len(mappings) > 0 {
 		namespaces = mappings[0]
@@ -66,9 +62,6 @@ func copyNativeResponseWithVisibility(w http.ResponseWriter, body io.Reader, con
 			raw, _ = json.Marshal(response)
 		}
 		_, _ = fullCapture.Write(raw)
-		if hideReasoning && hideNativeReasoning(response) {
-			raw, _ = json.Marshal(response)
-		}
 		written, writeErr := w.Write(raw)
 		if writeErr == nil && written != len(raw) {
 			writeErr = io.ErrShortWrite
@@ -118,23 +111,16 @@ func copyNativeResponseWithVisibility(w http.ResponseWriter, body io.Reader, con
 			// as the upstream sent it.
 			frame.SetData(string(raw))
 		}
-		// Capture the unfiltered protocol for private replay; the client receives
-		// only the selected visibility projection.
+		// Capture the same protocol sent to the client for private replay.
 		_ = frame.WriteFrame(fullCapture)
-		if !hideReasoning || !hiddenReasoningEvent(kind, event) {
-			if hideReasoning && hideNativeReasoning(event) {
-				raw, _ := json.Marshal(event)
-				frame.SetData(string(raw))
-			}
-			if err := frame.WriteFrame(target); err != nil {
-				result.Err = err
-				return err
-			}
-			target.Flush()
-			if target.Err != nil {
-				result.Err = target.Err
-				return target.Err
-			}
+		if err := frame.WriteFrame(target); err != nil {
+			result.Err = err
+			return err
+		}
+		target.Flush()
+		if target.Err != nil {
+			result.Err = target.Err
+			return target.Err
 		}
 		if usage := consoleUsageFromStreamEvent(event); len(usage) > 0 {
 			result.Usage = usage

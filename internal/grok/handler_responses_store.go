@@ -161,7 +161,7 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 	}
 	copyNativeCLIResponseHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
-	responseID, captured, result := copyNativeResponseWithVisibility(w, resp.Body, resp.Header.Get("Content-Type"), modelID, h.hideReasoning(), namespaces)
+	responseID, captured, result := copyNativeCLIResponseAndCaptureModel(w, resp.Body, resp.Header.Get("Content-Type"), modelID, namespaces)
 	h.auditChatOutcome(r.Context(), sess.acc, &chatwire.Request{Model: modelID, StartedAt: started}, result)
 	if session := sessionFromContext(r.Context()); session.Replay && len(captured) > 0 && result.Err == nil {
 		h.captureReasoningReplay(r.Context(), modelID, session.Key, captured)
@@ -279,8 +279,8 @@ func (h *Handler) HandleResponseResource(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	defer resp.Body.Close()
-	if r.Method == http.MethodGet && (len(ownership.ToolNamespaces) > 0 || h.hideReasoning()) && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		if err := restoreNativeResourceNamespaces(resp, ownership.ToolNamespaces, h.hideReasoning()); err != nil {
+	if r.Method == http.MethodGet && len(ownership.ToolNamespaces) > 0 && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if err := restoreNativeResourceNamespaces(resp, ownership.ToolNamespaces); err != nil {
 			writeResponsesAPIError(w, http.StatusBadGateway, "upstream_error", "Response tool state unavailable")
 			return
 		}

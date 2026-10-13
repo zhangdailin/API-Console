@@ -849,9 +849,6 @@ func (h *Handler) collectBuildChat(w http.ResponseWriter, req *chatwire.Request,
 	if len(reasoningItems) > 1 {
 		message["x_grok_reasoning"] = reasoningItems
 	}
-	if h.hideReasoning() {
-		hideChatReasoning(message)
-	}
 	finishReason := "stop"
 	if len(toolCalls) > 0 {
 		message["tool_calls"] = toolCalls
