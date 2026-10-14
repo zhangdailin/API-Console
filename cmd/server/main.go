@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	_ "net/http/pprof"
@@ -69,39 +70,43 @@ func (e accountChangeEmitter) Publish(change store.AccountChange) {
 }
 
 func main() {
+	configureRuntimeLogging(nil)
+	if err := run(); err != nil {
+		slog.Error("Server failed", "error", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	if handled, err := selfupdate.RunWatchdogCLI(os.Args[1:]); handled {
 		if err != nil {
-			slog.Error("Upgrade watchdog failed", "error", err)
-			os.Exit(1)
+			return fmt.Errorf("upgrade watchdog failed: %w", err)
 		}
-		return
+		return nil
 	}
 	if len(os.Args) == 2 && os.Args[1] == "--version" {
 		_ = json.NewEncoder(os.Stdout).Encode(buildinfo.Current())
-		return
+		return nil
 	}
 	configPath := flag.String("config", "", "Path to config.json/config.yaml")
 	flag.Parse()
 
 	cfg, resolvedConfigPath, err := config.Load(*configPath)
 	if err != nil {
-		slog.New(slog.NewJSONHandler(os.Stdout, nil)).Error("Failed to load config", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to load config: %w", err)
 	}
 
 	configureRuntimeLogging(cfg)
 	credentialKey, credentialKeySource, err := config.LoadOrCreateCredentialEncryptionKey(resolvedConfigPath, cfg)
 	if err != nil {
-		slog.Error("Failed to load credential encryption key", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to load credential encryption key: %w", err)
 	}
 	slog.Info("Credential encryption enabled", "key_source", credentialKeySource)
 
 	// Derive the compaction key before opening resources that need cleanup.
 	compactionCipher, cipherErr := secureblob.NewCipher(credentialKey)
 	if cipherErr != nil {
-		slog.Error("Failed to derive the gateway compaction key", "error", cipherErr)
-		os.Exit(1)
+		return fmt.Errorf("failed to derive the gateway compaction key: %w", cipherErr)
 	}
 
 	s, err := store.New(store.Options{
@@ -113,8 +118,7 @@ func main() {
 		CredentialEncryptionKey: credentialKey,
 	})
 	if err != nil {
-		slog.Error("Failed to initialize database", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to initialize database: %w", err)
 	}
 	defer s.Close()
 
@@ -189,6 +193,7 @@ func main() {
 	)
 	if redisClient := s.RedisClient(); redisClient != nil {
 		auditLogger := audit.NewRedisLogger(redisClient, s.RedisPrefix(), 10000)
+		defer auditLogger.Close()
 		apiHandler.SetAuditHealthReporter(auditLogger.Health)
 		h.SetAuditLogger(middleware.ObserveAuditLogger(auditLogger))
 		grokHandler.SetAuditLogger(middleware.ObserveAuditLogger(auditLogger))
@@ -200,8 +205,7 @@ func main() {
 		// reservation. Wiring it once keeps every channel's settle path identical.
 		billingLedger, err := billingledger.New(s, filepath.Join(filepath.Dir(resolvedConfigPath), "data", "billing-pending"))
 		if err != nil {
-			slog.Error("Failed to open billing settlement outbox", "error", err)
-			os.Exit(1)
+			return fmt.Errorf("failed to open billing settlement outbox: %w", err)
 		}
 		billingCtx, stopBilling := context.WithCancel(context.Background())
 		defer stopBilling()
@@ -241,15 +245,13 @@ func main() {
 			"request_recorder", true,
 			"alert_engine", true,
 			"account_change_bus", "in-process")
-		defer auditLogger.Close()
 		slog.Debug("Audit logger initialized", "backend", "redis")
 	}
 
 	// Initialize template renderer
 	tmplRenderer, err := template.NewRenderer()
 	if err != nil {
-		slog.Error("Failed to initialize template renderer", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to initialize template renderer: %w", err)
 	}
 	slog.Debug("Template renderer initialized")
 
@@ -259,8 +261,7 @@ func main() {
 	updater := registerRoutes(mux, cfg, s, h, grokHandler, apiHandler, limiter, accountTracker, tmplRenderer)
 	trustedProxy, err := middleware.TrustedProxyMiddleware(cfg.TrustedProxies)
 	if err != nil {
-		slog.Error("Invalid trusted proxy configuration", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("invalid trusted proxy configuration: %w", err)
 	}
 
 	// Build server
@@ -323,12 +324,12 @@ func main() {
 	slog.Info("Admin UI available", "url", "http://localhost:"+cfg.Port+cfg.AdminPath)
 
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {
-		slog.Error("Server start failed", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("server start failed: %w", err)
 	}
 
 	<-idleConnsClosed
 	slog.Info("Server shutdown gracefully")
+	return nil
 }
 
 // logReachability reports at startup whether this process can reach a provider
