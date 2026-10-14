@@ -136,7 +136,7 @@ function clineSubscriptionBadge(acc) {
         bg: free ? "rgba(52, 211, 153, 0.16)" : "rgba(167, 139, 250, 0.16)",
         color: free ? "#34d399" : "#c4b5fd",
         tip: free
-          ? "Cline 免费账号：上游 /users/me/plan 返回没有套餐记录"
+          ? "Cline 免费账号：上游套餐接口确认没有有效的付费订阅"
           : `Cline 套餐: ${plan}`,
       };
     }

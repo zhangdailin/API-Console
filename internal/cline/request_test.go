@@ -349,15 +349,30 @@ func TestCatalogSnapshotRoundTripsTheObservedFeed(t *testing.T) {
 // rows name models this account may not run, and an empty feed is an error
 // rather than an empty catalog.
 func TestParseCatalogPublishesOnlyTheFreeTier(t *testing.T) {
-	models, err := parseCatalog([]byte(`{"free":[{"id":"x-ai/grok-4.1-fast","name":"Grok 4.1 Fast"}],"paid":[{"id":"anthropic/claude-opus","name":"Opus"}]}`))
+	models, err := parseCatalog([]byte(`{"free":[{"id":"x-ai/grok-4.1-fast","name":"Grok 4.1 Fast"}],"clinePass":[{"id":"cline-pass/glm","name":"GLM"}]}`), false)
 	testutil.NoError(t, err, "parseCatalog() error = %v")
 	testutil.Equal(t, len(models), 1)
 	testutil.Equal(t, models[0].ID, "x-ai/grok-4.1-fast")
 	testutil.CheckEqual(t, models[0].Provider, "x-ai")
 	testutil.CheckFalse(t, !models[0].RequiresStream, "RequiresStream = false, want true for a bare identifier")
-	if models, err = parseCatalog([]byte(`{"free":[]}`)); err != nil || len(models) != 0 {
+	if models, err = parseCatalog([]byte(`{"free":[]}`), false); err != nil || len(models) != 0 {
 		t.Errorf("an empty feed must parse as empty, got %+v / %v", models, err)
 	}
+}
+
+func TestPaidCatalogSelectsSubscribedModels(t *testing.T) {
+	models, err := parseCatalog([]byte(`{"free":[{"id":"vendor/free"}],"clinePass":[{"id":"VENDOR/FREE"},{"id":"cline-pass/glm","name":"GLM"}],"clineCloud":[{"id":"vendor/cloud"}]}`), true)
+	testutil.NoError(t, err)
+	testutil.Equal(t, len(models), 2)
+	testutil.CheckEqual(t, models[0].BillingTier, "free")
+	testutil.CheckEqual(t, models[1].BillingTier, "paid")
+	rows := CatalogSnapshot(models)
+	testutil.True(t, CatalogSupportsModel(catalogRowsForPlan(rows, "Cline Pass"), "cline-pass/glm"))
+	testutil.False(t, CatalogSupportsModel(catalogRowsForPlan(rows, "free"), "cline-pass/glm"))
+	testutil.False(t, CatalogSupportsModel(rows, "vendor/cloud"))
+	models, err = parseCatalog([]byte(`{"free":[],"clinePass":[{"id":"cline-pass/glm"}]}`), true)
+	testutil.NoError(t, err)
+	testutil.Equal(t, len(models), 1)
 }
 
 // TestNewToolCallIDIsUnique keeps two concurrent tool calls from colliding on

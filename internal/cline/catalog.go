@@ -9,6 +9,7 @@ import (
 
 // Model is one row of the recommended-models feed.
 type Model struct {
+	BillingTier string `json:"billing_tier,omitempty"`
 	// ID is the upstream identifier, and the public identifier this gateway
 	// publishes: a client that saw it in /v1/models must be able to ask for it
 	// by that name.
@@ -34,46 +35,85 @@ type catalogSnapshotRow struct {
 	Name           string `json:"name,omitempty"`
 	Provider       string `json:"provider,omitempty"`
 	RequiresStream bool   `json:"requires_stream,omitempty"`
+	BillingTier    string `json:"billing_tier,omitempty"`
 }
 
-// catalogPayload is the recommended-models feed. Only the free tier is
-// published: the paid rows name models this account may not run.
+type catalogEntry struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// Subscription models are admitted only after an authoritative plan read.
 type catalogPayload struct {
-	Free []struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-	} `json:"free"`
+	Free      []catalogEntry `json:"free"`
+	ClinePass []catalogEntry `json:"clinePass"`
 }
 
-// parseCatalog reads the feed. An empty `free` list is an error rather than an
-// empty catalog: publishing nothing would hide an upstream that stopped
-// answering, and a caller cannot tell that apart from "this account has no
-// models".
-func parseCatalog(raw []byte) ([]Model, error) {
+// parseCatalog selects the observed free tier and, for subscribers, Pass tier.
+// The caller rejects an empty eligible catalog instead of inventing models.
+func parseCatalog(raw []byte, paid bool) ([]Model, error) {
 	var payload catalogPayload
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return nil, err
 	}
 	out := make([]Model, 0, len(payload.Free))
-	for _, entry := range payload.Free {
-		id := strings.TrimSpace(entry.ID)
-		if id == "" {
-			continue
+	seen := make(map[string]bool)
+	appendTier := func(entries []catalogEntry, tier string) {
+		for _, entry := range entries {
+			id := strings.TrimSpace(entry.ID)
+			key := strings.ToLower(id)
+			if id == "" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			provider := id
+			if index := strings.Index(id, "/"); index >= 0 {
+				provider = id[:index]
+			}
+			out = append(out, Model{
+				BillingTier: tier,
+				ID:          id,
+				Name:        strings.TrimSpace(entry.Name),
+				Provider:    provider,
+				// The upstream serves a bare identifier only as a stream; an
+				// identifier carrying ":" is a non-streaming variant.
+				RequiresStream: !strings.Contains(id, ":"),
+			})
 		}
-		provider := id
-		if index := strings.Index(id, "/"); index >= 0 {
-			provider = id[:index]
-		}
-		out = append(out, Model{
-			ID:       id,
-			Name:     strings.TrimSpace(entry.Name),
-			Provider: provider,
-			// The upstream serves a bare identifier only as a stream; an
-			// identifier carrying ":" is a non-streaming variant.
-			RequiresStream: !strings.Contains(id, ":"),
-		})
+	}
+	appendTier(payload.Free, "free")
+	if paid {
+		appendTier(payload.ClinePass, "paid")
 	}
 	return out, nil
+}
+
+func hasPaidPlan(name string) bool {
+	name = strings.TrimSpace(name)
+	return name != "" && !strings.EqualFold(name, freePlanName)
+}
+
+// A failed catalog read must not leave subscription rows routable after a
+// confirmed plan expiry. Unmarked JSON rows are prior free-tier observations.
+func catalogRowsForPlan(rows []string, plan string) []string {
+	out := make([]string, 0, len(rows))
+	for _, raw := range rows {
+		var row catalogSnapshotRow
+		if json.Unmarshal([]byte(raw), &row) != nil || row.ID == "" {
+			continue
+		}
+		switch row.BillingTier {
+		case "", "free":
+		case "paid":
+			if !hasPaidPlan(plan) {
+				continue
+			}
+		default:
+			continue
+		}
+		out = append(out, raw)
+	}
+	return out
 }
 
 // CatalogSnapshot projects the observed feed onto its stored form.
@@ -92,6 +132,7 @@ func CatalogSnapshot(models []Model) []string {
 			Name:           strings.TrimSpace(model.Name),
 			Provider:       strings.TrimSpace(model.Provider),
 			RequiresStream: model.RequiresStream,
+			BillingTier:    model.BillingTier,
 		})
 		if err != nil {
 			continue

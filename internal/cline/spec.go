@@ -2,6 +2,7 @@ package cline
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"strings"
 	"time"
@@ -61,7 +62,7 @@ func (capabilities) SupportsModel(acc *store.Account, model string) bool {
 	if acc == nil || len(acc.ClineModelIDs) == 0 {
 		return true
 	}
-	return CatalogSupportsModel(acc.ClineModelIDs, model)
+	return CatalogSupportsModel(catalogRowsForPlan(acc.ClineModelIDs, acc.ClinePlan), model)
 }
 
 // IsFreeModel is always false: Cline has no free tier the gateway can route an
@@ -82,28 +83,49 @@ func catalogPort() *provider.Catalog {
 		Observe: func(ctx context.Context, env provider.Env, acc *store.Account) (provider.Observation, error) {
 			client := newClientWithStore(acc, env.Config, env.Store)
 			defer client.Close()
+			plan, planErr := client.FetchPlan(ctx)
+			if planErr != nil && acc != nil {
+				slog.Warn("Cline catalog plan read failed; keeping the recorded tier", "account_id", acc.ID, "error", planErr)
+			} else if plan.Explicit {
+				client.setPlan(plan.Name)
+			}
 			models, err := client.FetchUpstreamModels(ctx)
+			record := provider.RecordSnapshot(CatalogSnapshot(models), setCatalogSnapshot)
 			return provider.Observation{
 				Models: CatalogModels(models),
-				Record: provider.RecordSnapshot(CatalogSnapshot(models), setCatalogSnapshot),
+				Record: func(account *store.Account, now time.Time) bool {
+					if !record(account, now) {
+						return false
+					}
+					if plan.Explicit {
+						account.ClinePlan = plan.Name
+					}
+					return true
+				},
 			}, err
 		},
 		LastKnown: func(acc *store.Account) []provider.Model {
 			if acc == nil {
 				return nil
 			}
-			rows := provider.ParseSnapshotRows(acc.ClineModelIDs)
+			rows := catalogRowsForPlan(acc.ClineModelIDs, acc.ClinePlan)
 			out := make([]provider.Model, 0, len(rows))
-			for _, row := range rows {
+			for _, raw := range rows {
+				var row catalogSnapshotRow
+				if json.Unmarshal([]byte(raw), &row) != nil {
+					continue
+				}
 				id := strings.TrimSpace(row.ID)
 				if id == "" {
 					continue
 				}
 				out = append(out, provider.Model{
 					ID:            id,
-					Name:          util.FirstNonEmpty(strings.TrimSpace(row.Name), strings.TrimSpace(row.DisplayName), id),
+					Name:          util.FirstNonEmpty(strings.TrimSpace(row.Name), id),
 					Provider:      strings.TrimSpace(row.Provider),
 					UpstreamModel: id,
+					BillingTier:   row.BillingTier,
+					BillingSource: "cline_recommended_models",
 				})
 			}
 			return out
@@ -125,7 +147,7 @@ func setCatalogSnapshot(acc *store.Account, rows []string, now time.Time) {
 //
 // Provider is the vendor half the feed names before the first "/". It is what
 // the public list reports as owned_by, and it is the only distinction between
-// two free models of the same channel.
+// the observed models of the same channel.
 func CatalogModels(models []Model) []provider.Model {
 	out := make([]provider.Model, 0, len(models))
 	for _, model := range models {
@@ -138,13 +160,15 @@ func CatalogModels(models []Model) []provider.Model {
 			Name:          util.FirstNonEmpty(strings.TrimSpace(model.Name), id),
 			Provider:      strings.TrimSpace(model.Provider),
 			UpstreamModel: id,
+			BillingTier:   model.BillingTier,
+			BillingSource: "cline_recommended_models",
 		})
 	}
 	return out
 }
 
 // catalogRefreshDue reports whether the account's catalog snapshot should be
-// re-read. The snapshot is an observation, and the free feed changes without
+// re-read. The snapshot is an observation, and the feed changes without
 // notice, so it is refreshed on the same cadence as the other providers.
 func catalogRefreshDue(acc *store.Account, now time.Time) bool {
 	if acc == nil {
@@ -156,8 +180,8 @@ func catalogRefreshDue(acc *store.Account, now time.Time) bool {
 	return now.Sub(acc.ClineModelsSyncedAt) >= provider.HealthRefreshInterval
 }
 
-// refreshCatalog re-reads the account's model feed. Cline has no credit meter
-// to poll, so this is the channel's whole maintenance step.
+// refreshCatalog re-reads the model feed and subscription on the same cadence,
+// so purchasing a plan does not leave a previously recorded free tier forever.
 //
 // It never publishes a compiled-in list: a failed read leaves the snapshot
 // untouched, so an account that stopped being able to read the feed keeps the
@@ -170,13 +194,13 @@ func refreshCatalog(ctx context.Context, env provider.Env, acc *store.Account) {
 		client := newClientWithStore(acc, env.Config, env.Store)
 		defer client.Close()
 		catalogCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		models, err := client.FetchUpstreamModels(catalogCtx)
+		observeAccount(catalogCtx, client, acc, "account_id", acc.ID,
+			"Auto refresh cline catalog failed; keeping the last snapshot",
+			"Auto refresh cline plan failed; keeping the recorded tier")
 		cancel()
-		if err != nil {
-			slog.Warn("Auto refresh cline catalog failed; keeping the last snapshot", "account_id", acc.ID, "error", err)
-			return
+		if err := env.Store.UpdateAccount(ctx, acc); err != nil {
+			slog.Warn("Auto refresh cline account: update failed", "account_id", acc.ID, "error", err)
 		}
-		provider.PersistSnapshot(ctx, env.Store, acc, catalogPort(), CatalogSnapshot(models), "Auto refresh cline catalog: update account failed")
 	}) {
 		slog.Debug("Auto refresh cline catalog: account already refreshing", "account_id", acc.ID)
 	}

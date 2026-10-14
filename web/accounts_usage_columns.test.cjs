@@ -256,7 +256,7 @@ test('the Cline tier badge reads the plan the upstream actually answered', () =>
   // included, so it cannot tell the two apart.
   const free = context.subscriptionBadge({ account_type: 'cline', cline_plan: 'free', cline_model_ids: ['a'] });
   assert.equal(free.text, '免费');
-  assert.match(free.tip, /没有套餐记录/);
+  assert.match(free.tip, /没有有效的付费订阅/);
   // A subscriber keeps the plan name; flattening it to 免费 would hide it.
   const paid = context.subscriptionBadge({ account_type: 'cline', cline_plan: 'Cline Pass', cline_model_ids: ['a'] });
   assert.equal(paid.text, 'Cline Pass');

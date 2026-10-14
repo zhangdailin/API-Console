@@ -198,6 +198,7 @@ func TestAccountClientFingerprintCoversProviderConstructionInputs(t *testing.T) 
 		{"qoder organization", func(a *store.Account) { a.QoderOrganizationTags = []string{"tag-b"} }},
 		{"qoder policy", func(a *store.Account) { a.QoderDataPolicy = false }},
 		{"qoder models", func(a *store.Account) { a.QoderModelIDs = []string{"q-model-b"} }},
+		{"cline plan", func(a *store.Account) { a.ClinePlan = "free" }},
 	}
 	for _, tc := range accountCases {
 		t.Run(tc.name, func(t *testing.T) {

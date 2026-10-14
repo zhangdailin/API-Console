@@ -491,7 +491,10 @@ func (c *Client) FetchUpstreamModels(ctx context.Context) ([]Model, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, apiError(http.MethodGet, endpoint, resp.StatusCode, raw)
 	}
-	models, err := parseCatalog(raw)
+	c.stateMu.RLock()
+	paid := c.account != nil && hasPaidPlan(c.account.ClinePlan)
+	c.stateMu.RUnlock()
+	models, err := parseCatalog(raw, paid)
 	if err != nil {
 		return nil, err
 	}
@@ -512,7 +515,7 @@ func (c *Client) FetchModels(ctx context.Context) ([]Model, error) { return c.Fe
 func (c *Client) resolveModel(req upstream.UpstreamRequest) (string, error) {
 	requested := strings.TrimSpace(req.Model)
 	c.stateMu.RLock()
-	ids := append([]string(nil), c.accountIDsLocked()...)
+	ids := c.accountIDsLocked()
 	c.stateMu.RUnlock()
 	if requested != "" {
 		for _, row := range ids {
@@ -537,7 +540,15 @@ func (c *Client) accountIDsLocked() []string {
 	if c.account == nil {
 		return nil
 	}
-	return c.account.ClineModelIDs
+	return catalogRowsForPlan(c.account.ClineModelIDs, c.account.ClinePlan)
+}
+
+func (c *Client) setPlan(name string) {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+	if c.account != nil {
+		c.account.ClinePlan = name
+	}
 }
 
 func logicalTaskID(requestID string) string {

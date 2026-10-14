@@ -85,10 +85,12 @@ Key 和账号并发限制与入口容量叠加。上游 HTTP、流空闲、首�
 |---|---|
 | WorkBuddy | 令牌、目录、信用额度 |
 | Qoder | 设备凭据、runtime、目录和权威额度 |
-| Cline | OAuth、免费推荐目录及套餐观察，不提供统一数值余额 |
+| Cline | OAuth、套餐与免费 / ClinePass 推荐目录，不提供统一数值余额 |
 | Grok | OAuth、Build 身份、账单与目录观察 |
 
 观察读取失败保留旧快照，不能补造余额或把认证成功等同于额度恢复。WorkBuddy 无时区额度时间按 UTC 解释，仅作参考。
+
+Cline 套餐只读取官方 `/users/me/plan` 的 `success=true`、`data.plan` 结构，使用 `displayName` 或 `name`；旧的扁平套餐返回格式不再支持。账号维护与模型目录观察都会先同步套餐，再更新账号的可用目录。确认有付费套餐后自动加入上游 `clinePass` 分类并保留免费模型；未确认付费时仅发布 `free` 分类。订阅到期或明确无套餐后撤销 Pass 路由资格，旧快照中的付费条目也不能继续选中。套餐读取失败保留已确认的状态；ClinePass 订阅不作为 `clineCloud` 按量计费模型的授权依据。
 
 ## 7. 各通道连接参数
 

@@ -46,11 +46,40 @@ func planClient(t *testing.T, status int, body string, capture *http.Header) *Cl
 // tier rather than being flattened to "free". The catalog cannot answer this:
 // it publishes the free list to every account, subscriber included.
 func TestPlanReadsASubscriberNamesThePlan(t *testing.T) {
-	client := planClient(t, http.StatusOK, `{"data":{"displayName":"Cline Pass (Monthly)"},"success":true}`, nil)
+	client := planClient(t, http.StatusOK, `{"data":{"plan":{"displayName":"Cline Pass (Monthly)"}},"success":true}`, nil)
 	plan, err := client.FetchPlan(context.Background())
 	testutil.NoError(t, err, "FetchPlan() error = %v")
 	testutil.CheckFalse(t, !plan.Explicit, "Explicit = false for a plan row the upstream returned")
 	testutil.CheckEqual(t, plan.Name, "Cline Pass (Monthly)")
+}
+
+func TestPlanReadsCurrentSubscription(t *testing.T) {
+	for name, body := range map[string]string{
+		"official envelope": `{"success":true,"data":{"subscriptionId":"subscription-1","plan":{"name":"cline-pass-monthly","displayName":"Cline Pass (Monthly)"}}}`,
+		"canonical name":    `{"success":true,"data":{"plan":{"name":"Cline Pass (Monthly)"}}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			plan, err := planClient(t, http.StatusOK, body, nil).FetchPlan(context.Background())
+			testutil.NoError(t, err)
+			testutil.CheckEqual(t, plan.Name, "Cline Pass (Monthly)")
+			testutil.True(t, plan.Explicit)
+		})
+	}
+}
+
+func TestPlanSubscriptionPeriod(t *testing.T) {
+	for _, fixture := range []struct{ end, want string }{
+		{"2020-01-01T00:00:00Z", "free"},
+		{"2060-01-01T00:00:00Z", "Cline Pass"},
+	} {
+		t.Run(fixture.end, func(t *testing.T) {
+			body := `{"success":true,"data":{"plan":{"displayName":"Cline Pass"},"canceledAt":"2020-01-01T00:00:00Z","currentPeriodEnd":"` + fixture.end + `"}}`
+			plan, err := planClient(t, http.StatusOK, body, nil).FetchPlan(context.Background())
+			testutil.NoError(t, err)
+			testutil.CheckEqual(t, plan.Name, fixture.want)
+			testutil.True(t, plan.Explicit)
+		})
+	}
 }
 
 // TestPlanNoHistoryMeansFree pins the free verdict on the sentence the upstream
@@ -78,6 +107,12 @@ func TestPlanNeverInventsATier(t *testing.T) {
 		"unrecognised 404":  {http.StatusNotFound, `{"error":"Not Found","success":false}`},
 		"200 without a row": {http.StatusOK, `{"data":{},"success":true}`},
 		"unparseable body":  {http.StatusOK, `not json`},
+		"flat data row":     {http.StatusOK, `{"success":true,"data":{"displayName":"Cline Pass"}}`},
+		"unwrapped row":     {http.StatusOK, `{"plan":{"displayName":"Cline Pass"}}`},
+		"flat root name":    {http.StatusOK, `{"success":true,"displayName":"Cline Pass"}`},
+		"legacy plan name":  {http.StatusOK, `{"success":true,"data":{"planName":"Cline Pass"}}`},
+		"failed envelope":   {http.StatusOK, `{"success":false,"data":{"plan":{"name":"Cline Pass"}}}`},
+		"401 no history":    {http.StatusUnauthorized, `{"error":"no plan history found for user","success":false}`},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -132,7 +167,7 @@ func TestClineAccountCarriesThePlanTier(t *testing.T) {
 // product-surface reason that has nothing to do with the credential.
 func TestPlanRequestSendsTheProductIdentity(t *testing.T) {
 	var seen http.Header
-	client := planClient(t, http.StatusOK, `{"data":{"displayName":"Cline Pass"},"success":true}`, &seen)
+	client := planClient(t, http.StatusOK, `{"data":{"plan":{"displayName":"Cline Pass"}},"success":true}`, &seen)
 	_, err := client.FetchPlan(context.Background())
 	testutil.CheckNoError(t, err)
 	for _, name := range []string{"X-CLIENT-TYPE", "X-CORE-VERSION", "User-Agent"} {

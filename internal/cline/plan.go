@@ -19,14 +19,12 @@ import (
 // plan name, so the two states have to be told apart by content.
 const PlanNoHistory = "no plan history found for user"
 
-// freePlanName is what the gateway records for an account the upstream says has
-// no plan history. It is the tier the account actually has, not a fallback for
-// a missing read: an empty ClinePlan still means "not probed".
+// freePlanName records no active subscription, including an expired period.
+// It never substitutes for a failed read; empty ClinePlan means not probed.
 const freePlanName = "free"
 
 // planRequestTimeout keeps a best-effort read from stalling a verification that
-// has already proved the credential. The tier is decoration; the credential
-// verdict is not.
+// has already proved the credential. Plan reads also gate the Pass catalog.
 const planRequestTimeout = 15 * time.Second
 
 // Plan reports the account's subscription tier as the upstream states it.
@@ -80,15 +78,15 @@ func (c *Client) fetchPlan(ctx context.Context) (Plan, error) {
 	}
 
 	var payload struct {
-		Data   *json.RawMessage `json:"data"`
-		Error  string           `json:"error"`
-		Detail string           `json:"detail"`
-		// The plan row is shaped like the other /users/me responses; only the
-		// name is needed, and it is read loosely so a renamed field does not
-		// turn a subscriber into "no history".
-		Name        string `json:"name"`
-		DisplayName string `json:"displayName"`
-		PlanName    string `json:"planName"`
+		Success bool   `json:"success"`
+		Error   string `json:"error"`
+		Data    *struct {
+			Plan *struct {
+				Name        string `json:"name"`
+				DisplayName string `json:"displayName"`
+			} `json:"plan"`
+			CurrentPeriodEnd *time.Time `json:"currentPeriodEnd"`
+		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return Plan{}, fmt.Errorf("decode cline plan response: %w", err)
@@ -96,26 +94,22 @@ func (c *Client) fetchPlan(ctx context.Context) (Plan, error) {
 
 	// A subscriber: the endpoint returns a row and no error sentence.
 	if resp.StatusCode == http.StatusOK {
-		name := util.FirstNonEmpty(payload.DisplayName, payload.Name, payload.PlanName)
-		if name == "" && payload.Data != nil {
-			var row struct {
-				Name        string `json:"name"`
-				DisplayName string `json:"displayName"`
-			}
-			if err := json.Unmarshal(*payload.Data, &row); err == nil {
-				name = util.FirstNonEmpty(row.DisplayName, row.Name)
-			}
+		if !payload.Success || payload.Data == nil || payload.Data.Plan == nil {
+			return Plan{}, fmt.Errorf("cline plan response carried no current subscription")
 		}
+		name := strings.TrimSpace(util.FirstNonEmpty(payload.Data.Plan.DisplayName, payload.Data.Plan.Name))
 		if name == "" {
 			// A 200 with nothing nameable is not evidence of a tier. Report it
 			// as unreadable rather than as "free".
 			return Plan{}, fmt.Errorf("cline plan response carried no plan name")
 		}
+		if end := payload.Data.CurrentPeriodEnd; end != nil && !end.After(time.Now()) {
+			return Plan{Name: freePlanName, Explicit: true}, nil
+		}
 		return Plan{Name: name, Explicit: true}, nil
 	}
 
-	message := strings.ToLower(util.FirstNonEmpty(payload.Error, payload.Detail))
-	if strings.Contains(message, PlanNoHistory) {
+	if resp.StatusCode == http.StatusNotFound && strings.Contains(strings.ToLower(payload.Error), PlanNoHistory) {
 		return Plan{Name: freePlanName, Explicit: true}, nil
 	}
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {

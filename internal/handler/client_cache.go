@@ -415,6 +415,7 @@ func accountClientFingerprint(acc *store.Account, cfg *config.Config) string {
 	writeInt64(acc.ClineExpiresAt.UnixNano())
 	writeString(acc.ClineEmail)
 	writeStrings(acc.ClineModelIDs)
+	writeString(acc.ClinePlan)
 	// Do not include stats-only timestamps like UpdatedAt here.
 	// Request/usage accounting bumps UpdatedAt on every call, and using it in the
 	// fingerprint would force unnecessary client rebuilds and drop keep-alive pools.

@@ -86,7 +86,7 @@ flowchart TD
 |---|---|---|
 | WorkBuddy | `/v3/config` | 免费权益需结合账号已观察目录 |
 | Qoder | `/algo/api/v2/model/list` | 公共模型名称与私有 key 映射来自账号快照 |
-| Cline | `/ai/cline/recommended-models` | 当前目录发布免费推荐列表，不等同全部套餐模型 |
+| Cline | `/ai/cline/recommended-models` 与 `/users/me/plan` | 免费账号发布 `free`，确认付费订阅后同时发布 `clinePass`；不授予按量计费目录权益 |
 | Grok Build | `/v1/models` | 目录刷新不是生成探针；过滤不支持的媒体标识 |
 
 失败保留旧快照，不以静态目录冒充上游观察。部分账号失败时禁止破坏性负向裁剪；模型状态、是否可见、账号是否能实际生成是不同事实。

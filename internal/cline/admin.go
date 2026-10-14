@@ -199,16 +199,17 @@ func VerifyAccount(ctx context.Context, acc *store.Account, cfg *config.Config, 
 // Optional account decoration is shared by login and verification; verification
 // still performs its separate renewal proof after this best-effort observation.
 func observeAccount(ctx context.Context, client *Client, acc *store.Account, key string, id any, catalogMessage, planMessage string) {
+	if plan, err := client.FetchPlan(ctx); err != nil {
+		slog.Warn(planMessage, key, id, "error", err)
+	} else if plan.Explicit {
+		acc.ClinePlan = plan.Name
+		client.setPlan(plan.Name)
+	}
 	if models, err := client.FetchUpstreamModels(ctx); err != nil {
 		slog.Warn(catalogMessage, key, id, "error", err)
 	} else if ids := CatalogSnapshot(models); len(ids) > 0 {
 		acc.ClineModelIDs = ids
 		acc.ClineModelsSyncedAt = time.Now()
-	}
-	if plan, err := client.FetchPlan(ctx); err != nil {
-		slog.Warn(planMessage, key, id, "error", err)
-	} else if plan.Explicit {
-		acc.ClinePlan = plan.Name
 	}
 }
 
