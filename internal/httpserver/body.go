@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"mime"
+	"net"
 	"net/http"
 	"strings"
 )
@@ -15,7 +16,7 @@ const MaxJSONBodyBytes = 32 << 20
 
 // DecodeJSONBody decodes the request body into v and writes the standard error
 // response on failure: 415 for a non-JSON content type, 413 for an oversized
-// body and 400 for malformed JSON.
+// body, 408 for a request-body read timeout and 400 for malformed JSON.
 func DecodeJSONBody(w http.ResponseWriter, r *http.Request, v any) bool {
 	return DecodeJSONBodyLimit(w, r, v, MaxJSONBodyBytes)
 }
@@ -52,7 +53,7 @@ func DecodeJSONBodyLimit(w http.ResponseWriter, r *http.Request, v any, limit in
 }
 
 // ReadBoundedJSONBody reads a JSON request body under the shared limit. It
-// writes the 413/400 response itself and returns an error so the caller only
+// writes the 413/408/400 response itself and returns an error so the caller only
 // has to return: an unbounded io.ReadAll lets one client allocate arbitrary
 // memory inside the gateway.
 func ReadBoundedJSONBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
@@ -71,6 +72,10 @@ func ReadBoundedJSONBody(w http.ResponseWriter, r *http.Request) ([]byte, error)
 func writeJSONBodyError(w http.ResponseWriter, err error) {
 	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 		WriteErrorCode(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body exceeds the configured limit")
+		return
+	}
+	if timeout, ok := errors.AsType[net.Error](err); ok && timeout.Timeout() {
+		WriteError(w, http.StatusRequestTimeout, "request body read timed out")
 		return
 	}
 	WriteError(w, http.StatusBadRequest, "invalid json")

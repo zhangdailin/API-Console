@@ -152,6 +152,7 @@ func TestErrorCodeForStatusCoversClientAndServerStatuses(t *testing.T) {
 		http.StatusNotFound:              "not_found",
 		http.StatusMethodNotAllowed:      "method_not_allowed",
 		http.StatusConflict:              "conflict",
+		http.StatusRequestTimeout:        "timeout",
 		http.StatusRequestEntityTooLarge: "request_too_large",
 		http.StatusUnsupportedMediaType:  "unsupported_media_type",
 		http.StatusTooManyRequests:       "rate_limit_exceeded",

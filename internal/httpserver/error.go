@@ -36,7 +36,7 @@ func ErrorCodeForStatus(status int) string {
 		return "rate_limit_exceeded"
 	case http.StatusServiceUnavailable:
 		return "service_unavailable"
-	case http.StatusGatewayTimeout:
+	case http.StatusRequestTimeout, http.StatusGatewayTimeout:
 		return "timeout"
 	}
 	if status >= 500 {
