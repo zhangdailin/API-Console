@@ -263,7 +263,6 @@ function startOfficialLogin(provider) {
 }
 function resetGrokDeviceLoginStatus() { grokDeviceLogin.reset(); }
 function stopGrokDeviceLogin() { grokDeviceLogin.stop(); }
-function startGrokDeviceLogin() { return grokDeviceLogin.start(); }
 
 function accountTypeLabel(type) { return window.OrchidsProviderRegistry?.label(type) || String(type || "").trim(); }
 

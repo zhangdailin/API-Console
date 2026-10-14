@@ -97,6 +97,13 @@ func main() {
 	}
 	slog.Info("Credential encryption enabled", "key_source", credentialKeySource)
 
+	// Derive the compaction key before opening resources that need cleanup.
+	compactionCipher, cipherErr := secureblob.NewCipher(credentialKey)
+	if cipherErr != nil {
+		slog.Error("Failed to derive the gateway compaction key", "error", cipherErr)
+		os.Exit(1)
+	}
+
 	s, err := store.New(store.Options{
 		RedisAddr:               cfg.RedisAddr,
 		RedisPassword:           cfg.RedisPassword,
@@ -159,11 +166,6 @@ func main() {
 	// Gateway-owned Responses compaction seals its summaries with a key derived
 	// from the credential key, so the state survives a restart and a request
 	// served by another account. Without a key the feature stays off.
-	compactionCipher, cipherErr := secureblob.NewCipher(credentialKey)
-	if cipherErr != nil {
-		slog.Error("Failed to derive the gateway compaction key", "error", cipherErr)
-		os.Exit(1)
-	}
 	grokHandler.SetCompactionCipher(compactionCipher)
 	apiHandler.SetConfigChangeHook(func(next *config.Config) {
 		configureRuntimeLogging(next)

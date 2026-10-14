@@ -592,11 +592,12 @@ test('the shared device-auth driver reserves the popup before its first await', 
 
 test('Grok device login keeps its provider URL allowlist isolated', async () => {
   const cases = [
-    { provider: 'Grok', start: 'startGrokDeviceLogin()', endpoint: '/api/grok/device-auth', statusId: 'grokDeviceLoginStatus', buttonId: 'grokDeviceLoginButton', allowed: 'https://auth.x.ai/device?code=ok', rejected: 'https://auth.example.com/device?code=wrong' },
+    { provider: 'Grok', start: "startOfficialLogin('grok')", endpoint: '/api/grok/device-auth', statusId: 'grokDeviceLoginStatus', buttonId: 'grokDeviceLoginButton', allowed: 'https://auth.x.ai/device?code=ok', rejected: 'https://auth.example.com/device?code=wrong' },
   ];
   for (const scenario of cases) {
     for (const [url, shouldOpen] of [[scenario.allowed, true], [scenario.rejected, false]]) {
       const { context, node } = loadUI();
+      node('accountType').value = 'grok';
       const requests = [];
       const opened = [];
       context.URL = URL;
@@ -622,9 +623,10 @@ test('Grok device login keeps its provider URL allowlist isolated', async () => 
 
 test('the shared device login lifecycle preserves cancellation and ignores stale poll results', async () => {
   for (const scenario of [
-    { start: 'startGrokDeviceLogin()', stop: 'stopGrokDeviceLogin(true)', endpoint: '/api/grok/device-auth', url: 'https://auth.x.ai/device' },
+    { start: "startOfficialLogin('grok')", stop: 'stopGrokDeviceLogin(true)', endpoint: '/api/grok/device-auth', url: 'https://auth.x.ai/device' },
   ]) {
-    const { context } = loadUI();
+    const { context, node } = loadUI();
+    node('accountType').value = 'grok';
     const requests = [];
     let releasePoll;
     context.URL = URL;

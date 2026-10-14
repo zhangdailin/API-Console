@@ -176,8 +176,7 @@ func consoleExtractText(v any) string {
 }
 
 func consoleExtractMessageText(v any) string {
-	switch x := v.(type) {
-	case map[string]any:
+	if x, ok := v.(map[string]any); ok {
 		if output, ok := x["output"].([]any); ok {
 			var text strings.Builder
 			for _, item := range output {

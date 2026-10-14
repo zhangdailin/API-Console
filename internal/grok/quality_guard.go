@@ -197,7 +197,7 @@ func (h *Handler) applyBuildQualityGuard(ctx context.Context, acc *store.Account
 		return qualityGuardNone
 	}
 	previous := acc.QualityFailures
-	action := qualityGuardNone
+	var action qualityGuardAction
 	switch {
 	case outcome.Withheld:
 		// The hold refused this turn, so it is an offence whatever the guard's

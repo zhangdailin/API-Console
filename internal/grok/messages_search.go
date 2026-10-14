@@ -80,7 +80,7 @@ func searchContent(item map[string]any) []any {
 	action, _ := item["action"].(map[string]any)
 	query := chatwire.ParseLooseStringAny(action["query"])
 	use := map[string]any{"type": "server_tool_use", "id": id, "name": "web_search", "input": map[string]any{"query": query}}
-	var content any = []any{}
+	var content any
 	if status := chatwire.ParseLooseStringAny(item["status"]); status == "failed" || status == "incomplete" || action == nil {
 		content = map[string]any{"type": "web_search_tool_result_error", "error_code": "unavailable"}
 	} else {
