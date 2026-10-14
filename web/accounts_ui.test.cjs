@@ -358,6 +358,9 @@ test('WorkBuddy rows show the metered credits, plan label and signed-in email', 
     quota_used: 202.72,
     quota_unit: 'credit',
     quota_plan: 'Free Plan Subscription',
+    plan_name: 'Free Plan Subscription',
+    plan_tier: 'free',
+    plan_confidence: 'confirmed',
     quota_consumed_units: 202,
     quota_reset_at: new Date(Date.now() + 12 * 86400000).toISOString(),
     usage_limit: 350,
@@ -378,7 +381,8 @@ test('WorkBuddy rows show the metered credits, plan label and signed-in email', 
   assert.match(markup, /剩余/);
   assert.match(markup, /天后重置/);
 
-  // 等级 shows the upstream plan label, not a guessed subscription tier.
+  // 等级 reads the server's tier; the upstream package name stays in the tooltip.
+  assert.match(context.buildSubscriptionMarkup(account), />免费</);
   assert.match(context.buildSubscriptionMarkup(account), /Free Plan Subscription/);
 
   // 调用 falls back to meter consumption because this channel has no request counter.
@@ -697,6 +701,8 @@ function qoderTrialAccount(overrides = {}) {
     has_credential: true,
     quota_supported: true,
     quota_plan: 'Pro Trial',
+    plan_name: 'Pro Trial',
+    plan_tier: 'paid',
     quota_unit: 'credits',
     quota_limit: 300,
     quota_remaining: 300,
@@ -735,6 +741,8 @@ test('a Qoder account with no quota snapshot says so instead of showing zero', (
   const account = qoderTrialAccount({
     quota_supported: false,
     quota_plan: '',
+    plan_name: '',
+    plan_tier: 'unsynced',
     quota_limit: 0,
     quota_remaining: 0,
   });
@@ -832,6 +840,8 @@ test('anonymized Qoder payloads render exact 等级 / 配额 / 状态', () => {
       usage_current: 300,
       quota_supported: true,
       quota_plan: 'Pro Trial',
+      plan_name: 'Pro Trial',
+      plan_tier: 'paid',
       quota_unit: 'credits',
       quota_limit: 300,
       quota_remaining: 300,
@@ -854,6 +864,9 @@ test('anonymized Qoder payloads render exact 等级 / 配额 / 状态', () => {
       usage_current: 0,
       quota_supported: true,
       quota_plan: 'Free',
+      plan_name: 'Free',
+      plan_tier: 'free',
+      plan_confidence: 'confirmed',
       quota_unit: 'credits',
       quota_limit: 0,
       quota_remaining: 0,
@@ -861,7 +874,7 @@ test('anonymized Qoder payloads render exact 等级 / 配额 / 状态', () => {
       quota_exhausted: true,
       quota_upgrade_url: 'https://qoder.com/pricing?client=qoder',
       quota_reset_at: '2026-09-14T02:39:48Z',
-      expect: { tier: 'Free', quota: '0 / 0 (剩余)', remaining: 0, limit: 0, used: 0, pctRemaining: 0, status: '额度不足' },
+      expect: { tier: '免费', quota: '0 / 0 (剩余)', remaining: 0, limit: 0, used: 0, pctRemaining: 0, status: '额度不足' },
     },
   ];
 
@@ -914,7 +927,7 @@ test('every channel has a badge style, for channel labels', () => {
 // server records "unknown" — and the tier column showed 未知 while the quota
 // column already knew the account was Free. The server now emits "free" once its
 // own Free inference fires, and the badge must render that as a tier.
-test('Grok OAuth API payloads render the Free tier and quota provenance', () => {
+test('Grok OAuth API payloads render the free tier and quota provenance', () => {
   const { context } = loadUI();
   const strip = (html) => String(html).replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
 
@@ -933,24 +946,27 @@ test('Grok OAuth API payloads render the Free tier and quota provenance', () => 
     quota_used: 500000,
     quota_unit: 'tokens',
     quota_window_hours: 24,
+    plan_name: '',
+    plan_tier: 'free',
+    plan_confidence: 'confirmed',
   };
-  assert.equal(strip(context.buildSubscriptionMarkup(free)), 'Free');
+  assert.equal(strip(context.buildSubscriptionMarkup(free)), '免费');
   const confirmedQuota = strip(context.buildQuotaMarkup(free));
   assert.match(confirmedQuota, /500[,.]?000/);
-  assert.match(confirmedQuota, /Free 实报/);
+  assert.match(confirmedQuota, /免费实报/);
   assert.doesNotMatch(confirmedQuota, /^≈/);
 
-  const estimated = { ...free, subscription: 'free', quota_source: 'billingProfile', quota_confidence: 'estimated', quota_limit_known: false };
-  assert.equal(strip(context.buildSubscriptionMarkup(estimated)), 'Free');
+  const estimated = { ...free, subscription: '', quota_source: 'billingProfile', quota_confidence: 'estimated', quota_limit_known: false, plan_confidence: 'inferred' };
+  assert.equal(strip(context.buildSubscriptionMarkup(estimated)), '免费（推断）');
   const estimatedQuota = strip(context.buildQuotaMarkup(estimated));
   assert.match(estimatedQuota, /^≈/);
-  assert.match(estimatedQuota, /Free 估算/);
+  assert.match(estimatedQuota, /免费估算/);
 
   // An account the server could not characterise stays honest.
-  const unknown = { ...free, subscription: 'unknown' };
+  const unknown = { ...free, subscription: 'unknown', plan_tier: 'unknown', plan_confidence: '' };
   assert.equal(strip(context.buildSubscriptionMarkup(unknown)), '未知');
   // A paid plan is never relabelled.
-  assert.equal(strip(context.buildSubscriptionMarkup({ ...free, subscription: 'XPremium' })), 'X Premium');
+  assert.equal(strip(context.buildSubscriptionMarkup({ ...free, subscription: 'XPremium', plan_name: 'X Premium', plan_tier: 'paid', plan_confidence: '' })), 'X Premium');
 });
 
 test('账号管理 and 运维总览 count the same 异常 accounts from one predicate', () => {

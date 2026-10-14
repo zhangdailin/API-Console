@@ -307,7 +307,7 @@ func projectQuota(fields map[string]any, acc *store.Account, _, _ float64, obser
 			fields["quota_reset_at"] = confirmed.ResetAt
 		}
 		provider.QuotaProvenance(fields, "free", "upstreamExhaustion", "confirmed",
-			"上游额度耗尽时返回的真实 Free 窗口（tokens actual/limit）", true, true)
+			"上游额度耗尽时返回的真实免费窗口（tokens actual/limit）", true, true)
 		return
 	}
 	switch verdict := InferFreeProfile(acc); {
@@ -328,7 +328,7 @@ func projectQuota(fields map[string]any, acc *store.Account, _, _ float64, obser
 		fields["quota_supported"] = true
 		fields["quota_window_hours"] = int(FreeBuildUsageWindow / time.Hour)
 		provider.QuotaProvenance(fields, "free", verdict.Source, "estimated",
-			"上游未下发数值额度；按 Free 画像估算，用量为本网关在窗口内观测到的 token", false, usageObserved)
+			"上游未下发数值额度；按免费画像估算，用量为本网关在窗口内观测到的 token", false, usageObserved)
 	case BuildPlanIsPaid(acc.Subscription):
 		provider.QuotaProvenance(fields, "paid", "planMetadata", "confirmed",
 			"官方身份接口报告为付费套餐，但未下发数值额度窗口", false, false)

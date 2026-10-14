@@ -4,7 +4,7 @@
 // matrix. Every figure that has no sample says so instead of rendering a healthy
 // zero.
 (function () {
-  const { el, make, attach, setText } = ConsoleUI;
+  const { el, make, attach, emptyRow, setText } = ConsoleUI;
 
   const state = {
     window: 180,
@@ -153,13 +153,6 @@
     container.replaceChildren();
     container.appendChild(make('p', className || 'ops-empty', text));
     return container;
-  }
-
-  function emptyRow(body, colSpan, text) {
-    const td = make('td', 'table-empty-cell', text);
-    td.colSpan = colSpan;
-    body.replaceChildren();
-    body.appendChild(attach(make('tr'), [td]));
   }
 
   // attachHandler wires one control to one handler. Every control is optional

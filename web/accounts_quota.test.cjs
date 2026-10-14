@@ -1,6 +1,6 @@
 // Run with: node --test web/accounts_quota.test.cjs
 //
-// The accounts table must be able to say "Free（推断）" and show an estimated window
+// The accounts table must be able to say "免费（推断）" and show an estimated window
 // without ever presenting the estimate as a balance the upstream reported. These
 // assertions pin both halves: the estimate is rendered (with ≈ and its provenance),
 // and an account with no signal at all still reads 未知.
@@ -77,7 +77,10 @@ function buildFreeAccount(overrides = {}) {
     quota_limit_known: false,
     quota_observed: true,
     quota_window_hours: 24,
-    quota_note: '上游未下发数值额度；按 Free 画像估算，用量为本网关在窗口内观测到的 token',
+    quota_note: '上游未下发数值额度；按免费画像估算，用量为本网关在窗口内观测到的 token',
+    plan_name: '',
+    plan_tier: 'free',
+    plan_confidence: 'inferred',
     quota_limit: 500000,
     quota_used: 12000,
     quota_remaining: 488000,
@@ -101,7 +104,7 @@ test('a Free-inferred Build account renders an estimated window instead of 未�
   assert.match(markup, /≈/, 'an estimated number must be prefixed with ≈');
   assert.match(markup, /12,000/);
   assert.match(markup, /500,000/);
-  assert.match(markup, /Free 估算/);
+  assert.match(markup, /免费估算/);
   assert.match(markup, /滚动 24h/);
   assert.doesNotMatch(markup, />未知</, 'an inferred account must not read 未知');
 });
@@ -111,8 +114,8 @@ test('the provenance travels with the number so it cannot be mistaken for a bala
   const acc = buildFreeAccount();
   const tip = context.quotaTooltip(acc, context.getQuotaStats(acc));
 
-  assert.match(tip, /Free（推断）估算额度/);
-  assert.match(tip, /Free 账单画像推断/);
+  assert.match(tip, /免费（推断）估算额度/);
+  assert.match(tip, /免费账单画像推断/);
   assert.match(tip, /置信度: 估算/);
   assert.match(tip, /限额未经上游确认/);
   assert.match(tip, /滚动 24 小时/);
@@ -128,12 +131,12 @@ test('an unmeasured window is shown as 未统计 rather than as zero usage', () 
   assert.match(context.quotaTooltip(acc, context.getQuotaStats(acc)), /本网关未统计到窗口内用量/);
 });
 
-test('the tier column says Free（推断）when upstream published no plan name', () => {
+test('the tier column says 免费（推断）when upstream published no plan name', () => {
   const context = load();
   const badge = context.subscriptionBadge(buildFreeAccount());
-  assert.equal(badge.text, 'Free（推断）');
-  assert.match(badge.tip, /判定为 Free/);
-  assert.match(badge.tip, /估算/);
+  assert.equal(badge.text, '免费（推断）');
+  assert.match(badge.tip, /推断为免费/);
+  assert.match(badge.tip, /免费账单画像推断/);
 });
 
 test('a Free window the upstream confirmed is shown as a balance, not an estimate', () => {
@@ -148,7 +151,8 @@ test('a Free window the upstream confirmed is shown as a balance, not an estimat
     quota_limit: 300000,
     quota_used: 300000,
     quota_remaining: 0,
-    quota_note: '上游额度耗尽时返回的真实 Free 窗口（tokens actual/limit）',
+    quota_note: '上游额度耗尽时返回的真实免费窗口（tokens actual/limit）',
+    plan_confidence: 'confirmed',
   });
 
   const quota = context.getQuotaStats(acc);
@@ -159,12 +163,12 @@ test('a Free window the upstream confirmed is shown as a balance, not an estimat
   const markup = context.buildQuotaMarkup(acc);
   assert.doesNotMatch(markup, /≈/, 'a confirmed window is not an estimate');
   assert.match(markup, /0 \/ 300,000/);
-  assert.match(markup, /Free 实报/);
+  assert.match(markup, /免费实报/);
 
   const tip = context.quotaTooltip(acc, quota);
   assert.match(tip, /上游额度耗尽实报/);
   assert.match(tip, /非估算/);
-  assert.equal(context.subscriptionBadge(acc).text, 'Free（已确认）', 'a confirmed Free window is not a guess');
+  assert.equal(context.subscriptionBadge(acc).text, '免费', 'a confirmed free window is not a guess');
 });
 
 test('a paid plan without a numeric window stays unknown and invents nothing', () => {
@@ -204,6 +208,8 @@ test('an account with no signal at all still reads 未知', () => {
     quota_limit_known: false,
     quota_observed: false,
     quota_note: '尚未同步到上游套餐或额度信息；点刷新立即同步',
+    plan_tier: 'unsynced',
+    plan_confidence: '',
     quota_limit: 0,
     quota_used: 0,
     quota_remaining: 0,
@@ -211,7 +217,7 @@ test('an account with no signal at all still reads 未知', () => {
 
   assert.equal(context.getQuotaStats(acc).quotaUnavailable, true);
   assert.match(context.buildQuotaMarkup(acc), /未知/);
-  assert.equal(context.subscriptionBadge(acc).text, '-', 'no signal means no Free claim');
+  assert.equal(context.subscriptionBadge(acc).text, '未同步', 'no signal means no free claim');
   assert.match(context.quotaTooltip(acc, context.getQuotaStats(acc)), /尚未同步/);
 });
 

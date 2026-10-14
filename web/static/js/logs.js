@@ -4,7 +4,7 @@
 // redacted summary the server produced; a diagnostic entry renders the captured
 // chain of the request — the per-request files that used to live under debug-logs/.
 (function () {
-  const { el, make, attach } = ConsoleUI;
+  const { el, make, attach, emptyRow } = ConsoleUI;
 
   const listLoads = ConsoleUI.requestGate();
   const state = { kind: 'request', cursor: '', records: [], selected: null, back: '' };
@@ -264,16 +264,7 @@
   // empty" and "this read failed" message in the page.
   function note(value, className) { return make('p', className || 'ops-empty', value); }
 
-  // emptyRow is the full-width "nothing matched" row. colSpan counts the columns
-  // of the table it lands in, so it is passed rather than assumed.
-  function emptyRow(body, colSpan, message) {
-    const td = make('td', 'table-empty-cell', message);
-    td.colSpan = colSpan;
-    body.replaceChildren();
-    body.appendChild(attach(make('tr'), [td]));
-  }
-
-  function formatTime(value) {
+  function formatAbsoluteTime(value) {
     if (!value) return '—';
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return String(value);
@@ -287,7 +278,7 @@
     return value + ' B';
   }
 
-  function statusMeta(status) {
+  function requestStatusMeta(status) {
     const normalized = String(status || '').toLowerCase();
     return STATUS_META[normalized] || { tone: 'is-idle', label: normalized || '—' };
   }
@@ -336,7 +327,7 @@
     const outcome = outcomeMeta(record);
     if (outcome) return badge(outcome, outcome.raw ? outcome.label + '（上游返回 ' + outcome.raw + '）' : outcome.label);
     const status = (record.event || {}).status;
-    return badge(statusMeta(status), text(status, '—'));
+    return badge(requestStatusMeta(status), text(status, '—'));
   }
 
   function attemptFailed(attempt) {
@@ -398,7 +389,7 @@
     const chips = [];
     const since = params.get('since');
     const until = params.get('until');
-    if (since || until) { chips.push(scopeChip('时间范围', `${since ? formatTime(since) : '不限'} → ${until ? formatTime(until) : '现在'}`)); }
+    if (since || until) { chips.push(scopeChip('时间范围', `${since ? formatAbsoluteTime(since) : '不限'} → ${until ? formatAbsoluteTime(until) : '现在'}`)); }
     FILTER_INPUTS.filter((entry) => entry.param !== 'since' && entry.param !== 'until').forEach((entry) => {
       const value = params.get(entry.param);
       if (!value) return;
@@ -478,7 +469,7 @@
       const status = make('td', 'logs-cell-status');
       status.appendChild(resultBadge(record));
       attach(tr, [
-        make('td', 'logs-cell-time', formatTime(event.timestamp)),
+        make('td', 'logs-cell-time', formatAbsoluteTime(event.timestamp)),
         action,
         target,
         status,
@@ -525,7 +516,7 @@
     const event = (record && record.event) || {};
     const outcome = outcomeMeta(record);
     const bits = [
-      formatTime(event.timestamp),
+      formatAbsoluteTime(event.timestamp),
       text(KIND_LABELS[event.kind] || event.kind, '?'),
       text(ACTION_LABELS[event.action] || actionLabel(event.action), event.action || '?'),
     ];
@@ -558,7 +549,7 @@
     const probe = isProbeRecord(event);
     const outcome = outcomeMeta(record);
     if (title) title.textContent = text(ACTION_LABELS[event.action] || actionLabel(event.action), '详情');
-    if (sub) sub.textContent = formatTime(event.timestamp) + ' · ' + text(event.request_id, '无请求 ID');
+    if (sub) sub.textContent = formatAbsoluteTime(event.timestamp) + ' · ' + text(event.request_id, '无请求 ID');
 
     // --- outcome first: a failing request is the usual reason this panel is open ---
     const outcomeRow = make('div', 'logs-detail-outcome');
@@ -677,7 +668,7 @@
         const li = make('li', 'logs-attempt' + (attemptFailed(attempt) ? ' is-failed' : ''));
         const head = make('div', '',
           `第 ${text(attempt.attempt, '?')} 次 · ${text(attempt.provider, '—')} · ${attempt.duration_ms || 0} ms`);
-        head.appendChild(badge(statusMeta(attempt.status), text(attempt.status, '—')));
+        head.appendChild(badge(requestStatusMeta(attempt.status), text(attempt.status, '—')));
         const detail = attempt.metadata || {};
         const upstream = detail.upstream_url || '';
         const attemptHTTP = detail.http_status || '';
@@ -774,7 +765,7 @@
       const failed = attempt.action === 'grok_quality_degraded' || attempt.status === 'error';
       const li = make('li', 'logs-attempt' + (failed ? ' is-failed' : ''));
       const parts = [attempt.action === 'grok_quality_resolution' ? '最终处理' : `第 ${text(attempt.attempt, '?')} 次`, `账号 #${text(attempt.account_id, '?')}`];
-      if (attempt.timestamp) parts.unshift(formatTime(attempt.timestamp));
+      if (attempt.timestamp) parts.unshift(formatAbsoluteTime(attempt.timestamp));
       if (detail.mode) parts.push(detail.mode === 'collected' ? '非流式' : '流式');
       const line = make('div', '', parts.join(' · '));
       const stage = QUALITY_RESOLUTIONS[attempt.status] || (failed ? { tone: 'is-warn', label: '质量拦截' } : { tone: 'is-info', label: actionLabel(attempt.action) });
@@ -816,7 +807,7 @@
       fact('连续降级次数', text(meta.failures, '0') + ' / ' + text(meta.disable_threshold, '?') + ' 次停用'),
       fact('账号是否仍启用', typeof meta.account_enabled !== 'boolean' ? '未记录' : meta.account_enabled ? '是' : '否，已停用'),
     ];
-    if (meta.cooldown_until) facts.push(fact('冷却至', formatTime(meta.cooldown_until), { title: String(meta.cooldown_until) }));
+    if (meta.cooldown_until) facts.push(fact('冷却至', formatAbsoluteTime(meta.cooldown_until), { title: String(meta.cooldown_until) }));
     facts.push(fact('该回答是否被拦截', typeof meta.withheld !== 'boolean' ? '未记录' : meta.withheld ? '是，交付前被暂存拦截' : '否'));
     if (event.request_id) facts.push(fact('触发请求', event.request_id, { wide: true, title: '在请求日志中按该请求 ID 可找到这次请求' }));
     panel.appendChild(factsGrid(facts));

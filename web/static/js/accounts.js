@@ -56,7 +56,7 @@ const QUOTA_SOURCE_LABELS = {
   upstreamBilling: "上游账单/额度接口",
   upstreamRateLimit: "上游限流响应头",
   planMetadata: "官方套餐标记",
-  billingProfile: "Free 账单画像推断",
+  billingProfile: "免费账单画像推断",
   subscription: "官方套餐名",
   upstreamExhaustion: "上游额度耗尽实报",
   unknown: "尚未同步",
@@ -70,11 +70,11 @@ function quotaTooltip(acc, quota) {
   const provenance = quotaProvenance(acc);
   const parts = [];
   if (quota?.estimated) {
-    parts.push("Free（推断）估算额度");
+    parts.push("免费（推断）估算额度");
   } else if (quota?.confirmedFree) {
-    parts.push("Free 实报额度");
+    parts.push("免费实报额度");
   } else if (provenance.type === "free") {
-    parts.push("Free");
+    parts.push("免费");
   } else if (provenance.type === "paid") { parts.push("付费额度"); }
   if (quota?.confirmedFree) { parts.push("上游额度耗尽时返回的真实 actual/limit，非估算"); }
   if (provenance.source) parts.push("来源: " + (QUOTA_SOURCE_LABELS[provenance.source] || provenance.source));
@@ -87,138 +87,39 @@ function quotaTooltip(acc, quota) {
 }
 
 
-function normalizeAccountSubscription(acc) {
-  const raw = String(acc?.subscription || "").trim().toLowerCase();
-  if (!raw) return "";
-  if (raw.includes("heavy")) return "heavy";
-  if (raw.includes("xpremiumplus") || raw.includes("x_premium_plus")) return "x_premium_plus";
-  if (raw.includes("xpremium") || raw.includes("x_premium")) return "x_premium";
-  if (raw.includes("xbasic") || raw.includes("x_basic")) return "x_basic";
-  if (raw.includes("supergrok")) return "supergrok";
-  if (raw.includes("super") || raw.includes("pro")) return "super";
-  if (raw.includes("lite")) return "lite";
-  // "free" must stay its own level: folding it into "basic" made the server's
-  // Free verdict render as "basic", which is a different product tier.
-  if (raw.includes("free")) return "free";
-  if (raw.includes("basic")) return "basic";
-  return raw;
-}
-
-function qoderSubscriptionBadge(acc) {
-    const plan = String(acc?.quota_plan || "").trim();
-    if (!acc?.quota_supported) {
-      // No snapshot yet: say so instead of showing a made-up level.
-      return { text: "未同步", bg: "rgba(100, 116, 139, 0.12)", color: "#94a3b8", tip: "尚未读取到 Qoder 计划与额度；点「检查」立即同步" };
-    }
-    if (plan) {
-      const paid = acc?.quota_used !== undefined && plan.toLowerCase().indexOf("free") === -1;
-      return {
-        text: plan,
-        bg: paid ? "rgba(251, 191, 36, 0.16)" : "rgba(100, 116, 139, 0.12)",
-        color: paid ? "#fbbf24" : "#cbd5e1",
-        tip: `Qoder 计划: ${plan}${acc?.quota_unit ? `（单位 ${acc.quota_unit}）` : ""}`,
-      };
-    }
-    return { text: "未知", bg: "rgba(100, 116, 139, 0.12)", color: "#94a3b8", tip: "Qoder 未返回计划档位" };
-}
-
-function clineSubscriptionBadge(acc) {
-    // The tier comes from the upstream plan endpoint, not from the catalog:
-    // recommended-models lists four tiers in one payload, so "the free list is
-    // non-empty" proves free access and says nothing about a paid plan held
-    // alongside it. The server records what /users/me/plan actually answered —
-    // a plan name for a subscriber, "free" for an account with no plan history.
-    const plan = String(acc?.cline_plan || "").trim();
-    if (plan) {
-      const free = plan.toLowerCase() === "free";
-      return {
-        text: free ? "免费" : plan,
-        bg: free ? "rgba(52, 211, 153, 0.16)" : "rgba(167, 139, 250, 0.16)",
-        color: free ? "#34d399" : "#c4b5fd",
-        tip: free
-          ? "Cline 免费账号：上游套餐接口确认没有有效的付费订阅"
-          : `Cline 套餐: ${plan}`,
-      };
-    }
-    // No tier recorded yet: an unread plan endpoint is not evidence of free, so
-    // the badge says what is missing rather than asserting a tier.
-    const modelCount = Array.isArray(acc?.cline_model_ids) ? acc.cline_model_ids.length : 0;
-    if (modelCount === 0) {
-      return { text: "未同步", bg: "rgba(100, 116, 139, 0.12)", color: "#94a3b8", tip: "尚未读取到 Cline 模型目录；点「刷新」立即同步" };
-    }
-    return { text: "未同步", bg: "rgba(100, 116, 139, 0.12)", color: "#94a3b8", tip: `已读到 ${modelCount} 个免费模型，但尚未读到套餐档位；点「刷新」重新探测` };
-}
-
-function workbuddySubscriptionBadge(acc) {
-    const plan = String(acc?.quota_plan || "").trim();
-    if (plan) {
-      return { text: plan, bg: "rgba(52, 211, 153, 0.16)", color: "#34d399", tip: `WorkBuddy 计量包: ${plan}${acc?.quota_unit ? `（单位 ${acc.quota_unit}）` : ""}` };
-    }
-    // No meter snapshot yet: say so instead of showing a made-up level.
-    return { text: "未同步", bg: "rgba(100, 116, 139, 0.12)", color: "#94a3b8", tip: "尚未读取到 WorkBuddy 计量包；点 Sync 刷新账号状态后重试" };
-}
-
-function defaultSubscriptionBadge(acc) {
-  const level = normalizeAccountSubscription(acc);
-  if (!level) {
-    // Upstream published no plan name. When the quota projection inferred Free, saying
-    // "Free（推断）" is more useful than a bare dash — and it stays honest because the
-    // badge says 推断 and the tooltip names the signal it came from.
-    const provenance = quotaProvenance(acc);
-    if (provenance.type === "free" && provenance.confidence) {
-      const sourceLabel = QUOTA_SOURCE_LABELS[provenance.source] || provenance.source || "上游数据";
-      const confidenceLabel = QUOTA_CONFIDENCE_LABELS[provenance.confidence] || provenance.confidence;
-      // "推断" and "已确认" are different claims: the second one is the upstream
-      // having refused a request for spending the free window, so it must not be
-      // labelled as a guess.
-      const confirmed = provenance.confidence === "confirmed";
-      return {
-        text: confirmed ? "Free（已确认）" : "Free（推断）",
-        bg: confirmed ? "rgba(56, 189, 248, 0.16)" : "rgba(148, 163, 184, 0.16)",
-        color: confirmed ? "#7dd3fc" : "#cbd5e1",
-        tip: `上游未下发套餐名；按「${sourceLabel}」判定为 Free（${confidenceLabel}）`,
-      };
-    }
-    return { text: "-", bg: "rgba(100, 116, 139, 0.12)", color: "#94a3b8", tip: "暂无订阅等级" };
-  }
-  if (normalizeAccountType(acc) !== "grok") { return { text: level, bg: "rgba(100, 116, 139, 0.12)", color: "#cbd5e1", tip: `订阅等级: ${level}` }; }
-  switch (level) {
-    case "unknown":
-      return { text: "未知", bg: "rgba(100, 116, 139, 0.12)", color: "#94a3b8", tip: "xAI 未返回可验证的 Grok 套餐等级" };
-    case "free":
-      // The server only emits this when its own Free inference fired (the plan
-      // endpoint reported Free, the billing profile came back empty, or the
-      // upstream refused a request for having spent the included free usage).
-      return { text: "Free", bg: "rgba(100, 116, 139, 0.12)", color: "#cbd5e1", tip: "Grok Free（上游未下发数值额度；配额列显示估算或实报的 Free 窗口）" };
-    case "x_premium_plus":
-      return { text: "X Premium+", bg: "rgba(251, 191, 36, 0.16)", color: "#fbbf24", tip: "xAI 官方 X Premium+ 套餐" };
-    case "x_premium":
-      return { text: "X Premium", bg: "rgba(56, 189, 248, 0.16)", color: "#38bdf8", tip: "xAI 官方 X Premium 套餐" };
-    case "x_basic":
-      return { text: "X Basic", bg: "rgba(167, 139, 250, 0.16)", color: "#c4b5fd", tip: "xAI 官方 X Basic 套餐" };
-    case "supergrok":
-      return { text: "SuperGrok", bg: "rgba(251, 191, 36, 0.16)", color: "#fbbf24", tip: "xAI 官方 SuperGrok 套餐" };
-    case "heavy":
-      return { text: "heavy", bg: "rgba(251, 191, 36, 0.16)", color: "#fbbf24", tip: "Grok Heavy 账号池" };
-    case "super":
-      return { text: "super", bg: "rgba(56, 189, 248, 0.16)", color: "#38bdf8", tip: "Grok Super 账号池" };
-    case "lite":
-      return { text: "lite", bg: "rgba(167, 139, 250, 0.16)", color: "#c4b5fd", tip: "Grok Lite 账号池" };
-    case "basic":
-      return { text: "basic", bg: "rgba(52, 211, 153, 0.14)", color: "#34d399", tip: "Grok Basic 账号池" };
-    default:
-      return { text: level, bg: "rgba(100, 116, 139, 0.12)", color: "#cbd5e1", tip: `Grok 账号池: ${level}` };
-  }
-}
-
-const ACCOUNT_SUBSCRIPTION_PRESENTERS = {
-  workbuddy: workbuddySubscriptionBadge,
-  qoder: qoderSubscriptionBadge,
-  cline: clineSubscriptionBadge,
+// PLAN_BADGE_STYLES colours the subscription badge by tier. The server
+// publishes plan_tier for every channel, so one table serves all of them.
+const PLAN_BADGE_STYLES = {
+  free: { bg: "rgba(52, 211, 153, 0.16)", color: "#34d399" },
+  inferredFree: { bg: "rgba(148, 163, 184, 0.16)", color: "#cbd5e1" },
+  paid: { bg: "rgba(167, 139, 250, 0.16)", color: "#c4b5fd" },
+  muted: { bg: "rgba(100, 116, 139, 0.12)", color: "#94a3b8" },
 };
 
+// subscriptionBadge renders plan_name / plan_tier / plan_confidence. The tier
+// rules (what counts as free, paid or unread) live on the server; this only
+// chooses words and colours.
 function subscriptionBadge(acc) {
-  return (ACCOUNT_SUBSCRIPTION_PRESENTERS[normalizeAccountType(acc)] || defaultSubscriptionBadge)(acc);
+  const channel = accountTypeLabel(acc?.account_type) || "账号";
+  const name = String(acc?.plan_name || "").trim();
+  switch (String(acc?.plan_tier || "").trim()) {
+    case "free": {
+      // "推断" and a stated free tier are different claims: an inference rests on
+      // an empty billing profile, so it must not read like the upstream said so.
+      if (acc?.plan_confidence === "inferred") {
+        const source = QUOTA_SOURCE_LABELS[acc?.quota_source] || "上游数据";
+        return { text: "免费（推断）", ...PLAN_BADGE_STYLES.inferredFree, tip: `${channel} 上游未下发套餐名；按「${source}」推断为免费` };
+      }
+      return { text: "免费", ...PLAN_BADGE_STYLES.free, tip: name ? `${channel} 套餐: ${name}（免费）` : `${channel} 上游确认为免费套餐` };
+    }
+    case "paid":
+      return { text: name || "付费", ...PLAN_BADGE_STYLES.paid, tip: `${channel} 套餐: ${name || "付费（上游未下发套餐名）"}` };
+    case "unknown":
+      return { text: name || "未知", ...PLAN_BADGE_STYLES.muted, tip: name ? `${channel} 套餐: ${name}（无法判定档位）` : `${channel} 上游未返回可识别的套餐档位` };
+    default:
+      // Never read yet: an unread plan is not evidence of any tier.
+      return { text: "未同步", ...PLAN_BADGE_STYLES.muted, tip: `尚未读取到 ${channel} 套餐；点「刷新」立即同步` };
+  }
 }
 
 function buildSubscriptionMarkup(acc) {
@@ -962,7 +863,7 @@ function buildQuotaMarkup(acc, quota = getQuotaStats(acc)) {
     const pct = quota.pctRemaining;
     const color = pct <= 10 ? "#fb7185" : pct <= 30 ? "#f59e0b" : "#34d399";
     const windowText = quota.windowHours ? `滚动 ${quota.windowHours}h` : "";
-    return `<span style="color:${color}">${formatCredit(quota.remaining)} / ${formatCredit(quota.limit)}</span> <span style="color:#64748b;font-size:0.75rem">(Free 实报${windowText ? " · " + windowText : ""})</span>`;
+    return `<span style="color:${color}">${formatCredit(quota.remaining)} / ${formatCredit(quota.limit)}</span> <span style="color:#64748b;font-size:0.75rem">(免费实报${windowText ? " · " + windowText : ""})</span>`;
   }
   if (quota && quota.estimated) {
     const pct = quota.pctRemaining;
@@ -971,7 +872,7 @@ function buildQuotaMarkup(acc, quota = getQuotaStats(acc)) {
     // balance the upstream actually reported.
     const usage = quota.observed ? formatCredit(quota.used) : "未统计";
     const windowText = quota.windowHours ? `滚动 ${quota.windowHours}h` : "";
-    return `<span style="color:${color}">≈ ${usage} / ${formatCredit(quota.limit)}</span> <span style="color:#64748b;font-size:0.75rem">(Free 估算${windowText ? " · " + windowText : ""})</span>`;
+    return `<span style="color:${color}">≈ ${usage} / ${formatCredit(quota.limit)}</span> <span style="color:#64748b;font-size:0.75rem">(免费估算${windowText ? " · " + windowText : ""})</span>`;
   }
   if (quota && quota.quotaUnavailable) { return `<span style="color:#94a3b8">未知</span> <span style="color:#64748b;font-size:0.75rem">(xAI 未下发 Build 数值配额)</span>`; }
   if (quota && quota.unmetered) {

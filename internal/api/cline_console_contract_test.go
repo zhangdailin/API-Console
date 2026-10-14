@@ -73,11 +73,10 @@ func TestAccountsJSRendersTheClineRowCells(t *testing.T) {
 	// accounts.js renders it on surfaces that still show the cell.
 	testutil.CheckContain(t, source, "未计量")
 	testutil.CheckContain(t, source, "clinePageOnly")
-	// 等级: the tier now comes from the upstream plan endpoint. What is pinned
-	// is that the badge reads that field at all — a tier inferred from the
-	// catalog cannot tell a free account from a subscriber's, which is exactly
-	// the mistake the old "免费目录" label made.
-	testutil.CheckContain(t, source, `cline_plan`)
+	// 等级: the badge reads the server's plan_tier, which Cline derives from
+	// the upstream plan endpoint. A tier inferred from the catalog cannot tell
+	// a free account from a subscriber's, the mistake the old "免费目录" label made.
+	testutil.CheckContain(t, source, `plan_tier`)
 	// 状态: the credential verdict must come from has_credential, not from the
 	// session columns this channel never writes.
 	testutil.CheckContainAll(t, source, `cline: '缺少 Cline WorkOS 凭据`, `hasSidebarAccountCredential(acc)`)

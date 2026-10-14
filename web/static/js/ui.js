@@ -106,6 +106,14 @@ globalThis.ConsoleUI = (() => {
     (children || []).forEach((child) => { if (child) parent.appendChild(child); });
     return parent;
   }
+  // emptyRow replaces a table body with one full-width message row. colSpan
+  // counts the columns of the table it lands in, so it is passed, not assumed.
+  function emptyRow(body, colSpan, text) {
+    const td = make('td', 'table-empty-cell', text);
+    td.colSpan = colSpan;
+    body.replaceChildren();
+    body.appendChild(attach(make('tr'), [td]));
+  }
   function setText(id, value) {
     const node = el(id);
     if (node) node.textContent = value == null ? '' : String(value);
@@ -225,5 +233,5 @@ globalThis.ConsoleUI = (() => {
     });
     return table;
   }
-  return Object.freeze({ el, make, attach, setText, modal, pagination, responsiveTable, requestGate, submission, keyedSubmission });
+  return Object.freeze({ el, make, attach, emptyRow, setText, modal, pagination, responsiveTable, requestGate, submission, keyedSubmission });
 })();
