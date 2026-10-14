@@ -39,9 +39,6 @@ func (r streamResult) FinishReason() string {
 	}
 }
 
-// NewToolCallID mints a local tool-call id for upstream deltas that omit one.
-func NewToolCallID() string { return util.NewToolCallID() }
-
 // newThinkingSignature mints the per-stream thinking signature the Anthropic
 // surface attaches to a thinking block. The prefix names the channel so a
 // signature can be attributed when it round-trips in history replay.

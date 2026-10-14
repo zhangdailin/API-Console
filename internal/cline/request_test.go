@@ -13,6 +13,7 @@ import (
 	"orchids-api/internal/prompt"
 	"orchids-api/internal/testutil"
 	"orchids-api/internal/upstream"
+	"orchids-api/internal/util"
 )
 
 // TestBuildChatBodyCarriesTheUpstreamDefaults pins what the upstream needs on
@@ -386,7 +387,7 @@ func TestNewToolCallIDIsUnique(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 25; j++ {
-				id := NewToolCallID()
+				id := util.NewToolCallID()
 				mu.Lock()
 				if seen[id] {
 					mu.Unlock()

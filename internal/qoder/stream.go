@@ -214,9 +214,6 @@ func (r streamResult) emitFinish(onMessage func(upstream.SSEMessage)) {
 	onMessage(upstream.SSEMessage{Type: "model.finish", Event: event})
 }
 
-// NewToolCallID mints a local tool-call id for upstream deltas that omit one.
-func NewToolCallID() string { return util.NewToolCallID() }
-
 // sseFrame is one accumulated SSE event.
 type sseFrame struct {
 	event string

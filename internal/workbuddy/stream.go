@@ -38,9 +38,6 @@ func (r streamResult) FinishReason() string {
 	}
 }
 
-// NewToolCallID mints a local tool-call id for upstream deltas that omit one.
-func NewToolCallID() string { return util.NewToolCallID() }
-
 // streamChunk is one `data:` line of the SSE response.
 type streamChunk struct {
 	ID      string `json:"id"`

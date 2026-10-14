@@ -115,7 +115,7 @@ func convertAssistantMessage(msg prompt.Message, toolCallIDs map[string]bool) (c
 			}
 			id := strings.TrimSpace(block.ID)
 			if id == "" {
-				id = NewToolCallID()
+				id = util.NewToolCallID()
 			}
 			call := chatToolCall{ID: id, Type: "function", Index: block.ToolIndex}
 			call.Function.Name = name
