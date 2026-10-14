@@ -116,7 +116,7 @@ func serveQualityTurn(t *testing.T, h *Handler, first *store.Account) *httptest.
 		Messages: []chatwire.Message{{Role: "user", Content: "hello"}},
 	}
 	rec := httptest.NewRecorder()
-	h.serveNativeChat(ctx, rec, req, spec, sess, nil, true)
+	h.serveNativeChat(ctx, rec, req, spec, sess, nil)
 	return rec
 }
 
@@ -291,7 +291,7 @@ func TestQualityHoldUsesAccountDefaultReasoning(t *testing.T) {
 				spec, ok := h.resolveConversationModel(context.Background(), req.Model)
 				testutil.True(t, ok, "model did not resolve")
 				rec := httptest.NewRecorder()
-				h.serveNativeChat(context.Background(), rec, req, spec, sess, nil, true)
+				h.serveNativeChat(context.Background(), rec, req, spec, sess, nil)
 				testutil.Equal(t, rec.Code, http.StatusOK)
 				checks := journal.byAction("grok_quality_check")
 				if requested == "none" {
@@ -330,7 +330,7 @@ func TestQualityHoldDefaultReasoningWithholdsAndRetries(t *testing.T) {
 	spec, ok := h.resolveConversationModel(context.Background(), req.Model)
 	testutil.True(t, ok, "model did not resolve")
 	rec := httptest.NewRecorder()
-	h.serveNativeChat(context.Background(), rec, req, spec, sess, nil, true)
+	h.serveNativeChat(context.Background(), rec, req, spec, sess, nil)
 	testutil.Equal(t, rec.Code, http.StatusOK)
 	testutil.MustContain(t, rec.Body.String(), "healthy answer")
 	testutil.MustNotContain(t, rec.Body.String(), "status loop")

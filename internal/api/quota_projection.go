@@ -25,11 +25,11 @@ func projectQuotaFields(fields map[string]interface{}, acc *store.Account, limit
 		admin.ProjectQuota(fields, acc, limit, current, observedTokens, usageObserved)
 		return
 	}
-	projectRateLimitQuota(fields, acc, limit, current, observedTokens, usageObserved)
+	projectRateLimitQuota(fields, limit, current)
 }
 
 // projectRateLimitQuota is the fallback for channels without a quota projection.
-func projectRateLimitQuota(fields map[string]interface{}, acc *store.Account, limit, current float64, observedTokens int64, usageObserved bool) {
+func projectRateLimitQuota(fields map[string]interface{}, limit, current float64) {
 	fields["quota_limit"] = limit
 	remaining := current
 	if remaining > limit && limit > 0 {

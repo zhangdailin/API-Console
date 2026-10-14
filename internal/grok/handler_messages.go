@@ -51,7 +51,7 @@ type anthropicTool struct {
 // HandleMessages exposes an Anthropic Messages compatibility surface for the
 // Grok channel while preserving the existing Chat routing and account logic.
 func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
+	if !requirePost(w, r) {
 		return
 	}
 	var req anthropicMessagesRequest

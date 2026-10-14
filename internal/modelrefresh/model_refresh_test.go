@@ -168,7 +168,7 @@ func TestChooseRefreshedDefaultModel_PrefersExistingDefault(t *testing.T) {
 	}
 	ordered := []discoveredModel{{ID: "b"}, {ID: "a"}}
 
-	got := chooseRefreshedDefaultModel("WorkBuddy", existing, ordered)
+	got := chooseRefreshedDefaultModel(existing, ordered)
 	testutil.Equal(t, got, "a")
 }
 

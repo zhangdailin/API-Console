@@ -200,7 +200,7 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 // Compaction is deliberately non-streaming and is not stored as a normal
 // response resource.
 func (h *Handler) HandleResponsesCompact(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
+	if !requirePost(w, r) {
 		return
 	}
 	var payload map[string]interface{}

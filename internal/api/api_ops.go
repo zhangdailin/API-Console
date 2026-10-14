@@ -102,7 +102,7 @@ func (a *API) HandleOpsOverview(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	r = r.WithContext(ctx)
 	window, since, until := a.parseOpsWindow(r)
-	channels, aggregates, channelErr := a.opsChannels(r.Context(), r, since, until)
+	channels, aggregates, channelErr := a.opsChannels(r.Context(), since, until)
 	target := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("channel")))
 
 	payload := map[string]interface{}{
@@ -806,7 +806,7 @@ func (a *API) parseOpsWindow(r *http.Request) (int, time.Time, time.Time) {
 // opsChannels lists the provider channels the page may filter by, plus the
 // infrastructure aggregates that were counted but left out, so the page can say
 // what it excluded instead of silently dropping traffic from the picker.
-func (a *API) opsChannels(ctx context.Context, r *http.Request, since, until time.Time) ([]string, []string, error) {
+func (a *API) opsChannels(ctx context.Context, since, until time.Time) ([]string, []string, error) {
 	seen := map[string]bool{}
 	if a.opsAggregator != nil && a.opsAggregator.Enabled() {
 		observed, err := a.opsAggregator.Channels(ctx, since, until)

@@ -625,5 +625,5 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	e.run()
 	r, currentAccount, releaseClient, trackedAccountID = e.r, e.currentAccount, e.releaseClient, e.trackedAccountID
 
-	h.finishMessages(w, r, sh, req, currentAccount, forcedChannel, isStream, responseFormat, startTime, logger)
+	h.finishMessages(w, r, sh, req, currentAccount, forcedChannel, isStream, responseFormat, startTime)
 }

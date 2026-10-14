@@ -13,13 +13,12 @@ import (
 
 	"orchids-api/internal/adapter"
 	"orchids-api/internal/audit"
-	"orchids-api/internal/debug"
 	"orchids-api/internal/middleware"
 	"orchids-api/internal/pricing"
 	"orchids-api/internal/store"
 )
 
-func (h *Handler) finishMessages(w http.ResponseWriter, r *http.Request, sh *streamHandler, req ClaudeRequest, currentAccount *store.Account, forcedChannel string, isStream bool, responseFormat adapter.ResponseFormat, startTime time.Time, logger *debug.Logger) {
+func (h *Handler) finishMessages(w http.ResponseWriter, r *http.Request, sh *streamHandler, req ClaudeRequest, currentAccount *store.Account, forcedChannel string, isStream bool, responseFormat adapter.ResponseFormat, startTime time.Time) {
 	// Ensure a final response
 	if !sh.hasReturn {
 		sh.finishResponse("end_turn")

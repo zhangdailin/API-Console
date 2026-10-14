@@ -33,9 +33,9 @@ func writeGrokError(w http.ResponseWriter, status int, message string) {
 	httpserver.WriteError(w, status, message)
 }
 
-// requireMethod rejects every method but the one the endpoint serves.
-func requireMethod(w http.ResponseWriter, r *http.Request, method string) bool {
-	return httpserver.RequireMethod(w, r, method)
+// requirePost rejects requests that do not use POST.
+func requirePost(w http.ResponseWriter, r *http.Request) bool {
+	return httpserver.RequireMethod(w, r, http.MethodPost)
 }
 
 // decodeJSONBody decodes the request body into v under the shared size limit.

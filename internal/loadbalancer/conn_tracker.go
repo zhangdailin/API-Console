@@ -176,11 +176,10 @@ func (t *RedisConnTracker) key(accountID int64) string {
 	return fmt.Sprintf("%s%d", t.prefix, accountID)
 }
 
-func (t *RedisConnTracker) Acquire(accountID int64) { _, _ = t.acquire(accountID, 0) }
+func (t *RedisConnTracker) Acquire(accountID int64) { t.acquire(accountID, 0) }
 
 func (t *RedisConnTracker) TryAcquire(accountID int64, limit int64) bool {
-	_, ok := t.acquire(accountID, limit)
-	return ok
+	return t.acquire(accountID, limit)
 }
 
 func (t *RedisConnTracker) Release(accountID int64) {
@@ -341,9 +340,9 @@ func (t *RedisConnTracker) fetchCounts(accountIDs []int64) map[int64]int64 {
 	return result
 }
 
-func (t *RedisConnTracker) acquire(accountID, limit int64) (*redisConnLease, bool) {
+func (t *RedisConnTracker) acquire(accountID, limit int64) bool {
 	if t == nil || t.client == nil || accountID == 0 {
-		return nil, false
+		return false
 	}
 	// A newly started process can briefly race Redis connection establishment or
 	// script loading. Retry one time so a transport hiccup is not misreported as
@@ -365,7 +364,7 @@ func (t *RedisConnTracker) acquire(accountID, limit int64) (*redisConnLease, boo
 		time.Sleep(25 * time.Millisecond)
 	}
 	if err != nil || result != 1 {
-		return nil, false
+		return false
 	}
 	t.mu.Lock()
 	if t.closed {
@@ -373,7 +372,7 @@ func (t *RedisConnTracker) acquire(accountID, limit int64) (*redisConnLease, boo
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		_ = t.releaseScript.Run(ctx, t.client, []string{t.key(accountID)}, lease.id).Err()
-		return nil, false
+		return false
 	}
 	t.held[accountID] = append(t.held[accountID], lease)
 	t.mu.Unlock()
@@ -381,7 +380,7 @@ func (t *RedisConnTracker) acquire(accountID, limit int64) (*redisConnLease, boo
 	// goroutine or ticker. done remains the release/shutdown lifecycle barrier.
 	close(lease.done)
 	t.adjustCachedCount(accountID, 1)
-	return lease, true
+	return true
 }
 
 func (t *RedisConnTracker) renewLoop() {

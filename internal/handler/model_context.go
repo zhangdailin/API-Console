@@ -127,6 +127,6 @@ func mergeInputWindows(w *modelContextWindows, channel string, windows map[strin
 }
 
 // modelContextWindow omits budgets which were not observed upstream.
-func (h *Handler) modelContextWindow(ctx context.Context, windows *modelContextWindows, channel, modelID, publicID string) (int, int) {
+func (h *Handler) modelContextWindow(windows *modelContextWindows, channel, modelID, publicID string) (int, int) {
 	return windows.lookup(channel, modelID, publicID)
 }

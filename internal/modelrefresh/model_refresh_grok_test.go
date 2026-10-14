@@ -93,24 +93,24 @@ func TestDiscoverGrokModelsWithoutUpstreamCatalogPublishesNothing(t *testing.T) 
 // TestShouldDeleteMissingModelsOnRefresh_NeverChannelPrunesOnBuildCatalog pins
 // the scope guard: Grok Build is reconciled separately from retired providers.
 func TestShouldDeleteMissingModelsOnRefresh_NeverChannelPrunesOnBuildCatalog(t *testing.T) {
-	testutil.False(t, shouldDeleteMissingModelsOnRefresh("Grok", "grok_build_models"), "a Build text-catalog read must not prune the channel catalog")
+	testutil.False(t, shouldDeleteMissingModelsOnRefresh("grok_build_models"), "a Build text-catalog read must not prune the channel catalog")
 	// Only complete authoritative account catalogs prune automatically.
 	// WorkBuddy's degraded whitelist fallback cannot prove absence.
 	for _, tc := range []struct{ channel, source string }{
 		{"Qoder", "qoder_upstream_models"},
 		{"Cline", "cline_recommended_models"},
 	} {
-		testutil.True(t, shouldDeleteMissingModelsOnRefresh(tc.channel, tc.source), "%s/%s must be allowed to prune")
+		testutil.True(t, shouldDeleteMissingModelsOnRefresh(tc.source), "%s/%s must be allowed to prune")
 	}
 	for _, tc := range []struct{ channel, source string }{
 		{"Grok", "grok_build_models"},
 		{"WorkBuddy", "workbuddy_cli_models"},
 	} {
-		testutil.Falsef(t, shouldDeleteMissingModelsOnRefresh(tc.channel, tc.source), "%s/%s must retain LKG rather than prune", tc.channel, tc.source)
+		testutil.Falsef(t, shouldDeleteMissingModelsOnRefresh(tc.source), "%s/%s must retain LKG rather than prune", tc.channel, tc.source)
 	}
 	// A non-upstream source never prunes.
 	for _, source := range []string{"", "test", "cline_cached_models", "grok_build_models_unavailable_cached"} {
-		testutil.Falsef(t, shouldDeleteMissingModelsOnRefresh("Grok", source), "source %q must not prune", source)
+		testutil.Falsef(t, shouldDeleteMissingModelsOnRefresh(source), "source %q must not prune", source)
 	}
 }
 

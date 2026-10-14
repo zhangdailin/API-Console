@@ -94,7 +94,7 @@ func applyModelRefreshWithPrune(ctx context.Context, s *store.Store, channel str
 		existingByID[model.ModelID] = model
 	}
 
-	defaultModelID := chooseRefreshedDefaultModel(channel, existingByID, candidates)
+	defaultModelID := chooseRefreshedDefaultModel(existingByID, candidates)
 	result.DefaultModelID = defaultModelID
 
 	// The channel's catalog port says how its rows are shaped and scoped. A
@@ -118,7 +118,7 @@ func applyModelRefreshWithPrune(ctx context.Context, s *store.Store, channel str
 		records = append(records, record)
 	}
 	reconcileOptions := store.ModelReconcileOptions{
-		Prune: allowPrune && shouldDeleteMissingModelsOnRefresh(channel, source),
+		Prune: allowPrune && shouldDeleteMissingModelsOnRefresh(source),
 	}
 	if catalog != nil && catalog.ProviderScope != "" && source == catalog.Source && allowPrune {
 		reconcileOptions.Prune = true
@@ -136,7 +136,7 @@ func applyModelRefreshWithPrune(ctx context.Context, s *store.Store, channel str
 // shouldDeleteMissingModelsOnRefresh reports whether a whole-channel catalog is
 // authoritative. Grok Build is handled as a provider-scoped catalog by apply;
 // it must remain false here so it can never prune retired provider planes.
-func shouldDeleteMissingModelsOnRefresh(channel, source string) bool {
+func shouldDeleteMissingModelsOnRefresh(source string) bool {
 	source = strings.TrimSpace(source)
 	if source == "grok_build_models" || source == "workbuddy_cli_models" {
 		// Grok is a provider subset; catalog reads may be inconclusive because of
@@ -147,7 +147,7 @@ func shouldDeleteMissingModelsOnRefresh(channel, source string) bool {
 	return isUpstreamCatalogSource(source)
 }
 
-func chooseRefreshedDefaultModel(channel string, existing map[string]*store.Model, ordered []discoveredModel) string {
+func chooseRefreshedDefaultModel(existing map[string]*store.Model, ordered []discoveredModel) string {
 	for _, model := range ordered {
 		if current := existing[model.ID]; current != nil && current.IsDefault {
 			return model.ID

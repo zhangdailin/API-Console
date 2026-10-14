@@ -179,8 +179,8 @@ func TestNormalizeAdminModelChannel_AcceptsQoder(t *testing.T) {
 // TestShouldDeleteMissingModelsOnRefresh_OnlyPrunesUpstreamCatalogs proves
 // pruning follows an observed catalog, and never a locally produced list.
 func TestShouldDeleteMissingModelsOnRefresh_OnlyPrunesUpstreamCatalogs(t *testing.T) {
-	testutil.False(t, !shouldDeleteMissingModelsOnRefresh("qoder", "qoder_upstream_models"), "an observed Qoder catalog must prune rows it no longer advertises")
+	testutil.False(t, !shouldDeleteMissingModelsOnRefresh("qoder_upstream_models"), "an observed Qoder catalog must prune rows it no longer advertises")
 	for _, source := range []string{"qoder_builtin_catalog", "cline_cached_models", "test", ""} {
-		testutil.Falsef(t, shouldDeleteMissingModelsOnRefresh("qoder", source), "source %q pruned the catalog", source)
+		testutil.Falsef(t, shouldDeleteMissingModelsOnRefresh(source), "source %q pruned the catalog", source)
 	}
 }

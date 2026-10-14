@@ -182,7 +182,7 @@ func (h *Handler) HandleModels(w http.ResponseWriter, r *http.Request) {
 		// The window is looked up by the route's own id first: that is what the
 		// channel's catalog was keyed by when it was observed. The public alias is
 		// the fallback for a channel that publishes a different spelling.
-		input, output := h.modelContextWindow(ctx, contextWindows, mChannel, m.ModelID, publicID)
+		input, output := h.modelContextWindow(contextWindows, mChannel, m.ModelID, publicID)
 		entry.ContextLength = input
 		entry.MaxInputTokens = input
 		entry.MaxOutputTokens = output
@@ -284,7 +284,7 @@ func (h *Handler) HandleModelByID(w http.ResponseWriter, r *http.Request) {
 	// a client that validates one catalog entry learns the real number instead of
 	// falling back to its own default.
 	contextWindows := h.observedModelContextWindows(ctx)
-	input, output := h.modelContextWindow(ctx, contextWindows, mChannel, m.ModelID, normalizeRequestedModelID(id))
+	input, output := h.modelContextWindow(contextWindows, mChannel, m.ModelID, normalizeRequestedModelID(id))
 	resp.ContextLength = input
 	resp.MaxInputTokens = input
 	resp.MaxOutputTokens = output

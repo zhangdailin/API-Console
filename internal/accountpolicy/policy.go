@@ -296,7 +296,7 @@ func Classify(acc *store.Account, err error, model string) Verdict {
 	case "401":
 		return Verdict{
 			Status:    "401",
-			Message:   credentialMessage(acc, message),
+			Message:   credentialMessage(acc),
 			Scope:     ScopeCredential,
 			Retryable: Retryable(err),
 			// A refused credential cannot serve this request, and the pool may
@@ -479,7 +479,7 @@ func isModelScopedFailure(lower string) bool {
 
 // credentialMessage explains a refused credential in operator terms. The action
 // must be concrete: waiting cannot repair a credential the upstream retired.
-func credentialMessage(acc *store.Account, fallback string) string {
+func credentialMessage(acc *store.Account) string {
 	switch {
 	case isGrok(acc):
 		return "上游拒绝该 Grok Build OAuth 授权，请在账号管理中重新完成官方登录"

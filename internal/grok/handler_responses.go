@@ -10,7 +10,7 @@ import (
 )
 
 func (h *Handler) HandleResponses(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
+	if !requirePost(w, r) {
 		return
 	}
 	// Keep the original object for the Build CLI route.  The CLI upstream

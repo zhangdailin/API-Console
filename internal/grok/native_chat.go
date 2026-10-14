@@ -492,7 +492,7 @@ func (h *Handler) finishUpstreamChat(ctx context.Context, w http.ResponseWriter,
 	return nil, false
 }
 
-func (h *Handler) serveNativeChat(ctx context.Context, w http.ResponseWriter, req *chatwire.Request, spec ModelSpec, sess *chatAccountSession, logger *debug.Logger, build bool) {
+func (h *Handler) serveNativeChat(ctx context.Context, w http.ResponseWriter, req *chatwire.Request, spec ModelSpec, sess *chatAccountSession, logger *debug.Logger) {
 	if h == nil || sess == nil || sess.acc == nil || h.buildClient() == nil {
 		writeGrokError(w, http.StatusServiceUnavailable, "grok upstream client or account not configured")
 		return

@@ -27,7 +27,7 @@ func (h *Handler) applyDefaultChatStream(req *chatwire.Request) {
 }
 
 func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
+	if !requirePost(w, r) {
 		return
 	}
 	var req chatwire.Request
@@ -89,7 +89,7 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer sess.Close()
-	h.serveNativeChat(r.Context(), w, &req, spec, sess, logger, true)
+	h.serveNativeChat(r.Context(), w, &req, spec, sess, logger)
 }
 
 // debugHeaderMap renders a header set for the debug journal, redacting the

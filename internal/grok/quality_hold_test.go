@@ -300,7 +300,7 @@ func TestServeNativeChatWithholdsDegradedTurnAndRetriesAnotherAccount(t *testing
 		Messages: []chatwire.Message{{Role: "user", Content: "hello"}},
 	}
 	rec := httptest.NewRecorder()
-	h.serveNativeChat(ctx, rec, req, spec, sess, nil, true)
+	h.serveNativeChat(ctx, rec, req, spec, sess, nil)
 
 	testutil.Equal(t, rec.Code, http.StatusOK)
 	stream := rec.Body.String()
@@ -494,7 +494,7 @@ func TestNativeChatTransportAndQualityRetryShareBudget(t *testing.T) {
 				req.WebSearchOptions = map[string]interface{}{}
 			}
 			rec := httptest.NewRecorder()
-			h.serveNativeChat(ctx, rec, req, spec, sess, nil, true)
+			h.serveNativeChat(ctx, rec, req, spec, sess, nil)
 			sess.Close()
 			testutil.Equal(t, calls.Load(), tc.wantCalls)
 			testutil.Equal(t, rec.Code, tc.wantStatus)
