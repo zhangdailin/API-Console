@@ -107,7 +107,7 @@ func parseTrustedProxyNetworks(values []string) ([]*net.IPNet, error) {
 
 func forwardedClientIP(remote net.IP, header string, trusted []*net.IPNet) net.IP {
 	chain := make([]net.IP, 0, 8)
-	for _, raw := range strings.Split(header, ",") {
+	for raw := range strings.SplitSeq(header, ",") {
 		if ip := net.ParseIP(strings.TrimSpace(raw)); ip != nil {
 			chain = append(chain, ip)
 		}

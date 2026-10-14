@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -375,10 +376,7 @@ func recordRequestOutcome(r *http.Request, wrapped *TracedResponseWriter, durati
 	}
 	firstTokenMS := int64(0)
 	if !firstWrite.IsZero() && (wrapped.isSSE() || wrapped.StatusCode < 400) {
-		firstTokenMS = firstWrite.Sub(wrapped.startedAt).Milliseconds()
-		if firstTokenMS < 0 {
-			firstTokenMS = 0
-		}
+		firstTokenMS = max(firstWrite.Sub(wrapped.startedAt).Milliseconds(), 0)
 	}
 	statusClass := httpStatusClass(wrapped.StatusCode)
 	if wrapped.StreamFailed() && statusClass == "2xx" {
@@ -473,8 +471,8 @@ func httpStatusClass(status int) string {
 // Chain combines several middlewares into one chain.
 func Chain(middlewares ...func(http.Handler) http.Handler) func(http.Handler) http.Handler {
 	return func(final http.Handler) http.Handler {
-		for i := len(middlewares) - 1; i >= 0; i-- {
-			final = middlewares[i](final)
+		for _, middleware := range slices.Backward(middlewares) {
+			final = middleware(final)
 		}
 		return final
 	}

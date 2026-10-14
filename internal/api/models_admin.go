@@ -112,10 +112,7 @@ func paginateAdminRows[T any](rows []T, page, pageSize int) ([]T, int) {
 	if start < 0 || start >= total {
 		return make([]T, 0), total
 	}
-	end := start + pageSize
-	if end > total {
-		end = total
-	}
+	end := min(start+pageSize, total)
 	return rows[start:end], total
 }
 

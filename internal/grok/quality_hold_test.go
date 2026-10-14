@@ -121,7 +121,7 @@ func TestClassifyQualityHold(t *testing.T) {
 
 func TestDecideQualityRetryPolicy(t *testing.T) {
 	// Six attempts: the first five withhold-and-retry, the sixth delivers.
-	for attempt := 0; attempt < qualityHoldMaxAttemptsDefault-1; attempt++ {
+	for attempt := range qualityHoldMaxAttemptsDefault - 1 {
 		testutil.Equal(t, decideQualityRetry(qualityWithhold, attempt, qualityHoldMaxAttemptsDefault), qualityActionRetry)
 	}
 	testutil.Equal(t, decideQualityRetry(qualityWithhold, qualityHoldMaxAttemptsDefault-1, qualityHoldMaxAttemptsDefault), qualityActionDeliverLast)
@@ -193,7 +193,7 @@ func TestDeferredResponseWriterOverflowDelivers(t *testing.T) {
 	for i := range chunk {
 		chunk[i] = 'x'
 	}
-	for i := 0; i < (qualityHoldMaxBytes>>20)+1; i++ {
+	for range (qualityHoldMaxBytes >> 20) + 1 {
 		_, err := deferred.Write(chunk)
 		testutil.CheckNoError(t, err)
 	}
@@ -469,7 +469,7 @@ func TestNativeChatTransportAndQualityRetryShareBudget(t *testing.T) {
 			h, database, _ := setupValidationHandler(t)
 			ctx := context.Background()
 			var first *store.Account
-			for i := 0; i < 4; i++ {
+			for i := range 4 {
 				acc := &store.Account{AccountType: "grok", Enabled: true, CredentialType: "oauth", GrokProvider: ProviderBuild, Weight: 1,
 					OAuthAccessToken: fmt.Sprintf("jwt-user-%d", i), GrokModels: []string{"grok-4.5"}, GrokModelsSyncedAt: time.Now()}
 				testutil.NoError(t, database.CreateAccount(ctx, acc))

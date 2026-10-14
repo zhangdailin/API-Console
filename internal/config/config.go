@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -152,9 +153,7 @@ func (c *Config) Clone() *Config {
 	clone.ProxyBypass = append([]string(nil), c.ProxyBypass...)
 	if c.ProviderConcurrencyLimits != nil {
 		clone.ProviderConcurrencyLimits = make(map[string]int, len(c.ProviderConcurrencyLimits))
-		for key, value := range c.ProviderConcurrencyLimits {
-			clone.ProviderConcurrencyLimits[key] = value
-		}
+		maps.Copy(clone.ProviderConcurrencyLimits, c.ProviderConcurrencyLimits)
 	}
 	return &clone
 }

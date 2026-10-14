@@ -8,7 +8,7 @@ import (
 
 func TestCredentialBackendFailureDoesNotLockOutValidLogins(t *testing.T) {
 	limiter := &RateLimiter{maxAttempts: 1, window: time.Hour}
-	for i := 0; i < 6; i++ {
+	for range 6 {
 		valid, allowed, err := limiter.CheckCredentialsWithError("source", func() (bool, error) { return false, context.DeadlineExceeded })
 		if valid || !allowed || err != context.DeadlineExceeded {
 			t.Fatal("backend outage spent the password failure budget")

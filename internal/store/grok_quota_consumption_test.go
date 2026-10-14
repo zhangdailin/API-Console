@@ -20,13 +20,11 @@ func TestClaimGrokPaidQuotaProbeIsBoundedAndAtomic(t *testing.T) {
 	claims := make(chan bool, 8)
 	var wg sync.WaitGroup
 	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			claimed, err := s.ClaimGrokPaidQuotaProbe(ctx, acc.ID, now)
 			testutil.CheckNoError(t, err, "claim: %v")
 			claims <- claimed
-		}()
+		})
 	}
 	wg.Wait()
 	close(claims)

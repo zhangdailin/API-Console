@@ -9,10 +9,10 @@ import (
 // 0x), avoiding float underflow, missing-as-zero, and display-label guesses.
 func zeroCredits(raw string) (zero, known bool) {
 	s := strings.TrimSpace(raw)
-	if strings.HasPrefix(s, "x") {
-		s = strings.TrimPrefix(s, "x")
-	} else if strings.HasSuffix(s, "x") {
-		s = strings.TrimSuffix(s, "x")
+	if after, ok := strings.CutPrefix(s, "x"); ok {
+		s = after
+	} else if before, ok := strings.CutSuffix(s, "x"); ok {
+		s = before
 	} else {
 		return false, false
 	}

@@ -15,7 +15,7 @@ func (s *redisStore) saveModelAtomic(ctx context.Context, m *Model) error {
 	if err != nil {
 		return err
 	}
-	for attempt := 0; attempt < 32; attempt++ {
+	for range 32 {
 		err = s.client.Watch(ctx, func(tx *redis.Tx) error {
 			for key, expected := range map[string]string{s.modelsIDsKey(): "set", s.modelsChannelModelIDMapKey(): "hash"} {
 				kind, err := tx.Type(ctx, key).Result()

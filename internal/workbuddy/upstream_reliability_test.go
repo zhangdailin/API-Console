@@ -19,7 +19,7 @@ func TestUpstreamReliabilityShortLivedTokenIsReused(t *testing.T) {
 	}))
 	defer server.Close()
 	c := NewFromAccount(&store.Account{AccountType: "workbuddy", WorkBuddyRefreshToken: "old-refresh", WorkBuddyUID: "uid"}, &config.Config{WorkBuddyBaseURL: server.URL})
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		if _, err := c.ensureAccessToken(context.Background()); err != nil {
 			t.Fatal(err)
 		}

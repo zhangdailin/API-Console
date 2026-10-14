@@ -67,14 +67,12 @@ func TestConcurrentRuntimeDerivationIsSingleFlight(t *testing.T) {
 	results := make(chan RuntimeFields, callers)
 	errs := make(chan error, callers)
 	var wg sync.WaitGroup
-	for i := 0; i < callers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range callers {
+		wg.Go(func() {
 			fields, err := client.ensureRuntimeFields(context.Background(), client.currentCredentials())
 			results <- fields
 			errs <- err
-		}()
+		})
 	}
 	wg.Wait()
 	close(results)
@@ -115,16 +113,14 @@ func TestConcurrentExpiredCredentialRefreshesOnlyOnce(t *testing.T) {
 	const callers = 24
 	errs := make(chan error, callers)
 	var wg sync.WaitGroup
-	for i := 0; i < callers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range callers {
+		wg.Go(func() {
 			creds, err := client.ensureAccessToken(context.Background())
 			if err == nil && creds.AccessToken != "access-new" {
 				err = fmt.Errorf("access token = %q", creds.AccessToken)
 			}
 			errs <- err
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)

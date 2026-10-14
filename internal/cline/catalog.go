@@ -67,8 +67,8 @@ func parseCatalog(raw []byte, paid bool) ([]Model, error) {
 			}
 			seen[key] = true
 			provider := id
-			if index := strings.Index(id, "/"); index >= 0 {
-				provider = id[:index]
+			if before, _, ok := strings.Cut(id, "/"); ok {
+				provider = before
 			}
 			out = append(out, Model{
 				BillingTier: tier,

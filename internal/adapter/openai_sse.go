@@ -107,8 +107,6 @@ func (d openAIDelta) empty() bool {
 	return d.Role == nil && d.Content == nil && d.ReasoningContent == nil && len(d.ToolCalls) == 0
 }
 
-func stringPtr(v string) *string { return &v }
-
 func appendOpenAIJSONString(dst []byte, value string) ([]byte, bool) {
 	for i := 0; i < len(value); i++ {
 		b := value[i]
@@ -425,7 +423,7 @@ func buildOpenAIChunkSlow(msgID string, created int64, event string, data []byte
 		if err := json.Unmarshal(data, &payload); err != nil || payload.Message == nil {
 			return nil, false
 		}
-		choice.Delta.Role = stringPtr("assistant")
+		choice.Delta.Role = new("assistant")
 		chunk.Model = payload.Message.Model
 	case "content_block_start":
 		var payload openAIContentBlockStartPayload
@@ -435,7 +433,7 @@ func buildOpenAIChunkSlow(msgID string, created int64, event string, data []byte
 		switch payload.ContentBlock.Type {
 		case "text":
 			if payload.ContentBlock.Text != "" {
-				choice.Delta.Content = stringPtr(payload.ContentBlock.Text)
+				choice.Delta.Content = new(payload.ContentBlock.Text)
 			}
 		case "tool_use":
 			choice.Delta.ToolCalls = []openAIToolCall{{
@@ -443,7 +441,7 @@ func buildOpenAIChunkSlow(msgID string, created int64, event string, data []byte
 				ID:    payload.ContentBlock.ID,
 				Type:  "function",
 				Function: openAIFunction{
-					Name:      stringPtr(payload.ContentBlock.Name),
+					Name:      new(payload.ContentBlock.Name),
 					Arguments: "",
 				},
 			}}
@@ -483,7 +481,7 @@ func buildOpenAIChunkSlow(msgID string, created int64, event string, data []byte
 			return nil, false
 		}
 		mapped := normalizeOpenAIStopReason(*payload.Delta.StopReason)
-		choice.FinishReason = stringPtr(mapped)
+		choice.FinishReason = new(mapped)
 	case "message_stop", "content_block_stop":
 		return nil, false
 	default:

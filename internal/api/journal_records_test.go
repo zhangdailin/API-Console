@@ -88,7 +88,7 @@ func TestJournalRecords_CursorAdvancesPastScannedEntries(t *testing.T) {
 	// The one request this test looks for is the OLDEST entry, buried under 40
 	// newer operations: exactly the "earlier operation logs cannot be found" case.
 	events := []audit.Event{{Kind: audit.KindRequest, Action: "grok_request", RequestID: "req-old", Status: "ok", Channel: "grok"}}
-	for i := 0; i < 40; i++ {
+	for range 40 {
 		events = append(events, audit.Event{Kind: audit.KindOperation, Action: "config_update", Status: "ok", Details: "tweak"})
 	}
 	seedJournal(t, a, events)
@@ -153,7 +153,7 @@ func TestJournalRecordsRecoversPartialQualityHistory(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 	a := &API{store: s}
 	events := []audit.Event{{Kind: audit.KindRequest, Action: "grok_quality_degraded", RequestID: "quality-1", Attempt: 1, Status: "degraded", Metadata: map[string]interface{}{"reason": "no_reasoning"}}}
-	for i := 0; i < 40; i++ {
+	for range 40 {
 		events = append(events, audit.Event{Kind: audit.KindOperation, Action: "config_update", Status: "ok"})
 	}
 	events = append(events,
@@ -222,7 +222,7 @@ func TestJournalRecordsRecoversHealthyCheckProcessBehindWindow(t *testing.T) {
 		{Kind: audit.KindRequest, Action: "grok_quality_check", RequestID: "healthy", Status: "checking", Attempt: 1},
 		{Kind: audit.KindRequest, Action: "grok_quality_check", RequestID: "healthy", Status: "passed", Attempt: 1},
 	}
-	for i := 0; i < 40; i++ {
+	for range 40 {
 		events = append(events, audit.Event{Kind: audit.KindOperation, Action: "config_update", Status: "ok"})
 	}
 	events = append(events, audit.Event{Kind: audit.KindRequest, Action: "grok_request", RequestID: "healthy", Status: "success", Metadata: map[string]interface{}{"quality_checked_attempts": 1, "quality_check_status": "passed"}})

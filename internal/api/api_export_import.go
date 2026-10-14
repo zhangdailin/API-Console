@@ -112,8 +112,7 @@ func (a *API) HandleImport(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
 	var exportData ExportData
 	if err := decoder.Decode(&exportData); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			http.Error(w, "Import file exceeds 8 MiB", http.StatusRequestEntityTooLarge)
 		} else {
 			http.Error(w, "Invalid import JSON", http.StatusBadRequest)

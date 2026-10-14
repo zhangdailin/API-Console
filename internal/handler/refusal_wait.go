@@ -130,13 +130,7 @@ func sharedRefusalWait(hint time.Duration, retry int) time.Duration {
 	if retry >= 1 && retry <= len(fractions) {
 		fraction = fractions[retry-1]
 	}
-	wait := time.Duration(float64(hint) * fraction)
-	if wait < time.Second {
-		wait = time.Second
-	}
-	if wait > hint {
-		wait = hint
-	}
+	wait := min(max(time.Duration(float64(hint)*fraction), time.Second), hint)
 	return wait
 }
 
@@ -148,10 +142,7 @@ func sharedRefusalJitter(delay time.Duration) time.Duration {
 	if delay <= 0 {
 		return 0
 	}
-	jitter := delay / 5
-	if jitter > 5*time.Second {
-		jitter = 5 * time.Second
-	}
+	jitter := min(delay/5, 5*time.Second)
 	if jitter <= 0 {
 		return 0
 	}

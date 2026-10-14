@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"strings"
 	"time"
 
@@ -44,9 +45,7 @@ func (o accountOutput) MarshalJSON() ([]byte, error) {
 	if o.SessionFingerprint != "" {
 		merged["session_fingerprint"] = o.SessionFingerprint
 	}
-	for key, value := range o.Quota {
-		merged[key] = value
-	}
+	maps.Copy(merged, o.Quota)
 	// Credentials are write-only. The account API exposes only their presence,
 	// including for create, update and refresh responses.
 	merged["has_credential"] = o.SessionFingerprint != ""

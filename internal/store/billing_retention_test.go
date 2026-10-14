@@ -14,7 +14,7 @@ func TestBillingReceiptsExpireWithoutResettingUsage(t *testing.T) {
 	s, mini := newTestRedisStore(t, "retention:")
 	key := createBillingKey(t, s, 0)
 	ctx := context.Background()
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		testutil.NoError(t, s.SettleApiKeyBilling(ctx, key.ID, billingledger.EventID(time.Now(), fmt.Sprint(i)), 2))
 	}
 	receipts := 0

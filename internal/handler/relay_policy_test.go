@@ -103,7 +103,7 @@ func TestRelayRepeatedTextIsNotFiltered(t *testing.T) {
 		h := newStreamHandler(&config.Config{}, rec, debug.New(false, false), streaming, adapter.FormatAnthropic)
 		text := "Hi! How can I help you today?"
 		h.handleMessage(upstream.SSEMessage{Type: "model.text-start", Event: map[string]interface{}{}})
-		for i := 0; i < 3; i++ {
+		for range 3 {
 			h.handleMessage(upstream.SSEMessage{Type: "model.text-delta", Event: map[string]interface{}{"delta": text + text}})
 		}
 		h.handleMessage(upstream.SSEMessage{Type: "model.finish", Event: map[string]interface{}{"finishReason": "stop"}})
@@ -161,7 +161,7 @@ func TestRelayIdenticalInflightRequestsBothReachUpstream(t *testing.T) {
 	h := NewWithLoadBalancer(&config.Config{RequestTimeout: 10}, nil)
 	h.client = client
 	finished := make(chan *httptest.ResponseRecorder, 2)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		go func() {
 			r := httptest.NewRequest(http.MethodPost, "/workbuddy/v1/messages", strings.NewReader(`{"model":"claude-3-5-sonnet","messages":[{"role":"user","content":"Explain the same example"}]}`))
 			r.Header.Set("Idempotency-Key", "same-inflight-key")
@@ -181,7 +181,7 @@ func TestRelayIdenticalInflightRequestsBothReachUpstream(t *testing.T) {
 		}
 	}
 	close(client.release)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		select {
 		case w := <-finished:
 			testutil.CheckFalsef(t, w.Code != 200 || !strings.Contains(w.Body.String(), "parallel answer"), "status=%d body=%s", w.Code, w.Body.String())

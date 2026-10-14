@@ -167,9 +167,7 @@ func TestPersistConfigConcurrentReadersSeeCompleteSnapshots(t *testing.T) {
 	errCh := make(chan error, 8)
 	done := make(chan struct{})
 	for range 8 {
-		readers.Add(1)
-		go func() {
-			defer readers.Done()
+		readers.Go(func() {
 			for {
 				select {
 				case <-done:
@@ -188,7 +186,7 @@ func TestPersistConfigConcurrentReadersSeeCompleteSnapshots(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 
 	for i := range updates {

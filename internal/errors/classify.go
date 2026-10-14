@@ -354,11 +354,11 @@ func isUpstreamServiceUnavailable(text string) bool {
 // keeps every shape working: `"serviceAvailable":false`, `serviceAvailable=false`
 // and a re-rendered or nested copy all read the same.
 func flagValue(text, name string) string {
-	idx := strings.Index(text, name)
-	if idx < 0 {
+	_, after, ok := strings.Cut(text, name)
+	if !ok {
 		return ""
 	}
-	rest := strings.TrimLeft(text[idx+len(name):], `":= `)
+	rest := strings.TrimLeft(after, `":= `)
 	end := strings.IndexAny(rest, `,"} `)
 	if end < 0 {
 		end = len(rest)

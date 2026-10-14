@@ -33,14 +33,12 @@ func TestHub_ConcurrentAcquire(t *testing.T) {
 	hub := NewHub()
 	var wg sync.WaitGroup
 	granted := make(chan struct{}, 16)
-	for i := 0; i < 16; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 16 {
+		wg.Go(func() {
 			if hub.TryAcquire(99) {
 				granted <- struct{}{}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(granted)

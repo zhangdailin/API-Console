@@ -55,7 +55,7 @@ func TestBus_CoalescesBurstsByAccount(t *testing.T) {
 	subscriber := &recordingSubscriber{}
 	bus.Subscribe(subscriber)
 
-	for i := 0; i < 25; i++ {
+	for range 25 {
 		bus.Publish(Change{AccountID: 7, Kind: KindStatus})
 	}
 
@@ -153,7 +153,7 @@ func TestBus_PublishNeverBlocks(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for i := 0; i < publishBuffer*3; i++ {
+		for i := range publishBuffer * 3 {
 			bus.Publish(Change{AccountID: int64(i%5) + 1})
 		}
 	}()

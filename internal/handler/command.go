@@ -44,8 +44,8 @@ func extractCommandFromPolicy(text string) string {
 	if match := policyCommandLine.FindStringSubmatch(text); len(match) > 1 {
 		return strings.TrimSpace(match[1])
 	}
-	if idx := strings.Index(text, "Command:"); idx >= 0 {
-		return strings.TrimSpace(text[idx+len("Command:"):])
+	if _, after, ok := strings.Cut(text, "Command:"); ok {
+		return strings.TrimSpace(after)
 	}
 	return ""
 }

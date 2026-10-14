@@ -347,7 +347,7 @@ func BenchmarkStreamingRelayTextDeltaFrame(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				sh := newStreamHandler(cfg, newDiscardFlushResponseWriter(), logger, true, adapter.FormatAnthropic)
-				for j := 0; j < framesPerRun; j++ {
+				for range framesPerRun {
 					sh.handleMessage(msg)
 				}
 				sh.release()

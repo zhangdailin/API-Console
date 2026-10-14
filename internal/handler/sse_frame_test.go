@@ -52,7 +52,7 @@ func TestAppendJSONBytesMatchesEncodingJSON(t *testing.T) {
 	// Every offset of a special byte inside consecutive eight-byte windows: a
 	// wide check that skips a lane would escape the wrong thing here.
 	for _, special := range []string{`"`, `\`, `<`, `>`, `&`, "\n", "\t", "\u2028"} {
-		for pad := 0; pad < 20; pad++ {
+		for pad := range 20 {
 			cases = append(cases,
 				strings.Repeat("a", pad)+special+strings.Repeat("b", 20),
 				strings.Repeat("a", 20)+special+strings.Repeat("b", pad),
@@ -61,7 +61,7 @@ func TestAppendJSONBytesMatchesEncodingJSON(t *testing.T) {
 	}
 	// Eight-byte windows of every byte value in a few alignments, including the
 	// invalid-UTF-8 bytes that force the stdlib fallback.
-	for b := 0; b < 256; b++ {
+	for b := range 256 {
 		cases = append(cases, "ab"+string([]byte{byte(b)})+"cd")
 	}
 
@@ -83,7 +83,7 @@ func TestAppendJSONBytesMatchesEncodingJSON(t *testing.T) {
 func TestAppendJSONBytesMatchesEncodingJSONOnRandomInput(t *testing.T) {
 	rng := rand.New(rand.NewSource(20240922))
 	alphabet := []byte("abcXYZ019 <>&\"\\\n\t\r\b\f\x00\x1f\x7f\xc3\xa9\xe4\xb8\xad\xff\x80\xe2\x80\xa8\xe2\x80\xa9")
-	for i := 0; i < 20000; i++ {
+	for range 20000 {
 		n := rng.Intn(48)
 		buf := make([]byte, n)
 		for j := range buf {

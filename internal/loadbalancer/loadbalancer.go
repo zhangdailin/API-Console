@@ -172,7 +172,7 @@ func (lb *LoadBalancer) GetNextAccountExcludingByChannelWithTrackerFilter(ctx co
 	if len(accounts) > accountScanWindow {
 		start := lb.rotateScanCursor(len(accounts))
 		scanned = make([]*store.Account, 0, accountScanWindow)
-		for offset := 0; offset < accountScanWindow; offset++ {
+		for offset := range accountScanWindow {
 			scanned = append(scanned, accounts[(start+offset)%len(accounts)])
 		}
 	}
@@ -456,7 +456,7 @@ func (lb *LoadBalancer) selectAccountWithTracker(accounts []*store.Account, trac
 		var window [accountScanWindow]*store.Account
 		for offset := 0; offset < len(accounts); offset += accountScanWindow {
 			n := min(accountScanWindow, len(accounts)-offset)
-			for i := 0; i < n; i++ {
+			for i := range n {
 				window[i] = accounts[(start+offset+i)%len(accounts)]
 			}
 			if picked := lb.selectAccountWithTracker(window[:n], tracker); picked != nil {

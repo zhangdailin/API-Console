@@ -45,7 +45,7 @@ func TestSelectAccount_Distribution(t *testing.T) {
 	counts := make(map[int64]int)
 	iterations := 1000
 
-	for i := 0; i < iterations; i++ {
+	for range iterations {
 		acc := lb.selectAccountWithTracker(accounts, nil)
 		testutil.False(t, acc == nil, "selectAccount returned nil")
 		counts[acc.ID]++
@@ -74,7 +74,7 @@ func TestSelectAccount_WeightedDistribution(t *testing.T) {
 	counts := make(map[int64]int)
 	iterations := 1000
 
-	for i := 0; i < iterations; i++ {
+	for range iterations {
 		acc := lb.selectAccountWithTracker(accounts, nil)
 		counts[acc.ID]++
 	}
@@ -93,7 +93,7 @@ func TestSelectAccount_ActiveConnections(t *testing.T) {
 	// acc2 has 0 conns, score 0/1 = 0
 
 	// Should always pick acc2
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		selected := lb.selectAccountWithTracker(accounts, nil)
 		testutil.CheckEqual(t, selected.ID, acc2.ID)
 	}
@@ -112,7 +112,7 @@ func TestSelectAccountWithTracker_UsesProvidedTracker(t *testing.T) {
 		},
 	}
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		selected := lb.selectAccountWithTracker(accounts, custom)
 		testutil.Falsef(t, selected == nil || selected.ID != acc2.ID, "expected Acc2 to be selected via custom tracker, got %#v", selected)
 	}
@@ -139,7 +139,7 @@ func TestQoderAccountsAreLoadBalanced(t *testing.T) {
 	// Idle pool: repeated selections must reach both accounts, not just the
 	// lowest ID.
 	counts := map[int64]int{}
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		selected, err := selectAccount(nil)
 		testutil.Falsef(t, err != nil, "selection %d: err=%v", i, err)
 		counts[selected.ID]++
@@ -149,7 +149,7 @@ func TestQoderAccountsAreLoadBalanced(t *testing.T) {
 	// A saturated account is skipped so the rest of the pool absorbs the
 	// request rather than the channel failing while capacity remains.
 	tracker.counts[first.ID] = EffectiveAccountConcurrencyLimit(first)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		selected, err := selectAccount(nil)
 		testutil.Equal(t, err, nil)
 		testutil.Equal(t, selected.ID, second.ID)
@@ -320,11 +320,11 @@ func TestSelectAccountRotatesAcrossEqualAccounts(t *testing.T) {
 	// prefers accounts that have never been selected, so the first
 	// accountCount draws are a permutation. This is what a regression in the
 	// rotation breaks first, and it does not depend on the random pick.
-	for round := 0; round < 50; round++ {
+	for range 50 {
 		lb := &LoadBalancer{connTracker: NewMemoryConnTracker()}
 		accounts := newAccounts()
 		seen := map[int64]int{}
-		for i := 0; i < accountCount; i++ {
+		for range accountCount {
 			acc := lb.selectAccountWithTracker(accounts, nil)
 			testutil.False(t, acc == nil, "nil account")
 			seen[acc.ID]++
@@ -339,7 +339,7 @@ func TestSelectAccountRotatesAcrossEqualAccounts(t *testing.T) {
 	lb := &LoadBalancer{connTracker: NewMemoryConnTracker()}
 	accounts := newAccounts()
 	counts := map[int64]int{}
-	for i := 0; i < draws; i++ {
+	for range draws {
 		acc := lb.selectAccountWithTracker(accounts, nil)
 		testutil.False(t, acc == nil, "nil account")
 		counts[acc.ID]++
@@ -355,9 +355,9 @@ func TestLargePoolIsScannedInRotatingWindows(t *testing.T) {
 	lb := &LoadBalancer{connTracker: NewMemoryConnTracker()}
 	size := accountScanWindow * 3
 	seen := map[int]bool{}
-	for i := 0; i < size; i++ {
+	for range size {
 		start := lb.rotateScanCursor(size)
-		for offset := 0; offset < accountScanWindow; offset++ {
+		for offset := range accountScanWindow {
 			seen[(start+offset)%size] = true
 		}
 	}

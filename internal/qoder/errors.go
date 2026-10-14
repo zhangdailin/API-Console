@@ -138,8 +138,7 @@ func IsTransientTransport(err error) bool {
 	if containsAnyMarker(strings.ToLower(detail), nonTransientTransportMarkers) {
 		return false
 	}
-	var netErr net.Error
-	if errors.As(err, &netErr) {
+	if netErr, ok := errors.AsType[net.Error](err); ok {
 		// A timeout is the transient case; a permanent address or protocol
 		// problem is not.
 		return netErr.Timeout() || isTransientOpError(err)
@@ -159,8 +158,7 @@ func IsTransientTransport(err error) bool {
 // isTransientOpError recognises the OS-level reset/abort errors net.Error does
 // not always classify as timeouts.
 func isTransientOpError(err error) bool {
-	var opErr *net.OpError
-	if errors.As(err, &opErr) {
+	if opErr, ok := errors.AsType[*net.OpError](err); ok {
 		if opErr.Timeout() {
 			return true
 		}
@@ -170,8 +168,7 @@ func isTransientOpError(err error) bool {
 }
 
 func isTransientSyscall(err error) bool {
-	var errno syscall.Errno
-	if errors.As(err, &errno) {
+	if errno, ok := errors.AsType[syscall.Errno](err); ok {
 		switch errno {
 		case syscall.ECONNRESET, syscall.ECONNABORTED, syscall.ECONNREFUSED,
 			syscall.EPIPE, syscall.ETIMEDOUT, syscall.EHOSTUNREACH, syscall.ENETUNREACH:

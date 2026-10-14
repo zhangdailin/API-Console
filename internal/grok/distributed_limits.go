@@ -92,10 +92,7 @@ func (b *redisGrokLimits) waitPacing(ctx context.Context, identity string, rate 
 	if b == nil || b.client == nil || rate <= 0 {
 		return nil
 	}
-	interval := time.Duration(float64(time.Second) / rate)
-	if interval < time.Millisecond {
-		interval = time.Millisecond
-	}
+	interval := max(time.Duration(float64(time.Second)/rate), time.Millisecond)
 	key := b.key("pace", identity)
 	pace := b.pace
 	if pace == nil {
@@ -117,10 +114,7 @@ func (b *redisGrokLimits) waitPacing(ctx context.Context, identity string, rate 
 		// Spread waiters across the last 10% of the window. Without jitter every
 		// replica wakes on the same millisecond and all but one immediately collide.
 		remaining := time.Duration(remainingMS) * time.Millisecond
-		jitterRange := remaining / 10
-		if jitterRange > 25*time.Millisecond {
-			jitterRange = 25 * time.Millisecond
-		}
+		jitterRange := min(remaining/10, 25*time.Millisecond)
 		if jitterRange > 0 {
 			digest := sha256.Sum256([]byte(fmt.Sprintf("%s:%d", identity, time.Now().UnixNano())))
 			remaining += time.Duration(digest[0]) * jitterRange / 255

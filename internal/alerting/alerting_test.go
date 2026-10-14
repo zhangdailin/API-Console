@@ -327,10 +327,10 @@ func TestEngine_ThresholdsOnNilEngineFallsBackToDefaults(t *testing.T) {
 func TestEngine_ThresholdsIsSafeUnderConcurrency(t *testing.T) {
 	engine := NewEngine(DefaultRules(), nil)
 	done := make(chan struct{})
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		go func() {
 			defer func() { done <- struct{}{} }()
-			for j := 0; j < 50; j++ {
+			for range 50 {
 				if got := engine.Thresholds().SuccessRateWarning; got != 0.9 {
 					t.Errorf("Thresholds() = %v, want 0.9", got)
 					return
@@ -339,7 +339,7 @@ func TestEngine_ThresholdsIsSafeUnderConcurrency(t *testing.T) {
 			}
 		}()
 	}
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		<-done
 	}
 }

@@ -12,6 +12,7 @@ package responses
 
 import (
 	"bytes"
+	"maps"
 
 	"crypto/rand"
 	_ "embed"
@@ -293,9 +294,7 @@ func clonePayload(payload map[string]interface{}) map[string]interface{} {
 		return map[string]interface{}{}
 	}
 	clone := make(map[string]interface{}, len(payload))
-	for key, value := range payload {
-		clone[key] = value
-	}
+	maps.Copy(clone, payload)
 	return clone
 }
 
@@ -358,8 +357,8 @@ func stripLeadingGatewayCompactionScratchpad(inner string) string {
 			result = strings.TrimSpace(result[end+len("</analysis>"):])
 		}
 	}
-	if strings.HasPrefix(result, "<summary>") {
-		result = strings.TrimSpace(strings.TrimPrefix(result, "<summary>"))
+	if after, ok := strings.CutPrefix(result, "<summary>"); ok {
+		result = strings.TrimSpace(after)
 	}
 	return result
 }
@@ -502,8 +501,7 @@ func gatewayCompactionEventErrorIsTransient(code, message string) bool {
 }
 
 func gatewayCompactionErrorIsTransient(err error) bool {
-	var streamErr *gatewayCompactionStreamError
-	if errors.As(err, &streamErr) {
+	if streamErr, ok := errors.AsType[*gatewayCompactionStreamError](err); ok {
 		return streamErr.transient
 	}
 	return true

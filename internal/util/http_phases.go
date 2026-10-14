@@ -3,6 +3,7 @@ package util
 import (
 	"context"
 	"crypto/tls"
+	"maps"
 	"net/http"
 	"net/http/httptrace"
 	"sync"
@@ -37,9 +38,7 @@ func TraceHTTPPhases(req *http.Request) *http.Request {
 		}
 		published = true
 		snapshot := make(map[string]int64, len(values))
-		for k, v := range values {
-			snapshot[k] = v
-		}
+		maps.Copy(snapshot, values)
 		mu.Unlock()
 		observer(snapshot)
 	}

@@ -290,8 +290,7 @@ func (c *Client) runChat(ctx context.Context, url string, body []byte, model mod
 		if upstream.RemainingAttempts(ctx) == 0 {
 			return err
 		}
-		var agentErr *agentLimitError
-		if errors.As(err, &agentErr) {
+		if _, ok := errors.AsType[*agentLimitError](err); ok {
 			// agentLimitResetTime is emitted by the inference agent and is not an
 			// authoritative account credit snapshot.  The OpenAPI quota endpoint
 			// may still report spendable credits, so do not overwrite QoderQuota or

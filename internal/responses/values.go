@@ -1,5 +1,7 @@
 package responses
 
+import "maps"
+
 import "orchids-api/internal/chatwire"
 
 // ParseLooseStringAny renders an arbitrary JSON-decoded value as a trimmed
@@ -65,9 +67,7 @@ func CloneStringInterfaceMap(value map[string]interface{}) map[string]interface{
 		return nil
 	}
 	out := make(map[string]interface{}, len(value))
-	for key, item := range value {
-		out[key] = item
-	}
+	maps.Copy(out, value)
 	return out
 }
 

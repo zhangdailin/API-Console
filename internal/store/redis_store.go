@@ -283,7 +283,7 @@ func (s *redisStore) updateAccountAtomic(ctx context.Context, id int64, mutate f
 		return nil
 	}
 	key := s.accountsKey(id)
-	for attempt := 0; attempt < 8; attempt++ {
+	for range 8 {
 		var previous *Account
 		err := s.client.Watch(ctx, func(tx *redis.Tx) error {
 			value, err := tx.Get(ctx, key).Bytes()

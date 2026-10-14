@@ -70,14 +70,14 @@ func TestJournalRecordsPagingReturnsEveryRecord(t *testing.T) {
 
 	const total = 120
 	events := make([]audit.Event, 0, total)
-	for i := 0; i < total; i++ {
+	for i := range total {
 		events = append(events, requestEvent(fmt.Sprintf("req-%03d", i), "success", 200))
 	}
 	seedJournal(t, a, events)
 
 	seen := map[string]int{}
 	cursor := ""
-	for page := 0; page < 10; page++ {
+	for range 10 {
 		query := "?kind=request&limit=50"
 		if cursor != "" {
 			query += "&before=" + cursor
@@ -234,7 +234,7 @@ func TestJournalRecordsRecoversAttemptsBehindThePageWindow(t *testing.T) {
 		{Kind: audit.KindRequest, Action: "grok_upstream_attempt", RequestID: "req-old", Status: "error", Channel: "grok", Attempt: 1, Metadata: map[string]interface{}{"http_status": float64(429)}},
 	}
 	// Traffic that finished while the request above was still running.
-	for i := 0; i < 40; i++ {
+	for range 40 {
 		events = append(events, audit.Event{Kind: audit.KindOperation, Action: "config_update", Status: "ok"})
 	}
 	events = append(events, requestEvent("req-old", "error", 429))

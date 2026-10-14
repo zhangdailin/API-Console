@@ -175,13 +175,13 @@ func TestStreamHandler_TerminalStateAndKeepAliveAreRaceSafe(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			sh.writeKeepAlive()
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			_, _ = sh.terminalState()
 		}
 		sh.finishResponse("end_turn")

@@ -14,9 +14,7 @@ func TestAttemptBudgetIsAtomicAndRecordsEachActualCallOnce(t *testing.T) {
 	ctx = WithAttemptObserver(ctx, func(bool) { recorded.Add(1) })
 	var wg sync.WaitGroup
 	for range 20 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			finish, err := BeginAttempt(ctx)
 			if err != nil {
 				if !errors.Is(err, ErrAttemptBudget) {
@@ -27,7 +25,7 @@ func TestAttemptBudgetIsAtomicAndRecordsEachActualCallOnce(t *testing.T) {
 			accepted.Add(1)
 			finish(nil)
 			finish(nil)
-		}()
+		})
 	}
 	wg.Wait()
 	if accepted.Load() != 4 || recorded.Load() != 4 || b.Remaining() != 0 {

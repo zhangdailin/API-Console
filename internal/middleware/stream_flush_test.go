@@ -94,7 +94,7 @@ func TestCoalescedFlushKeepsFirstTerminalAndFinalDrain(t *testing.T) {
 	writer := &coalescedWriter{ResponseWriter: target, interval: time.Hour}
 	writer.Write([]byte("data: first\n\n"))
 	writer.Flush()
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		writer.Write([]byte("data: delta\n\n"))
 		writer.Flush()
 	}

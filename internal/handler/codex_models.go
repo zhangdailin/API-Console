@@ -183,8 +183,8 @@ var codexEffortSuffixes = []string{"low", "medium", "high", "xhigh", "max"}
 // never disagree about which ids are bare families.
 func splitEffortVariantSuffix(modelID string) (family, level string) {
 	for _, suffix := range codexEffortSuffixes {
-		if strings.HasSuffix(modelID, "-"+suffix) {
-			return strings.TrimSuffix(modelID, "-"+suffix), suffix
+		if before, ok := strings.CutSuffix(modelID, "-"+suffix); ok {
+			return before, suffix
 		}
 	}
 	return modelID, ""

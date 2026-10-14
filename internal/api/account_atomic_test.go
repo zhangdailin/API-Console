@@ -22,10 +22,8 @@ func TestConcurrentReplicaLoginsCreateOnlyOneAccount(t *testing.T) {
 			results := make(chan error, 8)
 			created := make(chan bool, 8)
 			var wg sync.WaitGroup
-			for i := 0; i < 8; i++ {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+			for i := range 8 {
+				wg.Go(func() {
 					<-start
 					acc := &store.Account{AccountType: "workbuddy", WorkBuddyRefreshToken: "same-refresh", Enabled: true}
 					if stable {
@@ -35,7 +33,7 @@ func TestConcurrentReplicaLoginsCreateOnlyOneAccount(t *testing.T) {
 					duplicate, err := replicas[i%2].saveNewAccountUnlessDuplicate(t.Context(), acc)
 					results <- err
 					created <- duplicate == nil
-				}()
+				})
 			}
 			close(start)
 			wg.Wait()

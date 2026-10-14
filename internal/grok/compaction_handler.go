@@ -184,8 +184,7 @@ func waitGatewayCompactionRetry(ctx context.Context, delay time.Duration) bool {
 
 // compactionErrorParam exposes the input index an expansion failure points at.
 func compactionErrorParam(err error) string {
-	var blobErr *responses.CompactionBlobError
-	if errors.As(err, &blobErr) {
+	if blobErr, ok := errors.AsType[*responses.CompactionBlobError](err); ok {
 		return blobErr.Param()
 	}
 	return "input"

@@ -9,8 +9,8 @@ var providerPublicPrefixes = []string{"build/"}
 func ExternalPublicID(internalID string) string {
 	id := strings.ToLower(strings.TrimSpace(internalID))
 	for _, prefix := range providerPublicPrefixes {
-		if strings.HasPrefix(id, prefix) {
-			return strings.TrimSpace(strings.TrimPrefix(id, prefix))
+		if after, ok := strings.CutPrefix(id, prefix); ok {
+			return strings.TrimSpace(after)
 		}
 	}
 	return id

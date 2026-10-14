@@ -272,8 +272,7 @@ func isSharedGrokRateLimitError(err error) bool {
 	if err == nil {
 		return false
 	}
-	var synthetic *syntheticCooldownError
-	if errors.As(err, &synthetic) {
+	if _, ok := errors.AsType[*syntheticCooldownError](err); ok {
 		return true
 	}
 	lower := strings.ToLower(err.Error())

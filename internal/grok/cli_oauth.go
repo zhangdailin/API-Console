@@ -227,8 +227,7 @@ func parseCLIOAuthErrorResponse(body []byte, status int) error {
 // IsCLIPermanentOAuthError reports whether an OAuth failure is permanent
 // (credentials invalid) vs transient.
 func IsCLIPermanentOAuthError(err error) bool {
-	var oauthErr *cliOAuthError
-	if errors.As(err, &oauthErr) {
+	if oauthErr, ok := errors.AsType[*cliOAuthError](err); ok {
 		return oauthErr.status == http.StatusUnauthorized
 	}
 	return false

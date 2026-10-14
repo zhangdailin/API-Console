@@ -199,8 +199,7 @@ func (c *Client) attemptChat(ctx context.Context, url string, body []byte, model
 		}
 	}
 	if err != nil {
-		var target *attemptStreamError
-		if errors.As(err, &target) {
+		if _, ok := errors.AsType[*attemptStreamError](err); ok {
 			return result, err
 		}
 		// A busy or unauthorized verdict that arrived as an in-stream frame is

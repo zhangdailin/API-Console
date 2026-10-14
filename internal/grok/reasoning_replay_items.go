@@ -1,6 +1,7 @@
 package grok
 
 import (
+	"maps"
 	"orchids-api/internal/chatwire"
 	"orchids-api/internal/util"
 	"slices"
@@ -174,8 +175,8 @@ func comparableReplayCallIDs(callID string) []string {
 		return nil
 	}
 	const anthropicPrefix = "toolu_"
-	if strings.HasPrefix(callID, anthropicPrefix) {
-		if upstreamID := strings.TrimPrefix(callID, anthropicPrefix); upstreamID != "" {
+	if after, ok := strings.CutPrefix(callID, anthropicPrefix); ok {
+		if upstreamID := after; upstreamID != "" {
 			return []string{callID, upstreamID}
 		}
 		return []string{callID}
@@ -203,16 +204,14 @@ func anyReplayCallKeyExists(existing map[string]bool, keys []string) bool {
 // client's own tool output already uses, so the pair stays matched.
 func cloneReplayItemWithCallID(item map[string]interface{}, callID string) map[string]interface{} {
 	clone := make(map[string]interface{}, len(item))
-	for key, value := range item {
-		clone[key] = value
-	}
+	maps.Copy(clone, item)
 	clone["call_id"] = callID
 	return clone
 }
 
 func lastAssistantReplayMessage(input []interface{}) (map[string]interface{}, bool) {
-	for index := len(input) - 1; index >= 0; index-- {
-		item, ok := input[index].(map[string]interface{})
+	for _, i := range slices.Backward(input) {
+		item, ok := i.(map[string]interface{})
 		if !ok {
 			continue
 		}
@@ -431,8 +430,8 @@ func replayInsertIndex(input []interface{}, items []interface{}) int {
 			}
 		}
 	}
-	for index := len(input) - 1; index >= 0; index-- {
-		item, ok := input[index].(map[string]interface{})
+	for index, i := range slices.Backward(input) {
+		item, ok := i.(map[string]interface{})
 		if !ok {
 			continue
 		}

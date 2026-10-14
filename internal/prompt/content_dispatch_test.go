@@ -75,7 +75,7 @@ func TestMessageContentRoundTrip(t *testing.T) {
 func realisticConversation(messages, blockChars int) []byte {
 	var sb strings.Builder
 	sb.WriteString(`{"model":"claude-sonnet-4-5","messages":[`)
-	for i := 0; i < messages; i++ {
+	for i := range messages {
 		if i > 0 {
 			sb.WriteByte(',')
 		}

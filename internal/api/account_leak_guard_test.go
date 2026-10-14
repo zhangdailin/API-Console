@@ -37,7 +37,7 @@ var accountSecretFields = map[string]func(*store.Account) string{
 // like runtime_info, so even non-secret fields are explicitly classified here.
 func TestAccountSecretFieldsAreComplete(t *testing.T) {
 	nonSecret := map[string]bool{}
-	for _, name := range strings.Fields(`
+	for name := range strings.FieldsSeq(`
 		ID Name AccountType UserID AgentMode Email Weight MaxConcurrent Enabled
 		Subscription UsageCurrent UsageTotal UsageLimit TokensToday TokensDate
 		StatusCode AuthStatus RateLimitFailures QualityFailures QualityCooldownUntil QualityReason
@@ -59,7 +59,7 @@ func TestAccountSecretFieldsAreComplete(t *testing.T) {
 	seenNonSecrets := map[string]bool{}
 	for i := 0; i < accountType.NumField(); i++ {
 		field := accountType.Field(i)
-		key := strings.Split(field.Tag.Get("json"), ",")[0]
+		key, _, _ := strings.Cut(field.Tag.Get("json"), ",")
 		read, secret := accountSecretFields[key]
 		testutil.CheckFalsef(t, secret && nonSecret[field.Name], "%s is classified as both secret and non-secret", field.Name)
 		if !secret {

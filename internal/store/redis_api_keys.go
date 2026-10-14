@@ -30,7 +30,7 @@ type apiKeyRecord struct {
 	BillingPeriodDays    int      `json:"billing_period_days,omitempty"`
 	// BillingPeriodStartedAt travels with the record: without it a restart would
 	// forget when the current period began and never roll over.
-	BillingPeriodStartedAt time.Time  `json:"billing_period_started_at,omitempty"`
+	BillingPeriodStartedAt time.Time  `json:"billing_period_started_at"`
 	ExpiresAt              *time.Time `json:"expires_at,omitempty"`
 	LastUsedAt             *time.Time `json:"last_used_at"`
 	CreatedAt              time.Time  `json:"created_at"`

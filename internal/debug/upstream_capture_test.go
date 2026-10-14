@@ -63,14 +63,14 @@ func TestLoggerRetryRequestsAreNotOverwritten(t *testing.T) {
 func TestCapturePreservesManySectionsAndLargeBundle(t *testing.T) {
 	_, c := WithCapture(context.Background(), "limits")
 	defer c.Close()
-	for i := 0; i < 97; i++ {
+	for i := range 97 {
 		c.Append(fmt.Sprintf("small-%d", i), "x")
 	}
 	testutil.False(t, c.Bundle().Truncated || len(c.Bundle().Sections) != 97, "silently discarded sections")
 	c.Close()
 	_, c = WithCapture(context.Background(), "bytes")
 	defer c.Close()
-	for i := 0; i < 32; i++ {
+	for i := range 32 {
 		c.Append(fmt.Sprintf("large-%d", i), strings.Repeat("x", maxCaptureBytes))
 	}
 	b := c.Bundle()

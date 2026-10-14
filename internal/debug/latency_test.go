@@ -17,7 +17,7 @@ func TestLatencyCapturesReusedConnectionsAndSecrets(t *testing.T) {
 	defer server.Close()
 	ctx, capture := WithCapture(context.Background(), "latency")
 	client := server.Client()
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		req, _ := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
 		req.Header.Set("Cosy-Key", "secret-key")
 		req.Header.Set("Cosy-User", "private-user")

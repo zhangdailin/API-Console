@@ -20,7 +20,7 @@ const (
 // asciiClass maps every byte value to its class. Bytes >= utf8.RuneSelf carry
 // classNonASCII, which routes them to the rune decoder.
 var asciiClass = func() (table [256]uint8) {
-	for b := 0; b < 256; b++ {
+	for b := range 256 {
 		switch {
 		case b >= utf8.RuneSelf:
 			table[b] = classNonASCII

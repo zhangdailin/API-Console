@@ -174,7 +174,7 @@ func SettleAPIKeyBilling(
 	}
 	reservation.pending, reservation.priced = true, result
 	var err error
-	for attempt := 0; attempt < 3; attempt++ {
+	for range 3 {
 		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), billingReleaseTimeout)
 		err = settler.SettleApiKeyBilling(settleCtx, reservation.KeyID, reservation.EventID, result.CostInUSDTicks)
 		cancel()

@@ -176,7 +176,7 @@ func TestEstimatorMatchesReference(t *testing.T) {
 		"\u2028\u2029\u00e9\u4e2d",
 	}
 	// Every alignment of a long run against the eight-byte window.
-	for pad := 0; pad < 24; pad++ {
+	for pad := range 24 {
 		inputs = append(inputs, strings.Repeat("x", pad)+strings.Repeat("word", 5)+strings.Repeat("y", pad))
 	}
 

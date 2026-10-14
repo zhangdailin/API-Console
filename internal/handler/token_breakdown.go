@@ -24,10 +24,7 @@ func estimateInputTokenBreakdown(promptText string, tools []interface{}) inputTo
 	if sysText == "" {
 		sysText = extractTaggedContent(promptText, "system_context")
 	}
-	sysTokens := tiktoken.EstimateTextTokens(sysText)
-	if sysTokens > promptTokens {
-		sysTokens = promptTokens
-	}
+	sysTokens := min(tiktoken.EstimateTextTokens(sysText), promptTokens)
 
 	bd.SystemContextTokens = sysTokens
 	bd.BasePromptTokens = promptTokens - sysTokens

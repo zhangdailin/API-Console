@@ -139,7 +139,7 @@ func TestRange_SpansMinutesInOrder(t *testing.T) {
 	ctx := context.Background()
 	base := time.Now().Truncate(time.Minute).Add(-3 * time.Minute)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		agg.Observe(ctx, Outcome{Channel: "workbuddy", OK: true, DurationMS: 100, At: base.Add(time.Duration(i) * time.Minute)})
 	}
 	buckets, err := agg.Range(ctx, "workbuddy", base, base.Add(2*time.Minute))
@@ -160,7 +160,7 @@ func TestModelStatsFromBuckets(t *testing.T) {
 	ctx := context.Background()
 	at := time.Now().Truncate(time.Minute)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		agg.Observe(ctx, Outcome{Channel: "grok", Model: "grok-4.6", OK: i > 0, DurationMS: int64(100 * (i + 1)), At: at})
 	}
 	agg.Observe(ctx, Outcome{Channel: "grok", Model: "grok-4.5", OK: true, DurationMS: 50, At: at})

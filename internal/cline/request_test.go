@@ -382,11 +382,9 @@ func TestNewToolCallIDIsUnique(t *testing.T) {
 	seen := make(map[string]bool, 200)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 25; j++ {
+	for range 8 {
+		wg.Go(func() {
+			for range 25 {
 				id := util.NewToolCallID()
 				mu.Lock()
 				if seen[id] {
@@ -397,7 +395,7 @@ func TestNewToolCallIDIsUnique(t *testing.T) {
 				seen[id] = true
 				mu.Unlock()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	testutil.CheckEqual(t, len(seen), 200)

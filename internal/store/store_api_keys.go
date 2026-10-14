@@ -36,7 +36,7 @@ type ApiKey struct {
 	BillingPeriodDays int `json:"billing_period_days,omitempty"`
 	// BillingPeriodStartedAt is when the current period began. It is written by
 	// the rollover, not by the caller.
-	BillingPeriodStartedAt time.Time  `json:"billing_period_started_at,omitempty"`
+	BillingPeriodStartedAt time.Time  `json:"billing_period_started_at"`
 	ExpiresAt              *time.Time `json:"expires_at,omitempty"`
 	LastUsedAt             *time.Time `json:"last_used_at"`
 	CreatedAt              time.Time  `json:"created_at"`

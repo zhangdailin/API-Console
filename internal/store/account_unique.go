@@ -40,7 +40,7 @@ func (s *redisStore) createAccountUnlessDuplicate(ctx context.Context, acc *Acco
 		return nil, err
 	}
 	var duplicate *Account
-	for attempt := 0; attempt < 32; attempt++ {
+	for range 32 {
 		duplicate = nil
 		err = s.client.Watch(ctx, func(tx *redis.Tx) error {
 			ids, err := tx.SMembers(ctx, s.accountsIDsKey()).Result()

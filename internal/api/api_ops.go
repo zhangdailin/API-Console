@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"maps"
 	"net/http"
 	"orchids-api/internal/poolstate"
 	"orchids-api/internal/util"
@@ -722,9 +723,7 @@ func (a *API) opsMatrix(ctx context.Context, channels []string, since, until tim
 		}
 		row["capacity_available"] = false
 		if capacityAvailable {
-			for key, value := range opsPoolCapacity(accounts, counts, channel) {
-				row[key] = value
-			}
+			maps.Copy(row, opsPoolCapacity(accounts, counts, channel))
 		}
 		if a.opsAggregator != nil && a.opsAggregator.Enabled() {
 			buckets, err := a.opsAggregator.Range(ctx, channel, since, until)

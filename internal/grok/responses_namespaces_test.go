@@ -24,7 +24,7 @@ func TestNativeResponsesNamespacesAndContinuation(t *testing.T) {
 				var upstreamResponse map[string]interface{}
 				posts, gets := 0, 0
 				tools := []interface{}{}
-				for i := 0; i < 7; i++ {
+				for i := range 7 {
 					tools = append(tools, map[string]interface{}{"type": "function", "name": fmt.Sprintf("plain%d", i), "parameters": map[string]interface{}{"type": "object"}})
 				}
 				for _, ns := range []string{"alpha", "beta"} {
@@ -75,7 +75,7 @@ func TestNativeResponsesNamespacesAndContinuation(t *testing.T) {
 							t.Error("continuation id lost")
 						}
 						items := responses.InterfaceMaps(payload["input"])
-						for i := 0; i < 2; i++ {
+						for i := range 2 {
 							call, output := items[i*2], items[i*2+1]
 							if call["name"] != wireNames[i] || call["namespace"] != nil || call["arguments"] != arguments || call["call_id"] != fmt.Sprintf("call%d", i) {
 								t.Errorf("history=%v", call)

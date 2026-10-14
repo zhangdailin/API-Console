@@ -370,7 +370,7 @@ func stripAnthropicBillingHeader(text string) string {
 		return trimmed
 	}
 	kept := make([]string, 0, strings.Count(trimmed, "\n")+1)
-	for _, line := range strings.Split(trimmed, "\n") {
+	for line := range strings.SplitSeq(trimmed, "\n") {
 		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(line)), "x-anthropic-billing-header") {
 			continue
 		}

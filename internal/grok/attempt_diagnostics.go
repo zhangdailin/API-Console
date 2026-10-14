@@ -141,8 +141,7 @@ func (h *Handler) auditAttemptDiagnostic(ctx context.Context, acc *store.Account
 		// Typed HTTP errors are described by the structured body below, not a
 		// string containing its raw body and potentially arbitrary extra fields.
 		message := current.Error()
-		var wrapped *grokUpstreamError
-		if errors.As(current, &wrapped) {
+		if _, ok := errors.AsType[*grokUpstreamError](current); ok {
 			message = "upstream HTTP request rejected"
 		}
 		chain = append(chain, map[string]interface{}{"type": fmt.Sprintf("%T", current), "message": diagnosticText(message, acc)})

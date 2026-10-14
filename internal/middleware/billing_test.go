@@ -341,7 +341,7 @@ func TestBillingReservationConcurrentSettleIsIdempotent(t *testing.T) {
 	ledger := &stubBillingLedger{}
 	ctx := WithBillingReservation(context.Background(), held)
 	var done sync.WaitGroup
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		done.Go(func() { SettleAPIKeyBilling(ctx, ledger, "grok-4.6", audit.UsageSourceUpstream, 100, 0, 50) })
 	}
 	done.Wait()

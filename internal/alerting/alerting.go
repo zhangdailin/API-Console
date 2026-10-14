@@ -9,6 +9,7 @@ package alerting
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 )
@@ -299,9 +300,7 @@ func (e *Engine) Evaluate(snapshot Snapshot) Transition {
 	// The new firing set is "what was already firing and did not recover" plus
 	// the alerts that just started.
 	next := make(map[string]Alert, len(previous)+len(transition.Firing))
-	for key, alert := range previous {
-		next[key] = alert
-	}
+	maps.Copy(next, previous)
 	for _, alert := range transition.Recovered {
 		delete(next, alert.Key)
 	}

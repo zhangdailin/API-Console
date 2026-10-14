@@ -27,7 +27,7 @@ func TestBuildOpenAIChunk(t *testing.T) {
 				Object:  "chat.completion.chunk",
 				Created: 123,
 				Model:   "claude-3-7-sonnet",
-				Choices: []openAIChoice{{Index: 0, Delta: openAIDelta{Role: stringPtr("assistant")}}},
+				Choices: []openAIChoice{{Index: 0, Delta: openAIDelta{Role: new("assistant")}}},
 			},
 		},
 		{
@@ -47,7 +47,7 @@ func TestBuildOpenAIChunk(t *testing.T) {
 						ID:    "tool_123",
 						Type:  "function",
 						Function: openAIFunction{
-							Name:      stringPtr("Write"),
+							Name:      new("Write"),
 							Arguments: "",
 						},
 					}}},
@@ -64,7 +64,7 @@ func TestBuildOpenAIChunk(t *testing.T) {
 				Object:  "chat.completion.chunk",
 				Created: 123,
 				Model:   "",
-				Choices: []openAIChoice{{Index: 0, Delta: openAIDelta{Content: stringPtr("hello")}}},
+				Choices: []openAIChoice{{Index: 0, Delta: openAIDelta{Content: new("hello")}}},
 			},
 		},
 		{
@@ -77,7 +77,7 @@ func TestBuildOpenAIChunk(t *testing.T) {
 				Object:  "chat.completion.chunk",
 				Created: 123,
 				Model:   "",
-				Choices: []openAIChoice{{Index: 0, Delta: openAIDelta{Content: stringPtr("hello")}}},
+				Choices: []openAIChoice{{Index: 0, Delta: openAIDelta{Content: new("hello")}}},
 			},
 		},
 		{
@@ -109,7 +109,7 @@ func TestBuildOpenAIChunk(t *testing.T) {
 				Object:  "chat.completion.chunk",
 				Created: 123,
 				Model:   "",
-				Choices: []openAIChoice{{Index: 0, Delta: openAIDelta{ReasoningContent: stringPtr("step by step")}}},
+				Choices: []openAIChoice{{Index: 0, Delta: openAIDelta{ReasoningContent: new("step by step")}}},
 			},
 		},
 		{
@@ -122,7 +122,7 @@ func TestBuildOpenAIChunk(t *testing.T) {
 				Object:  "chat.completion.chunk",
 				Created: 123,
 				Model:   "",
-				Choices: []openAIChoice{{Index: 0, FinishReason: stringPtr("tool_calls")}},
+				Choices: []openAIChoice{{Index: 0, FinishReason: new("tool_calls")}},
 			},
 		},
 		{
@@ -141,7 +141,7 @@ func TestBuildOpenAIChunk(t *testing.T) {
 				Object:  "chat.completion.chunk",
 				Created: 123,
 				Model:   "",
-				Choices: []openAIChoice{{Index: 0, FinishReason: stringPtr("stop")}},
+				Choices: []openAIChoice{{Index: 0, FinishReason: new("stop")}},
 			},
 		},
 		{

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"strings"
 	"sync"
@@ -289,9 +290,7 @@ func finishRequestJournal(r *http.Request, w *TracedResponseWriter, duration tim
 	e.Timestamp = time.Now()
 	e.ClientIP, e.UserAgent = ClientIP(r), r.UserAgent()
 	metadata := map[string]interface{}{}
-	for k, v := range e.Metadata {
-		metadata[k] = v
-	}
+	maps.Copy(metadata, e.Metadata)
 	metadata["http_status"], metadata["path"], metadata["method"] = w.StatusCode, r.URL.Path, r.Method
 	metadata["trace_id"] = GetTraceID(r.Context())
 	if !w.FirstWriteAt().IsZero() {
@@ -320,17 +319,13 @@ func finishRequestJournal(r *http.Request, w *TracedResponseWriter, duration tim
 		box.mu.Lock()
 		metadata["upstream_http_phase_samples"] = box.httpPhaseSamples
 		phaseSnapshot := make(map[string]int64, len(box.httpPhases))
-		for k, v := range box.httpPhases {
-			phaseSnapshot[k] = v
-		}
+		maps.Copy(phaseSnapshot, box.httpPhases)
 		metadata["upstream_http_phases_sum"] = phaseSnapshot
 		metadata["retry_wait_ms"] = box.retryWaitMS
 		metadata["queue_wait_ms"] = box.queueWaitMS
 		metadata["upstream_attempts"] = box.attempts
 		metadata["account_switches"] = box.switches
-		for key, value := range box.annotations {
-			metadata[key] = value
-		}
+		maps.Copy(metadata, box.annotations)
 		box.mu.Unlock()
 	}
 	e.Metadata = metadata

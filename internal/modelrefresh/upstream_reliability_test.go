@@ -134,8 +134,7 @@ func TestCredentialRotationIsSharedAcrossClientInstances(t *testing.T) {
 			var wg sync.WaitGroup
 			errs := make(chan error, len(functions))
 			for _, f := range functions {
-				wg.Add(1)
-				go func() { defer wg.Done(); errs <- f() }()
+				wg.Go(func() { ; errs <- f() })
 			}
 			wg.Wait()
 			close(errs)

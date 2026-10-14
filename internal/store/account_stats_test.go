@@ -94,7 +94,7 @@ func TestIncrementAccountStatsOperationIsDurablyIdempotent(t *testing.T) {
 	acc := &Account{AccountType: "qoder", Enabled: true}
 	testutil.NoError(t, s.CreateAccount(ctx, acc))
 	completed := time.Date(2026, 3, 5, 23, 59, 59, 0, time.UTC)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		err := s.IncrementAccountStatsOperation(ctx, acc.ID, 42, 1, "request-123", completed)
 		testutil.CheckNoError(t, err)
 	}

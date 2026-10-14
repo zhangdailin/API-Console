@@ -129,7 +129,7 @@ func TestChangeEmitter_CoalescesBurstWithoutGoroutinePerWrite(t *testing.T) {
 	acc := &Account{AccountType: "workbuddy", Token: "t", Enabled: true}
 	testutil.NoError(t, s.CreateAccount(context.Background(), acc), "CreateAccount: %v")
 	before := runtime.NumGoroutine()
-	for i := 0; i < 500; i++ {
+	for i := range 500 {
 		acc.Weight = i + 1
 		if err := s.UpdateAccount(context.Background(), acc); err != nil {
 			close(release)

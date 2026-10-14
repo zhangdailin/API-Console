@@ -78,10 +78,8 @@ func TestPooledJSONEncodingPreservesWireAndOwnership(t *testing.T) {
 		map[string]interface{}{"large": string(bytes.Repeat([]byte("x"), 70000))},
 	}
 	var wg sync.WaitGroup
-	for i := 0; i < 32; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 32 {
+		wg.Go(func() {
 			for _, value := range values {
 				raw, err := json.Marshal(value)
 				if err != nil {
@@ -96,7 +94,7 @@ func TestPooledJSONEncodingPreservesWireAndOwnership(t *testing.T) {
 				_, _ = marshalEncodedBody(map[string]interface{}{"other": "reuses buffer"})
 				testutil.CheckFalse(t, !bytes.Equal(got, EncodeBody(raw)), "returned body aliases pool")
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	_, err := marshalEncodedBody(make(chan int))

@@ -116,12 +116,10 @@ func isUpstreamFailure(err error) bool {
 	if errors.As(err, &typed) || errors.As(err, &synthetic) || errors.As(err, &oauth) {
 		return true
 	}
-	var urlErr *url.Error
-	if errors.As(err, &urlErr) {
+	if _, ok := errors.AsType[*url.Error](err); ok {
 		return true
 	}
-	var netErr net.Error
-	if errors.As(err, &netErr) {
+	if _, ok := errors.AsType[net.Error](err); ok {
 		return true
 	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) ||
@@ -141,10 +139,7 @@ func upstreamRetryAfterSeconds(err error) int {
 		return 0
 	}
 	if value := parseRetryAfterHeader(typed.header.Get("Retry-After"), time.Now()); value > 0 {
-		seconds := int(value.Round(time.Second) / time.Second)
-		if seconds < 1 {
-			seconds = 1
-		}
+		seconds := max(int(value.Round(time.Second)/time.Second), 1)
 		return seconds
 	}
 	if info := parseRateLimitInfo(typed.header); info != nil {

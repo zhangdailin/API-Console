@@ -97,7 +97,7 @@ func (mc *MessageContent) UnmarshalJSON(data []byte) error {
 // trimLeadingJSONSpace returns data without its leading JSON whitespace. It is a
 // subslice, not a copy, so the dispatch above costs nothing.
 func trimLeadingJSONSpace(data []byte) []byte {
-	for i := 0; i < len(data); i++ {
+	for i := range data {
 		switch data[i] {
 		case ' ', '\t', '\n', '\r':
 			continue

@@ -95,7 +95,7 @@ func TestManagerUnhealthyNodeSkipped(t *testing.T) {
 	}
 	m := NewManager(cfg)
 	m.FeedbackOutcome("bad", OutcomeServerError)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		lease, err := m.Acquire(context.Background(), "cli", "acct-3")
 		testutil.Falsef(t, err != nil, "acquire %d failed: %v", i, err)
 		testutil.NotEqual(t, lease.NodeID, "bad")

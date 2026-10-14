@@ -95,12 +95,10 @@ func TestTeamCooldownNoteKeepsLongest(t *testing.T) {
 func TestTeamCooldownConcurrentNote(t *testing.T) {
 	registry := newTeamCooldownRegistry()
 	var wg sync.WaitGroup
-	for i := 0; i < 50; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 50 {
+		wg.Go(func() {
 			registry.Note(RateLimitScopeRPS, "team-conc", "grok-4.5", time.Second)
-		}()
+		})
 	}
 	wg.Wait()
 	remaining := registry.RetryAfterFor(RateLimitScopeRPS, "team-conc", "grok-4.5")

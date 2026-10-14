@@ -37,13 +37,11 @@ func TestConcurrentModelDefaultsHaveOneWinnerPerChannel(t *testing.T) {
 	start := make(chan struct{})
 	failures := make(chan error, 8)
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for i := range 8 {
+		wg.Go(func() {
 			<-start
 			failures <- s.CreateModel(t.Context(), &Model{Channel: "workbuddy", ModelID: fmt.Sprintf("m-%d", i), IsDefault: true})
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()

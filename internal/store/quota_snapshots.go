@@ -19,10 +19,10 @@ type QoderQuotaSnapshot struct {
 	PaidPlan       bool      `json:"paid_plan,omitempty"`
 	Unit           string    `json:"unit,omitempty"`
 	UpgradeURL     string    `json:"upgrade_url,omitempty"`
-	ResetAt        time.Time `json:"reset_at,omitempty"`
-	PeriodEnd      time.Time `json:"period_end,omitempty"`
+	ResetAt        time.Time `json:"reset_at"`
+	PeriodEnd      time.Time `json:"period_end"`
 	LastKnownLimit float64   `json:"last_known_limit,omitempty"`
-	SyncedAt       time.Time `json:"synced_at,omitempty"`
+	SyncedAt       time.Time `json:"synced_at"`
 }
 
 // ResyncAt reports when the snapshot should be refreshed again. A quota that is
@@ -47,11 +47,11 @@ type WorkBuddyQuotaSnapshot struct {
 	Used              float64   `json:"used,omitempty"`
 	PackageRemaining  float64   `json:"package_remaining,omitempty"`
 	LastConsumedUnits int       `json:"last_consumed_units,omitempty"`
-	ResetAt           time.Time `json:"reset_at,omitempty"`
-	PeriodEnd         time.Time `json:"period_end,omitempty"`
+	ResetAt           time.Time `json:"reset_at"`
+	PeriodEnd         time.Time `json:"period_end"`
 	PackageName       string    `json:"package_name,omitempty"`
 	Unit              string    `json:"unit,omitempty"`
-	SyncedAt          time.Time `json:"synced_at,omitempty"`
+	SyncedAt          time.Time `json:"synced_at"`
 }
 
 // ResyncAt reports when the quota snapshot needs refreshing. The cycle reset is
@@ -76,20 +76,20 @@ type GrokQuotaWindow struct {
 	HasLimit     bool      `json:"has_limit,omitempty"`
 	HasRemaining bool      `json:"has_remaining,omitempty"`
 	HasUsage     bool      `json:"has_usage,omitempty"`
-	ResetAt      time.Time `json:"reset_at,omitempty"`
+	ResetAt      time.Time `json:"reset_at"`
 }
 
 // GrokBillingSnapshot stores official Build weekly/monthly windows only.
 type GrokBillingSnapshot struct {
-	Weekly   GrokQuotaWindow `json:"weekly,omitempty"`
-	Monthly  GrokQuotaWindow `json:"monthly,omitempty"`
-	SyncedAt time.Time       `json:"synced_at,omitempty"`
+	Weekly   GrokQuotaWindow `json:"weekly"`
+	Monthly  GrokQuotaWindow `json:"monthly"`
+	SyncedAt time.Time       `json:"synced_at"`
 	Source   string          `json:"source,omitempty"`
 	// NextProbeAt serializes probes after an exhausted paid period ends. Before
 	// the first claim PeriodEnd is the due time; each claim advances this by the
 	// bounded retry interval so concurrent selectors cannot hammer billing.
-	NextProbeAt time.Time `json:"next_probe_at,omitempty"`
-	LastProbeAt time.Time `json:"last_probe_at,omitempty"`
+	NextProbeAt time.Time `json:"next_probe_at"`
+	LastProbeAt time.Time `json:"last_probe_at"`
 }
 
 const GrokPaidQuotaProbeInterval = 15 * time.Minute
@@ -116,10 +116,10 @@ func (b GrokBillingSnapshot) PeriodEnd() time.Time {
 // billing. They can be useful for cooldown and diagnostics but must never be
 // rendered as a paid-plan balance.
 type GrokRateLimitSnapshot struct {
-	Requests   GrokQuotaWindow `json:"requests,omitempty"`
-	Tokens     GrokQuotaWindow `json:"tokens,omitempty"`
+	Requests   GrokQuotaWindow `json:"requests"`
+	Tokens     GrokQuotaWindow `json:"tokens"`
 	Model      string          `json:"model,omitempty"`
-	ObservedAt time.Time       `json:"observed_at,omitempty"`
+	ObservedAt time.Time       `json:"observed_at"`
 }
 
 // GrokFreeQuotaSnapshot is the Free allowance window the upstream CONFIRMED by
@@ -131,6 +131,6 @@ type GrokFreeQuotaSnapshot struct {
 	Used        float64   `json:"used,omitempty"`
 	Limit       float64   `json:"limit,omitempty"`
 	HasLimit    bool      `json:"has_limit,omitempty"`
-	ResetAt     time.Time `json:"reset_at,omitempty"`
-	ConfirmedAt time.Time `json:"confirmed_at,omitempty"`
+	ResetAt     time.Time `json:"reset_at"`
+	ConfirmedAt time.Time `json:"confirmed_at"`
 }

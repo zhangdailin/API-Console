@@ -85,13 +85,7 @@ func (b *readIdleBody) Close() error {
 }
 
 func (b *readIdleBody) watch() {
-	interval := b.idle / 4
-	if interval < 10*time.Millisecond {
-		interval = 10 * time.Millisecond
-	}
-	if interval > time.Second {
-		interval = time.Second
-	}
+	interval := min(max(b.idle/4, 10*time.Millisecond), time.Second)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {

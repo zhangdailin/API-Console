@@ -59,11 +59,8 @@ func TestSharedRefusalJitterIsBounded(t *testing.T) {
 	t.Parallel()
 
 	for _, delay := range []time.Duration{0, -time.Second, 100 * time.Millisecond, time.Second, 30 * time.Second, time.Hour} {
-		limit := delay / 5
-		if limit > 5*time.Second {
-			limit = 5 * time.Second
-		}
-		for i := 0; i < 200; i++ {
+		limit := min(delay/5, 5*time.Second)
+		for range 200 {
 			got := sharedRefusalJitter(delay)
 			testutil.Falsef(t, got < 0, "jitter(%v) = %v, want non-negative", delay, got)
 			if limit <= 0 {

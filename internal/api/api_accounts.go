@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
@@ -204,9 +205,7 @@ func (a *API) HandleAccountByID(w http.ResponseWriter, r *http.Request) {
 				"usage_total":    account.UsageTotal,
 				"quota_reset_at": account.QuotaResetAt,
 			}
-			for k, v := range buildQuotaResponseFields(account) {
-				resp[k] = v
-			}
+			maps.Copy(resp, buildQuotaResponseFields(account))
 			util.WriteJSON(w, resp)
 			return
 		}
@@ -221,10 +220,7 @@ func (a *API) HandleAccountByID(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if next, ok := a.checkNextAllowed[id]; ok && !next.IsZero() && now.Before(next) {
-				retryAfter := int(next.Sub(now).Seconds())
-				if retryAfter < 1 {
-					retryAfter = 1
-				}
+				retryAfter := max(int(next.Sub(now).Seconds()), 1)
 				a.checkMu.Unlock()
 				w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
 				http.Error(w, "account check backoff", http.StatusTooManyRequests)

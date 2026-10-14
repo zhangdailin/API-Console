@@ -12,9 +12,7 @@ func TestSetConfigIsSafeForConcurrentReaders(t *testing.T) {
 	var readers sync.WaitGroup
 	done := make(chan struct{})
 	for range 8 {
-		readers.Add(1)
-		go func() {
-			defer readers.Done()
+		readers.Go(func() {
 			for {
 				select {
 				case <-done:
@@ -27,7 +25,7 @@ func TestSetConfigIsSafeForConcurrentReaders(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 	for range 100 {
 		h.SetConfig(&config.Config{RequestTimeout: 2})

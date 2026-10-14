@@ -259,7 +259,7 @@ func (m *Manager) phase(op *Operation, phase, message string) error {
 	return m.save(op)
 }
 func checksumDigest(text, name string) (string, error) {
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		parts := strings.Fields(line)
 		if len(parts) != 2 || strings.TrimPrefix(parts[1], "*") != name {
 			continue
@@ -352,7 +352,7 @@ func (m *Manager) perform(ctx context.Context, op *Operation) error {
 			return e
 		}
 		values := map[string]string{}
-		for _, line := range strings.Split(info.String(), "\n") {
+		for line := range strings.SplitSeq(info.String(), "\n") {
 			if k, v, ok := strings.Cut(line, "="); ok {
 				values[k] = strings.TrimSpace(v)
 			}

@@ -352,10 +352,7 @@ func (a *Aggregator) Channels(ctx context.Context, from, to time.Time) ([]string
 			}
 		}
 		for start := 0; start < len(candidates); start += 256 {
-			end := start + 256
-			if end > len(candidates) {
-				end = len(candidates)
-			}
+			end := min(start+256, len(candidates))
 			pipe := a.client.Pipeline()
 			checks := make([]*redis.BoolCmd, 0, end-start)
 			for _, candidate := range candidates[start:end] {

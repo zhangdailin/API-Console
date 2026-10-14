@@ -3,6 +3,7 @@ package qoder
 import (
 	"crypto/sha256"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -357,8 +358,8 @@ func businessName(req upstream.UpstreamRequest) string {
 }
 
 func latestUserText(req upstream.UpstreamRequest) string {
-	for i := len(req.Messages) - 1; i >= 0; i-- {
-		msg := req.Messages[i]
+	for _, msg := range slices.Backward(req.Messages) {
+
 		if !strings.EqualFold(strings.TrimSpace(msg.Role), "user") {
 			continue
 		}

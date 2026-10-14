@@ -13,7 +13,7 @@ func versionParts(v string) []string {
 	if p == nil {
 		return nil
 	}
-	for _, id := range strings.Split(p[4], ".") {
+	for id := range strings.SplitSeq(p[4], ".") {
 		if len(id) > 1 && id[0] == '0' && numeric(id) {
 			return nil
 		}

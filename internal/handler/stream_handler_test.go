@@ -289,7 +289,7 @@ func TestStreamHandler_CoalescesNonTextFlushes(t *testing.T) {
 	testutil.Equal(t, rec.flushes, 3)
 
 	// The remaining deferred thinking frames below the threshold add no flush.
-	for i := 0; i < sseDeferredFlushFrameThreshold-1; i++ {
+	for range sseDeferredFlushFrameThreshold - 1 {
 		writeFrame("content_block_delta", thinkingData)
 	}
 	testutil.Equal(t, rec.flushes, 3)

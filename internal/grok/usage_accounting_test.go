@@ -13,7 +13,7 @@ func TestAnthropicStreamMessageStartCarriesEstimatedInput(t *testing.T) {
 	stream := "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":1}}\n\ndata: [DONE]\n\n"
 	var out bytes.Buffer
 	testutil.NoError(t, translateOpenAIChatStreamToAnthropicWithInput(&out, strings.NewReader(stream), "grok-4.6", 7))
-	first := strings.Split(out.String(), "\n\n")[0]
+	first, _, _ := strings.Cut(out.String(), "\n\n")
 	testutil.MustContainAll(t, first, `"input_tokens":7`, `"cache_read_input_tokens":0`)
 }
 

@@ -162,10 +162,7 @@ func boundedModelRefreshWorkers(total int, concurrency int) int {
 	if total <= 0 {
 		return 0
 	}
-	workers := normalizeModelRefreshConcurrency(concurrency)
-	if workers > total {
-		workers = total
-	}
+	workers := min(normalizeModelRefreshConcurrency(concurrency), total)
 	return workers
 }
 

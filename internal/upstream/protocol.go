@@ -2,6 +2,7 @@ package upstream
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 )
 
@@ -79,9 +80,7 @@ func (r UpstreamRequest) ChatResponseFormat() map[string]interface{} {
 		return nil
 	}
 	out := make(map[string]interface{}, len(f))
-	for k, v := range f {
-		out[k] = v
-	}
+	maps.Copy(out, f)
 	if f["type"] == "json_schema" && f["json_schema"] == nil {
 		schema := make(map[string]interface{})
 		for _, key := range []string{"name", "schema", "strict", "description"} {

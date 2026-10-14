@@ -104,12 +104,10 @@ func readBoundedResponse(resp *http.Response) ([]byte, http.Header) {
 // upstreamStatus reads HTTP evidence from typed failures, including OAuth
 // failures and wrapped synthetic cooldowns. Local prose carries no status.
 func upstreamStatus(err error) int {
-	var upstream *grokUpstreamError
-	if errors.As(err, &upstream) {
+	if upstream, ok := errors.AsType[*grokUpstreamError](err); ok {
 		return upstream.status
 	}
-	var oauth *cliOAuthError
-	if errors.As(err, &oauth) {
+	if oauth, ok := errors.AsType[*cliOAuthError](err); ok {
 		return oauth.status
 	}
 	return 0

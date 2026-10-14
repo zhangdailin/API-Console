@@ -119,8 +119,8 @@ func anthropicMessageID(value string) string {
 	if trimmed == "" {
 		return "msg_" + util.RandomHex(12)
 	}
-	if strings.HasPrefix(trimmed, "chatcmpl_") {
-		return "msg_" + strings.TrimPrefix(trimmed, "chatcmpl_")
+	if after, ok := strings.CutPrefix(trimmed, "chatcmpl_"); ok {
+		return "msg_" + after
 	}
 	return trimmed
 }
@@ -177,9 +177,7 @@ func anthropicUsageFromOpenAI(usage map[string]interface{}) map[string]interface
 
 func (h *Handler) serveAnthropicMessageStream(w http.ResponseWriter, req *http.Request, model string, inputTokens int) {
 	h.withChatStream(req, func(status int, header http.Header, reader io.Reader) {
-		for key, values := range header {
-			w.Header()[key] = values
-		}
+		maps.Copy(w.Header(), header)
 		if status < 200 || status >= 300 {
 			body, _ := io.ReadAll(reader)
 			writeAnthropicUpstreamError(w, status, string(body))

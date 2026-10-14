@@ -207,14 +207,12 @@ func main() {
 	var wg sync.WaitGroup
 	started := time.Now()
 	for i := 0; i < min(*concurrency, *n); i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for j := range jobs {
 				rows[j] = probe(client, endpoint, key, *model, *effort, *budget, *timeout)
 				rows[j].Index = j
 			}
-		}()
+		})
 	}
 	for j := range rows {
 		jobs <- j

@@ -2,6 +2,7 @@ package grok
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 
 	"encoding/json"
@@ -124,9 +125,7 @@ func buildPayloadForAccount(immutable map[string]interface{}, acc *store.Account
 
 func replacePayload(dst map[string]interface{}, src map[string]interface{}) {
 	clear(dst)
-	for key, value := range src {
-		dst[key] = value
-	}
+	maps.Copy(dst, src)
 }
 
 // prepareBuildPayload applies account capabilities without changing the source

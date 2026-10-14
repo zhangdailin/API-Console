@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"strconv"
 	"strings"
 	"sync"
@@ -288,9 +289,7 @@ func (t *RedisConnTracker) GetCounts(accountIDs []int64) map[int64]int64 {
 		t.countMu.Unlock()
 		return counts, nil
 	})
-	for id, count := range value.(map[int64]int64) {
-		result[id] = count
-	}
+	maps.Copy(result, value.(map[int64]int64))
 	return result
 }
 
@@ -351,7 +350,7 @@ func (t *RedisConnTracker) acquire(accountID, limit int64) bool {
 	var lease *redisConnLease
 	var result int64
 	var err error
-	for attempt := 0; attempt < 2; attempt++ {
+	for range 2 {
 		lease = &redisConnLease{id: newRedisConnLeaseID(), stop: make(chan struct{}), done: make(chan struct{})}
 		now := time.Now()
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

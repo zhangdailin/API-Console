@@ -92,7 +92,7 @@ func TestRestrictionsScopedCooldownAndPacing(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		testutil.NoError(t, waitScopedRateLimit(ctx, ProviderBuild, "unlimited-default", "m", 0))
 	}
 	testutil.NoError(t, waitScopedRateLimit(ctx, ProviderBuild, "paced-account-a", "m", 0.1))

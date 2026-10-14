@@ -28,7 +28,7 @@ func (h *hijackableRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 func TestGenerateTraceID(t *testing.T) {
 	t.Run("generates unique IDs", func(t *testing.T) {
 		ids := make(map[string]bool)
-		for i := 0; i < 1000; i++ {
+		for range 1000 {
 			id := GenerateTraceID()
 			testutil.CheckFalsef(t, ids[id], "duplicate trace ID generated: %s", id)
 			ids[id] = true

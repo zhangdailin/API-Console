@@ -69,8 +69,7 @@ func ReadBoundedJSONBody(w http.ResponseWriter, r *http.Request) ([]byte, error)
 }
 
 func writeJSONBodyError(w http.ResponseWriter, err error) {
-	var maxErr *http.MaxBytesError
-	if errors.As(err, &maxErr) {
+	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 		WriteErrorCode(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body exceeds the configured limit")
 		return
 	}

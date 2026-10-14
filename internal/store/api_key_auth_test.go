@@ -57,7 +57,7 @@ func TestAuthorizeApiKeyPolicyAndRPM(t *testing.T) {
 	}
 	testutil.NoError(t, s.CreateApiKey(context.Background(), key), "CreateApiKey() error = %v")
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		got, err := s.AuthorizeApiKey(context.Background(), raw)
 		testutil.Falsef(t, err != nil || got == nil || len(got.AllowedModels) != 1 || got.AllowedModels[0] != "grok-4.6", "AuthorizeApiKey(%d) = %#v, %v", i, got, err)
 	}

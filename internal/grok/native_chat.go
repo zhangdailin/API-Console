@@ -708,8 +708,7 @@ func (h *Handler) retryWithAccountSwitchLimit(ctx context.Context, sess *chatAcc
 
 		sess.Close()
 		pace := switchPace
-		var cooldown *syntheticCooldownError
-		if errors.As(err, &cooldown) {
+		if _, ok := errors.AsType[*syntheticCooldownError](err); ok {
 			// This attempt never reached upstream. Rotate immediately; sleeping
 			// would serialize the same-team skip and hide the cooldown outcome.
 			pace = 0

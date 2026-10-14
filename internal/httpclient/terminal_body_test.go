@@ -50,7 +50,7 @@ func TestTerminalDrainPreservesHTTP1ConnectionReuse(t *testing.T) {
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport}
 	var reused bool
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		ctx := httptrace.WithClientTrace(t.Context(), &httptrace.ClientTrace{GotConn: func(info httptrace.GotConnInfo) { reused = info.Reused }})
 		r, _ := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
 		resp, err := client.Do(r)

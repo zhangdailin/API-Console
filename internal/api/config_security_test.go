@@ -67,7 +67,7 @@ func TestAdminPasswordEntrancesShareFailureBudget(t *testing.T) {
 	a, _, _ := setupConfigAPI(t)
 	credentials := func() (string, string) { return a.ConfigSnapshot().AdminPass, a.ConfigSnapshot().AdminToken }
 	protected := middleware.SessionAuthDynamic(credentials, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) }, a.AdminAuthenticationLimiter())
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		out := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", "/api/config/list", nil)
 		if i%2 == 0 {

@@ -143,7 +143,7 @@ func TestSharedStreamsReuseHTTP1AfterDone(t *testing.T) {
 			} else {
 				client = cline.NewFromAccount(&store.Account{ClineAccessToken: "test-access", ClineExpiresAt: time.Now().Add(time.Hour), ClineModelIDs: []string{`{"id":"model-a"}`}}, cfg)
 			}
-			for i := 0; i < 2; i++ {
+			for i := range 2 {
 				text := ""
 				ctx, cancel := context.WithCancel(context.Background())
 				err := client.SendRequestWithPayload(ctx, upstream.UpstreamRequest{Model: "model-a", Messages: []prompt.Message{{Role: "user", Content: prompt.MessageContent{Text: "hi"}}}}, func(event upstream.SSEMessage) {

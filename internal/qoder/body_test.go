@@ -45,7 +45,7 @@ func TestEncodeBodyMatchesPrivateAlphabet(t *testing.T) {
 func TestBodyCodecRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	for length := 0; length < 200; length++ {
+	for length := range 200 {
 		raw := make([]byte, length)
 		for i := range raw {
 			raw[i] = byte(i * 7 % 251)

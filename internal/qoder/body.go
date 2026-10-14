@@ -73,7 +73,7 @@ func EncodeBody(raw []byte) []byte {
 	encoded := make([]byte, bodyEncoding.EncodedLen(len(raw)))
 	bodyEncoding.Encode(encoded, raw)
 	q := len(encoded) / 3
-	for i := 0; i < q; i++ {
+	for i := range q {
 		encoded[i], encoded[len(encoded)-q+i] = encoded[len(encoded)-q+i], encoded[i]
 	}
 	return encoded

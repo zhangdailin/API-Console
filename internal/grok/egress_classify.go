@@ -57,8 +57,7 @@ func ClassifyUpstreamError(err error) UpstreamErrorKind {
 	if err == nil {
 		return UpstreamErrorUnknown
 	}
-	var typed *grokUpstreamError
-	if errors.As(err, &typed) {
+	if typed, ok := errors.AsType[*grokUpstreamError](err); ok {
 		return ClassifyUpstreamResponse(typed.status, typed.header, []byte(typed.body))
 	}
 	return UpstreamErrorUnknown

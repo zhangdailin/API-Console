@@ -2,6 +2,7 @@ package grok
 
 import (
 	"fmt"
+	"maps"
 	"orchids-api/internal/chatwire"
 	"orchids-api/internal/responses"
 	"orchids-api/internal/util"
@@ -189,9 +190,7 @@ func normalizeChatResponseFormat(format map[string]interface{}) map[string]inter
 	if strings.EqualFold(strings.TrimSpace(fmt.Sprint(copy["type"])), "json_schema") {
 		if nested, ok := copy["json_schema"].(map[string]interface{}); ok {
 			flattened := map[string]interface{}{"type": "json_schema"}
-			for key, value := range nested {
-				flattened[key] = value
-			}
+			maps.Copy(flattened, nested)
 			copy = flattened
 		}
 	}

@@ -382,11 +382,11 @@ func utlsProfileForUserAgent(userAgent string) utls.ClientHelloID {
 // chromeMajorFromUserAgent extracts the major version from a Chrome UA.
 func chromeMajorFromUserAgent(userAgent string) int {
 	marker := "Chrome/"
-	index := strings.Index(userAgent, marker)
-	if index < 0 {
+	_, after, ok := strings.Cut(userAgent, marker)
+	if !ok {
 		return 0
 	}
-	rest := userAgent[index+len(marker):]
+	rest := after
 	end := 0
 	for end < len(rest) && rest[end] >= '0' && rest[end] <= '9' {
 		end++

@@ -61,16 +61,14 @@ func TestClientConcurrentFirstUseRefreshesOnlyOnce(t *testing.T) {
 	const callers = 24
 	var wg sync.WaitGroup
 	errs := make(chan error, callers)
-	for i := 0; i < callers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range callers {
+		wg.Go(func() {
 			token, err := client.ensureAccessToken(context.Background())
 			if err == nil && token != "new-access" {
 				err = fmt.Errorf("token = %q", token)
 			}
 			errs <- err
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)

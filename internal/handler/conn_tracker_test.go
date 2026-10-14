@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -34,9 +35,7 @@ type spyConnTracker struct {
 
 func newSpyConnTracker(counts map[int64]int64) *spyConnTracker {
 	cloned := make(map[int64]int64, len(counts))
-	for id, count := range counts {
-		cloned[id] = count
-	}
+	maps.Copy(cloned, counts)
 	return &spyConnTracker{counts: cloned}
 }
 
@@ -353,7 +352,7 @@ func TestTryAcquireTrackedAccount_DoesNotAdmitRequestPastLimit(t *testing.T) {
 	tracker := loadbalancer.NewMemoryConnTracker()
 	h := &Handler{connTracker: tracker}
 	acc := &store.Account{ID: 42, AccountType: "workbuddy"}
-	for i := 0; i < limit; i++ {
+	for i := range limit {
 		_, ok := h.tryAcquireTrackedAccount(acc)
 		testutil.Falsef(t, !ok, "acquire %d unexpectedly rejected", i+1)
 	}

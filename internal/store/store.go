@@ -82,7 +82,7 @@ type Account struct {
 	// it, mirroring the Grok quality guard.
 	QualityFailures int `json:"quality_failures,omitempty"`
 	// QualityCooldownUntil parks a credential whose responses are degraded.
-	QualityCooldownUntil time.Time `json:"quality_cooldown_until,omitempty"`
+	QualityCooldownUntil time.Time `json:"quality_cooldown_until"`
 	// QualityReason belongs to the quality verdict, not the HTTP status message.
 	QualityReason string `json:"quality_reason,omitempty"`
 	// StatusMessage explains StatusCode in operator terms. A bare "401" cannot
@@ -95,7 +95,7 @@ type Account struct {
 	// distinguish "never checked" from "checked and healthy": LastAttempt and the
 	// quota snapshot are reset by ordinary quota recovery, so they cannot tell a
 	// newly added account from a verified one.
-	VerifiedAt time.Time `json:"verified_at,omitempty"`
+	VerifiedAt time.Time `json:"verified_at"`
 	// ClearVerifiedAt asks the store to drop the stored verdict timestamp when a
 	// credential is replaced. It exists because a zero VerifiedAt is
 	// indistinguishable from "this partial update did not touch the field".
@@ -110,7 +110,7 @@ type Account struct {
 	CredentialType    string    `json:"credential_type,omitempty"`
 	OAuthAccessToken  string    `json:"oauth_access_token,omitempty"`
 	OAuthRefreshToken string    `json:"oauth_refresh_token,omitempty"`
-	OAuthExpiresAt    time.Time `json:"oauth_expires_at,omitempty"`
+	OAuthExpiresAt    time.Time `json:"oauth_expires_at"`
 	TeamID            string    `json:"team_id,omitempty"`
 	// GrokProvider identifies the supported xAI product boundary: Build OAuth.
 	GrokProvider string `json:"grok_provider,omitempty"`
@@ -119,16 +119,16 @@ type Account struct {
 	// account supports every model.
 	GrokModels         []string               `json:"grok_models,omitempty"`
 	GrokModelCatalog   []modelcatalog.Profile `json:"grok_model_catalog,omitempty"`
-	GrokModelsSyncedAt time.Time              `json:"grok_models_synced_at,omitempty"`
+	GrokModelsSyncedAt time.Time              `json:"grok_models_synced_at"`
 	// GrokBilling contains only official xAI Build billing information. It is
 	// deliberately separate from GrokRateLimits, whose request/token headers
 	// are short-lived throttling windows rather than subscription allowance.
-	GrokBilling    GrokBillingSnapshot   `json:"grok_billing,omitempty"`
-	GrokRateLimits GrokRateLimitSnapshot `json:"grok_rate_limits,omitempty"`
+	GrokBilling    GrokBillingSnapshot   `json:"grok_billing"`
+	GrokRateLimits GrokRateLimitSnapshot `json:"grok_rate_limits"`
 	// GrokFreeQuota stores the Free window the upstream itself reported when it
 	// refused a request for having spent the included free usage. Confirmed numbers
 	// take precedence over an estimated Free window.
-	GrokFreeQuota GrokFreeQuotaSnapshot `json:"grok_free_quota,omitempty"`
+	GrokFreeQuota GrokFreeQuotaSnapshot `json:"grok_free_quota"`
 	// ModelCooldowns records a per-model, per-account cooldown. A model the
 	// upstream throttled must not take the whole account out of the pool: the
 	// other models of the same account are still usable, so the verdict is scoped
@@ -155,7 +155,7 @@ type Account struct {
 	// redact it without touching other channels.
 	WorkBuddyAccessToken  string    `json:"workbuddy_access_token,omitempty"`
 	WorkBuddyRefreshToken string    `json:"workbuddy_refresh_token,omitempty"`
-	WorkBuddyExpiresAt    time.Time `json:"workbuddy_expires_at,omitempty"`
+	WorkBuddyExpiresAt    time.Time `json:"workbuddy_expires_at"`
 	WorkBuddyUID          string    `json:"workbuddy_uid,omitempty"`
 	// ReplaceWorkBuddyCredentials is an explicit write intent. Ordinary full
 	// account updates carry a snapshot and must not overwrite a refresh token
@@ -165,12 +165,12 @@ type Account struct {
 	// whitelist snapshot. An empty snapshot means "not synced yet", not "the
 	// account supports every model".
 	WorkBuddyModelIDs       []string  `json:"workbuddy_model_ids,omitempty"`
-	WorkBuddyModelsSyncedAt time.Time `json:"workbuddy_models_synced_at,omitempty"`
+	WorkBuddyModelsSyncedAt time.Time `json:"workbuddy_models_synced_at"`
 	// WorkBuddyQuota is the last successful credit-meter snapshot. The generic
 	// UsageLimit/UsageCurrent fields stay authoritative for scheduling; this
 	// keeps the extra detail the meter reports (cycle reset, package label and
 	// the consumption delta the account table shows).
-	WorkBuddyQuota WorkBuddyQuotaSnapshot `json:"workbuddy_quota,omitempty"`
+	WorkBuddyQuota WorkBuddyQuotaSnapshot `json:"workbuddy_quota"`
 
 	// ── Qoder (qoder.com / openapi.qoder.sh) OAuth channel ──
 	//
@@ -183,7 +183,7 @@ type Account struct {
 	// without touching another channel's credential.
 	QoderAccessToken        string    `json:"qoder_access_token,omitempty"`
 	QoderRefreshToken       string    `json:"qoder_refresh_token,omitempty"`
-	QoderExpiresAt          time.Time `json:"qoder_expires_at,omitempty"`
+	QoderExpiresAt          time.Time `json:"qoder_expires_at"`
 	ReplaceQoderCredentials bool      `json:"-"`
 	// QoderMachineID is the 36-character device identity the CLI sends as
 	// Cosy-MachineId / Cosy-MachineToken. It is bound to the credential: the
@@ -211,13 +211,13 @@ type Account struct {
 	// snapshot. An empty snapshot means "not synced yet", not that the account
 	// supports every model.
 	QoderModelIDs       []string  `json:"qoder_model_ids,omitempty"`
-	QoderModelsSyncedAt time.Time `json:"qoder_models_synced_at,omitempty"`
+	QoderModelsSyncedAt time.Time `json:"qoder_models_synced_at"`
 	// QoderQuota is the last successful credit/plan snapshot. The generic
 	// UsageLimit/UsageCurrent fields stay authoritative for scheduling; this keeps
 	// the extra detail the gateway reports (plan tier, the exhausted verdict and
 	// the upgrade link) so the console can explain an account instead of showing
 	// it as broken.
-	QoderQuota QoderQuotaSnapshot `json:"qoder_quota,omitempty"`
+	QoderQuota QoderQuotaSnapshot `json:"qoder_quota"`
 
 	// ── Cline (api.cline.bot) OAuth channel ──
 	//
@@ -230,7 +230,7 @@ type Account struct {
 	// touching another channel's credential.
 	ClineAccessToken  string    `json:"cline_access_token,omitempty"`
 	ClineRefreshToken string    `json:"cline_refresh_token,omitempty"`
-	ClineExpiresAt    time.Time `json:"cline_expires_at,omitempty"`
+	ClineExpiresAt    time.Time `json:"cline_expires_at"`
 	ClineEmail        string    `json:"cline_email,omitempty"`
 	// ClinePlan is the account's subscription tier as the upstream states it.
 	//
@@ -250,7 +250,7 @@ type Account struct {
 	// empty snapshot means "not synced yet", not that the account supports every
 	// model.
 	ClineModelIDs       []string  `json:"cline_model_ids,omitempty"`
-	ClineModelsSyncedAt time.Time `json:"cline_models_synced_at,omitempty"`
+	ClineModelsSyncedAt time.Time `json:"cline_models_synced_at"`
 }
 
 // Qoder quota exhaustion is a capability downgrade when, and only when, the

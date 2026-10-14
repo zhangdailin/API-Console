@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"orchids-api/internal/channel"
 	"orchids-api/internal/chatwire"
@@ -30,8 +31,8 @@ const bridgedResponseProvider = "chat-bridge"
 func responsesChatPath(path string) string {
 	trimmed := strings.TrimRight(strings.TrimSpace(path), "/")
 	for _, suffix := range []string{"/responses/compact", "/responses"} {
-		if strings.HasSuffix(trimmed, suffix) {
-			return strings.TrimSuffix(trimmed, suffix) + "/chat/completions"
+		if before, ok := strings.CutSuffix(trimmed, suffix); ok {
+			return before + "/chat/completions"
 		}
 	}
 	return trimmed
@@ -155,9 +156,7 @@ func ResponsesBridgeHandler(chat http.HandlerFunc, opts BridgeOptions) http.Hand
 		if chatReq.Stream {
 			httpserver.StreamThroughChat(subReq, chat, func(status int, header http.Header, reader io.Reader) {
 				if status < 200 || status >= 300 {
-					for key, values := range header {
-						w.Header()[key] = values
-					}
+					maps.Copy(w.Header(), header)
 					w.WriteHeader(status)
 					_, _ = io.Copy(w, reader)
 					return

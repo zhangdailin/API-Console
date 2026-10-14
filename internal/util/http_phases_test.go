@@ -12,7 +12,7 @@ func TestHTTPPhasesWithoutCaptureAndReusedConnection(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok") }))
 	defer server.Close()
 	client := server.Client()
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		var phases map[string]int64
 		var samples int
 		ctx := WithHTTPPhaseObserver(context.Background(), func(v map[string]int64) { phases = v; samples++ })

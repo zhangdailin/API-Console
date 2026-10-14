@@ -121,7 +121,7 @@ func TestLoginParsingBoundariesAndPreAdmission(t *testing.T) {
 		testutil.Equal(t, w.Code, tc.want)
 	}
 	a, _, _ := setupConfigAPI(t)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		w := httptest.NewRecorder()
 		a.HandleLogin(w, httptest.NewRequest("POST", "/api/login", strings.NewReader(`{"password":"wrong"}`)))
 		testutil.Equal(t, w.Code, 401)

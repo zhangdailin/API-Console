@@ -326,7 +326,7 @@ func (c *Client) runChat(ctx context.Context, url string, body []byte, taskID st
 	}
 
 	attemptCredentials := creds
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := range 2 {
 		if current := c.currentCredentials(); current.HasCredential() {
 			attemptCredentials = current
 		}

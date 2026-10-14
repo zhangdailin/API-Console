@@ -66,7 +66,7 @@ func runWatchdog(state, service, executable, health, id string, restart func(str
 	// Serializes watchdog completion, rollback and any later administrative action.
 	var unlock func()
 	var err error
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		unlock, err = fileLock(filepath.Join(manager.Dir, "operation.lock"))
 		if err == nil {
 			break

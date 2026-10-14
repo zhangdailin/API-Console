@@ -21,7 +21,7 @@ func TestCodexNamespaceBridgeRoundTrip(t *testing.T) {
 			for _, stream := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s%s/stream=%v", provider, prefix, stream), func(t *testing.T) {
 					tools := []interface{}{}
-					for i := 0; i < 7; i++ {
+					for i := range 7 {
 						tools = append(tools, map[string]interface{}{"type": "function", "name": fmt.Sprintf("plain_%d", i), "parameters": map[string]interface{}{"type": "object"}})
 					}
 					for _, ns := range []string{"files", "remote"} {
@@ -69,7 +69,7 @@ func TestCodexNamespaceBridgeRoundTrip(t *testing.T) {
 						_, _ = io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n")
 					}, BridgeOptions{Store: responseStore})
 					payload := map[string]interface{}{"model": "m", "input": "read both", "tools": tools, "stream": stream, "tool_choice": map[string]interface{}{"type": "function", "namespace": "files", "name": "read"}}
-					for turn := 0; turn < 2; turn++ {
+					for range 2 {
 						body, _ := json.Marshal(payload)
 						rec := httptest.NewRecorder()
 						bridge(rec, httptest.NewRequest("POST", "/"+provider+prefix+"/responses", strings.NewReader(string(body))))

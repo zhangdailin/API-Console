@@ -353,7 +353,7 @@ func (a *API) auditCoverage(ctx context.Context) map[string]interface{} {
 
 // streamIDTime converts a Redis Stream ID ("ms-seq") into RFC3339, or null.
 func streamIDTime(id string) interface{} {
-	millis := strings.SplitN(strings.TrimSpace(id), "-", 2)[0]
+	millis, _, _ := strings.Cut(strings.TrimSpace(id), "-")
 	if millis == "" {
 		return nil
 	}

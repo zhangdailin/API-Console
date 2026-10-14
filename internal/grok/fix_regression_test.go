@@ -338,7 +338,7 @@ func TestAccumulatedInputItemsWalksTheContinuationChain(t *testing.T) {
 		{name: "cycle terminates", previous: "resp_a", wantOrder: []string{"current", "a", "b"}},
 		{name: "bound keeps the nearest ancestors", previous: "resp_c0", wantOrder: append([]string{"current"}, func() []string {
 			ids := make([]string, 0, maxStoredInputChainDepth)
-			for i := 0; i < maxStoredInputChainDepth; i++ {
+			for i := range maxStoredInputChainDepth {
 				ids = append(ids, fmt.Sprintf("c%d", i))
 			}
 			return ids

@@ -230,8 +230,7 @@ func asError(err error, target interface{}) bool {
 
 // compactionErrorParam exposes the input index an expansion failure points at.
 func compactionErrorParam(err error) string {
-	var blobErr *compactionBlobError
-	if errors.As(err, &blobErr) {
+	if blobErr, ok := errors.AsType[*compactionBlobError](err); ok {
 		return blobErr.Param()
 	}
 	return "input"

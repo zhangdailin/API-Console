@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/redis/go-redis/v9"
@@ -65,7 +66,7 @@ func (s *redisStore) GetApiKeySecret(ctx context.Context, id int64) (string, err
 // mutateApiKey retries against the current row, preserving concurrent policy,
 // billing-period and secret changes. Row, hash indexes and limit mirror commit together.
 func (s *redisStore) mutateApiKey(ctx context.Context, id int64, change func(*apiKeyRecord) error) error {
-	for attempt := 0; attempt < 8; attempt++ {
+	for range 8 {
 		err := s.client.Watch(ctx, func(tx *redis.Tx) error {
 			raw, err := tx.Get(ctx, s.apiKeysKey(id)).Bytes()
 			if err == redis.Nil {
@@ -144,9 +145,7 @@ func (s *redisStore) PatchApiKey(ctx context.Context, id int64, fields map[strin
 		if err = json.Unmarshal(raw, &current); err != nil {
 			return err
 		}
-		for name, value := range fields {
-			current[name] = value
-		}
+		maps.Copy(current, fields)
 		raw, err = json.Marshal(current)
 		if err != nil {
 			return err

@@ -77,7 +77,7 @@ func sampleHostCPU(raw string, now time.Time) (busy float64, window time.Duratio
 }
 
 func parseCPUTicks(raw string) (total, idle uint64, err error) {
-	line := strings.SplitN(raw, "\n", 2)[0]
+	line, _, _ := strings.Cut(raw, "\n")
 	fields := strings.Fields(line)
 	if len(fields) < 5 || fields[0] != "cpu" {
 		return 0, 0, fmt.Errorf("invalid /proc/stat")
@@ -99,7 +99,7 @@ func parseCPUTicks(raw string) (total, idle uint64, err error) {
 }
 func parseHostMemory(raw string) (used, total uint64) {
 	values := map[string]uint64{}
-	for _, line := range strings.Split(raw, "\n") {
+	for line := range strings.SplitSeq(raw, "\n") {
 		f := strings.Fields(line)
 		if len(f) >= 2 {
 			v, _ := strconv.ParseUint(f[1], 10, 64)
