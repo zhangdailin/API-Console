@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"orchids-api/internal/testutil"
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -51,7 +50,7 @@ func TestLimiterRejectsImmediatelyWhenBusyWithOpenAIError(t *testing.T) {
 		envelope.Error.Code != "server_overloaded" || envelope.Error.Param != nil {
 		t.Fatalf("unexpected OpenAI error envelope: %+v", envelope.Error)
 	}
-	testutil.Equal(t, atomic.LoadInt64(&cl.rejectedReqs), 1)
+	testutil.Equal(t, cl.rejectedReqs.Load(), 1)
 
 	close(release)
 	<-done

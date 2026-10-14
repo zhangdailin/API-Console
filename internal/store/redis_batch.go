@@ -3,7 +3,7 @@ package store
 import (
 	"errors"
 	"runtime"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -43,6 +43,6 @@ func parseSortedInt64s(values []string) []int64 {
 			ids = append(ids, id)
 		}
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	slices.Sort(ids)
 	return ids
 }

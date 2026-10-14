@@ -13,9 +13,8 @@ import (
 // ConcurrencyLimiter limits concurrent request processing using a weighted semaphore.
 // This is more efficient than channel-based semaphore for high-throughput scenarios.
 type ConcurrencyLimiter struct {
-	// 64-bit atomic fields must be at the top for 32-bit alignment
-	activeCount  int64
-	rejectedReqs int64
+	activeCount  atomic.Int64
+	rejectedReqs atomic.Int64
 
 	sem     *semaphore.Weighted
 	timeout time.Duration
@@ -49,9 +48,9 @@ func (cl *ConcurrencyLimiter) Limit(next http.HandlerFunc) http.HandlerFunc {
 		// semaphore consumes connections and goroutines precisely when the server
 		// is overloaded, which can amplify an overload into a broader outage.
 		if !cl.sem.TryAcquire(1) {
-			atomic.AddInt64(&cl.rejectedReqs, 1)
+			cl.rejectedReqs.Add(1)
 			// Log bounded samples; logging every rejected request worsens overload.
-			if count := atomic.LoadInt64(&cl.rejectedReqs); count == 1 || count%1000 == 0 {
+			if count := cl.rejectedReqs.Load(); count == 1 || count%1000 == 0 {
 				slog.Warn("Concurrency limit: Request rejected", "total_rejected", count)
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -61,17 +60,17 @@ func (cl *ConcurrencyLimiter) Limit(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		slog.Debug("Concurrency limit: Slot acquired", "active", atomic.LoadInt64(&cl.activeCount)+1)
+		slog.Debug("Concurrency limit: Slot acquired", "active", cl.activeCount.Load()+1)
 
-		atomic.AddInt64(&cl.activeCount, 1)
+		cl.activeCount.Add(1)
 		reqStart := time.Now()
 
 		defer func() {
 			cl.sem.Release(1)
-			atomic.AddInt64(&cl.activeCount, -1)
+			cl.activeCount.Add(-1)
 
 			duration := time.Since(reqStart)
-			slog.Debug("Concurrency limit: Slot released", "active", atomic.LoadInt64(&cl.activeCount), "duration", duration)
+			slog.Debug("Concurrency limit: Slot released", "active", cl.activeCount.Load(), "duration", duration)
 		}()
 
 		// Use the full concurrency timeout for ordinary request execution.

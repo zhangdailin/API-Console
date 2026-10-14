@@ -11,6 +11,7 @@ import (
 	"context"
 	"log/slog"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -608,7 +609,7 @@ func percentile(values []int64, p float64) int64 {
 		return 0
 	}
 	sorted := append([]int64(nil), values...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	slices.Sort(sorted)
 	rank := int(math.Ceil(float64(len(sorted))*p)) - 1
 	if rank >= len(sorted) {
 		rank = len(sorted) - 1
