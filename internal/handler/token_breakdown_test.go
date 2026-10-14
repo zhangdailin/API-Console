@@ -15,12 +15,12 @@ func TestEstimateInputTokenBreakdown_SplitsSystemContext(t *testing.T) {
 	t.Parallel()
 
 	prompt := "<env>\ndate: 2026-02-12\n</env>\n<rules>\n- concise\n</rules>\n<sys>\nproject context and constraints\n</sys>\n<user>\nhello\n</user>"
-	tools := []interface{}{
-		map[string]interface{}{
+	tools := []any{
+		map[string]any{
 			"type": "function",
-			"function": map[string]interface{}{
+			"function": map[string]any{
 				"name":       "Read",
-				"parameters": map[string]interface{}{"type": "object"},
+				"parameters": map[string]any{"type": "object"},
 			},
 		},
 	}
@@ -37,12 +37,12 @@ func TestEstimateInputTokenBreakdown_ProductionFallbackAlwaysPositive(t *testing
 	for _, tc := range []struct {
 		name   string
 		prompt string
-		tools  []interface{}
+		tools  []any
 	}{
 		{name: "empty user text uses request placeholder", prompt: "request"},
 		{name: "image-only user text uses request placeholder", prompt: "request"},
 		{name: "passthrough empty text", prompt: "workbuddy request"},
-		{name: "only tools", prompt: "request", tools: []interface{}{map[string]interface{}{"name": "Read"}}},
+		{name: "only tools", prompt: "request", tools: []any{map[string]any{"name": "Read"}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := estimateInputTokenBreakdown(tc.prompt, tc.tools)
@@ -60,15 +60,15 @@ func TestHandleCountTokens_ReturnsBreakdown(t *testing.T) {
 		RequestTimeout: 30,
 	}, nil)
 
-	reqBody := map[string]interface{}{
+	reqBody := map[string]any{
 		"model":    "claude-3-5-sonnet",
-		"messages": []map[string]interface{}{{"role": "user", "content": "What is dependency injection?"}},
-		"tools": []map[string]interface{}{
+		"messages": []map[string]any{{"role": "user", "content": "What is dependency injection?"}},
+		"tools": []map[string]any{
 			{
 				"type": "function",
-				"function": map[string]interface{}{
+				"function": map[string]any{
 					"name":       "Read",
-					"parameters": map[string]interface{}{"type": "object"},
+					"parameters": map[string]any{"type": "object"},
 				},
 			},
 		},
@@ -80,13 +80,13 @@ func TestHandleCountTokens_ReturnsBreakdown(t *testing.T) {
 	h.HandleCountTokens(rec, req)
 	testutil.Equal(t, rec.Code, http.StatusOK)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	testutil.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp), "decode response: %v")
 	v, ok := resp["input_tokens"].(float64)
 	testutil.Falsef(t, !ok || v <= 0, "expected positive input_tokens, got %#v", resp["input_tokens"])
 	_, ok = resp["prompt_profile"].(string)
 	testutil.Falsef(t, !ok, "expected prompt_profile string, got %#v", resp["prompt_profile"])
-	breakdown, ok := resp["breakdown"].(map[string]interface{})
+	breakdown, ok := resp["breakdown"].(map[string]any)
 	testutil.True(t, ok, "expected breakdown object, got %#v")
 	required := []string{"base_prompt_tokens", "system_context_tokens", "history_tokens", "tools_tokens"}
 	for _, key := range required {

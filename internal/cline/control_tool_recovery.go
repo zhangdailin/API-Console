@@ -83,7 +83,7 @@ func parseControlToolFallback(text string) (string, bool) {
 		return "", false
 	}
 	text = text[len(prefix) : len(text)-len(suffix)]
-	values := map[string]interface{}{}
+	values := map[string]any{}
 	for text != "" {
 		if !strings.HasPrefix(text, "<parameter=") {
 			return "", false

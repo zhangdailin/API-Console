@@ -30,20 +30,20 @@ func seedJournal(t *testing.T, a *API, events []audit.Event) {
 		testutil.NoError(t, err, "marshal event: %v")
 		if _, err := client.XAdd(context.Background(), &redis.XAddArgs{
 			Stream: key,
-			Values: map[string]interface{}{"data": string(raw), "action": event.Action, "status": event.Status, "kind": string(event.Kind)},
+			Values: map[string]any{"data": string(raw), "action": event.Action, "status": event.Status, "kind": string(event.Kind)},
 		}).Result(); err != nil {
 			t.Fatalf("XAdd: %v", err)
 		}
 	}
 }
 
-func journalRequest(t *testing.T, a *API, query string) map[string]interface{} {
+func journalRequest(t *testing.T, a *API, query string) map[string]any {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodGet, "/api/journal/records"+query, nil)
 	recorder := httptest.NewRecorder()
 	a.HandleJournalRecords(recorder, request)
 	testutil.Equal(t, recorder.Code, http.StatusOK)
-	var payload map[string]interface{}
+	var payload map[string]any
 	err := json.Unmarshal(recorder.Body.Bytes(), &payload)
 	testutil.CheckNoError(t, err)
 	return payload
@@ -65,13 +65,13 @@ func TestJournalRecords_AttachAttemptsToTheirRequest(t *testing.T) {
 	})
 
 	payload := journalRequest(t, a, "?kind=request")
-	rows, ok := payload["data"].([]interface{})
+	rows, ok := payload["data"].([]any)
 	testutil.True(t, ok, "data = %T, want a list")
 	testutil.Equal(t, len(rows), 1)
-	row, _ := rows[0].(map[string]interface{})
-	attempts, _ := row["attempts"].([]interface{})
+	row, _ := rows[0].(map[string]any)
+	attempts, _ := row["attempts"].([]any)
 	testutil.Equal(t, len(attempts), 2)
-	event, _ := row["event"].(map[string]interface{})
+	event, _ := row["event"].(map[string]any)
 	testutil.Equal(t, event["request_id"], "req-1")
 }
 
@@ -95,7 +95,7 @@ func TestJournalRecords_CursorAdvancesPastScannedEntries(t *testing.T) {
 
 	// limit=1 makes the scan window (limit*6) smaller than the 41 stored entries.
 	first := journalRequest(t, a, "?kind=request&limit=1")
-	rows, _ := first["data"].([]interface{})
+	rows, _ := first["data"].([]any)
 	testutil.Falsef(t, len(rows) != 0, "first page rows = %d, want 0 (newest 6 entries are operations)", len(rows))
 	// The cursor must point past everything that was scanned, so following it
 	// eventually reaches the request the first page could not fit.
@@ -114,10 +114,10 @@ func TestJournalRecords_CursorAdvancesPastScannedEntries(t *testing.T) {
 		testutil.Falsef(t, seen[cursor], "page %d reused cursor %s: paging is stuck", page, cursor)
 		seen[cursor] = true
 		payload := journalRequest(t, a, "?kind=request&limit=1&before="+cursor)
-		rows, _ := payload["data"].([]interface{})
+		rows, _ := payload["data"].([]any)
 		for _, raw := range rows {
-			row, _ := raw.(map[string]interface{})
-			event, _ := row["event"].(map[string]interface{})
+			row, _ := raw.(map[string]any)
+			event, _ := row["event"].(map[string]any)
 			if event["request_id"] == "req-old" {
 				found = true
 			}
@@ -152,25 +152,25 @@ func TestJournalRecordsRecoversPartialQualityHistory(t *testing.T) {
 	s, _ := newTestStore(t, "journal-quality-lookback:")
 	t.Cleanup(func() { _ = s.Close() })
 	a := &API{store: s}
-	events := []audit.Event{{Kind: audit.KindRequest, Action: "grok_quality_degraded", RequestID: "quality-1", Attempt: 1, Status: "degraded", Metadata: map[string]interface{}{"reason": "no_reasoning"}}}
+	events := []audit.Event{{Kind: audit.KindRequest, Action: "grok_quality_degraded", RequestID: "quality-1", Attempt: 1, Status: "degraded", Metadata: map[string]any{"reason": "no_reasoning"}}}
 	for range 40 {
 		events = append(events, audit.Event{Kind: audit.KindOperation, Action: "config_update", Status: "ok"})
 	}
 	events = append(events,
-		audit.Event{Kind: audit.KindRequest, Action: "grok_quality_degraded", RequestID: "quality-1", Attempt: 2, Status: "degraded", Metadata: map[string]interface{}{"reason": "burst_dump"}},
-		audit.Event{Kind: audit.KindRequest, Action: "grok_quality_resolution", RequestID: "quality-1", Status: "retried", Metadata: map[string]interface{}{"withheld_attempts": 2}},
-		audit.Event{Kind: audit.KindRequest, Action: "grok_request", RequestID: "quality-1", Channel: "grok", Status: "success", Metadata: map[string]interface{}{"quality_resolution": "retried", "quality_withheld_attempts": 2}},
+		audit.Event{Kind: audit.KindRequest, Action: "grok_quality_degraded", RequestID: "quality-1", Attempt: 2, Status: "degraded", Metadata: map[string]any{"reason": "burst_dump"}},
+		audit.Event{Kind: audit.KindRequest, Action: "grok_quality_resolution", RequestID: "quality-1", Status: "retried", Metadata: map[string]any{"withheld_attempts": 2}},
+		audit.Event{Kind: audit.KindRequest, Action: "grok_request", RequestID: "quality-1", Channel: "grok", Status: "success", Metadata: map[string]any{"quality_resolution": "retried", "quality_withheld_attempts": 2}},
 	)
 	seedJournal(t, a, events)
 	payload := journalRequest(t, a, "?kind=request&limit=1")
-	rows := payload["data"].([]interface{})
+	rows := payload["data"].([]any)
 	testutil.Equal(t, len(rows), 1)
-	row := rows[0].(map[string]interface{})
-	checks := row["quality"].([]interface{})
+	row := rows[0].(map[string]any)
+	checks := row["quality"].([]any)
 	testutil.Equal(t, len(checks), 3)
-	testutil.EqualAny(t, checks[0].(map[string]interface{})["attempt"], float64(1))
-	testutil.EqualAny(t, checks[1].(map[string]interface{})["attempt"], float64(2))
-	testutil.EqualAny(t, checks[2].(map[string]interface{})["action"], "grok_quality_resolution")
+	testutil.EqualAny(t, checks[0].(map[string]any)["attempt"], float64(1))
+	testutil.EqualAny(t, checks[1].(map[string]any)["attempt"], float64(2))
+	testutil.EqualAny(t, checks[2].(map[string]any)["action"], "grok_quality_resolution")
 	testutil.EqualAny(t, payload["next_cursor"], row["id"])
 }
 
@@ -185,20 +185,20 @@ func TestJournalRecordsShowsQualityProcessWithoutFilter(t *testing.T) {
 		{Kind: audit.KindRequest, Action: "grok_quality_check", RequestID: "process", Channel: "grok", Status: "checking", Attempt: 2},
 		{Kind: audit.KindRequest, Action: "grok_quality_check", RequestID: "process", Channel: "grok", Status: "passed", Attempt: 2},
 		{Kind: audit.KindRequest, Action: "grok_quality_resolution", RequestID: "process", Channel: "grok", Status: "retried"},
-		{Kind: audit.KindRequest, Action: "grok_request", RequestID: "process", Channel: "grok", Status: "success", Metadata: map[string]interface{}{"quality_resolution": "retried", "quality_checked_attempts": 2, "quality_withheld_attempts": 1}},
+		{Kind: audit.KindRequest, Action: "grok_request", RequestID: "process", Channel: "grok", Status: "success", Metadata: map[string]any{"quality_resolution": "retried", "quality_checked_attempts": 2, "quality_withheld_attempts": 1}},
 	}
 	seedJournal(t, a, events)
-	rows := journalRequest(t, a, "?kind=request")["data"].([]interface{})
+	rows := journalRequest(t, a, "?kind=request")["data"].([]any)
 	testutil.Equal(t, len(rows), len(events))
-	checks := rows[0].(map[string]interface{})["quality"].([]interface{})
+	checks := rows[0].(map[string]any)["quality"].([]any)
 	testutil.Equal(t, len(checks), 6)
 	for i, raw := range checks {
-		check := raw.(map[string]interface{})
+		check := raw.(map[string]any)
 		testutil.EqualAny(t, check["action"], events[i].Action)
 		testutil.EqualAny(t, check["status"], events[i].Status)
 	}
 	for _, raw := range rows[1:] {
-		row := raw.(map[string]interface{})
+		row := raw.(map[string]any)
 		_, classified := row["outcome_class"]
 		testutil.False(t, classified, "quality stages must not pretend to be HTTP request outcomes")
 	}
@@ -209,9 +209,9 @@ func TestJournalRecordsShowsCheckWhileRequestIsRunning(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 	a := &API{store: s}
 	seedJournal(t, a, []audit.Event{{Kind: audit.KindRequest, Action: "grok_quality_check", RequestID: "running", Status: "checking", Channel: "grok"}})
-	rows := journalRequest(t, a, "?kind=request")["data"].([]interface{})
+	rows := journalRequest(t, a, "?kind=request")["data"].([]any)
 	testutil.Equal(t, len(rows), 1)
-	testutil.EqualAny(t, rows[0].(map[string]interface{})["event"].(map[string]interface{})["status"], "checking")
+	testutil.EqualAny(t, rows[0].(map[string]any)["event"].(map[string]any)["status"], "checking")
 }
 
 func TestJournalRecordsRecoversHealthyCheckProcessBehindWindow(t *testing.T) {
@@ -225,11 +225,11 @@ func TestJournalRecordsRecoversHealthyCheckProcessBehindWindow(t *testing.T) {
 	for range 40 {
 		events = append(events, audit.Event{Kind: audit.KindOperation, Action: "config_update", Status: "ok"})
 	}
-	events = append(events, audit.Event{Kind: audit.KindRequest, Action: "grok_request", RequestID: "healthy", Status: "success", Metadata: map[string]interface{}{"quality_checked_attempts": 1, "quality_check_status": "passed"}})
+	events = append(events, audit.Event{Kind: audit.KindRequest, Action: "grok_request", RequestID: "healthy", Status: "success", Metadata: map[string]any{"quality_checked_attempts": 1, "quality_check_status": "passed"}})
 	seedJournal(t, a, events)
-	row := journalRequest(t, a, "?kind=request&limit=1")["data"].([]interface{})[0].(map[string]interface{})
-	checks := row["quality"].([]interface{})
+	row := journalRequest(t, a, "?kind=request&limit=1")["data"].([]any)[0].(map[string]any)
+	checks := row["quality"].([]any)
 	testutil.Equal(t, len(checks), 2)
-	testutil.EqualAny(t, checks[0].(map[string]interface{})["status"], "checking")
-	testutil.EqualAny(t, checks[1].(map[string]interface{})["status"], "passed")
+	testutil.EqualAny(t, checks[0].(map[string]any)["status"], "checking")
+	testutil.EqualAny(t, checks[1].(map[string]any)["status"], "passed")
 }

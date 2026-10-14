@@ -20,7 +20,7 @@ import (
 // non-negative. Most channels refine them from their own snapshot; observedTokens
 // and usageObserved carry the usage this gateway measured itself. An account
 // whose channel offers no projection falls back to the rate-limit projection.
-func projectQuotaFields(fields map[string]interface{}, acc *store.Account, limit, current float64, observedTokens int64, usageObserved bool) {
+func projectQuotaFields(fields map[string]any, acc *store.Account, limit, current float64, observedTokens int64, usageObserved bool) {
 	if admin := adminFor(acc.AccountType); admin != nil && admin.ProjectQuota != nil {
 		admin.ProjectQuota(fields, acc, limit, current, observedTokens, usageObserved)
 		return
@@ -29,7 +29,7 @@ func projectQuotaFields(fields map[string]interface{}, acc *store.Account, limit
 }
 
 // projectRateLimitQuota is the fallback for channels without a quota projection.
-func projectRateLimitQuota(fields map[string]interface{}, limit, current float64) {
+func projectRateLimitQuota(fields map[string]any, limit, current float64) {
 	fields["quota_limit"] = limit
 	remaining := current
 	if remaining > limit && limit > 0 {

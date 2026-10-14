@@ -59,28 +59,28 @@ func TestExpandGatewayCompactionHistory(t *testing.T) {
 	blob, err := codec.Encode("session-a", "Summary:\nreplayed")
 	testutil.NoError(t, err, "encode: %v")
 
-	payload := map[string]interface{}{"input": []interface{}{
-		map[string]interface{}{"type": "message", "role": "user", "content": "hello"},
-		map[string]interface{}{"id": "cmp_1", "type": "compaction", "encrypted_content": blob},
-		map[string]interface{}{"id": "cmp_2", "type": "compaction", "encrypted_content": "upstream-opaque"},
+	payload := map[string]any{"input": []any{
+		map[string]any{"type": "message", "role": "user", "content": "hello"},
+		map[string]any{"id": "cmp_1", "type": "compaction", "encrypted_content": blob},
+		map[string]any{"id": "cmp_2", "type": "compaction", "encrypted_content": "upstream-opaque"},
 	}}
 	drifted, err := expandGatewayCompactionHistory(payload, codec, "session-a")
 	testutil.Equal(t, err, nil)
 	testutil.Equal(t, drifted, 0)
-	items := payload["input"].([]interface{})
-	expanded := items[1].(map[string]interface{})
+	items := payload["input"].([]any)
+	expanded := items[1].(map[string]any)
 	testutil.Equal(t, expanded["type"], "message")
 	testutil.Equal(t, expanded["role"], "user")
-	parts := expanded["content"].([]interface{})
-	testutil.Equal(t, parts[0].(map[string]interface{})["text"], "Summary:\nreplayed")
+	parts := expanded["content"].([]any)
+	testutil.Equal(t, parts[0].(map[string]any)["text"], "Summary:\nreplayed")
 	// The upstream's own blob is handed to the upstream unchanged.
-	foreign := items[2].(map[string]interface{})
+	foreign := items[2].(map[string]any)
 	testutil.Equal(t, foreign["type"], "compaction")
 	testutil.Equal(t, foreign["encrypted_content"], "upstream-opaque")
 
 	// An undecodable gateway blob names the item that has to be dropped.
-	bad := map[string]interface{}{"input": []interface{}{
-		map[string]interface{}{"type": "compaction", "encrypted_content": gatewayCompactionPrefix + "broken"},
+	bad := map[string]any{"input": []any{
+		map[string]any{"type": "compaction", "encrypted_content": gatewayCompactionPrefix + "broken"},
 	}}
 	_, err = expandGatewayCompactionHistory(bad, codec, "session-a")
 	testutil.False(t, err == nil, "expected an error for an undecodable gateway blob")
@@ -144,12 +144,12 @@ func TestDegenerateGatewayCompactionSummary(t *testing.T) {
 }
 
 func TestPrepareGatewayCompactionSample(t *testing.T) {
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"model": "grok-4.5", "stream": false, "instructions": "be terse",
 		"temperature": 0.2, "store": true, "previous_response_id": "resp_1",
-		"max_output_tokens": 4096, "text": map[string]interface{}{"format": "json"},
-		"input":       []interface{}{map[string]interface{}{"type": "message", "role": "user", "content": "hello"}},
-		"tools":       []interface{}{map[string]interface{}{"type": "function", "name": "weather"}},
+		"max_output_tokens": 4096, "text": map[string]any{"format": "json"},
+		"input":       []any{map[string]any{"type": "message", "role": "user", "content": "hello"}},
+		"tools":       []any{map[string]any{"type": "function", "name": "weather"}},
 		"tool_choice": "none",
 	}
 	sample := prepareGatewayCompactionSample(payload)
@@ -161,33 +161,33 @@ func TestPrepareGatewayCompactionSample(t *testing.T) {
 	}
 	testutil.Equal(t, sample["temperature"], 1.0)
 	testutil.Equal(t, sample["tool_choice"], "auto")
-	reasoning, _ := sample["reasoning"].(map[string]interface{})
+	reasoning, _ := sample["reasoning"].(map[string]any)
 	testutil.Equal(t, reasoning["summary"], "concise")
 	for _, dropped := range []string{"previous_response_id", "text", "max_output_tokens", "max_completion_tokens"} {
 		_, present := sample[dropped]
 		testutil.Falsef(t, present, "%s survived sample preparation", dropped)
 	}
-	items := sample["input"].([]interface{})
-	last := items[len(items)-1].(map[string]interface{})
+	items := sample["input"].([]any)
+	last := items[len(items)-1].(map[string]any)
 	testutil.EqualAny(t, last["content"], gatewayCompactionPrompt)
 	// The caller's payload must not be mutated: it is still the request body.
 	_, present := payload["reasoning"]
 	testutil.False(t, present, "prepareGatewayCompactionSample mutated its input")
-	testutil.False(t, len(payload["input"].([]interface{})) != 1, "prepareGatewayCompactionSample appended to the caller's input")
+	testutil.False(t, len(payload["input"].([]any)) != 1, "prepareGatewayCompactionSample appended to the caller's input")
 	// Without tools, a stale tool_choice is removed rather than forwarded.
-	noTools := prepareGatewayCompactionSample(map[string]interface{}{"model": "grok-4.5", "input": []interface{}{}, "tool_choice": "none"})
+	noTools := prepareGatewayCompactionSample(map[string]any{"model": "grok-4.5", "input": []any{}, "tool_choice": "none"})
 	_, present = noTools["tool_choice"]
 	testutil.False(t, present, "tool_choice survived without tools")
 }
 
 func TestParseGatewayCompactionStream(t *testing.T) {
-	completed := map[string]interface{}{
-		"id": "resp_1", "output": []interface{}{map[string]interface{}{
+	completed := map[string]any{
+		"id": "resp_1", "output": []any{map[string]any{
 			"id": "msg_1", "type": "message", "role": "assistant",
-			"content": []interface{}{map[string]interface{}{"type": "output_text", "text": compactionTestSummary}},
+			"content": []any{map[string]any{"type": "output_text", "text": compactionTestSummary}},
 		}},
 	}
-	completedJSON, _ := json.Marshal(map[string]interface{}{"type": "response.completed", "response": completed})
+	completedJSON, _ := json.Marshal(map[string]any{"type": "response.completed", "response": completed})
 	stream := "event: response.created\ndata: {\"type\":\"response.created\"}\n\n" +
 		"event: response.completed\ndata: " + string(completedJSON) + "\n\n"
 	sample, err := parseGatewayCompactionStream([]byte(stream))
@@ -217,7 +217,7 @@ func TestParseGatewayCompactionStream(t *testing.T) {
 
 // asError is a tiny local helper so the test does not have to import errors
 // just for one assertion.
-func asError(err error, target interface{}) bool {
+func asError(err error, target any) bool {
 	blobErr, ok := err.(*compactionBlobError)
 	if typed, isTarget := target.(**compactionBlobError); isTarget {
 		if ok {

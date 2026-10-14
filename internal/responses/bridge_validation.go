@@ -7,14 +7,14 @@ import (
 
 // ValidateToolsAndHistory accepts native declarations without rewriting their
 // names, parameter schemas, argument JSON, or replay items.
-func ValidateToolsAndHistory(payload map[string]interface{}) error {
+func ValidateToolsAndHistory(payload map[string]any) error {
 	tools := InterfaceMaps(payload["tools"])
 	if raw := payload["tools"]; raw != nil {
 		valid := false
 		switch rows := raw.(type) {
-		case []map[string]interface{}:
+		case []map[string]any:
 			valid = true
-		case []interface{}:
+		case []any:
 			valid = len(rows) == len(tools)
 		}
 		if !valid {
@@ -44,7 +44,7 @@ func ValidateToolsAndHistory(payload map[string]interface{}) error {
 			return fmt.Errorf("tools[%d]: tool type %q is not supported", i, kind)
 		}
 	}
-	if choice, ok := payload["tool_choice"].(map[string]interface{}); ok {
+	if choice, ok := payload["tool_choice"].(map[string]any); ok {
 		if _, exists := choice["namespace"]; exists {
 			return fmt.Errorf("tool_choice.namespace is not supported")
 		}
@@ -80,7 +80,7 @@ func ValidateToolsAndHistory(payload map[string]interface{}) error {
 // ValidateBridgedTools checks the declaration and replay contract before the
 // standard Responses-to-Chat conversion, after namespace adaptation.
 func ValidateBridgedTools(req *CreateRequest) error {
-	if err := ValidateToolsAndHistory(map[string]interface{}{"tools": req.Tools, "tool_choice": req.ToolChoice, "input": req.Input}); err != nil {
+	if err := ValidateToolsAndHistory(map[string]any{"tools": req.Tools, "tool_choice": req.ToolChoice, "input": req.Input}); err != nil {
 		return err
 	}
 	for i, tool := range req.Tools {

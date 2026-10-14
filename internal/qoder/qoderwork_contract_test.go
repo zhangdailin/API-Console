@@ -44,7 +44,7 @@ func TestQoderWorkBodyMatchesCapture(t *testing.T) {
 	testutil.NoError(t, err)
 	raw, err := decodeBodyForTest(encoded)
 	testutil.NoError(t, err)
-	var body map[string]interface{}
+	var body map[string]any
 	testutil.NoError(t, json.Unmarshal(raw, &body))
 
 	wantKeys := []string{
@@ -60,7 +60,7 @@ func TestQoderWorkBodyMatchesCapture(t *testing.T) {
 		testutil.Falsef(t, !present, "body is missing %q, which the capture carries", key)
 	}
 
-	for key, want := range map[string]interface{}{
+	for key, want := range map[string]any{
 		"stream":           true,
 		"chat_task":        "FREE_INPUT",
 		"is_reply":         true,
@@ -81,9 +81,9 @@ func TestQoderWorkBodyMatchesCapture(t *testing.T) {
 	testutil.Equal(t, body["chat_record_id"], "request")
 	testutil.Equal(t, body["request_set_id"], "request-set")
 
-	business := body["business"].(map[string]interface{})
+	business := body["business"].(map[string]any)
 	testutil.Equal(t, len(business), 8)
-	for key, want := range map[string]interface{}{
+	for key, want := range map[string]any{
 		"product":  "qoder_work",
 		"version":  DefaultClientVersion,
 		"type":     "agent",
@@ -95,20 +95,20 @@ func TestQoderWorkBodyMatchesCapture(t *testing.T) {
 	}
 
 	// is_reasoning follows the model's own catalog capability.
-	modelConfig := body["model_config"].(map[string]interface{})
+	modelConfig := body["model_config"].(map[string]any)
 	testutil.Equal(t, modelConfig["is_reasoning"], true)
 	testutil.Equal(t, modelConfig["is_vl"], true)
 	testutil.Equal(t, modelConfig["source"], "system")
 
 	// text and extra.originalContent are the same plain string in the capture.
-	context := body["chat_context"].(map[string]interface{})
+	context := body["chat_context"].(map[string]any)
 	testutil.Equal(t, context["text"], "hi")
 	testutil.Equal(t, context["chatPrompt"], "")
-	extra := context["extra"].(map[string]interface{})
+	extra := context["extra"].(map[string]any)
 	testutil.Equal(t, extra["originalContent"], "hi")
-	testutil.Equal(t, extra["modelConfig"].(map[string]interface{})["is_reasoning"], true)
+	testutil.Equal(t, extra["modelConfig"].(map[string]any)["is_reasoning"], true)
 
-	testutil.EqualAny(t, body["parameters"].(map[string]interface{})["max_tokens"], float64(32000))
+	testutil.EqualAny(t, body["parameters"].(map[string]any)["max_tokens"], float64(32000))
 }
 
 // TestQoderWorkStreamFramesParse covers the envelope shape the gateway actually

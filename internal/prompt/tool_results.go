@@ -10,7 +10,7 @@ import (
 // builder needs it: text blocks joined by newlines, a plain string as itself,
 // and anything else as JSON. The providers used to carry a byte-identical copy
 // of this switch each.
-func StringifyToolResult(value interface{}) string {
+func StringifyToolResult(value any) string {
 	switch typed := value.(type) {
 	case nil:
 		return ""

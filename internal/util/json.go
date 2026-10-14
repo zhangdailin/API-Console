@@ -6,7 +6,7 @@ import (
 )
 
 // CompactToolInput renders a tool-call argument value as compact JSON.
-func CompactToolInput(value interface{}) string {
+func CompactToolInput(value any) string {
 	if value == nil {
 		return "{}"
 	}
@@ -18,7 +18,7 @@ func CompactToolInput(value interface{}) string {
 }
 
 // StringValue renders an arbitrary value as a string, preferring a plain string.
-func StringValue(value interface{}) string {
+func StringValue(value any) string {
 	if value == nil {
 		return ""
 	}

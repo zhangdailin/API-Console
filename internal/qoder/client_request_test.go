@@ -193,22 +193,22 @@ func TestReferenceChatBodyCarriesPromptContextAndModel(t *testing.T) {
 	testutil.NoError(t, err)
 	raw, err := decodeBodyForTest(encoded)
 	testutil.NoError(t, err)
-	var body map[string]interface{}
+	var body map[string]any
 	testutil.NoError(t, json.Unmarshal(raw, &body))
-	context := body["chat_context"].(map[string]interface{})
+	context := body["chat_context"].(map[string]any)
 	// The capture carries the same plain string in both fields; the
 	// {"type":"text","text":...} object shape this channel used to send is not
 	// something the QoderWork client produces.
 	testutil.Equal(t, context["text"], "你好 qoder")
-	testutil.Equal(t, context["extra"].(map[string]interface{})["originalContent"], "你好 qoder")
-	contextModel := context["extra"].(map[string]interface{})["modelConfig"].(map[string]interface{})
+	testutil.Equal(t, context["extra"].(map[string]any)["originalContent"], "你好 qoder")
+	contextModel := context["extra"].(map[string]any)["modelConfig"].(map[string]any)
 	testutil.Equal(t, contextModel["key"], "qfmodel")
 	testutil.Equal(t, contextModel["is_reasoning"], true)
-	modelConfig := body["model_config"].(map[string]interface{})
+	modelConfig := body["model_config"].(map[string]any)
 	testutil.Equal(t, modelConfig["key"], "qfmodel")
 	testutil.Equal(t, modelConfig["is_reasoning"], true)
-	testutil.Equal(t, body["business"].(map[string]interface{})["product"], "qoder_work")
-	params := body["parameters"].(map[string]interface{})
+	testutil.Equal(t, body["business"].(map[string]any)["product"], "qoder_work")
+	params := body["parameters"].(map[string]any)
 	testutil.EqualAny(t, params["max_tokens"], float64(32000))
 	for _, field := range []string{"reasoning_effort", "enable_thinking"} {
 		_, present := params[field]

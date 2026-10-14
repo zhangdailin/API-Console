@@ -496,7 +496,7 @@ func (s *redisStore) IncrementAccountStatsOperation(ctx context.Context, id int6
 	// avoids moving a pre-midnight completion into the following UTC day.
 	today := completedAt.Format("2006-01-02")
 	keys := []string{s.accountsKey(id), s.accountStatsOperationsKey(id)}
-	args := []interface{}{usage, count, nowStr, today, strings.TrimSpace(operationID)}
+	args := []any{usage, count, nowStr, today, strings.TrimSpace(operationID)}
 
 	err := incrementAccountStatsScript.Run(ctx, s.client, keys, args...).Err()
 	if err != nil && err != redis.Nil {

@@ -34,7 +34,7 @@ func TestNormalizeCommandEscalation(t *testing.T) {
 				}
 				return
 			}
-			var before, after map[string]interface{}
+			var before, after map[string]any
 			if err := json.Unmarshal([]byte(tc.input), &before); err != nil {
 				t.Fatal(err)
 			}

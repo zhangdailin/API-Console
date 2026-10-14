@@ -22,12 +22,12 @@ func TestBuildChatSummaryBoundary(t *testing.T) {
 				}
 				payload, err := (&Handler{}).responsesPayloadFromChat(ModelSpec{UpstreamModel: "grok-4.6"}, req, build)
 				testutil.NoError(t, err)
-				r, _ := payload["reasoning"].(map[string]interface{})
+				r, _ := payload["reasoning"].(map[string]any)
 				// Only the Build plane owns a Chat Completions summary contract: the
 				// official Build client always asks for a summary, so an omitted one
 				// becomes "concise". Native Responses and Anthropic requests are left
 				// alone, and "none" must never acquire a summary.
-				want := interface{}(nil)
+				want := any(nil)
 				if build && operation == "" && effort != "none" {
 					want = "concise"
 				}
@@ -49,7 +49,7 @@ func TestChatReasoningSummaryIsClientOwned(t *testing.T) {
 			}
 			payload, err := (&Handler{}).responsesPayloadFromChat(ModelSpec{UpstreamModel: "grok-4.6"}, req, build)
 			testutil.NoError(t, err)
-			r, _ := payload["reasoning"].(map[string]interface{})
+			r, _ := payload["reasoning"].(map[string]any)
 			// An explicit summary is never replaced by a plane default.
 			testutil.Equal(t, r["summary"], "auto")
 			testutil.Equal(t, r["effort"], "low")
@@ -76,7 +76,7 @@ func TestChatAlwaysRequestsEncryptedReasoning(t *testing.T) {
 						found = true
 					}
 				}
-			case []interface{}:
+			case []any:
 				for _, value := range values {
 					if chatwire.ParseLooseStringAny(value) == "reasoning.encrypted_content" {
 						found = true
@@ -95,7 +95,7 @@ func TestAuditChatOutcomePersistsAccountTokens(t *testing.T) {
 	h := &Handler{lb: loadbalancer.NewWithCacheTTL(s, time.Minute), auditLogger: audit.NewNopLogger()}
 	h.auditChatOutcome(context.Background(), acc, &chatwire.Request{Model: "grok-4.7"}, chatOutcome{
 		Finish:      "stop",
-		Usage:       map[string]interface{}{"prompt_tokens": 120, "completion_tokens": 30, "total_tokens": 150},
+		Usage:       map[string]any{"prompt_tokens": 120, "completion_tokens": 30, "total_tokens": 150},
 		UsageSource: audit.UsageSourceUpstream,
 	})
 	got, err := s.GetAccount(context.Background(), acc.ID)
@@ -107,11 +107,11 @@ func TestAuditChatOutcomePersistsAccountTokens(t *testing.T) {
 
 func TestReasoningDiagnosticsReachAttemptAndOutcome(t *testing.T) {
 	for _, effort := range []string{"", "low", "xhigh", "private-secret"} {
-		r := map[string]interface{}{"summary": "concise"}
+		r := map[string]any{"summary": "concise"}
 		if effort != "" {
 			r["effort"] = effort
 		}
-		ctx := withReasoningDiagnostics(context.Background(), map[string]interface{}{"reasoning": r})
+		ctx := withReasoningDiagnostics(context.Background(), map[string]any{"reasoning": r})
 		log := &parityAuditLog{}
 		h := &Handler{auditLogger: log}
 		h.auditAttempt(ctx, nil, ProviderBuild, 1, time.Now(), nil)

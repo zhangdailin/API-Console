@@ -116,7 +116,7 @@ func buildOpenAINonStreamResponse(sh *streamHandler, model string, stopReason st
 // materializeBlockField copies a streamed text/thinking block's accumulated
 // content into its wire field before a non-streaming response is encoded. A
 // block that never streamed anything still gets the field, empty.
-func materializeBlockField(block map[string]interface{}, field string, builders []*strings.Builder, idx int) {
+func materializeBlockField(block map[string]any, field string, builders []*strings.Builder, idx int) {
 	if builder := builderAt(builders, idx); builder != nil {
 		block[field] = builder.String()
 		return

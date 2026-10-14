@@ -10,12 +10,12 @@ import (
 )
 
 func TestNativeResponsesRelayPreservesNullError(t *testing.T) {
-	response := map[string]interface{}{
+	response := map[string]any{
 		"id": "resp_ok", "object": "response", "created_at": 42,
 		"model": "grok-4.7", "status": "completed", "error": nil,
-		"output": []interface{}{map[string]interface{}{
+		"output": []any{map[string]any{
 			"id": "msg_ok", "type": "message", "role": "assistant", "status": "completed",
-			"content": []interface{}{map[string]interface{}{"type": "output_text", "text": "2", "annotations": []interface{}{}}},
+			"content": []any{map[string]any{"type": "output_text", "text": "2", "annotations": []any{}}},
 		}},
 	}
 	raw, err := json.Marshal(response)
@@ -26,7 +26,7 @@ func TestNativeResponsesRelayPreservesNullError(t *testing.T) {
 		t.Run(contentType, func(t *testing.T) {
 			input := string(raw)
 			if contentType == "text/event-stream" {
-				input = parityFrame("response.completed", map[string]interface{}{"id": "resp_ok", "response": response})
+				input = parityFrame("response.completed", map[string]any{"id": "resp_ok", "response": response})
 			}
 			recorder := httptest.NewRecorder()
 			id, captured, result := copyNativeCLIResponseAndCaptureModel(recorder, strings.NewReader(input), contentType, "grok-4.7")
@@ -47,15 +47,15 @@ func TestNativeResponsesRelayPreservesNullError(t *testing.T) {
 func TestRedactResponseErrorSeparatesRejectionFromFailure(t *testing.T) {
 	cases := []struct {
 		name        string
-		event       map[string]interface{}
+		event       map[string]any
 		wantCode    string
 		wantMessage string
 		wantField   string
 	}{
 		{
 			name: "model rejection keeps a distinguishable code",
-			event: map[string]interface{}{
-				"error": map[string]interface{}{
+			event: map[string]any{
+				"error": map[string]any{
 					"message": "The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account.",
 					"type":    "invalid_request_error",
 				},
@@ -66,15 +66,15 @@ func TestRedactResponseErrorSeparatesRejectionFromFailure(t *testing.T) {
 		},
 		{
 			name:        "model not found is a rejection",
-			event:       map[string]interface{}{"error": map[string]interface{}{"message": "model not found"}},
+			event:       map[string]any{"error": map[string]any{"message": "model not found"}},
 			wantCode:    upstreamRejectionCode,
 			wantMessage: "The upstream rejected the request parameters or model. Check the request and model selection.",
 			wantField:   "error",
 		},
 		{
 			name: "server failure keeps the generic code",
-			event: map[string]interface{}{
-				"error": map[string]interface{}{"message": "Our servers are currently overloaded. Please try again later."},
+			event: map[string]any{
+				"error": map[string]any{"message": "Our servers are currently overloaded. Please try again later."},
 			},
 			wantCode:    "upstream_error",
 			wantMessage: "The upstream request failed. Use the request ID to inspect diagnostics.",
@@ -82,7 +82,7 @@ func TestRedactResponseErrorSeparatesRejectionFromFailure(t *testing.T) {
 		},
 		{
 			name: "bare error frame carries code and message",
-			event: map[string]interface{}{
+			event: map[string]any{
 				"type":    "error",
 				"message": "model not found",
 				"code":    "some_upstream_code",
@@ -95,7 +95,7 @@ func TestRedactResponseErrorSeparatesRejectionFromFailure(t *testing.T) {
 		},
 		{
 			name:  "empty error object still names the rejection",
-			event: map[string]interface{}{"error": map[string]interface{}{}},
+			event: map[string]any{"error": map[string]any{}},
 			// The message is unclassifiable, so the constant stands in for it; the
 			// code is what a client acts on.
 			wantCode:    upstreamRejectionCode,
@@ -109,7 +109,7 @@ func TestRedactResponseErrorSeparatesRejectionFromFailure(t *testing.T) {
 			testutil.False(t, !redactResponseError(tc.event), "redactResponseError() = false, want true")
 			envelope := tc.event
 			if tc.wantField != "" {
-				nested, ok := tc.event[tc.wantField].(map[string]interface{})
+				nested, ok := tc.event[tc.wantField].(map[string]any)
 				testutil.True(t, ok, "%s envelope = %#v")
 				envelope = nested
 			}
@@ -126,14 +126,14 @@ func TestRedactResponseErrorSeparatesRejectionFromFailure(t *testing.T) {
 // The upstream's own error text must never reach the client.
 func TestRedactResponseErrorNeverForwardsUpstreamText(t *testing.T) {
 	secret := "sk-live-upstream-credential"
-	event := map[string]interface{}{
-		"error": map[string]interface{}{
+	event := map[string]any{
+		"error": map[string]any{
 			"message": "request failed with " + secret + " (status=400)",
 			"code":    "invalid_request_error",
 		},
 	}
 	redactResponseError(event)
-	encoded := event["error"].(map[string]interface{})
+	encoded := event["error"].(map[string]any)
 	testutil.MustNotContain(t, chatwire.ParseLooseStringAny(encoded["message"]), secret)
 	got := codeForCategory("client")
 	testutil.Falsef(t, chatwire.ParseLooseStringAny(encoded["code"]) != got, "code = %q, want %q", chatwire.ParseLooseStringAny(encoded["code"]), got)
@@ -142,19 +142,19 @@ func TestRedactResponseErrorNeverForwardsUpstreamText(t *testing.T) {
 // A failed response envelope is normalized so the message inside it cannot
 // disagree with the event that carried it.
 func TestRedactResponseErrorNormalizesFailedEnvelope(t *testing.T) {
-	event := map[string]interface{}{
+	event := map[string]any{
 		"type": "response.failed",
-		"response": map[string]interface{}{
+		"response": map[string]any{
 			"id": "resp_1", "object": "response", "status": "failed", "model": "grok-4.6",
-			"error": map[string]interface{}{
+			"error": map[string]any{
 				"code":    "upstream_stream_error",
 				"message": "grok upstream stream error: model not found",
 			},
 		},
 	}
 	redactResponseError(event)
-	response := event["response"].(map[string]interface{})
-	envelope := response["error"].(map[string]interface{})
+	response := event["response"].(map[string]any)
+	envelope := response["error"].(map[string]any)
 	testutil.Equal(t, chatwire.ParseLooseStringAny(envelope["code"]), upstreamRejectionCode)
 	got := chatwire.ParseLooseStringAny(envelope["message"])
 	testutil.Falsef(t, !strings.Contains(got, "rejected the request parameters"), "envelope message = %q", got)
@@ -164,11 +164,11 @@ func TestRedactResponseErrorNormalizesFailedEnvelope(t *testing.T) {
 // A completed response that merely mentions an error field is not a failure and
 // must not be rewritten into one.
 func TestRedactResponseErrorLeavesCompletedEnvelopeStatus(t *testing.T) {
-	event := map[string]interface{}{
-		"response": map[string]interface{}{"id": "resp_1", "status": "completed", "error": nil},
+	event := map[string]any{
+		"response": map[string]any{"id": "resp_1", "status": "completed", "error": nil},
 	}
 	redactResponseError(event)
-	response := event["response"].(map[string]interface{})
+	response := event["response"].(map[string]any)
 	testutil.Equal(t, chatwire.ParseLooseStringAny(response["status"]), "completed")
 	testutil.True(t, response["error"] == nil, "successful response must retain error: null")
 }
@@ -176,14 +176,14 @@ func TestRedactResponseErrorLeavesCompletedEnvelopeStatus(t *testing.T) {
 func TestRedactResponseErrorPreservesNullErrors(t *testing.T) {
 	for _, status := range []string{"queued", "in_progress", "completed", "incomplete"} {
 		t.Run(status, func(t *testing.T) {
-			response := map[string]interface{}{"object": "response", "status": status, "error": nil}
+			response := map[string]any{"object": "response", "status": status, "error": nil}
 			if redactResponseError(response) {
 				t.Fatal("null error changed a response")
 			}
 			if value, exists := response["error"]; !exists || value != nil {
 				t.Fatalf("error = %#v, exists = %v; want explicit null", value, exists)
 			}
-			event := map[string]interface{}{"type": "response." + status, "response": response}
+			event := map[string]any{"type": "response." + status, "response": response}
 			if redactResponseError(event) || response["error"] != nil {
 				t.Fatal("nested SSE response acquired a spurious error")
 			}

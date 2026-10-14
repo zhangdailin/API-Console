@@ -88,7 +88,7 @@ type chatBody struct {
 	SessionID         string          `json:"session_id"`
 	Stream            bool            `json:"stream"`
 	ChatTask          string          `json:"chat_task"`
-	ChatContext       interface{}     `json:"chat_context"`
+	ChatContext       any             `json:"chat_context"`
 	IsReply           bool            `json:"is_reply"`
 	IsRetry           bool            `json:"is_retry"`
 	Source            int             `json:"source"`
@@ -100,9 +100,9 @@ type chatBody struct {
 	ModelConfig       modelConfigWire `json:"model_config"`
 	System            string          `json:"system"`
 	Messages          []chatMessage   `json:"messages"`
-	Tools             []interface{}   `json:"tools"`
-	ToolChoice        interface{}     `json:"tool_choice,omitempty"`
-	Parameters        interface{}     `json:"parameters"`
+	Tools             []any           `json:"tools"`
+	ToolChoice        any             `json:"tool_choice,omitempty"`
+	Parameters        any             `json:"parameters"`
 	ParallelToolCalls *bool           `json:"parallel_tool_calls,omitempty"`
 }
 
@@ -190,14 +190,14 @@ type chatToolCall struct {
 }
 
 type chatParameters struct {
-	ResponseFormat  map[string]interface{} `json:"response_format,omitempty"`
-	MaxTokens       int                    `json:"max_tokens"`
-	Temperature     *float64               `json:"temperature,omitempty"`
-	TopP            *float64               `json:"top_p,omitempty"`
-	Stop            *[]string              `json:"stop,omitempty"`
-	ContextLength   int                    `json:"context_length,omitempty"`
-	EnableThinking  *bool                  `json:"enable_thinking,omitempty"`
-	ReasoningEffort string                 `json:"reasoning_effort,omitempty"`
+	ResponseFormat  map[string]any `json:"response_format,omitempty"`
+	MaxTokens       int            `json:"max_tokens"`
+	Temperature     *float64       `json:"temperature,omitempty"`
+	TopP            *float64       `json:"top_p,omitempty"`
+	Stop            *[]string      `json:"stop,omitempty"`
+	ContextLength   int            `json:"context_length,omitempty"`
+	EnableThinking  *bool          `json:"enable_thinking,omitempty"`
+	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
 }
 
 func buildChatBodyProfile(req upstream.UpstreamRequest, model modelEntry, sessionID, requestID, requestSetID, clientVersion, aliyunUserType, businessProduct string) ([]byte, error) {
@@ -279,7 +279,7 @@ func buildChatBodyProfile(req upstream.UpstreamRequest, model modelEntry, sessio
 	if body.Tools == nil {
 		// The gateway rejects a null tools array on some plans; an empty array is
 		// the shape the CLI sends when the request carries no tools.
-		body.Tools = []interface{}{}
+		body.Tools = []any{}
 	}
 
 	encoded, err := marshalEncodedBody(body)
@@ -299,22 +299,22 @@ func buildChatBodyProfile(req upstream.UpstreamRequest, model modelEntry, sessio
 type referenceContext struct {
 	ChatPrompt string `json:"chatPrompt"`
 	Extra      struct {
-		Context     []interface{} `json:"context"`
+		Context     []any `json:"context"`
 		ModelConfig struct {
 			IsReasoning bool   `json:"is_reasoning"`
 			Key         string `json:"key"`
 		} `json:"modelConfig"`
 		OriginalContent string `json:"originalContent"`
 	} `json:"extra"`
-	Features  []interface{} `json:"features"`
-	ImageURLs interface{}   `json:"imageUrls"`
-	Text      string        `json:"text"`
+	Features  []any  `json:"features"`
+	ImageURLs any    `json:"imageUrls"`
+	Text      string `json:"text"`
 }
 
 func referenceChatContext(req upstream.UpstreamRequest, model modelEntry) referenceContext {
 	prompt := latestUserText(req)
-	ctx := referenceContext{Features: []interface{}{}, Text: prompt}
-	ctx.Extra.Context = []interface{}{}
+	ctx := referenceContext{Features: []any{}, Text: prompt}
+	ctx.Extra.Context = []any{}
 	ctx.Extra.ModelConfig.IsReasoning, ctx.Extra.ModelConfig.Key = model.IsReasoning, model.Key
 	ctx.Extra.OriginalContent = prompt
 	return ctx

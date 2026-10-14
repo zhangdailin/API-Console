@@ -30,8 +30,8 @@ func (r *Request) Validate() error {
 			default:
 				return fmt.Errorf("tool_choice must be auto, required, none, or a specific function object")
 			}
-		case map[string]interface{}:
-			fn, _ := v["function"].(map[string]interface{})
+		case map[string]any:
+			fn, _ := v["function"].(map[string]any)
 			name, _ := fn["name"].(string)
 			name = strings.TrimSpace(name)
 			if strings.TrimSpace(fmt.Sprint(v["type"])) != "function" || name == "" {

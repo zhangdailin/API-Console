@@ -70,7 +70,7 @@ func (s *StructuredOutput) Validate(text string) error {
 	if candidate == "" {
 		return fmt.Errorf("the model did not return JSON for a strict response_format request")
 	}
-	var value interface{}
+	var value any
 	decoder := json.NewDecoder(strings.NewReader(candidate))
 	if err := decoder.Decode(&value); err != nil {
 		return fmt.Errorf("the model returned text that is not valid JSON: %v", err)

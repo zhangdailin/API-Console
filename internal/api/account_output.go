@@ -24,12 +24,12 @@ type accountOutput struct {
 	// account response so the management table can render the plan/allowance
 	// columns consistently without re-deriving each channel's semantics on the
 	// client.
-	Quota map[string]interface{} `json:"-"`
+	Quota map[string]any `json:"-"`
 }
 
 // MarshalJSON flattens the quota projection into the account object itself.
 func (o accountOutput) MarshalJSON() ([]byte, error) {
-	merged := map[string]interface{}{}
+	merged := map[string]any{}
 	if o.Account != nil {
 		raw, err := json.Marshal(o.Account)
 		if err != nil {

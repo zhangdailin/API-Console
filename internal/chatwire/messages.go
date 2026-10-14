@@ -53,12 +53,12 @@ func ValidateMessages(messages []Message) error {
 			if strings.TrimSpace(content) == "" && role != "tool" && !(role == "assistant" && len(msg.ToolCalls) > 0) {
 				return fmt.Errorf("message content cannot be empty")
 			}
-		case []interface{}:
+		case []any:
 			if len(content) == 0 {
 				return fmt.Errorf("message content cannot be an empty array")
 			}
 			for _, block := range content {
-				m, ok := block.(map[string]interface{})
+				m, ok := block.(map[string]any)
 				if !ok {
 					return fmt.Errorf("content block must be an object")
 				}
@@ -90,7 +90,7 @@ func ValidateMessages(messages []Message) error {
 						return fmt.Errorf("text content cannot be empty")
 					}
 				case "image_url":
-					imageURL, _ := m["image_url"].(map[string]interface{})
+					imageURL, _ := m["image_url"].(map[string]any)
 					if imageURL == nil {
 						return fmt.Errorf("image_url must have a 'url' field")
 					}
@@ -99,7 +99,7 @@ func ValidateMessages(messages []Message) error {
 						return err
 					}
 				case "input_audio":
-					audio, _ := m["input_audio"].(map[string]interface{})
+					audio, _ := m["input_audio"].(map[string]any)
 					if audio == nil {
 						return fmt.Errorf("input_audio must have a 'data' field")
 					}
@@ -108,7 +108,7 @@ func ValidateMessages(messages []Message) error {
 						return err
 					}
 				case "file":
-					fileData, _ := m["file"].(map[string]interface{})
+					fileData, _ := m["file"].(map[string]any)
 					if fileData == nil {
 						return fmt.Errorf("file must have a 'file_data' field")
 					}
@@ -126,7 +126,7 @@ func ValidateMessages(messages []Message) error {
 					// image_url; accept both spellings of the same wire part.
 					urlVal := ParseLooseStringAny(m["image_url"])
 					if urlVal == "" {
-						if nested, ok := m["image_url"].(map[string]interface{}); ok {
+						if nested, ok := m["image_url"].(map[string]any); ok {
 							urlVal = ParseLooseStringAny(nested["url"])
 						}
 					}

@@ -82,7 +82,7 @@ func ResponsesBridgeHandler(chat http.HandlerFunc, opts BridgeOptions) http.Hand
 		req.Include = include
 		// The caller explicitly selected chat compatibility without hosted
 		// search. Do not advertise a client function that Codex cannot execute.
-		tools := make([]map[string]interface{}, 0, len(req.Tools))
+		tools := make([]map[string]any, 0, len(req.Tools))
 		searchDisabled := false
 		for _, tool := range req.Tools {
 			kind, _ := tool["type"].(string)
@@ -97,7 +97,7 @@ func ResponsesBridgeHandler(chat http.HandlerFunc, opts BridgeOptions) http.Hand
 				WriteAPIError(w, http.StatusBadRequest, "invalid_request_error", "web search is disabled for chat bridge; no executable required tool remains")
 				return
 			}
-			if choice, ok := req.ToolChoice.(map[string]interface{}); ok {
+			if choice, ok := req.ToolChoice.(map[string]any); ok {
 				kind, _ := choice["type"].(string)
 				if strings.HasPrefix(kind, "web_search") {
 					WriteAPIError(w, http.StatusBadRequest, "invalid_request_error", "web search is disabled for chat bridge; a forced search cannot be fulfilled")
@@ -175,7 +175,7 @@ func ResponsesBridgeHandler(chat http.HandlerFunc, opts BridgeOptions) http.Hand
 			copyCapturedResponse(w, rec)
 			return
 		}
-		var chatBody map[string]interface{}
+		var chatBody map[string]any
 		if err := json.Unmarshal(rec.Body.Bytes(), &chatBody); err != nil {
 			httpserver.WriteError(w, http.StatusBadRequest, err.Error())
 			return
@@ -220,7 +220,7 @@ func ResponsesChannelSubpath(chat http.HandlerFunc, opts BridgeOptions) http.Han
 	}
 }
 
-func applyBridgedResponseExtras(response map[string]interface{}, req CreateRequest) {
+func applyBridgedResponseExtras(response map[string]any, req CreateRequest) {
 	if response == nil {
 		return
 	}
@@ -232,7 +232,7 @@ func applyBridgedResponseExtras(response map[string]interface{}, req CreateReque
 	}
 }
 
-func saveBridgedResponse(r *http.Request, req CreateRequest, response map[string]interface{}, opts BridgeOptions) error {
+func saveBridgedResponse(r *http.Request, req CreateRequest, response map[string]any, opts BridgeOptions) error {
 	encoded, err := json.Marshal(response)
 	if err != nil {
 		return err
@@ -251,8 +251,8 @@ func saveBridgedResponse(r *http.Request, req CreateRequest, response map[string
 // bridgedResponseRecorder persists the response the stream just finished with.
 // A stream cannot report a storage failure to the client any more, so the
 // failure is logged and the next turn sees response_not_found.
-func bridgedResponseRecorder(r *http.Request, req CreateRequest, opts BridgeOptions) func(map[string]interface{}) {
-	return func(response map[string]interface{}) {
+func bridgedResponseRecorder(r *http.Request, req CreateRequest, opts BridgeOptions) func(map[string]any) {
+	return func(response map[string]any) {
 		// Only a completed response is a resource a client can continue from; a
 		// failed or partial one has no id worth owning.
 		if !strings.EqualFold(chatwire.ParseLooseStringAny(response["status"]), "completed") {

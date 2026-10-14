@@ -59,7 +59,7 @@ type usageThenErrorUpstreamEdge struct {
 
 func (m *usageThenErrorUpstreamEdge) SendRequestWithPayload(_ context.Context, _ upstream.UpstreamRequest, onMessage func(upstream.SSEMessage), _ *debug.Logger) error {
 	m.calls++
-	onMessage(upstream.SSEMessage{Type: "model.tokens-used", Event: map[string]interface{}{"inputTokens": 7, "outputTokens": 0}})
+	onMessage(upstream.SSEMessage{Type: "model.tokens-used", Event: map[string]any{"inputTokens": 7, "outputTokens": 0}})
 	return m.err
 }
 
@@ -80,14 +80,14 @@ type partialErrorUpstreamEdge struct {
 }
 
 func (m *partialErrorUpstreamEdge) SendRequestWithPayload(_ context.Context, _ upstream.UpstreamRequest, onMessage func(upstream.SSEMessage), _ *debug.Logger) error {
-	onMessage(upstream.SSEMessage{Type: "model.text-delta", Event: map[string]interface{}{"delta": "partial draft"}})
+	onMessage(upstream.SSEMessage{Type: "model.text-delta", Event: map[string]any{"delta": "partial draft"}})
 	return m.err
 }
 
 func TestHandleMessages_NonStreamPartialFailureReturnsOnlyError(t *testing.T) {
 	h := NewWithLoadBalancer(&config.Config{RequestTimeout: 10}, nil)
 	h.client = &partialErrorUpstreamEdge{err: errors.New("upstream HTTP 500")}
-	payload := map[string]interface{}{"model": "test", "messages": []map[string]interface{}{{"role": "user", "content": "hi"}}, "stream": false}
+	payload := map[string]any{"model": "test", "messages": []map[string]any{{"role": "user", "content": "hi"}}, "stream": false}
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()
 	h.HandleMessages(rec, httptest.NewRequest(http.MethodPost, "http://x/workbuddy/v1/messages", bytes.NewReader(body)))
@@ -99,7 +99,7 @@ func TestHandleMessages_UsageEvidenceSuppressesReplay(t *testing.T) {
 	h := NewWithLoadBalancer(&config.Config{RequestTimeout: 10, MaxRetries: 2}, nil)
 	client := &usageThenErrorUpstreamEdge{err: errors.New("connection reset by peer")}
 	h.client = client
-	payload := map[string]interface{}{"model": "test", "messages": []map[string]interface{}{{"role": "user", "content": "hi"}}, "stream": false}
+	payload := map[string]any{"model": "test", "messages": []map[string]any{{"role": "user", "content": "hi"}}, "stream": false}
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()
 	h.HandleMessages(rec, httptest.NewRequest(http.MethodPost, "http://x/workbuddy/v1/messages", bytes.NewReader(body)))
@@ -111,12 +111,12 @@ func TestHandleMessages_UsageEvidenceSuppressesReplay(t *testing.T) {
 func TestHandleMessages_NonStreamEncodeFailureIsObservable(t *testing.T) {
 	h := NewWithLoadBalancer(&config.Config{RequestTimeout: 10}, nil)
 	h.client = &mockUpstreamEdge{events: []upstream.SSEMessage{
-		{Type: "model.text-delta", Event: map[string]interface{}{"delta": "answer"}},
-		{Type: "model.finish", Event: map[string]interface{}{"finishReason": "stop"}},
+		{Type: "model.text-delta", Event: map[string]any{"delta": "answer"}},
+		{Type: "model.finish", Event: map[string]any{"finishReason": "stop"}},
 	}}
 	auditLog := &captureAuditLogger{}
 	h.SetAuditLogger(auditLog)
-	payload := map[string]interface{}{"model": "test", "messages": []map[string]interface{}{{"role": "user", "content": "hi"}}, "stream": false}
+	payload := map[string]any{"model": "test", "messages": []map[string]any{{"role": "user", "content": "hi"}}, "stream": false}
 	body, _ := json.Marshal(payload)
 	writer := &encodeFailResponseWriter{err: errors.New("client connection closed")}
 	h.HandleMessages(writer, httptest.NewRequest(http.MethodPost, "http://x/workbuddy/v1/messages", bytes.NewReader(body)))
@@ -128,7 +128,7 @@ func TestHandleMessages_NonStreamEncodeFailureIsObservable(t *testing.T) {
 func TestHandleMessages_StreamPartialFailureEndsWithErrorNotSuccess(t *testing.T) {
 	h := NewWithLoadBalancer(&config.Config{RequestTimeout: 10}, nil)
 	h.client = &partialErrorUpstreamEdge{err: errors.New("upstream HTTP 500")}
-	payload := map[string]interface{}{"model": "test", "messages": []map[string]interface{}{{"role": "user", "content": "hi"}}, "stream": true}
+	payload := map[string]any{"model": "test", "messages": []map[string]any{{"role": "user", "content": "hi"}}, "stream": true}
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()
 	h.HandleMessages(rec, httptest.NewRequest(http.MethodPost, "http://x/workbuddy/v1/messages", bytes.NewReader(body)))
@@ -141,7 +141,7 @@ type finishThenErrorUpstreamEdge struct{ calls int }
 
 func (m *finishThenErrorUpstreamEdge) SendRequestWithPayload(_ context.Context, _ upstream.UpstreamRequest, onMessage func(upstream.SSEMessage), _ *debug.Logger) error {
 	m.calls++
-	onMessage(upstream.SSEMessage{Type: "model.finish", Event: map[string]interface{}{"finishReason": "stop"}})
+	onMessage(upstream.SSEMessage{Type: "model.finish", Event: map[string]any{"finishReason": "stop"}})
 	return errors.New("connection reset after finish")
 }
 
@@ -149,7 +149,7 @@ func TestHandleMessages_DoesNotRetryAfterTerminalFinish(t *testing.T) {
 	h := NewWithLoadBalancer(&config.Config{RequestTimeout: 10, MaxRetries: 2}, nil)
 	client := &finishThenErrorUpstreamEdge{}
 	h.client = client
-	payload := map[string]interface{}{"model": "test", "messages": []map[string]interface{}{{"role": "user", "content": "hi"}}, "stream": true}
+	payload := map[string]any{"model": "test", "messages": []map[string]any{{"role": "user", "content": "hi"}}, "stream": true}
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()
 	h.HandleMessages(rec, httptest.NewRequest(http.MethodPost, "http://x/workbuddy/v1/messages", bytes.NewReader(body)))
@@ -406,7 +406,7 @@ func TestHandleMessages_NonRetryableClientErrorReturnsExplicitMessage(t *testing
 	testutil.Falsef(t, !strings.Contains(out, "rejected the request parameters or model") || strings.Contains(out, "workbuddy API error"), "expected redacted upstream error, got: %s", out)
 	testutil.MustNotContain(t, out, "No output was presented to the user")
 	testutil.MustNotContain(t, out, "retries exhausted")
-	var response map[string]interface{}
+	var response map[string]any
 	err := json.Unmarshal(rec.Body.Bytes(), &response)
 	testutil.CheckNoError(t, err)
 	_, exists := response["choices"]

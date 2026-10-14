@@ -168,7 +168,7 @@ func adminSessionAudit(next http.HandlerFunc) http.HandlerFunc {
 		if recorder.status >= 400 {
 			status = "error"
 		}
-		metadata := map[string]interface{}{
+		metadata := map[string]any{
 			"method": r.Method,
 			"path":   r.URL.Path,
 			"code":   recorder.status,

@@ -144,7 +144,7 @@ func InputItemsHandler(opts BridgeOptions) http.HandlerFunc {
 // it stands. That is what makes the endpoint idempotent instead of an error: a
 // client that cancels defensively must not be told its response does not exist.
 func writeCancelledRecord(w http.ResponseWriter, r *http.Request, st Store, record *store.StoredResponse, fallbackTTL time.Duration) {
-	var response map[string]interface{}
+	var response map[string]any
 	if err := json.Unmarshal(record.Body, &response); err != nil || response == nil {
 		WriteAPIError(w, http.StatusBadGateway, "invalid_stored_response", "stored response is not a JSON object")
 		return
@@ -177,7 +177,7 @@ func writeCancelledRecord(w http.ResponseWriter, r *http.Request, st Store, reco
 // it, cannot read it, and a cancel it cannot verify is worse than an honest
 // object carrying the identity it does know.
 func writeSyntheticCancelledResponse(w http.ResponseWriter, record *store.StoredResponse) {
-	response := map[string]interface{}{
+	response := map[string]any{
 		"id":     record.ResponseID,
 		"object": "response",
 		"status": "cancelled",
@@ -188,16 +188,16 @@ func writeSyntheticCancelledResponse(w http.ResponseWriter, record *store.Stored
 	if !record.CreatedAt.IsZero() {
 		response["created_at"] = record.CreatedAt.Unix()
 	}
-	response["output"] = []interface{}{}
+	response["output"] = []any{}
 	util.WriteJSON(w, response)
 }
 
 // markOutputItemsCancelled keeps the item statuses consistent with the response
 // status. An item that already finished keeps its own status, so the record
 // still says what the upstream actually produced.
-func markOutputItemsCancelled(response map[string]interface{}) {
+func markOutputItemsCancelled(response map[string]any) {
 	for _, raw := range InterfaceSlice(response["output"]) {
-		item, _ := raw.(map[string]interface{})
+		item, _ := raw.(map[string]any)
 		if item == nil {
 			continue
 		}
@@ -213,23 +213,23 @@ func markOutputItemsCancelled(response map[string]interface{}) {
 // gateway persisted input items reports an empty list rather than failing: the
 // response exists, and the caller can still read its output.
 func writeStoredInputItems(w http.ResponseWriter, record *store.StoredResponse) {
-	items := []interface{}{}
+	items := []any{}
 	if len(record.InputItems) > 0 {
-		var decoded []interface{}
+		var decoded []any
 		if err := json.Unmarshal(record.InputItems, &decoded); err == nil {
 			items = decoded
 		}
 	}
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"object":   "list",
 		"data":     items,
 		"has_more": false,
 	}
 	if len(items) > 0 {
-		if first, ok := items[0].(map[string]interface{}); ok {
+		if first, ok := items[0].(map[string]any); ok {
 			payload["first_id"] = ParseLooseStringAny(first["id"])
 		}
-		if last, ok := items[len(items)-1].(map[string]interface{}); ok {
+		if last, ok := items[len(items)-1].(map[string]any); ok {
 			payload["last_id"] = ParseLooseStringAny(last["id"])
 		}
 	}
@@ -244,7 +244,7 @@ func writeStoredInputItems(w http.ResponseWriter, record *store.StoredResponse) 
 // the next turn's `input` must not be rejected for fields the gateway elided.
 // Items the client already labelled keep their own id, so a replay stays
 // byte-stable.
-func inputItemsJSON(input interface{}) json.RawMessage {
+func inputItemsJSON(input any) json.RawMessage {
 	items := InputItems(input)
 	if len(items) == 0 {
 		return nil
@@ -257,7 +257,7 @@ func inputItemsJSON(input interface{}) json.RawMessage {
 }
 
 // InputItems normalizes input for storage and replay without modifying the caller.
-func InputItems(input interface{}) []interface{} {
+func InputItems(input any) []any {
 	switch value := input.(type) {
 	case nil:
 		return nil
@@ -265,17 +265,17 @@ func InputItems(input interface{}) []interface{} {
 		if strings.TrimSpace(value) == "" {
 			return nil
 		}
-		return []interface{}{map[string]interface{}{
+		return []any{map[string]any{
 			"id":      "msg_" + util.RandomHex(12),
 			"type":    "message",
 			"role":    "user",
 			"status":  "completed",
-			"content": []interface{}{map[string]interface{}{"type": "input_text", "text": value}},
+			"content": []any{map[string]any{"type": "input_text", "text": value}},
 		}}
-	case []interface{}:
-		out := make([]interface{}, 0, len(value))
+	case []any:
+		out := make([]any, 0, len(value))
 		for _, raw := range value {
-			item, _ := raw.(map[string]interface{})
+			item, _ := raw.(map[string]any)
 			if item == nil {
 				continue
 			}
@@ -315,7 +315,7 @@ func SubResourceHandler(action string, opts BridgeOptions) http.HandlerFunc {
 }
 
 // InputItemsJSON renders a request's input as the stored input-item list.
-func InputItemsJSON(input interface{}) json.RawMessage { return inputItemsJSON(input) }
+func InputItemsJSON(input any) json.RawMessage { return inputItemsJSON(input) }
 
 // ParseResourcePath splits a path below /responses/ into the response id and
 // an optional sibling action.

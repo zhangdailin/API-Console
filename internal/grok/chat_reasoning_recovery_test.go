@@ -24,12 +24,12 @@ func TestReplayCipherValidation(t *testing.T) {
 
 func TestChatReasoningRecoveryResetsOnlyAfterDecodeFailure(t *testing.T) {
 	initial := newCLIUpstreamError(400, nil, []byte("invalid_encrypted_content"))
-	payload := map[string]interface{}{"prompt_cache_key": "session", "input": []interface{}{map[string]interface{}{"type": "reasoning", "encrypted_content": "opaque", "summary": []interface{}{map[string]interface{}{"text": "remember this"}}}}}
+	payload := map[string]any{"prompt_cache_key": "session", "input": []any{map[string]any{"type": "reasoning", "encrypted_content": "opaque", "summary": []any{map[string]any{"text": "remember this"}}}}}
 	calls := 0
 	response, err := recoverChatReasoning(payload, initial, func(stage string) (*http.Response, error) {
 		calls++
 		if calls == 1 {
-			item := payload["input"].([]interface{})[0].(map[string]interface{})
+			item := payload["input"].([]any)[0].(map[string]any)
 			testutil.Fail(t, item["type"] != "message" || item["encrypted_content"] != nil, item)
 			testutil.Equal(t, payload["prompt_cache_key"], "session")
 			return nil, initial
@@ -42,7 +42,7 @@ func TestChatReasoningRecoveryResetsOnlyAfterDecodeFailure(t *testing.T) {
 
 func TestChatReasoningRecoveryPreservesPreviousResponse(t *testing.T) {
 	initial := newCLIUpstreamError(400, nil, []byte("invalid_encrypted_content"))
-	payload := map[string]interface{}{"prompt_cache_key": "session", "previous_response_id": "resp_1"}
+	payload := map[string]any{"prompt_cache_key": "session", "previous_response_id": "resp_1"}
 	_, err := recoverChatReasoning(payload, initial, func(string) (*http.Response, error) { t.Fatal("unsafe reset"); return nil, nil })
 	testutil.Fail(t, err != initial || payload["prompt_cache_key"] != "session", err, payload)
 }
@@ -50,7 +50,7 @@ func TestChatReasoningRecoveryPreservesPreviousResponse(t *testing.T) {
 func TestChatReasoningRecoveryDoesNotRetryRateLimit(t *testing.T) {
 	initial := newCLIUpstreamError(400, nil, []byte("invalid_encrypted_content"))
 	limited := newCLIUpstreamError(429, nil, []byte("rate limited"))
-	payload := map[string]interface{}{"prompt_cache_key": "session", "input": []interface{}{map[string]interface{}{"type": "reasoning", "encrypted_content": "opaque"}}}
+	payload := map[string]any{"prompt_cache_key": "session", "input": []any{map[string]any{"type": "reasoning", "encrypted_content": "opaque"}}}
 	calls := 0
 	_, err := recoverChatReasoning(payload, initial, func(string) (*http.Response, error) { calls++; return nil, limited })
 	testutil.Fail(t, err != limited || calls != 1, err, calls)

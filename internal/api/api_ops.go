@@ -106,7 +106,7 @@ func (a *API) HandleOpsOverview(w http.ResponseWriter, r *http.Request) {
 	channels, aggregates, channelErr := a.opsChannels(r.Context(), since, until)
 	target := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("channel")))
 
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"window_minutes": window,
 		"since":          since.UTC().Format(time.RFC3339),
 		"until":          until.UTC().Format(time.RFC3339),
@@ -117,7 +117,7 @@ func (a *API) HandleOpsOverview(w http.ResponseWriter, r *http.Request) {
 		"excluded_aggregates": aggregates,
 		"channel":             target,
 		"totals":              opsagg.Summary{},
-		"series":              []map[string]interface{}{},
+		"series":              []map[string]any{},
 		"alerts":              []alerting.Alert{},
 		"coverage":            a.auditCoverage(r.Context()),
 		"aggregation":         "per-minute",
@@ -193,14 +193,14 @@ func (a *API) HandleOpsOverview(w http.ResponseWriter, r *http.Request) {
 func (a *API) HandleOpsAlertRules(w http.ResponseWriter, r *http.Request) {
 	defaults := alerting.DefaultRules()
 	if a == nil || a.alertEngine == nil || a.store == nil || a.store.RedisClient() == nil {
-		util.WriteJSON(w, map[string]interface{}{
+		util.WriteJSON(w, map[string]any{
 			"rules": defaults, "defaults": defaults, "editable": false,
 			"note": "告警规则需要 Redis 和告警引擎。",
 		})
 		return
 	}
 	if r.Method == http.MethodGet {
-		util.WriteJSON(w, map[string]interface{}{
+		util.WriteJSON(w, map[string]any{
 			"rules": a.alertEngine.Thresholds(), "defaults": defaults, "editable": true,
 		})
 		return
@@ -227,7 +227,7 @@ func (a *API) HandleOpsAlertRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = a.alertEngine.SetThresholds(rules)
-	util.WriteJSON(w, map[string]interface{}{"rules": rules, "defaults": defaults, "editable": true})
+	util.WriteJSON(w, map[string]any{"rules": rules, "defaults": defaults, "editable": true})
 }
 
 // journalAttemptLookback bounds the extra scan that recovers upstream attempts whose
@@ -289,7 +289,7 @@ func pricingBreakdownForJournal(event audit.Event) (pricing.Breakdown, bool) {
 // or a stringified one. One reader for all of them keeps the log centre's
 // outcome class and the journal's cost breakdown in agreement about what a row
 // said.
-func metadataInt(metadata map[string]interface{}, key string) int64 {
+func metadataInt(metadata map[string]any, key string) int64 {
 	switch value := metadata[key].(type) {
 	case int:
 		return int64(value)
@@ -362,7 +362,7 @@ func (a *API) writeJournalList(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	records := make([]map[string]interface{}, 0, limit)
+	records := make([]map[string]any, 0, limit)
 	matched := 0
 	for _, entry := range entries {
 		event, ok := decodeAuditEvent(entry)
@@ -376,7 +376,7 @@ func (a *API) writeJournalList(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		matched++
-		records = append(records, map[string]interface{}{
+		records = append(records, map[string]any{
 			"id":       entry.ID,
 			"event":    event,
 			"attempts": attempts[event.RequestID],
@@ -484,7 +484,7 @@ func (a *API) writeJournalList(w http.ResponseWriter, r *http.Request) {
 	case int64(len(entries)) >= scanCap && len(entries) > 0:
 		nextCursor = entries[len(entries)-1].ID
 	}
-	util.WriteJSON(w, map[string]interface{}{
+	util.WriteJSON(w, map[string]any{
 		"data":        records,
 		"next_cursor": nextCursor,
 		"kind":        kind,
@@ -648,10 +648,10 @@ func (a *API) opsBucketsWithSamples(ctx context.Context, scope string, since, un
 	return out, durations, ttfts, nil
 }
 
-func opsSeries(buckets []opsagg.Bucket) []map[string]interface{} {
-	series := make([]map[string]interface{}, 0, len(buckets))
+func opsSeries(buckets []opsagg.Bucket) []map[string]any {
+	series := make([]map[string]any, 0, len(buckets))
 	for _, bucket := range buckets {
-		series = append(series, map[string]interface{}{
+		series = append(series, map[string]any{
 			"minute":       bucket.Minute.UTC().Format(time.RFC3339),
 			"requests":     bucket.Requests,
 			"success":      bucket.Success,
@@ -664,7 +664,7 @@ func opsSeries(buckets []opsagg.Bucket) []map[string]interface{} {
 
 // opsMatrix builds the channel × model status rows. A row with no samples is
 // reported as such (samples = 0) instead of a green, traffic-free channel.
-func (a *API) opsMatrix(ctx context.Context, channels []string, since, until time.Time) ([]map[string]interface{}, error) {
+func (a *API) opsMatrix(ctx context.Context, channels []string, since, until time.Time) ([]map[string]any, error) {
 	accounts, err := a.store.ListAccounts(ctx)
 	if err != nil {
 		return nil, err
@@ -697,7 +697,7 @@ func (a *API) opsMatrix(ctx context.Context, channels []string, since, until tim
 		windowMinutes = 1
 	}
 
-	rows := make([]map[string]interface{}, 0, len(channels))
+	rows := make([]map[string]any, 0, len(channels))
 	for _, channel := range channels {
 		// The matrix answers "which provider channel × model is healthy", so the
 		// infrastructure aggregates are not rows in it.
@@ -712,7 +712,7 @@ func (a *API) opsMatrix(ctx context.Context, channels []string, since, until tim
 				active += counts[acc.ID]
 			}
 		}
-		row := map[string]interface{}{
+		row := map[string]any{
 			"channel":          channel,
 			"accounts_enabled": enabled,
 			"active_requests":  active, "concurrency_available": a.connTracker != nil,
@@ -770,12 +770,12 @@ func (a *API) firingAlerts() []alerting.Alert {
 
 // currentConcurrency reports how many accounts are mid-refresh right now, if the
 // deployment wired a reporter.
-func (a *API) currentConcurrency() map[string]interface{} {
+func (a *API) currentConcurrency() map[string]any {
 	value := 0
 	if a != nil && a.refreshConcurrency != nil {
 		value = a.refreshConcurrency()
 	}
-	return map[string]interface{}{"accounts_refreshing": value}
+	return map[string]any{"accounts_refreshing": value}
 }
 
 // parseOpsWindow resolves the requested window, clamped to what the buckets

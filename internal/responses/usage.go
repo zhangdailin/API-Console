@@ -1,7 +1,7 @@
 package responses
 
-func UsageFromChat(raw interface{}) map[string]interface{} {
-	usage, _ := raw.(map[string]interface{})
+func UsageFromChat(raw any) map[string]any {
+	usage, _ := raw.(map[string]any)
 	input := InterfaceToInt(FirstNonNil(usage["prompt_tokens"], usage["input_tokens"]))
 	output := InterfaceToInt(FirstNonNil(usage["completion_tokens"], usage["output_tokens"]))
 	total := InterfaceToInt(usage["total_tokens"])
@@ -10,7 +10,7 @@ func UsageFromChat(raw interface{}) map[string]interface{} {
 	}
 	result := CloneStringInterfaceMap(usage)
 	if result == nil {
-		result = map[string]interface{}{}
+		result = map[string]any{}
 	}
 	delete(result, "prompt_tokens")
 	delete(result, "completion_tokens")
@@ -20,7 +20,7 @@ func UsageFromChat(raw interface{}) map[string]interface{} {
 	result["output_tokens"] = output
 	result["total_tokens"] = total
 	for target, source := range map[string]string{"input_tokens_details": "prompt_tokens_details", "output_tokens_details": "completion_tokens_details"} {
-		if details, ok := FirstNonNil(usage[target], usage[source]).(map[string]interface{}); ok {
+		if details, ok := FirstNonNil(usage[target], usage[source]).(map[string]any); ok {
 			result[target] = CloneStringInterfaceMap(details)
 		}
 	}

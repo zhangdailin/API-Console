@@ -110,7 +110,7 @@ func TestDiagnosticsStreamFailureSummaryMatchesJournal(t *testing.T) {
 		if s.Name == "6_http_summary.json" {
 			testutil.False(t, found, "duplicate HTTP summary section")
 			found = true
-			var v map[string]interface{}
+			var v map[string]any
 			testutil.NoError(t, json.Unmarshal([]byte(s.Payload), &v), "invalid HTTP summary: %v")
 			testutil.Fail(t, v["status"] != float64(200) || v["stream_failed"] != true, v)
 		}

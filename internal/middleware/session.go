@@ -181,8 +181,8 @@ func writeAPIKeyError(w http.ResponseWriter, status int, message, code string) {
 		// explicit so a client can distinguish it from a malformed key.
 		errorType = "insufficient_quota"
 	}
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"error": map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"error": map[string]any{
 			"message": message,
 			"type":    errorType,
 			"code":    code,

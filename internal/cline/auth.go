@@ -159,7 +159,7 @@ func ResolveCredentials(acc *store.Account) Credentials {
 
 // ParseExpiry reads the upstream expiry, which reaches this client as a number,
 // a numeric string or an RFC3339 timestamp depending on the endpoint.
-func ParseExpiry(value interface{}) time.Time {
+func ParseExpiry(value any) time.Time {
 	switch typed := value.(type) {
 	case float64:
 		return millisToTime(int64(typed))

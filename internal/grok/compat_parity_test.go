@@ -83,12 +83,12 @@ func TestChatCompletionsRequestValidateLeavesSamplingToUpstream(t *testing.T) {
 func TestChatCompletionsRequestValidateToolChoice(t *testing.T) {
 	tools := []chatwire.ToolDef{{
 		Type:     "function",
-		Function: map[string]interface{}{"name": "weather"},
+		Function: map[string]any{"name": "weather"},
 	}}
 	cases := []struct {
 		name       string
 		tools      []chatwire.ToolDef
-		toolChoice interface{}
+		toolChoice any
 		wantErr    bool
 	}{
 		{name: "required with a declared tool", tools: tools, toolChoice: "required"},
@@ -96,26 +96,26 @@ func TestChatCompletionsRequestValidateToolChoice(t *testing.T) {
 		{
 			name:  "forced declared function",
 			tools: tools,
-			toolChoice: map[string]interface{}{
+			toolChoice: map[string]any{
 				"type":     "function",
-				"function": map[string]interface{}{"name": "weather"},
+				"function": map[string]any{"name": "weather"},
 			},
 		},
 		{
 			name:  "forced unknown function",
 			tools: tools,
-			toolChoice: map[string]interface{}{
+			toolChoice: map[string]any{
 				"type":     "function",
-				"function": map[string]interface{}{"name": "unknown_tool"},
+				"function": map[string]any{"name": "unknown_tool"},
 			},
 			wantErr: true,
 		},
 		{
 			name:  "malformed forced function",
 			tools: tools,
-			toolChoice: map[string]interface{}{
+			toolChoice: map[string]any{
 				"type":     "function",
-				"function": map[string]interface{}{},
+				"function": map[string]any{},
 			},
 			wantErr: true,
 		},

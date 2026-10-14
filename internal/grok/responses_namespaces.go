@@ -18,7 +18,7 @@ func restoreNativeResourceNamespaces(resp *http.Response, stored json.RawMessage
 	if err != nil {
 		return err
 	}
-	var envelope map[string]interface{}
+	var envelope map[string]any
 	if err := json.Unmarshal(raw, &envelope); err != nil {
 		return err
 	}

@@ -341,7 +341,7 @@ func BenchmarkStreamingRelayTextDeltaFrame(b *testing.B) {
 		b.Run("delta="+strconv.Itoa(size), func(b *testing.B) {
 			msg := upstream.SSEMessage{
 				Type:  "model.text-delta",
-				Event: map[string]interface{}{"delta": strings.Repeat("x", size)},
+				Event: map[string]any{"delta": strings.Repeat("x", size)},
 			}
 			b.ReportAllocs()
 			b.ResetTimer()

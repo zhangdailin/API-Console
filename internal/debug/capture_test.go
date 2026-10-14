@@ -18,7 +18,7 @@ func TestCaptureRoundTripAndRetention(t *testing.T) {
 	store := NewDiagnosticStore(client, "test:")
 	ctx, capture := WithCapture(context.Background(), "request/../1")
 	logger := NewForContext(ctx, false, false)
-	logger.LogIncomingRequest(map[string]interface{}{"model": "test", "api_key": "sensitive-key", "max_tokens": 100})
+	logger.LogIncomingRequest(map[string]any{"model": "test", "api_key": "sensitive-key", "max_tokens": 100})
 	logger.LogUpstreamRequest("https://upstream.test", map[string]string{"Authorization": "Bearer a-secret"}, []byte(`{"messages":[{"content":"hello"}]}`))
 	raw := `data: {"text":"hello","access_token":"super-secret"}` + "\n"
 	capture.Append("4_upstream_sse.jsonl", raw)

@@ -66,9 +66,9 @@ func TestHandleMessages_CustomMCPToolCall_RemainsAllowed(t *testing.T) {
 	testutil.Equal(t, len(calls), 1)
 	testutil.Equal(t, len(calls[0].Tools), 1)
 
-	declared, ok := calls[0].Tools[0].(map[string]interface{})
+	declared, ok := calls[0].Tools[0].(map[string]any)
 	testutil.True(t, ok, "declared tool type=%T want map[string]interface{}")
-	function, ok := declared["function"].(map[string]interface{})
+	function, ok := declared["function"].(map[string]any)
 	testutil.True(t, ok, "declared tool function=%T want map[string]interface{}")
 	got, _ := function["name"].(string)
 	testutil.Falsef(t, got != "workspace_search", "declared tool name=%q want workspace_search", got)

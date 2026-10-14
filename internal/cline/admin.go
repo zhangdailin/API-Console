@@ -220,7 +220,7 @@ func observeAccount(ctx context.Context, client *Client, acc *store.Account, key
 // Fabricating a limit here is what makes an account look spent when it is not,
 // and the generic usage counters are reserved for channels that actually
 // bill them.
-func projectQuota(fields map[string]interface{}, acc *store.Account, limit, current float64, observedTokens int64, usageObserved bool) {
+func projectQuota(fields map[string]any, acc *store.Account, limit, current float64, observedTokens int64, usageObserved bool) {
 	fields["quota_limit"] = 0.0
 	fields["quota_used"] = 0.0
 	fields["quota_remaining"] = 0.0

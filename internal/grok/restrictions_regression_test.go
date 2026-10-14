@@ -33,10 +33,10 @@ func TestRestrictionsReasoningAliasesReachWire(t *testing.T) {
 		{"grok-3-mini", "medium"},
 		{"grok-3-mini-fast", "minimal"},
 	} {
-		payload := map[string]interface{}{"reasoning": map[string]interface{}{"effort": test.effort, "summary": "auto"}}
+		payload := map[string]any{"reasoning": map[string]any{"effort": test.effort, "summary": "auto"}}
 		err := validatePayloadReasoning(payload)
 		testutil.NoError(t, err)
-		testutil.Fail(t, payload["reasoning"].(map[string]interface{})["effort"] != test.effort, test, payload)
+		testutil.Fail(t, payload["reasoning"].(map[string]any)["effort"] != test.effort, test, payload)
 		effort := test.effort
 		request := &chatwire.Request{Model: test.model, Messages: []chatwire.Message{{Role: "user", Content: "hi"}}, ReasoningEffort: &effort}
 		err = request.Validate()
@@ -45,15 +45,15 @@ func TestRestrictionsReasoningAliasesReachWire(t *testing.T) {
 }
 
 func TestRestrictionsEmptyAndImageToolOutputs(t *testing.T) {
-	for _, content := range []interface{}{"", []interface{}{map[string]interface{}{"type": "image_url", "image_url": map[string]interface{}{"url": "https://example.com/a.png", "detail": "high"}}}} {
+	for _, content := range []any{"", []any{map[string]any{"type": "image_url", "image_url": map[string]any{"url": "https://example.com/a.png", "detail": "high"}}}} {
 		messages := []chatwire.Message{{Role: "tool", ToolCallID: "call_a", Content: content}}
 		testutil.NoError(t, chatwire.ValidateMessages(messages))
 		input, _ := responsesInputFromChatMessages(messages)
-		item := input[0].(map[string]interface{})
+		item := input[0].(map[string]any)
 		testutil.Equal(t, item["call_id"], "call_a")
 		testutil.False(t, content == "" && item["output"] != "", "empty result changed")
-		if parts, ok := item["output"].([]interface{}); ok {
-			testutil.Fail(t, parts[0].(map[string]interface{})["detail"] != "high", parts)
+		if parts, ok := item["output"].([]any); ok {
+			testutil.Fail(t, parts[0].(map[string]any)["detail"] != "high", parts)
 		}
 	}
 	err := chatwire.ValidateMessages([]chatwire.Message{{Role: "tool", Content: ""}})
@@ -104,14 +104,14 @@ func TestRestrictionsScopedCooldownAndPacing(t *testing.T) {
 }
 
 func TestRestrictionsBuildChatLongToolNameEndToEnd(t *testing.T) {
-	received := make(chan map[string]interface{}, 1)
+	received := make(chan map[string]any, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var payload map[string]interface{}
+		var payload map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&payload)
 		received <- payload
-		choice, _ := payload["tool_choice"].(map[string]interface{})
+		choice, _ := payload["tool_choice"].(map[string]any)
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "resp_tool", "status": "completed", "output": []interface{}{map[string]interface{}{"type": "function_call", "call_id": "call_long", "name": choice["name"], "arguments": "{}"}}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "resp_tool", "status": "completed", "output": []any{map[string]any{"type": "function_call", "call_id": "call_long", "name": choice["name"], "arguments": "{}"}}})
 	}))
 	defer upstream.Close()
 	h, s, _ := setupValidationHandler(t)
@@ -126,17 +126,17 @@ func TestRestrictionsBuildChatLongToolNameEndToEnd(t *testing.T) {
 	longName := strings.Repeat("Tool", 50)
 	tools := make([]chatwire.ToolDef, 129)
 	for i := range tools {
-		tools[i] = chatwire.ToolDef{Type: "function", Function: map[string]interface{}{"name": fmt.Sprintf("tool_%d", i)}}
+		tools[i] = chatwire.ToolDef{Type: "function", Function: map[string]any{"name": fmt.Sprintf("tool_%d", i)}}
 	}
 	tools[0].Function["name"] = longName
-	body, _ := json.Marshal(chatwire.Request{Model: model, Messages: []chatwire.Message{{Role: "user", Content: "use the tool"}}, Tools: tools, ToolChoice: map[string]interface{}{"type": "function", "function": map[string]interface{}{"name": longName}}})
+	body, _ := json.Marshal(chatwire.Request{Model: model, Messages: []chatwire.Message{{Role: "user", Content: "use the tool"}}, Tools: tools, ToolChoice: map[string]any{"type": "function", "function": map[string]any{"name": longName}}})
 	rec := httptest.NewRecorder()
 	h.HandleChatCompletions(rec, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body)))
 	testutil.Falsef(t, rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), longName) || !strings.Contains(rec.Body.String(), "call_long"), "%d %s", rec.Code, rec.Body.String())
 	select {
 	case payload := <-received:
 		testutil.Equal(t, len(responses.InterfaceMaps(payload["tools"])), 129)
-		if name := chatwire.ParseLooseStringAny(payload["tool_choice"].(map[string]interface{})["name"]); name != longName {
+		if name := chatwire.ParseLooseStringAny(payload["tool_choice"].(map[string]any)["name"]); name != longName {
 			t.Fatal("tool name changed", name)
 		}
 	default:

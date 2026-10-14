@@ -31,22 +31,22 @@ func TestCollectedQualityDoesNotInventStreamTiming(t *testing.T) {
 			h, journal, accounts := qualityLoggingHandler(t, func(base string) *config.Config {
 				return &config.Config{GrokCLIBaseURL: base}
 			}, "jwt-user-healthy")
-			output := []interface{}{}
+			output := []any{}
 			if tc.reasoning != "" || tc.encrypted != "" {
-				output = append(output, map[string]interface{}{
+				output = append(output, map[string]any{
 					"type": "reasoning", "encrypted_content": tc.encrypted,
-					"summary": []interface{}{map[string]interface{}{"type": "summary_text", "text": tc.reasoning}},
+					"summary": []any{map[string]any{"type": "summary_text", "text": tc.reasoning}},
 				})
 			}
-			output = append(output, map[string]interface{}{
+			output = append(output, map[string]any{
 				"type": "message", "role": "assistant",
-				"content": []interface{}{map[string]interface{}{"type": "output_text", "text": "an answer containing enough text"}},
+				"content": []any{map[string]any{"type": "output_text", "text": "an answer containing enough text"}},
 			})
-			body, err := json.Marshal(map[string]interface{}{
+			body, err := json.Marshal(map[string]any{
 				"status": "completed", "output": output,
-				"usage": map[string]interface{}{
+				"usage": map[string]any{
 					"input_tokens": 10, "output_tokens": tc.outputTokens,
-					"output_tokens_details": map[string]interface{}{"reasoning_tokens": tc.reasoningTokens},
+					"output_tokens_details": map[string]any{"reasoning_tokens": tc.reasoningTokens},
 				},
 			})
 			testutil.NoError(t, err, "marshal response: %v")

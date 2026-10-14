@@ -105,7 +105,7 @@ func (a *ToolCallAccumulator) CompleteAll() []*ToolCall {
 // UsageInt reads the first present numeric value among keys. Upstreams disagree
 // on both the key name and whether the number arrives as float64, int or
 // json.Number, so every shape is accepted.
-func UsageInt(values map[string]interface{}, keys ...string) (int, bool) {
+func UsageInt(values map[string]any, keys ...string) (int, bool) {
 	for _, key := range keys {
 		switch typed := values[key].(type) {
 		case float64:
@@ -122,9 +122,9 @@ func UsageInt(values map[string]interface{}, keys ...string) (int, bool) {
 }
 
 // UsageMap reads the first present nested object among keys.
-func UsageMap(values map[string]interface{}, keys ...string) map[string]interface{} {
+func UsageMap(values map[string]any, keys ...string) map[string]any {
 	for _, key := range keys {
-		if nested, ok := values[key].(map[string]interface{}); ok {
+		if nested, ok := values[key].(map[string]any); ok {
 			return nested
 		}
 	}

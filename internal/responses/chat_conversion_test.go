@@ -15,56 +15,56 @@ import (
 )
 
 func TestResponsesObjectFromChat_ConvertsMessageAndToolCalls(t *testing.T) {
-	chat := map[string]interface{}{
+	chat := map[string]any{
 		"model": "grok-4.20-0309",
-		"choices": []interface{}{map[string]interface{}{
-			"message": map[string]interface{}{
+		"choices": []any{map[string]any{
+			"message": map[string]any{
 				"role":    "assistant",
 				"content": "answer",
-				"annotations": []interface{}{map[string]interface{}{
+				"annotations": []any{map[string]any{
 					"type":         "url_citation",
-					"url_citation": map[string]interface{}{"url": "https://example.com"},
+					"url_citation": map[string]any{"url": "https://example.com"},
 				}},
-				"tool_calls": []interface{}{map[string]interface{}{
+				"tool_calls": []any{map[string]any{
 					"id":   "call_1",
 					"type": "function",
-					"function": map[string]interface{}{
+					"function": map[string]any{
 						"name":      "get_weather",
 						"arguments": `{"city":"Shanghai"}`,
 					},
 				}},
 			},
 		}},
-		"usage": map[string]interface{}{"prompt_tokens": float64(3), "completion_tokens": float64(4), "total_tokens": float64(7)},
+		"usage": map[string]any{"prompt_tokens": float64(3), "completion_tokens": float64(4), "total_tokens": float64(7)},
 	}
 
 	resp := ObjectFromChat("grok-4.20-0309", chat)
 	testutil.Equal(t, resp["object"], "response")
 	testutil.Equal(t, resp["status"], "completed")
-	output := resp["output"].([]interface{})
+	output := resp["output"].([]any)
 	testutil.Equal(t, len(output), 2)
-	fc := output[0].(map[string]interface{})
+	fc := output[0].(map[string]any)
 	testutil.Falsef(t, fc["type"] != "function_call" || fc["call_id"] != "call_1" || fc["name"] != "get_weather", "function_call mismatch: %#v", fc)
-	msg := output[1].(map[string]interface{})
-	content := msg["content"].([]interface{})[0].(map[string]interface{})
+	msg := output[1].(map[string]any)
+	content := msg["content"].([]any)[0].(map[string]any)
 	testutil.Equal(t, content["text"], "answer")
-	usage := resp["usage"].(map[string]interface{})
+	usage := resp["usage"].(map[string]any)
 	testutil.Falsef(t, usage["input_tokens"] != 3 || usage["output_tokens"] != 4 || usage["total_tokens"] != 7, "usage mismatch: %#v", usage)
 }
 
 func TestWriteResponsesStreamFromChat_ConvertsToolCallChunk(t *testing.T) {
 	var b strings.Builder
-	chunk := map[string]interface{}{
+	chunk := map[string]any{
 		"id":     "chatcmpl_1",
 		"object": "chat.completion.chunk",
-		"choices": []interface{}{map[string]interface{}{
+		"choices": []any{map[string]any{
 			"index": 0,
-			"delta": map[string]interface{}{
-				"tool_calls": []interface{}{map[string]interface{}{
+			"delta": map[string]any{
+				"tool_calls": []any{map[string]any{
 					"index": 0,
 					"id":    "call_1",
 					"type":  "function",
-					"function": map[string]interface{}{
+					"function": map[string]any{
 						"name":      "get_weather",
 						"arguments": `{"city":"Shanghai"}`,
 					},
@@ -72,7 +72,7 @@ func TestWriteResponsesStreamFromChat_ConvertsToolCallChunk(t *testing.T) {
 			},
 			"finish_reason": "tool_calls",
 		}},
-		"usage": map[string]interface{}{"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
+		"usage": map[string]any{"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
 	}
 	raw, _ := json.Marshal(chunk)
 	b.WriteString("data: ")
@@ -106,17 +106,17 @@ func TestWriteResponsesStreamFromChatFailsEmptyAndPrematureStreams(t *testing.T)
 }
 
 func TestResponsesObjectFromChatPreservesReasoningItem(t *testing.T) {
-	chat := map[string]interface{}{
+	chat := map[string]any{
 		"model": "grok-4.3",
-		"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{
+		"choices": []any{map[string]any{"message": map[string]any{
 			"role": "assistant", "reasoning_content": "plan", "content": "answer",
 		}}},
 	}
-	output := ObjectFromChat("grok-4.3", chat)["output"].([]interface{})
+	output := ObjectFromChat("grok-4.3", chat)["output"].([]any)
 	testutil.Equal(t, len(output), 2)
-	reasoning := output[0].(map[string]interface{})
+	reasoning := output[0].(map[string]any)
 	testutil.Equal(t, reasoning["type"], "reasoning")
-	summary := reasoning["summary"].([]interface{})[0].(map[string]interface{})
+	summary := reasoning["summary"].([]any)[0].(map[string]any)
 	testutil.Equal(t, summary["text"], "plan")
 }
 
@@ -193,21 +193,21 @@ func (w *observedStreamWriter) Write(data []byte) (int, error) {
 	return n, err
 }
 
-func remainingChatFrame(delta map[string]interface{}, finish interface{}) string {
-	b, _ := json.Marshal(map[string]interface{}{"choices": []interface{}{map[string]interface{}{"delta": delta, "finish_reason": finish}}})
+func remainingChatFrame(delta map[string]any, finish any) string {
+	b, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": delta, "finish_reason": finish}}})
 	return "data: " + string(b) + "\n\n"
 }
 
-func remainingResponse(t *testing.T, stream string) map[string]interface{} {
+func remainingResponse(t *testing.T, stream string) map[string]any {
 	t.Helper()
 	w := httptest.NewRecorder()
 	WriteStreamFromChatReader(w, CreateRequest{Model: "grok-4.6"}, strings.NewReader(stream), StreamOptions{})
-	var final map[string]interface{}
+	var final map[string]any
 	err := ReadSSE(strings.NewReader(w.Body.String()), func(kind, data string) error {
 		if kind == "response.completed" || kind == "response.failed" || kind == "response.incomplete" {
-			var event map[string]interface{}
+			var event map[string]any
 			_ = json.Unmarshal([]byte(data), &event)
-			final, _ = event["response"].(map[string]interface{})
+			final, _ = event["response"].(map[string]any)
 		}
 		return nil
 	})
@@ -216,8 +216,8 @@ func remainingResponse(t *testing.T, stream string) map[string]interface{} {
 }
 
 func TestRemainingResponsesRejectsBadToolAndPreservesIncomplete(t *testing.T) {
-	tool := func(args string) map[string]interface{} {
-		return map[string]interface{}{"tool_calls": []interface{}{map[string]interface{}{"index": 0, "id": "call_a", "function": map[string]interface{}{"name": "Read", "arguments": args}}}}
+	tool := func(args string) map[string]any {
+		return map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "call_a", "function": map[string]any{"name": "Read", "arguments": args}}}}
 	}
 	for _, finish := range []string{"stop", "length", "content_filter"} {
 		v := remainingResponse(t, remainingChatFrame(tool("{"), finish)+"data: [DONE]\n\n")
@@ -228,9 +228,9 @@ func TestRemainingResponsesRejectsBadToolAndPreservesIncomplete(t *testing.T) {
 		testutil.EqualAny(t, v["status"], want)
 	}
 	for _, s := range []string{
-		remainingChatFrame(map[string]interface{}{"tool_calls": []interface{}{map[string]interface{}{"index": 0, "function": map[string]interface{}{"arguments": "{}"}}}}, "tool_calls"),
-		remainingChatFrame(tool("{}"), nil) + remainingChatFrame(map[string]interface{}{"tool_calls": []interface{}{map[string]interface{}{"index": 0, "id": "changed"}}}, "tool_calls"),
-		remainingChatFrame(map[string]interface{}{"content": "a"}, "stop") + remainingChatFrame(map[string]interface{}{"content": "b"}, nil),
+		remainingChatFrame(map[string]any{"tool_calls": []any{map[string]any{"index": 0, "function": map[string]any{"arguments": "{}"}}}}, "tool_calls"),
+		remainingChatFrame(tool("{}"), nil) + remainingChatFrame(map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "changed"}}}, "tool_calls"),
+		remainingChatFrame(map[string]any{"content": "a"}, "stop") + remainingChatFrame(map[string]any{"content": "b"}, nil),
 	} {
 		v := remainingResponse(t, s+"data: [DONE]\n\n")
 		testutil.Equal(t, v["status"], "failed")
@@ -238,16 +238,16 @@ func TestRemainingResponsesRejectsBadToolAndPreservesIncomplete(t *testing.T) {
 }
 
 func TestRemainingResponsesLength(t *testing.T) {
-	v := remainingResponse(t, remainingChatFrame(map[string]interface{}{"content": "partial"}, nil)+remainingChatFrame(map[string]interface{}{}, "length")+"data: [DONE]\n\n")
+	v := remainingResponse(t, remainingChatFrame(map[string]any{"content": "partial"}, nil)+remainingChatFrame(map[string]any{}, "length")+"data: [DONE]\n\n")
 	testutil.Equal(t, v["status"], "incomplete")
 }
 
 func TestRemainingResponsesReasoningIdentity(t *testing.T) {
-	s := remainingChatFrame(map[string]interface{}{"reasoning_content": "first ", "reasoning_item_id": "rs_1"}, nil) + remainingChatFrame(map[string]interface{}{"content": "A"}, nil) + remainingChatFrame(map[string]interface{}{"reasoning_content": "second", "reasoning_item_id": "rs_2"}, nil) + remainingChatFrame(map[string]interface{}{}, "stop") + "data: [DONE]\n\n"
+	s := remainingChatFrame(map[string]any{"reasoning_content": "first ", "reasoning_item_id": "rs_1"}, nil) + remainingChatFrame(map[string]any{"content": "A"}, nil) + remainingChatFrame(map[string]any{"reasoning_content": "second", "reasoning_item_id": "rs_2"}, nil) + remainingChatFrame(map[string]any{}, "stop") + "data: [DONE]\n\n"
 	v := remainingResponse(t, s)
 	ids := map[string]bool{}
 	for _, raw := range InterfaceSlice(v["output"]) {
-		item, _ := raw.(map[string]interface{})
+		item, _ := raw.(map[string]any)
 		if item["type"] != "reasoning" {
 			continue
 		}
@@ -260,7 +260,7 @@ func TestRemainingResponsesReasoningIdentity(t *testing.T) {
 }
 
 func TestRemainingResponsesMalformedFrame(t *testing.T) {
-	v := remainingResponse(t, remainingChatFrame(map[string]interface{}{"content": "partial"}, nil)+"data: {broken\n\n"+"data: [DONE]\n\n")
+	v := remainingResponse(t, remainingChatFrame(map[string]any{"content": "partial"}, nil)+"data: {broken\n\n"+"data: [DONE]\n\n")
 	testutil.Equal(t, v["status"], "failed")
 }
 

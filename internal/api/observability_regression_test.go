@@ -22,9 +22,9 @@ func TestJournalDiagnosticLookupMatchesRequest(t *testing.T) {
 	testutil.NoError(t, a.diagnostics.Save(context.Background(), capture.Bundle()))
 	seedJournal(t, a, []audit.Event{{Kind: audit.KindRequest, Action: "chat_request", RequestID: "req-1", Status: "success"}, {Kind: audit.KindRequest, Action: "chat_request", RequestID: "other", Status: "success"}})
 	list := journalRequest(t, a, "?kind=request")
-	for _, raw := range list["data"].([]interface{}) {
-		row := raw.(map[string]interface{})
-		event := row["event"].(map[string]interface{})
+	for _, raw := range list["data"].([]any) {
+		row := raw.(map[string]any)
+		event := row["event"].(map[string]any)
 		_, present := row["diagnostics"]
 		testutil.Equal(t, present, (event["request_id"] == "req-1"))
 	}
@@ -37,7 +37,7 @@ func TestJournalDiagnosticLookupMatchesRequest(t *testing.T) {
 		a.HandleJournalDiagnostics(rec, httptest.NewRequest(http.MethodGet, "/api/journal/diagnostics?request_id="+tc.id, nil))
 		testutil.Equal(t, rec.Code, tc.code)
 		if tc.code == 200 {
-			var payload map[string]interface{}
+			var payload map[string]any
 			_ = json.Unmarshal(rec.Body.Bytes(), &payload)
 			testutil.EqualAny(t, payload["available"], tc.available)
 		}

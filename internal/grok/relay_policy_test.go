@@ -49,7 +49,7 @@ func TestRelayNativeContextAndUpstreamDecisions(t *testing.T) {
 		{"unsupported_compact", "/responses/compact", `{"error":{"code":"not_found"}}`, 404},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var received map[string]interface{}
+			var received map[string]any
 			calls := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls++
@@ -64,20 +64,20 @@ func TestRelayNativeContextAndUpstreamDecisions(t *testing.T) {
 			acc.ID, acc.GrokModels, acc.GrokModelsSyncedAt = 0, []string{"grok-4.6"}, time.Now()
 			testutil.NoError(t, h.lb.Store.CreateAccount(context.Background(), acc))
 			testutil.NoError(t, h.lb.Store.CreateModel(context.Background(), &store.Model{Channel: "Grok", ModelID: "grok-4.6", Name: "Grok 4.6", Status: store.ModelStatusAvailable, Verified: true}))
-			payload := map[string]interface{}{
+			payload := map[string]any{
 				"model": "grok-4.6", "stream": false, "prompt_cache_key": "client-session",
 				// The gateway now applies the Build defaults: store=false for
 				// zero-data-retention, and the encrypted-reasoning include that makes
 				// a replay chain possible at all. Everything the client sent is still
 				// relayed verbatim.
 				"store":              false,
-				"include":            []interface{}{"reasoning.encrypted_content"},
-				"reasoning":          map[string]interface{}{"effort": "future-effort"},
-				"context_management": []interface{}{map[string]interface{}{"type": "compaction", "compact_threshold": float64(50000)}},
-				"input": []interface{}{
-					map[string]interface{}{"type": "reasoning", "encrypted_content": "client-reasoning"},
-					map[string]interface{}{"type": "compaction", "encrypted_content": "client-native-compaction"},
-					map[string]interface{}{"role": "user", "content": strings.Repeat("完整上下文，不要摘要。", 2000)},
+				"include":            []any{"reasoning.encrypted_content"},
+				"reasoning":          map[string]any{"effort": "future-effort"},
+				"context_management": []any{map[string]any{"type": "compaction", "compact_threshold": float64(50000)}},
+				"input": []any{
+					map[string]any{"type": "reasoning", "encrypted_content": "client-reasoning"},
+					map[string]any{"type": "compaction", "encrypted_content": "client-native-compaction"},
+					map[string]any{"role": "user", "content": strings.Repeat("完整上下文，不要摘要。", 2000)},
 				},
 			}
 			body, _ := json.Marshal(payload)
@@ -112,9 +112,9 @@ func TestRelayNativeContextAndUpstreamDecisions(t *testing.T) {
 // carries a client compaction item: recovery rewrites only the reasoning item's
 // cipher and never the client-held compaction state.
 func TestRelayNativeResponsesRecoversOpaqueReasoning(t *testing.T) {
-	var bodies []map[string]interface{}
+	var bodies []map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var received map[string]interface{}
+		var received map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&received)
 		bodies = append(bodies, received)
 		w.Header().Set("Content-Type", "application/json")
@@ -126,12 +126,12 @@ func TestRelayNativeResponsesRecoversOpaqueReasoning(t *testing.T) {
 	acc.ID, acc.GrokModels, acc.GrokModelsSyncedAt = 0, []string{"grok-4.6"}, time.Now()
 	testutil.NoError(t, h.lb.Store.CreateAccount(context.Background(), acc))
 	testutil.NoError(t, h.lb.Store.CreateModel(context.Background(), &store.Model{Channel: "Grok", ModelID: "grok-4.6", Name: "Grok 4.6", Status: store.ModelStatusAvailable, Verified: true}))
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"model": "grok-4.6", "stream": false, "prompt_cache_key": "client-session",
-		"input": []interface{}{
-			map[string]interface{}{"type": "reasoning", "encrypted_content": "client-reasoning"},
-			map[string]interface{}{"type": "compaction", "encrypted_content": "client-native-compaction"},
-			map[string]interface{}{"role": "user", "content": "hello"},
+		"input": []any{
+			map[string]any{"type": "reasoning", "encrypted_content": "client-reasoning"},
+			map[string]any{"type": "compaction", "encrypted_content": "client-native-compaction"},
+			map[string]any{"role": "user", "content": "hello"},
 		},
 	}
 	body, _ := json.Marshal(payload)
@@ -140,10 +140,10 @@ func TestRelayNativeResponsesRecoversOpaqueReasoning(t *testing.T) {
 
 	testutil.Falsef(t, len(bodies) < 2, "expected a recovery retry, calls=%d", len(bodies))
 	for index, received := range bodies[1:] {
-		items, _ := received["input"].([]interface{})
+		items, _ := received["input"].([]any)
 		reasoningSeen := false
 		for _, raw := range items {
-			item, _ := raw.(map[string]interface{})
+			item, _ := raw.(map[string]any)
 			switch chatwire.ParseLooseStringAny(item["type"]) {
 			case "reasoning":
 				reasoningSeen = true
@@ -170,7 +170,7 @@ func TestRelayChatSamplingAndEffortAreClientOwned(t *testing.T) {
 		testutil.NoError(t, req.Validate())
 		payload, err := (&Handler{}).responsesPayloadFromChat(ModelSpec{ID: req.Model, UpstreamModel: req.Model}, req, true)
 		testutil.NoError(t, err)
-		testutil.Falsef(t, payload["reasoning"].(map[string]interface{})["effort"] != tc.want || payload["temperature"] != temperature || payload["top_p"] != topP, "effort=%q payload=%v", tc.effort, payload)
+		testutil.Falsef(t, payload["reasoning"].(map[string]any)["effort"] != tc.want || payload["temperature"] != temperature || payload["top_p"] != topP, "effort=%q payload=%v", tc.effort, payload)
 	}
 }
 
@@ -186,7 +186,7 @@ func TestRelayBuildEffortAliasesFollowModelContract(t *testing.T) {
 		req := &chatwire.Request{Model: tc.model, Messages: []chatwire.Message{{Role: "user", Content: "hi"}}, ReasoningEffort: &effort}
 		payload, err := (&Handler{}).responsesPayloadFromChat(ModelSpec{ID: tc.model, UpstreamModel: tc.model}, req, true)
 		testutil.NoError(t, err)
-		reasoning, _ := payload["reasoning"].(map[string]interface{})
+		reasoning, _ := payload["reasoning"].(map[string]any)
 		if tc.want == "" {
 			_, exists := reasoning["effort"]
 			testutil.Falsef(t, exists, "%s kept effort %v", tc.model, reasoning)
@@ -206,7 +206,7 @@ func TestRelayRepeatedDeltasAreForwarded(t *testing.T) {
 		{"reasoning_summary", "response.reasoning_summary_text.delta", "same summary "},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			stream := strings.Repeat(parityFrame(tc.kind, map[string]interface{}{"delta": tc.text}), repeats)
+			stream := strings.Repeat(parityFrame(tc.kind, map[string]any{"delta": tc.text}), repeats)
 			if tc.kind != "response.output_text.delta" {
 				stream += parityText("visible answer")
 			}

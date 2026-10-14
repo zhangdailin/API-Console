@@ -11,13 +11,13 @@ import (
 	"orchids-api/internal/upstream"
 )
 
-func decodeChatBodyForTest(t *testing.T, req upstream.UpstreamRequest) map[string]interface{} {
+func decodeChatBodyForTest(t *testing.T, req upstream.UpstreamRequest) map[string]any {
 	t.Helper()
 	encoded, err := buildChatBodyProfile(req, modelEntry{Key: "qmodel_latest", Source: "system"}, "session-id", "request-id", "request-set-id", DefaultClientVersion, "", sceneBusinessProduct)
 	testutil.NoError(t, err, "buildChatBodyProfile() error = %v")
 	raw, err := decodeBodyForTest(encoded)
 	testutil.NoError(t, err, "DecodeBody() error = %v")
-	var body map[string]interface{}
+	var body map[string]any
 	testutil.NoError(t, json.Unmarshal(raw, &body), "unmarshal body: %v")
 	return body
 }
@@ -26,7 +26,7 @@ func TestBuildChatBodyDropsDanglingAndDuplicateToolResults(t *testing.T) {
 	t.Parallel()
 	body := decodeChatBodyForTest(t, upstream.UpstreamRequest{Messages: []prompt.Message{
 		{Role: "assistant", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{{
-			Type: "tool_use", ID: "call-1", Name: "read_file", Input: map[string]interface{}{},
+			Type: "tool_use", ID: "call-1", Name: "read_file", Input: map[string]any{},
 		}}}},
 		{Role: "user", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{
 			{Type: "tool_result", ToolUseID: "call-1", Content: "ok"},
@@ -34,10 +34,10 @@ func TestBuildChatBodyDropsDanglingAndDuplicateToolResults(t *testing.T) {
 			{Type: "tool_result", ToolUseID: "missing", Content: "dangling"},
 		}}},
 	}})
-	messages, _ := body["messages"].([]interface{})
+	messages, _ := body["messages"].([]any)
 	toolMessages := 0
 	for _, raw := range messages {
-		message, _ := raw.(map[string]interface{})
+		message, _ := raw.(map[string]any)
 		if message["role"] == "tool" {
 			toolMessages++
 			testutil.Equal(t, message["tool_call_id"], "call-1")
@@ -47,13 +47,13 @@ func TestBuildChatBodyDropsDanglingAndDuplicateToolResults(t *testing.T) {
 	testutil.Equal(t, toolMessages, 1)
 }
 
-func sampleQoderTool() map[string]interface{} {
-	return map[string]interface{}{
+func sampleQoderTool() map[string]any {
+	return map[string]any{
 		"name":        "read_file",
 		"description": "Read a file",
-		"input_schema": map[string]interface{}{
+		"input_schema": map[string]any{
 			"type":       "object",
-			"properties": map[string]interface{}{"path": map[string]interface{}{"type": "string"}},
+			"properties": map[string]any{"path": map[string]any{"type": "string"}},
 		},
 	}
 }
@@ -61,28 +61,28 @@ func sampleQoderTool() map[string]interface{} {
 func TestBuildChatBodyPlacesToolControlsAtTopLevel(t *testing.T) {
 	t.Parallel()
 	body := decodeChatBodyForTest(t, upstream.UpstreamRequest{
-		Tools: []interface{}{sampleQoderTool()},
+		Tools: []any{sampleQoderTool()},
 	})
 	testutil.Equal(t, body["tool_choice"], "auto")
-	parameters, _ := body["parameters"].(map[string]interface{})
+	parameters, _ := body["parameters"].(map[string]any)
 	_, exists := parameters["tool_choice"]
 	testutil.Falsef(t, exists, "parameters.tool_choice must be absent: %#v", parameters)
-	tools, _ := body["tools"].([]interface{})
+	tools, _ := body["tools"].([]any)
 	testutil.Equal(t, len(tools), 1)
 }
 
 func TestBuildChatBodyNormalizesAnthropicToolControls(t *testing.T) {
 	t.Parallel()
 	body := decodeChatBodyForTest(t, upstream.UpstreamRequest{
-		Tools: []interface{}{sampleQoderTool()},
-		ToolChoice: map[string]interface{}{
+		Tools: []any{sampleQoderTool()},
+		ToolChoice: map[string]any{
 			"type":                      "tool",
 			"name":                      "read_file",
 			"disable_parallel_tool_use": true,
 		},
 	})
-	choice, _ := body["tool_choice"].(map[string]interface{})
-	function, _ := choice["function"].(map[string]interface{})
+	choice, _ := body["tool_choice"].(map[string]any)
+	function, _ := choice["function"].(map[string]any)
 	testutil.Equal(t, choice["type"], "function")
 	testutil.Equal(t, function["name"], "read_file")
 	parallel, ok := body["parallel_tool_calls"].(bool)
@@ -186,8 +186,8 @@ func TestConsumeStreamLongSplitWhitespacePrefixStaysLinearAndFlushes(t *testing.
 
 func TestConsumeStreamOversizedTextFallbackDegradesToText(t *testing.T) {
 	large := "Tool calls: " + strings.Repeat("x", 2<<20+1)
-	inner, err := json.Marshal(map[string]interface{}{"choices": []interface{}{map[string]interface{}{
-		"delta": map[string]interface{}{"content": large}, "finish_reason": "stop",
+	inner, err := json.Marshal(map[string]any{"choices": []any{map[string]any{
+		"delta": map[string]any{"content": large}, "finish_reason": "stop",
 	}}})
 	testutil.NoError(t, err)
 	body := envelope(string(inner)) + "event:finish\ndata: {}\n\n"
@@ -211,14 +211,14 @@ func TestBuildChatBodyCarriesThinkingSwitch(t *testing.T) {
 
 	// Default: even a reasoning-capable model has no reasoning controls.
 	body := decodeChatBodyForTestWithModel(t, reasoning, upstream.UpstreamRequest{})
-	params, _ := body["parameters"].(map[string]interface{})
+	params, _ := body["parameters"].(map[string]any)
 	_, present := params["enable_thinking"]
 	testutil.Falsef(t, present, "default reasoning model must not enable thinking: %#v", params)
 	_, present = params["reasoning_effort"]
 	testutil.Falsef(t, present, "default reasoning model must not set effort: %#v", params)
-	testutil.Equal(t, body["model_config"].(map[string]interface{})["is_reasoning"], true)
+	testutil.Equal(t, body["model_config"].(map[string]any)["is_reasoning"], true)
 	body = decodeChatBodyForTestWithModel(t, plain, upstream.UpstreamRequest{})
-	params, _ = body["parameters"].(map[string]interface{})
+	params, _ = body["parameters"].(map[string]any)
 	_, present = params["enable_thinking"]
 	testutil.Falsef(t, present, "plain model must not carry enable_thinking, got %#v", params)
 	_, present = params["reasoning_effort"]
@@ -226,33 +226,33 @@ func TestBuildChatBodyCarriesThinkingSwitch(t *testing.T) {
 
 	// An explicit effort turns thinking on, including a mixed-case value.
 	body = decodeChatBodyForTestWithModel(t, reasoning, upstream.UpstreamRequest{ReasoningEffort: "HIGH"})
-	params, _ = body["parameters"].(map[string]interface{})
-	testutil.Falsef(t, params["enable_thinking"] != true || params["reasoning_effort"] != "high" || body["model_config"].(map[string]interface{})["is_reasoning"] != true, "parameters = %#v, want explicit thinking on with effort=high", params)
+	params, _ = body["parameters"].(map[string]any)
+	testutil.Falsef(t, params["enable_thinking"] != true || params["reasoning_effort"] != "high" || body["model_config"].(map[string]any)["is_reasoning"] != true, "parameters = %#v, want explicit thinking on with effort=high", params)
 
 	// qfmodel is catalogued as reasoning-capable, so model_config reports that
 	// capability; the thinking parameters themselves stay off until the client
 	// asks for them.
 	body = decodeChatBodyForTestWithModel(t, modelEntry{Key: "qfmodel", IsReasoning: true}, upstream.UpstreamRequest{})
-	params, _ = body["parameters"].(map[string]interface{})
-	testutil.Equal(t, body["model_config"].(map[string]interface{})["is_reasoning"], true)
+	params, _ = body["parameters"].(map[string]any)
+	testutil.Equal(t, body["model_config"].(map[string]any)["is_reasoning"], true)
 	_, present = params["reasoning_effort"]
 	testutil.Falsef(t, present, "qfmodel default carried reasoning_effort: %#v", params)
 
 	// "none" disables thinking explicitly.
 	body = decodeChatBodyForTestWithModel(t, reasoning, upstream.UpstreamRequest{ReasoningEffort: "none"})
-	params, _ = body["parameters"].(map[string]interface{})
+	params, _ = body["parameters"].(map[string]any)
 	testutil.Equal(t, params["enable_thinking"], false)
 	_, present = params["reasoning_effort"]
 	testutil.Falsef(t, present, "none must not forward an effort level, got %#v", params["reasoning_effort"])
 }
 
-func decodeChatBodyForTestWithModel(t *testing.T, model modelEntry, req upstream.UpstreamRequest) map[string]interface{} {
+func decodeChatBodyForTestWithModel(t *testing.T, model modelEntry, req upstream.UpstreamRequest) map[string]any {
 	t.Helper()
 	encoded, err := buildChatBodyProfile(req, model, "session-id", "request-id", "request-set-id", DefaultClientVersion, "", sceneBusinessProduct)
 	testutil.NoError(t, err, "buildChatBodyProfile() error = %v")
 	raw, err := decodeBodyForTest(encoded)
 	testutil.NoError(t, err, "DecodeBody() error = %v")
-	var body map[string]interface{}
+	var body map[string]any
 	testutil.NoError(t, json.Unmarshal(raw, &body), "unmarshal body: %v")
 	return body
 }

@@ -25,14 +25,14 @@ import (
 // incomplete breaks requests that used to work. The rule is check what is
 // understood, ignore what is not.
 type Schema struct {
-	root map[string]interface{}
+	root map[string]any
 }
 
 // CompileSchema parses a schema object. It never fails: a schema this gateway
 // cannot read is treated as no schema at all, so an unreadable one cannot turn
 // a working request into an error.
-func CompileSchema(raw interface{}) *Schema {
-	object, ok := raw.(map[string]interface{})
+func CompileSchema(raw any) *Schema {
+	object, ok := raw.(map[string]any)
 	if !ok || len(object) == 0 {
 		return nil
 	}
@@ -40,7 +40,7 @@ func CompileSchema(raw interface{}) *Schema {
 }
 
 // Validate reports whether value satisfies the compiled schema.
-func (s *Schema) Validate(value interface{}) error {
+func (s *Schema) Validate(value any) error {
 	if s == nil || len(s.root) == 0 {
 		return nil
 	}
@@ -51,7 +51,7 @@ const maxSchemaDepth = 32
 
 // validate walks one schema/value pair. path is a JSON pointer-ish label used
 // only in error text, so a caller can find the offending field.
-func (s *Schema) validate(schema map[string]interface{}, value interface{}, path string, depth int) error {
+func (s *Schema) validate(schema map[string]any, value any, path string, depth int) error {
 	if depth > maxSchemaDepth {
 		// A cyclic or pathologically deep schema cannot be walked. Treat it as
 		// satisfied: rejecting here would fail every answer, including valid ones.
@@ -73,9 +73,9 @@ func (s *Schema) validate(schema map[string]interface{}, value interface{}, path
 		return err
 	}
 	switch typed := value.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		return s.validateObject(schema, typed, path, depth)
-	case []interface{}:
+	case []any:
 		return s.validateArray(schema, typed, path, depth)
 	case string:
 		return s.validateString(schema, typed, path)
@@ -86,7 +86,7 @@ func (s *Schema) validate(schema map[string]interface{}, value interface{}, path
 	return nil
 }
 
-func (s *Schema) validateType(schema map[string]interface{}, value interface{}, path string) error {
+func (s *Schema) validateType(schema map[string]any, value any, path string) error {
 	wanted, ok := schema["type"]
 	if !ok {
 		return nil
@@ -116,8 +116,8 @@ func (s *Schema) validateType(schema map[string]interface{}, value interface{}, 
 	return fmt.Errorf("%s: expected %s, got %s", path, strings.Join(sortedTypeKeys(allowed), " or "), jsonTypeOf(value))
 }
 
-func (s *Schema) validateObject(schema map[string]interface{}, value map[string]interface{}, path string, depth int) error {
-	properties, _ := schema["properties"].(map[string]interface{})
+func (s *Schema) validateObject(schema map[string]any, value map[string]any, path string, depth int) error {
+	properties, _ := schema["properties"].(map[string]any)
 	required := schemaStringList(schema["required"])
 	for _, key := range required {
 		if _, ok := value[key]; !ok {
@@ -132,7 +132,7 @@ func (s *Schema) validateObject(schema map[string]interface{}, value map[string]
 		}
 	}
 	for key, item := range value {
-		if property, ok := properties[key].(map[string]interface{}); ok {
+		if property, ok := properties[key].(map[string]any); ok {
 			if err := s.validate(property, item, path+"."+key, depth+1); err != nil {
 				return err
 			}
@@ -141,8 +141,8 @@ func (s *Schema) validateObject(schema map[string]interface{}, value map[string]
 	return nil
 }
 
-func (s *Schema) validateArray(schema map[string]interface{}, value []interface{}, path string, depth int) error {
-	if items, ok := schema["items"].(map[string]interface{}); ok {
+func (s *Schema) validateArray(schema map[string]any, value []any, path string, depth int) error {
+	if items, ok := schema["items"].(map[string]any); ok {
 		for i, item := range value {
 			if err := s.validate(items, item, fmt.Sprintf("%s[%d]", path, i), depth+1); err != nil {
 				return err
@@ -152,7 +152,7 @@ func (s *Schema) validateArray(schema map[string]interface{}, value []interface{
 	return nil
 }
 
-func (s *Schema) validateString(schema map[string]interface{}, value string, path string) error {
+func (s *Schema) validateString(schema map[string]any, value string, path string) error {
 	if format, ok := schemaString(schema["format"]); ok {
 		// Only the formats with an unambiguous JSON encoding are checked. An
 		// unknown format is a hint the gateway does not enforce.
@@ -170,7 +170,7 @@ func (s *Schema) validateString(schema map[string]interface{}, value string, pat
 	return nil
 }
 
-func (s *Schema) validateNumber(schema map[string]interface{}, value float64, path string) error {
+func (s *Schema) validateNumber(schema map[string]any, value float64, path string) error {
 	if min, ok := valueOfNumberAny(schema["minimum"]); ok && value < min {
 		return fmt.Errorf("%s: %v is below the minimum %v", path, value, min)
 	}
@@ -180,8 +180,8 @@ func (s *Schema) validateNumber(schema map[string]interface{}, value float64, pa
 	return nil
 }
 
-func (s *Schema) validateEnum(schema map[string]interface{}, value interface{}, path string) error {
-	options, ok := schema["enum"].([]interface{})
+func (s *Schema) validateEnum(schema map[string]any, value any, path string) error {
+	options, ok := schema["enum"].([]any)
 	if !ok || len(options) == 0 {
 		return nil
 	}
@@ -193,7 +193,7 @@ func (s *Schema) validateEnum(schema map[string]interface{}, value interface{}, 
 	return fmt.Errorf("%s: value is not one of the allowed enum values", path)
 }
 
-func (s *Schema) validateConst(schema map[string]interface{}, value interface{}, path string) error {
+func (s *Schema) validateConst(schema map[string]any, value any, path string) error {
 	constant, ok := schema["const"]
 	if !ok {
 		return nil
@@ -205,16 +205,16 @@ func (s *Schema) validateConst(schema map[string]interface{}, value interface{},
 }
 
 // lookupDef resolves one #/$defs/<name> reference from the schema root.
-func lookupDef(root map[string]interface{}, name string) (map[string]interface{}, bool) {
-	defs, ok := root["$defs"].(map[string]interface{})
+func lookupDef(root map[string]any, name string) (map[string]any, bool) {
+	defs, ok := root["$defs"].(map[string]any)
 	if !ok {
 		return nil, false
 	}
-	target, ok := defs[name].(map[string]interface{})
+	target, ok := defs[name].(map[string]any)
 	return target, ok
 }
 
-func schemaString(value interface{}) (string, bool) {
+func schemaString(value any) (string, bool) {
 	text, ok := value.(string)
 	if !ok {
 		return "", false
@@ -223,8 +223,8 @@ func schemaString(value interface{}) (string, bool) {
 	return text, text != ""
 }
 
-func schemaStringList(value interface{}) []string {
-	items, ok := value.([]interface{})
+func schemaStringList(value any) []string {
+	items, ok := value.([]any)
 	if !ok {
 		return nil
 	}
@@ -237,14 +237,14 @@ func schemaStringList(value interface{}) []string {
 	return out
 }
 
-func schemaTypeSet(value interface{}) map[string]bool {
+func schemaTypeSet(value any) map[string]bool {
 	out := map[string]bool{}
 	switch typed := value.(type) {
 	case string:
 		if text := strings.TrimSpace(typed); text != "" {
 			out[text] = true
 		}
-	case []interface{}:
+	case []any:
 		for _, item := range typed {
 			if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
 				out[text] = true
@@ -263,7 +263,7 @@ func sortedTypeKeys(set map[string]bool) []string {
 	return out
 }
 
-func jsonTypeOf(value interface{}) string {
+func jsonTypeOf(value any) string {
 	switch value.(type) {
 	case nil:
 		return "null"
@@ -271,9 +271,9 @@ func jsonTypeOf(value interface{}) string {
 		return "boolean"
 	case string:
 		return "string"
-	case []interface{}:
+	case []any:
 		return "array"
-	case map[string]interface{}:
+	case map[string]any:
 		return "object"
 	case float64, int, int64, json.Number:
 		return "number"
@@ -281,7 +281,7 @@ func jsonTypeOf(value interface{}) string {
 	return "unknown"
 }
 
-func valueOfNumberAny(value interface{}) (float64, bool) {
+func valueOfNumberAny(value any) (float64, bool) {
 	switch typed := value.(type) {
 	case float64:
 		return typed, true
@@ -296,7 +296,7 @@ func valueOfNumberAny(value interface{}) (float64, bool) {
 	return 0, false
 }
 
-func jsonEqual(left, right interface{}) bool {
+func jsonEqual(left, right any) bool {
 	if left == nil || right == nil {
 		return left == nil && right == nil
 	}

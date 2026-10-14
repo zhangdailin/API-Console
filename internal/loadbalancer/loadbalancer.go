@@ -354,7 +354,7 @@ func (lb *LoadBalancer) getEnabledAccounts(ctx context.Context) ([]*store.Accoun
 	}
 
 	// Use singleflight to prevent cache stampede
-	val, err, _ := lb.sfGroup.Do("getEnabledAccounts", func() (interface{}, error) {
+	val, err, _ := lb.sfGroup.Do("getEnabledAccounts", func() (any, error) {
 		// Double check after acquiring singleflight lock
 		if accounts, ok := lb.cachedAccountsBefore(now); ok {
 			return accounts, nil

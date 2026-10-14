@@ -55,8 +55,8 @@ func TestBlockMessagePreservesMultimodalOrderAcrossToolBoundaries(t *testing.T) 
 			// Verify the signed/encoded request path retains that exact representation.
 			req := upstream.UpstreamRequest{Messages: []prompt.Message{
 				{Role: "assistant", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{
-					{Type: "tool_use", ID: "call-1", Name: "first", Input: map[string]interface{}{}},
-					{Type: "tool_use", ID: "call-2", Name: "second", Input: map[string]interface{}{}},
+					{Type: "tool_use", ID: "call-1", Name: "first", Input: map[string]any{}},
+					{Type: "tool_use", ID: "call-2", Name: "second", Input: map[string]any{}},
 				}}}, msg,
 			}}
 			encoded, err := buildChatBodyProfile(req, modelEntry{Key: "test"}, "session", "request", "request-set", DefaultClientVersion, "", sceneBusinessProduct)

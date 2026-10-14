@@ -19,22 +19,22 @@ import (
 	"orchids-api/internal/testutil"
 )
 
-func parityFrame(kind string, fields map[string]interface{}) string {
+func parityFrame(kind string, fields map[string]any) string {
 	if fields == nil {
-		fields = map[string]interface{}{}
+		fields = map[string]any{}
 	}
 	fields["type"] = kind
 	raw, _ := json.Marshal(fields)
 	return "event: " + kind + "\ndata: " + string(raw) + "\n\n"
 }
 func parityItem(kind, id, call, name, args string) string {
-	return parityFrame(kind, map[string]interface{}{"item": map[string]interface{}{"type": "function_call", "id": id, "call_id": call, "name": name, "arguments": args}})
+	return parityFrame(kind, map[string]any{"item": map[string]any{"type": "function_call", "id": id, "call_id": call, "name": name, "arguments": args}})
 }
 func parityTerminal(kind string) string {
-	return parityFrame(kind, map[string]interface{}{"response": map[string]interface{}{"status": strings.TrimPrefix(kind, "response.")}})
+	return parityFrame(kind, map[string]any{"response": map[string]any{"status": strings.TrimPrefix(kind, "response.")}})
 }
 func parityText(text string) string {
-	return parityFrame("response.output_text.delta", map[string]interface{}{"delta": text})
+	return parityFrame("response.output_text.delta", map[string]any{"delta": text})
 }
 func parityRun(t *testing.T, stream string, stop ...string) (string, chatOutcome) {
 	t.Helper()
@@ -55,17 +55,17 @@ func parityTools(t *testing.T, stream string) map[int]*parityTool {
 		if data == "[DONE]" {
 			return nil
 		}
-		var chunk map[string]interface{}
+		var chunk map[string]any
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			return err
 		}
 		for _, raw := range responses.InterfaceSlice(chunk["choices"]) {
-			choice, _ := raw.(map[string]interface{})
-			delta, _ := choice["delta"].(map[string]interface{})
+			choice, _ := raw.(map[string]any)
+			delta, _ := choice["delta"].(map[string]any)
 			for _, raw := range responses.InterfaceSlice(delta["tool_calls"]) {
-				call, _ := raw.(map[string]interface{})
+				call, _ := raw.(map[string]any)
 				index := responses.InterfaceToInt(call["index"])
-				fn, _ := call["function"].(map[string]interface{})
+				fn, _ := call["function"].(map[string]any)
 				if calls[index] == nil {
 					calls[index] = &parityTool{}
 				}
@@ -86,9 +86,9 @@ func parityTools(t *testing.T, stream string) map[int]*parityTool {
 
 func TestParityToolsDeduplicateAndAssociateInterleavedArguments(t *testing.T) {
 	stream := parityItem("response.output_item.added", "fc_a", "call_a", "Read", "") + parityItem("response.output_item.added", "fc_b", "call_b", "Search", "")
-	stream += parityFrame("response.function_call_arguments.delta", map[string]interface{}{"item_id": "fc_a", "delta": "{\"path\":\"hello "})
-	stream += parityFrame("response.function_call_arguments.delta", map[string]interface{}{"item_id": "fc_b", "delta": "{\"query\":\"b\"}"})
-	stream += parityFrame("response.function_call_arguments.delta", map[string]interface{}{"item_id": "fc_a", "delta": " world\"}"})
+	stream += parityFrame("response.function_call_arguments.delta", map[string]any{"item_id": "fc_a", "delta": "{\"path\":\"hello "})
+	stream += parityFrame("response.function_call_arguments.delta", map[string]any{"item_id": "fc_b", "delta": "{\"query\":\"b\"}"})
+	stream += parityFrame("response.function_call_arguments.delta", map[string]any{"item_id": "fc_a", "delta": " world\"}"})
 	stream += parityItem("response.output_item.done", "fc_a", "call_a", "Read", `{"path":"hello  world"}`) + parityItem("response.output_item.done", "fc_b", "call_b", "Search", `{"query":"b"}`) + parityTerminal("response.completed")
 	body, result := parityRun(t, stream)
 	testutil.Fail(t, result.Err != nil, result.Err, body)
@@ -101,7 +101,7 @@ func TestParityToolsDeduplicateAndAssociateInterleavedArguments(t *testing.T) {
 
 func TestParityRejectsUnknownToolEventsAndInvalidIdentity(t *testing.T) {
 	for name, stream := range map[string]string{
-		"unknown_item":         parityFrame("response.function_call_arguments.delta", map[string]interface{}{"item_id": "unknown", "delta": "{}"}),
+		"unknown_item":         parityFrame("response.function_call_arguments.delta", map[string]any{"item_id": "unknown", "delta": "{}"}),
 		"empty_name":           parityItem("response.output_item.added", "fc_a", "call_a", "", "{}"),
 		"duplicate_call_id":    parityItem("response.output_item.added", "fc_a", "call_a", "Read", "{}") + parityItem("response.output_item.added", "fc_b", "call_a", "Read", "{}"),
 		"invalid_json":         parityItem("response.output_item.added", "fc_a", "call_a", "Read", "{") + parityTerminal("response.completed"),
@@ -116,9 +116,9 @@ func TestParityRejectsUnknownToolEventsAndInvalidIdentity(t *testing.T) {
 
 func TestParityTerminalErrorsReachMessages(t *testing.T) {
 	for name, stream := range map[string]string{
-		"failed":                parityFrame("response.failed", map[string]interface{}{"response": map[string]interface{}{"error": map[string]interface{}{"message": "synthetic failure"}}}),
+		"failed":                parityFrame("response.failed", map[string]any{"response": map[string]any{"error": map[string]any{"message": "synthetic failure"}}}),
 		"empty_completed":       parityTerminal("response.completed"),
-		"thinking_only":         parityFrame("response.reasoning_text.delta", map[string]interface{}{"delta": "plan"}) + parityTerminal("response.completed"),
+		"thinking_only":         parityFrame("response.reasoning_text.delta", map[string]any{"delta": "plan"}) + parityTerminal("response.completed"),
 		"eof":                   parityText("partial"),
 		"done_without_terminal": "data: [DONE]\n\n",
 	} {
@@ -159,12 +159,12 @@ func TestParityIncompleteAndStopSequences(t *testing.T) {
 }
 
 func TestParityMissingToolIDsAndUsage(t *testing.T) {
-	for _, id := range []interface{}{nil, "", 42, "<nil>"} {
-		_, err := anthropicMessageToChat(anthropicMessage{Role: "assistant", Content: []interface{}{map[string]interface{}{"type": "tool_use", "id": id, "name": "Read", "input": map[string]interface{}{}}}})
+	for _, id := range []any{nil, "", 42, "<nil>"} {
+		_, err := anthropicMessageToChat(anthropicMessage{Role: "assistant", Content: []any{map[string]any{"type": "tool_use", "id": id, "name": "Read", "input": map[string]any{}}}})
 		testutil.Fail(t, err == nil || strings.Contains(err.Error(), "duplicate"), id, err)
 	}
 	for _, cached := range []int{0, 80, 180} {
-		usage := anthropicUsageFromOpenAI(map[string]interface{}{"prompt_tokens": 100, "completion_tokens": 10, "prompt_tokens_details": map[string]interface{}{"cached_tokens": cached}})
+		usage := anthropicUsageFromOpenAI(map[string]any{"prompt_tokens": 100, "completion_tokens": 10, "prompt_tokens_details": map[string]any{"cached_tokens": cached}})
 		testutil.Equal(t, responses.InterfaceToInt(usage["input_tokens"])+responses.InterfaceToInt(usage["cache_read_input_tokens"]), 100)
 	}
 }
@@ -209,14 +209,14 @@ func TestParityToolsAreVisibleBeforeStreamCompletes(t *testing.T) {
 func TestParityReasoningAndSearchBlocks(t *testing.T) {
 	stream := ""
 	for _, id := range []string{"rs1", "rs2"} {
-		stream += parityFrame("response.output_item.added", map[string]interface{}{"item": map[string]interface{}{"type": "reasoning", "id": id}})
-		stream += parityFrame("response.reasoning_summary_text.delta", map[string]interface{}{"item_id": id, "delta": "plan " + id})
-		stream += parityFrame("response.reasoning_text.delta", map[string]interface{}{"item_id": id, "delta": "duplicate " + id})
-		stream += parityFrame("response.output_item.done", map[string]interface{}{"item": map[string]interface{}{"type": "reasoning", "id": id, "encrypted_content": "signature_" + id}})
+		stream += parityFrame("response.output_item.added", map[string]any{"item": map[string]any{"type": "reasoning", "id": id}})
+		stream += parityFrame("response.reasoning_summary_text.delta", map[string]any{"item_id": id, "delta": "plan " + id})
+		stream += parityFrame("response.reasoning_text.delta", map[string]any{"item_id": id, "delta": "duplicate " + id})
+		stream += parityFrame("response.output_item.done", map[string]any{"item": map[string]any{"type": "reasoning", "id": id, "encrypted_content": "signature_" + id}})
 	}
-	search := map[string]interface{}{"type": "web_search_call", "id": "ws1", "status": "completed", "action": map[string]interface{}{"query": "current news", "sources": []interface{}{map[string]interface{}{"url": "https://example.com/news", "title": "News"}}}}
-	stream += parityFrame("response.output_item.added", map[string]interface{}{"item": search}) + parityFrame("response.output_item.done", map[string]interface{}{"item": search})
-	stream += parityText("answer") + parityFrame("response.output_text.annotation.added", map[string]interface{}{"annotation": map[string]interface{}{"type": "url_citation", "url": "https://example.com/news", "title": "News"}}) + parityTerminal("response.completed")
+	search := map[string]any{"type": "web_search_call", "id": "ws1", "status": "completed", "action": map[string]any{"query": "current news", "sources": []any{map[string]any{"url": "https://example.com/news", "title": "News"}}}}
+	stream += parityFrame("response.output_item.added", map[string]any{"item": search}) + parityFrame("response.output_item.done", map[string]any{"item": search})
+	stream += parityText("answer") + parityFrame("response.output_text.annotation.added", map[string]any{"annotation": map[string]any{"type": "url_citation", "url": "https://example.com/news", "title": "News"}}) + parityTerminal("response.completed")
 	body, result := parityRun(t, stream)
 	testutil.Fail(t, result.Err != nil, result.Err)
 	var out bytes.Buffer
@@ -228,7 +228,7 @@ func TestParityReasoningAndSearchBlocks(t *testing.T) {
 func TestParityClientSearchToolsRemainClientTools(t *testing.T) {
 	h := &Handler{}
 	spec, _ := ResolveModel("grok-4.6", []modelcatalog.Profile{{ModelID: "grok-4.6"}})
-	request := &chatwire.Request{Messages: []chatwire.Message{{Role: "user", Content: "hello"}}, Tools: []chatwire.ToolDef{{Type: "function", Function: map[string]interface{}{"name": "web_search", "parameters": map[string]interface{}{"type": "object"}}}}}
+	request := &chatwire.Request{Messages: []chatwire.Message{{Role: "user", Content: "hello"}}, Tools: []chatwire.ToolDef{{Type: "function", Function: map[string]any{"name": "web_search", "parameters": map[string]any{"type": "object"}}}}}
 	payload, err := h.responsesPayloadFromChat(spec, request, false)
 	testutil.NoError(t, err)
 	tools := responses.InterfaceMaps(payload["tools"])
@@ -248,12 +248,12 @@ func TestParityAuditCapturesTerminalUsageAndFailure(t *testing.T) {
 		var events parityAuditLog
 		h := &Handler{auditLogger: &events}
 		kind := "response.completed"
-		response := map[string]interface{}{"status": "completed", "usage": map[string]interface{}{"input_tokens": 100, "output_tokens": 10, "input_tokens_details": map[string]interface{}{"cached_tokens": 80}}}
+		response := map[string]any{"status": "completed", "usage": map[string]any{"input_tokens": 100, "output_tokens": 10, "input_tokens_details": map[string]any{"cached_tokens": 80}}}
 		if failed {
 			kind = "response.failed"
-			response["error"] = map[string]interface{}{"message": "failed upstream"}
+			response["error"] = map[string]any{"message": "failed upstream"}
 		}
-		_, _, result := copyNativeCLIResponseAndCaptureModel(httptest.NewRecorder(), strings.NewReader(parityText("hello")+parityFrame(kind, map[string]interface{}{"response": response})), "text/event-stream", "grok-4.6")
+		_, _, result := copyNativeCLIResponseAndCaptureModel(httptest.NewRecorder(), strings.NewReader(parityText("hello")+parityFrame(kind, map[string]any{"response": response})), "text/event-stream", "grok-4.6")
 		h.auditChatOutcome(context.Background(), &store.Account{ID: 1}, &chatwire.Request{Model: "grok-4.6", StartedAt: time.Now().Add(-time.Second)}, result)
 		testutil.Fail(t, len(events.events) != 1 || events.events[0].InputTokens != 100 || events.events[0].CachedInputTokens != 80 || (events.events[0].Status == "error") != failed, events.events)
 	}
@@ -261,13 +261,13 @@ func TestParityAuditCapturesTerminalUsageAndFailure(t *testing.T) {
 
 func TestParityNonStreamingDoesNotLeakReasoningAndPreservesAllMessages(t *testing.T) {
 	for _, onlyReasoning := range []bool{false, true} {
-		output := []interface{}{map[string]interface{}{"type": "reasoning", "content": []interface{}{map[string]interface{}{"type": "reasoning_text", "text": "private plan"}}}}
+		output := []any{map[string]any{"type": "reasoning", "content": []any{map[string]any{"type": "reasoning_text", "text": "private plan"}}}}
 		if !onlyReasoning {
 			for _, text := range []string{"first ", " second"} {
-				output = append(output, map[string]interface{}{"type": "message", "content": []interface{}{map[string]interface{}{"type": "output_text", "text": text}}})
+				output = append(output, map[string]any{"type": "message", "content": []any{map[string]any{"type": "output_text", "text": text}}})
 			}
 		}
-		data, _ := json.Marshal(map[string]interface{}{"status": "completed", "output": output})
+		data, _ := json.Marshal(map[string]any{"status": "completed", "output": output})
 		rec := httptest.NewRecorder()
 		result := (&Handler{}).collectBuildChat(rec, &chatwire.Request{Model: "grok-4.6"}, bytes.NewReader(data))
 		if onlyReasoning {

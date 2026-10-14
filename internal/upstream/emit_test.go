@@ -50,8 +50,8 @@ func TestSharedEmittersMatchEveryCallersShape(t *testing.T) {
 	EmitToolCalls(func(msg SSEMessage) { events = append(events, msg) }, accumulator.CompleteAll(), &emitted, &toolCount)
 	testutil.Equal(t, len(events), 0)
 
-	usage := map[string]interface{}{"inputTokens": 1}
-	stored := map[string]interface{}{}
+	usage := map[string]any{"inputTokens": 1}
+	stored := map[string]any{}
 	sawUsage := false
 	ApplyStreamUsage(nil, nil, &sawUsage, &stored)
 	testutil.Falsef(t, sawUsage || len(stored) != 0, "empty usage applied: saw=%v stored=%v", sawUsage, stored)
@@ -71,26 +71,26 @@ func TestNormalizeUsageMapUnifiesClineAndWorkBuddyAliases(t *testing.T) {
 
 	cases := []struct {
 		name string
-		raw  map[string]interface{}
+		raw  map[string]any
 	}{
-		{"top level snake", map[string]interface{}{"prompt_tokens": 5.0, "completion_tokens": 2.0, "reasoning_tokens": 4.0}},
-		{"top level camel", map[string]interface{}{"promptTokens": 5.0, "completionTokens": 2.0, "reasoningTokens": 4.0}},
-		{"glm thinking key", map[string]interface{}{"prompt_tokens": 5.0, "completion_tokens": 2.0, "completion_thinking_tokens": 4.0}},
-		{"nested completion details", map[string]interface{}{
+		{"top level snake", map[string]any{"prompt_tokens": 5.0, "completion_tokens": 2.0, "reasoning_tokens": 4.0}},
+		{"top level camel", map[string]any{"promptTokens": 5.0, "completionTokens": 2.0, "reasoningTokens": 4.0}},
+		{"glm thinking key", map[string]any{"prompt_tokens": 5.0, "completion_tokens": 2.0, "completion_thinking_tokens": 4.0}},
+		{"nested completion details", map[string]any{
 			"prompt_tokens": 5.0, "completion_tokens": 2.0,
-			"completion_tokens_details": map[string]interface{}{"reasoning_tokens": 4.0},
+			"completion_tokens_details": map[string]any{"reasoning_tokens": 4.0},
 		}},
-		{"nested camel details", map[string]interface{}{
+		{"nested camel details", map[string]any{
 			"prompt_tokens": 5.0, "completion_tokens": 2.0,
-			"completionTokensDetails": map[string]interface{}{"reasoningTokens": 4.0},
+			"completionTokensDetails": map[string]any{"reasoningTokens": 4.0},
 		}},
-		{"nested output details", map[string]interface{}{
+		{"nested output details", map[string]any{
 			"prompt_tokens": 5.0, "completion_tokens": 2.0,
-			"output_tokens_details": map[string]interface{}{"reasoning_tokens": 4.0},
+			"output_tokens_details": map[string]any{"reasoning_tokens": 4.0},
 		}},
-		{"nested thinking alias", map[string]interface{}{
+		{"nested thinking alias", map[string]any{
 			"prompt_tokens": 5.0, "completion_tokens": 2.0,
-			"completion_tokens_details": map[string]interface{}{"thinking_tokens": 4.0},
+			"completion_tokens_details": map[string]any{"thinking_tokens": 4.0},
 		}},
 	}
 	for _, tc := range cases {
@@ -106,8 +106,8 @@ func TestNormalizeUsageMapUnifiesClineAndWorkBuddyAliases(t *testing.T) {
 	got := NormalizeUsageMap(nil)
 	testutil.Falsef(t, got != nil, "nil usage = %+v, want nil", got)
 	// A usage object with neither input nor output is not a usage report.
-	got = NormalizeUsageMap(map[string]interface{}{"total_tokens": 9.0})
+	got = NormalizeUsageMap(map[string]any{"total_tokens": 9.0})
 	testutil.Falsef(t, got != nil, "usage without input/output = %+v, want nil", got)
-	got = NormalizeUsageMap(map[string]interface{}{"prompt_tokens": 3.0, "prompt_cache_hit_tokens": 2.0})
+	got = NormalizeUsageMap(map[string]any{"prompt_tokens": 3.0, "prompt_cache_hit_tokens": 2.0})
 	testutil.Falsef(t, got["cacheReadTokens"] != 2 || got["cache_read_tokens"] != 2, "cache read = %+v", got)
 }

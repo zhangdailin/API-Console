@@ -18,7 +18,7 @@ import (
 type streamResult struct {
 	SawMeaningfulEvent bool
 	ToolCallCount      int
-	Usage              map[string]interface{}
+	Usage              map[string]any
 	ThinkingSignature  string
 	FinishReasonValue  string
 }
@@ -63,7 +63,7 @@ type streamChunk struct {
 			} `json:"tool_calls"`
 		} `json:"delta"`
 	} `json:"choices"`
-	Usage map[string]interface{} `json:"usage"`
+	Usage map[string]any `json:"usage"`
 	Error struct {
 		Message string          `json:"message"`
 		Code    json.RawMessage `json:"code"`
@@ -138,7 +138,7 @@ func consumeStream(body io.Reader, onMessage func(upstream.SSEMessage)) (streamR
 				if result.ThinkingSignature == "" {
 					result.ThinkingSignature = newThinkingSignature()
 				}
-				onMessage(upstream.SSEMessage{Type: "model.reasoning-delta", Event: map[string]interface{}{
+				onMessage(upstream.SSEMessage{Type: "model.reasoning-delta", Event: map[string]any{
 					"delta":     delta.ReasoningContent,
 					"signature": result.ThinkingSignature,
 				}})

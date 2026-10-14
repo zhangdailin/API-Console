@@ -15,18 +15,18 @@ import (
 // need the same envelope and each used to carry their own copy. It always
 // returns a non-nil slice: callers differ only in what an empty result means,
 // and each keeps that decision to itself.
-func NormalizeToolDefinitions(tools []interface{}) []interface{} {
-	out := make([]interface{}, 0, len(tools))
+func NormalizeToolDefinitions(tools []any) []any {
+	out := make([]any, 0, len(tools))
 	for _, tool := range tools {
 		raw, err := json.Marshal(tool)
 		if err != nil {
 			continue
 		}
-		var decoded map[string]interface{}
+		var decoded map[string]any
 		if err := json.Unmarshal(raw, &decoded); err != nil {
 			continue
 		}
-		if fn, ok := decoded["function"].(map[string]interface{}); ok {
+		if fn, ok := decoded["function"].(map[string]any); ok {
 			if strings.TrimSpace(StringValue(fn["name"])) == "" {
 				continue
 			}
@@ -40,11 +40,11 @@ func NormalizeToolDefinitions(tools []interface{}) []interface{} {
 		}
 		parameters := decoded["input_schema"]
 		if parameters == nil {
-			parameters = map[string]interface{}{"type": "object", "properties": map[string]interface{}{}}
+			parameters = map[string]any{"type": "object", "properties": map[string]any{}}
 		}
-		out = append(out, map[string]interface{}{
+		out = append(out, map[string]any{
 			"type": "function",
-			"function": map[string]interface{}{
+			"function": map[string]any{
 				"name":        name,
 				"description": StringValue(decoded["description"]),
 				"parameters":  parameters,

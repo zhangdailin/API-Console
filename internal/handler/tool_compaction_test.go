@@ -6,28 +6,28 @@ import (
 	"testing"
 )
 
-func sampleIncomingTools() []interface{} {
-	return []interface{}{
-		map[string]interface{}{
+func sampleIncomingTools() []any {
+	return []any{
+		map[string]any{
 			"type": "function",
-			"function": map[string]interface{}{
+			"function": map[string]any{
 				"name":        "Write",
 				"description": "write file content safely",
-				"parameters": map[string]interface{}{
+				"parameters": map[string]any{
 					"type": "object",
-					"properties": map[string]interface{}{
-						"file_path": map[string]interface{}{"type": "string"},
-						"content":   map[string]interface{}{"type": "string", "description": "utf-8 内容"},
+					"properties": map[string]any{
+						"file_path": map[string]any{"type": "string"},
+						"content":   map[string]any{"type": "string", "description": "utf-8 内容"},
 					},
 				},
 			},
 		},
-		map[string]interface{}{
+		map[string]any{
 			"name":        "Read",
 			"description": "read file content",
-			"input_schema": map[string]interface{}{
+			"input_schema": map[string]any{
 				"type":       "object",
-				"properties": map[string]interface{}{"file_path": map[string]interface{}{"type": "string"}},
+				"properties": map[string]any{"file_path": map[string]any{"type": "string"}},
 			},
 		},
 	}
@@ -43,15 +43,15 @@ func TestEstimateToolsTokensMeasuresTheToolsThatAreSent(t *testing.T) {
 	testutil.Falsef(t, got <= 0, "estimateToolsTokens() = %d, want a positive estimate", got)
 	// A tool the old projection would have dropped must still change the
 	// estimate, otherwise the number does not describe the request.
-	withExtra := append(append([]interface{}{}, tools...), map[string]interface{}{
+	withExtra := append(append([]any{}, tools...), map[string]any{
 		"type": "function",
-		"function": map[string]interface{}{
+		"function": map[string]any{
 			"name":        "Agent",
 			"description": strings.Repeat("long description ", 200),
-			"parameters": map[string]interface{}{
+			"parameters": map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"prompt": map[string]interface{}{"type": "string", "description": strings.Repeat("payload ", 200)},
+				"properties": map[string]any{
+					"prompt": map[string]any{"type": "string", "description": strings.Repeat("payload ", 200)},
 				},
 			},
 		},
@@ -61,16 +61,16 @@ func TestEstimateToolsTokensMeasuresTheToolsThatAreSent(t *testing.T) {
 
 func TestEstimateToolsTokensIsEmptyForNoTools(t *testing.T) {
 	testutil.Equal(t, estimateToolsTokens(nil), 0)
-	testutil.Equal(t, estimateToolsTokens([]interface{}{}), 0)
+	testutil.Equal(t, estimateToolsTokens([]any{}), 0)
 }
 
 // A tool description the old code cut to 128 characters still counts in full.
 func TestEstimateToolsTokensCountsLongDescriptionsInFull(t *testing.T) {
-	short := []interface{}{map[string]interface{}{
+	short := []any{map[string]any{
 		"name":        "Bash",
 		"description": "run a command",
 	}}
-	long := []interface{}{map[string]interface{}{
+	long := []any{map[string]any{
 		"name":        "Bash",
 		"description": strings.Repeat("run a command with a great deal of extra guidance ", 40),
 	}}
@@ -86,10 +86,10 @@ func BenchmarkEstimateToolsTokens(b *testing.B) {
 }
 
 func TestDeclaredToolNames_EmptyAndNoValidDeclarations(t *testing.T) {
-	for _, tools := range [][]interface{}{
+	for _, tools := range [][]any{
 		nil,
 		{},
-		{map[string]interface{}{"name": "  "}, map[string]interface{}{"description": "missing name"}},
+		{map[string]any{"name": "  "}, map[string]any{"description": "missing name"}},
 	} {
 		got := declaredToolNames(tools)
 		testutil.Falsef(t, got != nil, "declaredToolNames(%#v) = %#v, want nil", tools, got)
@@ -97,11 +97,11 @@ func TestDeclaredToolNames_EmptyAndNoValidDeclarations(t *testing.T) {
 }
 
 func TestDeclaredToolNames_PreservesExactNames(t *testing.T) {
-	tools := []interface{}{
-		map[string]interface{}{"name": " Agent "},
-		map[string]interface{}{"name": "task"},
-		map[string]interface{}{"name": "WEB_SEARCH"},
-		map[string]interface{}{"name": "web_search"},
+	tools := []any{
+		map[string]any{"name": " Agent "},
+		map[string]any{"name": "task"},
+		map[string]any{"name": "WEB_SEARCH"},
+		map[string]any{"name": "web_search"},
 	}
 	got := declaredToolNames(tools)
 	want := []string{"Agent", "task", "WEB_SEARCH", "web_search"}
@@ -112,10 +112,10 @@ func TestDeclaredToolNames_PreservesExactNames(t *testing.T) {
 }
 
 func TestDeclaredToolNames_KeepCustomAndCanonicalAliases(t *testing.T) {
-	tools := []interface{}{
-		map[string]interface{}{"name": "workspace_search"},
-		map[string]interface{}{"name": "read_files"},
-		map[string]interface{}{"name": "Read"},
+	tools := []any{
+		map[string]any{"name": "workspace_search"},
+		map[string]any{"name": "read_files"},
+		map[string]any{"name": "Read"},
 	}
 
 	got := declaredToolNames(tools)

@@ -27,9 +27,9 @@ type reasoningDiagnosticsKey struct{}
 
 // Capture only bounded protocol controls from the payload actually sent upstream.
 // An omitted effort stays omitted: it does not mean low, medium, or disabled.
-func withReasoningDiagnostics(ctx context.Context, payload map[string]interface{}) context.Context {
+func withReasoningDiagnostics(ctx context.Context, payload map[string]any) context.Context {
 	values := map[string]string{}
-	reasoning, _ := payload["reasoning"].(map[string]interface{})
+	reasoning, _ := payload["reasoning"].(map[string]any)
 	if effort, ok := reasoning["effort"].(string); ok {
 		switch effort = strings.ToLower(strings.TrimSpace(effort)); effort {
 		case "auto", "none", "minimal", "low", "medium", "high", "xhigh", "max":
@@ -47,7 +47,7 @@ func withReasoningDiagnostics(ctx context.Context, payload map[string]interface{
 	return context.WithValue(ctx, reasoningDiagnosticsKey{}, values)
 }
 
-func addReasoningDiagnostics(ctx context.Context, metadata map[string]interface{}) {
+func addReasoningDiagnostics(ctx context.Context, metadata map[string]any) {
 	values, _ := ctx.Value(reasoningDiagnosticsKey{}).(map[string]string)
 	for key, value := range values {
 		metadata[key] = value
@@ -97,7 +97,7 @@ func (h *Handler) auditAttemptDiagnostic(ctx context.Context, acc *store.Account
 	if logger == nil {
 		return
 	}
-	metadata := map[string]interface{}{"stage": stage, "started_at": started.UTC().Format(time.RFC3339Nano)}
+	metadata := map[string]any{"stage": stage, "started_at": started.UTC().Format(time.RFC3339Nano)}
 	addReasoningDiagnostics(ctx, metadata)
 	status := "ok"
 	if result != "" {
@@ -136,7 +136,7 @@ func (h *Handler) auditAttemptDiagnostic(ctx context.Context, acc *store.Account
 	if len(allowed) > 0 {
 		metadata["response_headers"] = allowed
 	}
-	chain := []interface{}{}
+	chain := []any{}
 	for current, n := err, 0; current != nil && n < 4; current, n = errors.Unwrap(current), n+1 {
 		// Typed HTTP errors are described by the structured body below, not a
 		// string containing its raw body and potentially arbitrary extra fields.
@@ -144,12 +144,12 @@ func (h *Handler) auditAttemptDiagnostic(ctx context.Context, acc *store.Account
 		if _, ok := errors.AsType[*grokUpstreamError](current); ok {
 			message = "upstream HTTP request rejected"
 		}
-		chain = append(chain, map[string]interface{}{"type": fmt.Sprintf("%T", current), "message": diagnosticText(message, acc)})
+		chain = append(chain, map[string]any{"type": fmt.Sprintf("%T", current), "message": diagnosticText(message, acc)})
 	}
 	if len(chain) > 0 {
 		metadata["error_chain"] = chain
 	}
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if len(body) > 0 {
 		metadata["response_body_bytes"] = len(body)
 		metadata["response_body_sha256"] = fmt.Sprintf("%x", sha256.Sum256(body))
@@ -160,8 +160,8 @@ func (h *Handler) auditAttemptDiagnostic(ctx context.Context, acc *store.Account
 					metadata["response_"+key] = diagnosticText(value, acc)
 				}
 			}
-			if detail, ok := parsed["error"].(map[string]interface{}); ok {
-				safe := map[string]interface{}{}
+			if detail, ok := parsed["error"].(map[string]any); ok {
+				safe := map[string]any{}
 				for _, key := range []string{"code", "type", "param", "message"} {
 					if value := responses.StreamString(detail[key]); value != "" {
 						safe[key] = diagnosticText(value, acc)
@@ -171,11 +171,11 @@ func (h *Handler) auditAttemptDiagnostic(ctx context.Context, acc *store.Account
 			}
 		}
 	}
-	usageRaw, reported := parsed["usage"].(map[string]interface{})
+	usageRaw, reported := parsed["usage"].(map[string]any)
 	metadata["usage_reported"] = reported
 	usage := responses.UsageFromChat(usageRaw)
-	inputDetails, _ := usage["input_tokens_details"].(map[string]interface{})
-	outputDetails, _ := usage["output_tokens_details"].(map[string]interface{})
+	inputDetails, _ := usage["input_tokens_details"].(map[string]any)
+	outputDetails, _ := usage["output_tokens_details"].(map[string]any)
 	accountID := int64(0)
 	if acc != nil {
 		accountID = acc.ID

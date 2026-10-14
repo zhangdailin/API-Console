@@ -20,10 +20,10 @@ type UpstreamAttempt struct {
 	latency *Latency
 }
 
-func BeginUpstream(ctx context.Context, method, url string, headers http.Header, body interface{}) *UpstreamAttempt {
+func BeginUpstream(ctx context.Context, method, url string, headers http.Header, body any) *UpstreamAttempt {
 	return beginUpstream(FromContext(ctx), method, url, headers, body)
 }
-func beginUpstream(c *Capture, method, url string, headers http.Header, body interface{}) *UpstreamAttempt {
+func beginUpstream(c *Capture, method, url string, headers http.Header, body any) *UpstreamAttempt {
 	if c == nil {
 		return nil
 	}
@@ -48,7 +48,7 @@ func beginUpstream(c *Capture, method, url string, headers http.Header, body int
 			safeHeaders[k] = strings.Join(v, ", ")
 		}
 	}
-	a.writeJSON("request.json", map[string]interface{}{"attempt": id, "method": method, "url": url, "headers": safeHeaders, "body": body})
+	a.writeJSON("request.json", map[string]any{"attempt": id, "method": method, "url": url, "headers": safeHeaders, "body": body})
 	return a
 }
 func (a *UpstreamAttempt) TraceRequest(req *http.Request) *http.Request {
@@ -56,11 +56,11 @@ func (a *UpstreamAttempt) TraceRequest(req *http.Request) *http.Request {
 	if a == nil {
 		return req
 	}
-	ctx, l := a.Trace(req.Context(), map[string]interface{}{"kind": "http", "host": req.URL.Host})
+	ctx, l := a.Trace(req.Context(), map[string]any{"kind": "http", "host": req.URL.Host})
 	a.latency = l
 	return req.WithContext(ctx)
 }
-func (a *UpstreamAttempt) writeJSON(suffix string, value interface{}) {
+func (a *UpstreamAttempt) writeJSON(suffix string, value any) {
 	if a == nil {
 		return
 	}
@@ -81,7 +81,7 @@ func (a *UpstreamAttempt) Response(resp *http.Response, err error) {
 			a.latency.Finish(err)
 		}
 	}
-	result := map[string]interface{}{"elapsed_ms": time.Since(a.started).Milliseconds()}
+	result := map[string]any{"elapsed_ms": time.Since(a.started).Milliseconds()}
 	if resp != nil {
 		result["status"] = resp.StatusCode
 		result["content_type"] = resp.Header.Get("Content-Type")
@@ -122,7 +122,7 @@ func (b *attemptBody) Read(p []byte) (int, error) {
 		b.attempt.latency.Finish(nil)
 	}
 	if err != nil && err != io.EOF {
-		b.attempt.writeJSON("read_error.json", map[string]interface{}{"error": err.Error()})
+		b.attempt.writeJSON("read_error.json", map[string]any{"error": err.Error()})
 	}
 	return n, err
 }
@@ -130,6 +130,6 @@ func (b *attemptBody) Read(p []byte) (int, error) {
 func (b *attemptBody) Close() error {
 	err := b.ReadCloser.Close()
 	b.attempt.latency.Finish(err)
-	b.attempt.writeJSON("body_state.json", map[string]interface{}{"bytes": b.bytes, "complete": b.complete, "note": "complete 表示读到上游 EOF；提前结束或取消不代表诊断按长度截断"})
+	b.attempt.writeJSON("body_state.json", map[string]any{"bytes": b.bytes, "complete": b.complete, "note": "complete 表示读到上游 EOF；提前结束或取消不代表诊断按长度截断"})
 	return err
 }

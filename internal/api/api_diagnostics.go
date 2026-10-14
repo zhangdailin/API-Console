@@ -67,7 +67,7 @@ func (a *API) HandleJournalDiagnostics(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Could not read diagnostics", http.StatusServiceUnavailable)
 		return
 	}
-	payload := map[string]interface{}{"available": bundle != nil, "retention": "24 小时，最多 512 个请求"}
+	payload := map[string]any{"available": bundle != nil, "retention": "24 小时，最多 512 个请求"}
 	if bundle != nil {
 		payload["entry"] = bundle
 	} else {

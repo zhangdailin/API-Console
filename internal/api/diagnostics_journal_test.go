@@ -29,10 +29,10 @@ func TestInvalidJSONDiagnosticIsReachableFromJournal(t *testing.T) {
 	journal.Close() // Flush the asynchronous audit writer before querying the API.
 	testutil.Equal(t, rec.Code, 400)
 	list := journalRequest(t, a, "?kind=request&channel=workbuddy")
-	rows := list["data"].([]interface{})
+	rows := list["data"].([]any)
 	testutil.Equal(t, len(rows), 1)
-	row := rows[0].(map[string]interface{})
-	event := row["event"].(map[string]interface{})
+	row := rows[0].(map[string]any)
+	event := row["event"].(map[string]any)
 	id := rec.Header().Get(middleware.DiagnosticRequestIDHeader)
 	testutil.Fail(t, event["request_id"] != id || row["diagnostics"] == nil, row)
 	detail := httptest.NewRecorder()

@@ -116,7 +116,7 @@ func parseHostMemory(raw string) (used, total uint64) {
 	}
 	return
 }
-func runtimeMetric(label, value, detail string, available bool, percent float64) map[string]interface{} {
+func runtimeMetric(label, value, detail string, available bool, percent float64) map[string]any {
 	status := "unknown"
 	if available {
 		status = "ok"
@@ -126,7 +126,7 @@ func runtimeMetric(label, value, detail string, available bool, percent float64)
 			status = "warn"
 		}
 	}
-	return map[string]interface{}{"label": label, "value": value, "detail": detail, "available": available, "status": status}
+	return map[string]any{"label": label, "value": value, "detail": detail, "available": available, "status": status}
 }
 func (a *API) HandleOpsRuntime(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
@@ -165,8 +165,8 @@ func (a *API) HandleOpsRuntime(w http.ResponseWriter, r *http.Request) {
 	if a != nil && a.refreshConcurrency != nil {
 		refreshing = a.refreshConcurrency()
 	}
-	metrics := []map[string]interface{}{cpu, memory, rss, runtimeMetric("Go 堆内存", formatRuntimeBytes(mem.Alloc), "当前已分配", true, 0), runtimeMetric("Goroutine", strconv.Itoa(runtime.NumGoroutine()), "当前协程数", true, 0), runtimeMetric("账号刷新", strconv.Itoa(refreshing), "正在刷新", true, 0)}
-	util.WriteJSON(w, map[string]interface{}{"available": true, "metrics": metrics})
+	metrics := []map[string]any{cpu, memory, rss, runtimeMetric("Go 堆内存", formatRuntimeBytes(mem.Alloc), "当前已分配", true, 0), runtimeMetric("Goroutine", strconv.Itoa(runtime.NumGoroutine()), "当前协程数", true, 0), runtimeMetric("账号刷新", strconv.Itoa(refreshing), "正在刷新", true, 0)}
+	util.WriteJSON(w, map[string]any{"available": true, "metrics": metrics})
 }
 func formatRuntimeBytes(value uint64) string {
 	if value >= 1<<30 {

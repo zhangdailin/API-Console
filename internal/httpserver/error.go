@@ -71,8 +71,8 @@ func WriteErrorCode(w http.ResponseWriter, status int, code, message string) {
 	case status >= 500:
 		errorType = "server_error"
 	}
-	util.WriteJSONStatus(w, status, map[string]interface{}{
-		"error": map[string]interface{}{
+	util.WriteJSONStatus(w, status, map[string]any{
+		"error": map[string]any{
 			"message": message,
 			"type":    errorType,
 			"code":    strings.TrimSpace(code),

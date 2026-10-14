@@ -52,7 +52,7 @@ func ServeStoredResource(w http.ResponseWriter, r *http.Request, record *store.S
 			WriteAPIError(w, http.StatusServiceUnavailable, "response_store_unavailable", "failed to delete response")
 			return
 		}
-		util.WriteJSON(w, map[string]interface{}{"id": record.ResponseID, "object": "response.deleted", "deleted": true})
+		util.WriteJSON(w, map[string]any{"id": record.ResponseID, "object": "response.deleted", "deleted": true})
 		return
 	}
 	if len(record.Body) == 0 {

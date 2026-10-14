@@ -21,7 +21,7 @@ func TestBridgeConsumesEncryptedReasoningProjection(t *testing.T) {
 				t.Fatalf("%s: %d %s", channel, rec.Code, rec.Body.String())
 			}
 			if value, exists := calls[0].body["include"]; exists && value != nil {
-				if items, ok := value.([]interface{}); !ok || len(items) != 0 {
+				if items, ok := value.([]any); !ok || len(items) != 0 {
 					t.Fatalf("include leaked: %v", value)
 				}
 			}
@@ -52,7 +52,7 @@ func TestBridgeDisablesHostedSearchWithoutInventingFunction(t *testing.T) {
 		if rec.Code != 200 || len(calls) != 1 {
 			t.Fatalf("%s: %d %s", channel, rec.Code, rec.Body.String())
 		}
-		tools, _ := calls[0].body["tools"].([]interface{})
+		tools, _ := calls[0].body["tools"].([]any)
 		if len(tools) != 1 || strings.Contains(rec.Body.String(), "web_search_call") {
 			t.Fatal("invented search or lost real tool")
 		}

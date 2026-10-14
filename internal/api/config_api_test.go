@@ -43,8 +43,8 @@ func TestHandleConfigListReturnsCodeFreeMaxShape(t *testing.T) {
 	api.HandleConfigList(rec, req)
 
 	var resp struct {
-		Code int                    `json:"code"`
-		Data map[string]interface{} `json:"data"`
+		Code int            `json:"code"`
+		Data map[string]any `json:"data"`
 	}
 	testutil.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp), "unmarshal response: %v")
 

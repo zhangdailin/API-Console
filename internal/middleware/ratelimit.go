@@ -68,7 +68,7 @@ func (rl *RateLimiter) cleanup() {
 	// TTL is twice the window size to ensure we don't prematurely delete active entries
 	ttl := rl.window * 2
 
-	rl.entries.Range(func(key, value interface{}) bool {
+	rl.entries.Range(func(key, value any) bool {
 		entry := value.(*limiterEntry)
 		entry.mu.Lock()
 		lastVisit := entry.lastVisit

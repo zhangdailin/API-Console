@@ -53,13 +53,13 @@ func TestDecodeJSONBodyRequiresOneCompleteValue(t *testing.T) {
 		t.Run(body, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest("POST", "/", strings.NewReader(body))
-			var value map[string]interface{}
+			var value map[string]any
 			if DecodeJSONBody(rec, req, &value) || rec.Code != 400 {
 				t.Fatalf("invalid body accepted: %d", rec.Code)
 			}
 		})
 	}
-	var value map[string]interface{}
+	var value map[string]any
 	rec := httptest.NewRecorder()
 	if !DecodeJSONBody(rec, httptest.NewRequest("POST", "/", strings.NewReader("{\"a\":1} \r\n\t")), &value) {
 		t.Fatal("trailing whitespace rejected")
@@ -74,7 +74,7 @@ func TestDecodeJSONBodyRequiresOneCompleteValue(t *testing.T) {
 func TestDecodeJSONBodyEnforcesLimitAfterValidPrefix(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/", strings.NewReader("{}"+strings.Repeat(" ", MaxJSONBodyBytes)))
-	var value map[string]interface{}
+	var value map[string]any
 	if DecodeJSONBody(rec, req, &value) || rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("oversized suffix accepted: %d", rec.Code)
 	}
@@ -199,7 +199,7 @@ func TestDecodeJSONBodyRejectsNonJSONContentType(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(`{"a":1}`))
 	req.Header.Set("Content-Type", "text/plain")
-	var payload map[string]interface{}
+	var payload map[string]any
 	testutil.False(t, DecodeJSONBody(rec, req, &payload), "DecodeJSONBody accepted a non-JSON content type")
 	testutil.Equal(t, rec.Code, http.StatusUnsupportedMediaType)
 }

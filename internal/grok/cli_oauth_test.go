@@ -94,7 +94,7 @@ func TestCLIResponsesRefreshesRejectedUnexpiredTokenOnSameAccount(t *testing.T) 
 	acc := &store.Account{
 		OAuthAccessToken: "old-access", OAuthRefreshToken: "old-refresh", OAuthExpiresAt: time.Now().Add(time.Hour),
 	}
-	resp, err := client.doResponsesAt(context.Background(), acc, "/responses", map[string]interface{}{"model": "grok-4.6", "input": "hello"})
+	resp, err := client.doResponsesAt(context.Background(), acc, "/responses", map[string]any{"model": "grok-4.6", "input": "hello"})
 	testutil.NoError(t, err)
 	_ = resp.Body.Close()
 	testutil.Falsef(t, responseCalls != 2 || refreshCalls != 1 || acc.OAuthAccessToken != "new-access", "response_calls=%d refresh_calls=%d access=%q", responseCalls, refreshCalls, acc.OAuthAccessToken)
@@ -273,7 +273,7 @@ func TestCLIResponsesRejectsTeamModelCooldownBeforeUpstream(t *testing.T) {
 
 	client := &CLIClient{}
 	started := time.Now()
-	_, err := client.doResponsesAt(context.Background(), &store.Account{TeamID: "team-1"}, "/responses", map[string]interface{}{"model": "grok-4.6"})
+	_, err := client.doResponsesAt(context.Background(), &store.Account{TeamID: "team-1"}, "/responses", map[string]any{"model": "grok-4.6"})
 	testutil.Falsef(t, err == nil || !strings.Contains(err.Error(), "status=429") || !strings.Contains(err.Error(), "retry-after"), "error=%v want immediate team/model cooldown 429 with retry-after", err)
 	elapsed := time.Since(started)
 	testutil.Falsef(t, elapsed > 100*time.Millisecond, "team cooldown blocked for %s; it must reject immediately so the retry loop can rotate accounts", elapsed)

@@ -89,7 +89,7 @@ func pruneDebugLogDirectories(root string, keep int) {
 }
 
 // LogIncomingRequest records step 1: the incoming Claude API request.
-func (l *Logger) LogIncomingRequest(req interface{}) {
+func (l *Logger) LogIncomingRequest(req any) {
 	if !l.enabled {
 		return
 	}
@@ -97,11 +97,11 @@ func (l *Logger) LogIncomingRequest(req interface{}) {
 }
 
 // LogEarlyExit records why the request returned early.
-func (l *Logger) LogEarlyExit(reason string, details map[string]interface{}) {
+func (l *Logger) LogEarlyExit(reason string, details map[string]any) {
 	if !l.enabled {
 		return
 	}
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"reason":     reason,
 		"elapsed_ms": time.Since(l.startTime).Milliseconds(),
 	}
@@ -120,7 +120,7 @@ func (l *Logger) LogConvertedPrompt(prompt string) {
 }
 
 // LogUpstreamRequest records step 3: the request sent upstream.
-func (l *Logger) LogUpstreamRequest(url string, headers map[string]string, body interface{}) {
+func (l *Logger) LogUpstreamRequest(url string, headers map[string]string, body any) {
 	if !l.enabled {
 		return
 	}
@@ -141,7 +141,7 @@ func (l *Logger) LogUpstreamRequest(url string, headers map[string]string, body 
 			body = string(raw)
 		}
 	}
-	data := map[string]interface{}{
+	data := map[string]any{
 		"url":     url,
 		"headers": safeHeaders,
 		"body":    body,
@@ -163,7 +163,7 @@ func (l *Logger) LogUpstreamHTTPError(url string, status int, body string, err e
 	if !l.enabled {
 		return
 	}
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"url":        url,
 		"status":     status,
 		"body":       body,
@@ -232,7 +232,7 @@ func (l *Logger) LogInputTokenBreakdown(profile string, basePromptTokens, system
 		return
 	}
 
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"prompt_profile":        profile,
 		"base_prompt_tokens":    basePromptTokens,
 		"system_context_tokens": systemContextTokens,
@@ -249,7 +249,7 @@ func (l *Logger) LogSummary(inputTokens, outputTokens int, duration time.Duratio
 		return
 	}
 
-	summary := map[string]interface{}{
+	summary := map[string]any{
 		"input_tokens":  inputTokens,
 		"output_tokens": outputTokens,
 		"total_tokens":  inputTokens + outputTokens,
@@ -274,7 +274,7 @@ func (l *Logger) Close() {
 	}
 }
 
-func (l *Logger) writeJSON(filename string, data interface{}) {
+func (l *Logger) writeJSON(filename string, data any) {
 	jsonData, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		return

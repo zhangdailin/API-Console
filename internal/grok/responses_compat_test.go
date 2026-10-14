@@ -14,42 +14,42 @@ func TestNativeResponsesPreservesOutputAndUsage(t *testing.T) {
 	for _, streaming := range []bool{false, true} {
 		for _, status := range []string{"completed", "incomplete"} {
 			t.Run(status+"/stream="+fmt.Sprint(streaming), func(t *testing.T) {
-				response := map[string]interface{}{
+				response := map[string]any{
 					"id": "resp_native", "object": "response", "model": "grok-4.6", "created_at": 42, "status": status,
-					"output": []interface{}{
-						map[string]interface{}{"id": "rs_a", "type": "reasoning", "summary": []interface{}{map[string]interface{}{"type": "summary_text", "text": "first plan"}}, "encrypted_content": "opaque-a"},
-						map[string]interface{}{"id": "rs_b", "type": "reasoning", "summary": []interface{}{map[string]interface{}{"type": "summary_text", "text": "second plan"}}, "encrypted_content": "opaque-b"},
-						map[string]interface{}{"id": "ws_a", "type": "web_search_call", "status": "completed", "action": map[string]interface{}{"type": "search", "query": "news"}},
-						map[string]interface{}{"id": "fc_a", "type": "function_call", "call_id": "call_a", "name": "lookup", "arguments": `{"city":"Shanghai"}`},
-						map[string]interface{}{"id": "msg_a", "type": "message", "role": "assistant", "content": []interface{}{
-							map[string]interface{}{"type": "output_text", "text": " answer ", "annotations": []interface{}{map[string]interface{}{"type": "url_citation", "url": "https://example.com", "title": "source", "start_index": 0, "end_index": 6}}},
-							map[string]interface{}{"type": "refusal", "refusal": "Cannot help."},
+					"output": []any{
+						map[string]any{"id": "rs_a", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "first plan"}}, "encrypted_content": "opaque-a"},
+						map[string]any{"id": "rs_b", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "second plan"}}, "encrypted_content": "opaque-b"},
+						map[string]any{"id": "ws_a", "type": "web_search_call", "status": "completed", "action": map[string]any{"type": "search", "query": "news"}},
+						map[string]any{"id": "fc_a", "type": "function_call", "call_id": "call_a", "name": "lookup", "arguments": `{"city":"Shanghai"}`},
+						map[string]any{"id": "msg_a", "type": "message", "role": "assistant", "content": []any{
+							map[string]any{"type": "output_text", "text": " answer ", "annotations": []any{map[string]any{"type": "url_citation", "url": "https://example.com", "title": "source", "start_index": 0, "end_index": 6}}},
+							map[string]any{"type": "refusal", "refusal": "Cannot help."},
 						}},
 					},
-					"usage": map[string]interface{}{"input_tokens": 10, "output_tokens": 4, "input_tokens_details": map[string]interface{}{"cached_tokens": 3}, "output_tokens_details": map[string]interface{}{"reasoning_tokens": 2}},
+					"usage": map[string]any{"input_tokens": 10, "output_tokens": 4, "input_tokens_details": map[string]any{"cached_tokens": 3}, "output_tokens_details": map[string]any{"reasoning_tokens": 2}},
 				}
 				if status == "incomplete" {
-					response["incomplete_details"] = map[string]interface{}{"reason": "max_output_tokens"}
+					response["incomplete_details"] = map[string]any{"reason": "max_output_tokens"}
 				}
 				raw, err := json.Marshal(response)
 				testutil.NoError(t, err)
 				input, contentType := string(raw), "application/json"
 				if streaming {
-					input = parityFrame("response."+status, map[string]interface{}{"response": response})
+					input = parityFrame("response."+status, map[string]any{"response": response})
 					contentType = "text/event-stream"
 				}
 				rec := httptest.NewRecorder()
 				_, _, outcome := copyNativeCLIResponseAndCaptureModel(rec, strings.NewReader(input), contentType, "grok-4.6")
 				testutil.NoError(t, outcome.Err)
-				var got map[string]interface{}
+				var got map[string]any
 				if streaming {
 					err = responses.ReadSSE(strings.NewReader(rec.Body.String()), func(kind, data string) error {
 						if kind == "response."+status {
-							var event map[string]interface{}
+							var event map[string]any
 							if err := json.Unmarshal([]byte(data), &event); err != nil {
 								return err
 							}
-							got, _ = event["response"].(map[string]interface{})
+							got, _ = event["response"].(map[string]any)
 						}
 						return nil
 					})

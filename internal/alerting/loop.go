@@ -169,7 +169,7 @@ func AuditRecorder(logger audit.Logger) func(Alert, bool) {
 			Status:  status,
 			Error:   errorText,
 			Details: alert.Title,
-			Metadata: map[string]interface{}{
+			Metadata: map[string]any{
 				"severity": string(alert.Severity),
 				"key":      alert.Key,
 			},

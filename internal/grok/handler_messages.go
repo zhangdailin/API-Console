@@ -16,36 +16,36 @@ import (
 )
 
 type anthropicMessagesRequest struct {
-	Model         string                   `json:"model"`
-	MaxTokens     int                      `json:"max_tokens"`
-	Messages      []anthropicMessage       `json:"messages"`
-	System        interface{}              `json:"system,omitempty"`
-	Tools         []anthropicTool          `json:"tools,omitempty"`
-	ToolChoice    interface{}              `json:"tool_choice,omitempty"`
-	Stream        bool                     `json:"stream,omitempty"`
-	Temperature   *float64                 `json:"temperature,omitempty"`
-	TopP          *float64                 `json:"top_p,omitempty"`
-	Metadata      map[string]interface{}   `json:"metadata,omitempty"`
-	Thinking      map[string]interface{}   `json:"thinking,omitempty"`
-	StopSequences []string                 `json:"stop_sequences,omitempty"`
-	OutputConfig  map[string]interface{}   `json:"output_config,omitempty"`
-	MCPServers    []map[string]interface{} `json:"mcp_servers,omitempty"`
+	Model         string             `json:"model"`
+	MaxTokens     int                `json:"max_tokens"`
+	Messages      []anthropicMessage `json:"messages"`
+	System        any                `json:"system,omitempty"`
+	Tools         []anthropicTool    `json:"tools,omitempty"`
+	ToolChoice    any                `json:"tool_choice,omitempty"`
+	Stream        bool               `json:"stream,omitempty"`
+	Temperature   *float64           `json:"temperature,omitempty"`
+	TopP          *float64           `json:"top_p,omitempty"`
+	Metadata      map[string]any     `json:"metadata,omitempty"`
+	Thinking      map[string]any     `json:"thinking,omitempty"`
+	StopSequences []string           `json:"stop_sequences,omitempty"`
+	OutputConfig  map[string]any     `json:"output_config,omitempty"`
+	MCPServers    []map[string]any   `json:"mcp_servers,omitempty"`
 }
 
 type anthropicMessage struct {
-	Role    string      `json:"role"`
-	Content interface{} `json:"content"`
+	Role    string `json:"role"`
+	Content any    `json:"content"`
 }
 
 type anthropicTool struct {
-	Type            string      `json:"type,omitempty"`
-	Name            string      `json:"name"`
-	Description     string      `json:"description,omitempty"`
-	InputSchema     interface{} `json:"input_schema"`
-	Strict          *bool       `json:"strict,omitempty"`
-	AllowedDomains  []string    `json:"allowed_domains,omitempty"`
-	BlockedDomains  []string    `json:"blocked_domains,omitempty"`
-	ExcludedDomains []string    `json:"excluded_domains,omitempty"`
+	Type            string   `json:"type,omitempty"`
+	Name            string   `json:"name"`
+	Description     string   `json:"description,omitempty"`
+	InputSchema     any      `json:"input_schema"`
+	Strict          *bool    `json:"strict,omitempty"`
+	AllowedDomains  []string `json:"allowed_domains,omitempty"`
+	BlockedDomains  []string `json:"blocked_domains,omitempty"`
+	ExcludedDomains []string `json:"excluded_domains,omitempty"`
 }
 
 // HandleMessages exposes an Anthropic Messages compatibility surface for the
@@ -114,7 +114,7 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		writeAnthropicUpstreamError(w, rec.Code, rec.Body.String())
 		return
 	}
-	var chatResponse map[string]interface{}
+	var chatResponse map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &chatResponse); err != nil {
 		writeAnthropicError(w, http.StatusBadGateway, "invalid chat response")
 		return

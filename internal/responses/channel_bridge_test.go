@@ -40,7 +40,7 @@ func TestResponsesCompletionCallbackRequiresTerminalDelivery(t *testing.T) {
 	for _, failure := range []error{nil, errors.New("terminal flush disconnected")} {
 		calls := 0
 		w := terminalFlushWriter{httptest.NewRecorder(), failure}
-		WriteStreamFromChatReader(w, CreateRequest{Model: "test"}, strings.NewReader(input), StreamOptions{OnComplete: func(map[string]interface{}) { calls++ }})
+		WriteStreamFromChatReader(w, CreateRequest{Model: "test"}, strings.NewReader(input), StreamOptions{OnComplete: func(map[string]any) { calls++ }})
 		want := 1
 		if failure != nil {
 			want = 0
@@ -94,7 +94,7 @@ func TestResponsesChatPathMapsTheChannelPrefix(t *testing.T) {
 
 type recordedChatCall struct {
 	path string
-	body map[string]interface{}
+	body map[string]any
 }
 
 // recordingChat captures the inner chat request and replies with a complete
@@ -104,7 +104,7 @@ func recordingChat(t *testing.T, calls *[]recordedChatCall, mu *sync.Mutex) http
 	return func(w http.ResponseWriter, r *http.Request) {
 		raw, err := io.ReadAll(r.Body)
 		testutil.CheckNoError(t, err, "inner chat body: %v")
-		var decoded map[string]interface{}
+		var decoded map[string]any
 		_ = json.Unmarshal(raw, &decoded)
 		mu.Lock()
 		*calls = append(*calls, recordedChatCall{path: r.URL.Path, body: decoded})
@@ -153,7 +153,7 @@ func TestResponsesBridgeStreamNumbersEveryEvent(t *testing.T) {
 			return nil
 		}
 		seen++
-		var payload map[string]interface{}
+		var payload map[string]any
 		if err := json.Unmarshal(event.Data(), &payload); err != nil {
 			return fmt.Errorf("event %q: %v", event.Event, err)
 		}
@@ -197,9 +197,9 @@ func TestResponsesBridgeStreamsChatAsResponses(t *testing.T) {
 	defer mu.Unlock()
 	testutil.Equal(t, len(calls), 1)
 	testutil.Equal(t, calls[0].path, "/workbuddy/v1/chat/completions")
-	messages, _ := calls[0].body["messages"].([]interface{})
+	messages, _ := calls[0].body["messages"].([]any)
 	testutil.Equal(t, len(messages), 2)
-	first, _ := messages[0].(map[string]interface{})
+	first, _ := messages[0].(map[string]any)
 	testutil.Equal(t, first["role"], "system")
 	testutil.Equal(t, first["content"], "be brief")
 	if stream, _ := calls[0].body["stream"].(bool); !stream {
@@ -223,7 +223,7 @@ func TestResponsesBridgeNonStreamReturnsAResponseObject(t *testing.T) {
 	bridge(rec, req)
 
 	testutil.Equal(t, rec.Code, http.StatusOK)
-	var decoded map[string]interface{}
+	var decoded map[string]any
 	err := json.Unmarshal(rec.Body.Bytes(), &decoded)
 	testutil.CheckNoError(t, err)
 	testutil.Equal(t, decoded["object"], "response")
@@ -341,10 +341,10 @@ func TestResponsesBridgeStoresAndServesResponses(t *testing.T) {
 	s := store.NewMemoryResponseStore(time.Hour)
 
 	var mu sync.Mutex
-	var chatBodies []map[string]interface{}
+	var chatBodies []map[string]any
 	chat := func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
-		var decoded map[string]interface{}
+		var decoded map[string]any
 		_ = json.Unmarshal(raw, &decoded)
 		mu.Lock()
 		chatBodies = append(chatBodies, decoded)
@@ -361,7 +361,7 @@ func TestResponsesBridgeStoresAndServesResponses(t *testing.T) {
 	bridge(create, httptest.NewRequest(http.MethodPost, "/workbuddy/v1/responses",
 		strings.NewReader(`{"model":"gpt-5.6-luna","input":"hi","store":true}`)))
 	testutil.Equal(t, create.Code, http.StatusOK)
-	var created map[string]interface{}
+	var created map[string]any
 	err := json.Unmarshal(create.Body.Bytes(), &created)
 	testutil.CheckNoError(t, err)
 	responseID, _ := created["id"].(string)

@@ -10,16 +10,16 @@ import (
 
 func compile(t *testing.T, raw string) *Schema {
 	t.Helper()
-	var value interface{}
+	var value any
 	testutil.NoError(t, json.Unmarshal([]byte(raw), &value), "unmarshal schema: %v")
 	schema := CompileSchema(value)
 	testutil.False(t, schema == nil, "schema did not compile")
 	return schema
 }
 
-func decodeValue(t *testing.T, raw string) interface{} {
+func decodeValue(t *testing.T, raw string) any {
 	t.Helper()
-	var value interface{}
+	var value any
 	testutil.NoError(t, json.Unmarshal([]byte(raw), &value), "unmarshal value: %v")
 	return value
 }
@@ -27,7 +27,7 @@ func decodeValue(t *testing.T, raw string) interface{} {
 func TestCompileSchemaRejectsUnreadableInput(t *testing.T) {
 	testutil.Equal(t, CompileSchema(nil) == nil, true)
 	testutil.Equal(t, CompileSchema("not a schema") == nil, true)
-	testutil.Equal(t, CompileSchema(map[string]interface{}{}) == nil, true)
+	testutil.Equal(t, CompileSchema(map[string]any{}) == nil, true)
 }
 
 func TestSchemaValidateObject(t *testing.T) {
@@ -127,12 +127,12 @@ func TestSchemaIgnoresUnsupportedKeywords(t *testing.T) {
 }
 
 func TestStrictSchemaOnlyWhenStrict(t *testing.T) {
-	strict := UpstreamRequest{ResponseFormat: map[string]interface{}{
+	strict := UpstreamRequest{ResponseFormat: map[string]any{
 		"type": "json_schema",
-		"json_schema": map[string]interface{}{
+		"json_schema": map[string]any{
 			"name":   "answer",
 			"strict": true,
-			"schema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"ok": map[string]interface{}{"type": "boolean"}}, "required": []interface{}{"ok"}},
+			"schema": map[string]any{"type": "object", "properties": map[string]any{"ok": map[string]any{"type": "boolean"}}, "required": []any{"ok"}},
 		},
 	}}
 	schema, ok := strict.StrictSchema()
@@ -140,29 +140,29 @@ func TestStrictSchemaOnlyWhenStrict(t *testing.T) {
 	testutil.False(t, schema == nil, "strict request produced no schema")
 
 	// The same envelope without strict is a hint, not a contract.
-	loose := UpstreamRequest{ResponseFormat: map[string]interface{}{
+	loose := UpstreamRequest{ResponseFormat: map[string]any{
 		"type": "json_schema",
-		"json_schema": map[string]interface{}{
+		"json_schema": map[string]any{
 			"name":   "answer",
 			"strict": false,
-			"schema": map[string]interface{}{"type": "object"},
+			"schema": map[string]any{"type": "object"},
 		},
 	}}
 	_, ok = loose.StrictSchema()
 	testutil.Equal(t, ok, false)
 
 	// json_object names no schema at all.
-	_, ok = UpstreamRequest{ResponseFormat: map[string]interface{}{"type": "json_object"}}.StrictSchema()
+	_, ok = UpstreamRequest{ResponseFormat: map[string]any{"type": "json_object"}}.StrictSchema()
 	testutil.Equal(t, ok, false)
 	_, ok = UpstreamRequest{}.StrictSchema()
 	testutil.Equal(t, ok, false)
 
 	// Responses text.format is the same contract under a different spelling.
-	responses := UpstreamRequest{ResponseText: map[string]interface{}{"format": map[string]interface{}{
+	responses := UpstreamRequest{ResponseText: map[string]any{"format": map[string]any{
 		"type": "json_schema",
-		"json_schema": map[string]interface{}{
+		"json_schema": map[string]any{
 			"strict": true,
-			"schema": map[string]interface{}{"type": "object"},
+			"schema": map[string]any{"type": "object"},
 		},
 	}}}
 	_, ok = responses.StrictSchema()
@@ -174,9 +174,9 @@ func TestSystemHintEmptyUnlessStrict(t *testing.T) {
 	testutil.Equal(t, none.SystemHint(), "")
 	testutil.NoError(t, none.Validate("anything"), "nil validator rejected an answer: %v")
 
-	out := NewStructuredOutput(UpstreamRequest{ResponseFormat: map[string]interface{}{
+	out := NewStructuredOutput(UpstreamRequest{ResponseFormat: map[string]any{
 		"type":        "json_schema",
-		"json_schema": map[string]interface{}{"strict": true, "schema": map[string]interface{}{"type": "object"}},
+		"json_schema": map[string]any{"strict": true, "schema": map[string]any{"type": "object"}},
 	}})
 	testutil.False(t, out == nil, "strict request produced no validator")
 	testutil.MustContain(t, out.SystemHint(), "Respond with JSON only.")
@@ -184,16 +184,16 @@ func TestSystemHintEmptyUnlessStrict(t *testing.T) {
 }
 
 func TestValidateAcceptsFencedAndDecoratedJSON(t *testing.T) {
-	out := NewStructuredOutput(UpstreamRequest{ResponseFormat: map[string]interface{}{
+	out := NewStructuredOutput(UpstreamRequest{ResponseFormat: map[string]any{
 		"type": "json_schema",
-		"json_schema": map[string]interface{}{
+		"json_schema": map[string]any{
 			"strict": true,
-			"schema": map[string]interface{}{
+			"schema": map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"name": map[string]interface{}{"type": "string"},
+				"properties": map[string]any{
+					"name": map[string]any{"type": "string"},
 				},
-				"required":             []interface{}{"name"},
+				"required":             []any{"name"},
 				"additionalProperties": false,
 			},
 		},

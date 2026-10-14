@@ -16,29 +16,29 @@ import (
 	"orchids-api/internal/testutil"
 )
 
-func reasoningOutputResponse() map[string]interface{} {
-	return map[string]interface{}{
+func reasoningOutputResponse() map[string]any {
+	return map[string]any{
 		"id": "resp-visible", "object": "response", "status": "completed", "model": "grok-4.6",
-		"output": []interface{}{
-			map[string]interface{}{"id": "reason-1", "type": "reasoning", "encrypted_content": "opaque-replay",
-				"content": []interface{}{map[string]interface{}{"type": "reasoning_text", "text": "PRIVATE_RAW"}},
-				"summary": []interface{}{map[string]interface{}{"type": "summary_text", "text": "PRIVATE_SUMMARY"}}},
-			map[string]interface{}{"id": "answer-1", "type": "message", "role": "assistant", "content": []interface{}{map[string]interface{}{"type": "output_text", "text": "Public answer"}}},
-			map[string]interface{}{"id": "tool-1", "type": "function_call", "call_id": "call-1", "name": "lookup", "arguments": `{"reasoning":"tool parameter"}`},
+		"output": []any{
+			map[string]any{"id": "reason-1", "type": "reasoning", "encrypted_content": "opaque-replay",
+				"content": []any{map[string]any{"type": "reasoning_text", "text": "PRIVATE_RAW"}},
+				"summary": []any{map[string]any{"type": "summary_text", "text": "PRIVATE_SUMMARY"}}},
+			map[string]any{"id": "answer-1", "type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "Public answer"}}},
+			map[string]any{"id": "tool-1", "type": "function_call", "call_id": "call-1", "name": "lookup", "arguments": `{"reasoning":"tool parameter"}`},
 		},
-		"usage": map[string]interface{}{"input_tokens": 10, "output_tokens": 20, "output_tokens_details": map[string]interface{}{"reasoning_tokens": 15}},
+		"usage": map[string]any{"input_tokens": 10, "output_tokens": 20, "output_tokens_details": map[string]any{"reasoning_tokens": 15}},
 	}
 }
 
 func reasoningOutputStream() string {
 	response := reasoningOutputResponse()
-	reason := response["output"].([]interface{})[0]
-	return parityFrame("response.output_item.added", map[string]interface{}{"output_index": 0, "item": map[string]interface{}{"id": "reason-1", "type": "reasoning"}}) +
-		parityFrame("response.reasoning_text.delta", map[string]interface{}{"item_id": "reason-1", "delta": "PRIVATE_RAW"}) +
-		parityFrame("response.reasoning_summary_text.delta", map[string]interface{}{"item_id": "reason-1", "delta": "PRIVATE_SUMMARY_DELTA"}) +
-		parityFrame("response.output_item.done", map[string]interface{}{"output_index": 0, "item": reason}) +
-		parityFrame("response.output_text.delta", map[string]interface{}{"item_id": "answer-1", "output_index": 1, "content_index": 0, "delta": "Public answer"}) +
-		parityFrame("response.completed", map[string]interface{}{"response": response})
+	reason := response["output"].([]any)[0]
+	return parityFrame("response.output_item.added", map[string]any{"output_index": 0, "item": map[string]any{"id": "reason-1", "type": "reasoning"}}) +
+		parityFrame("response.reasoning_text.delta", map[string]any{"item_id": "reason-1", "delta": "PRIVATE_RAW"}) +
+		parityFrame("response.reasoning_summary_text.delta", map[string]any{"item_id": "reason-1", "delta": "PRIVATE_SUMMARY_DELTA"}) +
+		parityFrame("response.output_item.done", map[string]any{"output_index": 0, "item": reason}) +
+		parityFrame("response.output_text.delta", map[string]any{"item_id": "answer-1", "output_index": 1, "content_index": 0, "delta": "Public answer"}) +
+		parityFrame("response.completed", map[string]any{"response": response})
 }
 
 func TestNativeReasoningOutputKeepsReplayAndAccounting(t *testing.T) {
@@ -63,7 +63,7 @@ func TestNativeReasoningOutputKeepsReplayAndAccounting(t *testing.T) {
 			if !strings.Contains(string(captured), "PRIVATE_RAW") || !strings.Contains(string(captured), "opaque-replay") {
 				t.Fatal("private replay capture was filtered")
 			}
-			if result.Usage["completion_tokens_details"].(map[string]interface{})["reasoning_tokens"] != 15 {
+			if result.Usage["completion_tokens_details"].(map[string]any)["reasoning_tokens"] != 15 {
 				t.Fatalf("lost reasoning accounting: %+v", result.Usage)
 			}
 		})
@@ -87,7 +87,7 @@ func TestChatAndMessagesKeepReasoningSeparateFromAnswer(t *testing.T) {
 				t.Fatalf("lost internal reasoning evidence: %+v", result)
 			}
 			var answer, thinking strings.Builder
-			checkChat := func(message map[string]interface{}) {
+			checkChat := func(message map[string]any) {
 				answer.WriteString(responses.StreamString(message["content"]))
 				thinking.WriteString(responses.StreamString(message["reasoning_content"]))
 			}
@@ -97,13 +97,13 @@ func TestChatAndMessagesKeepReasoningSeparateFromAnswer(t *testing.T) {
 					if data == "[DONE]" {
 						return nil
 					}
-					var chunk map[string]interface{}
+					var chunk map[string]any
 					if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 						return err
 					}
 					for _, value := range responses.InterfaceSlice(chunk["choices"]) {
-						choice := value.(map[string]interface{})
-						checkChat(choice["delta"].(map[string]interface{}))
+						choice := value.(map[string]any)
+						checkChat(choice["delta"].(map[string]any))
 					}
 					return nil
 				}))
@@ -111,17 +111,17 @@ func TestChatAndMessagesKeepReasoningSeparateFromAnswer(t *testing.T) {
 				testutil.NoError(t, translateOpenAIChatStreamToAnthropicWithInput(&out, bytes.NewReader(w.Body.Bytes()), req.Model, 10))
 				blocks := map[int]string{}
 				testutil.NoError(t, responses.ReadSSE(bytes.NewReader(out.Bytes()), func(event, data string) error {
-					var frame map[string]interface{}
+					var frame map[string]any
 					if err := json.Unmarshal([]byte(data), &frame); err != nil {
 						return err
 					}
 					index := responses.InterfaceToInt(frame["index"])
 					if event == "content_block_start" {
-						block := frame["content_block"].(map[string]interface{})
+						block := frame["content_block"].(map[string]any)
 						blocks[index] = responses.StreamString(block["type"])
 					}
 					if event == "content_block_delta" {
-						delta := frame["delta"].(map[string]interface{})
+						delta := frame["delta"].(map[string]any)
 						switch delta["type"] {
 						case "text_delta":
 							testutil.Equal(t, blocks[index], "text")
@@ -134,12 +134,12 @@ func TestChatAndMessagesKeepReasoningSeparateFromAnswer(t *testing.T) {
 					return nil
 				}))
 			} else {
-				var chat map[string]interface{}
+				var chat map[string]any
 				testutil.NoError(t, json.Unmarshal(w.Body.Bytes(), &chat))
-				checkChat(responses.InterfaceSlice(chat["choices"])[0].(map[string]interface{})["message"].(map[string]interface{}))
+				checkChat(responses.InterfaceSlice(chat["choices"])[0].(map[string]any)["message"].(map[string]any))
 				message := anthropicResponseFromChat(req.Model, chat)
 				for _, value := range responses.InterfaceSlice(message["content"]) {
-					block := value.(map[string]interface{})
+					block := value.(map[string]any)
 					switch block["type"] {
 					case "text":
 						messageAnswer.WriteString(responses.StreamString(block["text"]))

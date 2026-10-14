@@ -62,25 +62,25 @@ func setupCompactionHandler(t *testing.T, upstream *httptest.Server) (*Handler, 
 	return h, s, func() { _ = s.Close() }
 }
 
-func compactionUpstream(t *testing.T, summary string, received *map[string]interface{}) *httptest.Server {
+func compactionUpstream(t *testing.T, summary string, received *map[string]any) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		testutil.NoError(t, err, "read upstream body: %v")
 		if received != nil {
-			var decoded map[string]interface{}
+			var decoded map[string]any
 			testutil.NoError(t, json.Unmarshal(body, &decoded), "decode upstream body: %v")
 			*received = decoded
 		}
-		completed := map[string]interface{}{
+		completed := map[string]any{
 			"id": "resp_upstream_1", "object": "response", "status": "completed", "model": "grok-4.5",
-			"output": []interface{}{map[string]interface{}{
+			"output": []any{map[string]any{
 				"id": "msg_1", "type": "message", "role": "assistant",
-				"content": []interface{}{map[string]interface{}{"type": "output_text", "text": summary}},
+				"content": []any{map[string]any{"type": "output_text", "text": summary}},
 			}},
-			"usage": map[string]interface{}{"input_tokens": float64(1200), "output_tokens": float64(300)},
+			"usage": map[string]any{"input_tokens": float64(1200), "output_tokens": float64(300)},
 		}
-		completedJSON, _ := json.Marshal(map[string]interface{}{"type": "response.completed", "response": completed})
+		completedJSON, _ := json.Marshal(map[string]any{"type": "response.completed", "response": completed})
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(w, "event: response.created\ndata: {\"type\":\"response.created\"}\n\n")
 		_, _ = io.WriteString(w, "event: response.completed\ndata: "+string(completedJSON)+"\n\n")
@@ -90,55 +90,55 @@ func compactionUpstream(t *testing.T, summary string, received *map[string]inter
 func TestClassifyResponsesCompactionPayload(t *testing.T) {
 	cases := []struct {
 		name    string
-		payload map[string]interface{}
+		payload map[string]any
 		want    responses.CompactionKind
 	}{
 		{
 			name:    "codex remote-v2 trigger",
-			payload: map[string]interface{}{"input": []interface{}{map[string]interface{}{"type": "compaction_trigger"}}},
+			payload: map[string]any{"input": []any{map[string]any{"type": "compaction_trigger"}}},
 			want:    responses.CompactionTrigger,
 		},
 		{
 			name: "trigger mixed with ordinary items",
-			payload: map[string]interface{}{"input": []interface{}{
-				map[string]interface{}{"type": "message", "role": "user", "content": "hello"},
-				map[string]interface{}{"type": "compaction_trigger"},
+			payload: map[string]any{"input": []any{
+				map[string]any{"type": "message", "role": "user", "content": "hello"},
+				map[string]any{"type": "compaction_trigger"},
 			}},
 			want: responses.CompactionTrigger,
 		},
 		{
 			name: "grok tui prompt as last user item",
-			payload: map[string]interface{}{"input": []interface{}{
-				map[string]interface{}{"type": "message", "role": "user", "content": "earlier turn"},
-				map[string]interface{}{"type": "message", "role": "user", "content": []interface{}{
-					map[string]interface{}{"type": "input_text", "text": "Please summarize. Note: " + responses.ClientCompactionPromptMarker},
+			payload: map[string]any{"input": []any{
+				map[string]any{"type": "message", "role": "user", "content": "earlier turn"},
+				map[string]any{"type": "message", "role": "user", "content": []any{
+					map[string]any{"type": "input_text", "text": "Please summarize. Note: " + responses.ClientCompactionPromptMarker},
 				}},
 			}},
 			want: responses.CompactionTUI,
 		},
 		{
 			name: "tui prompt recognised on the messages wire too",
-			payload: map[string]interface{}{"messages": []interface{}{
-				map[string]interface{}{"role": "user", "content": responses.ClientCompactionPromptMarker},
+			payload: map[string]any{"messages": []any{
+				map[string]any{"role": "user", "content": responses.ClientCompactionPromptMarker},
 			}},
 			want: responses.CompactionTUI,
 		},
 		{
 			name: "tui marker not last is an ordinary turn",
-			payload: map[string]interface{}{"input": []interface{}{
-				map[string]interface{}{"type": "message", "role": "user", "content": responses.ClientCompactionPromptMarker},
-				map[string]interface{}{"type": "message", "role": "assistant", "content": "ok"},
+			payload: map[string]any{"input": []any{
+				map[string]any{"type": "message", "role": "user", "content": responses.ClientCompactionPromptMarker},
+				map[string]any{"type": "message", "role": "assistant", "content": "ok"},
 			}},
 			want: responses.CompactionNone,
 		},
 		{
 			name:    "assistant cannot trigger it",
-			payload: map[string]interface{}{"input": []interface{}{map[string]interface{}{"type": "message", "role": "assistant", "content": responses.ClientCompactionPromptMarker}}},
+			payload: map[string]any{"input": []any{map[string]any{"type": "message", "role": "assistant", "content": responses.ClientCompactionPromptMarker}}},
 			want:    responses.CompactionNone,
 		},
 		{
 			name:    "ordinary conversation",
-			payload: map[string]interface{}{"input": []interface{}{map[string]interface{}{"type": "message", "role": "user", "content": "hello"}}},
+			payload: map[string]any{"input": []any{map[string]any{"type": "message", "role": "user", "content": "hello"}}},
 			want:    responses.CompactionNone,
 		},
 		{name: "empty payload", payload: nil, want: responses.CompactionNone},
@@ -151,9 +151,9 @@ func TestClassifyResponsesCompactionPayload(t *testing.T) {
 }
 
 func TestBuildGatewayCompactionResponseShape(t *testing.T) {
-	response := map[string]interface{}{
+	response := map[string]any{
 		"id": "resp_abc", "status": "completed", "output_text": "leak me not",
-		"usage": map[string]interface{}{"input_tokens": float64(10), "output_tokens": float64(5)},
+		"usage": map[string]any{"input_tokens": float64(10), "output_tokens": float64(5)},
 	}
 	result := responses.BuildCompactionResponse(response, "g2a_compact_v1.xyz", "grok-4.5")
 
@@ -163,15 +163,15 @@ func TestBuildGatewayCompactionResponseShape(t *testing.T) {
 	testutil.Equal(t, result["model"], "grok-4.5")
 	_, present := result["output_text"]
 	testutil.False(t, present, "output_text leaked into the compaction response")
-	output := result["output"].([]interface{})
-	item := output[0].(map[string]interface{})
+	output := result["output"].([]any)
+	item := output[0].(map[string]any)
 	testutil.Equal(t, item["type"], "compaction")
 	testutil.Equal(t, item["encrypted_content"], "g2a_compact_v1.xyz")
 	testutil.Equal(t, item["id"], "cmp_abc")
-	usage := result["usage"].(map[string]interface{})
+	usage := result["usage"].(map[string]any)
 	testutil.EqualAny(t, usage["total_tokens"], int64(15))
 	// A response without usage keeps it absent instead of inventing zeros.
-	noUsage := responses.BuildCompactionResponse(map[string]interface{}{"id": "resp_x"}, "blob", "grok-4.5")
+	noUsage := responses.BuildCompactionResponse(map[string]any{"id": "resp_x"}, "blob", "grok-4.5")
 	_, present = noUsage["usage"]
 	testutil.False(t, present, "usage was fabricated")
 
@@ -179,7 +179,7 @@ func TestBuildGatewayCompactionResponseShape(t *testing.T) {
 	var builder strings.Builder
 	testutil.NoError(t, responses.WriteCompactionStream(&builder, result), "write stream: %v")
 	names := make([]string, 0, 6)
-	var completedPayload map[string]interface{}
+	var completedPayload map[string]any
 	if err := responses.ConsumeSSE(strings.NewReader(builder.String()), func(event responses.SSEEvent) error {
 		names = append(names, event.Event)
 		if event.Event == "response.completed" {
@@ -193,13 +193,13 @@ func TestBuildGatewayCompactionResponseShape(t *testing.T) {
 	}
 	want := []string{"response.created", "response.in_progress", "response.output_item.added", "keepalive", "response.output_item.done", "response.completed"}
 	testutil.Equal(t, strings.Join(names, ","), strings.Join(want, ","))
-	completedResponse := completedPayload["response"].(map[string]interface{})
+	completedResponse := completedPayload["response"].(map[string]any)
 	testutil.Equal(t, completedResponse["status"], "completed")
 }
 
 // asError is a tiny local alias so the test does not have to import errors just
 // for one assertion.
-func asError(err error, target interface{}) bool {
+func asError(err error, target any) bool {
 	switch typed := target.(type) {
 	case **responses.CompactionBlobError:
 		blobErr, ok := err.(*responses.CompactionBlobError)
@@ -220,9 +220,9 @@ func TestHandleResponsesCompactionTriggerStreamsSyntheticEvents(t *testing.T) {
 	h, _, cleanup := setupCompactionHandler(t, upstream)
 	defer cleanup()
 
-	body, _ := json.Marshal(map[string]interface{}{
+	body, _ := json.Marshal(map[string]any{
 		"model": "grok-4.5", "stream": true,
-		"input": []interface{}{map[string]interface{}{"type": "compaction_trigger"}},
+		"input": []any{map[string]any{"type": "compaction_trigger"}},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(string(body)))
 	rec := httptest.NewRecorder()
@@ -236,12 +236,12 @@ func TestHandleResponsesCompactionTriggerStreamsSyntheticEvents(t *testing.T) {
 	if err := responses.ConsumeSSE(strings.NewReader(rec.Body.String()), func(event responses.SSEEvent) error {
 		events = append(events, event.Event)
 		if event.Event == "response.completed" {
-			var payload map[string]interface{}
+			var payload map[string]any
 			if err := json.Unmarshal(event.Data(), &payload); err != nil {
 				return err
 			}
-			response := payload["response"].(map[string]interface{})
-			item := response["output"].([]interface{})[0].(map[string]interface{})
+			response := payload["response"].(map[string]any)
+			item := response["output"].([]any)[0].(map[string]any)
 			blob, _ = item["encrypted_content"].(string)
 		}
 		return nil

@@ -20,8 +20,8 @@ const auditScanCap = 2000
 // writeAccountCheckBusy tells the caller that a refresh of this account is already
 // running, so the click was merged instead of racing a second refresh.
 func writeAccountCheckBusy(w http.ResponseWriter) {
-	util.WriteJSONStatus(w, http.StatusConflict, map[string]interface{}{
-		"error": map[string]interface{}{
+	util.WriteJSONStatus(w, http.StatusConflict, map[string]any{
+		"error": map[string]any{
 			"type":    "check_in_progress",
 			"message": "this account is already being refreshed; the request was merged",
 		},
@@ -263,8 +263,8 @@ func (f auditQueryFilter) matches(event audit.Event) bool {
 	return !(f.accountID != 0 && event.AccountID != f.accountID || f.apiKeyID != 0 && event.APIKeyID != f.apiKeyID)
 }
 
-func (f auditQueryFilter) describe() map[string]interface{} {
-	described := map[string]interface{}{}
+func (f auditQueryFilter) describe() map[string]any {
+	described := map[string]any{}
 	if f.kind != "" {
 		described["kind"] = f.kind
 	}
@@ -305,8 +305,8 @@ func (f auditQueryFilter) describe() map[string]interface{} {
 // auditCoverage reports the retained window and the per-journal counts, so the
 // UI can state what the numbers actually cover instead of promising a fixed
 // retention period.
-func (a *API) auditCoverage(ctx context.Context) map[string]interface{} {
-	coverage := map[string]interface{}{"available": false, "entries": 0, "oldest": nil, "newest": nil, "counts": map[string]int{}}
+func (a *API) auditCoverage(ctx context.Context) map[string]any {
+	coverage := map[string]any{"available": false, "entries": 0, "oldest": nil, "newest": nil, "counts": map[string]int{}}
 	if a == nil || a.store == nil || a.store.RedisClient() == nil {
 		return coverage
 	}
@@ -352,7 +352,7 @@ func (a *API) auditCoverage(ctx context.Context) map[string]interface{} {
 }
 
 // streamIDTime converts a Redis Stream ID ("ms-seq") into RFC3339, or null.
-func streamIDTime(id string) interface{} {
+func streamIDTime(id string) any {
 	millis, _, _ := strings.Cut(strings.TrimSpace(id), "-")
 	if millis == "" {
 		return nil

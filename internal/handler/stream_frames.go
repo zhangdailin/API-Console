@@ -33,7 +33,7 @@ func sseFramePrefix(event string) []byte {
 	return nil
 }
 
-func mapKeys(m map[string]interface{}) []string {
+func mapKeys(m map[string]any) []string {
 	if m == nil {
 		return nil
 	}

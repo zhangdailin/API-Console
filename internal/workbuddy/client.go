@@ -219,7 +219,7 @@ func (c *Client) runChat(ctx context.Context, req upstream.UpstreamRequest, time
 	// HTTP/1 connection before advertising completion to that caller.
 	httpclient.DrainTerminalResponse(reqCtx, resp)
 	if onMessage != nil {
-		event := map[string]interface{}{"finishReason": result.FinishReason()}
+		event := map[string]any{"finishReason": result.FinishReason()}
 		if len(result.Usage) > 0 {
 			event["usage"] = result.Usage
 		}
@@ -256,10 +256,10 @@ func (c *Client) buildBody(req upstream.UpstreamRequest) ([]byte, error) {
 	if model == "" {
 		model = defaultModel
 	}
-	body := map[string]interface{}{
+	body := map[string]any{
 		"model":          model,
 		"stream":         true,
-		"stream_options": map[string]interface{}{"include_usage": true},
+		"stream_options": map[string]any{"include_usage": true},
 		"messages":       buildMessages(req),
 	}
 	if format := req.ChatResponseFormat(); len(format) > 0 {

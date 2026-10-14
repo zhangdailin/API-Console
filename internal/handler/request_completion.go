@@ -41,20 +41,20 @@ func (h *Handler) finishMessages(w http.ResponseWriter, r *http.Request, sh *str
 		}
 
 		if len(sh.contentBlocks) == 0 && sh.responseText.Len() > 0 {
-			sh.contentBlocks = append(sh.contentBlocks, map[string]interface{}{
+			sh.contentBlocks = append(sh.contentBlocks, map[string]any{
 				"type": "text",
 				"text": sh.responseText.String(),
 			})
 		}
 		if sh.contentBlocks == nil {
-			sh.contentBlocks = make([]map[string]interface{}, 0)
+			sh.contentBlocks = make([]map[string]any, 0)
 		}
 
-		var response interface{}
+		var response any
 		if responseFormat == adapter.FormatOpenAI {
 			response = buildOpenAINonStreamResponse(sh, req.Model, stopReason)
 		} else {
-			anthropicResponse := map[string]interface{}{
+			anthropicResponse := map[string]any{
 				"id":            sh.msgID,
 				"type":          "message",
 				"role":          "assistant",
@@ -101,7 +101,7 @@ func (h *Handler) finishMessages(w http.ResponseWriter, r *http.Request, sh *str
 		if sh.useUpstreamUsage {
 			usageSource = audit.UsageSourceUpstream
 		}
-		metadata := map[string]interface{}{
+		metadata := map[string]any{
 			"stream":               isStream,
 			"finish_reason":        sh.finalStopReason,
 			"requested_max_tokens": req.outputTokenLimit(),
@@ -159,11 +159,11 @@ func (h *Handler) finishMessages(w http.ResponseWriter, r *http.Request, sh *str
 	}
 }
 
-func toolChoiceDisablesTools(choice interface{}) bool {
+func toolChoiceDisablesTools(choice any) bool {
 	switch typed := choice.(type) {
 	case string:
 		return strings.EqualFold(strings.TrimSpace(typed), "none")
-	case map[string]interface{}:
+	case map[string]any:
 		return strings.EqualFold(strings.TrimSpace(fmt.Sprint(typed["type"])), "none")
 	default:
 		return false

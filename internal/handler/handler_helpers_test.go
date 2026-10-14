@@ -261,13 +261,13 @@ func TestRequestReasoningEffort(t *testing.T) {
 		want string
 	}{
 		{"openai field", ClaudeRequest{ReasoningEffort: "LOW"}, "low"},
-		{"output_config effort", ClaudeRequest{OutputConfig: map[string]interface{}{"effort": "High"}}, "high"},
-		{"thinking effort", ClaudeRequest{Thinking: map[string]interface{}{"effort": "medium"}}, "medium"},
-		{"openai field wins", ClaudeRequest{ReasoningEffort: "xhigh", OutputConfig: map[string]interface{}{"effort": "low"}}, "xhigh"},
-		{"small thinking budget", ClaudeRequest{Thinking: map[string]interface{}{"budget_tokens": float64(2048)}}, "low"},
-		{"mid thinking budget", ClaudeRequest{Thinking: map[string]interface{}{"budget_tokens": float64(8192)}}, "medium"},
-		{"large thinking budget", ClaudeRequest{Thinking: map[string]interface{}{"budget_tokens": float64(32000)}}, "high"},
-		{"thinking disabled", ClaudeRequest{Thinking: map[string]interface{}{"type": "disabled"}}, ""},
+		{"output_config effort", ClaudeRequest{OutputConfig: map[string]any{"effort": "High"}}, "high"},
+		{"thinking effort", ClaudeRequest{Thinking: map[string]any{"effort": "medium"}}, "medium"},
+		{"openai field wins", ClaudeRequest{ReasoningEffort: "xhigh", OutputConfig: map[string]any{"effort": "low"}}, "xhigh"},
+		{"small thinking budget", ClaudeRequest{Thinking: map[string]any{"budget_tokens": float64(2048)}}, "low"},
+		{"mid thinking budget", ClaudeRequest{Thinking: map[string]any{"budget_tokens": float64(8192)}}, "medium"},
+		{"large thinking budget", ClaudeRequest{Thinking: map[string]any{"budget_tokens": float64(32000)}}, "high"},
+		{"thinking disabled", ClaudeRequest{Thinking: map[string]any{"type": "disabled"}}, ""},
 		{"no hint", ClaudeRequest{}, ""},
 	}
 	for _, tc := range cases {

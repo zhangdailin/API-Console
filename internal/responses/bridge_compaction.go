@@ -48,13 +48,13 @@ func bridgeCompactionChannel(path string) string {
 }
 
 func expandBridgedCompaction(r *http.Request, req *CreateRequest, opts BridgeOptions) error {
-	items, ok := req.Input.([]interface{})
+	items, ok := req.Input.([]any)
 	if !ok {
 		return nil
 	}
-	out := make([]interface{}, 0, len(items))
+	out := make([]any, 0, len(items))
 	for index, raw := range items {
-		item, _ := raw.(map[string]interface{})
+		item, _ := raw.(map[string]any)
 		if item["type"] != "compaction" {
 			out = append(out, raw)
 			continue
@@ -77,7 +77,7 @@ func expandBridgedCompaction(r *http.Request, req *CreateRequest, opts BridgeOpt
 		if state.Model != req.Model || state.Channel != bridgeCompactionChannel(r.URL.Path) {
 			return fmt.Errorf("input[%d]: compaction belongs to another model or channel", index)
 		}
-		out = append(out, map[string]interface{}{"type": "message", "role": "developer", "content": "Conversation summary:\n" + state.Summary})
+		out = append(out, map[string]any{"type": "message", "role": "developer", "content": "Conversation summary:\n" + state.Summary})
 	}
 	req.Input = out
 	return nil
@@ -146,7 +146,7 @@ func ResponsesBridgeCompactHandler(chat http.HandlerFunc, opts BridgeOptions) ht
 			copyCapturedResponse(w, rec)
 			return
 		}
-		var completion map[string]interface{}
+		var completion map[string]any
 		if json.Unmarshal(rec.Body.Bytes(), &completion) != nil {
 			WriteAPIError(w, http.StatusBadGateway, "invalid_upstream_response", "invalid summary response")
 			return

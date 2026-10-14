@@ -45,7 +45,7 @@ func requestReasoningEffort(req ClaudeRequest) string {
 	if effort := strings.ToLower(strings.TrimSpace(req.ReasoningEffort)); effort != "" {
 		return effort
 	}
-	for _, config := range []map[string]interface{}{req.OutputConfig, req.Thinking} {
+	for _, config := range []map[string]any{req.OutputConfig, req.Thinking} {
 		value, ok := config["effort"].(string)
 		if !ok {
 			continue
@@ -72,7 +72,7 @@ func requestReasoningEffort(req ClaudeRequest) string {
 }
 
 // looseNumber accepts the numeric shapes JSON decoding produces.
-func looseNumber(value interface{}) (float64, bool) {
+func looseNumber(value any) (float64, bool) {
 	switch typed := value.(type) {
 	case float64:
 		return typed, true

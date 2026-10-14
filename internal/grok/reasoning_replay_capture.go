@@ -25,7 +25,7 @@ func (h *Handler) captureReasoningReplay(ctx context.Context, model, key string,
 	h.captureReasoningReplayItems(ctx, model, key, items)
 }
 
-func (h *Handler) captureReasoningReplayFromMap(ctx context.Context, model, key string, raw map[string]interface{}) {
+func (h *Handler) captureReasoningReplayFromMap(ctx context.Context, model, key string, raw map[string]any) {
 	if h == nil || strings.TrimSpace(key) == "" || raw == nil {
 		return
 	}
@@ -36,7 +36,7 @@ func (h *Handler) captureReasoningReplayFromMap(ctx context.Context, model, key 
 	h.captureReasoningReplayItems(ctx, model, key, items)
 }
 
-func (h *Handler) captureReasoningReplayItems(ctx context.Context, model, key string, items []interface{}) {
+func (h *Handler) captureReasoningReplayItems(ctx context.Context, model, key string, items []any) {
 	normalized, ok := normalizeReplayItems(items)
 	if !ok {
 		h.clearReasoningReplay(ctx, model, key)
@@ -47,13 +47,13 @@ func (h *Handler) captureReasoningReplayItems(ctx context.Context, model, key st
 
 // replayItemsFromPayload accepts either a buffered JSON response or an SSE
 // stream, and returns the portable output items of the completed response.
-func replayItemsFromPayload(raw []byte) ([]interface{}, bool) {
+func replayItemsFromPayload(raw []byte) ([]any, bool) {
 	if items, ok := extractReplayItemsFromJSON(raw); ok {
 		return items, true
 	}
-	var completed map[string]interface{}
+	var completed map[string]any
 	_ = responses.ReadSSE(bytes.NewReader(raw), func(_ string, data string) error {
-		var event map[string]interface{}
+		var event map[string]any
 		if json.Unmarshal([]byte(data), &event) != nil {
 			return nil
 		}
@@ -69,8 +69,8 @@ func replayItemsFromPayload(raw []byte) ([]interface{}, bool) {
 	return extractReplayItems(completed)
 }
 
-func extractReplayItemsFromJSON(raw []byte) ([]interface{}, bool) {
-	var root map[string]interface{}
+func extractReplayItemsFromJSON(raw []byte) ([]any, bool) {
+	var root map[string]any
 	if json.Unmarshal(raw, &root) != nil || root == nil {
 		return nil, false
 	}

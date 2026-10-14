@@ -25,7 +25,7 @@ func TestToolHistoryRetainsIndexAndReasoningWhitespace(t *testing.T) {
 	testutil.Falsef(t, call.Index == nil || *call.Index != 0 || call.Function.Arguments != `{"command":"dir"}` || got[1].ToolCallID != call.ID || got[1].Content != "file.txt", "tool pairing changed: %+v", got)
 	wire, err := json.Marshal(call)
 	testutil.NoError(t, err)
-	var fields map[string]interface{}
+	var fields map[string]any
 	err = json.Unmarshal(wire, &fields)
 	testutil.NoError(t, err)
 	_, ok := fields["index"]

@@ -28,15 +28,15 @@ func (e *buildReasoningProfileError) Error() string {
 
 // cloneBuildPayload makes an attempt-local payload. Retry normalization may
 // edit nested reasoning state, so a shallow map copy is not sufficient.
-func cloneBuildPayload(payload map[string]interface{}) (map[string]interface{}, error) {
+func cloneBuildPayload(payload map[string]any) (map[string]any, error) {
 	if payload == nil {
-		return map[string]interface{}{}, nil
+		return map[string]any{}, nil
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
-	var cloned map[string]interface{}
+	var cloned map[string]any
 	if err := json.Unmarshal(raw, &cloned); err != nil {
 		return nil, err
 	}
@@ -57,7 +57,7 @@ func buildCatalogProfile(acc *store.Account, upstreamModel string) (modelcatalog
 
 // buildPayloadForAccount derives an attempt payload from immutable request
 // input, then applies only the selected account's observed catalog profile.
-func buildPayloadForAccount(immutable map[string]interface{}, acc *store.Account, upstreamModel string) (map[string]interface{}, error) {
+func buildPayloadForAccount(immutable map[string]any, acc *store.Account, upstreamModel string) (map[string]any, error) {
 	payload, err := cloneBuildPayload(immutable)
 	if err != nil {
 		return nil, err
@@ -67,12 +67,12 @@ func buildPayloadForAccount(immutable map[string]interface{}, acc *store.Account
 		return payload, nil
 	}
 
-	reasoning, _ := payload["reasoning"].(map[string]interface{})
+	reasoning, _ := payload["reasoning"].(map[string]any)
 	explicit := reasoning != nil && strings.TrimSpace(chatwire.ParseLooseStringAny(reasoning["effort"])) != ""
 	if !explicit {
 		if profile.SupportsReasoningEffort {
 			if reasoning == nil {
-				reasoning = map[string]interface{}{}
+				reasoning = map[string]any{}
 			}
 			if profile.DefaultReasoningEffort != "" {
 				reasoning["effort"] = profile.DefaultReasoningEffort
@@ -123,14 +123,14 @@ func buildPayloadForAccount(immutable map[string]interface{}, acc *store.Account
 	return payload, nil
 }
 
-func replacePayload(dst map[string]interface{}, src map[string]interface{}) {
+func replacePayload(dst map[string]any, src map[string]any) {
 	clear(dst)
 	maps.Copy(dst, src)
 }
 
 // prepareBuildPayload applies account capabilities without changing the source
 // shared by retries and returns the payload used by both Chat and Responses.
-func prepareBuildPayload(source, payload map[string]interface{}, acc *store.Account, model string) error {
+func prepareBuildPayload(source, payload map[string]any, acc *store.Account, model string) error {
 	attempt, err := buildPayloadForAccount(source, acc, model)
 	if err != nil {
 		return err

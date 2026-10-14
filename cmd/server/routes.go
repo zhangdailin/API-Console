@@ -236,7 +236,7 @@ func registerRoutes(
 		for _, definition := range channel.All() {
 			providers[string(definition.ID)] = "ready"
 		}
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status":    "ok",
 			"providers": providers,
 			"build":     buildinfo.Current(),

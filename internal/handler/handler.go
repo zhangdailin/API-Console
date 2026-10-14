@@ -82,22 +82,22 @@ type Handler struct {
 type UpstreamClient = provider.Client
 
 type ClaudeRequest struct {
-	MaxTokens           *int                   `json:"max_tokens,omitempty"`
-	MaxCompletionTokens *int                   `json:"max_completion_tokens,omitempty"`
-	Temperature         *float64               `json:"temperature,omitempty"`
-	TopP                *float64               `json:"top_p,omitempty"`
-	Stop                StopSequences          `json:"stop,omitempty"`
-	StopSequences       []string               `json:"stop_sequences,omitempty"`
-	Model               string                 `json:"model"`
-	Messages            []prompt.Message       `json:"messages"`
-	System              SystemItems            `json:"system"`
-	Tools               []interface{}          `json:"tools"`
-	ToolChoice          interface{}            `json:"tool_choice,omitempty"`
-	ParallelToolCalls   *bool                  `json:"parallel_tool_calls,omitempty"`
-	Stream              bool                   `json:"stream"`
-	ConversationID      string                 `json:"conversation_id"`
-	ConversationIDAlt   string                 `json:"conversationId"`
-	Metadata            map[string]interface{} `json:"metadata"`
+	MaxTokens           *int             `json:"max_tokens,omitempty"`
+	MaxCompletionTokens *int             `json:"max_completion_tokens,omitempty"`
+	Temperature         *float64         `json:"temperature,omitempty"`
+	TopP                *float64         `json:"top_p,omitempty"`
+	Stop                StopSequences    `json:"stop,omitempty"`
+	StopSequences       []string         `json:"stop_sequences,omitempty"`
+	Model               string           `json:"model"`
+	Messages            []prompt.Message `json:"messages"`
+	System              SystemItems      `json:"system"`
+	Tools               []any            `json:"tools"`
+	ToolChoice          any              `json:"tool_choice,omitempty"`
+	ParallelToolCalls   *bool            `json:"parallel_tool_calls,omitempty"`
+	Stream              bool             `json:"stream"`
+	ConversationID      string           `json:"conversation_id"`
+	ConversationIDAlt   string           `json:"conversationId"`
+	Metadata            map[string]any   `json:"metadata"`
 	// ReasoningEffort is the OpenAI-style effort hint. A catalog publishes models
 	// as "<family>-<effort>", so a client that asks for the family name plus an
 	// effort must have it resolved onto the catalog entry.
@@ -105,14 +105,14 @@ type ClaudeRequest struct {
 	// OutputConfig and Thinking carry the Anthropic-side effort hints Claude
 	// Code sends (output_config.effort, thinking.effort/budget_tokens). They
 	// feed the same effort resolution as reasoning_effort.
-	OutputConfig   map[string]interface{}   `json:"output_config,omitempty"`
-	Thinking       map[string]interface{}   `json:"thinking,omitempty"`
-	ResponseFormat map[string]interface{}   `json:"response_format,omitempty"`
-	ResponseText   map[string]interface{}   `json:"text,omitempty"`
-	Include        []string                 `json:"include,omitempty"`
-	PromptCacheKey string                   `json:"prompt_cache_key,omitempty"`
-	ResponsesTools []map[string]interface{} `json:"x_responses_tools,omitempty"`
-	MCPServers     []map[string]interface{} `json:"mcp_servers,omitempty"`
+	OutputConfig   map[string]any   `json:"output_config,omitempty"`
+	Thinking       map[string]any   `json:"thinking,omitempty"`
+	ResponseFormat map[string]any   `json:"response_format,omitempty"`
+	ResponseText   map[string]any   `json:"text,omitempty"`
+	Include        []string         `json:"include,omitempty"`
+	PromptCacheKey string           `json:"prompt_cache_key,omitempty"`
+	ResponsesTools []map[string]any `json:"x_responses_tools,omitempty"`
+	MCPServers     []map[string]any `json:"mcp_servers,omitempty"`
 }
 
 type toolCall struct {
@@ -132,7 +132,7 @@ type openAINonStreamToolCall struct {
 
 type openAINonStreamMessage struct {
 	Role             string                    `json:"role"`
-	Content          interface{}               `json:"content"`
+	Content          any                       `json:"content"`
 	ReasoningContent string                    `json:"reasoning_content,omitempty"`
 	ToolCalls        []openAINonStreamToolCall `json:"tool_calls,omitempty"`
 }
@@ -318,7 +318,7 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	if ok, command := isCommandPrefixRequest(req); ok {
 		logutil.DebugIf(verboseDiagnostics, "Handling command prefix request", "command", command)
 		prefix := detectCommandPrefix(command)
-		logger.LogEarlyExit("command_prefix", map[string]interface{}{
+		logger.LogEarlyExit("command_prefix", map[string]any{
 			"command": command,
 			"prefix":  prefix,
 		})
@@ -328,7 +328,7 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 
 	if isTopicClassifierRequest(req) {
 		logutil.DebugIf(verboseDiagnostics, "Handling topic classifier request locally")
-		logger.LogEarlyExit("topic_classifier", map[string]interface{}{"mode": "local"})
+		logger.LogEarlyExit("topic_classifier", map[string]any{"mode": "local"})
 		writeTopicClassifierResponse(w, req, responseFormat, startTime, logger)
 		return
 	}
@@ -336,7 +336,7 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	if isTitleGenerationRequest(req) {
 		title := generateTopicTitle(extractUserText(req.Messages))
 		logutil.DebugIf(verboseDiagnostics, "Handling title generation request locally", "title", title)
-		logger.LogEarlyExit("title_generation", map[string]interface{}{
+		logger.LogEarlyExit("title_generation", map[string]any{
 			"mode":  "local",
 			"title": title,
 		})
@@ -371,7 +371,7 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	if isSuggestionMode(req.Messages) {
 		suggestion := buildLocalSuggestion(req.Messages)
 		logutil.DebugIf(verboseDiagnostics, "Handling suggestion mode request locally", "suggestion", suggestion)
-		logger.LogEarlyExit("suggestion_mode", map[string]interface{}{
+		logger.LogEarlyExit("suggestion_mode", map[string]any{
 			"mode":       "local",
 			"suggestion": suggestion,
 		})
@@ -387,8 +387,8 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		ResponseFormat: req.ResponseFormat, ResponseText: req.ResponseText,
 		Include: req.Include, PromptCacheKey: req.PromptCacheKey, ResponsesTools: req.ResponsesTools,
 	}
-	if format, ok := req.OutputConfig["format"].(map[string]interface{}); ok && len(protocolControls.ResponseFormat) == 0 && len(protocolControls.ResponseText) == 0 {
-		protocolControls.ResponseText = map[string]interface{}{"format": format}
+	if format, ok := req.OutputConfig["format"].(map[string]any); ok && len(protocolControls.ResponseFormat) == 0 && len(protocolControls.ResponseText) == 0 {
+		protocolControls.ResponseText = map[string]any{"format": format}
 		req.ResponseText = protocolControls.ResponseText
 	}
 	if len(req.MCPServers) > 0 {
@@ -458,7 +458,7 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	}()
 	if err != nil {
 		slog.Error("selectAccount failed", "error", err, "channel", targetChannel)
-		logger.LogEarlyExit("select_account_failed", map[string]interface{}{
+		logger.LogEarlyExit("select_account_failed", map[string]any{
 			"error":   err.Error(),
 			"model":   req.Model,
 			"channel": targetChannel,

@@ -307,7 +307,7 @@ func VerifyAccount(ctx context.Context, acc *store.Account, cfg *config.Config, 
 // and the verdict decides whether the account can spend at all — so the
 // console can say "Free, 0 credits left, upgrade here" instead of showing
 // a broken account.
-func projectQuota(fields map[string]interface{}, acc *store.Account, limit, current float64, observedTokens int64, usageObserved bool) {
+func projectQuota(fields map[string]any, acc *store.Account, limit, current float64, observedTokens int64, usageObserved bool) {
 	snapshot := acc.QoderQuota
 	windowLimit := snapshot.Limit
 	if windowLimit <= 0 {

@@ -117,9 +117,9 @@ func (c *Client) attemptChat(ctx context.Context, url string, body []byte, model
 		return streamResult{}, &attemptStreamError{err: err}
 	}
 	attempt := debug.BeginUpstream(ctx, req.Method, req.URL.String(), req.Header, body)
-	var traceMetadata map[string]interface{}
+	var traceMetadata map[string]any
 	if debug.FromContext(ctx) != nil {
-		traceMetadata = map[string]interface{}{"provider": "qoder", "model_key": model.Key, "model_source": model.Source, "host": req.URL.Host, "httpdns_ip": req.Header.Get("X-Qoder-Httpdns-Ip"), "body_bytes": len(body)}
+		traceMetadata = map[string]any{"provider": "qoder", "model_key": model.Key, "model_source": model.Source, "host": req.URL.Host, "httpdns_ip": req.Header.Get("X-Qoder-Httpdns-Ip"), "body_bytes": len(body)}
 	}
 	traceCtx, latency := attempt.Trace(req.Context(), traceMetadata)
 	if latency != nil {
@@ -301,17 +301,17 @@ func nestedInt64(raw []byte, key string, depth int) int64 {
 	if depth > 5 || len(bytes.TrimSpace(raw)) == 0 {
 		return 0
 	}
-	var value interface{}
+	var value any
 	if json.Unmarshal(bytes.TrimSpace(raw), &value) != nil {
 		return 0
 	}
-	var walk func(interface{}, int) int64
-	walk = func(node interface{}, level int) int64 {
+	var walk func(any, int) int64
+	walk = func(node any, level int) int64 {
 		if level > 5 {
 			return 0
 		}
 		switch typed := node.(type) {
-		case map[string]interface{}:
+		case map[string]any:
 			if rawValue, ok := typed[key]; ok {
 				switch number := rawValue.(type) {
 				case float64:
@@ -326,14 +326,14 @@ func nestedInt64(raw []byte, key string, depth int) int64 {
 					return found
 				}
 			}
-		case []interface{}:
+		case []any:
 			for _, child := range typed {
 				if found := walk(child, level+1); found > 0 {
 					return found
 				}
 			}
 		case string:
-			var nested interface{}
+			var nested any
 			if json.Unmarshal([]byte(strings.TrimSpace(typed)), &nested) == nil {
 				return walk(nested, level+1)
 			}

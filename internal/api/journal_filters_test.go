@@ -28,7 +28,7 @@ func requestEvent(id string, status string, httpStatus int) audit.Event {
 		Timestamp: time.Now(),
 	}
 	if httpStatus != 0 {
-		event.Metadata = map[string]interface{}{"http_status": float64(httpStatus)}
+		event.Metadata = map[string]any{"http_status": float64(httpStatus)}
 	}
 	return event
 }
@@ -52,7 +52,7 @@ func seedJournalAt(t *testing.T, a *API, events []audit.Event) {
 		if _, err := client.XAdd(context.Background(), &redis.XAddArgs{
 			Stream: key,
 			ID:     id,
-			Values: map[string]interface{}{"data": string(raw), "action": event.Action, "status": event.Status, "kind": string(event.Kind)},
+			Values: map[string]any{"data": string(raw), "action": event.Action, "status": event.Status, "kind": string(event.Kind)},
 		}).Result(); err != nil {
 			t.Fatalf("XAdd: %v", err)
 		}
@@ -83,10 +83,10 @@ func TestJournalRecordsPagingReturnsEveryRecord(t *testing.T) {
 			query += "&before=" + cursor
 		}
 		payload := journalRequest(t, a, query)
-		rows, _ := payload["data"].([]interface{})
+		rows, _ := payload["data"].([]any)
 		for _, raw := range rows {
-			row, _ := raw.(map[string]interface{})
-			event, _ := row["event"].(map[string]interface{})
+			row, _ := raw.(map[string]any)
+			event, _ := row["event"].(map[string]any)
 			seen[fmt.Sprint(event["request_id"])]++
 		}
 		cursor, _ = payload["next_cursor"].(string)
@@ -124,11 +124,11 @@ func TestJournalRecordsAppliesTimeAndOutcomeFilters(t *testing.T) {
 	ids := func(query string) []string {
 		t.Helper()
 		payload := journalRequest(t, a, query)
-		rows, _ := payload["data"].([]interface{})
+		rows, _ := payload["data"].([]any)
 		found := make([]string, 0, len(rows))
 		for _, raw := range rows {
-			row, _ := raw.(map[string]interface{})
-			event, _ := row["event"].(map[string]interface{})
+			row, _ := raw.(map[string]any)
+			event, _ := row["event"].(map[string]any)
 			found = append(found, fmt.Sprint(event["request_id"]))
 		}
 		return found
@@ -154,7 +154,7 @@ func TestJournalRecordsAppliesTimeAndOutcomeFilters(t *testing.T) {
 	// The page must state which result class it was narrowed to, or the reader
 	// cannot tell a filtered list from an empty one.
 	payload := journalRequest(t, a, "?kind=request&outcome=failed&since="+boundary)
-	used, _ := payload["filter_used"].(map[string]interface{})
+	used, _ := payload["filter_used"].(map[string]any)
 	testutil.Equal(t, used["outcome_label"], "失败（全部失败类型）")
 	testutil.False(t, used["since"] == nil, "filter_used.since is missing: the coverage note cannot warn about the retention edge")
 }
@@ -182,11 +182,11 @@ func TestJournalRecordsOutcomeClassMatchesOverview(t *testing.T) {
 	})
 
 	payload := journalRequest(t, a, "?kind=request&limit=50")
-	rows, _ := payload["data"].([]interface{})
+	rows, _ := payload["data"].([]any)
 	classes := map[string]string{}
 	for _, raw := range rows {
-		row, _ := raw.(map[string]interface{})
-		event, _ := row["event"].(map[string]interface{})
+		row, _ := raw.(map[string]any)
+		event, _ := row["event"].(map[string]any)
 		classes[fmt.Sprint(event["request_id"])] = fmt.Sprint(row["outcome_class"])
 	}
 	want := map[string]string{
@@ -231,7 +231,7 @@ func TestJournalRecordsRecoversAttemptsBehindThePageWindow(t *testing.T) {
 	a := &API{store: s}
 
 	events := []audit.Event{
-		{Kind: audit.KindRequest, Action: "grok_upstream_attempt", RequestID: "req-old", Status: "error", Channel: "grok", Attempt: 1, Metadata: map[string]interface{}{"http_status": float64(429)}},
+		{Kind: audit.KindRequest, Action: "grok_upstream_attempt", RequestID: "req-old", Status: "error", Channel: "grok", Attempt: 1, Metadata: map[string]any{"http_status": float64(429)}},
 	}
 	// Traffic that finished while the request above was still running.
 	for range 40 {
@@ -242,12 +242,12 @@ func TestJournalRecordsRecoversAttemptsBehindThePageWindow(t *testing.T) {
 
 	// limit=1 makes the scan window six entries: the attempt stays far outside it.
 	payload := journalRequest(t, a, "?kind=request&limit=1")
-	rows, _ := payload["data"].([]interface{})
+	rows, _ := payload["data"].([]any)
 	testutil.Equal(t, len(rows), 1)
-	row, _ := rows[0].(map[string]interface{})
-	attempts, _ := row["attempts"].([]interface{})
+	row, _ := rows[0].(map[string]any)
+	attempts, _ := row["attempts"].([]any)
 	testutil.Equal(t, len(attempts), 1)
-	attempt, _ := attempts[0].(map[string]interface{})
+	attempt, _ := attempts[0].(map[string]any)
 	testutil.Equal(t, attempt["request_id"], "req-old")
 
 	// The lookback must not move the cursor: the next page still starts before the

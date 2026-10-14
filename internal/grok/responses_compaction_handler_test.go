@@ -18,7 +18,7 @@ import (
 // gateway runs the summary turn itself, seals it, and returns a portable
 // compaction item instead of an upstream blob only one account can read.
 func TestHandleResponsesCompactSealsGatewaySummary(t *testing.T) {
-	var received map[string]interface{}
+	var received map[string]any
 	upstream := compactionUpstream(t, compactionTestSummary, &received)
 	defer upstream.Close()
 	codecCipher := testCompactionCipher(t)
@@ -42,14 +42,14 @@ func TestHandleResponsesCompactSealsGatewaySummary(t *testing.T) {
 	if received["instructions"] != nil {
 		t.Fatalf("sample instructions=%v", received["instructions"])
 	}
-	items := received["input"].([]interface{})
-	last := items[len(items)-1].(map[string]interface{})
+	items := received["input"].([]any)
+	last := items[len(items)-1].(map[string]any)
 	testutil.EqualAny(t, last["content"], responses.CompactionPrompt)
 
-	var payload map[string]interface{}
+	var payload map[string]any
 	testutil.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload), "decode response: %v")
-	output := payload["output"].([]interface{})
-	item := output[0].(map[string]interface{})
+	output := payload["output"].([]any)
+	item := output[0].(map[string]any)
 	testutil.Equal(t, item["type"], "compaction")
 	blob := item["encrypted_content"].(string)
 	testutil.Falsef(t, !strings.HasPrefix(blob, responses.CompactionPrefix), "blob=%q is not gateway-owned", blob)
@@ -64,10 +64,10 @@ func TestHandleResponsesCompactSealsGatewaySummary(t *testing.T) {
 // sealed summary comes back as an ordinary user message, so any account can
 // serve the continuation.
 func TestHandleResponsesExpandsGatewayCompactionHistory(t *testing.T) {
-	var received map[string]interface{}
+	var received map[string]any
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		var decoded map[string]interface{}
+		var decoded map[string]any
 		testutil.NoError(t, json.Unmarshal(body, &decoded), "decode upstream body: %v")
 		received = decoded
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -82,11 +82,11 @@ func TestHandleResponsesExpandsGatewayCompactionHistory(t *testing.T) {
 	codec := responses.NewCompactionCodec(testCompactionCipher(t))
 	blob, err := codec.Encode("session-a", "Summary:\ncarried forward")
 	testutil.NoError(t, err, "encode: %v")
-	body, _ := json.Marshal(map[string]interface{}{
+	body, _ := json.Marshal(map[string]any{
 		"model": "grok-4.5", "stream": true,
-		"input": []interface{}{
-			map[string]interface{}{"type": "compaction", "encrypted_content": blob},
-			map[string]interface{}{"type": "message", "role": "user", "content": "next question"},
+		"input": []any{
+			map[string]any{"type": "compaction", "encrypted_content": blob},
+			map[string]any{"type": "message", "role": "user", "content": "next question"},
 		},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(string(body)))
@@ -95,16 +95,16 @@ func TestHandleResponsesExpandsGatewayCompactionHistory(t *testing.T) {
 
 	testutil.Equal(t, rec.Code, http.StatusOK)
 	testutil.False(t, received == nil, "upstream saw no request")
-	items := received["input"].([]interface{})
+	items := received["input"].([]any)
 	for index, raw := range items {
-		item, ok := raw.(map[string]interface{})
+		item, ok := raw.(map[string]any)
 		testutil.Falsef(t, ok && item["type"] == "compaction", "input[%d] still carries a compaction item: %#v", index, item)
 	}
-	first := items[0].(map[string]interface{})
+	first := items[0].(map[string]any)
 	testutil.Equal(t, first["type"], "message")
 	testutil.Equal(t, first["role"], "user")
-	parts := first["content"].([]interface{})
-	testutil.Equal(t, parts[0].(map[string]interface{})["text"], "Summary:\ncarried forward")
+	parts := first["content"].([]any)
+	testutil.Equal(t, parts[0].(map[string]any)["text"], "Summary:\ncarried forward")
 }
 
 // A blob this gateway cannot open is a 400 that names the offending item. It must
@@ -119,11 +119,11 @@ func TestHandleResponsesRejectsUnreadableGatewayCompactionBlob(t *testing.T) {
 	h, _, cleanup := setupCompactionHandler(t, upstream)
 	defer cleanup()
 
-	body, _ := json.Marshal(map[string]interface{}{
+	body, _ := json.Marshal(map[string]any{
 		"model": "grok-4.5", "stream": false,
-		"input": []interface{}{
-			map[string]interface{}{"type": "message", "role": "user", "content": "hi"},
-			map[string]interface{}{"type": "compaction", "encrypted_content": responses.CompactionPrefix + "broken"},
+		"input": []any{
+			map[string]any{"type": "message", "role": "user", "content": "hi"},
+			map[string]any{"type": "compaction", "encrypted_content": responses.CompactionPrefix + "broken"},
 		},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(string(body)))
@@ -131,9 +131,9 @@ func TestHandleResponsesRejectsUnreadableGatewayCompactionBlob(t *testing.T) {
 	h.HandleResponses(rec, req)
 
 	testutil.Equal(t, rec.Code, http.StatusBadRequest)
-	var payload map[string]interface{}
+	var payload map[string]any
 	testutil.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload), "decode error body: %v")
-	errObj := payload["error"].(map[string]interface{})
+	errObj := payload["error"].(map[string]any)
 	testutil.Equal(t, errObj["code"], "invalid_compaction_blob")
 	testutil.Equal(t, errObj["param"], "input[1].encrypted_content")
 	testutil.Equal(t, upstreamCalls, 0)
@@ -142,10 +142,10 @@ func TestHandleResponsesRejectsUnreadableGatewayCompactionBlob(t *testing.T) {
 // Without a sealing key the feature is off, and a compaction trigger keeps the
 // old behaviour: it is relayed to the upstream rather than answered locally.
 func TestHandleResponsesRelaysCompactionTriggerWhenDisabled(t *testing.T) {
-	var received map[string]interface{}
+	var received map[string]any
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		var decoded map[string]interface{}
+		var decoded map[string]any
 		_ = json.Unmarshal(body, &decoded)
 		received = decoded
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -159,9 +159,9 @@ func TestHandleResponsesRelaysCompactionTriggerWhenDisabled(t *testing.T) {
 	h.SetCompactionCipher(nil)
 	testutil.False(t, h.GatewayCompactionEnabled(), "compaction reported as enabled without a cipher")
 
-	body, _ := json.Marshal(map[string]interface{}{
+	body, _ := json.Marshal(map[string]any{
 		"model": "grok-4.5", "stream": true,
-		"input": []interface{}{map[string]interface{}{"type": "compaction_trigger"}},
+		"input": []any{map[string]any{"type": "compaction_trigger"}},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(string(body)))
 	rec := httptest.NewRecorder()
@@ -169,10 +169,10 @@ func TestHandleResponsesRelaysCompactionTriggerWhenDisabled(t *testing.T) {
 
 	testutil.Equal(t, rec.Code, http.StatusOK)
 	testutil.False(t, received == nil, "the trigger was not relayed upstream")
-	items := received["input"].([]interface{})
-	testutil.Equal(t, items[0].(map[string]interface{})["type"], "compaction_trigger")
+	items := received["input"].([]any)
+	testutil.Equal(t, items[0].(map[string]any)["type"], "compaction_trigger")
 	for _, raw := range items {
-		item, ok := raw.(map[string]interface{})
+		item, ok := raw.(map[string]any)
 		testutil.False(t, ok && item["content"] == responses.CompactionPrompt, "the gateway ran a summary turn while the feature was disabled")
 	}
 }
@@ -200,9 +200,9 @@ func TestHandleResponsesCompactFailsOnDegenerateSummary(t *testing.T) {
 	h.HandleResponsesCompact(rec, req)
 
 	testutil.Equal(t, rec.Code, http.StatusBadGateway)
-	var payload map[string]interface{}
+	var payload map[string]any
 	testutil.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload), "decode error body: %v")
-	errObj, _ := payload["error"].(map[string]interface{})
+	errObj, _ := payload["error"].(map[string]any)
 	testutil.Equal(t, errObj["code"], "compaction_failed")
 	testutil.Equal(t, attempts, responses.CompactionMaxAttempts)
 }

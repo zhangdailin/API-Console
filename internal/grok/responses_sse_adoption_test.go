@@ -48,8 +48,8 @@ func TestResponsesNativeOutcomeStatusAndEOF(t *testing.T) {
 		{"in_progress", "error", true}, {"queued", "error", true},
 	} {
 		t.Run(test.status, func(t *testing.T) {
-			response := map[string]interface{}{"status": test.status}
-			raw := strings.TrimRight(parityFrame("response.completed", map[string]interface{}{"response": response}), "\n")
+			response := map[string]any{"status": test.status}
+			raw := strings.TrimRight(parityFrame("response.completed", map[string]any{"response": response}), "\n")
 			// Byte-sized reads and no final LF exercise the shared production decoder.
 			_, _, result := copyNativeCLIResponseAndCaptureModel(httptest.NewRecorder(), iotest.OneByteReader(strings.NewReader(raw)), "text/event-stream", "grok-4.6")
 			testutil.Falsef(t, result.Finish != test.finish || (result.Err != nil) != test.fail, "%+v", result)
@@ -69,7 +69,7 @@ func (w compatShortWriter) Write(p []byte) (int, error) { return len(p) - 1, nil
 func TestResponsesNativeOutcomeShortWriteAndStickyFailure(t *testing.T) {
 	_, _, result := copyNativeCLIResponseAndCaptureModel(compatShortWriter{httptest.NewRecorder()}, strings.NewReader(parityTerminal("response.completed")), "text/event-stream", "grok-4.6")
 	testutil.Fail(t, !errors.Is(result.Err, io.ErrShortWrite) || result.Finish != "error", result)
-	stream := parityFrame("response.failed", map[string]interface{}{"response": map[string]interface{}{"error": map[string]interface{}{"message": "failed first"}}}) + parityTerminal("response.completed")
+	stream := parityFrame("response.failed", map[string]any{"response": map[string]any{"error": map[string]any{"message": "failed first"}}}) + parityTerminal("response.completed")
 	_, _, result = copyNativeCLIResponseAndCaptureModel(httptest.NewRecorder(), strings.NewReader(stream), "text/event-stream", "grok-4.6")
 	testutil.Fail(t, result.Err == nil || result.Finish != "error", result)
 }

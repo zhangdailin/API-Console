@@ -35,7 +35,7 @@ type messageExecution struct {
 	verboseDiagnostics bool
 	gateNoTools        bool
 	upstreamMessages   []prompt.Message
-	effectiveTools     []interface{}
+	effectiveTools     []any
 	structured         *upstream.StructuredOutput
 	logger             *debug.Logger
 	apiClient          UpstreamClient

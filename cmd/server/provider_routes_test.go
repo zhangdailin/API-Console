@@ -60,11 +60,11 @@ func TestProviderRoutesBothBasesAndRetiredUnifiedRoutes(t *testing.T) {
 					if w.Code != 200 || !strings.Contains(w.Body.String(), `"owned_by":"`+string(d.ID)+`"`) {
 						t.Fatalf("model provider lost: %d %s", w.Code, w.Body.String())
 					}
-					var body map[string]interface{}
+					var body map[string]any
 					if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 						t.Fatal(err)
 					}
-					if rows, ok := body["data"].([]interface{}); ok && len(rows) != 1 {
+					if rows, ok := body["data"].([]any); ok && len(rows) != 1 {
 						t.Fatalf("cross-provider catalog: %s", w.Body.String())
 					}
 				}

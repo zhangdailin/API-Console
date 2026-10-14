@@ -130,8 +130,8 @@ func TestHealthyAccountStillServesFreeModels(t *testing.T) {
 	h := NewWithLoadBalancer(&config.Config{DebugEnabled: false, RequestTimeout: 10, MaxRetries: 0}, loadbalancer.NewWithCacheTTL(s, 0))
 	h.SetClientFactory(func(*store.Account, *config.Config) UpstreamClient {
 		return &mockUpstreamEdge{events: []upstream.SSEMessage{
-			{Type: "model.text-delta", Event: map[string]interface{}{"delta": "ok"}},
-			{Type: "model.finish", Event: map[string]interface{}{"finishReason": "stop"}},
+			{Type: "model.text-delta", Event: map[string]any{"delta": "ok"}},
+			{Type: "model.finish", Event: map[string]any{"finishReason": "stop"}},
 		}}
 	})
 

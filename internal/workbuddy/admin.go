@@ -243,7 +243,7 @@ func VerifyAccount(ctx context.Context, acc *store.Account, cfg *config.Config, 
 // The meter reports the remaining credits of the current cycle; the
 // generic UsageCurrent slot stores that remaining value for this channel,
 // so "used" must be derived rather than read from UsageCurrent.
-func projectQuota(fields map[string]interface{}, acc *store.Account, limit, current float64, observedTokens int64, usageObserved bool) {
+func projectQuota(fields map[string]any, acc *store.Account, limit, current float64, observedTokens int64, usageObserved bool) {
 	snapshot := acc.WorkBuddyQuota
 	quotaLimit := limit
 	if snapshot.Limit > 0 {

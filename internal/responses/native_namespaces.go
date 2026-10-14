@@ -7,15 +7,15 @@ import (
 
 // NormalizeNamespacePayload preserves native fields outside the tool contract.
 // Both native Responses and Chat transports use the same stable function names.
-func NormalizeNamespacePayload(payload map[string]interface{}) (ToolNamespaces, error) {
+func NormalizeNamespacePayload(payload map[string]any) (ToolNamespaces, error) {
 	tools := InterfaceMaps(payload["tools"])
 	if raw := payload["tools"]; raw != nil {
 		switch rows := raw.(type) {
-		case []interface{}:
+		case []any:
 			if len(rows) != len(tools) {
 				return nil, fmt.Errorf("tools must contain only objects")
 			}
-		case []map[string]interface{}:
+		case []map[string]any:
 		default:
 			return nil, fmt.Errorf("tools must be an array of objects")
 		}
@@ -25,7 +25,7 @@ func NormalizeNamespacePayload(payload map[string]interface{}) (ToolNamespaces, 
 	if err != nil {
 		return nil, err
 	}
-	for key, value := range map[string]interface{}{"tools": req.Tools, "input": req.Input, "tool_choice": req.ToolChoice} {
+	for key, value := range map[string]any{"tools": req.Tools, "input": req.Input, "tool_choice": req.ToolChoice} {
 		if _, exists := payload[key]; exists {
 			payload[key] = value
 		}
@@ -35,7 +35,7 @@ func NormalizeNamespacePayload(payload map[string]interface{}) (ToolNamespaces, 
 
 // A plain function cannot reuse a wire name from an earlier namespace: the
 // upstream's call would otherwise have two possible public identities.
-func (aliases ToolNamespaces) ValidatePlainTools(tools interface{}) error {
+func (aliases ToolNamespaces) ValidatePlainTools(tools any) error {
 	for _, tool := range InterfaceMaps(tools) {
 		if tool["type"] == "function" {
 			if _, exists := aliases[ParseLooseStringAny(tool["name"])]; exists {
@@ -75,23 +75,23 @@ func (aliases ToolNamespaces) MergeStored(raw json.RawMessage) error {
 
 // RestoreEnvelope changes only protocol identity fields, never argument strings,
 // result bodies, text deltas or opaque reasoning content.
-func (aliases ToolNamespaces) RestoreEnvelope(envelope map[string]interface{}) bool {
+func (aliases ToolNamespaces) RestoreEnvelope(envelope map[string]any) bool {
 	changed := aliases.RestoreResponse(envelope)
-	if item, ok := envelope["item"].(map[string]interface{}); ok {
+	if item, ok := envelope["item"].(map[string]any); ok {
 		changed = aliases.RestoreItem(item) || changed
 	}
-	if response, ok := envelope["response"].(map[string]interface{}); ok {
+	if response, ok := envelope["response"].(map[string]any); ok {
 		changed = aliases.RestoreEnvelope(response) || changed
 	}
-	if choice, ok := envelope["tool_choice"].(map[string]interface{}); ok && choice["type"] == "function" {
+	if choice, ok := envelope["tool_choice"].(map[string]any); ok && choice["type"] == "function" {
 		if identity, found := aliases[ParseLooseStringAny(choice["name"])]; found {
 			choice["name"], choice["namespace"] = identity.Name, identity.Namespace
 			changed = true
 		}
 	}
 	tools := InterfaceMaps(envelope["tools"])
-	groups := map[string]map[string]interface{}{}
-	var restored []map[string]interface{}
+	groups := map[string]map[string]any{}
+	var restored []map[string]any
 	toolsChanged := false
 	for _, tool := range tools {
 		identity, found := aliases[ParseLooseStringAny(tool["name"])]
@@ -102,7 +102,7 @@ func (aliases ToolNamespaces) RestoreEnvelope(envelope map[string]interface{}) b
 		toolsChanged = true
 		group := groups[identity.Namespace]
 		if group == nil {
-			group = map[string]interface{}{"type": "namespace", "name": identity.Namespace, "tools": []map[string]interface{}{}}
+			group = map[string]any{"type": "namespace", "name": identity.Namespace, "tools": []map[string]any{}}
 			if identity.Description != "" {
 				group["description"] = identity.Description
 			}
@@ -114,7 +114,7 @@ func (aliases ToolNamespaces) RestoreEnvelope(envelope map[string]interface{}) b
 			function = CloneStringInterfaceMap(tool)
 			function["name"] = identity.Name
 		}
-		group["tools"] = append(group["tools"].([]map[string]interface{}), function)
+		group["tools"] = append(group["tools"].([]map[string]any), function)
 	}
 	if toolsChanged {
 		envelope["tools"] = restored

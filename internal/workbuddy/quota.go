@@ -90,7 +90,7 @@ func (c *Client) FetchQuota(ctx context.Context) (*Quota, error) {
 	}
 
 	now := time.Now()
-	body, err := json.Marshal(map[string]interface{}{
+	body, err := json.Marshal(map[string]any{
 		"PageNumber":               1,
 		"PageSize":                 billingPageSize,
 		"ProductCode":              billingProductCode,

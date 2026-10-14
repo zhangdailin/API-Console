@@ -171,7 +171,7 @@ func TestHandleMessages_ForwardsAndEnforcesToolControls(t *testing.T) {
 	h.client = up
 	tool := map[string]any{"name": "read", "input_schema": map[string]any{"type": "object"}}
 
-	send := func(choice interface{}) upstream.UpstreamRequest {
+	send := func(choice any) upstream.UpstreamRequest {
 		body, _ := json.Marshal(map[string]any{
 			"model": "claude-opus-5", "messages": []map[string]any{{"role": "user", "content": "hi"}},
 			"tools": []any{tool}, "tool_choice": choice, "parallel_tool_calls": parallel, "stream": false,
@@ -184,7 +184,7 @@ func TestHandleMessages_ForwardsAndEnforcesToolControls(t *testing.T) {
 	}
 
 	forwarded := send(map[string]any{"type": "tool", "name": "read"})
-	choice, _ := forwarded.ToolChoice.(map[string]interface{})
+	choice, _ := forwarded.ToolChoice.(map[string]any)
 	testutil.Falsef(t, choice["type"] != "tool" || choice["name"] != "read" || forwarded.ParallelToolCalls == nil || *forwarded.ParallelToolCalls, "tool controls were not forwarded: %#v", forwarded)
 	testutil.Falsef(t, forwarded.NoTools || len(forwarded.Tools) != 1, "enabled tools were unexpectedly gated: %#v", forwarded)
 

@@ -173,11 +173,11 @@ func WriteSSEError(w http.ResponseWriter, message, errType, code string) {
 	if strings.TrimSpace(errType) == "" {
 		errType = "server_error"
 	}
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		// The top-level type is what OpenAI-compatible clients dispatch on; a
 		// frame without it looks like an ordinary chunk to them.
 		"type": "error",
-		"error": map[string]interface{}{
+		"error": map[string]any{
 			"message":    apperrors.PublicMessage(message),
 			"type":       strings.TrimSpace(errType),
 			"code":       strings.TrimSpace(code),

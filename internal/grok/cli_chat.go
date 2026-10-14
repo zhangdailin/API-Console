@@ -28,7 +28,7 @@ func (h *Handler) cliHeaders(acc *store.Account, token string) http.Header {
 
 // Continuations keep the creating account and apply its capability profile just
 // as first turns do. They must never bypass reasoning validation or switch accounts.
-func (h *Handler) doCLIPinnedResponsesAt(ctx context.Context, sess *chatAccountSession, payload map[string]interface{}, modelID, path string) (*http.Response, error) {
+func (h *Handler) doCLIPinnedResponsesAt(ctx context.Context, sess *chatAccountSession, payload map[string]any, modelID, path string) (*http.Response, error) {
 	attempt, err := buildPayloadForAccount(payload, sess.acc, modelID)
 	if err != nil {
 		return nil, err
@@ -40,7 +40,7 @@ func (h *Handler) doCLIPinnedResponsesAt(ctx context.Context, sess *chatAccountS
 // doCLIWithAutoSwitchAt issues a CLI request, switching to another OAuth account
 // on transient failures (401 after refresh, 5xx) while treating team-level 429
 // as shared (no switch).
-func (h *Handler) doCLIWithAutoSwitchAt(ctx context.Context, sess *chatAccountSession, payload map[string]interface{}, modelID, path string) (*http.Response, error) {
+func (h *Handler) doCLIWithAutoSwitchAt(ctx context.Context, sess *chatAccountSession, payload map[string]any, modelID, path string) (*http.Response, error) {
 	if sess == nil || sess.acc == nil {
 		return nil, fmt.Errorf("empty cli chat session")
 	}

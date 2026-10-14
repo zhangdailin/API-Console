@@ -35,7 +35,7 @@ func TestObservedContextTiersAndRequestDefault(t *testing.T) {
 		testutil.NoError(t, err)
 		var body chatBody
 		testutil.NoError(t, json.Unmarshal(raw, &body))
-		parameters := body.Parameters.(map[string]interface{})
+		parameters := body.Parameters.(map[string]any)
 		testutil.EqualAny(t, parameters["context_length"], float64(tc.def))
 		testutil.Equal(t, body.ModelConfig.MaxInputTokens, tc.input)
 	}

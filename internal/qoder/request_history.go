@@ -225,7 +225,7 @@ func blockImageURL(block prompt.ContentBlock) string {
 // helper: Qoder distinguishes "no tools" (nil, so the gateway sees an empty
 // array via the chatBody fallback below) from "tools present", while WorkBuddy
 // always keeps a non-nil slice.
-func normalizeToolDefinitions(req upstream.UpstreamRequest) []interface{} {
+func normalizeToolDefinitions(req upstream.UpstreamRequest) []any {
 	if req.NoTools || len(req.Tools) == 0 {
 		return nil
 	}
@@ -236,7 +236,7 @@ func normalizeToolDefinitions(req upstream.UpstreamRequest) []interface{} {
 // the OpenAI-compatible fields accepted by Qoder's chat endpoint. Tool controls
 // belong at the top level of the request; placing tool_choice under parameters
 // makes the gateway treat an otherwise valid tool request as ordinary chat.
-func normalizeToolControls(req upstream.UpstreamRequest, toolsEnabled bool) (interface{}, *bool) {
+func normalizeToolControls(req upstream.UpstreamRequest, toolsEnabled bool) (any, *bool) {
 	if !toolsEnabled || req.NoTools {
 		return nil, nil
 	}
@@ -255,7 +255,7 @@ func normalizeToolControls(req upstream.UpstreamRequest, toolsEnabled bool) (int
 		default:
 			return "auto", parallel
 		}
-	case map[string]interface{}:
+	case map[string]any:
 		kind := strings.ToLower(strings.TrimSpace(util.StringValue(typed["type"])))
 		if disable, ok := typed["disable_parallel_tool_use"].(bool); ok && parallel == nil {
 			value := !disable
@@ -273,9 +273,9 @@ func normalizeToolControls(req upstream.UpstreamRequest, toolsEnabled bool) (int
 			if name == "" {
 				return "auto", parallel
 			}
-			return map[string]interface{}{
+			return map[string]any{
 				"type":     "function",
-				"function": map[string]interface{}{"name": name},
+				"function": map[string]any{"name": name},
 			}, parallel
 		case "function":
 			return typed, parallel

@@ -11,7 +11,7 @@ import (
 
 // Capacity is the available channel pool, before model-specific eligibility.
 // Busy slots on held/disabled accounts remain in active_requests, not this ratio.
-func opsPoolCapacity(accounts []*store.Account, counts map[int64]int64, channel string) map[string]interface{} {
+func opsPoolCapacity(accounts []*store.Account, counts map[int64]int64, channel string) map[string]any {
 	now := time.Now()
 	var capacity, occupied int64
 	for _, acc := range accounts {
@@ -20,10 +20,10 @@ func opsPoolCapacity(accounts []*store.Account, counts map[int64]int64, channel 
 		}
 		limit := loadbalancer.EffectiveAccountConcurrencyLimit(acc)
 		if limit <= 0 {
-			return map[string]interface{}{"capacity_available": false}
+			return map[string]any{"capacity_available": false}
 		}
 		capacity += limit
 		occupied += max(0, counts[acc.ID])
 	}
-	return map[string]interface{}{"capacity_available": true, "capacity_slots": capacity, "occupied_slots": occupied, "capacity_sampled_at": now.UTC().Format(time.RFC3339Nano)}
+	return map[string]any{"capacity_available": true, "capacity_slots": capacity, "occupied_slots": occupied, "capacity_sampled_at": now.UTC().Format(time.RFC3339Nano)}
 }

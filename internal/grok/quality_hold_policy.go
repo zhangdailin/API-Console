@@ -348,7 +348,7 @@ func qualityRequestReplayUnsafe(req *chatwire.Request) bool {
 			// These only ask the model to return a call; the client runs it.
 			continue
 		case "shell":
-			environment, _ := tool["environment"].(map[string]interface{})
+			environment, _ := tool["environment"].(map[string]any)
 			if strings.ToLower(strings.TrimSpace(chatwire.ParseLooseStringAny(environment["type"]))) != "local" {
 				return true
 			}
@@ -361,13 +361,13 @@ func qualityRequestReplayUnsafe(req *chatwire.Request) bool {
 	for _, tool := range req.Tools {
 		declaration := tool.Raw
 		if declaration == nil {
-			declaration = map[string]interface{}{"type": tool.Type}
+			declaration = map[string]any{"type": tool.Type}
 		}
 		switch strings.ToLower(strings.TrimSpace(util.FirstNonEmpty(tool.Type, chatwire.ParseLooseStringAny(declaration["type"])))) {
 		case "", "function", "custom", "local_shell", "apply_patch", "tool_search":
 			continue
 		case "shell":
-			environment, _ := declaration["environment"].(map[string]interface{})
+			environment, _ := declaration["environment"].(map[string]any)
 			if strings.ToLower(strings.TrimSpace(chatwire.ParseLooseStringAny(environment["type"]))) != "local" {
 				return true
 			}

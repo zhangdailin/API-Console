@@ -175,9 +175,9 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 		return fmt.Errorf("qoder client is nil")
 	}
 	preparation := debug.BeginUpstream(ctx, "PREPARE", c.endpoints.inference, nil, nil)
-	var prepMetadata map[string]interface{}
+	var prepMetadata map[string]any
 	if debug.FromContext(ctx) != nil {
-		prepMetadata = map[string]interface{}{"kind": "preparation", "provider": "qoder"}
+		prepMetadata = map[string]any{"kind": "preparation", "provider": "qoder"}
 	}
 	_, prepTrace := preparation.Trace(ctx, prepMetadata)
 	defer func() {

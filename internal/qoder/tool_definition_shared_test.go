@@ -14,34 +14,34 @@ import (
 // normalization: Qoder no longer carries its own copy of the loop, so any
 // drift between the channels would silently change one upstream's wire format.
 func TestNormalizeToolDefinitionsMatchesSharedHelper(t *testing.T) {
-	declarations := []interface{}{
+	declarations := []any{
 		// Already in the OpenAI function envelope: kept as-is with type forced.
-		map[string]interface{}{
+		map[string]any{
 			"type": "function",
-			"function": map[string]interface{}{
+			"function": map[string]any{
 				"name":        "openai_tool",
 				"description": "already normalized",
-				"parameters":  map[string]interface{}{"type": "object", "properties": map[string]interface{}{"a": map[string]interface{}{"type": "string"}}},
+				"parameters":  map[string]any{"type": "object", "properties": map[string]any{"a": map[string]any{"type": "string"}}},
 			},
 		},
 		// Anthropic shape: name + input_schema -> function envelope.
-		map[string]interface{}{
+		map[string]any{
 			"name":        "anthropic_tool",
 			"description": "converted",
-			"input_schema": map[string]interface{}{
+			"input_schema": map[string]any{
 				"type":       "object",
-				"properties": map[string]interface{}{"path": map[string]interface{}{"type": "string"}},
-				"required":   []interface{}{"path"},
+				"properties": map[string]any{"path": map[string]any{"type": "string"}},
+				"required":   []any{"path"},
 			},
 		},
 		// Anthropic shape without input_schema: default empty object schema.
-		map[string]interface{}{"name": "no_schema"},
+		map[string]any{"name": "no_schema"},
 		// Names are trimmed; an empty name is dropped either way.
-		map[string]interface{}{"name": "  spaced_name  "},
-		map[string]interface{}{"name": "   "},
-		map[string]interface{}{"type": "function", "function": map[string]interface{}{"name": ""}},
+		map[string]any{"name": "  spaced_name  "},
+		map[string]any{"name": "   "},
+		map[string]any{"type": "function", "function": map[string]any{"name": ""}},
 		// Unknown shapes and non-objects are dropped.
-		map[string]interface{}{"unrelated": true},
+		map[string]any{"unrelated": true},
 		"not-a-map",
 		42,
 		nil,

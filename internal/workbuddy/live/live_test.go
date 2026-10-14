@@ -133,14 +133,14 @@ func TestLive_ToolCall(t *testing.T) {
 			Role:    "user",
 			Content: prompt.MessageContent{Text: "List the files in the current directory."},
 		}},
-		Tools: []interface{}{map[string]interface{}{
+		Tools: []any{map[string]any{
 			"type": "function",
-			"function": map[string]interface{}{
+			"function": map[string]any{
 				"name":        "list_files",
 				"description": "List files in a directory",
-				"parameters": map[string]interface{}{
+				"parameters": map[string]any{
 					"type":       "object",
-					"properties": map[string]interface{}{"path": map[string]interface{}{"type": "string"}},
+					"properties": map[string]any{"path": map[string]any{"type": "string"}},
 				},
 			},
 		}},

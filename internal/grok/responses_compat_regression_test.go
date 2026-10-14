@@ -27,16 +27,16 @@ func TestGrok47ResponsesCompatibilityBeforeToolExecution(t *testing.T) {
 			calls := 0
 			var auth string
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				var payload map[string]interface{}
+				var payload map[string]any
 				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 					t.Error(err)
 					return
 				}
 				calls++
 				w.Header().Set("Content-Type", "application/json")
-				reasoning, _ := payload["reasoning"].(map[string]interface{})
-				tools := payload["tools"].([]interface{})
-				params := tools[0].(map[string]interface{})["parameters"].(map[string]interface{})
+				reasoning, _ := payload["reasoning"].(map[string]any)
+				tools := payload["tools"].([]any)
+				params := tools[0].(map[string]any)["parameters"].(map[string]any)
 				if params["type"] != "object" || params["anyOf"] != nil || params["oneOf"] != nil || reasoning["effort"] != "low" {
 					w.WriteHeader(http.StatusBadRequest)
 					fmt.Fprint(w, `{"error":{"message":"invalid function root or reasoning effort"}}`)

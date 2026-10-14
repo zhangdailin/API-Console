@@ -25,11 +25,11 @@ func (r UpstreamRequest) ValidateProtocolControls(provider string) error {
 		switch strings.TrimSpace(fmt.Sprint(format["type"])) {
 		case "text", "json_object":
 		case "json_schema":
-			schema, ok := format["json_schema"].(map[string]interface{})
+			schema, ok := format["json_schema"].(map[string]any)
 			if !ok {
 				return fmt.Errorf("response_format.json_schema must be an object")
 			}
-			if _, ok := schema["schema"].(map[string]interface{}); !ok {
+			if _, ok := schema["schema"].(map[string]any); !ok {
 				return fmt.Errorf("response_format.json_schema.schema must be an object")
 			}
 		default:
@@ -55,7 +55,7 @@ func (r UpstreamRequest) StrictSchema() (*Schema, bool) {
 	if !strings.EqualFold(strings.TrimSpace(fmt.Sprint(format["type"])), "json_schema") {
 		return nil, false
 	}
-	envelope, _ := format["json_schema"].(map[string]interface{})
+	envelope, _ := format["json_schema"].(map[string]any)
 	if len(envelope) == 0 {
 		return nil, false
 	}
@@ -71,18 +71,18 @@ func (r UpstreamRequest) StrictSchema() (*Schema, bool) {
 
 // ChatResponseFormat lowers Responses text.format to the chat spelling without
 // changing the client's schema or strictness. It also accepts chat-shaped input.
-func (r UpstreamRequest) ChatResponseFormat() map[string]interface{} {
+func (r UpstreamRequest) ChatResponseFormat() map[string]any {
 	f := r.ResponseFormat
-	if v, ok := r.ResponseText["format"].(map[string]interface{}); ok {
+	if v, ok := r.ResponseText["format"].(map[string]any); ok {
 		f = v
 	}
 	if len(f) == 0 {
 		return nil
 	}
-	out := make(map[string]interface{}, len(f))
+	out := make(map[string]any, len(f))
 	maps.Copy(out, f)
 	if f["type"] == "json_schema" && f["json_schema"] == nil {
-		schema := make(map[string]interface{})
+		schema := make(map[string]any)
 		for _, key := range []string{"name", "schema", "strict", "description"} {
 			if v, ok := f[key]; ok {
 				schema[key] = v

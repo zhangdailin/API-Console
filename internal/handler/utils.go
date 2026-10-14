@@ -106,7 +106,7 @@ func workBuddyConversationRequestID(r *http.Request) string {
 	return middleware.GetRequestID(r.Context())
 }
 
-func metadataString(metadata map[string]interface{}, keys ...string) string {
+func metadataString(metadata map[string]any, keys ...string) string {
 	for _, key := range keys {
 		if value, ok := metadata[key]; ok {
 			if str, ok := value.(string); ok {

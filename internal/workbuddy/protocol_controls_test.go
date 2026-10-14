@@ -8,16 +8,16 @@ import (
 
 func TestProtocolControlsInWireBody(t *testing.T) {
 	zero, limit, parallel := 0.0, 17, false
-	req := upstream.UpstreamRequest{Model: "m", MaxTokens: &limit, Temperature: &zero, ParallelToolCalls: &parallel, PromptCacheKey: "cache", ResponseText: map[string]interface{}{"format": map[string]interface{}{"type": "json_schema", "name": "answer", "schema": map[string]interface{}{"type": "object"}, "strict": true}}}
+	req := upstream.UpstreamRequest{Model: "m", MaxTokens: &limit, Temperature: &zero, ParallelToolCalls: &parallel, PromptCacheKey: "cache", ResponseText: map[string]any{"format": map[string]any{"type": "json_schema", "name": "answer", "schema": map[string]any{"type": "object"}, "strict": true}}}
 	raw, err := (&Client{}).buildBody(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var body map[string]interface{}
+	var body map[string]any
 	if err := json.Unmarshal(raw, &body); err != nil {
 		t.Fatal(err)
 	}
-	schema := body["response_format"].(map[string]interface{})["json_schema"].(map[string]interface{})
+	schema := body["response_format"].(map[string]any)["json_schema"].(map[string]any)
 	if schema["name"] != "answer" || schema["strict"] != true || body["max_tokens"] != float64(17) || body["temperature"] != float64(0) {
 		t.Fatalf("controls lost: %s", raw)
 	}
@@ -37,7 +37,7 @@ func TestDefaultOutputLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var body map[string]interface{}
+	var body map[string]any
 	if err := json.Unmarshal(raw, &body); err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestConfiguredOutputBudgetPreservesExplicitLimit(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var body map[string]interface{}
+		var body map[string]any
 		if err := json.Unmarshal(raw, &body); err != nil {
 			t.Fatal(err)
 		}

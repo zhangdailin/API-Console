@@ -21,14 +21,14 @@ func TestNativeResponsesNamespacesAndContinuation(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/stream=%t", prefix, stream), func(t *testing.T) {
 				const arguments = `{"count":1000.0,"text":"unchanged"}`
 				var wireNames []string
-				var upstreamResponse map[string]interface{}
+				var upstreamResponse map[string]any
 				posts, gets := 0, 0
-				tools := []interface{}{}
+				tools := []any{}
 				for i := range 7 {
-					tools = append(tools, map[string]interface{}{"type": "function", "name": fmt.Sprintf("plain%d", i), "parameters": map[string]interface{}{"type": "object"}})
+					tools = append(tools, map[string]any{"type": "function", "name": fmt.Sprintf("plain%d", i), "parameters": map[string]any{"type": "object"}})
 				}
 				for _, ns := range []string{"alpha", "beta"} {
-					tools = append(tools, map[string]interface{}{"type": "namespace", "name": ns, "description": "group " + ns, "tools": []interface{}{map[string]interface{}{"type": "function", "name": "read", "description": "read data", "strict": true, "parameters": map[string]interface{}{"type": "object", "additionalProperties": false}}}})
+					tools = append(tools, map[string]any{"type": "namespace", "name": ns, "description": "group " + ns, "tools": []any{map[string]any{"type": "function", "name": "read", "description": "read data", "strict": true, "parameters": map[string]any{"type": "object", "additionalProperties": false}}}})
 				}
 				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if r.Method == http.MethodGet {
@@ -38,7 +38,7 @@ func TestNativeResponsesNamespacesAndContinuation(t *testing.T) {
 						return
 					}
 					posts++
-					var payload map[string]interface{}
+					var payload map[string]any
 					if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 						t.Error(err)
 						return
@@ -59,14 +59,14 @@ func TestNativeResponsesNamespacesAndContinuation(t *testing.T) {
 						}
 						for _, tool := range flat[7:] {
 							wireNames = append(wireNames, tool["name"].(string))
-							if tool["strict"] != true || !reflect.DeepEqual(tool["parameters"], map[string]interface{}{"type": "object", "additionalProperties": false}) {
+							if tool["strict"] != true || !reflect.DeepEqual(tool["parameters"], map[string]any{"type": "object", "additionalProperties": false}) {
 								t.Error("schema changed")
 							}
 						}
 						if wireNames[0] == wireNames[1] {
 							t.Error("same-name namespace collision")
 						}
-						choice := payload["tool_choice"].(map[string]interface{})
+						choice := payload["tool_choice"].(map[string]any)
 						if choice["name"] != wireNames[0] || choice["namespace"] != nil {
 							t.Errorf("choice=%v", choice)
 						}
@@ -85,11 +85,11 @@ func TestNativeResponsesNamespacesAndContinuation(t *testing.T) {
 							}
 						}
 					}
-					calls := []interface{}{}
+					calls := []any{}
 					for i, name := range wireNames {
-						calls = append(calls, map[string]interface{}{"type": "function_call", "id": fmt.Sprintf("fc%d", i), "call_id": fmt.Sprintf("call%d", i), "name": name, "arguments": arguments, "status": "completed"})
+						calls = append(calls, map[string]any{"type": "function_call", "id": fmt.Sprintf("fc%d", i), "call_id": fmt.Sprintf("call%d", i), "name": name, "arguments": arguments, "status": "completed"})
 					}
-					upstreamResponse = map[string]interface{}{"id": fmt.Sprintf("resp_ns_%d", posts), "object": "response", "model": "grok-4.6", "status": "completed", "output": calls, "vendor_field": "preserved"}
+					upstreamResponse = map[string]any{"id": fmt.Sprintf("resp_ns_%d", posts), "object": "response", "model": "grok-4.6", "status": "completed", "output": calls, "vendor_field": "preserved"}
 					if posts == 1 {
 						upstreamResponse["tools"], upstreamResponse["tool_choice"] = payload["tools"], payload["tool_choice"]
 					}
@@ -99,25 +99,25 @@ func TestNativeResponsesNamespacesAndContinuation(t *testing.T) {
 						return
 					}
 					w.Header().Set("Content-Type", "text/event-stream")
-					emit := func(event map[string]interface{}) {
+					emit := func(event map[string]any) {
 						raw, _ := json.Marshal(event)
 						_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event["type"], raw)
 					}
 					for i, raw := range calls {
-						item := responses.CloneStringInterfaceMap(raw.(map[string]interface{}))
+						item := responses.CloneStringInterfaceMap(raw.(map[string]any))
 						item["arguments"] = ""
-						emit(map[string]interface{}{"type": "response.output_item.added", "output_index": i, "item": item})
+						emit(map[string]any{"type": "response.output_item.added", "output_index": i, "item": item})
 						for _, part := range []string{arguments[:10], arguments[10:]} {
-							emit(map[string]interface{}{"type": "response.function_call_arguments.delta", "output_index": i, "item_id": fmt.Sprintf("fc%d", i), "delta": part})
+							emit(map[string]any{"type": "response.function_call_arguments.delta", "output_index": i, "item_id": fmt.Sprintf("fc%d", i), "delta": part})
 						}
-						emit(map[string]interface{}{"type": "response.output_item.done", "output_index": i, "item": raw})
+						emit(map[string]any{"type": "response.output_item.done", "output_index": i, "item": raw})
 					}
-					emit(map[string]interface{}{"type": "response.completed", "response": upstreamResponse})
+					emit(map[string]any{"type": "response.completed", "response": upstreamResponse})
 				}))
 				defer upstream.Close()
 				h, s, _ := setupValidationHandler(t)
 				configureStoredResponseTestHandler(t, h, s, upstream)
-				request := func(owner, method, path string, payload interface{}, handler http.HandlerFunc) *httptest.ResponseRecorder {
+				request := func(owner, method, path string, payload any, handler http.HandlerFunc) *httptest.ResponseRecorder {
 					raw, _ := json.Marshal(payload)
 					req := httptest.NewRequest(method, path, strings.NewReader(string(raw)))
 					req.Header.Set("Authorization", "Bearer "+owner)
@@ -128,20 +128,20 @@ func TestNativeResponsesNamespacesAndContinuation(t *testing.T) {
 					}, handler)(rec, req)
 					return rec
 				}
-				assertResponse := func(rec *httptest.ResponseRecorder, sse bool) map[string]interface{} {
+				assertResponse := func(rec *httptest.ResponseRecorder, sse bool) map[string]any {
 					t.Helper()
 					if rec.Code != 200 {
 						t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 					}
-					var response map[string]interface{}
+					var response map[string]any
 					if sse {
 						var deltas [2]string
 						if err := responses.ReadSSEBytes(strings.NewReader(rec.Body.String()), func(_ string, raw []byte) error {
-							var event map[string]interface{}
+							var event map[string]any
 							if err := json.Unmarshal(raw, &event); err != nil {
 								return err
 							}
-							if item, ok := event["item"].(map[string]interface{}); ok && item["type"] == "function_call" {
+							if item, ok := event["item"].(map[string]any); ok && item["type"] == "function_call" {
 								if item["name"] != "read" || item["namespace"] == nil {
 									t.Errorf("event identity=%v", item)
 								}
@@ -150,7 +150,7 @@ func TestNativeResponsesNamespacesAndContinuation(t *testing.T) {
 								deltas[int(event["output_index"].(float64))] += event["delta"].(string)
 							}
 							if event["type"] == "response.completed" {
-								response, _ = event["response"].(map[string]interface{})
+								response, _ = event["response"].(map[string]any)
 							}
 							return nil
 						}); err != nil {
@@ -178,7 +178,7 @@ func TestNativeResponsesNamespacesAndContinuation(t *testing.T) {
 					}
 					return response
 				}
-				firstPayload := map[string]interface{}{"model": "grok-4.6", "input": "hello", "stream": stream, "tools": tools, "tool_choice": map[string]interface{}{"type": "function", "namespace": "alpha", "name": "read"}, "vendor_field": "preserved"}
+				firstPayload := map[string]any{"model": "grok-4.6", "input": "hello", "stream": stream, "tools": tools, "tool_choice": map[string]any{"type": "function", "namespace": "alpha", "name": "read"}, "vendor_field": "preserved"}
 				first := assertResponse(request("owner-a", "POST", prefix+"/responses", firstPayload, h.HandleResponses), stream)
 				if !reflect.DeepEqual(first["tools"], tools) {
 					t.Errorf("echoed tools=%v", first["tools"])
@@ -190,12 +190,12 @@ func TestNativeResponsesNamespacesAndContinuation(t *testing.T) {
 				if rec := request("owner-b", "GET", prefix+"/responses/resp_ns_1", nil, h.HandleResponseResource); rec.Code != 404 {
 					t.Error("owner isolation failed")
 				}
-				history := []interface{}{}
-				for _, raw := range first["output"].([]interface{}) {
-					item := raw.(map[string]interface{})
-					history = append(history, item, map[string]interface{}{"type": "function_call_output", "call_id": item["call_id"], "output": "result"})
+				history := []any{}
+				for _, raw := range first["output"].([]any) {
+					item := raw.(map[string]any)
+					history = append(history, item, map[string]any{"type": "function_call_output", "call_id": item["call_id"], "output": "result"})
 				}
-				secondPayload := map[string]interface{}{"model": "grok-4.6", "input": history, "stream": stream, "previous_response_id": "resp_ns_1", "vendor_field": "preserved"}
+				secondPayload := map[string]any{"model": "grok-4.6", "input": history, "stream": stream, "previous_response_id": "resp_ns_1", "vendor_field": "preserved"}
 				assertResponse(request("owner-a", "POST", prefix+"/responses", secondPayload, h.HandleResponses), stream)
 				assertResponse(request("owner-a", "GET", prefix+"/responses/resp_ns_2", nil, h.HandleResponseResource), false)
 				items := request("owner-a", "GET", prefix+"/responses/resp_ns_2/input_items", nil, h.HandleResponseResource)
@@ -249,17 +249,17 @@ func TestNativeNamespaceStreamFailureDoesNotSaveOwnership(t *testing.T) {
 func TestNativeNamespaceReasoningReplayKeepsToolIdentity(t *testing.T) {
 	h, _, _ := setupValidationHandler(t)
 	const arguments = `{"number":1.0}`
-	first := map[string]interface{}{"output": []interface{}{
-		map[string]interface{}{"type": "function_call", "call_id": "call-a", "name": "read", "namespace": "alpha", "arguments": arguments},
-		map[string]interface{}{"type": "function_call", "call_id": "call-b", "name": "read", "namespace": "beta", "arguments": arguments},
+	first := map[string]any{"output": []any{
+		map[string]any{"type": "function_call", "call_id": "call-a", "name": "read", "namespace": "alpha", "arguments": arguments},
+		map[string]any{"type": "function_call", "call_id": "call-b", "name": "read", "namespace": "beta", "arguments": arguments},
 	}}
 	h.captureReasoningReplayFromMap(context.Background(), "grok-4.6", "namespace-replay", first)
-	payload := map[string]interface{}{"input": []interface{}{
-		map[string]interface{}{"type": "function_call_output", "call_id": "call-a", "output": "a"},
-		map[string]interface{}{"type": "function_call_output", "call_id": "call-b", "output": "b"},
+	payload := map[string]any{"input": []any{
+		map[string]any{"type": "function_call_output", "call_id": "call-a", "output": "a"},
+		map[string]any{"type": "function_call_output", "call_id": "call-b", "output": "b"},
 	}}
 	h.applyNativeReasoningReplay("grok-4.6", "namespace-replay", payload)
-	var calls []map[string]interface{}
+	var calls []map[string]any
 	for _, item := range responses.InterfaceMaps(payload["input"]) {
 		if item["type"] == "function_call" {
 			calls = append(calls, item)

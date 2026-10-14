@@ -30,8 +30,8 @@ func (c *admissionBlockingClient) SendRequestWithPayload(ctx context.Context, _ 
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	emit(upstream.SSEMessage{Type: "model", Event: map[string]interface{}{"type": "text-delta", "delta": "done"}})
-	emit(upstream.SSEMessage{Type: "model", Event: map[string]interface{}{"type": "finish", "finishReason": "stop"}})
+	emit(upstream.SSEMessage{Type: "model", Event: map[string]any{"type": "text-delta", "delta": "done"}})
+	emit(upstream.SSEMessage{Type: "model", Event: map[string]any{"type": "finish", "finishReason": "stop"}})
 	return nil
 }
 

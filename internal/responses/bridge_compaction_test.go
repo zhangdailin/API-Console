@@ -37,16 +37,16 @@ func TestBridgeCompactionRoundTripAndIsolation(t *testing.T) {
 			if compact.Code != 200 || got.Stream || got.ToolChoice != "none" {
 				t.Fatalf("status=%d body=%s request=%#v", compact.Code, compact.Body.String(), got)
 			}
-			var result map[string]interface{}
+			var result map[string]any
 			if err := json.Unmarshal(compact.Body.Bytes(), &result); err != nil {
 				t.Fatal(err)
 			}
-			item := result["output"].([]interface{})[0].(map[string]interface{})
+			item := result["output"].([]any)[0].(map[string]any)
 			if item["type"] != "compaction" || !strings.HasPrefix(item["encrypted_content"].(string), bridgeCompactionPrefix) {
 				t.Fatalf("bad compaction: %v", result)
 			}
-			input := []interface{}{item, map[string]interface{}{"type": "message", "role": "user", "content": "continue"}}
-			body, _ := json.Marshal(map[string]interface{}{"model": "m", "input": input})
+			input := []any{item, map[string]any{"type": "message", "role": "user", "content": "continue"}}
+			body, _ := json.Marshal(map[string]any{"model": "m", "input": input})
 			next := httptest.NewRecorder()
 			ResponsesBridgeHandler(chat, opts)(next, httptest.NewRequest(http.MethodPost, path, strings.NewReader(string(body))))
 			if next.Code != 200 || len(got.Messages) != 2 || !strings.Contains(got.Messages[0].Content.(string), "task A") {
@@ -57,7 +57,7 @@ func TestBridgeCompactionRoundTripAndIsolation(t *testing.T) {
 				if other == path {
 					model = "other-model"
 				}
-				raw, _ := json.Marshal(map[string]interface{}{"model": model, "input": input})
+				raw, _ := json.Marshal(map[string]any{"model": model, "input": input})
 				bad := httptest.NewRecorder()
 				before := calls
 				ResponsesBridgeHandler(chat, opts)(bad, httptest.NewRequest(http.MethodPost, other, strings.NewReader(string(raw))))
@@ -129,11 +129,11 @@ func TestBridgeCompactionOwnerIsolationAndFailures(t *testing.T) {
 	if created.Code != 200 {
 		t.Fatalf("compact=%d %s", created.Code, created.Body.String())
 	}
-	var response map[string]interface{}
+	var response map[string]any
 	if err := json.Unmarshal(created.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	body, _ := json.Marshal(map[string]interface{}{"model": "m", "input": response["output"]})
+	body, _ := json.Marshal(map[string]any{"model": "m", "input": response["output"]})
 	denied := call("owner-b", string(body), ResponsesBridgeHandler(chat, opts))
 	if denied.Code != 400 || calls != 1 {
 		t.Fatalf("owner isolation failed: %d calls=%d", denied.Code, calls)
@@ -151,8 +151,8 @@ func TestBridgeCompactionOwnerIsolationAndFailures(t *testing.T) {
 }
 
 func TestBridgeRejectsNonportableHistory(t *testing.T) {
-	for _, item := range []interface{}{map[string]interface{}{"type": "local_shell_call"}, map[string]interface{}{"type": "reasoning", "encrypted_content": "foreign-token"}, map[string]interface{}{"type": "function_call", "name": "f"}, "bad"} {
-		_, err := InputToMessages([]interface{}{map[string]interface{}{"type": "message", "role": "user", "content": "hi"}, item})
+	for _, item := range []any{map[string]any{"type": "local_shell_call"}, map[string]any{"type": "reasoning", "encrypted_content": "foreign-token"}, map[string]any{"type": "function_call", "name": "f"}, "bad"} {
+		_, err := InputToMessages([]any{map[string]any{"type": "message", "role": "user", "content": "hi"}, item})
 		if err == nil {
 			t.Fatalf("silently accepted history: %v", item)
 		}

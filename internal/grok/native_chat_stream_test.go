@@ -50,10 +50,10 @@ func TestCollectBuildChatSeparatesReasoningFromContent(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	body := `{"id":"resp_1","output":[{"id":"rs_1","type":"reasoning","content":[{"type":"reasoning_text","text":"private plan"}],"summary":[{"type":"summary_text","text":"duplicate summary"}]},{"id":"msg_1","type":"message","content":[{"type":"output_text","text":"public answer"}]}]}`
 	(&Handler{}).collectBuildChat(recorder, &chatwire.Request{Model: "grok-4.3"}, strings.NewReader(body))
-	var response map[string]interface{}
+	var response map[string]any
 	testutil.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-	choice := responses.InterfaceSlice(response["choices"])[0].(map[string]interface{})
-	message := choice["message"].(map[string]interface{})
+	choice := responses.InterfaceSlice(response["choices"])[0].(map[string]any)
+	message := choice["message"].(map[string]any)
 	testutil.Equal(t, message["content"], "public answer")
 	testutil.Equal(t, message["reasoning_content"], "private plan")
 }

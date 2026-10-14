@@ -235,7 +235,7 @@ func preserveRuntimeStateOnAdminEdit(acc, existing *store.Account) {
 // estimated / limitKnown=false, so the number is a sense of scale rather than an
 // official balance, and rate-limit headers stay where they belong (throttling, never
 // a subscription balance).
-func projectQuota(fields map[string]interface{}, acc *store.Account, _, _ float64, observedTokens int64, usageObserved bool) {
+func projectQuota(fields map[string]any, acc *store.Account, _, _ float64, observedTokens int64, usageObserved bool) {
 	weekly := acc.GrokBilling.Weekly
 	monthly := acc.GrokBilling.Monthly
 	fields["quota_mode"] = "unknown"

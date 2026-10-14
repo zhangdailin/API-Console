@@ -18,22 +18,22 @@ import (
 	apperrors "orchids-api/internal/errors"
 )
 
-func anthropicResponseFromChat(model string, chat map[string]interface{}) map[string]interface{} {
-	content := make([]interface{}, 0)
+func anthropicResponseFromChat(model string, chat map[string]any) map[string]any {
+	content := make([]any, 0)
 	stopReason := "end_turn"
 	sawRefusal := false
 	stopSequence := ""
-	choices, _ := chat["choices"].([]interface{})
+	choices, _ := chat["choices"].([]any)
 	if len(choices) > 0 {
-		choice, _ := choices[0].(map[string]interface{})
-		message, _ := choice["message"].(map[string]interface{})
+		choice, _ := choices[0].(map[string]any)
+		message, _ := choice["message"].(map[string]any)
 		stopSequence = chatwire.ParseLooseStringAny(message["stop_sequence"])
 		thinking := strings.TrimSpace(fmt.Sprint(responses.FirstNonNil(message["reasoning_content"], message["reasoning"])))
 		signature := strings.TrimSpace(fmt.Sprint(message["reasoning_encrypted_content"]))
 		if items := responses.InterfaceSlice(message["x_grok_reasoning"]); len(items) > 0 {
 			for _, item := range items {
-				wrapper := map[string]interface{}{"output": []interface{}{item}}
-				content = append(content, map[string]interface{}{"type": "thinking", "thinking": consoleExtractReasoningText(wrapper), "signature": consoleExtractEncryptedReasoning(wrapper)})
+				wrapper := map[string]any{"output": []any{item}}
+				content = append(content, map[string]any{"type": "thinking", "thinking": consoleExtractReasoningText(wrapper), "signature": consoleExtractEncryptedReasoning(wrapper)})
 			}
 			thinking = ""
 			signature = ""
@@ -47,32 +47,32 @@ func anthropicResponseFromChat(model string, chat map[string]interface{}) map[st
 			signature = ""
 		}
 		if thinking != "" || signature != "" {
-			block := map[string]interface{}{"type": "thinking", "thinking": thinking}
+			block := map[string]any{"type": "thinking", "thinking": thinking}
 			if signature != "" {
 				block["signature"] = signature
 			}
 			content = append(content, block)
 		}
 		for _, raw := range responses.InterfaceSlice(message["x_grok_searches"]) {
-			item, _ := raw.(map[string]interface{})
+			item, _ := raw.(map[string]any)
 			content = append(content, searchContent(item)...)
 		}
 		if text, ok := message["content"].(string); ok && text != "" {
-			block := map[string]interface{}{"type": "text", "text": text}
+			block := map[string]any{"type": "text", "text": text}
 			if citations := chatCitations(responses.InterfaceSlice(message["annotations"])); len(citations) > 0 {
 				block["citations"] = citations
 			}
 			content = append(content, block)
 		}
-		toolCalls, _ := message["tool_calls"].([]interface{})
+		toolCalls, _ := message["tool_calls"].([]any)
 		if refusal := responses.StreamString(message["refusal"]); refusal != "" {
-			content = append(content, map[string]interface{}{"type": "text", "text": refusal})
+			content = append(content, map[string]any{"type": "text", "text": refusal})
 			sawRefusal = true
 		}
 		for _, raw := range toolCalls {
-			call, _ := raw.(map[string]interface{})
-			fn, _ := call["function"].(map[string]interface{})
-			input := interface{}(map[string]interface{}{})
+			call, _ := raw.(map[string]any)
+			fn, _ := call["function"].(map[string]any)
+			input := any(map[string]any{})
 			switch args := fn["arguments"].(type) {
 			case string:
 				_ = json.Unmarshal([]byte(args), &input)
@@ -80,7 +80,7 @@ func anthropicResponseFromChat(model string, chat map[string]interface{}) map[st
 			default:
 				input = args
 			}
-			content = append(content, map[string]interface{}{
+			content = append(content, map[string]any{
 				"type": "tool_use", "id": call["id"], "name": fn["name"], "input": input,
 			})
 		}
@@ -93,10 +93,10 @@ func anthropicResponseFromChat(model string, chat map[string]interface{}) map[st
 		stopReason = "stop_sequence"
 	}
 	if len(content) == 0 {
-		content = append(content, map[string]interface{}{"type": "text", "text": ""})
+		content = append(content, map[string]any{"type": "text", "text": ""})
 	}
-	usage, _ := chat["usage"].(map[string]interface{})
-	return map[string]interface{}{
+	usage, _ := chat["usage"].(map[string]any)
+	return map[string]any{
 		// The id the Chat Completions layer produced is a chatcmpl_* value; the
 		// Anthropic contract uses msg_*. Handing the caller a chatcmpl_ message
 		// id broke every client that validates the prefix and lost the upstream
@@ -142,15 +142,15 @@ func openAIFinishToAnthropic(value string) string {
 	}
 }
 
-func anthropicUsageFromOpenAI(usage map[string]interface{}) map[string]interface{} {
+func anthropicUsageFromOpenAI(usage map[string]any) map[string]any {
 	input := max(0, responses.InterfaceToInt(usage["prompt_tokens"]))
 	cached := 0
-	if details, ok := usage["prompt_tokens_details"].(map[string]interface{}); ok {
+	if details, ok := usage["prompt_tokens_details"].(map[string]any); ok {
 		cached = max(0, responses.InterfaceToInt(details["cached_tokens"]))
 	}
 	cached = min(cached, input)
 	output := max(0, responses.InterfaceToInt(usage["completion_tokens"]))
-	result := map[string]interface{}{
+	result := map[string]any{
 		"input_tokens": input - cached,
 		// Anthropic reports both cache counters unconditionally, with 0 meaning
 		// "no cache". Omitting them made a caller unable to tell "no cache" from
@@ -160,10 +160,10 @@ func anthropicUsageFromOpenAI(usage map[string]interface{}) map[string]interface
 		"output_tokens":               output,
 	}
 	reasoning := 0
-	if details, ok := usage["completion_tokens_details"].(map[string]interface{}); ok {
+	if details, ok := usage["completion_tokens_details"].(map[string]any); ok {
 		reasoning = max(0, responses.InterfaceToInt(details["reasoning_tokens"]))
 	}
-	result["output_tokens_details"] = map[string]interface{}{
+	result["output_tokens_details"] = map[string]any{
 		"thinking_tokens": min(output, reasoning),
 	}
 	if cost := responses.InterfaceToInt(usage["cost_in_usd_ticks"]); cost > 0 {
@@ -201,7 +201,7 @@ type anthropicStreamState struct {
 	thinkIndex       int
 	toolIndexes      map[int]int
 	open             map[int]bool
-	usage            map[string]interface{}
+	usage            map[string]any
 	stopReason       string
 	stopSequence     string
 	reasoningID      string
@@ -228,12 +228,12 @@ func translateOpenAIChatStreamToAnthropicWithInput(w io.Writer, reader io.Reader
 		// Upstream usage arrives on the terminal chunk, after message_start. The
 		// request is already parsed here, so seed Anthropic's required input/cache
 		// counters from the same conservative estimator used by chat fallback.
-		usage:    anthropicUsageFromOpenAI(map[string]interface{}{"prompt_tokens": max(0, inputTokens), "completion_tokens": 0}),
+		usage:    anthropicUsageFromOpenAI(map[string]any{"prompt_tokens": max(0, inputTokens), "completion_tokens": 0}),
 		searches: map[string]*messageSearchState{}, citations: map[string]bool{},
 	}
-	writeAnthropicSSE(w, "message_start", map[string]interface{}{
-		"type": "message_start", "message": map[string]interface{}{"id": state.id, "type": "message", "role": "assistant", "model": model, "created_at": time.Now().Unix(),
-			"content": []interface{}{}, "stop_reason": nil, "stop_sequence": nil, "usage": state.usage},
+	writeAnthropicSSE(w, "message_start", map[string]any{
+		"type": "message_start", "message": map[string]any{"id": state.id, "type": "message", "role": "assistant", "model": model, "created_at": time.Now().Unix(),
+			"content": []any{}, "stop_reason": nil, "stop_sequence": nil, "usage": state.usage},
 	})
 	if tracked.Err != nil {
 		return tracked.Err
@@ -249,21 +249,21 @@ func translateOpenAIChatStreamToAnthropicWithInput(w io.Writer, reader io.Reader
 			}
 			return io.EOF
 		}
-		var chunk map[string]interface{}
+		var chunk map[string]any
 		if err := json.Unmarshal(data, &chunk); err != nil {
 			return fmt.Errorf("invalid chat SSE: %w", err)
 		}
 		if chunk["error"] != nil || event == "error" {
 			return responses.Failure(chunk)
 		}
-		if usage, ok := chunk["usage"].(map[string]interface{}); ok {
+		if usage, ok := chunk["usage"].(map[string]any); ok {
 			state.usage = anthropicUsageFromOpenAI(usage)
 		}
 		for _, rawChoice := range responses.InterfaceSlice(chunk["choices"]) {
-			choice, _ := rawChoice.(map[string]interface{})
-			delta, _ := choice["delta"].(map[string]interface{})
+			choice, _ := rawChoice.(map[string]any)
+			delta, _ := choice["delta"].(map[string]any)
 			if len(delta) == 0 {
-				delta, _ = choice["message"].(map[string]interface{})
+				delta, _ = choice["message"].(map[string]any)
 			}
 			if key := chatwire.ParseLooseStringAny(delta["reasoning_item_id"]); key != "" && key != state.reasoningID {
 				state.detachThinking(w)
@@ -278,7 +278,7 @@ func translateOpenAIChatStreamToAnthropicWithInput(w io.Writer, reader io.Reader
 			if done, _ := delta["reasoning_done"].(bool); done && state.thinkIndex >= 0 {
 				state.detachThinking(w)
 			}
-			if item, ok := delta["x_grok_search"].(map[string]interface{}); ok {
+			if item, ok := delta["x_grok_search"].(map[string]any); ok {
 				done, _ := delta["x_grok_search_done"].(bool)
 				state.writeSearch(w, item, done)
 			}
@@ -316,7 +316,7 @@ func translateOpenAIChatStreamToAnthropicWithInput(w io.Writer, reader io.Reader
 	}
 	if err != nil {
 		if tracked.Err == nil {
-			writeAnthropicSSE(w, "error", map[string]interface{}{"type": "error", "error": map[string]interface{}{"type": "api_error", "message": err.Error()}})
+			writeAnthropicSSE(w, "error", map[string]any{"type": "error", "error": map[string]any{"type": "api_error", "message": err.Error()}})
 		}
 		return err
 	}
@@ -327,11 +327,11 @@ func translateOpenAIChatStreamToAnthropicWithInput(w io.Writer, reader io.Reader
 	return tracked.Err
 }
 
-func (s *anthropicStreamState) startBlock(w io.Writer, block map[string]interface{}) int {
+func (s *anthropicStreamState) startBlock(w io.Writer, block map[string]any) int {
 	index := s.nextIndex
 	s.nextIndex++
 	s.open[index] = true
-	writeAnthropicSSE(w, "content_block_start", map[string]interface{}{
+	writeAnthropicSSE(w, "content_block_start", map[string]any{
 		"type": "content_block_start", "index": index, "content_block": block,
 	})
 	return index
@@ -341,7 +341,7 @@ func (s *anthropicStreamState) closeBlock(w io.Writer, index int) {
 	if !s.open[index] {
 		return
 	}
-	writeAnthropicSSE(w, "content_block_stop", map[string]interface{}{"type": "content_block_stop", "index": index})
+	writeAnthropicSSE(w, "content_block_stop", map[string]any{"type": "content_block_stop", "index": index})
 	delete(s.open, index)
 }
 
@@ -368,9 +368,9 @@ func (s *anthropicStreamState) detachThinking(w io.Writer) {
 func (s *anthropicStreamState) writeText(w io.Writer, text string) {
 	s.detachThinking(w)
 	if s.textIndex < 0 {
-		s.textIndex = s.startBlock(w, map[string]interface{}{"type": "text", "text": ""})
+		s.textIndex = s.startBlock(w, map[string]any{"type": "text", "text": ""})
 	}
-	writeAnthropicContentBlockDelta(w, s.textIndex, map[string]interface{}{"type": "text_delta", "text": text})
+	writeAnthropicContentBlockDelta(w, s.textIndex, map[string]any{"type": "text_delta", "text": text})
 }
 
 func (s *anthropicStreamState) writeThinkingDelta(w io.Writer, deltaType, field, value string) {
@@ -385,7 +385,7 @@ func (s *anthropicStreamState) writeThinkingDelta(w io.Writer, deltaType, field,
 			}
 			s.thinkIndex = index
 		} else {
-			s.thinkIndex = s.startBlock(w, map[string]interface{}{"type": "thinking", "thinking": "", "signature": ""})
+			s.thinkIndex = s.startBlock(w, map[string]any{"type": "thinking", "thinking": "", "signature": ""})
 			if s.reasoningID != "" {
 				s.reasoningIndexes[s.reasoningID] = s.thinkIndex
 			}
@@ -397,13 +397,13 @@ func (s *anthropicStreamState) writeThinkingDelta(w io.Writer, deltaType, field,
 		}
 		s.reasoningSigned[s.thinkIndex] = true
 	}
-	writeAnthropicContentBlockDelta(w, s.thinkIndex, map[string]interface{}{"type": deltaType, field: value})
+	writeAnthropicContentBlockDelta(w, s.thinkIndex, map[string]any{"type": deltaType, field: value})
 }
 
-func (s *anthropicStreamState) writeToolCall(w io.Writer, raw interface{}) error {
-	call, _ := raw.(map[string]interface{})
+func (s *anthropicStreamState) writeToolCall(w io.Writer, raw any) error {
+	call, _ := raw.(map[string]any)
 	callIndex := responses.InterfaceToInt(call["index"])
-	fn, _ := call["function"].(map[string]interface{})
+	fn, _ := call["function"].(map[string]any)
 	blockIndex, exists := s.toolIndexes[callIndex]
 	if !exists {
 		s.closeTextualBlocks(w)
@@ -418,18 +418,18 @@ func (s *anthropicStreamState) writeToolCall(w io.Writer, raw interface{}) error
 			return fmt.Errorf("duplicate tool call id %q", id)
 		}
 		s.toolIDs[id] = callIndex
-		blockIndex = s.startBlock(w, map[string]interface{}{"type": "tool_use", "id": id, "name": name, "input": map[string]interface{}{}})
+		blockIndex = s.startBlock(w, map[string]any{"type": "tool_use", "id": id, "name": name, "input": map[string]any{}})
 		s.toolIndexes[callIndex] = blockIndex
 	}
 	if args := responses.StreamString(fn["arguments"]); args != "" {
-		writeAnthropicContentBlockDelta(w, blockIndex, map[string]interface{}{"type": "input_json_delta", "partial_json": args})
+		writeAnthropicContentBlockDelta(w, blockIndex, map[string]any{"type": "input_json_delta", "partial_json": args})
 	}
 	return nil
 }
 
 func (s *anthropicStreamState) finish(w io.Writer) {
 	if len(s.searches) > 0 {
-		s.usage["server_tool_use"] = map[string]interface{}{"web_search_requests": len(s.searches)}
+		s.usage["server_tool_use"] = map[string]any{"web_search_requests": len(s.searches)}
 	}
 	// Closing every open block must happen in index order, and closeBlock mutates
 	// s.open, so the keys are collected before the loop walks them.
@@ -443,22 +443,22 @@ func (s *anthropicStreamState) finish(w io.Writer) {
 			s.stopReason = "end_turn"
 		}
 	}
-	writeAnthropicSSE(w, "message_delta", map[string]interface{}{
-		"type": "message_delta", "delta": map[string]interface{}{"stop_reason": s.stopReason, "stop_sequence": nullableProtocolString(s.stopSequence)},
+	writeAnthropicSSE(w, "message_delta", map[string]any{
+		"type": "message_delta", "delta": map[string]any{"stop_reason": s.stopReason, "stop_sequence": nullableProtocolString(s.stopSequence)},
 		"usage": s.usage,
 	})
-	writeAnthropicSSE(w, "message_stop", map[string]interface{}{"type": "message_stop"})
+	writeAnthropicSSE(w, "message_stop", map[string]any{"type": "message_stop"})
 }
 
 // writeAnthropicContentBlockDelta frames one content_block_delta event; every
 // streamed text, thinking and tool-argument delta shares this envelope.
-func writeAnthropicContentBlockDelta(w io.Writer, index int, delta map[string]interface{}) {
-	writeAnthropicSSE(w, "content_block_delta", map[string]interface{}{
+func writeAnthropicContentBlockDelta(w io.Writer, index int, delta map[string]any) {
+	writeAnthropicSSE(w, "content_block_delta", map[string]any{
 		"type": "content_block_delta", "index": index, "delta": delta,
 	})
 }
 
-func writeAnthropicSSE(w io.Writer, event string, payload interface{}) {
+func writeAnthropicSSE(w io.Writer, event string, payload any) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return
@@ -474,8 +474,8 @@ func writeAnthropicSSE(w io.Writer, event string, payload interface{}) {
 }
 
 func writeAnthropicModelNotFound(w http.ResponseWriter, model string) {
-	util.WriteJSONStatus(w, http.StatusNotFound, map[string]interface{}{
-		"type": "error", "error": map[string]interface{}{"type": "not_found_error", "message": modelNotFoundMessage(model)},
+	util.WriteJSONStatus(w, http.StatusNotFound, map[string]any{
+		"type": "error", "error": map[string]any{"type": "not_found_error", "message": modelNotFoundMessage(model)},
 	})
 }
 
@@ -518,9 +518,9 @@ func anthropicErrorCode(status int) string {
 }
 
 func writeAnthropicError(w http.ResponseWriter, status int, message string) {
-	util.WriteJSONStatus(w, status, map[string]interface{}{
+	util.WriteJSONStatus(w, status, map[string]any{
 		"type": "error",
-		"error": map[string]interface{}{
+		"error": map[string]any{
 			"type":    anthropicErrorType(status),
 			"code":    anthropicErrorCode(status),
 			"message": message,

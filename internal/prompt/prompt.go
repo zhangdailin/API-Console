@@ -31,15 +31,15 @@ type ContentBlock struct {
 	URL       string       `json:"url,omitempty"`
 
 	// tool_use fields
-	ID        string      `json:"id,omitempty"`
-	Name      string      `json:"name,omitempty"`
-	Input     interface{} `json:"input,omitempty"`
-	Thinking  string      `json:"thinking,omitempty"`
-	Signature string      `json:"signature,omitempty"`
+	ID        string `json:"id,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Input     any    `json:"input,omitempty"`
+	Thinking  string `json:"thinking,omitempty"`
+	Signature string `json:"signature,omitempty"`
 
 	// tool_result fields
 	ToolUseID    string        `json:"tool_use_id,omitempty"`
-	Content      interface{}   `json:"content,omitempty"`
+	Content      any           `json:"content,omitempty"`
 	IsError      bool          `json:"is_error,omitempty"`
 	CacheControl *CacheControl `json:"cache_control,omitempty"`
 }
@@ -227,25 +227,25 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func decodeOpenAIToolArguments(raw string) interface{} {
+func decodeOpenAIToolArguments(raw string) any {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return map[string]interface{}{}
+		return map[string]any{}
 	}
 
-	var value interface{}
+	var value any
 	if err := json.Unmarshal([]byte(trimmed), &value); err == nil {
 		switch typed := value.(type) {
 		case nil:
-			return map[string]interface{}{}
-		case map[string]interface{}:
+			return map[string]any{}
+		case map[string]any:
 			return typed
 		default:
-			return map[string]interface{}{"value": typed}
+			return map[string]any{"value": typed}
 		}
 	}
 
-	return map[string]interface{}{"raw": trimmed}
+	return map[string]any{"raw": trimmed}
 }
 
 // SystemItem is one entry of the system prompt.

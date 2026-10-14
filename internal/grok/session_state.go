@@ -28,7 +28,7 @@ type sessionAffinityEntry struct {
 }
 
 type reasoningReplayEntry struct {
-	Items     []interface{}
+	Items     []any
 	ExpiresAt time.Time
 }
 
@@ -230,7 +230,7 @@ func replayMapKey(model, key string) string {
 }
 
 // loadReasoningReplayItems returns the normalized replay items for a session.
-func (h *Handler) loadReasoningReplayItems(model, key string) []interface{} {
+func (h *Handler) loadReasoningReplayItems(model, key string) []any {
 	if h == nil || strings.TrimSpace(key) == "" {
 		return nil
 	}
@@ -282,13 +282,13 @@ func (h *Handler) loadReasoningReplayItems(model, key string) []interface{} {
 }
 
 // replayItemsFromStored reads current normalized item lists only.
-func replayItemsFromStored(persisted *store.StoredReasoningReplay) []interface{} {
+func replayItemsFromStored(persisted *store.StoredReasoningReplay) []any {
 	if persisted == nil {
 		return nil
 	}
-	items := make([]interface{}, 0, len(persisted.Items))
+	items := make([]any, 0, len(persisted.Items))
 	for _, raw := range persisted.Items {
-		var item map[string]interface{}
+		var item map[string]any
 		if json.Unmarshal(raw, &item) == nil && item != nil {
 			items = append(items, item)
 		}
@@ -296,12 +296,12 @@ func replayItemsFromStored(persisted *store.StoredReasoningReplay) []interface{}
 	return items
 }
 
-func reasoningReplayItem(encrypted string) map[string]interface{} {
-	return map[string]interface{}{"type": "reasoning", "summary": []interface{}{}, "encrypted_content": encrypted}
+func reasoningReplayItem(encrypted string) map[string]any {
+	return map[string]any{"type": "reasoning", "summary": []any{}, "encrypted_content": encrypted}
 }
 
 // storeReasoningReplayItems persists a normalized item list for a session.
-func (h *Handler) storeReasoningReplayItems(model, key string, items []interface{}) {
+func (h *Handler) storeReasoningReplayItems(model, key string, items []any) {
 	if h == nil || strings.TrimSpace(key) == "" || len(items) == 0 {
 		return
 	}
@@ -350,7 +350,7 @@ func (h *Handler) storeReasoningReplayItems(model, key string, items []interface
 // cloneReplayItems prevents request normalizers from mutating cached maps that
 // another request may be reading. Replay values are already JSON-compatible,
 // making a JSON round trip a compact and reliable deep copy.
-func cloneReplayItems(items []interface{}) []interface{} {
+func cloneReplayItems(items []any) []any {
 	if len(items) == 0 {
 		return nil
 	}
@@ -358,7 +358,7 @@ func cloneReplayItems(items []interface{}) []interface{} {
 	if err != nil {
 		return nil
 	}
-	var cloned []interface{}
+	var cloned []any
 	if json.Unmarshal(raw, &cloned) != nil {
 		return nil
 	}
@@ -371,7 +371,7 @@ func (h *Handler) storeReasoningReplay(model, key, encrypted string) {
 	if !validReplayCipher(encrypted) {
 		return
 	}
-	h.storeReasoningReplayItems(model, key, []interface{}{reasoningReplayItem(encrypted)})
+	h.storeReasoningReplayItems(model, key, []any{reasoningReplayItem(encrypted)})
 }
 
 func validReplayCipher(value string) bool {
@@ -396,7 +396,7 @@ func validReplayCipher(value string) bool {
 	return entropy/math.Log2(float64(min(len(decoded), 256))) >= 0.85
 }
 
-func (h *Handler) applyNativeReasoningReplay(model, key string, payload map[string]interface{}) {
+func (h *Handler) applyNativeReasoningReplay(model, key string, payload map[string]any) {
 	if h == nil || payload == nil || strings.TrimSpace(chatwire.ParseLooseStringAny(payload["previous_response_id"])) != "" {
 		return
 	}
@@ -404,11 +404,11 @@ func (h *Handler) applyNativeReasoningReplay(model, key string, payload map[stri
 	if len(items) == 0 {
 		return
 	}
-	input, ok := payload["input"].([]interface{})
+	input, ok := payload["input"].([]any)
 	if !ok {
 		if text, textOK := payload["input"].(string); textOK && strings.TrimSpace(text) != "" {
-			input = []interface{}{map[string]interface{}{
-				"type": "message", "role": "user", "content": []interface{}{map[string]interface{}{"type": "input_text", "text": text}},
+			input = []any{map[string]any{
+				"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": text}},
 			}}
 		} else {
 			return
@@ -427,7 +427,7 @@ func (h *Handler) applyNativeReasoningReplay(model, key string, payload map[stri
 	ensureReasoningEncryptedInclude(payload)
 }
 
-func ensureReasoningEncryptedInclude(payload map[string]interface{}) {
+func ensureReasoningEncryptedInclude(payload map[string]any) {
 	includes := responses.InterfaceSlice(payload["include"])
 	for _, value := range includes {
 		if strings.EqualFold(strings.TrimSpace(fmt.Sprint(value)), "reasoning.encrypted_content") {
@@ -454,15 +454,15 @@ func (h *Handler) clearReasoningReplay(ctx context.Context, model, key string) {
 	}
 }
 
-func stripInjectedReasoningReplay(payload map[string]interface{}) bool {
-	input, ok := payload["input"].([]interface{})
+func stripInjectedReasoningReplay(payload map[string]any) bool {
+	input, ok := payload["input"].([]any)
 	if !ok {
 		return false
 	}
 	changed := false
-	next := make([]interface{}, 0, len(input))
+	next := make([]any, 0, len(input))
 	for _, raw := range input {
-		item, _ := raw.(map[string]interface{})
+		item, _ := raw.(map[string]any)
 		if item != nil && strings.EqualFold(chatwire.ParseLooseStringAny(item["type"]), "compaction") {
 			next = append(next, raw)
 			continue
@@ -470,15 +470,15 @@ func stripInjectedReasoningReplay(payload map[string]interface{}) bool {
 		if item != nil && strings.EqualFold(chatwire.ParseLooseStringAny(item["type"]), "reasoning") && chatwire.ParseLooseStringAny(item["encrypted_content"]) != "" {
 			// A reasoning item without its proof is not portable. Preserve its
 			// readable summary as an ordinary assistant message instead.
-			parts := []interface{}{}
+			parts := []any{}
 			for _, summary := range responses.InterfaceMaps(item["summary"]) {
 				if value := chatwire.ParseLooseStringAny(summary["text"]); value != "" {
-					parts = append(parts, map[string]interface{}{"type": "output_text", "text": value})
+					parts = append(parts, map[string]any{"type": "output_text", "text": value})
 				}
 			}
 			changed = true
 			if len(parts) > 0 {
-				next = append(next, map[string]interface{}{"type": "message", "role": "assistant", "content": parts})
+				next = append(next, map[string]any{"type": "message", "role": "assistant", "content": parts})
 			}
 			continue
 		}
@@ -515,17 +515,17 @@ func isCompactionBlobDecodeError(err error) bool {
 // compaction rejection when the request actually carried a compaction item.
 // A plain encrypted-content rejection stays recoverable even then, because the
 // recovery only rewrites reasoning items and never compaction state.
-func preservesClientCompaction(payload map[string]interface{}, err error) bool {
+func preservesClientCompaction(payload map[string]any, err error) bool {
 	return payloadHasCompactionInput(payload) && isCompactionBlobDecodeError(err)
 }
 
-func payloadHasCompactionInput(payload map[string]interface{}) bool {
-	input, ok := payload["input"].([]interface{})
+func payloadHasCompactionInput(payload map[string]any) bool {
+	input, ok := payload["input"].([]any)
 	if !ok {
 		return false
 	}
 	for _, raw := range input {
-		if item, ok := raw.(map[string]interface{}); ok && strings.EqualFold(chatwire.ParseLooseStringAny(item["type"]), "compaction") {
+		if item, ok := raw.(map[string]any); ok && strings.EqualFold(chatwire.ParseLooseStringAny(item["type"]), "compaction") {
 			return true
 		}
 	}

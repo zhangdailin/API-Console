@@ -95,7 +95,7 @@ func TestBuildPreviousResponsePinsCreatingAccount(t *testing.T) {
 	}
 	first := request(`{"model":"grok-4.6","input":"first","stream":false}`)
 	testutil.Equal(t, first.Code, http.StatusOK)
-	var firstBody map[string]interface{}
+	var firstBody map[string]any
 	_ = json.Unmarshal(first.Body.Bytes(), &firstBody)
 	second := request(`{"model":"grok-4.6","input":"second","stream":false,"previous_response_id":"` + chatwire.ParseLooseStringAny(firstBody["id"]) + `"}`)
 	testutil.Equal(t, second.Code, http.StatusOK)
@@ -105,7 +105,7 @@ func TestBuildPreviousResponsePinsCreatingAccount(t *testing.T) {
 func TestResponsesCompactForcesNonStreamingNativeEndpoint(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		testutil.Equal(t, r.URL.Path, "/v1/responses/compact")
-		var payload map[string]interface{}
+		var payload map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&payload)
 		if stream, _ := payload["stream"].(bool); stream {
 			t.Fatal("compact request remained streaming")

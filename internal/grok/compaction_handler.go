@@ -46,7 +46,7 @@ func (h *Handler) GatewayCompactionEnabled() bool { return h.compactionCodecSnap
 // The summary turn is retried on another account for transient failures only. A
 // degenerate or malformed summary and any 4xx describe the request, so repeating
 // them would burn another full summary generation for the same answer.
-func (h *Handler) handleGatewayCompaction(w http.ResponseWriter, r *http.Request, modelID string, spec ModelSpec, payload map[string]interface{}, streaming bool) {
+func (h *Handler) handleGatewayCompaction(w http.ResponseWriter, r *http.Request, modelID string, spec ModelSpec, payload map[string]any, streaming bool) {
 	codec := h.compactionCodecSnapshot()
 	if !codec.Available() {
 		writeResponsesAPIError(w, http.StatusServiceUnavailable, "service_unavailable", "gateway compaction is not configured")
@@ -153,11 +153,11 @@ func (h *Handler) handleGatewayCompaction(w http.ResponseWriter, r *http.Request
 
 // auditGatewayCompaction records the gateway-owned compaction turn. Token counts
 // come from the summary turn the gateway itself ran, so the source is upstream.
-func (h *Handler) auditGatewayCompaction(ctx context.Context, accountID int64, modelID string, result map[string]interface{}) {
+func (h *Handler) auditGatewayCompaction(ctx context.Context, accountID int64, modelID string, result map[string]any) {
 	if h == nil || h.auditLogger == nil {
 		return
 	}
-	usage, _ := result["usage"].(map[string]interface{})
+	usage, _ := result["usage"].(map[string]any)
 	h.auditLogger.Log(ctx, audit.Event{
 		Kind: audit.KindRequest, RequestID: middleware.GetRequestID(ctx), Action: "grok_compaction",
 		APIKeyID: middleware.APIKeyID(ctx), AccountID: accountID, Model: modelID,
@@ -192,7 +192,7 @@ func compactionErrorParam(err error) string {
 
 // responsesPayloadStreaming reports whether the caller asked for SSE. The parsed
 // request is authoritative when the raw payload omitted the field.
-func responsesPayloadStreaming(payload map[string]interface{}, fallback bool) bool {
+func responsesPayloadStreaming(payload map[string]any, fallback bool) bool {
 	if value, ok := payload["stream"].(bool); ok {
 		return value
 	}

@@ -15,7 +15,7 @@ import (
 func TestBuildBodyResponsesParallelToolFollowup(t *testing.T) {
 	// Codex sends one Responses item per parallel call, followed by all results.
 	// Replay its bridge conversion, not an already grouped Chat history.
-	var input interface{}
+	var input any
 	testutil.NoError(t, json.Unmarshal([]byte(`[
 		{"role":"user","content":"Read three files"},
 		{"type":"reasoning","summary":[{"text":"Inspect the files."}]},
@@ -61,7 +61,7 @@ func TestBuildBodyResponsesParallelToolFollowup(t *testing.T) {
 
 func TestBuildMessagesKeepsToolTurnAndUserBoundaries(t *testing.T) {
 	call := func(id string) prompt.Message {
-		return prompt.Message{Role: "assistant", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{{Type: "tool_use", ID: id, Name: "read_file", Input: map[string]interface{}{"path": id}}}}}
+		return prompt.Message{Role: "assistant", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{{Type: "tool_use", ID: id, Name: "read_file", Input: map[string]any{"path": id}}}}}
 	}
 	result := func(id string) prompt.Message {
 		return prompt.Message{Role: "user", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{{Type: "tool_result", ToolUseID: id, Content: id + " result"}}}}
@@ -111,7 +111,7 @@ func TestBuildMessagesMergesInterleavedSystemWithoutLosingTools(t *testing.T) {
 			roleMessage(t, "developer", "second instruction"),
 			userMessage(t, "question one"),
 			roleMessage(t, "system", "third instruction"),
-			{Role: "assistant", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{{Type: "tool_use", ID: "call-one", Name: "read_file", Input: map[string]interface{}{"path": "file.txt"}}}}},
+			{Role: "assistant", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{{Type: "tool_use", ID: "call-one", Name: "read_file", Input: map[string]any{"path": "file.txt"}}}}},
 			{Role: "user", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{{Type: "tool_result", ToolUseID: "call-one", Content: "file result"}}}},
 			userMessage(t, "question two"),
 		},
@@ -138,7 +138,7 @@ func TestBuildMessages_KeepsSystemItemsAndToolResults(t *testing.T) {
 		Messages: []prompt.Message{{
 			Role: "assistant",
 			Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{
-				{Type: "tool_use", ID: "toolu_1", Name: "run", Input: map[string]interface{}{}},
+				{Type: "tool_use", ID: "toolu_1", Name: "run", Input: map[string]any{}},
 			}},
 		}, {
 			Role: "user",
@@ -307,7 +307,7 @@ func TestBuildMessagesCodexMarkerFallbackAndHistoryPreservation(t *testing.T) {
 			userMessage(t, marker),
 			{Role: "assistant", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{
 				{Type: "text", Text: marker},
-				{Type: "tool_use", ID: "call-codex", Name: "read_file", Input: map[string]interface{}{"path": "README.md"}},
+				{Type: "tool_use", ID: "call-codex", Name: "read_file", Input: map[string]any{"path": "README.md"}},
 			}}},
 			{Role: "user", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{
 				{Type: "tool_result", ToolUseID: "call-codex", Content: marker},

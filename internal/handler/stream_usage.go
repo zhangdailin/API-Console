@@ -34,7 +34,7 @@ func (h *streamHandler) finalizeOutputTokens() {
 // applyUpstreamUsageTokens folds one provider usage payload into the reported
 // totals under one lock. Omitted fields keep their local estimates; metadata
 // alone still counts as provider usage evidence.
-func (h *streamHandler) applyUpstreamUsageTokens(usage map[string]interface{}) {
+func (h *streamHandler) applyUpstreamUsageTokens(usage map[string]any) {
 	if len(usage) == 0 {
 		return
 	}
@@ -85,7 +85,7 @@ func (h *streamHandler) applyUpstreamUsageTokens(usage map[string]interface{}) {
 	}
 	if hasCredits || hasOriginalCredits || hasMetadata {
 		if h.usageMetadata == nil {
-			h.usageMetadata = make(map[string]interface{}, 7)
+			h.usageMetadata = make(map[string]any, 7)
 		}
 		for _, key := range metadataKeys {
 			if value, ok := usage[key]; ok {
@@ -101,7 +101,7 @@ func (h *streamHandler) applyUpstreamUsageTokens(usage map[string]interface{}) {
 	}
 }
 
-func getUsageIntValue(usage map[string]interface{}, key string) (int, bool) {
+func getUsageIntValue(usage map[string]any, key string) (int, bool) {
 	value, ok := usage[key]
 	if !ok {
 		return 0, false

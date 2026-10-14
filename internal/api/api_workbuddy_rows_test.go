@@ -52,13 +52,13 @@ func TestHandleAccounts_WorkBuddyRowCarriesTierAndQuota(t *testing.T) {
 	a.HandleAccounts(rec, httptest.NewRequest(http.MethodGet, "/api/accounts", nil))
 	testutil.Equal(t, rec.Code, http.StatusOK)
 
-	var rows []map[string]interface{}
+	var rows []map[string]any
 	err := json.Unmarshal(rec.Body.Bytes(), &rows)
 	testutil.CheckNoError(t, err)
 	testutil.Equal(t, len(rows), 1)
 	row := rows[0]
 	testutil.Equal(t, row["email"], "operator@example.com")
-	for key, want := range map[string]interface{}{
+	for key, want := range map[string]any{
 		"quota_plan":      "Free Plan Subscription",
 		"quota_supported": true,
 		"quota_limit":     250.0,
@@ -68,7 +68,7 @@ func TestHandleAccounts_WorkBuddyRowCarriesTierAndQuota(t *testing.T) {
 	}
 	used, ok := row["quota_used"].(float64)
 	testutil.Falsef(t, !ok || math.Abs(used-202.72) > 0.01, "quota_used = %v", row["quota_used"])
-	quota, ok := row["workbuddy_quota"].(map[string]interface{})
+	quota, ok := row["workbuddy_quota"].(map[string]any)
 	testutil.True(t, ok, "workbuddy_quota = %v, want the meter snapshot")
 	testutil.Falsef(t, quota["package_name"] != "Free Plan Subscription" || quota["synced_at"] == nil, "workbuddy_quota = %v, want the package label and a sync timestamp", quota)
 	if row["workbuddy_refresh_token"] != nil {
@@ -103,11 +103,11 @@ func TestHandleAccounts_GrokRowCarriesSnapshotTimestamp(t *testing.T) {
 	rec := httptest.NewRecorder()
 	a.HandleAccounts(rec, httptest.NewRequest(http.MethodGet, "/api/accounts", nil))
 	testutil.Equal(t, rec.Code, http.StatusOK)
-	var rows []map[string]interface{}
+	var rows []map[string]any
 	testutil.NoError(t, json.Unmarshal(rec.Body.Bytes(), &rows), "decode: %v")
 	testutil.Equal(t, len(rows), 1)
 	row := rows[0]
-	billing, ok := row["grok_billing"].(map[string]interface{})
+	billing, ok := row["grok_billing"].(map[string]any)
 	if !ok || billing["synced_at"] == nil {
 		t.Fatalf("Grok Build row is missing grok_billing.synced_at: %v", row["grok_billing"])
 	}

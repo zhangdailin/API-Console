@@ -13,15 +13,15 @@ import (
 func responsesSearchRequest() responses.CreateRequest {
 	return responses.CreateRequest{
 		Model: "grok-4.20-0309",
-		Input: []interface{}{
-			map[string]interface{}{"type": "message", "role": "user", "content": []interface{}{
-				map[string]interface{}{"type": "input_text", "text": "今天有什么新闻"},
+		Input: []any{
+			map[string]any{"type": "message", "role": "user", "content": []any{
+				map[string]any{"type": "input_text", "text": "今天有什么新闻"},
 			}},
 		},
-		Tools: []map[string]interface{}{
+		Tools: []map[string]any{
 			{"type": "web_search"},
 			{"type": "x_search"},
-			{"type": "function", "name": "lookup", "parameters": map[string]interface{}{"type": "object"}},
+			{"type": "function", "name": "lookup", "parameters": map[string]any{"type": "object"}},
 		},
 	}
 }
@@ -73,10 +73,10 @@ func TestBuildPayloadForResponsesBridge_AdvertisesHostedSearchTools(t *testing.T
 }
 
 func TestNormalizeBuildResponsesPayloadCompletesWebSearchRoute(t *testing.T) {
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"model": "grok-4.7",
 		"input": "search",
-		"tools": []interface{}{map[string]interface{}{"type": "web_search"}},
+		"tools": []any{map[string]any{"type": "web_search"}},
 	}
 	testutil.NoError(t, normalizeBuildResponsesPayload(payload))
 	declared := map[string]int{}
@@ -88,10 +88,10 @@ func TestNormalizeBuildResponsesPayloadCompletesWebSearchRoute(t *testing.T) {
 }
 
 func TestNormalizeBuildResponsesPayloadPreservesExplicitXSearch(t *testing.T) {
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"model": "grok-4.7",
 		"input": "search X",
-		"tools": []interface{}{map[string]interface{}{"type": "x_search"}},
+		"tools": []any{map[string]any{"type": "x_search"}},
 	}
 	testutil.NoError(t, normalizeBuildResponsesPayload(payload))
 	tools := responses.InterfaceMaps(payload["tools"])
@@ -104,7 +104,7 @@ func TestNormalizeBuildResponsesPayloadPreservesExplicitXSearch(t *testing.T) {
 // list must not be the way around it.
 func TestChatRequestFromResponses_DeduplicatesHostedTools(t *testing.T) {
 	req := responsesSearchRequest()
-	req.Tools = append(req.Tools, map[string]interface{}{"type": "web_search_preview"})
+	req.Tools = append(req.Tools, map[string]any{"type": "web_search_preview"})
 	chat, err := responses.ChatRequestFromResponses(req)
 	testutil.NoError(t, err, "responses.ChatRequestFromResponses() error = %v")
 	searches := 0

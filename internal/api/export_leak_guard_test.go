@@ -32,7 +32,7 @@ func exportedCredentialKeys(t *testing.T, acc *store.Account) []string {
 	a.HandleExport(rec, httptest.NewRequest(http.MethodGet, "/api/export", nil))
 	testutil.Equal(t, rec.Code, http.StatusOK)
 	var payload struct {
-		Accounts []map[string]interface{} `json:"accounts"`
+		Accounts []map[string]any `json:"accounts"`
 	}
 	testutil.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload), "decode export: %v")
 	testutil.Equal(t, len(payload.Accounts), 1)

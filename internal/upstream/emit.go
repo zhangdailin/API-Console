@@ -9,7 +9,7 @@ import "orchids-api/internal/util"
 //   - GLM-compatible gateways: completion_thinking_tokens
 //   - the nested OpenAI details object: completion_tokens_details /
 //     completionTokensDetails / output_tokens_details / outputTokensDetails
-func reasoningUsage(raw map[string]interface{}) (int, bool) {
+func reasoningUsage(raw map[string]any) (int, bool) {
 	if value, ok := util.UsageInt(raw, "reasoning_tokens", "reasoningTokens", "completion_thinking_tokens"); ok {
 		return value, true
 	}
@@ -45,7 +45,7 @@ func EmitTextDelta(onMessage func(SSEMessage), text string, saw *bool) {
 		*saw = true
 	}
 	if onMessage != nil {
-		onMessage(SSEMessage{Type: "model.text-delta", Event: map[string]interface{}{"delta": text}})
+		onMessage(SSEMessage{Type: "model.text-delta", Event: map[string]any{"delta": text}})
 	}
 }
 
@@ -68,7 +68,7 @@ func EmitToolCalls(onMessage func(SSEMessage), states []*util.ToolCall, saw *boo
 		if id == "" {
 			id = util.NewToolCallID()
 		}
-		onMessage(SSEMessage{Type: "model.tool-call", Event: map[string]interface{}{
+		onMessage(SSEMessage{Type: "model.tool-call", Event: map[string]any{
 			"toolCallId": id,
 			"toolName":   state.Name,
 			"input":      state.Arguments,
@@ -79,7 +79,7 @@ func EmitToolCalls(onMessage func(SSEMessage), states []*util.ToolCall, saw *boo
 // ApplyStreamUsage stores a normalized usage payload on the stream result and
 // reports the shared usage event. A nil or empty payload is a no-op, so a
 // caller can hand over whatever its own normalizer produced.
-func ApplyStreamUsage(onMessage func(SSEMessage), usage map[string]interface{}, saw *bool, dst *map[string]interface{}) {
+func ApplyStreamUsage(onMessage func(SSEMessage), usage map[string]any, saw *bool, dst *map[string]any) {
 	if len(usage) == 0 {
 		return
 	}
@@ -101,7 +101,7 @@ func ApplyStreamUsage(onMessage func(SSEMessage), usage map[string]interface{}, 
 // Reasoning is read from every alias the gateways have shipped: a bare
 // reasoning count at the top level, the GLM-style completion_thinking_tokens,
 // and the OpenAI-style nested details object.
-func NormalizeUsageMap(raw map[string]interface{}) map[string]interface{} {
+func NormalizeUsageMap(raw map[string]any) map[string]any {
 	if len(raw) == 0 {
 		return nil
 	}
@@ -110,7 +110,7 @@ func NormalizeUsageMap(raw map[string]interface{}) map[string]interface{} {
 	if !hasInput && !hasOutput {
 		return nil
 	}
-	out := make(map[string]interface{}, 6)
+	out := make(map[string]any, 6)
 	if hasInput {
 		out["inputTokens"] = input
 		out["input_tokens"] = input

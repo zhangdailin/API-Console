@@ -8,8 +8,8 @@ type UpstreamRequest struct {
 	Model             string
 	Messages          []prompt.Message
 	System            []prompt.SystemItem
-	Tools             []interface{}
-	ToolChoice        interface{}
+	Tools             []any
+	ToolChoice        any
 	ParallelToolCalls *bool
 	NoTools           bool
 	Attempt           int
@@ -24,11 +24,11 @@ type UpstreamRequest struct {
 	// effort or thinking switch forward it; the value stays empty when the
 	// client did not state one.
 	ReasoningEffort string
-	ResponseFormat  map[string]interface{}
-	ResponseText    map[string]interface{}
+	ResponseFormat  map[string]any
+	ResponseText    map[string]any
 	Include         []string
 	PromptCacheKey  string
-	ResponsesTools  []map[string]interface{}
+	ResponsesTools  []map[string]any
 	// RequestID identifies one downstream request across provider retries and
 	// account switches. Providers that expose an upstream request-correlation
 	// header can reuse it instead of making every retry look like a new turn.
@@ -45,6 +45,6 @@ type UpstreamRequest struct {
 
 // SSEMessage is the shared streaming event representation for upstream providers.
 type SSEMessage struct {
-	Type  string                 `json:"type"`
-	Event map[string]interface{} `json:"event,omitempty"`
+	Type  string         `json:"type"`
+	Event map[string]any `json:"event,omitempty"`
 }

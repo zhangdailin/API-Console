@@ -11,8 +11,8 @@ import (
 	"encoding/json"
 )
 
-func responsesInputFromChatMessages(messages []chatwire.Message) ([]interface{}, string) {
-	items := make([]interface{}, 0, len(messages))
+func responsesInputFromChatMessages(messages []chatwire.Message) ([]any, string) {
+	items := make([]any, 0, len(messages))
 	var instructions strings.Builder
 	for _, message := range messages {
 		role := strings.ToLower(strings.TrimSpace(message.Role))
@@ -38,13 +38,13 @@ func responsesInputFromChatMessages(messages []chatwire.Message) ([]interface{},
 				// emitting a function_call_output for an id that does not exist.
 				continue
 			}
-			items = append(items, map[string]interface{}{"type": "function_call_output", "call_id": callID, "output": responsesToolOutput(message.Content)})
+			items = append(items, map[string]any{"type": "function_call_output", "call_id": callID, "output": responsesToolOutput(message.Content)})
 			continue
 		}
 		if role == "assistant" && (strings.TrimSpace(message.ReasoningContent) != "" || strings.TrimSpace(message.ReasoningEncryptedContent) != "") {
-			reasoning := map[string]interface{}{"type": "reasoning", "summary": []interface{}{}}
+			reasoning := map[string]any{"type": "reasoning", "summary": []any{}}
 			if text := strings.TrimSpace(message.ReasoningContent); text != "" {
-				reasoning["summary"] = []interface{}{map[string]interface{}{"type": "summary_text", "text": text}}
+				reasoning["summary"] = []any{map[string]any{"type": "summary_text", "text": text}}
 			}
 			if encrypted := strings.TrimSpace(message.ReasoningEncryptedContent); encrypted != "" {
 				reasoning["encrypted_content"] = encrypted
@@ -57,7 +57,7 @@ func responsesInputFromChatMessages(messages []chatwire.Message) ([]interface{},
 				if name == "" {
 					continue
 				}
-				items = append(items, map[string]interface{}{
+				items = append(items, map[string]any{
 					"type": "function_call", "call_id": util.FirstNonEmpty(strings.TrimSpace(call.ID), "call_"+util.RandomHex(12)),
 					"name": name, "arguments": stringifyToolArguments(call.Function["arguments"]),
 				})
@@ -70,7 +70,7 @@ func responsesInputFromChatMessages(messages []chatwire.Message) ([]interface{},
 		if role != "assistant" {
 			role = "user"
 		}
-		items = append(items, map[string]interface{}{"type": "message", "role": role, "content": parts})
+		items = append(items, map[string]any{"type": "message", "role": role, "content": parts})
 	}
 	return items, strings.TrimSpace(instructions.String())
 }
@@ -88,7 +88,7 @@ func validateNativeChatContent(messages []chatwire.Message) error {
 	return nil
 }
 
-func responsesMessageParts(content interface{}, assistant bool) []interface{} {
+func responsesMessageParts(content any, assistant bool) []any {
 	// History parts always use input_text: the upstream `input` contract only
 	// guarantees input_text, and an assistant turn resent as output_text was
 	// rejected (all input-side text is rewritten this way).
@@ -99,22 +99,22 @@ func responsesMessageParts(content interface{}, assistant bool) []interface{} {
 		if strings.TrimSpace(value) == "" {
 			return nil
 		}
-		return []interface{}{map[string]interface{}{"type": textType, "text": value}}
-	case []interface{}:
-		parts := make([]interface{}, 0, len(value))
+		return []any{map[string]any{"type": textType, "text": value}}
+	case []any:
+		parts := make([]any, 0, len(value))
 		for _, raw := range value {
-			block, _ := raw.(map[string]interface{})
+			block, _ := raw.(map[string]any)
 			kind := strings.ToLower(strings.TrimSpace(fmt.Sprint(block["type"])))
 			switch kind {
 			case "text", "input_text", "output_text":
 				if text := fmt.Sprint(block["text"]); text != "" && text != "<nil>" {
-					parts = append(parts, map[string]interface{}{"type": textType, "text": text})
+					parts = append(parts, map[string]any{"type": textType, "text": text})
 				}
 			case "image_url", "input_image", "image":
 				if url := responseImageURL(block); url != "" {
-					part := map[string]interface{}{"type": "input_image", "image_url": url}
+					part := map[string]any{"type": "input_image", "image_url": url}
 					detail := chatwire.ParseLooseStringAny(block["detail"])
-					if nested, ok := block["image_url"].(map[string]interface{}); ok && detail == "" {
+					if nested, ok := block["image_url"].(map[string]any); ok && detail == "" {
 						detail = chatwire.ParseLooseStringAny(nested["detail"])
 					}
 					if detail == "" {
@@ -127,10 +127,10 @@ func responsesMessageParts(content interface{}, assistant bool) []interface{} {
 					parts = append(parts, part)
 				}
 			case "file_url", "input_file":
-				part := map[string]interface{}{"type": "input_file"}
+				part := map[string]any{"type": "input_file"}
 				for _, key := range []string{"file_url", "file_data", "file_id", "filename"} {
 					if v, ok := block[key]; ok {
-						if nested, nestedOK := v.(map[string]interface{}); nestedOK {
+						if nested, nestedOK := v.(map[string]any); nestedOK {
 							v = nested["url"]
 						}
 						if text := strings.TrimSpace(fmt.Sprint(v)); text != "" && text != "<nil>" {
@@ -149,7 +149,7 @@ func responsesMessageParts(content interface{}, assistant bool) []interface{} {
 	}
 }
 
-func responsesToolOutput(content interface{}) interface{} {
+func responsesToolOutput(content any) any {
 	if text, ok := content.(string); ok {
 		return text
 	}
@@ -159,10 +159,10 @@ func responsesToolOutput(content interface{}) interface{} {
 	return chatMessageContentText(content)
 }
 
-func responseImageURL(block map[string]interface{}) string {
+func responseImageURL(block map[string]any) string {
 	for _, key := range []string{"image_url", "url"} {
 		value := block[key]
-		if nested, ok := value.(map[string]interface{}); ok {
+		if nested, ok := value.(map[string]any); ok {
 			value = nested["url"]
 		}
 		if text := strings.TrimSpace(fmt.Sprint(value)); text != "" && text != "<nil>" {
@@ -172,7 +172,7 @@ func responseImageURL(block map[string]interface{}) string {
 	return ""
 }
 
-func stringifyToolArguments(value interface{}) string {
+func stringifyToolArguments(value any) string {
 	if text, ok := value.(string); ok && strings.TrimSpace(text) != "" {
 		return strings.TrimSpace(text)
 	}
@@ -185,11 +185,11 @@ func stringifyToolArguments(value interface{}) string {
 	return "{}"
 }
 
-func normalizeChatResponseFormat(format map[string]interface{}) map[string]interface{} {
+func normalizeChatResponseFormat(format map[string]any) map[string]any {
 	copy := responses.CloneStringInterfaceMap(format)
 	if strings.EqualFold(strings.TrimSpace(fmt.Sprint(copy["type"])), "json_schema") {
-		if nested, ok := copy["json_schema"].(map[string]interface{}); ok {
-			flattened := map[string]interface{}{"type": "json_schema"}
+		if nested, ok := copy["json_schema"].(map[string]any); ok {
+			flattened := map[string]any{"type": "json_schema"}
 			maps.Copy(flattened, nested)
 			copy = flattened
 		}

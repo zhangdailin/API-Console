@@ -17,7 +17,7 @@ type inputTokenBreakdown struct {
 	Total               int
 }
 
-func estimateInputTokenBreakdown(promptText string, tools []interface{}) inputTokenBreakdown {
+func estimateInputTokenBreakdown(promptText string, tools []any) inputTokenBreakdown {
 	var bd inputTokenBreakdown
 	promptTokens := tiktoken.EstimateTextTokens(promptText)
 	sysText := extractTaggedContent(promptText, "sys")

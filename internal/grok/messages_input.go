@@ -54,7 +54,7 @@ func anthropicRequestToChat(req anthropicMessagesRequest) (chatwire.Request, err
 		return chatwire.Request{}, err
 	}
 	tools := make([]chatwire.ToolDef, 0, len(req.Tools))
-	nativeTools := make([]map[string]interface{}, 0, len(req.Tools)+len(req.MCPServers))
+	nativeTools := make([]map[string]any, 0, len(req.Tools)+len(req.MCPServers))
 	for _, tool := range req.Tools {
 		typeName := strings.ToLower(strings.TrimSpace(tool.Type))
 		if strings.HasPrefix(typeName, "web_search_") {
@@ -74,9 +74,9 @@ func anthropicRequestToChat(req anthropicMessagesRequest) (chatwire.Request, err
 		}
 		parameters := tool.InputSchema
 		if parameters == nil {
-			parameters = map[string]interface{}{"type": "object"}
+			parameters = map[string]any{"type": "object"}
 		}
-		function := map[string]interface{}{
+		function := map[string]any{
 			"name": name, "description": tool.Description, "parameters": parameters,
 		}
 		if tool.Strict != nil {
@@ -90,7 +90,7 @@ func anthropicRequestToChat(req anthropicMessagesRequest) (chatwire.Request, err
 		if name == "" || name == "<nil>" || url == "" || url == "<nil>" {
 			return chatwire.Request{}, fmt.Errorf("mcp_servers[%d] requires name and url", index)
 		}
-		item := map[string]interface{}{"type": "mcp", "server_label": name, "server_url": url}
+		item := map[string]any{"type": "mcp", "server_label": name, "server_url": url}
 		if token := strings.TrimSpace(fmt.Sprint(server["authorization_token"])); token != "" && token != "<nil>" {
 			item["authorization"] = token
 		}
@@ -99,12 +99,12 @@ func anthropicRequestToChat(req anthropicMessagesRequest) (chatwire.Request, err
 	maxTokens := req.MaxTokens
 	reasoningEffort, wantsReasoningSummary := anthropicReasoningEffort(req.Thinking, req.OutputConfig)
 	promptCacheKey := anthropicPromptCacheKey(req.Metadata)
-	var responseText map[string]interface{}
-	if format, _ := req.OutputConfig["format"].(map[string]interface{}); len(format) > 0 {
+	var responseText map[string]any
+	if format, _ := req.OutputConfig["format"].(map[string]any); len(format) > 0 {
 		if !strings.EqualFold(strings.TrimSpace(fmt.Sprint(format["type"])), "json_schema") || format["schema"] == nil {
 			return chatwire.Request{}, fmt.Errorf("output_config.format must be json_schema with schema")
 		}
-		responseText = map[string]interface{}{"format": map[string]interface{}{"type": "json_schema", "name": "anthropic_output", "schema": format["schema"]}}
+		responseText = map[string]any{"format": map[string]any{"type": "json_schema", "name": "anthropic_output", "schema": format["schema"]}}
 	}
 	parallel := anthropicParallelToolCalls(req.ToolChoice)
 	responsesInput, err := anthropicResponsesInput(req.Messages)
@@ -143,9 +143,9 @@ func anthropicRequestToChat(req anthropicMessagesRequest) (chatwire.Request, err
 	}, nil
 }
 
-func anthropicResponsesInput(messages []anthropicMessage) ([]interface{}, error) {
-	input := make([]interface{}, 0, len(messages))
-	serverSearches := map[string]map[string]interface{}{}
+func anthropicResponsesInput(messages []anthropicMessage) ([]any, error) {
+	input := make([]any, 0, len(messages))
+	serverSearches := map[string]map[string]any{}
 	for _, message := range messages {
 		role := strings.ToLower(strings.TrimSpace(message.Role))
 		if text, ok := message.Content.(string); ok {
@@ -154,21 +154,21 @@ func anthropicResponsesInput(messages []anthropicMessage) ([]interface{}, error)
 				if role == "assistant" {
 					partType = "output_text"
 				}
-				input = append(input, map[string]interface{}{"type": "message", "role": role, "content": []interface{}{map[string]interface{}{"type": partType, "text": text}}})
+				input = append(input, map[string]any{"type": "message", "role": role, "content": []any{map[string]any{"type": partType, "text": text}}})
 			}
 			continue
 		}
-		blocks, _ := message.Content.([]interface{})
-		parts := make([]interface{}, 0, len(blocks))
+		blocks, _ := message.Content.([]any)
+		parts := make([]any, 0, len(blocks))
 		flush := func() {
 			if len(parts) == 0 {
 				return
 			}
-			input = append(input, map[string]interface{}{"type": "message", "role": role, "content": parts})
+			input = append(input, map[string]any{"type": "message", "role": role, "content": parts})
 			parts = nil
 		}
 		for _, raw := range blocks {
-			block, _ := raw.(map[string]interface{})
+			block, _ := raw.(map[string]any)
 			kind := strings.ToLower(strings.TrimSpace(fmt.Sprint(block["type"])))
 			switch kind {
 			case "text":
@@ -176,10 +176,10 @@ func anthropicResponsesInput(messages []anthropicMessage) ([]interface{}, error)
 				if role == "assistant" {
 					partType = "output_text"
 				}
-				parts = append(parts, map[string]interface{}{"type": partType, "text": fmt.Sprint(block["text"])})
+				parts = append(parts, map[string]any{"type": partType, "text": fmt.Sprint(block["text"])})
 			case "image":
 				if url := anthropicSourceURL(block["source"]); url != "" {
-					parts = append(parts, map[string]interface{}{"type": "input_image", "image_url": url})
+					parts = append(parts, map[string]any{"type": "input_image", "image_url": url})
 				}
 			case "document":
 				document, err := anthropicDocumentContent(block)
@@ -189,7 +189,7 @@ func anthropicResponsesInput(messages []anthropicMessage) ([]interface{}, error)
 				parts = append(parts, document)
 			case "tool_use":
 				flush()
-				input = append(input, map[string]interface{}{
+				input = append(input, map[string]any{
 					"type": "function_call", "call_id": chatwire.ParseLooseStringAny(block["id"]),
 					"name": chatwire.ParseLooseStringAny(block["name"]), "arguments": stringifyToolArguments(block["input"]),
 				})
@@ -199,12 +199,12 @@ func anthropicResponsesInput(messages []anthropicMessage) ([]interface{}, error)
 				if isError, _ := block["is_error"].(bool); isError {
 					output = prependAnthropicToolError(output)
 				}
-				input = append(input, map[string]interface{}{"type": "function_call_output", "call_id": chatwire.ParseLooseStringAny(block["tool_use_id"]), "output": output})
+				input = append(input, map[string]any{"type": "function_call_output", "call_id": chatwire.ParseLooseStringAny(block["tool_use_id"]), "output": output})
 			case "thinking", "redacted_thinking":
 				flush()
-				reasoning := map[string]interface{}{"type": "reasoning", "summary": []interface{}{}}
+				reasoning := map[string]any{"type": "reasoning", "summary": []any{}}
 				if kind == "thinking" {
-					reasoning["summary"] = []interface{}{map[string]interface{}{"type": "summary_text", "text": chatwire.ParseLooseStringAny(block["thinking"])}}
+					reasoning["summary"] = []any{map[string]any{"type": "summary_text", "text": chatwire.ParseLooseStringAny(block["thinking"])}}
 				}
 				if encrypted := chatwire.ParseLooseStringAny(responses.FirstNonNil(block["signature"], block["data"])); encrypted != "" {
 					reasoning["encrypted_content"] = encrypted
@@ -216,10 +216,10 @@ func anthropicResponsesInput(messages []anthropicMessage) ([]interface{}, error)
 				}
 				flush()
 				id := chatwire.ParseLooseStringAny(block["id"])
-				arguments, _ := block["input"].(map[string]interface{})
-				call := map[string]interface{}{
+				arguments, _ := block["input"].(map[string]any)
+				call := map[string]any{
 					"type": "web_search_call", "id": id, "status": "completed",
-					"action": map[string]interface{}{"type": "search", "query": chatwire.ParseLooseStringAny(arguments["query"])},
+					"action": map[string]any{"type": "search", "query": chatwire.ParseLooseStringAny(arguments["query"])},
 				}
 				serverSearches[id] = call
 				input = append(input, call)
@@ -235,27 +235,27 @@ func anthropicResponsesInput(messages []anthropicMessage) ([]interface{}, error)
 	return input, nil
 }
 
-func applyAnthropicWebSearchResult(call map[string]interface{}, raw interface{}) {
+func applyAnthropicWebSearchResult(call map[string]any, raw any) {
 	if call == nil {
 		return
 	}
-	results, ok := raw.([]interface{})
+	results, ok := raw.([]any)
 	if ok {
-		sources := make([]interface{}, 0, len(results))
+		sources := make([]any, 0, len(results))
 		for _, item := range results {
-			result, _ := item.(map[string]interface{})
+			result, _ := item.(map[string]any)
 			if strings.EqualFold(chatwire.ParseLooseStringAny(result["type"]), "web_search_result") {
 				if value := chatwire.ParseLooseStringAny(result["url"]); value != "" {
-					sources = append(sources, map[string]interface{}{"type": "url", "url": value})
+					sources = append(sources, map[string]any{"type": "url", "url": value})
 				}
 			}
 		}
-		if action, _ := call["action"].(map[string]interface{}); action != nil && len(sources) > 0 {
+		if action, _ := call["action"].(map[string]any); action != nil && len(sources) > 0 {
 			action["sources"] = sources
 		}
 		return
 	}
-	if result, _ := raw.(map[string]interface{}); result != nil && strings.EqualFold(chatwire.ParseLooseStringAny(result["type"]), "web_search_tool_result_error") {
+	if result, _ := raw.(map[string]any); result != nil && strings.EqualFold(chatwire.ParseLooseStringAny(result["type"]), "web_search_tool_result_error") {
 		call["status"] = "failed"
 	}
 }
@@ -299,7 +299,7 @@ func validateChatToolSequence(messages []chatwire.Message) error {
 	return nil
 }
 
-func anthropicReasoningEffort(thinking, outputConfig map[string]interface{}) (*string, bool) {
+func anthropicReasoningEffort(thinking, outputConfig map[string]any) (*string, bool) {
 	// An explicit `thinking: {"type":"disabled"}` wins over output_config: a
 	// client that asked for no reasoning must not silently get reasoning just
 	// because a stale effort value was also present; resolve in that order.
@@ -331,7 +331,7 @@ func anthropicReasoningEffort(thinking, outputConfig map[string]interface{}) (*s
 	return nil, false
 }
 
-func anthropicPromptCacheKey(metadata map[string]interface{}) string {
+func anthropicPromptCacheKey(metadata map[string]any) string {
 	for _, key := range []string{"prompt_cache_key", "session_id", "user_id"} {
 		if value := strings.TrimSpace(fmt.Sprint(metadata[key])); value != "" && value != "<nil>" {
 			return value
@@ -340,14 +340,14 @@ func anthropicPromptCacheKey(metadata map[string]interface{}) string {
 	return ""
 }
 
-func anthropicSystemText(value interface{}) string {
+func anthropicSystemText(value any) string {
 	switch v := value.(type) {
 	case string:
 		return stripAnthropicBillingHeader(v)
-	case []interface{}:
+	case []any:
 		parts := make([]string, 0, len(v))
 		for _, raw := range v {
-			block, _ := raw.(map[string]interface{})
+			block, _ := raw.(map[string]any)
 			if strings.EqualFold(strings.TrimSpace(fmt.Sprint(block["type"])), "text") {
 				if text := stripAnthropicBillingHeader(fmt.Sprint(block["text"])); text != "" {
 					parts = append(parts, text)
@@ -387,28 +387,28 @@ func anthropicMessageToChat(message anthropicMessage) ([]chatwire.Message, error
 	if text, ok := message.Content.(string); ok {
 		return []chatwire.Message{{Role: role, Content: text}}, nil
 	}
-	blocks, ok := message.Content.([]interface{})
+	blocks, ok := message.Content.([]any)
 	if !ok {
 		return nil, fmt.Errorf("message content must be a string or array")
 	}
-	content := make([]interface{}, 0, len(blocks))
+	content := make([]any, 0, len(blocks))
 	toolCalls := make([]chatwire.ToolCall, 0)
 	toolResults := make([]chatwire.Message, 0)
 	var reasoningContent, reasoningEncryptedContent string
 	for _, raw := range blocks {
-		block, ok := raw.(map[string]interface{})
+		block, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
 		switch strings.ToLower(strings.TrimSpace(fmt.Sprint(block["type"]))) {
 		case "text":
-			content = append(content, map[string]interface{}{"type": "text", "text": fmt.Sprint(block["text"])})
+			content = append(content, map[string]any{"type": "text", "text": fmt.Sprint(block["text"])})
 		case "image":
 			url := anthropicSourceURL(block["source"])
 			if url == "" {
 				return nil, fmt.Errorf("image source is invalid")
 			}
-			content = append(content, map[string]interface{}{"type": "image_url", "image_url": map[string]interface{}{"url": url}})
+			content = append(content, map[string]any{"type": "image_url", "image_url": map[string]any{"url": url}})
 		case "document":
 			document, err := anthropicDocumentContent(block)
 			if err != nil {
@@ -421,22 +421,22 @@ func anthropicMessageToChat(message anthropicMessage) ([]chatwire.Message, error
 			}
 			id, idOK := block["id"].(string)
 			name, nameOK := block["name"].(string)
-			input, inputOK := block["input"].(map[string]interface{})
+			input, inputOK := block["input"].(map[string]any)
 			if !idOK || !nameOK || !inputOK || input == nil || strings.TrimSpace(id) == "" || id == "<nil>" || strings.TrimSpace(name) == "" || name == "<nil>" {
 				return nil, fmt.Errorf("tool_use requires a non-empty string id, name and object input")
 			}
 			toolCalls = append(toolCalls, chatwire.ToolCall{
 				ID:       strings.TrimSpace(id),
 				Type:     "function",
-				Function: map[string]interface{}{"name": block["name"], "arguments": block["input"]},
+				Function: map[string]any{"name": block["name"], "arguments": block["input"]},
 			})
 		case "server_tool_use":
 			if role != "assistant" {
 				return nil, fmt.Errorf("server_tool_use is only valid in assistant messages")
 			}
 			if strings.EqualFold(strings.TrimSpace(fmt.Sprint(block["name"])), "web_search") {
-				input, _ := block["input"].(map[string]interface{})
-				content = append(content, map[string]interface{}{"type": "text", "text": "Web search performed: " + strings.TrimSpace(fmt.Sprint(input["query"]))})
+				input, _ := block["input"].(map[string]any)
+				content = append(content, map[string]any{"type": "text", "text": "Web search performed: " + strings.TrimSpace(fmt.Sprint(input["query"]))})
 			}
 		case "tool_result":
 			if role != "user" {
@@ -457,7 +457,7 @@ func anthropicMessageToChat(message anthropicMessage) ([]chatwire.Message, error
 		case "web_search_tool_result":
 			if role == "assistant" {
 				if text := anthropicBlockContentText(block["content"]); text != "" {
-					content = append(content, map[string]interface{}{"type": "text", "text": text})
+					content = append(content, map[string]any{"type": "text", "text": text})
 				}
 			}
 		case "thinking", "redacted_thinking":
@@ -478,7 +478,7 @@ func anthropicMessageToChat(message anthropicMessage) ([]chatwire.Message, error
 	// messages to precede that user message.
 	out = append(out, toolResults...)
 	if len(content) > 0 || len(toolCalls) > 0 || reasoningContent != "" || reasoningEncryptedContent != "" {
-		var normalizedContent interface{} = content
+		var normalizedContent any = content
 		if len(content) == 0 {
 			normalizedContent = ""
 		}
@@ -492,8 +492,8 @@ func anthropicMessageToChat(message anthropicMessage) ([]chatwire.Message, error
 	return out, nil
 }
 
-func anthropicSourceURL(raw interface{}) string {
-	source, _ := raw.(map[string]interface{})
+func anthropicSourceURL(raw any) string {
+	source, _ := raw.(map[string]any)
 	switch strings.ToLower(strings.TrimSpace(fmt.Sprint(source["type"]))) {
 	case "base64":
 		mediaType := strings.TrimSpace(fmt.Sprint(source["media_type"]))
@@ -507,17 +507,17 @@ func anthropicSourceURL(raw interface{}) string {
 	return ""
 }
 
-func anthropicDocumentContent(block map[string]interface{}) (map[string]interface{}, error) {
-	source, _ := block["source"].(map[string]interface{})
+func anthropicDocumentContent(block map[string]any) (map[string]any, error) {
+	source, _ := block["source"].(map[string]any)
 	title := chatwire.ParseLooseStringAny(block["title"])
 	switch strings.ToLower(chatwire.ParseLooseStringAny(source["type"])) {
 	case "text":
 		if data := chatwire.ParseLooseStringAny(source["data"]); data != "" {
-			return map[string]interface{}{"type": "input_text", "text": data}, nil
+			return map[string]any{"type": "input_text", "text": data}, nil
 		}
 	case "url":
 		if url := chatwire.ParseLooseStringAny(source["url"]); url != "" {
-			out := map[string]interface{}{"type": "input_file", "file_url": url}
+			out := map[string]any{"type": "input_file", "file_url": url}
 			if title != "" {
 				out["filename"] = title
 			}
@@ -527,7 +527,7 @@ func anthropicDocumentContent(block map[string]interface{}) (map[string]interfac
 		mediaType := chatwire.ParseLooseStringAny(source["media_type"])
 		data := chatwire.ParseLooseStringAny(source["data"])
 		if mediaType != "" && data != "" {
-			out := map[string]interface{}{"type": "input_file", "file_data": "data:" + mediaType + ";base64," + data}
+			out := map[string]any{"type": "input_file", "file_data": "data:" + mediaType + ";base64," + data}
 			if title != "" {
 				out["filename"] = title
 			}
@@ -537,20 +537,20 @@ func anthropicDocumentContent(block map[string]interface{}) (map[string]interfac
 	return nil, fmt.Errorf("unsupported document source")
 }
 
-func anthropicToolResultContent(raw interface{}) interface{} {
+func anthropicToolResultContent(raw any) any {
 	if text, ok := raw.(string); ok {
 		return text
 	}
-	blocks, _ := raw.([]interface{})
-	parts := make([]interface{}, 0, len(blocks))
+	blocks, _ := raw.([]any)
+	parts := make([]any, 0, len(blocks))
 	for _, value := range blocks {
-		block, _ := value.(map[string]interface{})
+		block, _ := value.(map[string]any)
 		switch strings.ToLower(chatwire.ParseLooseStringAny(block["type"])) {
 		case "text":
-			parts = append(parts, map[string]interface{}{"type": "input_text", "text": fmt.Sprint(block["text"])})
+			parts = append(parts, map[string]any{"type": "input_text", "text": fmt.Sprint(block["text"])})
 		case "image":
 			if url := anthropicSourceURL(block["source"]); url != "" {
-				parts = append(parts, map[string]interface{}{"type": "input_image", "detail": "auto", "image_url": url})
+				parts = append(parts, map[string]any{"type": "input_image", "detail": "auto", "image_url": url})
 			}
 		case "document":
 			if document, err := anthropicDocumentContent(block); err == nil {
@@ -558,7 +558,7 @@ func anthropicToolResultContent(raw interface{}) interface{} {
 			}
 		case "tool_reference":
 			if name := chatwire.ParseLooseStringAny(block["tool_name"]); name != "" {
-				parts = append(parts, map[string]interface{}{"type": "input_text", "text": fmt.Sprintf("Tool search matched declared tool %q; its definition is available in this request.", name)})
+				parts = append(parts, map[string]any{"type": "input_text", "text": fmt.Sprintf("Tool search matched declared tool %q; its definition is available in this request.", name)})
 			}
 		}
 	}
@@ -568,23 +568,23 @@ func anthropicToolResultContent(raw interface{}) interface{} {
 	return parts
 }
 
-func prependAnthropicToolError(content interface{}) interface{} {
+func prependAnthropicToolError(content any) any {
 	const prefix = "Tool execution failed: "
 	if text, ok := content.(string); ok {
 		return prefix + text
 	}
-	parts, _ := content.([]interface{})
-	return append([]interface{}{map[string]interface{}{"type": "input_text", "text": prefix}}, parts...)
+	parts, _ := content.([]any)
+	return append([]any{map[string]any{"type": "input_text", "text": prefix}}, parts...)
 }
 
-func anthropicBlockContentText(raw interface{}) string {
+func anthropicBlockContentText(raw any) string {
 	if text, ok := raw.(string); ok {
 		return text
 	}
-	blocks, _ := raw.([]interface{})
+	blocks, _ := raw.([]any)
 	parts := make([]string, 0, len(blocks))
 	for _, item := range blocks {
-		block, _ := item.(map[string]interface{})
+		block, _ := item.(map[string]any)
 		if text := fmt.Sprint(block["text"]); text != "<nil>" && text != "" {
 			parts = append(parts, text)
 		}
@@ -592,8 +592,8 @@ func anthropicBlockContentText(raw interface{}) string {
 	return strings.Join(parts, "\n")
 }
 
-func anthropicToolChoiceToOpenAI(raw interface{}) interface{} {
-	choice, ok := raw.(map[string]interface{})
+func anthropicToolChoiceToOpenAI(raw any) any {
+	choice, ok := raw.(map[string]any)
 	if !ok {
 		return raw
 	}
@@ -605,14 +605,14 @@ func anthropicToolChoiceToOpenAI(raw interface{}) interface{} {
 	case "none":
 		return "none"
 	case "tool":
-		return map[string]interface{}{"type": "function", "function": map[string]interface{}{"name": choice["name"]}}
+		return map[string]any{"type": "function", "function": map[string]any{"name": choice["name"]}}
 	default:
 		return nil
 	}
 }
 
-func anthropicParallelToolCalls(raw interface{}) *bool {
-	choice, ok := raw.(map[string]interface{})
+func anthropicParallelToolCalls(raw any) *bool {
+	choice, ok := raw.(map[string]any)
 	if !ok {
 		return nil
 	}

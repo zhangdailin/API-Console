@@ -80,9 +80,9 @@ func TestSkillRequestControlsAndSharedRetry(t *testing.T) {
 		var body chatBody
 		testutil.NoError(t, json.Unmarshal(raw, &body))
 		testutil.Falsef(t, body.IsRetry, "attempt %d retry=%v", attempt, body.IsRetry)
-		p := body.Parameters.(map[string]interface{})
+		p := body.Parameters.(map[string]any)
 		testutil.Falsef(t, p["max_tokens"] != float64(123) || p["temperature"] != float64(0) || p["top_p"] != 0.25, "controls=%#v", p)
-		stops, ok := p["stop"].([]interface{})
+		stops, ok := p["stop"].([]any)
 		if !ok || len(stops) != 1 || stops[0] != "END" {
 			t.Fatalf("stop=%#v", p["stop"])
 		}

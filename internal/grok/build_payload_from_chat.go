@@ -10,13 +10,13 @@ import (
 
 // responsesPayloadFromChat converts Chat/Messages compatibility input into
 // the native Responses wire shape used by Build.
-func (h *Handler) responsesPayloadFromChat(spec ModelSpec, req *chatwire.Request, build bool) (map[string]interface{}, error) {
+func (h *Handler) responsesPayloadFromChat(spec ModelSpec, req *chatwire.Request, build bool) (map[string]any, error) {
 	if err := validateNativeChatContent(req.Messages); err != nil {
 		return nil, err
 	}
 	input, instructions := responsesInputFromChatMessages(req.Messages)
 	if len(req.ResponsesInput) > 0 {
-		input = append([]interface{}(nil), req.ResponsesInput...)
+		input = append([]any(nil), req.ResponsesInput...)
 	}
 	if req.ReasoningReplay && strings.TrimSpace(req.PromptCacheKey) != "" {
 		if items := h.loadReasoningReplayItems(req.Model, req.PromptCacheKey); len(items) > 0 {
@@ -31,7 +31,7 @@ func (h *Handler) responsesPayloadFromChat(spec ModelSpec, req *chatwire.Request
 		return nil, fmt.Errorf("empty message")
 	}
 	model := spec.UpstreamModel
-	payload := map[string]interface{}{"model": model, "input": input}
+	payload := map[string]any{"model": model, "input": input}
 	if instructions != "" {
 		payload["instructions"] = instructions
 	}
@@ -64,21 +64,21 @@ func (h *Handler) responsesPayloadFromChat(spec ModelSpec, req *chatwire.Request
 	if len(req.ResponseText) > 0 {
 		payload["text"] = responses.CloneStringInterfaceMap(req.ResponseText)
 	} else if len(req.ResponseFormat) > 0 {
-		payload["text"] = map[string]interface{}{"format": normalizeChatResponseFormat(req.ResponseFormat)}
+		payload["text"] = map[string]any{"format": normalizeChatResponseFormat(req.ResponseFormat)}
 	}
 	// Both planes return opaque reasoning only when it is explicitly requested.
 	// Without it the replay cache is never populated, so a default (auto) turn
 	// would silently lose multi-turn reasoning continuity. The appended entry
 	// also means the list can never come back empty.
 	payload["include"] = util.UniqueStrings(append(append([]string(nil), req.Include...), "reasoning.encrypted_content"))
-	tools := append([]map[string]interface{}(nil), req.ResponsesTools...)
+	tools := append([]map[string]any(nil), req.ResponsesTools...)
 	tools = append(tools, buildToolsFromOpenAI(req.Tools)...)
 	// OpenAI's web_search_options has no function form: it means "run the
 	// hosted search tool". Lower it to the native tool the Responses planes
 	// understand when the caller did not already
 	// declare a search tool.
 	if len(req.WebSearchOptions) > 0 && !hasNativeSearchTool(tools) {
-		tools = append(tools, map[string]interface{}{"type": "web_search"})
+		tools = append(tools, map[string]any{"type": "web_search"})
 	}
 	if len(tools) > 0 {
 		payload["tools"] = tools
@@ -108,9 +108,9 @@ func (h *Handler) responsesPayloadFromChat(spec ModelSpec, req *chatwire.Request
 		// without overriding a summary the caller already asked for, and without
 		// imposing it on native Responses or Anthropic requests.
 		if req.SourceOperation == "" && (req.ReasoningEffort == nil || *req.ReasoningEffort != "none") {
-			reasoning, _ := payload["reasoning"].(map[string]interface{})
+			reasoning, _ := payload["reasoning"].(map[string]any)
 			if reasoning == nil {
-				reasoning = map[string]interface{}{}
+				reasoning = map[string]any{}
 			}
 			if _, exists := reasoning["summary"]; !exists {
 				reasoning["summary"] = "concise"

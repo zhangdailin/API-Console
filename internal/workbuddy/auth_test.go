@@ -82,13 +82,13 @@ func TestRunChat_RequiresCredentials(t *testing.T) {
 func TestBuildBodyNormalizesStringOnlyToolChoice(t *testing.T) {
 	client := NewFromAccount(nil, nil)
 	body, err := client.buildBody(upstream.UpstreamRequest{
-		Tools: []interface{}{map[string]interface{}{
-			"name": "read", "input_schema": map[string]interface{}{"type": "object"},
+		Tools: []any{map[string]any{
+			"name": "read", "input_schema": map[string]any{"type": "object"},
 		}},
-		ToolChoice: map[string]interface{}{"type": "tool", "name": "read"},
+		ToolChoice: map[string]any{"type": "tool", "name": "read"},
 	})
 	testutil.NoError(t, err)
-	var decoded map[string]interface{}
+	var decoded map[string]any
 	testutil.NoError(t, json.Unmarshal(body, &decoded))
 	testutil.Equal(t, decoded["tool_choice"], "required")
 }
@@ -96,7 +96,7 @@ func TestBuildBodyNormalizesStringOnlyToolChoice(t *testing.T) {
 func TestRunChat_SendsSystemFirstAndSurfacesBusinessError(t *testing.T) {
 	t.Parallel()
 
-	var gotBody map[string]interface{}
+	var gotBody map[string]any
 	var sawUID bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -126,11 +126,11 @@ func TestRunChat_SendsSystemFirstAndSurfacesBusinessError(t *testing.T) {
 	}, 5*time.Second, nil, nil)
 
 	testutil.CheckTrue(t, sawUID, "X-User-Id header missing on the chat request")
-	messages, ok := gotBody["messages"].([]interface{})
+	messages, ok := gotBody["messages"].([]any)
 	if !ok || len(messages) == 0 {
 		t.Fatalf("request body messages = %v", gotBody["messages"])
 	}
-	first, _ := messages[0].(map[string]interface{})
+	first, _ := messages[0].(map[string]any)
 	testutil.Equal(t, first["role"], "system")
 	testutil.Equal(t, gotBody["stream"], true)
 	testutil.False(t, err == nil, "runChat() error = nil, want the failure surfaced")
@@ -193,10 +193,10 @@ func TestBuildBody_IncludesUsageAndCamelCaseConversationID(t *testing.T) {
 
 	body, err := NewFromAccount(nil, nil).buildBody(upstream.UpstreamRequest{ConversationID: "conv-1"})
 	testutil.NoError(t, err)
-	var decoded map[string]interface{}
+	var decoded map[string]any
 	testutil.NoError(t, json.Unmarshal(body, &decoded))
 	testutil.Equal(t, decoded["conversationId"], "conv-1")
-	options, ok := decoded["stream_options"].(map[string]interface{})
+	options, ok := decoded["stream_options"].(map[string]any)
 	if !ok || options["include_usage"] != true {
 		t.Fatalf("stream_options = %#v, want include_usage=true", decoded["stream_options"])
 	}
@@ -256,7 +256,7 @@ func TestBuildBodyForwardsReasoningEffort(t *testing.T) {
 	// A stated effort is forwarded as the OpenAI-style field.
 	body, err := NewFromAccount(nil, nil).buildBody(upstream.UpstreamRequest{ReasoningEffort: "high"})
 	testutil.NoError(t, err)
-	var decoded map[string]interface{}
+	var decoded map[string]any
 	testutil.NoError(t, json.Unmarshal(body, &decoded))
 	testutil.Equal(t, decoded["reasoning_effort"], "high")
 
@@ -299,7 +299,7 @@ func TestSilentRequestKeepsChainOfThoughtPrivate(t *testing.T) {
 	for _, effort := range []string{"", "   "} {
 		body, err := NewFromAccount(nil, nil).buildBody(upstream.UpstreamRequest{ReasoningEffort: effort})
 		testutil.NoError(t, err)
-		var decoded map[string]interface{}
+		var decoded map[string]any
 		testutil.NoError(t, json.Unmarshal(body, &decoded))
 		got, present := decoded["reasoning_effort"]
 		testutil.True(t, present, "effort %q: reasoning_effort is missing; the upstream would inline its reasoning into content")

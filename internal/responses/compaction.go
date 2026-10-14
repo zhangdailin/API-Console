@@ -138,7 +138,7 @@ func (c *gatewayCompactionCodec) decode(session, blob string) (summary string, o
 
 // classifyResponsesCompactionPayload decides whether this turn is a compaction
 // request, without retaining or logging the body.
-func classifyResponsesCompactionPayload(payload map[string]interface{}) gatewayCompactionKind {
+func classifyResponsesCompactionPayload(payload map[string]any) gatewayCompactionKind {
 	if payload == nil {
 		return responsesCompactionNone
 	}
@@ -152,9 +152,9 @@ func classifyResponsesCompactionPayload(payload map[string]interface{}) gatewayC
 	return responsesCompactionNone
 }
 
-func hasCompactionTrigger(items []interface{}) bool {
+func hasCompactionTrigger(items []any) bool {
 	for _, raw := range items {
-		item, ok := raw.(map[string]interface{})
+		item, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -165,11 +165,11 @@ func hasCompactionTrigger(items []interface{}) bool {
 	return false
 }
 
-func lastItemLooksLikeCompactionPrompt(items []interface{}) bool {
+func lastItemLooksLikeCompactionPrompt(items []any) bool {
 	if len(items) == 0 {
 		return false
 	}
-	item, ok := items[len(items)-1].(map[string]interface{})
+	item, ok := items[len(items)-1].(map[string]any)
 	if !ok || !strings.EqualFold(strings.TrimSpace(ParseLooseStringAny(item["role"])), "user") {
 		return false
 	}
@@ -182,21 +182,21 @@ func looksLikeCompactionPrompt(text string) bool {
 
 // compactionContentText flattens the two content shapes a user item can carry: a
 // plain string, or an array of parts.
-func compactionContentText(content interface{}) string {
+func compactionContentText(content any) string {
 	switch typed := content.(type) {
 	case string:
 		return typed
-	case []interface{}:
+	case []any:
 		var builder strings.Builder
 		for _, raw := range typed {
-			part, ok := raw.(map[string]interface{})
+			part, ok := raw.(map[string]any)
 			if !ok {
 				continue
 			}
 			builder.WriteString(ParseLooseStringAny(part["text"]))
 		}
 		return builder.String()
-	case map[string]interface{}:
+	case map[string]any:
 		return ParseLooseStringAny(typed["text"])
 	default:
 		return ""
@@ -208,17 +208,17 @@ func compactionContentText(content interface{}) string {
 // untouched (upstream originals), and an unreadable prefixed blob is an error
 // carrying the exact input index, because silently dropping it would answer a
 // question the client never asked.
-func expandGatewayCompactionHistory(payload map[string]interface{}, codec *gatewayCompactionCodec, session string) (drifted int, err error) {
+func expandGatewayCompactionHistory(payload map[string]any, codec *gatewayCompactionCodec, session string) (drifted int, err error) {
 	if payload == nil || !codec.available() {
 		return 0, nil
 	}
-	items, ok := payload["input"].([]interface{})
+	items, ok := payload["input"].([]any)
 	if !ok {
 		return 0, nil
 	}
 	changed := false
 	for index, raw := range items {
-		item, ok := raw.(map[string]interface{})
+		item, ok := raw.(map[string]any)
 		if !ok || ParseLooseStringAny(item["type"]) != "compaction" {
 			continue
 		}
@@ -263,10 +263,10 @@ func (e *compactionBlobError) Unwrap() error { return e.cause }
 // streaming /responses, instructions=null, tools retained with
 // tool_choice=auto, concise reasoning summary, and the canonical final user
 // prompt.
-func prepareGatewayCompactionSample(payload map[string]interface{}) map[string]interface{} {
+func prepareGatewayCompactionSample(payload map[string]any) map[string]any {
 	sample := clonePayload(payload)
-	items, _ := sample["input"].([]interface{})
-	items = append(items, map[string]interface{}{
+	items, _ := sample["input"].([]any)
+	items = append(items, map[string]any{
 		"type": "message", "role": "user", "content": gatewayCompactionPrompt,
 	})
 	sample["input"] = items
@@ -274,13 +274,13 @@ func prepareGatewayCompactionSample(payload map[string]interface{}) map[string]i
 	sample["stream"] = true
 	sample["store"] = false
 	sample["temperature"] = 1.0
-	if tools, ok := sample["tools"].([]interface{}); ok && len(tools) > 0 {
+	if tools, ok := sample["tools"].([]any); ok && len(tools) > 0 {
 		// Some deployments reject tools together with tool_choice=none.
 		sample["tool_choice"] = "auto"
 	} else {
 		delete(sample, "tool_choice")
 	}
-	sample["reasoning"] = map[string]interface{}{"summary": "concise"}
+	sample["reasoning"] = map[string]any{"summary": "concise"}
 	for _, field := range []string{
 		"previous_response_id", "text", "response_format", "max_output_tokens", "max_completion_tokens",
 	} {
@@ -289,11 +289,11 @@ func prepareGatewayCompactionSample(payload map[string]interface{}) map[string]i
 	return sample
 }
 
-func clonePayload(payload map[string]interface{}) map[string]interface{} {
+func clonePayload(payload map[string]any) map[string]any {
 	if payload == nil {
-		return map[string]interface{}{}
+		return map[string]any{}
 	}
-	clone := make(map[string]interface{}, len(payload))
+	clone := make(map[string]any, len(payload))
 	maps.Copy(clone, payload)
 	return clone
 }
@@ -385,15 +385,15 @@ func gatewayCompactionContinuation(raw string) string {
 // Responses does not expose SyntheticReason, so an ordinary user input item is
 // the closest wire-level representation of Grok Build's synthetic user_meta
 // carrier.
-func gatewayCompactionSummaryMessage(text string) map[string]interface{} {
-	return map[string]interface{}{
+func gatewayCompactionSummaryMessage(text string) map[string]any {
+	return map[string]any{
 		"type": "message", "role": "user",
-		"content": []interface{}{map[string]interface{}{"type": "input_text", "text": text}},
+		"content": []any{map[string]any{"type": "input_text", "text": text}},
 	}
 }
 
 type gatewayCompactionSample struct {
-	Response map[string]interface{}
+	Response map[string]any
 	Summary  string
 }
 
@@ -413,13 +413,13 @@ var (
 // completed response is authoritative; the streamed output items are the
 // fallback for a stream that ends without a usable summary object.
 func parseGatewayCompactionStream(data []byte) (gatewayCompactionSample, error) {
-	var completed map[string]interface{}
+	var completed map[string]any
 	var streamedParts []string
 	err := ConsumeSSE(bytes.NewReader(data), func(event SSEEvent) error {
 		if !event.HasData() || bytes.Equal(bytes.TrimSpace(event.Data()), []byte("[DONE]")) {
 			return nil
 		}
-		var payload map[string]interface{}
+		var payload map[string]any
 		if json.Unmarshal(event.Data(), &payload) != nil {
 			return nil
 		}
@@ -429,22 +429,22 @@ func parseGatewayCompactionStream(data []byte) (gatewayCompactionSample, error) 
 		}
 		switch kind {
 		case "response.output_item.done":
-			if item, ok := payload["item"].(map[string]interface{}); ok {
+			if item, ok := payload["item"].(map[string]any); ok {
 				streamedParts = append(streamedParts, gatewayCompactionItemText(item)...)
 			}
 		case "response.completed":
-			if response, ok := payload["response"].(map[string]interface{}); ok {
+			if response, ok := payload["response"].(map[string]any); ok {
 				completed = clonePayload(response)
 			}
 		case "response.failed":
-			response, _ := payload["response"].(map[string]interface{})
-			errorValue, _ := response["error"].(map[string]interface{})
+			response, _ := payload["response"].(map[string]any)
+			errorValue, _ := response["error"].(map[string]any)
 			return newGatewayCompactionStreamError(
 				strings.TrimSpace(ParseLooseStringAny(errorValue["code"])),
 				strings.TrimSpace(ParseLooseStringAny(errorValue["message"])),
 			)
 		case "error", "response.error":
-			errorValue, _ := payload["error"].(map[string]interface{})
+			errorValue, _ := payload["error"].(map[string]any)
 			if errorValue == nil {
 				errorValue = payload
 			}
@@ -507,14 +507,14 @@ func gatewayCompactionErrorIsTransient(err error) bool {
 	return true
 }
 
-func gatewayCompactionItemText(item map[string]interface{}) []string {
+func gatewayCompactionItemText(item map[string]any) []string {
 	if ParseLooseStringAny(item["type"]) != "message" {
 		return nil
 	}
-	content, _ := item["content"].([]interface{})
+	content, _ := item["content"].([]any)
 	parts := make([]string, 0, len(content))
 	for _, raw := range content {
-		value, ok := raw.(map[string]interface{})
+		value, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -528,14 +528,14 @@ func gatewayCompactionItemText(item map[string]interface{}) []string {
 	return parts
 }
 
-func extractCompactionSummary(response map[string]interface{}) string {
+func extractCompactionSummary(response map[string]any) string {
 	if text := strings.TrimSpace(ParseLooseStringAny(response["output_text"])); text != "" {
 		return text
 	}
 	var parts []string
-	output, _ := response["output"].([]interface{})
+	output, _ := response["output"].([]any)
 	for _, raw := range output {
-		if item, ok := raw.(map[string]interface{}); ok {
+		if item, ok := raw.(map[string]any); ok {
 			parts = append(parts, gatewayCompactionItemText(item)...)
 		}
 	}
@@ -545,8 +545,8 @@ func extractCompactionSummary(response map[string]interface{}) string {
 // normalizeGatewayCompactionUsage keeps the synthetic response acceptable to
 // Codex even when Grok omits one of the required usage fields. An entirely
 // absent usage object stays absent rather than being fabricated.
-func normalizeGatewayCompactionUsage(response map[string]interface{}) {
-	usage, ok := response["usage"].(map[string]interface{})
+func normalizeGatewayCompactionUsage(response map[string]any) {
+	usage, ok := response["usage"].(map[string]any)
 	if !ok {
 		if response["usage"] == nil {
 			delete(response, "usage")
@@ -562,12 +562,12 @@ func normalizeGatewayCompactionUsage(response map[string]interface{}) {
 	}
 }
 
-func nonNegativeJSONInteger(value interface{}) int64 {
+func nonNegativeJSONInteger(value any) int64 {
 	number, _ := nonNegativeJSONIntegerOK(value)
 	return number
 }
 
-func nonNegativeJSONIntegerOK(value interface{}) (int64, bool) {
+func nonNegativeJSONIntegerOK(value any) (int64, bool) {
 	switch typed := value.(type) {
 	case float64:
 		if typed < 0 || typed != float64(int64(typed)) {
@@ -592,14 +592,14 @@ func nonNegativeJSONIntegerOK(value interface{}) (int64, bool) {
 // buildGatewayCompactionResponse turns the summary turn into the answer the
 // client actually asked for: a single compaction item holding this gateway's
 // sealed blob.
-func buildGatewayCompactionResponse(response map[string]interface{}, blob, model string) map[string]interface{} {
+func buildGatewayCompactionResponse(response map[string]any, blob, model string) map[string]any {
 	result := clonePayload(response)
 	normalizeGatewayCompactionUsage(result)
 	responseID := strings.TrimSpace(ParseLooseStringAny(result["id"]))
 	if responseID == "" {
 		responseID = "resp_" + compactionRandomHex(16)
 	}
-	item := map[string]interface{}{
+	item := map[string]any{
 		"id":                "cmp_" + strings.TrimPrefix(responseID, "resp_"),
 		"type":              "compaction",
 		"encrypted_content": blob,
@@ -611,7 +611,7 @@ func buildGatewayCompactionResponse(response map[string]interface{}, blob, model
 	result["object"] = "response.compaction"
 	result["status"] = "completed"
 	result["model"] = model
-	result["output"] = []interface{}{item}
+	result["output"] = []any{item}
 	delete(result, "output_text")
 	return result
 }
@@ -628,25 +628,25 @@ func compactionRandomHex(size int) string {
 // writeGatewayCompactionStream emits the synthetic SSE sequence Codex expects
 // from a compaction turn. It mirrors the upstream event order so a client that
 // tracks sequence numbers sees one consistent stream.
-func writeGatewayCompactionStream(w io.Writer, response map[string]interface{}) error {
+func writeGatewayCompactionStream(w io.Writer, response map[string]any) error {
 	flusher, _ := w.(http.Flusher)
 	created := clonePayload(response)
 	created["status"] = "in_progress"
-	created["output"] = []interface{}{}
-	item := response["output"].([]interface{})[0]
+	created["output"] = []any{}
+	item := response["output"].([]any)[0]
 	// The wire `type` of every event is its own name, so it is derived instead
 	// of repeated. The encoded bytes are unchanged: the payload is a map, and
 	// both encoders sort its keys.
 	events := []struct {
 		name string
-		data map[string]interface{}
+		data map[string]any
 	}{
-		{"response.created", map[string]interface{}{"sequence_number": 0, "response": created}},
-		{"response.in_progress", map[string]interface{}{"sequence_number": 1, "response": clonePayload(created)}},
-		{"response.output_item.added", map[string]interface{}{"sequence_number": 2, "output_index": 0, "item": item}},
-		{"keepalive", map[string]interface{}{"sequence_number": 3}},
-		{"response.output_item.done", map[string]interface{}{"sequence_number": 4, "output_index": 0, "item": item}},
-		{"response.completed", map[string]interface{}{"sequence_number": 5, "response": response}},
+		{"response.created", map[string]any{"sequence_number": 0, "response": created}},
+		{"response.in_progress", map[string]any{"sequence_number": 1, "response": clonePayload(created)}},
+		{"response.output_item.added", map[string]any{"sequence_number": 2, "output_index": 0, "item": item}},
+		{"keepalive", map[string]any{"sequence_number": 3}},
+		{"response.output_item.done", map[string]any{"sequence_number": 4, "output_index": 0, "item": item}},
+		{"response.completed", map[string]any{"sequence_number": 5, "response": response}},
 	}
 	for _, event := range events {
 		event.data["type"] = event.name

@@ -20,18 +20,18 @@ func TestCodexNamespaceBridgeRoundTrip(t *testing.T) {
 		for _, prefix := range []string{"", "/v1"} {
 			for _, stream := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s%s/stream=%v", provider, prefix, stream), func(t *testing.T) {
-					tools := []interface{}{}
+					tools := []any{}
 					for i := range 7 {
-						tools = append(tools, map[string]interface{}{"type": "function", "name": fmt.Sprintf("plain_%d", i), "parameters": map[string]interface{}{"type": "object"}})
+						tools = append(tools, map[string]any{"type": "function", "name": fmt.Sprintf("plain_%d", i), "parameters": map[string]any{"type": "object"}})
 					}
 					for _, ns := range []string{"files", "remote"} {
-						tools = append(tools, map[string]interface{}{"type": "namespace", "name": ns, "description": "Read tools", "tools": []interface{}{map[string]interface{}{"type": "function", "name": "read", "parameters": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"path": map[string]interface{}{"type": "string"}}}}}})
+						tools = append(tools, map[string]any{"type": "namespace", "name": ns, "description": "Read tools", "tools": []any{map[string]any{"type": "function", "name": "read", "parameters": map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}}}}}})
 					}
 					calls := 0
 					responseStore := store.NewMemoryResponseStore(0)
 					bridge := ResponsesBridgeHandler(func(w http.ResponseWriter, r *http.Request) {
 						calls++
-						var req map[string]interface{}
+						var req map[string]any
 						if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 							t.Fatal(err)
 						}
@@ -39,19 +39,19 @@ func TestCodexNamespaceBridgeRoundTrip(t *testing.T) {
 						if len(defs) != 9 {
 							t.Fatalf("tools=%v", defs)
 						}
-						first := defs[7]["function"].(map[string]interface{})["name"].(string)
-						second := defs[8]["function"].(map[string]interface{})["name"].(string)
+						first := defs[7]["function"].(map[string]any)["name"].(string)
+						second := defs[8]["function"].(map[string]any)["name"].(string)
 						if first == second {
 							t.Fatal("namespaces collided")
 						}
-						choice := req["tool_choice"].(map[string]interface{})["function"].(map[string]interface{})
+						choice := req["tool_choice"].(map[string]any)["function"].(map[string]any)
 						if choice["name"] != first {
 							t.Fatalf("choice=%v", choice)
 						}
 						if calls == 2 {
 							messages := InterfaceMaps(req["messages"])
 							toolCall := InterfaceMaps(messages[0]["tool_calls"])[0]
-							if toolCall["function"].(map[string]interface{})["name"] != first || toolCall["id"] != "call_a" || messages[1]["tool_call_id"] != "call_a" {
+							if toolCall["function"].(map[string]any)["name"] != first || toolCall["id"] != "call_a" || messages[1]["tool_call_id"] != "call_a" {
 								t.Fatalf("history=%v", messages)
 							}
 						}
@@ -68,7 +68,7 @@ func TestCodexNamespaceBridgeRoundTrip(t *testing.T) {
 						}
 						_, _ = io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n")
 					}, BridgeOptions{Store: responseStore})
-					payload := map[string]interface{}{"model": "m", "input": "read both", "tools": tools, "stream": stream, "tool_choice": map[string]interface{}{"type": "function", "namespace": "files", "name": "read"}}
+					payload := map[string]any{"model": "m", "input": "read both", "tools": tools, "stream": stream, "tool_choice": map[string]any{"type": "function", "namespace": "files", "name": "read"}}
 					for range 2 {
 						body, _ := json.Marshal(payload)
 						rec := httptest.NewRecorder()
@@ -76,7 +76,7 @@ func TestCodexNamespaceBridgeRoundTrip(t *testing.T) {
 						if rec.Code != 200 {
 							t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 						}
-						var response map[string]interface{}
+						var response map[string]any
 						if !stream {
 							_ = json.Unmarshal(rec.Body.Bytes(), &response)
 						} else {
@@ -84,15 +84,15 @@ func TestCodexNamespaceBridgeRoundTrip(t *testing.T) {
 								if string(frame.Data()) == "[DONE]" {
 									return nil
 								}
-								var event map[string]interface{}
+								var event map[string]any
 								if err := json.Unmarshal(frame.Data(), &event); err != nil {
 									return err
 								}
-								if item, ok := event["item"].(map[string]interface{}); ok && item["type"] == "function_call" && (item["name"] != "read" || item["namespace"] == nil) {
+								if item, ok := event["item"].(map[string]any); ok && item["type"] == "function_call" && (item["name"] != "read" || item["namespace"] == nil) {
 									t.Fatalf("bad event: %v", event)
 								}
 								if event["type"] == "response.completed" {
-									response = event["response"].(map[string]interface{})
+									response = event["response"].(map[string]any)
 								}
 								return nil
 							})
@@ -108,7 +108,7 @@ func TestCodexNamespaceBridgeRoundTrip(t *testing.T) {
 						if err != nil || !strings.Contains(string(saved.Body), `"namespace":"files"`) {
 							t.Fatalf("client identity lost in stored response: %v %v", saved, err)
 						}
-						payload["input"] = []interface{}{out[0], map[string]interface{}{"type": "function_call_output", "call_id": "call_a", "output": "found"}, map[string]interface{}{"role": "user", "content": "continue"}}
+						payload["input"] = []any{out[0], map[string]any{"type": "function_call_output", "call_id": "call_a", "output": "found"}, map[string]any{"role": "user", "content": "continue"}}
 					}
 					if calls != 2 {
 						t.Fatalf("upstream calls=%d", calls)

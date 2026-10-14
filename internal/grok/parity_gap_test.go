@@ -93,17 +93,17 @@ func (w *observedStreamWriter) Write(data []byte) (int, error) {
 func TestAnthropicAdvancedFieldsAndReasoningReplayArePreserved(t *testing.T) {
 	req := anthropicMessagesRequest{
 		Model: "grok-4.6", MaxTokens: 4096,
-		Thinking:      map[string]interface{}{"type": "enabled", "budget_tokens": float64(2048)},
+		Thinking:      map[string]any{"type": "enabled", "budget_tokens": float64(2048)},
 		StopSequences: []string{"END"},
-		OutputConfig: map[string]interface{}{"effort": "high", "format": map[string]interface{}{
-			"type": "json_schema", "schema": map[string]interface{}{"type": "object"},
+		OutputConfig: map[string]any{"effort": "high", "format": map[string]any{
+			"type": "json_schema", "schema": map[string]any{"type": "object"},
 		}},
-		MCPServers: []map[string]interface{}{{"name": "example", "url": "https://example.test/mcp"}},
-		Metadata:   map[string]interface{}{"session_id": "claude-session"},
+		MCPServers: []map[string]any{{"name": "example", "url": "https://example.test/mcp"}},
+		Metadata:   map[string]any{"session_id": "claude-session"},
 		Messages: []anthropicMessage{
-			{Role: "assistant", Content: []interface{}{map[string]interface{}{
+			{Role: "assistant", Content: []any{map[string]any{
 				"type": "thinking", "thinking": "private plan", "signature": "opaque-cipher",
-			}, map[string]interface{}{"type": "text", "text": "previous answer"}}},
+			}, map[string]any{"type": "text", "text": "previous answer"}}},
 			{Role: "user", Content: "continue"},
 		},
 	}
@@ -122,7 +122,7 @@ func TestReasoningReplayIsModelAndSessionIsolated(t *testing.T) {
 		if len(items) != 1 {
 			return ""
 		}
-		item, _ := items[0].(map[string]interface{})
+		item, _ := items[0].(map[string]any)
 		return chatwire.ParseLooseStringAny(item["encrypted_content"])
 	}
 	h.storeReasoningReplay("grok-4.6", "session-a", validTestReplayCipher())
@@ -130,11 +130,11 @@ func TestReasoningReplayIsModelAndSessionIsolated(t *testing.T) {
 	testutil.Equal(t, replayCipher("grok-4.5", "session-a"), "")
 	testutil.Equal(t, replayCipher("grok-4.6", "session-b"), "")
 
-	payload := map[string]interface{}{"input": []interface{}{map[string]interface{}{"role": "user", "content": "continue"}}}
+	payload := map[string]any{"input": []any{map[string]any{"role": "user", "content": "continue"}}}
 	h.applyNativeReasoningReplay("grok-4.6", "session-a", payload)
-	input := payload["input"].([]interface{})
+	input := payload["input"].([]any)
 	testutil.Equal(t, len(input), 2)
-	testutil.EqualAny(t, input[0].(map[string]interface{})["encrypted_content"], validTestReplayCipher())
+	testutil.EqualAny(t, input[0].(map[string]any)["encrypted_content"], validTestReplayCipher())
 }
 
 func TestReasoningReplayUsesPortableShapeAndCanBeStripped(t *testing.T) {
@@ -143,14 +143,14 @@ func TestReasoningReplayUsesPortableShapeAndCanBeStripped(t *testing.T) {
 	req := &chatwire.Request{Model: "grok-4.6", PromptCacheKey: "session-a", ReasoningReplay: true, Messages: []chatwire.Message{{Role: "user", Content: "next"}}}
 	payload, err := h.responsesPayloadFromChat(ModelSpec{UpstreamModel: "grok-4.6"}, req, true)
 	testutil.NoError(t, err)
-	input := payload["input"].([]interface{})
-	reasoning := input[0].(map[string]interface{})
+	input := payload["input"].([]any)
+	reasoning := input[0].(map[string]any)
 	_, exists := reasoning["content"]
 	testutil.Falsef(t, exists, "replay contains non-portable content field: %#v", reasoning)
-	if !stripInjectedReasoningReplay(payload) || len(payload["input"].([]interface{})) != 1 {
+	if !stripInjectedReasoningReplay(payload) || len(payload["input"].([]any)) != 1 {
 		t.Fatalf("replay was not stripped: %#v", payload["input"])
 	}
-	stripped := payload["input"].([]interface{})[0].(map[string]interface{})
+	stripped := payload["input"].([]any)[0].(map[string]any)
 	_, exists = stripped["encrypted_content"]
 	testutil.False(t, exists, "encrypted replay content was not removed")
 	testutil.False(t, !isReasoningReplayDecodeError(newCLIUpstreamError(400, nil, []byte("Could not decode the compaction blob"))), "compaction decode error was not recognized")
@@ -159,13 +159,13 @@ func TestReasoningReplayUsesPortableShapeAndCanBeStripped(t *testing.T) {
 func TestNativeReasoningReplayConvertsStringInput(t *testing.T) {
 	h := &Handler{affinity: map[string]sessionAffinityEntry{}, replay: map[string]reasoningReplayEntry{}}
 	h.storeReasoningReplay("grok-4.6", "session", validTestReplayCipher())
-	payload := map[string]interface{}{"input": "continue"}
+	payload := map[string]any{"input": "continue"}
 	h.applyNativeReasoningReplay("grok-4.6", "session", payload)
-	input, ok := payload["input"].([]interface{})
+	input, ok := payload["input"].([]any)
 	if !ok || len(input) != 2 {
 		t.Fatalf("input=%#v", payload["input"])
 	}
-	testutil.EqualAny(t, input[0].(map[string]interface{})["encrypted_content"], validTestReplayCipher())
+	testutil.EqualAny(t, input[0].(map[string]any)["encrypted_content"], validTestReplayCipher())
 }
 
 func TestPrepareGrokSessionSeparatesTenantsAndSoftReplay(t *testing.T) {

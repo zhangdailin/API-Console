@@ -230,7 +230,7 @@ func (s *DiagnosticStore) Save(ctx context.Context, b Bundle) error {
 	for _, sec := range b.Sections {
 		names = append(names, sec.Name)
 	}
-	index, _ := json.Marshal(map[string]interface{}{"metadata": map[string]interface{}{"sections": names, "bytes": b.Bytes, "truncated": b.Truncated, "retention": "24 小时，最多 512 个请求"}})
+	index, _ := json.Marshal(map[string]any{"metadata": map[string]any{"sections": names, "bytes": b.Bytes, "truncated": b.Truncated, "retention": "24 小时，最多 512 个请求"}})
 	var compressed bytes.Buffer
 	zw := gzip.NewWriter(&compressed)
 	if _, err = zw.Write(raw); err != nil {
@@ -272,8 +272,8 @@ func (s *DiagnosticStore) Get(ctx context.Context, id string) (*Bundle, error) {
 	}
 	return &b, nil
 }
-func (s *DiagnosticStore) Indexes(ctx context.Context, ids []string) (map[string]interface{}, error) {
-	out := map[string]interface{}{}
+func (s *DiagnosticStore) Indexes(ctx context.Context, ids []string) (map[string]any, error) {
+	out := map[string]any{}
 	if s == nil || s.client == nil || len(ids) == 0 {
 		return out, nil
 	}
@@ -287,7 +287,7 @@ func (s *DiagnosticStore) Indexes(ctx context.Context, ids []string) (map[string
 	}
 	for i, v := range values {
 		if raw, ok := v.(string); ok {
-			var index interface{}
+			var index any
 			if json.Unmarshal([]byte(raw), &index) == nil {
 				out[ids[i]] = index
 			}

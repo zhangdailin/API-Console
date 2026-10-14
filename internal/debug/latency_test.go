@@ -22,7 +22,7 @@ func TestLatencyCapturesReusedConnectionsAndSecrets(t *testing.T) {
 		req.Header.Set("Cosy-Key", "secret-key")
 		req.Header.Set("Cosy-User", "private-user")
 		a := BeginUpstream(ctx, req.Method, server.URL, req.Header, nil)
-		traced, l := a.Trace(ctx, map[string]interface{}{"model_key": "qfmodel"})
+		traced, l := a.Trace(ctx, map[string]any{"model_key": "qfmodel"})
 		resp, err := client.Do(req.WithContext(traced))
 		testutil.NoError(t, err)
 		l.Response(resp)
@@ -40,7 +40,7 @@ func TestLatencyCapturesReusedConnectionsAndSecrets(t *testing.T) {
 			continue
 		}
 		count++
-		var v map[string]interface{}
+		var v map[string]any
 		testutil.NoError(t, json.Unmarshal([]byte(s.Payload), &v))
 		if count == 2 {
 			testutil.Equal(t, v["connection_reused"], true)

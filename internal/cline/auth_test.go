@@ -53,7 +53,7 @@ func TestResolveCredentialsReadsTheChannelFields(t *testing.T) {
 // of rendering as 1970 (which would make the token look permanently expired).
 func TestParseExpiryAcceptsEveryUpstreamSpelling(t *testing.T) {
 	const want = int64(4102444800000)
-	for _, value := range []interface{}{
+	for _, value := range []any{
 		float64(want),
 		int64(want),
 		"4102444800000",

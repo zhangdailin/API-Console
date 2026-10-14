@@ -269,11 +269,11 @@ func (a *Aggregator) Observe(ctx context.Context, outcome Outcome) {
 }
 
 // Health reports writes in this process, separately from the retained counters.
-func (a *Aggregator) Health() map[string]interface{} {
+func (a *Aggregator) Health() map[string]any {
 	if !a.Enabled() {
-		return map[string]interface{}{"available": false}
+		return map[string]any{"available": false}
 	}
-	return map[string]interface{}{"available": true, "written": a.written.Load(), "write_failed": a.writeFailed.Load()}
+	return map[string]any{"available": true, "written": a.written.Load(), "write_failed": a.writeFailed.Load()}
 }
 
 // Range reads the buckets of one channel between two instants (inclusive of the

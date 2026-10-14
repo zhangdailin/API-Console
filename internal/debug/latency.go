@@ -15,17 +15,17 @@ type Latency struct {
 	mu      sync.Mutex
 	attempt *UpstreamAttempt
 	started time.Time
-	values  map[string]interface{}
+	values  map[string]any
 	stages  map[string]time.Time
 }
 
-func (a *UpstreamAttempt) Trace(ctx context.Context, metadata map[string]interface{}) (context.Context, *Latency) {
+func (a *UpstreamAttempt) Trace(ctx context.Context, metadata map[string]any) (context.Context, *Latency) {
 	if a == nil {
 		return ctx, nil
 	}
 	l := &Latency{attempt: a, started: a.started, values: metadata, stages: map[string]time.Time{}}
 	if l.values == nil {
-		l.values = map[string]interface{}{}
+		l.values = map[string]any{}
 	}
 	l.values["before_upstream_ms"] = a.started.Sub(a.capture.started).Milliseconds()
 	trace := &httptrace.ClientTrace{
@@ -88,7 +88,7 @@ func (l *Latency) Mark(k string) {
 	}
 	l.mu.Unlock()
 }
-func (l *Latency) Set(k string, v interface{}) {
+func (l *Latency) Set(k string, v any) {
 	if l == nil {
 		return
 	}
@@ -124,5 +124,5 @@ func RecordWait(ctx context.Context, reason string, planned, actual time.Duratio
 		return
 	}
 	a := beginUpstream(c, "WAIT", "", nil, nil)
-	a.writeJSON("latency.json", map[string]interface{}{"kind": "retry_wait", "reason": reason, "planned_wait_ms": planned.Milliseconds(), "actual_wait_ms": actual.Milliseconds(), "cancelled": cancelled})
+	a.writeJSON("latency.json", map[string]any{"kind": "retry_wait", "reason": reason, "planned_wait_ms": planned.Milliseconds(), "actual_wait_ms": actual.Milliseconds(), "cancelled": cancelled})
 }

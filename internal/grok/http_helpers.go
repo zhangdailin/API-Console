@@ -39,7 +39,7 @@ func requirePost(w http.ResponseWriter, r *http.Request) bool {
 }
 
 // decodeJSONBody decodes the request body into v under the shared size limit.
-func decodeJSONBody(w http.ResponseWriter, r *http.Request, v interface{}) bool {
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, v any) bool {
 	return httpserver.DecodeJSONBody(w, r, v)
 }
 

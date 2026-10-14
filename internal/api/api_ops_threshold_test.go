@@ -61,7 +61,7 @@ func TestHandleOpsOverview_PublishesTheTargetOnTheUnavailableBranch(t *testing.T
 	(&API{}).HandleOpsOverview(recorder, httptest.NewRequest(http.MethodGet, "/api/ops/overview", nil))
 
 	testutil.Equal(t, recorder.Code, http.StatusOK)
-	payload := map[string]interface{}{}
+	payload := map[string]any{}
 	err := json.Unmarshal(recorder.Body.Bytes(), &payload)
 	testutil.CheckNoError(t, err)
 	if available, _ := payload["available"].(bool); available {

@@ -20,7 +20,7 @@ func TestSinkHealthReportsPersistenceFailure(t *testing.T) {
 func TestSinkRejectsOversizeAndSnapshotsMetadata(t *testing.T) {
 	logger, _ := setupRedisLogger(t)
 	logger.Log(context.Background(), Event{Details: strings.Repeat("x", maxEventBytes+1)})
-	metadata := map[string]interface{}{"value": "original"}
+	metadata := map[string]any{"value": "original"}
 	logger.Log(context.Background(), Event{Action: "test", Metadata: metadata})
 	metadata["value"] = "changed"
 	logger.Close()

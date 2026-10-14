@@ -11,7 +11,7 @@ import (
 // `store` defaults to false (ZDR) and `include` always asks for
 // reasoning.encrypted_content. An explicit `store` from the caller is kept, and
 // an existing include list keeps its other entries and its order.
-func applyBuildResponseDefaults(payload map[string]interface{}) {
+func applyBuildResponseDefaults(payload map[string]any) {
 	if payload == nil {
 		return
 	}
@@ -19,9 +19,9 @@ func applyBuildResponseDefaults(payload map[string]interface{}) {
 		payload["store"] = false
 	}
 	const reasoningInclude = "reasoning.encrypted_content"
-	includes := make([]interface{}, 0, 2)
+	includes := make([]any, 0, 2)
 	switch typed := payload["include"].(type) {
-	case []interface{}:
+	case []any:
 		includes = append(includes, typed...)
 	case []string:
 		for _, value := range typed {
@@ -40,7 +40,7 @@ func applyBuildResponseDefaults(payload map[string]interface{}) {
 	payload["include"] = append(includes, reasoningInclude)
 }
 
-func hasBuildHostedTool(tools []map[string]interface{}, kind string) bool {
+func hasBuildHostedTool(tools []map[string]any, kind string) bool {
 	for _, tool := range tools {
 		if strings.EqualFold(strings.TrimSpace(chatwire.ParseLooseStringAny(tool["type"])), kind) {
 			return true
@@ -49,7 +49,7 @@ func hasBuildHostedTool(tools []map[string]interface{}, kind string) bool {
 	return false
 }
 
-func normalizeBuildResponsesPayload(payload map[string]interface{}) error {
+func normalizeBuildResponsesPayload(payload map[string]any) error {
 	if err := responses.ValidateToolsAndHistory(payload); err != nil {
 		return err
 	}
@@ -58,10 +58,10 @@ func normalizeBuildResponsesPayload(payload map[string]interface{}) error {
 	// include the upstream never returns encrypted_content, and `store:false` is
 	// the zero-data-retention default the reference implementation documents.
 	applyBuildResponseDefaults(payload)
-	if raw, ok := payload["response_format"].(map[string]interface{}); ok {
+	if raw, ok := payload["response_format"].(map[string]any); ok {
 		delete(payload, "response_format")
 		if _, exists := payload["text"]; !exists {
-			payload["text"] = map[string]interface{}{"format": normalizeChatResponseFormat(raw)}
+			payload["text"] = map[string]any{"format": normalizeChatResponseFormat(raw)}
 		}
 	}
 	tools := responses.InterfaceMaps(payload["tools"])
@@ -78,7 +78,7 @@ func normalizeBuildResponsesPayload(payload map[string]interface{}) error {
 	// Keep an explicit x_search unchanged and never add web_search when only X was
 	// requested, so this does not broaden a caller's search permission.
 	if hasBuildHostedTool(tools, "web_search") && !hasBuildHostedTool(tools, "x_search") {
-		tools = append(tools, map[string]interface{}{"type": "x_search"})
+		tools = append(tools, map[string]any{"type": "x_search"})
 	}
 	payload["tools"] = tools
 	return responses.ValidateToolsAndHistory(payload)
@@ -88,11 +88,11 @@ func normalizeBuildResponsesPayload(payload map[string]interface{}) error {
 // reasoning_effort / reasoning_summary extensions and rebuild the Responses
 // shape from them. A control the caller omitted stays omitted rather than being
 // guessed here; plane-specific defaults are applied later.
-func chatReasoningControls(req *chatwire.Request) map[string]interface{} {
+func chatReasoningControls(req *chatwire.Request) map[string]any {
 	if req == nil {
 		return nil
 	}
-	reasoning := map[string]interface{}{}
+	reasoning := map[string]any{}
 	if req.ReasoningEffort != nil {
 		if effort := strings.TrimSpace(*req.ReasoningEffort); effort != "" {
 			reasoning["effort"] = effort
@@ -106,9 +106,9 @@ func chatReasoningControls(req *chatwire.Request) map[string]interface{} {
 	return reasoning
 }
 
-func validatePayloadReasoning(payload map[string]interface{}) error {
+func validatePayloadReasoning(payload map[string]any) error {
 	if raw, exists := payload["reasoning"]; exists && raw != nil {
-		reasoning, ok := raw.(map[string]interface{})
+		reasoning, ok := raw.(map[string]any)
 		if !ok {
 			return fmt.Errorf("reasoning must be an object")
 		}
@@ -128,6 +128,6 @@ func validatePayloadReasoning(payload map[string]interface{}) error {
 
 // hasNativeSearchTool reports whether the tool list already declares a hosted
 // search tool, so web_search_options does not duplicate it.
-func hasNativeSearchTool(tools []map[string]interface{}) bool {
+func hasNativeSearchTool(tools []map[string]any) bool {
 	return hasBuildHostedTool(tools, "web_search") || hasBuildHostedTool(tools, "x_search")
 }

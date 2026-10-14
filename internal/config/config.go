@@ -342,8 +342,8 @@ func generateRandomPassword(length int) (string, error) {
 	return encoded, nil
 }
 
-func parseYAMLFlat(data []byte) (map[string]interface{}, error) {
-	out := map[string]interface{}{}
+func parseYAMLFlat(data []byte) (map[string]any, error) {
+	out := map[string]any{}
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())

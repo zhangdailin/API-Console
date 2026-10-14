@@ -134,18 +134,18 @@ func TestDecideQualityRetryPolicy(t *testing.T) {
 func TestQualityRequestReplayUnsafe(t *testing.T) {
 	testutil.False(t, qualityRequestReplayUnsafe(nil), "nil request must be replay-safe")
 	testutil.False(t, qualityRequestReplayUnsafe(&chatwire.Request{}), "a plain request must be replay-safe")
-	functionTool := map[string]interface{}{"type": "function", "name": "weather"}
-	testutil.False(t, qualityRequestReplayUnsafe(&chatwire.Request{ResponsesTools: []map[string]interface{}{functionTool}}), "a client-executed function tool must be replay-safe")
-	hosted := map[string]interface{}{"type": "web_search"}
-	testutil.False(t, !qualityRequestReplayUnsafe(&chatwire.Request{ResponsesTools: []map[string]interface{}{hosted}}), "a hosted search tool must block replay")
-	testutil.False(t, !qualityRequestReplayUnsafe(&chatwire.Request{WebSearchOptions: map[string]interface{}{"search_context_size": "low"}}), "web_search_options must block replay")
-	testutil.False(t, !qualityRequestReplayUnsafe(&chatwire.Request{MCPServers: []map[string]interface{}{{"url": "https://example.test"}}}), "mcp_servers must block replay")
-	remoteShell := map[string]interface{}{"type": "shell", "environment": map[string]interface{}{"type": "container"}}
-	testutil.False(t, !qualityRequestReplayUnsafe(&chatwire.Request{ResponsesTools: []map[string]interface{}{remoteShell}}), "a hosted shell must block replay")
-	localShell := map[string]interface{}{"type": "shell", "environment": map[string]interface{}{"type": "local"}}
-	testutil.False(t, qualityRequestReplayUnsafe(&chatwire.Request{ResponsesTools: []map[string]interface{}{localShell}}), "a local shell must stay replay-safe")
+	functionTool := map[string]any{"type": "function", "name": "weather"}
+	testutil.False(t, qualityRequestReplayUnsafe(&chatwire.Request{ResponsesTools: []map[string]any{functionTool}}), "a client-executed function tool must be replay-safe")
+	hosted := map[string]any{"type": "web_search"}
+	testutil.False(t, !qualityRequestReplayUnsafe(&chatwire.Request{ResponsesTools: []map[string]any{hosted}}), "a hosted search tool must block replay")
+	testutil.False(t, !qualityRequestReplayUnsafe(&chatwire.Request{WebSearchOptions: map[string]any{"search_context_size": "low"}}), "web_search_options must block replay")
+	testutil.False(t, !qualityRequestReplayUnsafe(&chatwire.Request{MCPServers: []map[string]any{{"url": "https://example.test"}}}), "mcp_servers must block replay")
+	remoteShell := map[string]any{"type": "shell", "environment": map[string]any{"type": "container"}}
+	testutil.False(t, !qualityRequestReplayUnsafe(&chatwire.Request{ResponsesTools: []map[string]any{remoteShell}}), "a hosted shell must block replay")
+	localShell := map[string]any{"type": "shell", "environment": map[string]any{"type": "local"}}
+	testutil.False(t, qualityRequestReplayUnsafe(&chatwire.Request{ResponsesTools: []map[string]any{localShell}}), "a local shell must stay replay-safe")
 	// Unknown tool types default to no replay.
-	testutil.False(t, !qualityRequestReplayUnsafe(&chatwire.Request{ResponsesTools: []map[string]interface{}{{"type": "code_execution"}}}), "an unknown hosted tool must block replay")
+	testutil.False(t, !qualityRequestReplayUnsafe(&chatwire.Request{ResponsesTools: []map[string]any{{"type": "code_execution"}}}), "an unknown hosted tool must block replay")
 }
 
 func TestDeferredResponseWriterHoldsThenCommits(t *testing.T) {
@@ -218,7 +218,7 @@ func degradedUpstream(t *testing.T) *httptest.Server {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(w, "event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"encrypted_content\":\""+encrypted+"\"}}\n\n")
 		dump := strings.Repeat("status loop ", 120)
-		payload, _ := json.Marshal(map[string]interface{}{"type": "response.output_text.delta", "delta": dump})
+		payload, _ := json.Marshal(map[string]any{"type": "response.output_text.delta", "delta": dump})
 		_, _ = io.WriteString(w, "event: response.output_text.delta\ndata: "+string(payload)+"\n\n")
 		_, _ = io.WriteString(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_degraded\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":10,\"output_tokens\":1440,\"output_tokens_details\":{\"reasoning_tokens\":0}}}}\n\n")
 	}))
@@ -403,10 +403,10 @@ func TestServeNativeChatDoesNotReplayHostedToolTurn(t *testing.T) {
 	h.cliClient.httpClient = routing.Client()
 	h.cliClient.oauth.httpClient = routing.Client()
 
-	body, _ := json.Marshal(map[string]interface{}{
+	body, _ := json.Marshal(map[string]any{
 		"model": "grok-4.5", "stream": true, "reasoning_effort": "high",
-		"messages":          []map[string]interface{}{{"role": "user", "content": "search the web"}},
-		"x_responses_tools": []map[string]interface{}{{"type": "web_search"}},
+		"messages":          []map[string]any{{"role": "user", "content": "search the web"}},
+		"x_responses_tools": []map[string]any{{"type": "web_search"}},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/grok/v1/chat/completions", strings.NewReader(string(body)))
 	rec := httptest.NewRecorder()
@@ -491,7 +491,7 @@ func TestNativeChatTransportAndQualityRetryShareBudget(t *testing.T) {
 			effort := "high"
 			req := &chatwire.Request{Model: "grok-4.5", Stream: true, ReasoningEffort: &effort, Messages: []chatwire.Message{{Role: "user", Content: "hello"}}}
 			if tc.unsafe {
-				req.WebSearchOptions = map[string]interface{}{}
+				req.WebSearchOptions = map[string]any{}
 			}
 			rec := httptest.NewRecorder()
 			h.serveNativeChat(ctx, rec, req, spec, sess, nil)

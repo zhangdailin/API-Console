@@ -45,7 +45,7 @@ func (h *Handler) HandleCountTokens(w http.ResponseWriter, r *http.Request) {
 	breakdown := estimateRequestTokenBreakdown(req)
 
 	w.Header().Set("Content-Type", "application/json")
-	resp := map[string]interface{}{
+	resp := map[string]any{
 		"input_tokens":   breakdown.Total,
 		"prompt_profile": profile,
 		"breakdown": map[string]int{

@@ -72,7 +72,7 @@ func probeEnvironment(t *testing.T) (*config.Config, *store.Store) {
 		t.Skipf("store unavailable: %v", err)
 	}
 	if raw, err := s.GetSetting(context.Background(), "config"); err == nil && strings.TrimSpace(raw) != "" {
-		var override map[string]interface{}
+		var override map[string]any
 		if json.Unmarshal([]byte(raw), &override) == nil {
 			if v, ok := override["qoder_inference_base_url"].(string); ok && v != "" {
 				cfg.QoderInferenceURL = v

@@ -13,14 +13,14 @@ func TestValidateChatMessages_AcceptsCaseInsensitiveRoleAndType(t *testing.T) {
 	messages := []chatwire.Message{
 		{
 			Role: "User",
-			Content: []interface{}{
-				map[string]interface{}{"type": "Text", "text": "hello"},
-				map[string]interface{}{"type": "Image_URL", "image_url": map[string]interface{}{"url": "https://a/b.png"}},
+			Content: []any{
+				map[string]any{"type": "Text", "text": "hello"},
+				map[string]any{"type": "Image_URL", "image_url": map[string]any{"url": "https://a/b.png"}},
 			},
 		},
 		{
 			Role:    "ASSISTANT",
-			Content: []interface{}{map[string]interface{}{"type": "TEXT", "text": "ok"}},
+			Content: []any{map[string]any{"type": "TEXT", "text": "ok"}},
 		},
 	}
 

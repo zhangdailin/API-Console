@@ -11,53 +11,53 @@ import "encoding/json"
 // ("true", "1", a numeric string), so interface{} members shadow the typed ones
 // and are parsed loosely afterwards.
 type CreateRequest struct {
-	Model              string                   `json:"model"`
-	Input              interface{}              `json:"input"`
-	Instructions       string                   `json:"instructions,omitempty"`
-	Stream             bool                     `json:"stream,omitempty"`
-	StreamProvided     bool                     `json:"-"`
-	Reasoning          map[string]interface{}   `json:"reasoning,omitempty"`
-	Temperature        *float64                 `json:"temperature,omitempty"`
-	TopP               *float64                 `json:"top_p,omitempty"`
-	MaxOutputTokens    *int                     `json:"max_output_tokens,omitempty"`
-	Tools              []map[string]interface{} `json:"tools,omitempty"`
-	ToolChoice         interface{}              `json:"tool_choice,omitempty"`
-	ParallelToolCalls  *bool                    `json:"parallel_tool_calls,omitempty"`
-	PreviousResponseID string                   `json:"previous_response_id,omitempty"`
-	Store              *bool                    `json:"store,omitempty"`
-	Metadata           map[string]interface{}   `json:"metadata,omitempty"`
-	Truncation         string                   `json:"truncation,omitempty"`
-	Include            []string                 `json:"include,omitempty"`
-	Background         *bool                    `json:"background,omitempty"`
-	PromptCacheKey     string                   `json:"prompt_cache_key,omitempty"`
+	Model              string           `json:"model"`
+	Input              any              `json:"input"`
+	Instructions       string           `json:"instructions,omitempty"`
+	Stream             bool             `json:"stream,omitempty"`
+	StreamProvided     bool             `json:"-"`
+	Reasoning          map[string]any   `json:"reasoning,omitempty"`
+	Temperature        *float64         `json:"temperature,omitempty"`
+	TopP               *float64         `json:"top_p,omitempty"`
+	MaxOutputTokens    *int             `json:"max_output_tokens,omitempty"`
+	Tools              []map[string]any `json:"tools,omitempty"`
+	ToolChoice         any              `json:"tool_choice,omitempty"`
+	ParallelToolCalls  *bool            `json:"parallel_tool_calls,omitempty"`
+	PreviousResponseID string           `json:"previous_response_id,omitempty"`
+	Store              *bool            `json:"store,omitempty"`
+	Metadata           map[string]any   `json:"metadata,omitempty"`
+	Truncation         string           `json:"truncation,omitempty"`
+	Include            []string         `json:"include,omitempty"`
+	Background         *bool            `json:"background,omitempty"`
+	PromptCacheKey     string           `json:"prompt_cache_key,omitempty"`
 	// Text carries the Responses text controls, whose only member is the output
 	// format (`text.format`). The chat-only channels express the same thing as
 	// `response_format`, so the bridge passes the object through unchanged and
 	// lets the chat layer decide how much of it the upstream honors.
-	Text map[string]interface{} `json:"text,omitempty"`
+	Text map[string]any `json:"text,omitempty"`
 	// ResponseFormat accepts the chat-shaped field as well. Clients that were
 	// written against the chat API and later migrated to Responses keep sending
 	// it, and silently dropping it used to turn a structured-output request into
 	// free-form prose.
-	ResponseFormat map[string]interface{} `json:"response_format,omitempty"`
+	ResponseFormat map[string]any `json:"response_format,omitempty"`
 }
 
 func (r *CreateRequest) UnmarshalJSON(data []byte) error {
 	type plainCreateRequest CreateRequest
 	type rawCreateRequest struct {
 		plainCreateRequest
-		Model              interface{} `json:"model"`
-		Instructions       interface{} `json:"instructions,omitempty"`
-		Stream             interface{} `json:"stream,omitempty"`
-		Temperature        interface{} `json:"temperature,omitempty"`
-		TopP               interface{} `json:"top_p,omitempty"`
-		MaxOutputTokens    interface{} `json:"max_output_tokens,omitempty"`
-		ParallelToolCalls  interface{} `json:"parallel_tool_calls,omitempty"`
-		PreviousResponseID interface{} `json:"previous_response_id,omitempty"`
-		Store              interface{} `json:"store,omitempty"`
-		Truncation         interface{} `json:"truncation,omitempty"`
-		Background         interface{} `json:"background,omitempty"`
-		PromptCacheKey     interface{} `json:"prompt_cache_key,omitempty"`
+		Model              any `json:"model"`
+		Instructions       any `json:"instructions,omitempty"`
+		Stream             any `json:"stream,omitempty"`
+		Temperature        any `json:"temperature,omitempty"`
+		TopP               any `json:"top_p,omitempty"`
+		MaxOutputTokens    any `json:"max_output_tokens,omitempty"`
+		ParallelToolCalls  any `json:"parallel_tool_calls,omitempty"`
+		PreviousResponseID any `json:"previous_response_id,omitempty"`
+		Store              any `json:"store,omitempty"`
+		Truncation         any `json:"truncation,omitempty"`
+		Background         any `json:"background,omitempty"`
+		PromptCacheKey     any `json:"prompt_cache_key,omitempty"`
 	}
 
 	var raw rawCreateRequest

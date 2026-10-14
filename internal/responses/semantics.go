@@ -7,7 +7,7 @@ import (
 
 // The response object's status takes
 // precedence over the event label. A terminal label cannot finish queued work.
-func TerminalFinish(kind string, response map[string]interface{}) (string, error) {
+func TerminalFinish(kind string, response map[string]any) (string, error) {
 	if kind == "response.failed" || kind == "error" || response["error"] != nil {
 		return "error", Failure(response)
 	}
@@ -33,15 +33,15 @@ func TerminalFinish(kind string, response map[string]interface{}) (string, error
 	return "error", fmt.Errorf("upstream terminal response has invalid status %q", status)
 }
 
-func ExtractRefusal(response map[string]interface{}) string {
+func ExtractRefusal(response map[string]any) string {
 	var result strings.Builder
 	for _, raw := range InterfaceSlice(response["output"]) {
-		item, _ := raw.(map[string]interface{})
+		item, _ := raw.(map[string]any)
 		if StreamString(item["type"]) != "message" {
 			continue
 		}
 		for _, raw := range InterfaceSlice(item["content"]) {
-			part, _ := raw.(map[string]interface{})
+			part, _ := raw.(map[string]any)
 			if StreamString(part["type"]) == "refusal" {
 				result.WriteString(StreamString(part["refusal"]))
 			}
@@ -50,25 +50,25 @@ func ExtractRefusal(response map[string]interface{}) string {
 	return result.String()
 }
 
-func StatusFromFinish(finish string) (string, interface{}) {
+func StatusFromFinish(finish string) (string, any) {
 	switch finish {
 	case "length":
-		return "incomplete", map[string]interface{}{"reason": "max_output_tokens"}
+		return "incomplete", map[string]any{"reason": "max_output_tokens"}
 	case "content_filter":
-		return "incomplete", map[string]interface{}{"reason": "content_filter"}
+		return "incomplete", map[string]any{"reason": "content_filter"}
 	default:
 		return "completed", nil
 	}
 }
 
-func Annotations(raw interface{}) []interface{} {
-	out := []interface{}{}
+func Annotations(raw any) []any {
+	out := []any{}
 	for _, raw := range InterfaceSlice(raw) {
-		item, ok := raw.(map[string]interface{})
+		item, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
-		if nested, ok := item["url_citation"].(map[string]interface{}); ok {
+		if nested, ok := item["url_citation"].(map[string]any); ok {
 			item = CloneStringInterfaceMap(nested)
 			item["type"] = "url_citation"
 		}

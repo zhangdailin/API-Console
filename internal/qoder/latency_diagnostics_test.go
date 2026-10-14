@@ -28,7 +28,7 @@ func TestQoderDiagnosticAttemptsCaptureSSEAndModel(t *testing.T) {
 		if !strings.HasSuffix(section.Name, "latency.json") {
 			continue
 		}
-		var v map[string]interface{}
+		var v map[string]any
 		e := json.Unmarshal([]byte(section.Payload), &v)
 		testutil.NoError(t, e)
 		for _, key := range []string{"first_sse_ms", "first_text_ms", "total_ms", "response_headers_ms", "remote_address", "conversation_fingerprint"} {

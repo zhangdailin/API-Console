@@ -50,7 +50,7 @@ func (h *streamHandler) finishResponse(stopReason string) {
 			h.mu.Unlock()
 			h.handleMessage(upstream.SSEMessage{
 				Type:  "model.text-delta",
-				Event: map[string]interface{}{"delta": fallback},
+				Event: map[string]any{"delta": fallback},
 			})
 		}
 	}

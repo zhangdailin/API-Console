@@ -22,12 +22,12 @@ import (
 // access token carries the Keycloak identity claims (sub / email), which is what
 // lets a pasted document label the account without an extra profile call.
 var workBuddyAuthDocument = func() string {
-	encode := func(value interface{}) string {
+	encode := func(value any) string {
 		raw, _ := json.Marshal(value)
 		return base64.RawURLEncoding.EncodeToString(raw)
 	}
 	token := encode(map[string]string{"alg": "RS256", "typ": "JWT"}) + "." +
-		encode(map[string]interface{}{
+		encode(map[string]any{
 			"sub":   "07ab88c8-5596-4257-8d21-e9fcbe3a3810",
 			"email": "operator@example.com",
 			"iss":   "https://www.workbuddy.ai/auth/realms/copilot",
@@ -245,7 +245,7 @@ func TestAccountStatusReasonIsExposed(t *testing.T) {
 	rec := httptest.NewRecorder()
 	a.HandleAccounts(rec, httptest.NewRequest(http.MethodGet, "/api/accounts", nil))
 	testutil.Equal(t, rec.Code, http.StatusOK)
-	var rows []map[string]interface{}
+	var rows []map[string]any
 	testutil.NoError(t, json.Unmarshal(rec.Body.Bytes(), &rows), "decode: %v")
 	testutil.Equal(t, len(rows), 1)
 	testutil.Equal(t, rows[0]["status_code"], "401")
@@ -259,7 +259,7 @@ func TestAccountStatusReasonIsExposed(t *testing.T) {
 	rec2 := httptest.NewRecorder()
 	a.HandleAccounts(rec2, httptest.NewRequest(http.MethodGet, "/api/accounts", nil))
 	// Decode into a fresh slice: reusing it would keep keys the new payload omits.
-	var cleared []map[string]interface{}
+	var cleared []map[string]any
 	testutil.NoError(t, json.Unmarshal(rec2.Body.Bytes(), &cleared), "decode: %v")
 	testutil.Equal(t, len(cleared), 1)
 	testutil.Equal(t, cleared[0]["status_code"], "")

@@ -27,7 +27,7 @@ import (
 // then retried a request that had already succeeded upstream.
 const maxNativeResponsesBytes = 128 << 20
 
-func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Request, modelID string, spec ModelSpec, payload map[string]interface{}, upstreamPath string, saveOwnership bool) {
+func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Request, modelID string, spec ModelSpec, payload map[string]any, upstreamPath string, saveOwnership bool) {
 	// Native Responses bypasses the chat handler that normally installs Grok's
 	// model context. Keep the upstream model on every selection/request/retry so a
 	// model-scoped Free refusal cannot be escalated into a 24-hour account block.
@@ -108,9 +108,9 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 
 	payload["model"] = spec.UpstreamModel
 	if spec.AliasReasoningEffort != "" {
-		reasoning, _ := payload["reasoning"].(map[string]interface{})
+		reasoning, _ := payload["reasoning"].(map[string]any)
 		if reasoning == nil {
-			reasoning = map[string]interface{}{}
+			reasoning = map[string]any{}
 		}
 		reasoning["effort"] = spec.AliasReasoningEffort
 		payload["reasoning"] = reasoning
@@ -203,7 +203,7 @@ func (h *Handler) HandleResponsesCompact(w http.ResponseWriter, r *http.Request)
 	if !requirePost(w, r) {
 		return
 	}
-	var payload map[string]interface{}
+	var payload map[string]any
 	if !decodeJSONBody(w, r, &payload) || payload == nil {
 		return
 	}
@@ -298,7 +298,7 @@ const maxStoredInputChainDepth = 8
 
 // accumulatedInputItems returns this turn's input followed by the input of the
 // responses it continues (nearest ancestor first, bounded).
-func (h *Handler) accumulatedInputItems(r *http.Request, ownerHash string, payload map[string]interface{}) []interface{} {
+func (h *Handler) accumulatedInputItems(r *http.Request, ownerHash string, payload map[string]any) []any {
 	current := responses.InputItems(payload["input"])
 	if h == nil || r == nil || ownerHash == "" {
 		return current
@@ -312,7 +312,7 @@ func (h *Handler) accumulatedInputItems(r *http.Request, ownerHash string, paylo
 			break
 		}
 		if len(record.InputItems) > 0 {
-			var decoded []interface{}
+			var decoded []any
 			if json.Unmarshal(record.InputItems, &decoded) == nil {
 				current = append(current, decoded...)
 			}
@@ -366,7 +366,7 @@ func readAndValidateNativeResponse(body io.Reader) ([]byte, error) {
 	if err != nil || len(raw) > maxNativeResponsesBytes {
 		return nil, fmt.Errorf("upstream response unavailable")
 	}
-	var response map[string]interface{}
+	var response map[string]any
 	if json.Unmarshal(raw, &response) != nil || response == nil {
 		return nil, fmt.Errorf("invalid upstream response")
 	}
@@ -417,7 +417,7 @@ const upstreamRejectionMessage = "upstream_rejection"
 // client retrying a request that can never succeed. The category decides: a
 // client-category error keeps the stable upstream_rejection code and the
 // category's public text, everything else keeps the generic upstream_error.
-func redactResponseError(event map[string]interface{}) bool {
+func redactResponseError(event map[string]any) bool {
 	if event == nil {
 		return false
 	}
@@ -426,7 +426,7 @@ func redactResponseError(event map[string]interface{}) bool {
 	// values need redaction; treating null as an empty error invents a rejection.
 	if raw, exists := event["error"]; exists && raw != nil {
 		code, message := redactedUpstreamError(raw)
-		event["error"] = map[string]interface{}{"code": code, "message": message}
+		event["error"] = map[string]any{"code": code, "message": message}
 		changed = true
 	}
 	if event["type"] == "error" {
@@ -441,7 +441,7 @@ func redactResponseError(event map[string]interface{}) bool {
 	// A response envelope carries its own status; reconciling the error with it
 	// gives the redacted text the same shape as a failure the gateway detected
 	// itself (as in writeResponsesStreamFailure), so the two paths agree.
-	if response, ok := event["response"].(map[string]interface{}); ok {
+	if response, ok := event["response"].(map[string]any); ok {
 		changed = redactResponseError(response) || changed
 		reconcileResponseErrorEnvelope(response)
 	}
@@ -450,7 +450,7 @@ func redactResponseError(event map[string]interface{}) bool {
 
 // redactedUpstreamError classifies the raw error value and returns the code and
 // the public message that belong together.
-func redactedUpstreamError(raw interface{}) (code string, message string) {
+func redactedUpstreamError(raw any) (code string, message string) {
 	// An error object reached the client unredacted; its text is still upstream
 	// text, so the classification runs on the original before it is dropped.
 	text := strings.TrimSpace(upstreamErrorText(raw))
@@ -463,13 +463,13 @@ func redactedUpstreamError(raw interface{}) (code string, message string) {
 // upstreamErrorText renders the message text of an error value without falling
 // back to Go's map formatting, which would fold a structured error into a
 // "map[...]" string that no classifier recognises.
-func upstreamErrorText(raw interface{}) string {
+func upstreamErrorText(raw any) string {
 	switch value := raw.(type) {
 	case nil:
 		return ""
 	case string:
 		return value
-	case map[string]interface{}:
+	case map[string]any:
 		return util.FirstNonEmpty(
 			chatwire.ParseLooseStringAny(value["message"]),
 			chatwire.ParseLooseStringAny(value["detail"]),
@@ -500,15 +500,15 @@ func codeForCategory(category string) string {
 // that produced the envelope, and re-deriving it from the already-masked text
 // would read the generic wrapper "Upstream request failed" instead of the
 // original upstream detail.
-func reconcileResponseErrorEnvelope(response map[string]interface{}) {
+func reconcileResponseErrorEnvelope(response map[string]any) {
 	if response == nil || !strings.EqualFold(chatwire.ParseLooseStringAny(response["status"]), "failed") {
 		return
 	}
-	error_, _ := response["error"].(map[string]interface{})
+	error_, _ := response["error"].(map[string]any)
 	if error_ == nil || strings.TrimSpace(chatwire.ParseLooseStringAny(error_["message"])) == "" || strings.TrimSpace(chatwire.ParseLooseStringAny(error_["code"])) == "" {
 		return
 	}
-	response["error"] = map[string]interface{}{
+	response["error"] = map[string]any{
 		"code":    chatwire.ParseLooseStringAny(error_["code"]),
 		"message": chatwire.ParseLooseStringAny(error_["message"]),
 	}

@@ -14,24 +14,24 @@ func TestAnthropicRequestToChatPreservesToolsAndMultimodalContent(t *testing.T) 
 	req := anthropicMessagesRequest{
 		Model:     "grok-4.6",
 		MaxTokens: 512,
-		System:    []interface{}{map[string]interface{}{"type": "text", "text": "Be precise."}},
+		System:    []any{map[string]any{"type": "text", "text": "Be precise."}},
 		Messages: []anthropicMessage{
-			{Role: "user", Content: []interface{}{
-				map[string]interface{}{"type": "text", "text": "Inspect this"},
-				map[string]interface{}{"type": "image", "source": map[string]interface{}{
+			{Role: "user", Content: []any{
+				map[string]any{"type": "text", "text": "Inspect this"},
+				map[string]any{"type": "image", "source": map[string]any{
 					"type": "base64", "media_type": "image/png", "data": "YWJj",
 				}},
 			}},
-			{Role: "assistant", Content: []interface{}{
-				map[string]interface{}{"type": "tool_use", "id": "tool_1", "name": "Read", "input": map[string]interface{}{"path": "a.txt"}},
+			{Role: "assistant", Content: []any{
+				map[string]any{"type": "tool_use", "id": "tool_1", "name": "Read", "input": map[string]any{"path": "a.txt"}},
 			}},
-			{Role: "user", Content: []interface{}{
-				map[string]interface{}{"type": "tool_result", "tool_use_id": "tool_1", "content": "done"},
-				map[string]interface{}{"type": "text", "text": "Now summarize it."},
+			{Role: "user", Content: []any{
+				map[string]any{"type": "tool_result", "tool_use_id": "tool_1", "content": "done"},
+				map[string]any{"type": "text", "text": "Now summarize it."},
 			}},
 		},
-		Tools:      []anthropicTool{{Name: "Read", Description: "Read a file", InputSchema: map[string]interface{}{"type": "object"}}},
-		ToolChoice: map[string]interface{}{"type": "tool", "name": "Read"},
+		Tools:      []anthropicTool{{Name: "Read", Description: "Read a file", InputSchema: map[string]any{"type": "object"}}},
+		ToolChoice: map[string]any{"type": "tool", "name": "Read"},
 	}
 
 	chat, err := anthropicRequestToChat(req)
@@ -41,8 +41,8 @@ func TestAnthropicRequestToChatPreservesToolsAndMultimodalContent(t *testing.T) 
 	testutil.Equal(t, chat.Messages[3].Role, "tool")
 	testutil.Equal(t, chat.Messages[3].ToolCallID, "tool_1")
 	testutil.Equal(t, chat.Messages[4].Role, "user")
-	parts, ok := chat.Messages[1].Content.([]interface{})
-	if !ok || len(parts) != 2 || !strings.Contains(parts[1].(map[string]interface{})["image_url"].(map[string]interface{})["url"].(string), "data:image/png;base64,YWJj") {
+	parts, ok := chat.Messages[1].Content.([]any)
+	if !ok || len(parts) != 2 || !strings.Contains(parts[1].(map[string]any)["image_url"].(map[string]any)["url"].(string), "data:image/png;base64,YWJj") {
 		t.Fatalf("multimodal content mismatch: %#v", chat.Messages[1].Content)
 	}
 	testutil.Equal(t, len(chat.Messages[2].ToolCalls), 1)
@@ -50,29 +50,29 @@ func TestAnthropicRequestToChatPreservesToolsAndMultimodalContent(t *testing.T) 
 }
 
 func TestAnthropicResponseFromChat(t *testing.T) {
-	chat := map[string]interface{}{
+	chat := map[string]any{
 		"id": "chat_1",
-		"choices": []interface{}{map[string]interface{}{
+		"choices": []any{map[string]any{
 			"finish_reason": "tool_calls",
-			"message": map[string]interface{}{
+			"message": map[string]any{
 				"content": "checking",
-				"tool_calls": []interface{}{map[string]interface{}{
-					"id": "call_1", "function": map[string]interface{}{"name": "Read", "arguments": `{"path":"a.txt"}`},
+				"tool_calls": []any{map[string]any{
+					"id": "call_1", "function": map[string]any{"name": "Read", "arguments": `{"path":"a.txt"}`},
 				}},
 			},
 		}},
-		"usage": map[string]interface{}{
+		"usage": map[string]any{
 			"prompt_tokens": 11, "completion_tokens": 7,
-			"prompt_tokens_details": map[string]interface{}{"cached_tokens": 3},
+			"prompt_tokens_details": map[string]any{"cached_tokens": 3},
 		},
 	}
 	got := anthropicResponseFromChat("grok-4.6", chat)
 	testutil.Equal(t, got["id"], "chat_1")
 	testutil.Equal(t, got["stop_reason"], "tool_use")
-	content := got["content"].([]interface{})
+	content := got["content"].([]any)
 	testutil.Equal(t, len(content), 2)
-	testutil.Equal(t, content[1].(map[string]interface{})["type"], "tool_use")
-	usage := got["usage"].(map[string]interface{})
+	testutil.Equal(t, content[1].(map[string]any)["type"], "tool_use")
+	usage := got["usage"].(map[string]any)
 	testutil.Equal(t, usage["input_tokens"], 8)
 	testutil.Equal(t, usage["output_tokens"], 7)
 	testutil.Equal(t, usage["cache_read_input_tokens"], 3)

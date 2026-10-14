@@ -46,7 +46,7 @@ func probe(client *http.Client, endpoint, key, model, effort string, maxTokens i
 	started := time.Now()
 	r := result{}
 	elapsed := func() float64 { return float64(time.Since(started)) / float64(time.Millisecond) }
-	body := map[string]interface{}{"model": model, "stream": true, "max_tokens": maxTokens, "stream_options": map[string]bool{"include_usage": true}, "messages": []map[string]string{{"role": "user", "content": "Output exactly the integers from 1 to 20 separated by spaces, with no explanation."}}}
+	body := map[string]any{"model": model, "stream": true, "max_tokens": maxTokens, "stream_options": map[string]bool{"include_usage": true}, "messages": []map[string]string{{"role": "user", "content": "Output exactly the integers from 1 to 20 separated by spaces, with no explanation."}}}
 	if effort != "" {
 		body["reasoning_effort"] = effort
 	}
@@ -168,12 +168,12 @@ func probe(client *http.Client, endpoint, key, model, effort string, maxTokens i
 	return r
 }
 
-func distribution(values []float64) map[string]interface{} {
+func distribution(values []float64) map[string]any {
 	if len(values) == 0 {
-		return map[string]interface{}{"samples": 0}
+		return map[string]any{"samples": 0}
 	}
 	sort.Float64s(values)
-	d := map[string]interface{}{"samples": len(values)}
+	d := map[string]any{"samples": len(values)}
 	for name, q := range map[string]float64{"p50_ms": .5, "p90_ms": .9, "p95_ms": .95, "p99_ms": .99} {
 		d[name] = values[int(math.Ceil(q*float64(len(values))))-1]
 	}
@@ -256,11 +256,11 @@ func main() {
 			}
 		}
 	}
-	var tokenRate interface{}
+	var tokenRate any
 	if usageSamples > 0 {
 		tokenRate = float64(tokens) / seconds
 	}
-	report := map[string]interface{}{"model": *model, "concurrency": *concurrency, "samples": *n, "warmup_excluded": *warm, "max_tokens": *budget, "http_success": httpOK, "protocol_success": protocolOK, "visible_answers": answers, "reasoning_only": reasoningOnly, "output_truncated": truncated, "elapsed_seconds": seconds, "completed_rps": float64(protocolOK) / seconds, "usage_samples": usageSamples, "correct_answers": correctAnswers, "reported_output_tokens_per_second": tokenRate, "e2e_all": distribution(e2e), "first_generated_protocol_success": distribution(generated), "first_visible_protocol_success": distribution(visible), "visible_delta_gap": distribution(gaps), "notes": []string{"closed-loop workload, not maximum capacity", "delta gaps are not token ITL; reported output tokens may include reasoning", "HTTP success, protocol success, visible answers and truncation are distinct", "P99 needs sufficient samples; fewer than 100 requests is exploratory", "client timings include network/CDN; correlate request IDs with gateway and Caddy logs"}, "results": rows}
+	report := map[string]any{"model": *model, "concurrency": *concurrency, "samples": *n, "warmup_excluded": *warm, "max_tokens": *budget, "http_success": httpOK, "protocol_success": protocolOK, "visible_answers": answers, "reasoning_only": reasoningOnly, "output_truncated": truncated, "elapsed_seconds": seconds, "completed_rps": float64(protocolOK) / seconds, "usage_samples": usageSamples, "correct_answers": correctAnswers, "reported_output_tokens_per_second": tokenRate, "e2e_all": distribution(e2e), "first_generated_protocol_success": distribution(generated), "first_visible_protocol_success": distribution(visible), "visible_delta_gap": distribution(gaps), "notes": []string{"closed-loop workload, not maximum capacity", "delta gaps are not token ITL; reported output tokens may include reasoning", "HTTP success, protocol success, visible answers and truncation are distinct", "P99 needs sufficient samples; fewer than 100 requests is exploratory", "client timings include network/CDN; correlate request IDs with gateway and Caddy logs"}, "results": rows}
 	raw, _ := json.MarshalIndent(report, "", "  ")
 	if *output != "" {
 		if err := os.WriteFile(*output, append(raw, '\n'), 0600); err != nil {

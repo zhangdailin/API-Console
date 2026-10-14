@@ -10,14 +10,14 @@ import (
 
 const controlFallback = "<tool_call><function=write_stdin><parameter=chars>\x03</parameter><parameter=max_output_tokens>7000</parameter><parameter=session_id>11436</parameter><parameter=yield_time_ms>1000</parameter></function></tool_call>"
 
-func controlFrame(delta map[string]interface{}, finish string) string {
-	value := map[string]interface{}{"choices": []interface{}{map[string]interface{}{"index": 0, "delta": delta, "finish_reason": finish}}}
+func controlFrame(delta map[string]any, finish string) string {
+	value := map[string]any{"choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": finish}}}
 	raw, _ := json.Marshal(value)
 	return "data: " + string(raw) + "\n\n"
 }
 
-func controlAnchor(args string) map[string]interface{} {
-	return map[string]interface{}{"tool_calls": []interface{}{map[string]interface{}{"index": 0, "id": "call-original", "function": map[string]interface{}{"name": "write_stdin", "arguments": args}}}}
+func controlAnchor(args string) map[string]any {
+	return map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "call-original", "function": map[string]any{"name": "write_stdin", "arguments": args}}}}
 }
 
 func controlMessages(t *testing.T, stream string, enabled bool) (streamResult, []upstream.SSEMessage, error) {
@@ -31,7 +31,7 @@ func TestControlToolRecoveryAcrossFrames(t *testing.T) {
 	// Production first emitted a native identity and only {"chars":, then
 	// replayed the call in content. Test every content split, including tags.
 	for split := 1; split < len(controlFallback); split++ {
-		stream := controlFrame(controlAnchor(`{"chars": `), "") + controlFrame(map[string]interface{}{"content": controlFallback[:split]}, "") + controlFrame(map[string]interface{}{"content": controlFallback[split:]}, "tool_calls") + controlFrame(map[string]interface{}{}, "tool_calls") + "data: [DONE]\n\n"
+		stream := controlFrame(controlAnchor(`{"chars": `), "") + controlFrame(map[string]any{"content": controlFallback[:split]}, "") + controlFrame(map[string]any{"content": controlFallback[split:]}, "tool_calls") + controlFrame(map[string]any{}, "tool_calls") + "data: [DONE]\n\n"
 		result, messages, err := controlMessages(t, stream, true)
 		if err != nil || result.ToolCallCount != 1 || result.FinishReason() != "tool_use" {
 			t.Fatalf("split %d: result=%+v err=%v", split, result, err)
@@ -39,7 +39,7 @@ func TestControlToolRecoveryAcrossFrames(t *testing.T) {
 		if len(messages) != 1 || messages[0].Type != "model.tool-call" || messages[0].Event["toolCallId"] != "call-original" {
 			t.Fatalf("split %d: unexpected delivery %+v", split, messages)
 		}
-		var args map[string]interface{}
+		var args map[string]any
 		if err := json.Unmarshal([]byte(messages[0].Event["input"].(string)), &args); err != nil {
 			t.Fatal(err)
 		}
@@ -59,7 +59,7 @@ func TestControlToolRecoveryDoesNotInventCalls(t *testing.T) {
 		{"valid-native", controlFrame(controlAnchor(`{"chars":"","session_id":11436}`), ""), true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			result, messages, err := controlMessages(t, tc.native+controlFrame(map[string]interface{}{"content": controlFallback}, "stop")+"data: [DONE]\n\n", tc.enabled)
+			result, messages, err := controlMessages(t, tc.native+controlFrame(map[string]any{"content": controlFallback}, "stop")+"data: [DONE]\n\n", tc.enabled)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -81,7 +81,7 @@ func TestControlToolRecoveryDoesNotInventCalls(t *testing.T) {
 
 func TestControlToolRecoveryTextBeforeNativeIdentity(t *testing.T) {
 	split := strings.Index(controlFallback, "</parameter>") + len("</parameter")
-	stream := controlFrame(map[string]interface{}{"content": controlFallback[:split]}, "") + controlFrame(controlAnchor(""), "") + controlFrame(map[string]interface{}{"tool_calls": []interface{}{map[string]interface{}{"index": 0, "function": map[string]interface{}{"arguments": `{"chars": `}}}}, "") + controlFrame(map[string]interface{}{"content": controlFallback[split:]}, "tool_calls") + "data: [DONE]\n\n"
+	stream := controlFrame(map[string]any{"content": controlFallback[:split]}, "") + controlFrame(controlAnchor(""), "") + controlFrame(map[string]any{"tool_calls": []any{map[string]any{"index": 0, "function": map[string]any{"arguments": `{"chars": `}}}}, "") + controlFrame(map[string]any{"content": controlFallback[split:]}, "tool_calls") + "data: [DONE]\n\n"
 	result, messages, err := controlMessages(t, stream, true)
 	if err != nil || result.ToolCallCount != 1 || len(messages) != 1 || messages[0].Type != "model.tool-call" || messages[0].Event["toolCallId"] != "call-original" {
 		t.Fatalf("production ordering not recovered: %+v %+v %v", result, messages, err)
@@ -90,9 +90,9 @@ func TestControlToolRecoveryTextBeforeNativeIdentity(t *testing.T) {
 
 func TestControlToolRecoveryRequiresUniqueNativeAnchor(t *testing.T) {
 	second := controlAnchor(`{"chars": `)
-	call := second["tool_calls"].([]interface{})[0].(map[string]interface{})
+	call := second["tool_calls"].([]any)[0].(map[string]any)
 	call["index"], call["id"] = 1, "call-second"
-	stream := controlFrame(controlAnchor(`{"chars": `), "") + controlFrame(second, "") + controlFrame(map[string]interface{}{"content": controlFallback}, "tool_calls")
+	stream := controlFrame(controlAnchor(`{"chars": `), "") + controlFrame(second, "") + controlFrame(map[string]any{"content": controlFallback}, "tool_calls")
 	result, messages, err := controlMessages(t, stream, true)
 	if err == nil || result.ToolCallCount != 0 || len(messages) != 0 {
 		t.Fatalf("ambiguous anchor accepted: %+v %+v %v", result, messages, err)
@@ -109,7 +109,7 @@ func TestControlToolRecoveryRejectsAmbiguousFallback(t *testing.T) {
 		"oversize":          strings.Replace(controlFallback, ">7000<", ">"+strings.Repeat("7", 17*1024)+"<", 1),
 	} {
 		t.Run(name, func(t *testing.T) {
-			result, messages, err := controlMessages(t, controlFrame(controlAnchor(`{"chars": `), "")+controlFrame(map[string]interface{}{"content": text}, "tool_calls"), true)
+			result, messages, err := controlMessages(t, controlFrame(controlAnchor(`{"chars": `), "")+controlFrame(map[string]any{"content": text}, "tool_calls"), true)
 			if err == nil || result.ToolCallCount != 0 || len(messages) != 0 {
 				t.Fatalf("invalid fallback delivered: %+v, %+v, %v", result, messages, err)
 			}

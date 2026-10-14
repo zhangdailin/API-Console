@@ -9,7 +9,7 @@ import (
 	"orchids-api/internal/toolname"
 )
 
-func declaredToolNames(tools []interface{}) []string {
+func declaredToolNames(tools []any) []string {
 	if len(tools) == 0 {
 		return nil
 	}
@@ -51,7 +51,7 @@ func declaredToolNames(tools []interface{}) []string {
 // described a request this gateway never sends. The number is what a client
 // budgets against (directly through /v1/messages/count_tokens), so under-
 // reporting it let a client believe it had room it did not have.
-func estimateToolsTokens(tools []interface{}) int {
+func estimateToolsTokens(tools []any) int {
 	if len(tools) == 0 {
 		return 0
 	}

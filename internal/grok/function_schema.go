@@ -6,10 +6,10 @@ import "orchids-api/internal/responses"
 // the object argument contract at the root, retaining every branch and sibling
 // constraint. Nullable roots are restricted to objects because function-call
 // arguments must be JSON objects; nullable properties remain unchanged.
-func normalizeBuildFunctionSchema(schema map[string]interface{}) map[string]interface{} {
+func normalizeBuildFunctionSchema(schema map[string]any) map[string]any {
 	out := responses.CloneStringInterfaceMap(schema)
 	objectRoot := out["type"] == "object"
-	if types, ok := out["type"].([]interface{}); ok && len(types) > 0 {
+	if types, ok := out["type"].([]any); ok && len(types) > 0 {
 		hasObject, onlyObjectOrNull := false, true
 		for _, kind := range types {
 			hasObject = hasObject || kind == "object"
@@ -19,10 +19,10 @@ func normalizeBuildFunctionSchema(schema map[string]interface{}) map[string]inte
 	}
 	if _, typed := out["type"]; !typed {
 		for _, keyword := range []string{"anyOf", "oneOf"} {
-			branches, ok := out[keyword].([]interface{})
+			branches, ok := out[keyword].([]any)
 			hasObject, onlyObjectOrNull := false, ok && len(branches) > 0
 			for _, raw := range branches {
-				branch, ok := raw.(map[string]interface{})
+				branch, ok := raw.(map[string]any)
 				kind := branch["type"]
 				hasObject = hasObject || kind == "object"
 				onlyObjectOrNull = onlyObjectOrNull && ok && (kind == "object" || kind == "null")
@@ -34,15 +34,15 @@ func normalizeBuildFunctionSchema(schema map[string]interface{}) map[string]inte
 		return out
 	}
 	if raw, exists := out["allOf"]; exists {
-		if _, ok := raw.([]interface{}); !ok {
+		if _, ok := raw.([]any); !ok {
 			return out // Do not erase an unrecognized existing constraint.
 		}
 	}
 	out["type"] = "object"
-	conjuncts := append([]interface{}(nil), responses.InterfaceSlice(out["allOf"])...)
+	conjuncts := append([]any(nil), responses.InterfaceSlice(out["allOf"])...)
 	for _, keyword := range []string{"anyOf", "oneOf"} {
 		if branches, exists := out[keyword]; exists {
-			conjuncts = append(conjuncts, map[string]interface{}{keyword: branches})
+			conjuncts = append(conjuncts, map[string]any{keyword: branches})
 			delete(out, keyword)
 		}
 	}
@@ -52,13 +52,13 @@ func normalizeBuildFunctionSchema(schema map[string]interface{}) map[string]inte
 	return out
 }
 
-func normalizeBuildFunctionTools(tools []map[string]interface{}) []map[string]interface{} {
-	tools = append([]map[string]interface{}(nil), tools...)
+func normalizeBuildFunctionTools(tools []map[string]any) []map[string]any {
+	tools = append([]map[string]any(nil), tools...)
 	for i, tool := range tools {
 		if tool["type"] != "function" {
 			continue
 		}
-		if schema, ok := tool["parameters"].(map[string]interface{}); ok {
+		if schema, ok := tool["parameters"].(map[string]any); ok {
 			copy := responses.CloneStringInterfaceMap(tool)
 			copy["parameters"] = normalizeBuildFunctionSchema(schema)
 			tools[i] = copy

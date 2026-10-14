@@ -165,16 +165,16 @@ func (a *API) HandleConfigSave(w http.ResponseWriter, r *http.Request) {
 	writeCodeEnvelope(w, 0, nil, "success")
 }
 
-func configPayload(cfg *config.Config) (map[string]interface{}, error) {
+func configPayload(cfg *config.Config) (map[string]any, error) {
 	if cfg == nil {
-		return map[string]interface{}{}, nil
+		return map[string]any{}, nil
 	}
 
 	raw, err := json.Marshal(cfg)
 	if err != nil {
 		return nil, err
 	}
-	payload := map[string]interface{}{}
+	payload := map[string]any{}
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return nil, err
 	}
@@ -209,12 +209,12 @@ func buildConfigFromPatch(r *http.Request, current *config.Config) (*config.Conf
 	if err != nil {
 		return nil, err
 	}
-	baseMap := map[string]interface{}{}
+	baseMap := map[string]any{}
 	if err := json.Unmarshal(rawBase, &baseMap); err != nil {
 		return nil, err
 	}
 
-	patch := map[string]interface{}{}
+	patch := map[string]any{}
 	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 		return nil, err
 	}
@@ -265,7 +265,7 @@ func buildConfigFromPatch(r *http.Request, current *config.Config) (*config.Conf
 	return &newCfg, nil
 }
 
-func normalizeConfigPatchValue(key string, value interface{}) interface{} {
+func normalizeConfigPatchValue(key string, value any) any {
 	if value == nil {
 		return nil
 	}
@@ -288,7 +288,7 @@ func normalizeConfigPatchValue(key string, value interface{}) interface{} {
 	return value
 }
 
-func parseBoolish(value interface{}) (bool, bool) {
+func parseBoolish(value any) (bool, bool) {
 	switch v := value.(type) {
 	case bool:
 		return v, true
@@ -306,7 +306,7 @@ func parseBoolish(value interface{}) (bool, bool) {
 	return false, false
 }
 
-func parseIntish(value interface{}) (int, bool) {
+func parseIntish(value any) (int, bool) {
 	switch v := value.(type) {
 	case int:
 		return v, true
@@ -323,11 +323,11 @@ func parseIntish(value interface{}) (int, bool) {
 	return 0, false
 }
 
-func normalizeProxyBypassValue(value interface{}) []string {
+func normalizeProxyBypassValue(value any) []string {
 	switch v := value.(type) {
 	case []string:
 		return v
-	case []interface{}:
+	case []any:
 		out := make([]string, 0, len(v))
 		for _, item := range v {
 			s := strings.TrimSpace(fmt.Sprint(item))

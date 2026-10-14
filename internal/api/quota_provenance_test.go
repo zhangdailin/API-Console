@@ -22,19 +22,19 @@ func buildAccount(plan string, billing store.GrokBillingSnapshot) *store.Account
 	}
 }
 
-func fieldString(t *testing.T, fields map[string]interface{}, key string) string {
+func fieldString(t *testing.T, fields map[string]any, key string) string {
 	t.Helper()
 	value, _ := fields[key].(string)
 	return value
 }
 
-func fieldBool(t *testing.T, fields map[string]interface{}, key string) bool {
+func fieldBool(t *testing.T, fields map[string]any, key string) bool {
 	t.Helper()
 	value, _ := fields[key].(bool)
 	return value
 }
 
-func fieldFloat(t *testing.T, fields map[string]interface{}, key string) float64 {
+func fieldFloat(t *testing.T, fields map[string]any, key string) float64 {
 	t.Helper()
 	value, _ := fields[key].(float64)
 	return value

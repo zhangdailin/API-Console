@@ -21,14 +21,14 @@ func TestSimplePromptRequestRetainsContextAndExplicitBudget(t *testing.T) {
 		err = json.Unmarshal(raw, &body)
 		testutil.NoError(t, err)
 		testutil.Falsef(t, len(body.Messages) != 1 || body.Messages[0].Content != req.Prompt || len(body.Tools) != 0 || body.System != "", "unexpected simple payload: messages=%v tools=%d", body.Messages, len(body.Tools))
-		context := body.ChatContext.(map[string]interface{})
+		context := body.ChatContext.(map[string]any)
 		testutil.EqualAny(t, context["text"], req.Prompt)
-		testutil.EqualAny(t, context["extra"].(map[string]interface{})["originalContent"], req.Prompt)
+		testutil.EqualAny(t, context["extra"].(map[string]any)["originalContent"], req.Prompt)
 		want := 32000
 		if limit != 0 {
 			want = limit
 		}
-		parameters := body.Parameters.(map[string]interface{})
+		parameters := body.Parameters.(map[string]any)
 		testutil.EqualAny(t, parameters["max_tokens"], float64(want))
 	}
 }

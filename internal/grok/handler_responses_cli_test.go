@@ -18,7 +18,7 @@ import (
 )
 
 func TestHandleResponses_ProxiesBuildOAuthNatively(t *testing.T) {
-	var received map[string]interface{}
+	var received map[string]any
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		testutil.Equal(t, r.Method, http.MethodPost)
 		testutil.Equal(t, r.URL.Path, "/v1/responses")
@@ -70,7 +70,7 @@ func TestHandleResponses_ProxiesBuildOAuthNatively(t *testing.T) {
 	got := rec.Body.String()
 	testutil.Falsef(t, !strings.Contains(got, "event: response.created") || strings.Contains(got, "chat.completion.chunk"), "response was not native Responses SSE: %q", got)
 	testutil.Equal(t, received["previous_response_id"], "resp_previous")
-	metadata, _ := received["metadata"].(map[string]interface{})
+	metadata, _ := received["metadata"].(map[string]any)
 	testutil.Equal(t, metadata["trace"], "keep")
 	testutil.Equal(t, len(responses.InterfaceSlice(received["tools"])), 1)
 }

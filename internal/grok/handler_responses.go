@@ -33,7 +33,7 @@ func (h *Handler) HandleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.applyDefaultResponsesStream(&req)
-	var nativePayload map[string]interface{}
+	var nativePayload map[string]any
 	if err := json.Unmarshal(body, &nativePayload); err != nil || nativePayload == nil {
 		writeGrokError(w, http.StatusBadRequest, "invalid json")
 		return
@@ -73,7 +73,7 @@ func (h *Handler) HandleResponses(w http.ResponseWriter, r *http.Request) {
 // Chat-Completions compatibility conversion.  Besides preserving the official
 // request and event schema, this keeps SSE streaming realtime and bounded by
 // the normal HTTP backpressure instead of buffering the whole completion.
-func (h *Handler) handleNativeCLIResponses(w http.ResponseWriter, r *http.Request, modelID string, spec ModelSpec, payload map[string]interface{}) {
+func (h *Handler) handleNativeCLIResponses(w http.ResponseWriter, r *http.Request, modelID string, spec ModelSpec, payload map[string]any) {
 	h.handleNativeCLIResponsesAt(w, r, modelID, spec, payload, "/responses", true)
 }
 

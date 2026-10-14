@@ -35,12 +35,12 @@ func (c *responsesProtocolRecorder) SendRequestWithPayload(_ context.Context, re
 			}
 		}
 		for _, call := range calls {
-			emit(upstream.SSEMessage{Type: "model", Event: map[string]interface{}{"type": "tool-call", "toolCallId": call.id, "toolName": call.name, "input": `{"value":"` + call.value + `"}`}})
+			emit(upstream.SSEMessage{Type: "model", Event: map[string]any{"type": "tool-call", "toolCallId": call.id, "toolName": call.name, "input": `{"value":"` + call.value + `"}`}})
 		}
-		emit(upstream.SSEMessage{Type: "model", Event: map[string]interface{}{"type": "finish", "finishReason": "tool_calls"}})
+		emit(upstream.SSEMessage{Type: "model", Event: map[string]any{"type": "finish", "finishReason": "tool_calls"}})
 		return nil
 	}
-	for _, event := range []map[string]interface{}{{"type": "text-start"}, {"type": "text-delta", "delta": "Preserve task A and main.go"}, {"type": "finish", "finishReason": "stop"}} {
+	for _, event := range []map[string]any{{"type": "text-start"}, {"type": "text-delta", "delta": "Preserve task A and main.go"}, {"type": "finish", "finishReason": "stop"}} {
 		emit(upstream.SSEMessage{Type: "model", Event: event})
 	}
 	return nil
@@ -84,15 +84,15 @@ func TestResponsesProtocolThroughAuthenticatedRoutes(t *testing.T) {
 			if compressed.Code != 200 {
 				t.Fatalf("compact=%d %s", compressed.Code, compressed.Body.String())
 			}
-			var result map[string]interface{}
+			var result map[string]any
 			if err := json.Unmarshal(compressed.Body.Bytes(), &result); err != nil {
 				t.Fatal(err)
 			}
 			if result["object"] != "response.compaction" {
 				t.Fatalf("not compact: %v", result)
 			}
-			input := append(result["output"].([]interface{}), map[string]interface{}{"type": "message", "role": "user", "content": "continue"})
-			body, _ := json.Marshal(map[string]interface{}{"model": "m", "input": input})
+			input := append(result["output"].([]any), map[string]any{"type": "message", "role": "user", "content": "continue"})
+			body, _ := json.Marshal(map[string]any{"model": "m", "input": input})
 			// A summary made on /provider/v1 must continue on /provider as well.
 			continued := call("/"+channel+"/responses", string(body))
 			if continued.Code != 200 || len(client.requests) != 3 {
@@ -108,7 +108,7 @@ func TestResponsesProtocolThroughAuthenticatedRoutes(t *testing.T) {
 			if err := json.Unmarshal(unversioned.Body.Bytes(), &result); err != nil {
 				t.Fatal(err)
 			}
-			body, _ = json.Marshal(map[string]interface{}{"model": "m", "input": append(result["output"].([]interface{}), map[string]interface{}{"role": "user", "content": "continue"})})
+			body, _ = json.Marshal(map[string]any{"model": "m", "input": append(result["output"].([]any), map[string]any{"role": "user", "content": "continue"})})
 			// The reverse direction must retain the same compaction identity.
 			unversionedNext := call(path, string(body))
 			if unversionedNext.Code != 200 || len(client.requests) != 5 {

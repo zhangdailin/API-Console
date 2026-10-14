@@ -175,7 +175,7 @@ func TestAccountResponsesNeverCarryCredentials(t *testing.T) {
 			leaked := findPlantedSecrets(raw)
 			testutil.Falsef(t, len(leaked) > 0, "%s account response leaked %v\n%s", channel, leaked, raw)
 			// Presence, not the value, is how the table proves a credential exists.
-			var row map[string]interface{}
+			var row map[string]any
 			testutil.NoError(t, json.Unmarshal(raw, &row), "decode rendered account: %v")
 			testutil.Equal(t, row["has_credential"], true)
 		})
@@ -189,7 +189,7 @@ func TestAccountResponsesHideCredentialKeys(t *testing.T) {
 	acc := accountWithSecrets("qoder")
 	raw, err := json.Marshal(normalizeAccountOutput(acc))
 	testutil.NoError(t, err, "marshal account output: %v")
-	var row map[string]interface{}
+	var row map[string]any
 	testutil.NoError(t, json.Unmarshal(raw, &row), "decode rendered account: %v")
 	for field := range accountSecretFields {
 		_, exists := row[field]

@@ -277,7 +277,7 @@ func (t *RedisConnTracker) GetCounts(accountIDs []int64) map[int64]int64 {
 		key.WriteString(strconv.FormatInt(id, 10))
 		key.WriteByte(',')
 	}
-	value, _, _ := t.countGroup.Do(key.String(), func() (interface{}, error) {
+	value, _, _ := t.countGroup.Do(key.String(), func() (any, error) {
 		counts := t.fetchCounts(missing)
 		t.countMu.Lock()
 		if t.countCache == nil || len(t.countCache) > 65536 {
@@ -434,7 +434,7 @@ func (t *RedisConnTracker) renewBatch() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		pipe := t.client.Pipeline()
 		for _, b := range batches[start:min(start+128, len(batches))] {
-			args := make([]interface{}, 0, len(b.ids)+2)
+			args := make([]any, 0, len(b.ids)+2)
 			args = append(args, time.Now().Add(redisConnLeaseTTL).UnixMilli(), (redisConnLeaseTTL * 2).Milliseconds())
 			for _, id := range b.ids {
 				args = append(args, id)

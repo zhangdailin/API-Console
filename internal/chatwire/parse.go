@@ -10,7 +10,7 @@ import (
 // string. A client routinely sends a number or a bool where the protocol says
 // string, and a nil must read as "" rather than "<nil>", so the loose read is
 // the only safe one on this boundary.
-func ParseLooseStringAny(value interface{}) string {
+func ParseLooseStringAny(value any) string {
 	switch v := value.(type) {
 	case nil:
 		return ""
@@ -23,7 +23,7 @@ func ParseLooseStringAny(value interface{}) string {
 
 // ParseLooseBoolAnyForField reads a boolean that a client may send as a bool, a
 // number or a word, naming the field in the error so the caller can quote it.
-func ParseLooseBoolAnyForField(value interface{}, field string) (bool, error) {
+func ParseLooseBoolAnyForField(value any, field string) (bool, error) {
 	if strings.TrimSpace(field) == "" {
 		field = "value"
 	}
@@ -60,13 +60,13 @@ func ParseLooseBoolAnyForField(value interface{}, field string) (bool, error) {
 }
 
 // ParseLooseBoolAny is ParseLooseBoolAnyForField for the `stream` field.
-func ParseLooseBoolAny(value interface{}) (bool, error) {
+func ParseLooseBoolAny(value any) (bool, error) {
 	return ParseLooseBoolAnyForField(value, "stream")
 }
 
 // ParseLooseIntAny reads an integer that a client may send as a number or a
 // numeric string.
-func ParseLooseIntAny(value interface{}) (int, error) {
+func ParseLooseIntAny(value any) (int, error) {
 	switch v := value.(type) {
 	case nil:
 		return 0, nil
@@ -95,7 +95,7 @@ func ParseLooseIntAny(value interface{}) (int, error) {
 
 // ParseLooseFloatAny reads an optional float: nil stays nil, so a caller can
 // tell "absent" from "zero".
-func ParseLooseFloatAny(value interface{}) (*float64, error) {
+func ParseLooseFloatAny(value any) (*float64, error) {
 	switch v := value.(type) {
 	case nil:
 		return nil, nil
@@ -128,13 +128,13 @@ func ParseLooseFloatAny(value interface{}) (*float64, error) {
 
 // ParseStringList accepts a string or an array of strings, which is how clients
 // spell `stop`.
-func ParseStringList(value interface{}, field string) ([]string, error) {
+func ParseStringList(value any, field string) ([]string, error) {
 	switch item := value.(type) {
 	case nil:
 		return nil, nil
 	case string:
 		return []string{item}, nil
-	case []interface{}:
+	case []any:
 		out := make([]string, 0, len(item))
 		for _, raw := range item {
 			text, ok := raw.(string)

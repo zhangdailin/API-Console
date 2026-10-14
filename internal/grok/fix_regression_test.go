@@ -225,19 +225,19 @@ func TestBuildSessionUUIDIsStableAndValid(t *testing.T) {
 
 func TestToolMessagesRequireCallID(t *testing.T) {
 	messages := []chatwire.Message{
-		{Role: "assistant", ToolCalls: []chatwire.ToolCall{{ID: "call_1", Type: "function", Function: map[string]interface{}{"name": "read", "arguments": "{}"}}}},
+		{Role: "assistant", ToolCalls: []chatwire.ToolCall{{ID: "call_1", Type: "function", Function: map[string]any{"name": "read", "arguments": "{}"}}}},
 		{Role: "tool", Name: "read", Content: "done"},
 	}
 	items, _ := responsesInputFromChatMessages(messages)
 	for _, item := range items {
-		m, ok := item.(map[string]interface{})
+		m, ok := item.(map[string]any)
 		testutil.Falsef(t, ok && m["type"] == "function_call_output", "a tool message without tool_call_id must not become a function_call_output: %#v", m)
 	}
 }
 
 func TestChatToolUseMustBeAnswered(t *testing.T) {
 	unanswered := []chatwire.Message{
-		{Role: "assistant", ToolCalls: []chatwire.ToolCall{{ID: "call_1", Function: map[string]interface{}{"name": "read"}}}},
+		{Role: "assistant", ToolCalls: []chatwire.ToolCall{{ID: "call_1", Function: map[string]any{"name": "read"}}}},
 		{Role: "user", Content: "next"},
 	}
 	err := validateChatToolSequence(unanswered)
@@ -247,38 +247,38 @@ func TestChatToolUseMustBeAnswered(t *testing.T) {
 }
 
 func TestBackfillReasoningForCalls(t *testing.T) {
-	proof := map[string]interface{}{"type": "reasoning", "id": "rs_1", "encrypted_content": "cipher-1"}
-	cached := []interface{}{
+	proof := map[string]any{"type": "reasoning", "id": "rs_1", "encrypted_content": "cipher-1"}
+	cached := []any{
 		proof,
-		map[string]interface{}{"type": "function_call", "call_id": "call_1", "name": "read", "arguments": "{}"},
+		map[string]any{"type": "function_call", "call_id": "call_1", "name": "read", "arguments": "{}"},
 	}
 	// The client echoes the call but not its proof.
-	input := []interface{}{map[string]interface{}{"type": "function_call", "call_id": "call_1", "name": "read", "arguments": "{}"}}
+	input := []any{map[string]any{"type": "function_call", "call_id": "call_1", "name": "read", "arguments": "{}"}}
 	filled := backfillReasoningForCalls(input, cached)
 	testutil.Equal(t, len(filled), 2)
-	first, _ := filled[0].(map[string]interface{})
+	first, _ := filled[0].(map[string]any)
 	testutil.Equal(t, first["type"], "reasoning")
 	testutil.Equal(t, first["encrypted_content"], "cipher-1")
 	// A call that already carries its proof is not doubled.
-	withProof := append(cloneReplayItems([]interface{}{proof}), input...)
+	withProof := append(cloneReplayItems([]any{proof}), input...)
 	got := backfillReasoningForCalls(withProof, cached)
 	testutil.Falsef(t, len(got) != len(withProof), "a call that already carries its proof must not be doubled: %#v", got)
 	// An unknown call id is left alone.
-	unknown := []interface{}{map[string]interface{}{"type": "function_call", "call_id": "call_9", "name": "read"}}
+	unknown := []any{map[string]any{"type": "function_call", "call_id": "call_9", "name": "read"}}
 	got = backfillReasoningForCalls(unknown, cached)
 	testutil.Falsef(t, len(got) != 1, "an unknown call must not gain a proof: %#v", got)
 	// No cache means no change.
-	plain := []interface{}{map[string]interface{}{"type": "function_call", "call_id": "call_1"}}
+	plain := []any{map[string]any{"type": "function_call", "call_id": "call_1"}}
 	got = backfillReasoningForCalls(plain, nil)
 	testutil.Falsef(t, len(got) != 1, "without cached items nothing may be inserted: %#v", got)
 }
 
 func TestReasoningForCallsIndexesOnlyProofs(t *testing.T) {
-	index := reasoningForCalls([]interface{}{
-		map[string]interface{}{"type": "reasoning", "id": "rs_1"}, // no encrypted content
-		map[string]interface{}{"type": "function_call", "call_id": "call_1"},
-		map[string]interface{}{"type": "reasoning", "id": "rs_2", "encrypted_content": "cipher"},
-		map[string]interface{}{"type": "custom_tool_call", "call_id": "call_2"},
+	index := reasoningForCalls([]any{
+		map[string]any{"type": "reasoning", "id": "rs_1"}, // no encrypted content
+		map[string]any{"type": "function_call", "call_id": "call_1"},
+		map[string]any{"type": "reasoning", "id": "rs_2", "encrypted_content": "cipher"},
+		map[string]any{"type": "custom_tool_call", "call_id": "call_2"},
 	})
 	_, ok := index["call_1"]
 	testutil.False(t, ok, "a reasoning item without a proof must not be indexed")
@@ -324,8 +324,8 @@ func TestAccumulatedInputItemsWalksTheContinuationChain(t *testing.T) {
 		save(fmt.Sprintf("resp_c%d", i), previous, fmt.Sprintf("c%d", i))
 	}
 
-	itemText := func(item interface{}) string {
-		entry, ok := item.(map[string]interface{})
+	itemText := func(item any) string {
+		entry, ok := item.(map[string]any)
 		testutil.True(t, ok, "input item = %#v, want an object")
 		return fmt.Sprint(entry["content"])
 	}
@@ -348,8 +348,8 @@ func TestAccumulatedInputItemsWalksTheContinuationChain(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			payload := map[string]interface{}{
-				"input":                []interface{}{map[string]interface{}{"role": "user", "content": "current"}},
+			payload := map[string]any{
+				"input":                []any{map[string]any{"role": "user", "content": "current"}},
 				"previous_response_id": tc.previous,
 			}
 			req := httptest.NewRequest(http.MethodGet, "/v1/responses", nil)

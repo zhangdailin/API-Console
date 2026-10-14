@@ -21,23 +21,23 @@ const replayToolCallSeparator = "\x00"
 // extractReplayItems pulls the portable item types out of a completed Responses
 // object. It reports false when the payload carries no usable output at all, so
 // a truncated or error payload never overwrites good state.
-func extractReplayItems(raw map[string]interface{}) ([]interface{}, bool) {
+func extractReplayItems(raw map[string]any) ([]any, bool) {
 	if raw == nil {
 		return nil, false
 	}
 	outputRaw := raw["output"]
 	if outputRaw == nil {
-		if nested, ok := raw["response"].(map[string]interface{}); ok {
+		if nested, ok := raw["response"].(map[string]any); ok {
 			outputRaw = nested["output"]
 		}
 	}
-	output, ok := outputRaw.([]interface{})
+	output, ok := outputRaw.([]any)
 	if !ok {
 		return nil, false
 	}
-	items := make([]interface{}, 0, len(output))
+	items := make([]any, 0, len(output))
 	for _, entry := range output {
-		item, ok := entry.(map[string]interface{})
+		item, ok := entry.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -52,11 +52,11 @@ func extractReplayItems(raw map[string]interface{}) ([]interface{}, bool) {
 // normalizeReplayItems reduces items to their portable shape. It reports false
 // when nothing anchorable survives, which tells the caller to drop the session
 // state rather than replay a partial turn.
-func normalizeReplayItems(items []interface{}) ([]interface{}, bool) {
-	normalized := make([]interface{}, 0, len(items))
+func normalizeReplayItems(items []any) ([]any, bool) {
+	normalized := make([]any, 0, len(items))
 	hasAnchor := false
 	for _, entry := range items {
-		item, ok := entry.(map[string]interface{})
+		item, ok := entry.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -73,7 +73,7 @@ func normalizeReplayItems(items []interface{}) ([]interface{}, bool) {
 	return normalized, hasAnchor && len(normalized) > 0
 }
 
-func normalizeReplayItem(item map[string]interface{}) (map[string]interface{}, bool) {
+func normalizeReplayItem(item map[string]any) (map[string]any, bool) {
 	switch strings.TrimSpace(chatwire.ParseLooseStringAny(item["type"])) {
 	case "reasoning":
 		return normalizeReasoningReplayItem(item)
@@ -88,31 +88,31 @@ func normalizeReplayItem(item map[string]interface{}) (map[string]interface{}, b
 	}
 }
 
-func normalizeReasoningReplayItem(item map[string]interface{}) (map[string]interface{}, bool) {
+func normalizeReasoningReplayItem(item map[string]any) (map[string]any, bool) {
 	encrypted, ok := item["encrypted_content"].(string)
 	if !ok || !validReplayCipher(encrypted) {
 		return nil, false
 	}
 	// xAI treats extra keys such as content:null as a modified compaction blob
 	// and 400s, so replay only the portable input shape.
-	return map[string]interface{}{
+	return map[string]any{
 		"type":              "reasoning",
-		"summary":           []interface{}{},
+		"summary":           []any{},
 		"encrypted_content": encrypted,
 	}, true
 }
 
-func normalizeAssistantMessageReplayItem(item map[string]interface{}) (map[string]interface{}, bool) {
+func normalizeAssistantMessageReplayItem(item map[string]any) (map[string]any, bool) {
 	if !strings.EqualFold(strings.TrimSpace(chatwire.ParseLooseStringAny(item["role"])), "assistant") {
 		return nil, false
 	}
-	content, ok := item["content"].([]interface{})
+	content, ok := item["content"].([]any)
 	if !ok || len(content) == 0 {
 		return nil, false
 	}
-	parts := make([]interface{}, 0, len(content))
+	parts := make([]any, 0, len(content))
 	for _, entry := range content {
-		part, ok := entry.(map[string]interface{})
+		part, ok := entry.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -122,29 +122,29 @@ func normalizeAssistantMessageReplayItem(item map[string]interface{}) (map[strin
 			if !ok {
 				continue
 			}
-			parts = append(parts, map[string]interface{}{"type": "output_text", "text": text})
+			parts = append(parts, map[string]any{"type": "output_text", "text": text})
 		case "refusal":
 			refusal, ok := part["refusal"].(string)
 			if !ok {
 				continue
 			}
-			parts = append(parts, map[string]interface{}{"type": "refusal", "refusal": refusal})
+			parts = append(parts, map[string]any{"type": "refusal", "refusal": refusal})
 		}
 	}
 	if len(parts) == 0 {
 		return nil, false
 	}
-	return map[string]interface{}{"type": "message", "role": "assistant", "content": parts}, true
+	return map[string]any{"type": "message", "role": "assistant", "content": parts}, true
 }
 
-func normalizeFunctionCallReplayItem(item map[string]interface{}) (map[string]interface{}, bool) {
+func normalizeFunctionCallReplayItem(item map[string]any) (map[string]any, bool) {
 	callID := strings.TrimSpace(chatwire.ParseLooseStringAny(item["call_id"]))
 	name := strings.TrimSpace(chatwire.ParseLooseStringAny(item["name"]))
 	arguments, ok := item["arguments"].(string)
 	if !ok || callID == "" || name == "" {
 		return nil, false
 	}
-	normalized := map[string]interface{}{"type": "function_call", "call_id": callID, "name": name, "arguments": arguments}
+	normalized := map[string]any{"type": "function_call", "call_id": callID, "name": name, "arguments": arguments}
 	if raw, exists := item["namespace"]; exists {
 		namespace, ok := raw.(string)
 		if !ok || strings.TrimSpace(namespace) == "" {
@@ -155,7 +155,7 @@ func normalizeFunctionCallReplayItem(item map[string]interface{}) (map[string]in
 	return normalized, true
 }
 
-func normalizeCustomToolCallReplayItem(item map[string]interface{}) (map[string]interface{}, bool) {
+func normalizeCustomToolCallReplayItem(item map[string]any) (map[string]any, bool) {
 	callID := strings.TrimSpace(chatwire.ParseLooseStringAny(item["call_id"]))
 	name := strings.TrimSpace(chatwire.ParseLooseStringAny(item["name"]))
 	input, exists := item["input"]
@@ -164,7 +164,7 @@ func normalizeCustomToolCallReplayItem(item map[string]interface{}) (map[string]
 	}
 	status := strings.TrimSpace(chatwire.ParseLooseStringAny(item["status"]))
 	status = util.FirstNonEmptyUntrimmed(status, "completed")
-	return map[string]interface{}{"type": "custom_tool_call", "status": status, "call_id": callID, "name": name, "input": input}, true
+	return map[string]any{"type": "custom_tool_call", "status": status, "call_id": callID, "name": name, "input": input}, true
 }
 
 // comparableReplayCallIDs returns the equivalent spellings of a tool call ID.
@@ -202,16 +202,16 @@ func anyReplayCallKeyExists(existing map[string]bool, keys []string) bool {
 
 // cloneReplayItemWithCallID rebinds a replayed tool call to the spelling the
 // client's own tool output already uses, so the pair stays matched.
-func cloneReplayItemWithCallID(item map[string]interface{}, callID string) map[string]interface{} {
-	clone := make(map[string]interface{}, len(item))
+func cloneReplayItemWithCallID(item map[string]any, callID string) map[string]any {
+	clone := make(map[string]any, len(item))
 	maps.Copy(clone, item)
 	clone["call_id"] = callID
 	return clone
 }
 
-func lastAssistantReplayMessage(input []interface{}) (map[string]interface{}, bool) {
+func lastAssistantReplayMessage(input []any) (map[string]any, bool) {
 	for _, i := range slices.Backward(input) {
-		item, ok := i.(map[string]interface{})
+		item, ok := i.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -224,9 +224,9 @@ func lastAssistantReplayMessage(input []interface{}) (map[string]interface{}, bo
 	return nil, false
 }
 
-func cachedAssistantReplayMessage(items []interface{}) (map[string]interface{}, bool) {
+func cachedAssistantReplayMessage(items []any) (map[string]any, bool) {
 	for _, entry := range items {
-		item, ok := entry.(map[string]interface{})
+		item, ok := entry.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -242,20 +242,20 @@ type replayAssistantPart struct {
 	value    string
 }
 
-func replayAssistantParts(raw interface{}) ([]replayAssistantPart, bool) {
+func replayAssistantParts(raw any) ([]replayAssistantPart, bool) {
 	if raw == nil {
 		return nil, false
 	}
 	if text, ok := raw.(string); ok {
 		return []replayAssistantPart{{partType: "output_text", value: text}}, true
 	}
-	parts, ok := raw.([]interface{})
+	parts, ok := raw.([]any)
 	if !ok {
 		return nil, false
 	}
 	result := make([]replayAssistantPart, 0, len(parts))
 	for _, entry := range parts {
-		part, ok := entry.(map[string]interface{})
+		part, ok := entry.(map[string]any)
 		if !ok {
 			return nil, false
 		}
@@ -279,7 +279,7 @@ func replayAssistantParts(raw interface{}) ([]replayAssistantPart, bool) {
 	return result, len(result) > 0
 }
 
-func replayAssistantContentEqual(left, right map[string]interface{}) bool {
+func replayAssistantContentEqual(left, right map[string]any) bool {
 	leftParts, leftOK := replayAssistantParts(left["content"])
 	rightParts, rightOK := replayAssistantParts(right["content"])
 	if !leftOK || !rightOK || len(leftParts) != len(rightParts) {
@@ -297,7 +297,7 @@ func replayAssistantContentEqual(left, right map[string]interface{}) bool {
 // replay never duplicates the client's own history. It returns nil when the
 // client's last assistant message disagrees with the cached one, because then
 // the cache belongs to a different branch of the conversation.
-func filterReplayItemsForInput(input []interface{}, items []interface{}) []interface{} {
+func filterReplayItemsForInput(input []any, items []any) []any {
 	if len(input) == 0 {
 		return nil
 	}
@@ -311,7 +311,7 @@ func filterReplayItemsForInput(input []interface{}, items []interface{}) []inter
 	existingOutputs := map[string]string{}
 	existingEncrypted := map[string]bool{}
 	for _, entry := range input {
-		item, ok := entry.(map[string]interface{})
+		item, ok := entry.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -332,9 +332,9 @@ func filterReplayItemsForInput(input []interface{}, items []interface{}) []inter
 			}
 		}
 	}
-	filtered := make([]interface{}, 0, len(items))
+	filtered := make([]any, 0, len(items))
 	for _, entry := range items {
-		item, ok := entry.(map[string]interface{})
+		item, ok := entry.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -383,22 +383,22 @@ func filterReplayItemsForInput(input []interface{}, items []interface{}) []inter
 // insertReplayItems places the replay immediately before the point it belongs:
 // ahead of the matching tool output, else ahead of the last assistant message,
 // else ahead of the first non-system input.
-func insertReplayItems(input []interface{}, items []interface{}) []interface{} {
+func insertReplayItems(input []any, items []any) []any {
 	if len(items) == 0 {
 		return input
 	}
 	insertAt := replayInsertIndex(input, items)
-	next := make([]interface{}, 0, len(input)+len(items))
+	next := make([]any, 0, len(input)+len(items))
 	next = append(next, input[:insertAt]...)
 	next = append(next, items...)
 	next = append(next, input[insertAt:]...)
 	return next
 }
 
-func replayInsertIndex(input []interface{}, items []interface{}) int {
+func replayInsertIndex(input []any, items []any) int {
 	replayCallIDs := map[string]bool{}
 	for _, entry := range items {
-		item, ok := entry.(map[string]interface{})
+		item, ok := entry.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -411,7 +411,7 @@ func replayInsertIndex(input []interface{}, items []interface{}) int {
 	}
 	if len(replayCallIDs) > 0 {
 		for index, entry := range input {
-			item, ok := entry.(map[string]interface{})
+			item, ok := entry.(map[string]any)
 			if !ok {
 				continue
 			}
@@ -431,7 +431,7 @@ func replayInsertIndex(input []interface{}, items []interface{}) int {
 		}
 	}
 	for index, i := range slices.Backward(input) {
-		item, ok := i.(map[string]interface{})
+		item, ok := i.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -448,8 +448,8 @@ func replayInsertIndex(input []interface{}, items []interface{}) int {
 	return len(input)
 }
 
-func shouldInsertReplayBefore(entry interface{}) bool {
-	item, ok := entry.(map[string]interface{})
+func shouldInsertReplayBefore(entry any) bool {
+	item, ok := entry.(map[string]any)
 	if !ok {
 		return true
 	}
@@ -465,11 +465,11 @@ func shouldInsertReplayBefore(entry interface{}) bool {
 // the function_call that follows them. A multi-turn tool loop only needs the
 // reasoning proof that belongs to the call it is answering, and a client that
 // echoes its own calls may drop that block.
-func reasoningForCalls(items []interface{}) map[string]map[string]interface{} {
-	index := map[string]map[string]interface{}{}
-	var pending map[string]interface{}
+func reasoningForCalls(items []any) map[string]map[string]any {
+	index := map[string]map[string]any{}
+	var pending map[string]any
 	for _, entry := range items {
-		item, ok := entry.(map[string]interface{})
+		item, ok := entry.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -496,9 +496,9 @@ func reasoningForCalls(items []interface{}) map[string]map[string]interface{} {
 
 // hasReasoningBefore reports whether a reasoning item precedes position in the
 // input, which is what the upstream requires for a call to carry its proof.
-func hasReasoningBefore(input []interface{}, position int) bool {
+func hasReasoningBefore(input []any, position int) bool {
 	for i := position - 1; i >= 0; i-- {
-		item, ok := input[i].(map[string]interface{})
+		item, ok := input[i].(map[string]any)
 		if !ok {
 			return false
 		}
@@ -519,7 +519,7 @@ func hasReasoningBefore(input []interface{}, position int) bool {
 // This is the per-call counterpart of the whole-turn replay: a client that
 // resends only part of its history (or reorders it) still gets the proof the
 // upstream needs, instead of the upstream silently losing the reasoning chain.
-func backfillReasoningForCalls(input []interface{}, cached []interface{}) []interface{} {
+func backfillReasoningForCalls(input []any, cached []any) []any {
 	if len(input) == 0 || len(cached) == 0 {
 		return input
 	}
@@ -529,9 +529,9 @@ func backfillReasoningForCalls(input []interface{}, cached []interface{}) []inte
 	}
 	seen := map[string]bool{}
 	added := 0
-	out := make([]interface{}, 0, len(input))
+	out := make([]any, 0, len(input))
 	for position, entry := range input {
-		item, ok := entry.(map[string]interface{})
+		item, ok := entry.(map[string]any)
 		if !ok {
 			out = append(out, entry)
 			continue
@@ -545,7 +545,7 @@ func backfillReasoningForCalls(input []interface{}, cached []interface{}) []inte
 					continue
 				}
 				seen[key] = true
-				out = append(out, cloneReplayItems([]interface{}{proof})...)
+				out = append(out, cloneReplayItems([]any{proof})...)
 				added++
 				break
 			}

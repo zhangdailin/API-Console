@@ -42,30 +42,30 @@ func TestBuildChatBodyConvertsAnthropicToolsToOpenAI(t *testing.T) {
 	body, err := buildChatBody(upstream.UpstreamRequest{
 		Model:    "z-ai/glm-5.3-flash",
 		Messages: []prompt.Message{{Role: "user", Content: prompt.MessageContent{Text: "inspect"}}},
-		Tools: []interface{}{map[string]interface{}{
-			"name": "glob", "description": "Find files", "input_schema": map[string]interface{}{
-				"type": "object", "properties": map[string]interface{}{"pattern": map[string]interface{}{"type": "string"}}, "required": []interface{}{"pattern"},
+		Tools: []any{map[string]any{
+			"name": "glob", "description": "Find files", "input_schema": map[string]any{
+				"type": "object", "properties": map[string]any{"pattern": map[string]any{"type": "string"}}, "required": []any{"pattern"},
 			},
 		}},
-		ToolChoice: map[string]interface{}{"type": "tool", "name": "glob"},
+		ToolChoice: map[string]any{"type": "tool", "name": "glob"},
 	}, "z-ai/glm-5.3-flash")
 	testutil.NoError(t, err)
-	var decoded map[string]interface{}
+	var decoded map[string]any
 	testutil.NoError(t, json.Unmarshal(body, &decoded))
-	tools, _ := decoded["tools"].([]interface{})
+	tools, _ := decoded["tools"].([]any)
 	testutil.Equal(t, len(tools), 1)
-	tool := tools[0].(map[string]interface{})
+	tool := tools[0].(map[string]any)
 	testutil.Equal(t, tool["type"], "function")
-	function := tool["function"].(map[string]interface{})
+	function := tool["function"].(map[string]any)
 	testutil.Falsef(t, function["name"] != "glob" || function["parameters"] == nil, "function=%#v", function)
-	choice := decoded["tool_choice"].(map[string]interface{})
+	choice := decoded["tool_choice"].(map[string]any)
 	testutil.Equal(t, choice["type"], "function")
-	testutil.Equal(t, choice["function"].(map[string]interface{})["name"], "glob")
+	testutil.Equal(t, choice["function"].(map[string]any)["name"], "glob")
 }
 
 func TestBuildChatBodyKeepsOpenAITools(t *testing.T) {
-	openAI := map[string]interface{}{"type": "function", "function": map[string]interface{}{"name": "bash", "parameters": map[string]interface{}{"type": "object"}}}
-	body, err := buildChatBody(upstream.UpstreamRequest{Messages: []prompt.Message{{Role: "user", Content: prompt.MessageContent{Text: "run"}}}, Tools: []interface{}{openAI}}, "z-ai/glm-5.3-flash")
+	openAI := map[string]any{"type": "function", "function": map[string]any{"name": "bash", "parameters": map[string]any{"type": "object"}}}
+	body, err := buildChatBody(upstream.UpstreamRequest{Messages: []prompt.Message{{Role: "user", Content: prompt.MessageContent{Text: "run"}}}, Tools: []any{openAI}}, "z-ai/glm-5.3-flash")
 	testutil.NoError(t, err)
 	testutil.MustContain(t, string(body), `"tools":[{"function":{"name":"bash","parameters":{"type":"object"}},"type":"function"}]`)
 }
@@ -81,7 +81,7 @@ func TestBuildMessagesMapsToolHistory(t *testing.T) {
 			{
 				Role: "assistant",
 				Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{
-					{Type: "tool_use", ID: "call-1", Name: "Read", Input: map[string]interface{}{"path": "/tmp/a"}},
+					{Type: "tool_use", ID: "call-1", Name: "Read", Input: map[string]any{"path": "/tmp/a"}},
 				}},
 			},
 			{
@@ -129,7 +129,7 @@ func TestConsumeStreamEmitsTextAndUsage(t *testing.T) {
 		"data: {\"data\":{\"choices\":[{\"delta\":{\"content\":\" world\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2}}}\n\n" +
 		"data: [DONE]\n\n"
 	var text strings.Builder
-	var usage map[string]interface{}
+	var usage map[string]any
 	finish := false
 	result, err := consumeStream(strings.NewReader(stream), false, func(msg upstream.SSEMessage) {
 		switch msg.Type {
@@ -295,7 +295,7 @@ func TestConsumeStreamLeavesTextToolMarkupWithoutDeclaredTools(t *testing.T) {
 	testutil.Falsef(t, text.String() != markup || result.ToolCallCount != 0, "text=%q result=%+v", text.String(), result)
 }
 
-func mustJSON(t *testing.T, value interface{}) []byte {
+func mustJSON(t *testing.T, value any) []byte {
 	t.Helper()
 	raw, err := json.Marshal(value)
 	testutil.NoError(t, err)
@@ -341,7 +341,7 @@ func TestCatalogSnapshotRoundTripsTheObservedFeed(t *testing.T) {
 	testutil.CheckEqual(t, catalogID(rows[0]), "x-ai/grok-4.1-fast")
 	testutil.CheckEqual(t, catalogID("openai/gpt-5"), "")
 	// The snapshot is JSON rows, so the identifier has to survive the encoding.
-	var decoded map[string]interface{}
+	var decoded map[string]any
 	testutil.NoError(t, json.Unmarshal([]byte(rows[0]), &decoded), "row is not JSON: %v")
 	testutil.CheckEqual(t, decoded["id"], "x-ai/grok-4.1-fast")
 }

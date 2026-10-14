@@ -155,7 +155,7 @@ func (a *DeviceAuthenticator) clientID() string {
 	return "b1a00492-073a-47ea-816f-4c329264a828"
 }
 
-func (a *DeviceAuthenticator) postForm(ctx context.Context, endpoint string, form url.Values, target interface{}) error {
+func (a *DeviceAuthenticator) postForm(ctx context.Context, endpoint string, form url.Values, target any) error {
 	body, _, err := postOAuthForm(ctx, a.httpClient, endpoint, form, grokDeviceOAuthMaxBodyBytes,
 		func(req *http.Request) {
 			if a.cfg != nil {

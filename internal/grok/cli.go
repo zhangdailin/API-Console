@@ -136,7 +136,7 @@ func (c *CLIClient) clientIdentifier() string {
 // doResponses issues a standard Responses request to the CLI proxy. It ensures a
 // valid access token (refreshing if needed) then POSTs the payload, returning
 // the raw upstream response (SSE or JSON) for the caller to stream or collect.
-func (c *CLIClient) doResponsesAt(ctx context.Context, acc *store.Account, path string, payload map[string]interface{}) (*http.Response, error) {
+func (c *CLIClient) doResponsesAt(ctx context.Context, acc *store.Account, path string, payload map[string]any) (*http.Response, error) {
 	if acc == nil {
 		return nil, fmt.Errorf("empty cli account")
 	}
@@ -246,7 +246,7 @@ func modelScopedFreeQuotaRefusal(body []byte) bool {
 	return strings.Contains(text, "for model") || strings.Contains(text, "model:")
 }
 
-func (c *CLIClient) doResponsesOnceAt(ctx context.Context, acc *store.Account, path string, payload map[string]interface{}) (*http.Response, error) {
+func (c *CLIClient) doResponsesOnceAt(ctx context.Context, acc *store.Account, path string, payload map[string]any) (*http.Response, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err

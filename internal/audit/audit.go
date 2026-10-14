@@ -83,8 +83,8 @@ type Event struct {
 	Details string `json:"details,omitempty"`
 	// Redacted lists the request fields that were masked before persisting, so a
 	// reader knows a change summary is incomplete by design.
-	Redacted []string               `json:"redacted,omitempty"`
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	Redacted []string       `json:"redacted,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // Logger is the audit logging interface.
@@ -211,7 +211,7 @@ func (l *RedisLogger) writeLoop() {
 			event := item.event
 			commands = append(commands, pipe.XAdd(ctx, &redis.XAddArgs{
 				Stream: l.streamKey, MaxLen: l.maxLen, Approx: true,
-				Values: map[string]interface{}{"data": string(item.data), "action": event.Action, "status": event.Status, "kind": string(event.Kind)},
+				Values: map[string]any{"data": string(item.data), "action": event.Action, "status": event.Status, "kind": string(event.Kind)},
 			}))
 		}
 		_, err := pipe.Exec(ctx)
@@ -274,12 +274,12 @@ func sensitiveKey(key string) bool {
 
 // Redact sanitises a parsed request body for the operation journal. Credential
 // fields are replaced, not dropped, so the summary still shows which knob moved.
-func Redact(value interface{}) (interface{}, []string) { return redactValue(value, "") }
+func Redact(value any) (any, []string) { return redactValue(value, "") }
 
-func redactValue(value interface{}, prefix string) (interface{}, []string) {
+func redactValue(value any, prefix string) (any, []string) {
 	switch typed := value.(type) {
-	case map[string]interface{}:
-		out := make(map[string]interface{}, len(typed))
+	case map[string]any:
+		out := make(map[string]any, len(typed))
 		redacted := make([]string, 0, 2)
 		for key, item := range typed {
 			path := key
@@ -296,8 +296,8 @@ func redactValue(value interface{}, prefix string) (interface{}, []string) {
 			redacted = append(redacted, nested...)
 		}
 		return out, redacted
-	case []interface{}:
-		out := make([]interface{}, 0, len(typed))
+	case []any:
+		out := make([]any, 0, len(typed))
 		redacted := make([]string, 0)
 		for _, item := range typed {
 			clean, nested := redactValue(item, prefix)
@@ -314,7 +314,7 @@ func redactValue(value interface{}, prefix string) (interface{}, []string) {
 
 // redactString masks a password embedded in a URL, which a key-name check cannot
 // see: "redis://user:secret@host" must not reach the journal intact.
-func redactString(value string, path string) (interface{}, []string) {
+func redactString(value string, path string) (any, []string) {
 	if !strings.Contains(value, "://") {
 		return value, nil
 	}
@@ -335,7 +335,7 @@ func SummarizeChange(body []byte) (string, []string) {
 	if trimmed == "" {
 		return "", nil
 	}
-	var parsed interface{}
+	var parsed any
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		// Not JSON (form post, plain text): keep the shape, never the content.
 		return "<" + contentTypeOf(trimmed) + " body, " + itoa(len(trimmed)) + " bytes>", nil

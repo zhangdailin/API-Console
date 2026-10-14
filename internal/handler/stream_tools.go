@@ -40,11 +40,11 @@ func (h *streamHandler) emitToolCallNonStream(call toolCall) {
 	h.addOutputTokens(call.input)
 	inputJSON := strings.TrimSpace(call.input)
 	inputJSON = util.FirstNonEmptyUntrimmed(inputJSON, "{}")
-	var inputValue interface{}
+	var inputValue any
 	if err := json.Unmarshal([]byte(inputJSON), &inputValue); err != nil {
-		inputValue = map[string]interface{}{}
+		inputValue = map[string]any{}
 	}
-	h.contentBlocks = append(h.contentBlocks, map[string]interface{}{
+	h.contentBlocks = append(h.contentBlocks, map[string]any{
 		"type":  "tool_use",
 		"id":    call.id,
 		"name":  call.name,

@@ -51,7 +51,7 @@ type Admin struct {
 	// limit and current are the generic usage slots, already clamped to
 	// non-negative; observedTokens and usageObserved carry the usage this
 	// gateway measured itself inside ObservedUsageWindow.
-	ProjectQuota func(fields map[string]interface{}, acc *store.Account, limit, current float64, observedTokens int64, usageObserved bool)
+	ProjectQuota func(fields map[string]any, acc *store.Account, limit, current float64, observedTokens int64, usageObserved bool)
 	// ObservedUsageWindow is how far back the gateway's own token count has to
 	// reach for ProjectQuota. Zero means the channel does not use it.
 	ObservedUsageWindow time.Duration
@@ -173,7 +173,7 @@ func PreserveObservedState(acc, existing *store.Account) {
 // synced. quota_type is paid/free/unknown, quota_source names the signal,
 // quota_confidence is confirmed/observed/estimated, and quota_limit_known is
 // false whenever the limit is an estimate that the upstream has not confirmed.
-func QuotaProvenance(fields map[string]interface{}, quotaType, source, confidence, note string, limitKnown, observed bool) {
+func QuotaProvenance(fields map[string]any, quotaType, source, confidence, note string, limitKnown, observed bool) {
 	fields["quota_type"] = quotaType
 	fields["quota_source"] = source
 	fields["quota_confidence"] = confidence

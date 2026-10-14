@@ -19,7 +19,7 @@ import (
 // non-secret identity claims the way the real xAI token does.
 func grokOAuthJWT(t *testing.T, sub, email, team string) string {
 	t.Helper()
-	encode := func(value interface{}) string {
+	encode := func(value any) string {
 		raw, err := json.Marshal(value)
 		testutil.NoError(t, err, "marshal claim: %v")
 		return base64.RawURLEncoding.EncodeToString(raw)
@@ -35,7 +35,7 @@ func TestGrokDeviceLogin_SecondLoginForSameAccountUpdatesInPlace(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/token" {
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"access_token":  grokOAuthJWT(t, "user-one", "one@example.com", "team-one"),
 				"refresh_token": "refresh-new",
 				"expires_in":    3600,

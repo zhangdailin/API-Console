@@ -34,12 +34,12 @@ func WriteAPIErrorWithParam(w http.ResponseWriter, status int, code, message, pa
 	case status >= 500:
 		errType = "server_error"
 	}
-	var paramValue interface{}
+	var paramValue any
 	if strings.TrimSpace(param) != "" {
 		paramValue = param
 	}
-	util.WriteJSONStatus(w, status, map[string]interface{}{
-		"error": map[string]interface{}{
+	util.WriteJSONStatus(w, status, map[string]any{
+		"error": map[string]any{
 			"message": message,
 			"type":    errType,
 			"code":    code,

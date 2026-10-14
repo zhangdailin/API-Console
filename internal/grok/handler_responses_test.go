@@ -13,27 +13,27 @@ import (
 )
 
 func TestChatRequestFromResponses_ConvertsInputToolsAndReasoning(t *testing.T) {
-	effort := map[string]interface{}{"effort": "high"}
+	effort := map[string]any{"effort": "high"}
 	parallel := false
 	req := responses.CreateRequest{
 		Model:        "grok-4.20-0309",
 		Instructions: "用中文回答",
-		Input: []interface{}{
-			map[string]interface{}{"type": "message", "role": "user", "content": []interface{}{
-				map[string]interface{}{"type": "input_text", "text": "上海天气"},
-				map[string]interface{}{"type": "input_file", "file_url": "https://example.com/a.pdf"},
+		Input: []any{
+			map[string]any{"type": "message", "role": "user", "content": []any{
+				map[string]any{"type": "input_text", "text": "上海天气"},
+				map[string]any{"type": "input_file", "file_url": "https://example.com/a.pdf"},
 			}},
-			map[string]interface{}{"type": "function_call", "call_id": "call_1", "name": "get_weather", "arguments": `{"city":"Shanghai"}`},
-			map[string]interface{}{"type": "function_call_output", "call_id": "call_1", "output": `{"temp":25}`},
+			map[string]any{"type": "function_call", "call_id": "call_1", "name": "get_weather", "arguments": `{"city":"Shanghai"}`},
+			map[string]any{"type": "function_call_output", "call_id": "call_1", "output": `{"temp":25}`},
 		},
 		Reasoning: effort,
-		Tools: []map[string]interface{}{{
+		Tools: []map[string]any{{
 			"type":        "function",
 			"name":        "get_weather",
 			"description": "Get weather",
-			"parameters":  map[string]interface{}{"type": "object"},
+			"parameters":  map[string]any{"type": "object"},
 		}},
-		ToolChoice:        map[string]interface{}{"type": "function", "name": "get_weather"},
+		ToolChoice:        map[string]any{"type": "function", "name": "get_weather"},
 		ParallelToolCalls: &parallel,
 	}
 
@@ -42,16 +42,16 @@ func TestChatRequestFromResponses_ConvertsInputToolsAndReasoning(t *testing.T) {
 	testutil.Equal(t, len(chatReq.Messages), 4)
 	testutil.Equal(t, chatReq.Messages[0].Role, "system")
 	testutil.Equal(t, chatReq.Messages[0].Content, "用中文回答")
-	testutil.Equal(t, chatReq.Messages[1].Content.([]interface{})[0].(map[string]interface{})["type"], "text")
-	testutil.Equal(t, chatReq.Messages[1].Content.([]interface{})[1].(map[string]interface{})["type"], "file")
+	testutil.Equal(t, chatReq.Messages[1].Content.([]any)[0].(map[string]any)["type"], "text")
+	testutil.Equal(t, chatReq.Messages[1].Content.([]any)[1].(map[string]any)["type"], "file")
 	testutil.Equal(t, len(chatReq.Messages[2].ToolCalls), 1)
 	testutil.Equal(t, chatReq.Messages[3].Role, "tool")
 	testutil.Equal(t, chatReq.Messages[3].ToolCallID, "call_1")
 	testutil.Falsef(t, chatReq.ReasoningEffort == nil || *chatReq.ReasoningEffort != "high", "reasoning_effort=%v want high", chatReq.ReasoningEffort)
 	testutil.Equal(t, len(chatReq.Tools), 1)
 	testutil.Equal(t, chatReq.Tools[0].Function["name"], "get_weather")
-	choice := chatReq.ToolChoice.(map[string]interface{})
-	fn := choice["function"].(map[string]interface{})
+	choice := chatReq.ToolChoice.(map[string]any)
+	fn := choice["function"].(map[string]any)
 	testutil.Equal(t, fn["name"], "get_weather")
 }
 
@@ -108,7 +108,7 @@ func TestValidateResponsesCompatibilityFor_RejectsUnsupportedBridgeFields(t *tes
 func TestValidateResponsesCompatibilityFor_AcceptsBridgeFields(t *testing.T) {
 	store := true
 	if err := responses.ValidateCompatibility(responses.CreateRequest{
-		Metadata: map[string]interface{}{"trace": "value"}, Truncation: "auto",
+		Metadata: map[string]any{"trace": "value"}, Truncation: "auto",
 		Include: []string{"reasoning.encrypted_content"}, Store: &store, Stream: true,
 	}, true); err != nil {
 		t.Fatalf("responses.ValidateCompatibility() error = %v", err)
@@ -147,26 +147,26 @@ func TestCopyNativeCLIResponseKeepsValidTerminal(t *testing.T) {
 // A bare file_id is intentionally not covered: the chat layer only accepts a URL
 // or data URI, so an opaque asset id is not representable on this path.
 func TestResponsesInputFileRoundTripsIntoChatMessages(t *testing.T) {
-	for _, part := range []map[string]interface{}{
-		{"type": "input_file", "file": map[string]interface{}{"data": "data:application/pdf;base64,QUFB"}},
+	for _, part := range []map[string]any{
+		{"type": "input_file", "file": map[string]any{"data": "data:application/pdf;base64,QUFB"}},
 		{"type": "input_file", "file_url": "https://example.com/a.pdf"},
 		{"type": "input_file", "file_data": "data:application/pdf;base64,QUFB"},
-		{"type": "input_file", "file": map[string]interface{}{"url": "https://example.com/b.pdf"}},
+		{"type": "input_file", "file": map[string]any{"url": "https://example.com/b.pdf"}},
 	} {
-		input := []interface{}{map[string]interface{}{
+		input := []any{map[string]any{
 			"type": "message", "role": "user",
-			"content": []interface{}{map[string]interface{}{"type": "input_text", "text": "see attached"}, part},
+			"content": []any{map[string]any{"type": "input_text", "text": "see attached"}, part},
 		}}
 		messages, err := responses.InputToMessages(input)
 		testutil.Falsef(t, err != nil, "%v: %v", part, err)
 		err = chatwire.ValidateMessages(messages)
 		testutil.CheckNoError(t, err)
-		parts, ok := messages[0].Content.([]interface{})
+		parts, ok := messages[0].Content.([]any)
 		if !ok || len(parts) != 2 {
 			t.Fatalf("%v: converted content=%#v", part, messages[0].Content)
 		}
-		filePart, _ := parts[1].(map[string]interface{})
-		file, _ := filePart["file"].(map[string]interface{})
+		filePart, _ := parts[1].(map[string]any)
+		file, _ := filePart["file"].(map[string]any)
 		data, _ := file["file_data"].(string)
 		testutil.Falsef(t, data == "", "%v: file_data missing after conversion: %#v", part, filePart)
 	}

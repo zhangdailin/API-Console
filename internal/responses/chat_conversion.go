@@ -13,8 +13,8 @@ import (
 	"orchids-api/internal/util"
 )
 
-func expandStoredResponseInput(responseBody []byte, current interface{}) (interface{}, error) {
-	var previous map[string]interface{}
+func expandStoredResponseInput(responseBody []byte, current any) (any, error) {
+	var previous map[string]any
 	if json.Unmarshal(responseBody, &previous) != nil {
 		return nil, fmt.Errorf("stored response is invalid")
 	}
@@ -22,15 +22,15 @@ func expandStoredResponseInput(responseBody []byte, current interface{}) (interf
 	if len(output) == 0 {
 		return nil, fmt.Errorf("stored response has no output")
 	}
-	currentItems := make([]interface{}, 0)
+	currentItems := make([]any, 0)
 	switch value := current.(type) {
 	case string:
 		if strings.TrimSpace(value) != "" {
-			currentItems = append(currentItems, map[string]interface{}{
-				"type": "message", "role": "user", "content": []interface{}{map[string]interface{}{"type": "input_text", "text": value}},
+			currentItems = append(currentItems, map[string]any{
+				"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": value}},
 			})
 		}
-	case []interface{}:
+	case []any:
 		currentItems = append(currentItems, value...)
 	default:
 		return nil, fmt.Errorf("input must be a string or an array")
@@ -38,7 +38,7 @@ func expandStoredResponseInput(responseBody []byte, current interface{}) (interf
 	if len(currentItems) == 0 {
 		return nil, fmt.Errorf("input is required")
 	}
-	combined := make([]interface{}, 0, len(output)+len(currentItems))
+	combined := make([]any, 0, len(output)+len(currentItems))
 	combined = append(combined, output...)
 	combined = append(combined, currentItems...)
 	return combined, nil
@@ -115,27 +115,27 @@ func ChatRequestFromResponses(req CreateRequest) (chatwire.Request, error) {
 // response_format. Both are forwarded unchanged — the chat layer normalizes the
 // shape it receives — so a bridge that receives either one keeps the caller's
 // intent, including the `text.verbosity` control the format object may carry.
-func responsesTextControls(req CreateRequest) map[string]interface{} {
+func responsesTextControls(req CreateRequest) map[string]any {
 	return CloneStringInterfaceMap(req.Text)
 }
 
 // responsesOutputFormat derives the chat `response_format` from either spelling.
 // `text.format` wins when both are present because it is the field the Responses
 // API defines.
-func responsesOutputFormat(req CreateRequest) map[string]interface{} {
-	if format, ok := req.Text["format"].(map[string]interface{}); ok && len(format) > 0 {
+func responsesOutputFormat(req CreateRequest) map[string]any {
+	if format, ok := req.Text["format"].(map[string]any); ok && len(format) > 0 {
 		return CloneStringInterfaceMap(format)
 	}
 	return CloneStringInterfaceMap(req.ResponseFormat)
 }
 
-func InputToMessages(input interface{}) ([]chatwire.Message, error) {
+func InputToMessages(input any) ([]chatwire.Message, error) {
 	return InputToMessagesMode(input, true)
 }
 
 // Native identity extraction never changes the payload sent upstream. Unknown
 // items remain in that original payload; only the chat bridge rejects them.
-func InputToMessagesMode(input interface{}, strict bool) ([]chatwire.Message, error) {
+func InputToMessagesMode(input any, strict bool) ([]chatwire.Message, error) {
 	switch v := input.(type) {
 	case nil:
 		return nil, fmt.Errorf("input is required")
@@ -144,10 +144,10 @@ func InputToMessagesMode(input interface{}, strict bool) ([]chatwire.Message, er
 			return nil, fmt.Errorf("input is required")
 		}
 		return []chatwire.Message{{Role: "user", Content: v}}, nil
-	case []interface{}:
+	case []any:
 		messages := make([]chatwire.Message, 0, len(v))
 		for index, raw := range v {
-			item, _ := raw.(map[string]interface{})
+			item, _ := raw.(map[string]any)
 			if item == nil {
 				if !strict {
 					continue
@@ -191,7 +191,7 @@ func InputToMessagesMode(input interface{}, strict bool) ([]chatwire.Message, er
 					ToolCalls: []chatwire.ToolCall{{
 						ID:   strings.TrimSpace(fmt.Sprint(item["call_id"])),
 						Type: "function",
-						Function: map[string]interface{}{
+						Function: map[string]any{
 							"name":      name,
 							"arguments": args,
 						},
@@ -211,10 +211,10 @@ func InputToMessagesMode(input interface{}, strict bool) ([]chatwire.Message, er
 				if strict && chatwire.ParseLooseStringAny(item["call_id"]) == "" {
 					return nil, fmt.Errorf("input[%d].call_id is required", index)
 				}
-				arguments, _ := json.Marshal(map[string]interface{}{"input": FirstNonNil(item["input"], item["arguments"], "")})
+				arguments, _ := json.Marshal(map[string]any{"input": FirstNonNil(item["input"], item["arguments"], "")})
 				messages = append(messages, chatwire.Message{Role: "assistant", Content: nil, ToolCalls: []chatwire.ToolCall{{
 					ID: util.FirstNonEmpty(chatwire.ParseLooseStringAny(item["call_id"]), chatwire.ParseLooseStringAny(item["id"])), Type: "function",
-					Function: map[string]interface{}{"name": name, "arguments": string(arguments)},
+					Function: map[string]any{"name": name, "arguments": string(arguments)},
 				}}})
 			case "custom_tool_call_output":
 				if strict && chatwire.ParseLooseStringAny(item["call_id"]) == "" {
@@ -254,7 +254,7 @@ func InputToMessagesMode(input interface{}, strict bool) ([]chatwire.Message, er
 	}
 }
 
-func bridgeToolOutput(output interface{}) string {
+func bridgeToolOutput(output any) string {
 	if text, ok := output.(string); ok {
 		return text
 	}
@@ -265,10 +265,10 @@ func bridgeToolOutput(output interface{}) string {
 	return string(encoded)
 }
 
-func responsesReasoningSummary(item map[string]interface{}) string {
+func responsesReasoningSummary(item map[string]any) string {
 	parts := make([]string, 0)
 	for _, raw := range InterfaceSlice(item["summary"]) {
-		part, _ := raw.(map[string]interface{})
+		part, _ := raw.(map[string]any)
 		if text := chatwire.ParseLooseStringAny(part["text"]); text != "" {
 			parts = append(parts, text)
 		}
@@ -276,24 +276,24 @@ func responsesReasoningSummary(item map[string]interface{}) string {
 	return strings.Join(parts, "")
 }
 
-func normalizeResponsesMessageContent(content interface{}) interface{} {
-	parts, ok := content.([]interface{})
+func normalizeResponsesMessageContent(content any) any {
+	parts, ok := content.([]any)
 	if !ok {
 		return content
 	}
-	out := make([]interface{}, 0, len(parts))
+	out := make([]any, 0, len(parts))
 	for _, raw := range parts {
-		part, _ := raw.(map[string]interface{})
+		part, _ := raw.(map[string]any)
 		if part == nil {
 			continue
 		}
 		ptype := strings.ToLower(strings.TrimSpace(fmt.Sprint(part["type"])))
 		switch ptype {
 		case "input_text", "output_text":
-			out = append(out, map[string]interface{}{"type": "text", "text": fmt.Sprint(part["text"])})
+			out = append(out, map[string]any{"type": "text", "text": fmt.Sprint(part["text"])})
 		case "input_image", "image":
 			if url := responsesPartURL(part, []string{"image_url", "source"}, []string{"url"}); url != "" {
-				out = append(out, map[string]interface{}{"type": "image_url", "image_url": map[string]interface{}{"url": url}})
+				out = append(out, map[string]any{"type": "image_url", "image_url": map[string]any{"url": url}})
 			}
 		case "input_file", "file":
 			url := responsesPartURL(part, []string{"file", "file_url", "source", "file_data"}, []string{"url", "file_url", "data", "file_data"})
@@ -304,7 +304,7 @@ func normalizeResponsesMessageContent(content interface{}) interface{} {
 				// The chat layer validates the portable file shape, so carry the
 				// resolved reference as file_data instead of a nested url. This
 				// also makes the chat->Responses->chat round trip lossless.
-				out = append(out, map[string]interface{}{"type": "file", "file": map[string]interface{}{"file_data": url}})
+				out = append(out, map[string]any{"type": "file", "file": map[string]any{"file_data": url}})
 			}
 		default:
 			out = append(out, part)
@@ -313,7 +313,7 @@ func normalizeResponsesMessageContent(content interface{}) interface{} {
 	return out
 }
 
-func responsesPartURL(part map[string]interface{}, keys, nestedKeys []string) string {
+func responsesPartURL(part map[string]any, keys, nestedKeys []string) string {
 	for _, key := range keys {
 		raw := part[key]
 		switch v := raw.(type) {
@@ -321,7 +321,7 @@ func responsesPartURL(part map[string]interface{}, keys, nestedKeys []string) st
 			if strings.TrimSpace(v) != "" {
 				return strings.TrimSpace(v)
 			}
-		case map[string]interface{}:
+		case map[string]any:
 			for _, nestedKey := range nestedKeys {
 				if s := chatwire.ParseLooseStringAny(v[nestedKey]); s != "" {
 					return s
@@ -337,9 +337,9 @@ func responsesPartURL(part map[string]interface{}, keys, nestedKeys []string) st
 // forwards untouched. A hosted tool has no `function` object, so it has no
 // ToolDef representation: dropping it was how web_search and x_search silently
 // disappeared between the Responses endpoint and the upstream.
-func responsesToolsToChatTools(tools []map[string]interface{}) ([]chatwire.ToolDef, []map[string]interface{}) {
+func responsesToolsToChatTools(tools []map[string]any) ([]chatwire.ToolDef, []map[string]any) {
 	functions := make([]chatwire.ToolDef, 0, len(tools))
-	var hosted []map[string]interface{}
+	var hosted []map[string]any
 	seenHosted := map[string]struct{}{}
 	for _, tool := range tools {
 		declaredType := strings.TrimSpace(fmt.Sprint(tool["type"]))
@@ -356,7 +356,7 @@ func responsesToolsToChatTools(tools []map[string]interface{}) ([]chatwire.ToolD
 			}
 			continue
 		}
-		if fn, _ := tool["function"].(map[string]interface{}); fn != nil {
+		if fn, _ := tool["function"].(map[string]any); fn != nil {
 			if strings.TrimSpace(fmt.Sprint(fn["name"])) != "" {
 				functions = append(functions, chatwire.ToolDef{Type: "function", Function: fn})
 			}
@@ -366,34 +366,34 @@ func responsesToolsToChatTools(tools []map[string]interface{}) ([]chatwire.ToolD
 		if name == "" {
 			continue
 		}
-		functions = append(functions, chatwire.ToolDef{Type: "function", Function: map[string]interface{}{
+		functions = append(functions, chatwire.ToolDef{Type: "function", Function: map[string]any{
 			"name":        name,
 			"description": strings.TrimSpace(fmt.Sprint(tool["description"])),
-			"parameters":  FirstNonNil(tool["parameters"], map[string]interface{}{}),
+			"parameters":  FirstNonNil(tool["parameters"], map[string]any{}),
 		}})
 	}
 	return functions, hosted
 }
 
-func responsesToolChoiceToChat(choice interface{}) interface{} {
+func responsesToolChoiceToChat(choice any) any {
 	if choice == nil {
 		return nil
 	}
-	m, _ := choice.(map[string]interface{})
+	m, _ := choice.(map[string]any)
 	if m == nil || !strings.EqualFold(strings.TrimSpace(fmt.Sprint(m["type"])), "function") {
 		return choice
 	}
-	if _, ok := m["function"].(map[string]interface{}); ok {
+	if _, ok := m["function"].(map[string]any); ok {
 		return choice
 	}
 	name := chatwire.ParseLooseStringAny(m["name"])
 	if name == "" {
 		return choice
 	}
-	return map[string]interface{}{"type": "function", "function": map[string]interface{}{"name": name}}
+	return map[string]any{"type": "function", "function": map[string]any{"name": name}}
 }
 
-func responsesReasoningEffort(reasoning map[string]interface{}) *string {
+func responsesReasoningEffort(reasoning map[string]any) *string {
 	if len(reasoning) == 0 {
 		return nil
 	}
@@ -404,15 +404,15 @@ func responsesReasoningEffort(reasoning map[string]interface{}) *string {
 }
 
 // ObjectFromChat projects standard Chat completion fields.
-func ObjectFromChat(model string, chat map[string]interface{}) map[string]interface{} {
+func ObjectFromChat(model string, chat map[string]any) map[string]any {
 	output := OutputFromChat(chat)
 	finish := ""
 	if choices := InterfaceSlice(chat["choices"]); len(choices) > 0 {
-		choice, _ := choices[0].(map[string]interface{})
+		choice, _ := choices[0].(map[string]any)
 		finish = StreamString(choice["finish_reason"])
 	}
 	status, details := StatusFromFinish(finish)
-	result := map[string]interface{}{"id": "resp_" + util.RandomHex(12), "object": "response", "created_at": time.Now().Unix(), "status": status, "model": util.FirstNonEmpty(chatwire.ParseLooseStringAny(chat["model"]), model), "output": output, "parallel_tool_calls": true, "tool_choice": "auto", "usage": UsageFromChat(chat["usage"])}
+	result := map[string]any{"id": "resp_" + util.RandomHex(12), "object": "response", "created_at": time.Now().Unix(), "status": status, "model": util.FirstNonEmpty(chatwire.ParseLooseStringAny(chat["model"]), model), "output": output, "parallel_tool_calls": true, "tool_choice": "auto", "usage": UsageFromChat(chat["usage"])}
 	if details != nil {
 		result["incomplete_details"] = details
 	}
@@ -421,29 +421,29 @@ func ObjectFromChat(model string, chat map[string]interface{}) map[string]interf
 		result["error"] = chat["error"]
 	}
 	for _, raw := range output {
-		item, _ := raw.(map[string]interface{})
+		item, _ := raw.(map[string]any)
 		item["status"] = status
 	}
 	return result
 }
 
-func OutputFromChat(chat map[string]interface{}) []interface{} {
-	out := []interface{}{}
+func OutputFromChat(chat map[string]any) []any {
+	out := []any{}
 	choices := InterfaceSlice(chat["choices"])
 	if len(choices) == 0 {
 		return out
 	}
-	choice, _ := choices[0].(map[string]interface{})
-	message, _ := choice["message"].(map[string]interface{})
+	choice, _ := choices[0].(map[string]any)
+	message, _ := choice["message"].(map[string]any)
 	if message == nil {
 		return out
 	}
 	text := StreamString(FirstNonNil(message["reasoning_content"], message["reasoning"]))
 	signature := StreamString(message["reasoning_encrypted_content"])
 	if text != "" || signature != "" {
-		item := map[string]interface{}{"id": "rs_" + util.RandomHex(12), "type": "reasoning", "status": "completed", "summary": []interface{}{}}
+		item := map[string]any{"id": "rs_" + util.RandomHex(12), "type": "reasoning", "status": "completed", "summary": []any{}}
 		if text != "" {
-			item["summary"] = []interface{}{map[string]interface{}{"type": "summary_text", "text": text}}
+			item["summary"] = []any{map[string]any{"type": "summary_text", "text": text}}
 		}
 		if signature != "" {
 			item["encrypted_content"] = signature
@@ -451,36 +451,36 @@ func OutputFromChat(chat map[string]interface{}) []interface{} {
 		out = append(out, item)
 	}
 	for _, raw := range InterfaceSlice(message["tool_calls"]) {
-		call, _ := raw.(map[string]interface{})
+		call, _ := raw.(map[string]any)
 		if item := responseFunctionCallItem(call); item != nil {
 			out = append(out, item)
 		}
 	}
-	parts := []interface{}{}
+	parts := []any{}
 	if text := StreamString(message["content"]); text != "" {
-		parts = append(parts, map[string]interface{}{"type": "output_text", "text": text, "annotations": Annotations(message["annotations"])})
+		parts = append(parts, map[string]any{"type": "output_text", "text": text, "annotations": Annotations(message["annotations"])})
 	}
 	if text := StreamString(message["refusal"]); text != "" {
-		parts = append(parts, map[string]interface{}{"type": "refusal", "refusal": text})
+		parts = append(parts, map[string]any{"type": "refusal", "refusal": text})
 	}
 	if len(parts) > 0 {
-		out = append(out, map[string]interface{}{"id": "msg_" + util.RandomHex(12), "type": "message", "status": "completed", "role": "assistant", "content": parts})
+		out = append(out, map[string]any{"id": "msg_" + util.RandomHex(12), "type": "message", "status": "completed", "role": "assistant", "content": parts})
 	}
 	return out
 }
 
-func responseFunctionCallItem(call map[string]interface{}) map[string]interface{} {
+func responseFunctionCallItem(call map[string]any) map[string]any {
 	if call == nil {
 		return nil
 	}
-	fn, _ := call["function"].(map[string]interface{})
+	fn, _ := call["function"].(map[string]any)
 	name := chatwire.ParseLooseStringAny(fn["name"])
 	if name == "" {
 		return nil
 	}
 	args := StreamString(fn["arguments"])
 	args = util.FirstNonEmptyUntrimmed(args, "{}")
-	return map[string]interface{}{
+	return map[string]any{
 		"id":        "fc_" + util.RandomHex(12),
 		"type":      "function_call",
 		"call_id":   util.FirstNonEmpty(StreamString(call["id"]), "call_"+util.RandomHex(12)),

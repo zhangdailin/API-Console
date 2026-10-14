@@ -14,9 +14,9 @@ import (
 )
 
 func TestRefactorNativeUsageSurvivesFullCaptureOverflow(t *testing.T) {
-	frame := parityFrame("response.in_progress", map[string]interface{}{"padding": strings.Repeat("a", 128<<10)})
-	stream := strings.Repeat(frame, 70) + parityFrame("response.completed", map[string]interface{}{"response": map[string]interface{}{
-		"id": "resp_a", "status": "completed", "usage": map[string]interface{}{"input_tokens": 100, "output_tokens": 10},
+	frame := parityFrame("response.in_progress", map[string]any{"padding": strings.Repeat("a", 128<<10)})
+	stream := strings.Repeat(frame, 70) + parityFrame("response.completed", map[string]any{"response": map[string]any{
+		"id": "resp_a", "status": "completed", "usage": map[string]any{"input_tokens": 100, "output_tokens": 10},
 	}})
 	id, captured, result := copyNativeCLIResponseAndCaptureModel(httptest.NewRecorder(), strings.NewReader(stream), "text/event-stream", "grok-4.6")
 	testutil.Fail(t, id != "resp_a" || len(captured) != responses.MaxEventBytes || result.Err != nil || responses.InterfaceToInt(result.Usage["completion_tokens"]) != 10, id, len(captured), result)

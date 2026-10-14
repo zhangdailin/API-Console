@@ -7,10 +7,10 @@ import (
 )
 
 type namespaceToolIdentity struct {
-	Namespace   string                 `json:"namespace"`
-	Name        string                 `json:"name"`
-	Function    map[string]interface{} `json:"function,omitempty"`
-	Description string                 `json:"description,omitempty"`
+	Namespace   string         `json:"namespace"`
+	Name        string         `json:"name"`
+	Function    map[string]any `json:"function,omitempty"`
+	Description string         `json:"description,omitempty"`
 }
 
 // ToolNamespaces keeps the client identity of each flattened function for one
@@ -41,7 +41,7 @@ func namespaceToolName(namespace, name string) string {
 // custom tools, execute tools, or change their parameter JSON.
 func NormalizeBridgedNamespaces(req *CreateRequest) (ToolNamespaces, error) {
 	aliases := ToolNamespaces{}
-	normalized := make([]map[string]interface{}, 0, len(req.Tools))
+	normalized := make([]map[string]any, 0, len(req.Tools))
 	seenNamespaces, seenNames := map[string]bool{}, map[string]bool{}
 	for i, tool := range req.Tools {
 		if tool["type"] != "namespace" {
@@ -59,9 +59,9 @@ func NormalizeBridgedNamespaces(req *CreateRequest) (ToolNamespaces, error) {
 		children := InterfaceMaps(tool["tools"])
 		valid := false
 		switch rows := tool["tools"].(type) {
-		case []map[string]interface{}:
+		case []map[string]any:
 			valid = len(rows) > 0
-		case []interface{}:
+		case []any:
 			valid = len(rows) > 0 && len(rows) == len(children)
 		}
 		if !valid {
@@ -72,7 +72,7 @@ func NormalizeBridgedNamespaces(req *CreateRequest) (ToolNamespaces, error) {
 				return nil, fmt.Errorf("tools[%d].tools[%d]: only function tools can be bridged", i, j)
 			}
 			// Apply the same standard-function checks before removing the grouping.
-			if err := ValidateToolsAndHistory(map[string]interface{}{"tools": []map[string]interface{}{child}}); err != nil {
+			if err := ValidateToolsAndHistory(map[string]any{"tools": []map[string]any{child}}); err != nil {
 				return nil, fmt.Errorf("tools[%d].tools[%d]: %w", i, j, err)
 			}
 			name := child["name"].(string)
@@ -95,10 +95,10 @@ func NormalizeBridgedNamespaces(req *CreateRequest) (ToolNamespaces, error) {
 	// All name collisions, including a plain function named like an alias, are
 	// rejected by the normal validator after flattening.
 	input := req.Input
-	if items, ok := input.([]interface{}); ok {
-		copyItems := append([]interface{}(nil), items...)
+	if items, ok := input.([]any); ok {
+		copyItems := append([]any(nil), items...)
 		for i, raw := range items {
-			item, ok := raw.(map[string]interface{})
+			item, ok := raw.(map[string]any)
 			if !ok || item["type"] != "function_call" {
 				continue
 			}
@@ -123,7 +123,7 @@ func NormalizeBridgedNamespaces(req *CreateRequest) (ToolNamespaces, error) {
 		input = copyItems
 	}
 	choice := req.ToolChoice
-	if original, ok := choice.(map[string]interface{}); ok {
+	if original, ok := choice.(map[string]any); ok {
 		if namespace, exists := original["namespace"]; exists {
 			ns, nsOK := namespace.(string)
 			name, nameOK := original["name"].(string)
@@ -136,7 +136,7 @@ func NormalizeBridgedNamespaces(req *CreateRequest) (ToolNamespaces, error) {
 			choice = copyChoice
 		}
 	}
-	if err := ValidateToolsAndHistory(map[string]interface{}{"tools": normalized, "input": input, "tool_choice": choice}); err != nil {
+	if err := ValidateToolsAndHistory(map[string]any{"tools": normalized, "input": input, "tool_choice": choice}); err != nil {
 		return nil, err
 	}
 	if err := aliases.ValidatePlainTools(req.Tools); err != nil {
@@ -146,7 +146,7 @@ func NormalizeBridgedNamespaces(req *CreateRequest) (ToolNamespaces, error) {
 	return aliases, nil
 }
 
-func (aliases ToolNamespaces) RestoreItem(item map[string]interface{}) bool {
+func (aliases ToolNamespaces) RestoreItem(item map[string]any) bool {
 	if item["type"] != "function_call" {
 		return false
 	}
@@ -158,7 +158,7 @@ func (aliases ToolNamespaces) RestoreItem(item map[string]interface{}) bool {
 	return false
 }
 
-func (aliases ToolNamespaces) RestoreResponse(response map[string]interface{}) bool {
+func (aliases ToolNamespaces) RestoreResponse(response map[string]any) bool {
 	changed := false
 	for _, item := range InterfaceMaps(response["output"]) {
 		changed = aliases.RestoreItem(item) || changed

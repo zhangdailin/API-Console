@@ -27,24 +27,24 @@ func TestStreamHandler_UsageMissingFieldsKeepLocalEstimate(t *testing.T) {
 	sh := newStreamHandler(&config.Config{}, newFlushRecorder(), debug.New(false, false), false, adapter.FormatAnthropic)
 	defer sh.release()
 	sh.inputTokens, sh.outputTokens = 31, 17
-	sh.applyUpstreamUsageTokens(map[string]interface{}{"output_tokens": 9, "credits": 0.5})
+	sh.applyUpstreamUsageTokens(map[string]any{"output_tokens": 9, "credits": 0.5})
 	testutil.Falsef(t, !sh.useUpstreamUsage || sh.inputTokens != 31 || sh.outputTokens != 9 || sh.usageMetadata["credits"] != 0.5, "partial usage overwrote estimate or lost metadata: input=%d output=%d metadata=%v", sh.inputTokens, sh.outputTokens, sh.usageMetadata)
 	sh.resetRoundState()
 	sh.inputTokens, sh.outputTokens = 31, 17
-	sh.applyUpstreamUsageTokens(map[string]interface{}{"original_credits": 0.25})
+	sh.applyUpstreamUsageTokens(map[string]any{"original_credits": 0.25})
 	testutil.Falsef(t, !sh.useUpstreamUsage || sh.inputTokens != 31 || sh.outputTokens != 17 || sh.usageMetadata["original_credits"] != 0.25, "credits-only usage lost evidence or estimate: input=%d output=%d metadata=%v", sh.inputTokens, sh.outputTokens, sh.usageMetadata)
 }
 
 func TestStreamHandler_DetailedUsageIsAssignedIdempotently(t *testing.T) {
 	sh := newStreamHandler(&config.Config{}, newFlushRecorder(), debug.New(false, false), false, adapter.FormatAnthropic)
 	defer sh.release()
-	usage := map[string]interface{}{
+	usage := map[string]any{
 		"inputTokens": 1000, "outputTokens": 20, "cacheReadTokens": 900,
 		"cacheWriteTokens": 50, "reasoningTokens": 7,
 		"credits": 0.25, "original_credits": 0.5,
 	}
 	sh.handleMessage(upstream.SSEMessage{Type: "model.tokens-used", Event: usage})
-	sh.handleMessage(upstream.SSEMessage{Type: "model.finish", Event: map[string]interface{}{"usage": usage}})
+	sh.handleMessage(upstream.SSEMessage{Type: "model.finish", Event: map[string]any{"usage": usage}})
 	testutil.Falsef(t, sh.inputTokens != 1000 || sh.outputTokens != 20 || sh.cachedInputTokens != 900 || sh.cacheWriteTokens != 50 || sh.reasoningTokens != 7, "detailed usage lost or doubled: in=%d out=%d cached=%d write=%d reasoning=%d", sh.inputTokens, sh.outputTokens, sh.cachedInputTokens, sh.cacheWriteTokens, sh.reasoningTokens)
 	testutil.Equal(t, sh.usageMetadata["credits"], 0.25)
 	testutil.Equal(t, sh.usageMetadata["original_credits"], 0.5)
@@ -83,7 +83,7 @@ func TestStreamHandler_KeepAlive_NoPanic(t *testing.T) {
 	sh.mu.Unlock()
 	sh.writeKeepAlive()
 	testutil.Equal(t, rec.buf.Len(), 0)
-	sh.handleMessage(upstream.SSEMessage{Type: "model.text-delta", Event: map[string]interface{}{"delta": "hello"}})
+	sh.handleMessage(upstream.SSEMessage{Type: "model.text-delta", Event: map[string]any{"delta": "hello"}})
 	sh.writeKeepAlive()
 	testutil.MustContain(t, rec.buf.String(), ": keep-alive")
 }

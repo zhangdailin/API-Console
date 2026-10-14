@@ -336,7 +336,7 @@ func (c *Client) runChat(ctx context.Context, url string, body []byte, taskID st
 				return fmt.Errorf("cline stream produced no usable events")
 			}
 			if onMessage != nil {
-				event := map[string]interface{}{"finishReason": result.FinishReason()}
+				event := map[string]any{"finishReason": result.FinishReason()}
 				if len(result.Usage) > 0 {
 					event["usage"] = result.Usage
 				}

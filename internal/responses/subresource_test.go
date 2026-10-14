@@ -57,7 +57,7 @@ func TestParseResponsesResourcePath(t *testing.T) {
 func TestResponsesInputItemsJSONNormalizesEveryInputShape(t *testing.T) {
 	t.Parallel()
 
-	var fromString []map[string]interface{}
+	var fromString []map[string]any
 	testutil.NoError(t, json.Unmarshal(InputItemsJSON("hello"), &fromString), "string input did not normalize: %v")
 	testutil.Equal(t, len(fromString), 1)
 	testutil.Equal(t, fromString[0]["type"], "message")
@@ -67,12 +67,12 @@ func TestResponsesInputItemsJSONNormalizesEveryInputShape(t *testing.T) {
 	}
 	testutil.Equal(t, fromString[0]["status"], "completed")
 
-	var fromArray []map[string]interface{}
-	raw := []interface{}{
-		map[string]interface{}{"type": "message", "role": "user", "content": []interface{}{
-			map[string]interface{}{"type": "input_text", "text": "first"},
+	var fromArray []map[string]any
+	raw := []any{
+		map[string]any{"type": "message", "role": "user", "content": []any{
+			map[string]any{"type": "input_text", "text": "first"},
 		}},
-		map[string]interface{}{"id": "fc_known", "type": "function_call", "call_id": "call_1", "name": "f"},
+		map[string]any{"id": "fc_known", "type": "function_call", "call_id": "call_1", "name": "f"},
 	}
 	testutil.NoError(t, json.Unmarshal(InputItemsJSON(raw), &fromArray), "array input did not normalize: %v")
 	testutil.Equal(t, len(fromArray), 2)
@@ -107,18 +107,18 @@ func TestResponsesInputItemsServesPersistedItems(t *testing.T) {
 
 	testutil.Equal(t, rec.Code, http.StatusOK)
 	var payload struct {
-		Object  string                   `json:"object"`
-		Data    []map[string]interface{} `json:"data"`
-		FirstID string                   `json:"first_id"`
-		LastID  string                   `json:"last_id"`
+		Object  string           `json:"object"`
+		Data    []map[string]any `json:"data"`
+		FirstID string           `json:"first_id"`
+		LastID  string           `json:"last_id"`
 	}
 	err := json.Unmarshal(rec.Body.Bytes(), &payload)
 	testutil.CheckNoError(t, err)
 	testutil.Equal(t, payload.Object, "list")
 	testutil.Equal(t, len(payload.Data), 1)
-	content, _ := payload.Data[0]["content"].([]interface{})
+	content, _ := payload.Data[0]["content"].([]any)
 	testutil.Equal(t, len(content), 1)
-	part, _ := content[0].(map[string]interface{})
+	part, _ := content[0].(map[string]any)
 	testutil.Equal(t, part["text"], "first turn")
 	testutil.Falsef(t, payload.FirstID == "" || payload.FirstID != payload.LastID, "first_id/last_id = %q/%q, want the single item id", payload.FirstID, payload.LastID)
 }
@@ -171,12 +171,12 @@ func TestResponsesCancelFlipsStoredStatus(t *testing.T) {
 	first := httptest.NewRecorder()
 	cancel(first, httptest.NewRequest(http.MethodPost, "/workbuddy/v1/responses/"+id+"/cancel", nil))
 	testutil.Equal(t, first.Code, http.StatusOK)
-	var cancelled map[string]interface{}
+	var cancelled map[string]any
 	err := json.Unmarshal(first.Body.Bytes(), &cancelled)
 	testutil.CheckNoError(t, err)
 	testutil.Equal(t, cancelled["status"], "cancelled")
 	testutil.EqualAny(t, cancelled["id"], id)
-	output, _ := cancelled["output"].([]interface{})
+	output, _ := cancelled["output"].([]any)
 	testutil.Equal(t, len(output), 1)
 
 	record, err := opts.StoreFor().GetStoredResponse(context.Background(), id, "anonymous") //nolint:staticcheck // see above
@@ -215,7 +215,7 @@ func TestResponsesCancelAnswersBuildOwnershipRecords(t *testing.T) {
 	rec := httptest.NewRecorder()
 	CancelHandler(opts)(rec, httptest.NewRequest(http.MethodPost, "/grok/v1/responses/"+id+"/cancel", nil))
 	testutil.Equal(t, rec.Code, http.StatusOK)
-	var decoded map[string]interface{}
+	var decoded map[string]any
 	err := json.Unmarshal(rec.Body.Bytes(), &decoded)
 	testutil.CheckNoError(t, err)
 	testutil.Equal(t, decoded["status"], "cancelled")
@@ -245,14 +245,14 @@ func TestResponsesBridgeForwardsTextFormatAndInclude(t *testing.T) {
 	defer mu.Unlock()
 	testutil.Equal(t, len(calls), 1)
 	inner := calls[0].body
-	format, _ := inner["response_format"].(map[string]interface{})
+	format, _ := inner["response_format"].(map[string]any)
 	if format == nil || format["type"] != "json_schema" || format["name"] != "answer" {
 		t.Fatalf("response_format = %#v, want the text.format object", inner["response_format"])
 	}
-	include, _ := inner["include"].([]interface{})
+	include, _ := inner["include"].([]any)
 	testutil.Equal(t, len(include), 0)
 	testutil.True(t, rec.Header().Get("X-Grok2API-Compatibility-Warnings") != "", "missing encrypted reasoning compatibility warning")
-	text, _ := inner["text"].(map[string]interface{})
+	text, _ := inner["text"].(map[string]any)
 	testutil.Falsef(t, text == nil, "text controls were dropped: %#v", inner)
 }
 
@@ -274,7 +274,7 @@ func TestResponsesBridgePrefersTextFormatOverResponseFormat(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	format, _ := calls[0].body["response_format"].(map[string]interface{})
+	format, _ := calls[0].body["response_format"].(map[string]any)
 	if format == nil || format["type"] != "json_object" {
 		t.Fatalf("response_format = %#v, want text.format to win", calls[0].body["response_format"])
 	}
@@ -299,7 +299,7 @@ func TestResponsesBridgeMemoryFallbackStoresResponses(t *testing.T) {
 	bridge(create, httptest.NewRequest(http.MethodPost, "/workbuddy/v1/responses",
 		strings.NewReader(`{"model":"gpt-5.6-luna","input":"hi","store":true}`)))
 	testutil.Equal(t, create.Code, http.StatusOK)
-	var created map[string]interface{}
+	var created map[string]any
 	err := json.Unmarshal(create.Body.Bytes(), &created)
 	testutil.CheckNoError(t, err)
 	responseID, _ := created["id"].(string)
@@ -333,7 +333,7 @@ func TestResponsesSubResourcesRoundTripThroughRedis(t *testing.T) {
 	ResponsesBridgeHandler(chat, opts)(create, httptest.NewRequest(http.MethodPost, "/workbuddy/v1/responses",
 		strings.NewReader(`{"model":"gpt-5.6-luna","input":"remember this turn","store":true}`)))
 	testutil.Equal(t, create.Code, http.StatusOK)
-	var created map[string]interface{}
+	var created map[string]any
 	err := json.Unmarshal(create.Body.Bytes(), &created)
 	testutil.CheckNoError(t, err)
 	responseID, _ := created["id"].(string)

@@ -187,7 +187,7 @@ func writeLocalTextResponse(w http.ResponseWriter, req ClaudeRequest, responseFo
 		Content      []map[string]string `json:"content"`
 		Model        string              `json:"model"`
 		StopReason   string              `json:"stop_reason"`
-		StopSequence interface{}         `json:"stop_sequence"`
+		StopSequence any                 `json:"stop_sequence"`
 		Usage        struct {
 			InputTokens  int `json:"input_tokens"`
 			OutputTokens int `json:"output_tokens"`
@@ -221,7 +221,7 @@ func writeCommandPrefixResponse(w http.ResponseWriter, req ClaudeRequest, respon
 
 func writeTopicClassifierResponse(w http.ResponseWriter, req ClaudeRequest, responseFormat adapter.ResponseFormat, startTime time.Time, logger *debug.Logger) {
 	isNewTopic, title := classifyTopicRequest(req)
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"isNewTopic": isNewTopic,
 		"title":      nil,
 	}

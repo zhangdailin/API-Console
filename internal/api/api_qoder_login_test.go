@@ -386,7 +386,7 @@ func TestQoderAccountCreateAndEditAreOAuthOnly(t *testing.T) {
 	}
 	testutil.NoError(t, s.CreateAccount(t.Context(), acc), "CreateAccount: %v")
 
-	editBody, _ := json.Marshal(map[string]interface{}{
+	editBody, _ := json.Marshal(map[string]any{
 		"account_type": "qoder",
 		"name":         "renamed",
 		"enabled":      true,

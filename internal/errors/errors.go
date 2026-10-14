@@ -25,7 +25,7 @@ type AppError struct {
 
 // ToJSON returns the JSON representation of the error.
 func (e *AppError) ToJSON() []byte {
-	data, _ := json.Marshal(map[string]interface{}{
+	data, _ := json.Marshal(map[string]any{
 		"type": "error",
 		"error": map[string]string{
 			"type":    e.Code,

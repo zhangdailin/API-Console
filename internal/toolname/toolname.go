@@ -3,17 +3,17 @@ package toolname
 import "strings"
 
 // ExtractToolSpecFields reads the common OpenAI/Anthropic tool definition shapes.
-func ExtractToolSpecFields(tool interface{}) (string, string, map[string]interface{}) {
-	tm, ok := tool.(map[string]interface{})
+func ExtractToolSpecFields(tool any) (string, string, map[string]any) {
+	tm, ok := tool.(map[string]any)
 	if !ok {
 		return "", "", nil
 	}
 
 	var name string
 	var description string
-	var schema map[string]interface{}
+	var schema map[string]any
 
-	if fn, ok := tm["function"].(map[string]interface{}); ok {
+	if fn, ok := tm["function"].(map[string]any); ok {
 		if v, ok := fn["name"].(string); ok {
 			name = strings.TrimSpace(v)
 		}
@@ -38,13 +38,13 @@ func ExtractToolSpecFields(tool interface{}) (string, string, map[string]interfa
 	return name, description, schema
 }
 
-func extractSchemaMap(tm map[string]interface{}, keys ...string) map[string]interface{} {
+func extractSchemaMap(tm map[string]any, keys ...string) map[string]any {
 	if tm == nil {
 		return nil
 	}
 	for _, key := range keys {
 		if v, ok := tm[key]; ok {
-			if schema, ok := v.(map[string]interface{}); ok {
+			if schema, ok := v.(map[string]any); ok {
 				return schema
 			}
 		}

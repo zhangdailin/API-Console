@@ -12,7 +12,7 @@ var jsonEmptyObjectBytes = []byte("{}")
 // Escaping is off because the payload goes into an SSE data line and into
 // upstream bodies: turning <, > and & into \u003c-style escapes changes bytes
 // without changing meaning, and the upstream compares them.
-func EncodeJSONBytes(v interface{}) []byte {
+func EncodeJSONBytes(v any) []byte {
 	buf := bytes.Buffer{}
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)

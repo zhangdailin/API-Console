@@ -138,7 +138,7 @@ func (s *redisStore) GetReasoningReplay(ctx context.Context, model, sessionKey s
 		return nil, nil
 	}
 	for _, item := range replay.Items {
-		var object map[string]interface{}
+		var object map[string]any
 		if json.Unmarshal(item, &object) != nil || object == nil {
 			return nil, nil
 		}

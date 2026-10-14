@@ -50,12 +50,12 @@ func (f *fakePayloadClient) SendRequestWithPayload(ctx context.Context, req upst
 	if convID != "" {
 		onMessage(upstream.SSEMessage{
 			Type:  "model.conversation_id",
-			Event: map[string]interface{}{"id": convID},
+			Event: map[string]any{"id": convID},
 		})
 	}
 	onMessage(upstream.SSEMessage{
 		Type:  "model.finish",
-		Event: map[string]interface{}{"finishReason": "end_turn"},
+		Event: map[string]any{"finishReason": "end_turn"},
 	})
 	return nil
 }
@@ -193,7 +193,7 @@ func TestOpenAIChatCompletionsToolFollowup_NormalizesToolMessages(t *testing.T) 
 	if assistantBlocks[0].Type != "tool_use" || assistantBlocks[0].Name != "Write" || assistantBlocks[0].ID != "call_write_1" {
 		t.Fatalf("unexpected assistant tool_use block: %#v", assistantBlocks[0])
 	}
-	input, ok := assistantBlocks[0].Input.(map[string]interface{})
+	input, ok := assistantBlocks[0].Input.(map[string]any)
 	testutil.True(t, ok, "assistant tool input type = %T, want map[string]interface{}")
 	testutil.Equal(t, input["file_path"], "note.txt")
 	testutil.Equal(t, input["content"], "hello world")
@@ -337,7 +337,7 @@ func TestWorkBuddyPassthrough_DoesNotTrimMessagesOrSanitizeSystem(t *testing.T) 
 			{Type: "text", Text: "cc_entrypoint=claude-code; keep=this"},
 		},
 		Stream: false,
-		Tools:  []interface{}{},
+		Tools:  []any{},
 	}
 
 	body, err := json.Marshal(reqPayload)
@@ -365,13 +365,13 @@ func TestToolResultFollowup_RepeatedWriteIsForwarded(t *testing.T) {
 			{
 				{
 					Type: "model.tool-call",
-					Event: map[string]interface{}{
+					Event: map[string]any{
 						"toolCallId": "tool_new_1",
 						"toolName":   "Write",
 						"input":      `{"file_path":"scratch.txt","content":"alpha\nbeta\n"}`,
 					},
 				},
-				{Type: "model.finish", Event: map[string]interface{}{"finishReason": "tool_use"}},
+				{Type: "model.finish", Event: map[string]any{"finishReason": "tool_use"}},
 			},
 		},
 	}
@@ -483,17 +483,17 @@ func TestToolResultFollowup_StreamsSingleBatchedResponse(t *testing.T) {
 	client := &fakePayloadClient{
 		eventsByOp: [][]upstream.SSEMessage{
 			{
-				{Type: "model.conversation_id", Event: map[string]interface{}{"id": "workbuddy_conv_batch"}},
-				{Type: "model.text-delta", Event: map[string]interface{}{"delta": "Let me dig into the rest of the codebase first."}},
+				{Type: "model.conversation_id", Event: map[string]any{"id": "workbuddy_conv_batch"}},
+				{Type: "model.text-delta", Event: map[string]any{"delta": "Let me dig into the rest of the codebase first."}},
 				{
 					Type: "model.tool-call",
-					Event: map[string]interface{}{
+					Event: map[string]any{
 						"toolCallId": "tool_visible",
 						"toolName":   "Read",
 						"input":      `{"file_path":"/Users/dailin/Documents/GitHub/truth_social_scraper/monitor_trump.py"}`,
 					},
 				},
-				{Type: "model.finish", Event: map[string]interface{}{"finishReason": "tool_use"}},
+				{Type: "model.finish", Event: map[string]any{"finishReason": "tool_use"}},
 			},
 		},
 	}

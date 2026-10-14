@@ -36,7 +36,7 @@ func TestStreamFlushFailureCancelsAndDoesNotEmitSuccessfulTerminal(t *testing.T)
 		defer sh.release()
 		canceled := false
 		sh.cancelUpstream = func() { canceled = true }
-		sh.handleMessage(upstream.SSEMessage{Type: "model.text-delta", Event: map[string]interface{}{"delta": "hello"}})
+		sh.handleMessage(upstream.SSEMessage{Type: "model.text-delta", Event: map[string]any{"delta": "hello"}})
 		sh.finishResponse("end_turn")
 		if !sh.requestFailed || sh.finalStopReason != "write_error" || !canceled || target.writes != 1 {
 			t.Fatalf("failed=%v reason=%s canceled=%v writes=%d", sh.requestFailed, sh.finalStopReason, canceled, target.writes)

@@ -7,9 +7,9 @@ import (
 )
 
 func TestEncodeJSONBytesDoesNotEscapeHTML(t *testing.T) {
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"type": "chunk",
-		"data": map[string]interface{}{
+		"data": map[string]any{
 			"text": "hello <world>",
 			"n":    1,
 		},
@@ -24,11 +24,11 @@ func TestEncodeJSONBytesFallsBackToEmptyObject(t *testing.T) {
 }
 
 func BenchmarkEncodeJSON_Bytes(b *testing.B) {
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"id": "msg_1",
-		"choices": []map[string]interface{}{{
+		"choices": []map[string]any{{
 			"index": 0,
-			"delta": map[string]interface{}{"content": "hello world"},
+			"delta": map[string]any{"content": "hello world"},
 		}},
 	}
 	b.ReportAllocs()

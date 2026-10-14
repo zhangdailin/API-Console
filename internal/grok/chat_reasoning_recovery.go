@@ -8,7 +8,7 @@ import (
 // recoverChatReasoning runs only after a recognized pre-generation decode 400.
 // A genuine compaction rejection is client-held upstream state and is never
 // rewritten; every other recognized decode failure is recoverable.
-func recoverChatReasoning(payload map[string]interface{}, initial error, call func(string) (*http.Response, error)) (*http.Response, error) {
+func recoverChatReasoning(payload map[string]any, initial error, call func(string) (*http.Response, error)) (*http.Response, error) {
 	if preservesClientCompaction(payload, initial) {
 		return nil, initial
 	}

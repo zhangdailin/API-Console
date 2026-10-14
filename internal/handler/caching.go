@@ -29,7 +29,7 @@ func applyCacheStrategy(req *ClaudeRequest, strategy string) {
 		addCache(&req.System[len(req.System)-1].CacheControl)
 	}
 	if len(req.Tools) > 0 && breakpoints < 4 {
-		if tool, ok := req.Tools[len(req.Tools)-1].(map[string]interface{}); ok {
+		if tool, ok := req.Tools[len(req.Tools)-1].(map[string]any); ok {
 			if _, exists := tool["cache_control"]; !exists {
 				tool["cache_control"] = map[string]string{"type": "ephemeral"}
 				breakpoints++

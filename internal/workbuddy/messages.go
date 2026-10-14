@@ -260,14 +260,14 @@ func convertBlockMessage(role string, msg prompt.Message, pendingToolCalls map[s
 // the string-only control accepted by WorkBuddy. A named-tool request cannot
 // be represented exactly by this upstream, so "required" is the closest safe
 // behavior; the response-side allowlist still rejects undeclared tool names.
-func normalizeToolChoice(choice interface{}) string {
+func normalizeToolChoice(choice any) string {
 	switch typed := choice.(type) {
 	case string:
 		switch strings.ToLower(strings.TrimSpace(typed)) {
 		case "auto", "required", "none":
 			return strings.ToLower(strings.TrimSpace(typed))
 		}
-	case map[string]interface{}:
+	case map[string]any:
 		switch strings.ToLower(strings.TrimSpace(util.StringValue(typed["type"]))) {
 		case "auto":
 			return "auto"
@@ -283,6 +283,6 @@ func normalizeToolChoice(choice interface{}) string {
 // normalizeToolDefinitions renders the OpenAI function envelope for the tool
 // declarations the gateway forwards. It is the shared implementation in
 // internal/util: WorkBuddy, Qoder and Cline all need the same envelope.
-func normalizeToolDefinitions(tools []interface{}) []interface{} {
+func normalizeToolDefinitions(tools []any) []any {
 	return util.NormalizeToolDefinitions(tools)
 }

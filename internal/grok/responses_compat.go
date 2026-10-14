@@ -19,13 +19,13 @@ type responsesCompatibilityState struct {
 	itemIDs    map[int64]string
 }
 
-func supplementResponsesEvent(event map[string]interface{}, state *responsesCompatibilityState) bool {
+func supplementResponsesEvent(event map[string]any, state *responsesCompatibilityState) bool {
 	if event == nil || state == nil {
 		return false
 	}
 	changed := false
 	kind := chatwire.ParseLooseStringAny(event["type"])
-	response, _ := event["response"].(map[string]interface{})
+	response, _ := event["response"].(map[string]any)
 	if response != nil {
 		id := strings.TrimSpace(chatwire.ParseLooseStringAny(response["id"]))
 		if id == "" {
@@ -47,7 +47,7 @@ func supplementResponsesEvent(event map[string]interface{}, state *responsesComp
 			changed = true
 		}
 		if _, ok := response["output"]; !ok || response["output"] == nil {
-			response["output"] = []interface{}{}
+			response["output"] = []any{}
 			changed = true
 		}
 		if model := strings.TrimSpace(chatwire.ParseLooseStringAny(response["model"])); model != "" {
@@ -57,7 +57,7 @@ func supplementResponsesEvent(event map[string]interface{}, state *responsesComp
 			changed = true
 		}
 	}
-	if item, ok := event["item"].(map[string]interface{}); ok {
+	if item, ok := event["item"].(map[string]any); ok {
 		index, indexed := responseEventIndex(event["output_index"])
 		id := strings.TrimSpace(chatwire.ParseLooseStringAny(item["id"]))
 		if indexed && state.itemIDs != nil && state.itemIDs[index] != "" {
@@ -123,7 +123,7 @@ func (s *responsesCompatibilityState) nextItemID() string {
 	return fmt.Sprintf("item_%d", s.itemSeq)
 }
 
-func responseEventIndex(value interface{}) (int64, bool) {
+func responseEventIndex(value any) (int64, bool) {
 	switch value := value.(type) {
 	case float64:
 		return int64(value), true
@@ -159,13 +159,13 @@ func responsesEventNeedsItemID(kind string) bool {
 	}
 }
 
-func ensureResponsesOutputTextAnnotations(value interface{}) bool {
+func ensureResponsesOutputTextAnnotations(value any) bool {
 	changed := false
 	switch value := value.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		if chatwire.ParseLooseStringAny(value["type"]) == "output_text" {
 			if _, ok := value["annotations"]; !ok || value["annotations"] == nil {
-				value["annotations"] = []interface{}{}
+				value["annotations"] = []any{}
 				changed = true
 			}
 		}
@@ -174,7 +174,7 @@ func ensureResponsesOutputTextAnnotations(value interface{}) bool {
 				changed = true
 			}
 		}
-	case []interface{}:
+	case []any:
 		for _, child := range value {
 			if ensureResponsesOutputTextAnnotations(child) {
 				changed = true

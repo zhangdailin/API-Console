@@ -133,16 +133,16 @@ func containsJSONField(body, field string) bool {
 }
 
 func jsonContainsKey(body []byte, field string) bool {
-	var decoded map[string]interface{}
+	var decoded map[string]any
 	if err := json.Unmarshal(body, &decoded); err != nil {
 		return false
 	}
 	return deepHasKey(decoded, field)
 }
 
-func deepHasKey(value interface{}, field string) bool {
+func deepHasKey(value any, field string) bool {
 	switch typed := value.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		if _, ok := typed[field]; ok {
 			return true
 		}
@@ -151,7 +151,7 @@ func deepHasKey(value interface{}, field string) bool {
 				return true
 			}
 		}
-	case []interface{}:
+	case []any:
 		for _, item := range typed {
 			if deepHasKey(item, field) {
 				return true

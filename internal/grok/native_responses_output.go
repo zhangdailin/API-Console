@@ -40,7 +40,7 @@ func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader,
 			writeResponsesAPIError(w, http.StatusBadGateway, "upstream_error", "Upstream response unavailable")
 			return
 		}
-		var response map[string]interface{}
+		var response map[string]any
 		if result.Err = json.Unmarshal(raw, &response); result.Err != nil {
 			writeResponsesAPIError(w, http.StatusBadGateway, "upstream_error", "Invalid upstream response")
 			return
@@ -77,7 +77,7 @@ func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader,
 	failureCode, failureMessage := "", ""
 	compat := &responsesCompatibilityState{model: model}
 	err := responses.ConsumeSSE(body, func(frame responses.SSEEvent) error {
-		var event map[string]interface{}
+		var event map[string]any
 		kind := ""
 		if frame.HasData() {
 			data := frame.Data()
@@ -97,7 +97,7 @@ func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader,
 			if responses.IsPrivateBuildControlEvent(kind) {
 				return nil
 			}
-			response, _ := event["response"].(map[string]interface{})
+			response, _ := event["response"].(map[string]any)
 			if id := chatwire.ParseLooseStringAny(response["id"]); id != "" {
 				responseID = id
 			}
@@ -126,7 +126,7 @@ func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader,
 			result.Usage = usage
 			result.UsageSource = audit.UsageSourceUpstream
 		}
-		item, _ := event["item"].(map[string]interface{})
+		item, _ := event["item"].(map[string]any)
 		meaningful := strings.HasSuffix(kind, ".delta") && responses.StreamString(event["delta"]) != ""
 		toolStart := kind == "response.output_item.added" && chatwire.ParseLooseStringAny(item["type"]) == "function_call" && chatwire.ParseLooseStringAny(item["name"]) != ""
 		if result.FirstToken.IsZero() && (meaningful || toolStart) {
@@ -134,7 +134,7 @@ func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader,
 		}
 		switch kind {
 		case "response.completed", "response.failed", "response.incomplete", "error":
-			response, _ := event["response"].(map[string]interface{})
+			response, _ := event["response"].(map[string]any)
 			if response == nil {
 				response = event
 			}
@@ -166,12 +166,12 @@ func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader,
 			result.Err = fmt.Errorf("%s: %w", failureMessage, err)
 		}
 		now := time.Now().Unix()
-		failure, _ := json.Marshal(map[string]interface{}{
-			"type": "response.failed", "response": map[string]interface{}{
+		failure, _ := json.Marshal(map[string]any{
+			"type": "response.failed", "response": map[string]any{
 				"id": responseID, "object": "response", "status": "failed", "model": model,
 				"created_at": now, "completed_at": now,
-				"output": []interface{}{},
-				"error":  map[string]interface{}{"code": failureCode, "message": failureMessage},
+				"output": []any{},
+				"error":  map[string]any{"code": failureCode, "message": failureMessage},
 			},
 		})
 		frame := responses.SSEEvent{Event: "response.failed"}

@@ -34,7 +34,7 @@ func TestMessageUnmarshalJSON_OpenAIToolCallsWithNullContent(t *testing.T) {
 	testutil.Equal(t, blocks[0].Type, "tool_use")
 	testutil.Equal(t, blocks[0].ID, "call_write_1")
 	testutil.Equal(t, blocks[0].Name, "Write")
-	input, ok := blocks[0].Input.(map[string]interface{})
+	input, ok := blocks[0].Input.(map[string]any)
 	testutil.True(t, ok, "block input type = %T, want map[string]interface{}")
 	testutil.Equal(t, input["file_path"], "note.txt")
 	testutil.Equal(t, input["content"], "hello world")

@@ -37,27 +37,27 @@ const (
 )
 
 // ClassifyCompactionPayload decides whether a payload is a compaction turn.
-func ClassifyCompactionPayload(payload map[string]interface{}) CompactionKind {
+func ClassifyCompactionPayload(payload map[string]any) CompactionKind {
 	return classifyResponsesCompactionPayload(payload)
 }
 
 // PrepareCompactionSample strips the compaction controls out of a payload.
-func PrepareCompactionSample(payload map[string]interface{}) map[string]interface{} {
+func PrepareCompactionSample(payload map[string]any) map[string]any {
 	return prepareGatewayCompactionSample(payload)
 }
 
 // ExpandCompactionHistory reopens sealed blobs in a replayed history.
-func ExpandCompactionHistory(payload map[string]interface{}, codec *CompactionCodec, session string) (int, error) {
+func ExpandCompactionHistory(payload map[string]any, codec *CompactionCodec, session string) (int, error) {
 	return expandGatewayCompactionHistory(payload, codec, session)
 }
 
 // BuildCompactionResponse renders the compaction result object.
-func BuildCompactionResponse(response map[string]interface{}, blob, model string) map[string]interface{} {
+func BuildCompactionResponse(response map[string]any, blob, model string) map[string]any {
 	return buildGatewayCompactionResponse(response, blob, model)
 }
 
 // WriteCompactionStream emits the synthetic SSE sequence a compaction client expects.
-func WriteCompactionStream(w io.Writer, response map[string]interface{}) error {
+func WriteCompactionStream(w io.Writer, response map[string]any) error {
 	return writeGatewayCompactionStream(w, response)
 }
 
@@ -65,7 +65,7 @@ func WriteCompactionStream(w io.Writer, response map[string]interface{}) error {
 func CompactionRandomHex(size int) string { return compactionRandomHex(size) }
 
 // ExtractCompactionSummary reads the summary text out of a completed response.
-func ExtractCompactionSummary(response map[string]interface{}) string {
+func ExtractCompactionSummary(response map[string]any) string {
 	return extractCompactionSummary(response)
 }
 
@@ -129,7 +129,7 @@ func ParseCompactionStream(data []byte) (gatewayCompactionSample, error) {
 var ErrCompactionDegenerate = errGatewayCompactionDegenerate
 
 // NonNegativeJSONInteger reads a usage counter that must not be negative.
-func NonNegativeJSONInteger(value interface{}) int64 { return nonNegativeJSONInteger(value) }
+func NonNegativeJSONInteger(value any) int64 { return nonNegativeJSONInteger(value) }
 
 // ClientCompactionPromptMarker is the distinctive line from the compaction
 // prompt that identifies a TUI-style compaction turn.

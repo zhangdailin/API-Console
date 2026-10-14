@@ -31,9 +31,9 @@ func (h *Handler) auditChatOutcome(ctx context.Context, acc *store.Account, req 
 		message = result.Err.Error()
 	}
 	usage := result.Usage
-	prompt, _ := usage["prompt_tokens_details"].(map[string]interface{})
-	completion, _ := usage["completion_tokens_details"].(map[string]interface{})
-	metadata := map[string]interface{}{"finish_reason": result.Finish, "visible_output": result.SawText}
+	prompt, _ := usage["prompt_tokens_details"].(map[string]any)
+	completion, _ := usage["completion_tokens_details"].(map[string]any)
+	metadata := map[string]any{"finish_reason": result.Finish, "visible_output": result.SawText}
 	if result.QualityChecked {
 		metadata["quality_checked_attempts"] = result.QualityAttempt
 		metadata["quality_check_status"] = "passed"

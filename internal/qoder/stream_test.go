@@ -275,7 +275,7 @@ func TestConsumeStreamToolCallAccumulatesArguments(t *testing.T) {
 
 	events, result, err := collectStream(t, body)
 	testutil.NoError(t, err, "consumeStream() error = %v")
-	var call map[string]interface{}
+	var call map[string]any
 	for _, event := range events {
 		if event.Type == "model.tool-call" {
 			call = event.Event

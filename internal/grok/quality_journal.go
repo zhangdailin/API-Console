@@ -46,7 +46,7 @@ func (h *Handler) auditQualityCheck(ctx context.Context, acc *store.Account, req
 	if acc != nil {
 		accountID = acc.ID
 	}
-	metadata := map[string]interface{}{
+	metadata := map[string]any{
 		"mode": mode, "max_attempts": policy.MaxAttempts,
 		"hold_timeout_ms": policy.HoldTimeout.Milliseconds(), "on_exhausted": qualityRetryFailOpen,
 		"visible_chars": outcome.Quality.VisibleChars, "reasoning_chars": outcome.Quality.ReasoningChars,
@@ -79,7 +79,7 @@ func (h *Handler) auditQualityRetry(ctx context.Context, previous, next *store.A
 		Kind: audit.KindRequest, RequestID: middleware.GetRequestID(ctx), Action: "grok_quality_retry",
 		APIKeyID: middleware.APIKeyID(ctx), AccountID: next.ID, Model: req.Model, Channel: "grok",
 		Provider: ProviderBuild, Attempt: attempt, Status: "retrying",
-		Metadata: map[string]interface{}{"from_account_id": previous.ID, "to_account_id": next.ID},
+		Metadata: map[string]any{"from_account_id": previous.ID, "to_account_id": next.ID},
 	})
 }
 
@@ -126,7 +126,7 @@ func (h *Handler) auditQualityDegraded(ctx context.Context, acc *store.Account, 
 		InputTokens:     responses.InterfaceToInt(outcome.Usage["prompt_tokens"]),
 		OutputTokens:    responses.InterfaceToInt(outcome.Usage["completion_tokens"]),
 		ReasoningTokens: int(outcome.Quality.ReasoningTokens),
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"mode":             turn.Mode,
 			"reason":           outcome.WithheldReason,
 			"guard":            string(turn.Guard),
@@ -202,7 +202,7 @@ func (h *Handler) auditQualityResolution(ctx context.Context, acc *store.Account
 	if logger == nil {
 		return
 	}
-	metadata := map[string]interface{}{
+	metadata := map[string]any{
 		"withheld_attempts": withheld,
 		"reasons":           reasons,
 		"max_attempts":      policy.MaxAttempts,
@@ -232,7 +232,7 @@ func (h *Handler) auditQualityGuard(ctx context.Context, acc *store.Account, req
 	if req != nil {
 		model = req.Model
 	}
-	metadata := map[string]interface{}{
+	metadata := map[string]any{
 		"failures":          acc.QualityFailures,
 		"previous_failures": previousFailures,
 		"disable_threshold": qualityDisableThreshold,

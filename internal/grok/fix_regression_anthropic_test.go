@@ -14,32 +14,32 @@ import (
 )
 
 func TestAnthropicUsageCarriesCacheAndThinkingFields(t *testing.T) {
-	usage := map[string]interface{}{
+	usage := map[string]any{
 		"prompt_tokens":     100,
 		"completion_tokens": 20,
-		"prompt_tokens_details": map[string]interface{}{
+		"prompt_tokens_details": map[string]any{
 			"cached_tokens":    30,
 			"reasoning_tokens": 0,
 		},
-		"completion_tokens_details": map[string]interface{}{"reasoning_tokens": 7},
+		"completion_tokens_details": map[string]any{"reasoning_tokens": 7},
 	}
 	got := anthropicUsageFromOpenAI(usage)
 	testutil.Equal(t, got["input_tokens"], 70)
 	testutil.Equal(t, got["cache_read_input_tokens"], 30)
 	_, ok := got["cache_creation_input_tokens"]
 	testutil.False(t, !ok, "cache_creation_input_tokens must be reported (0 is a value, not absence)")
-	details, ok := got["output_tokens_details"].(map[string]interface{})
+	details, ok := got["output_tokens_details"].(map[string]any)
 	if !ok || details["thinking_tokens"] != 7 {
 		t.Fatalf("output_tokens_details = %v, want thinking_tokens=7", got["output_tokens_details"])
 	}
 }
 
 func TestAnthropicRefusalUsesDedicatedStopReason(t *testing.T) {
-	chat := map[string]interface{}{
+	chat := map[string]any{
 		"id": "chatcmpl_1",
-		"choices": []interface{}{map[string]interface{}{
+		"choices": []any{map[string]any{
 			"finish_reason": "stop",
-			"message":       map[string]interface{}{"refusal": "I can't help with that"},
+			"message":       map[string]any{"refusal": "I can't help with that"},
 		}},
 	}
 	got := anthropicResponseFromChat("grok-4.6", chat)

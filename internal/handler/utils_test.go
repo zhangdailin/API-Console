@@ -35,7 +35,7 @@ func TestConversationKeyForRequestPriority(t *testing.T) {
 			name: "conversation_id highest priority",
 			req: ClaudeRequest{
 				ConversationID: "cid",
-				Metadata:       map[string]interface{}{"user_id": "u1"},
+				Metadata:       map[string]any{"user_id": "u1"},
 			},
 			headerKey: "X-Conversation-Id",
 			headerVal: "header",
@@ -44,7 +44,7 @@ func TestConversationKeyForRequestPriority(t *testing.T) {
 		{
 			name: "metadata conversation_id before header",
 			req: ClaudeRequest{
-				Metadata: map[string]interface{}{"conversation_id": "meta"},
+				Metadata: map[string]any{"conversation_id": "meta"},
 			},
 			headerKey: "X-Conversation-Id",
 			headerVal: "header",
@@ -53,7 +53,7 @@ func TestConversationKeyForRequestPriority(t *testing.T) {
 		{
 			name: "header before metadata user_id",
 			req: ClaudeRequest{
-				Metadata: map[string]interface{}{"user_id": "u1"},
+				Metadata: map[string]any{"user_id": "u1"},
 			},
 			headerKey: "X-Conversation-Id",
 			headerVal: "header",
@@ -62,7 +62,7 @@ func TestConversationKeyForRequestPriority(t *testing.T) {
 		{
 			name: "no explicit session key returns empty",
 			req: ClaudeRequest{
-				Metadata: map[string]interface{}{"user_id": "u1"},
+				Metadata: map[string]any{"user_id": "u1"},
 			},
 			want: "u1",
 		},
@@ -258,7 +258,7 @@ func TestStripSystemRemindersForMode_StripsLocalCommandMetadata(t *testing.T) {
 
 func TestLastUserIsToolResultFollowup_AllowsTextAlongsideToolResult(t *testing.T) {
 	messages := []prompt.Message{
-		{Role: "assistant", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{{Type: "tool_use", ID: "tool_1", Name: "Read", Input: map[string]interface{}{"file_path": "utils.py"}}}}},
+		{Role: "assistant", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{{Type: "tool_use", ID: "tool_1", Name: "Read", Input: map[string]any{"file_path": "utils.py"}}}}},
 		{Role: "user", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{
 			{Type: "tool_result", ToolUseID: "tool_1", Content: "import flask"},
 			{Type: "text", Text: "这个项目使用了哪些技术架构"},

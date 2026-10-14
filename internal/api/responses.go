@@ -30,8 +30,8 @@ func writeMethodNotAllowed(w http.ResponseWriter) {
 // endpoints share: 0 carries the payload, 1 carries an operator-facing message.
 // Absent fields are left out rather than sent as null, so the shape a client
 // sees is the shape it already parses.
-func writeCodeEnvelope(w http.ResponseWriter, code int, data interface{}, msg string) {
-	payload := map[string]interface{}{"code": code}
+func writeCodeEnvelope(w http.ResponseWriter, code int, data any, msg string) {
+	payload := map[string]any{"code": code}
 	if data != nil {
 		payload["data"] = data
 	}

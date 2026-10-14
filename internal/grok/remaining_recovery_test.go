@@ -17,7 +17,7 @@ func TestRemainingAttemptDiagnosticsRedactAndBound(t *testing.T) {
 	log := &parityAuditLog{}
 	h := &Handler{auditLogger: log}
 	acc := &store.Account{ID: 7, Token: "synthetic-account-secret", OAuthAccessToken: "synthetic-oauth-secret"}
-	body, _ := json.Marshal(map[string]interface{}{"error": map[string]interface{}{"code": "invalid_encrypted_content", "message": "retry Bearer private-bearer password=private-password synthetic-account-secret synthetic-oauth-secret " + strings.Repeat("x", 2000)}, "output": "private-user-output", "encrypted_content": "private-cipher"})
+	body, _ := json.Marshal(map[string]any{"error": map[string]any{"code": "invalid_encrypted_content", "message": "retry Bearer private-bearer password=private-password synthetic-account-secret synthetic-oauth-secret " + strings.Repeat("x", 2000)}, "output": "private-user-output", "encrypted_content": "private-cipher"})
 	header := http.Header{"Set-Cookie": []string{"private-cookie"}, "Authorization": []string{"Bearer private-auth"}, "X-Request-Id": []string{"request-123"}}
 	err := fmt.Errorf("wrapped: %w", newCLIUpstreamError(400, header, body))
 	h.auditAttempt(context.Background(), acc, ProviderBuild, 2, time.Now(), err, "reasoning_replay_recovery")

@@ -8,7 +8,7 @@ import (
 
 // InterfaceToInt reads a loosely-typed JSON number as an int, which is how
 // usage counters arrive after a round trip through interface{}.
-func InterfaceToInt(value interface{}) int {
+func InterfaceToInt(value any) int {
 	switch x := value.(type) {
 	case int:
 		return x
@@ -30,7 +30,7 @@ func InterfaceToInt(value interface{}) int {
 
 // FirstNonNil returns the first non-nil value, so a caller can pick whichever
 // spelling of a field the upstream sent.
-func FirstNonNil(values ...interface{}) interface{} {
+func FirstNonNil(values ...any) any {
 	for _, v := range values {
 		if v != nil {
 			return v

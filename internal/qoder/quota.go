@@ -195,7 +195,7 @@ func (c *Client) getStatus(ctx context.Context, creds Credentials) (*statusRespo
 // getJSON performs one authenticated OpenAPI read. These endpoints take the
 // device access token as a plain Bearer; they are not COSY-signed, which is why
 // they are useful for diagnosing an account whose signed chat request failed.
-func (c *Client) getJSON(ctx context.Context, url string, creds Credentials, out interface{}) error {
+func (c *Client) getJSON(ctx context.Context, url string, creds Credentials, out any) error {
 	reqCtx, cancel := context.WithTimeout(ctx, authRequestTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)

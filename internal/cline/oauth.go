@@ -221,9 +221,9 @@ func (c *Client) Register(ctx context.Context, workosAccess, workosRefresh strin
 
 	var payload struct {
 		Data struct {
-			AccessToken  string      `json:"accessToken"`
-			RefreshToken string      `json:"refreshToken"`
-			ExpiresAt    interface{} `json:"expiresAt"`
+			AccessToken  string `json:"accessToken"`
+			RefreshToken string `json:"refreshToken"`
+			ExpiresAt    any    `json:"expiresAt"`
 			UserInfo     *struct {
 				Email string `json:"email"`
 			} `json:"userInfo"`
@@ -289,9 +289,9 @@ func (c *Client) Refresh(ctx context.Context, refreshToken string) (Credentials,
 
 	var payload struct {
 		Data struct {
-			AccessToken  string      `json:"accessToken"`
-			RefreshToken string      `json:"refreshToken"`
-			ExpiresAt    interface{} `json:"expiresAt"`
+			AccessToken  string `json:"accessToken"`
+			RefreshToken string `json:"refreshToken"`
+			ExpiresAt    any    `json:"expiresAt"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
