@@ -4,11 +4,12 @@ import (
 	"net/http"
 	"orchids-api/internal/chatwire"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"orchids-api/internal/accountpolicy"
+	"orchids-api/internal/provider"
 	"orchids-api/internal/store"
 )
 
@@ -208,11 +209,70 @@ type FreeProfileVerdict struct {
 // The check exists so a paid account that deliberately exposes no numeric window is
 // never reclassified as Free by the estimate below.
 func BuildPlanIsPaid(subscription string) bool {
-	plan := strings.ToLower(strings.TrimSpace(subscription))
-	if plan == "" || plan == "unknown" {
-		return false
+	return accountpolicy.GrokBuildPlanIsPaid(subscription)
+}
+
+// PlanDisplayName renders a Build subscription string as the plan name an
+// operator recognises. An unrecognised string is returned trimmed as-is.
+func PlanDisplayName(subscription string) string {
+	raw := strings.TrimSpace(subscription)
+	plan := strings.ToLower(raw)
+	switch {
+	case plan == "":
+		return ""
+	case strings.Contains(plan, "heavy"):
+		return "Heavy"
+	case strings.Contains(plan, "xpremiumplus"), strings.Contains(plan, "x_premium_plus"):
+		return "X Premium+"
+	case strings.Contains(plan, "xpremium"), strings.Contains(plan, "x_premium"):
+		return "X Premium"
+	case strings.Contains(plan, "xbasic"), strings.Contains(plan, "x_basic"):
+		return "X Basic"
+	case strings.Contains(plan, "supergrok"):
+		return "SuperGrok"
+	case strings.Contains(plan, "super"), strings.Contains(plan, "pro"):
+		return "Super"
+	case strings.Contains(plan, "lite"):
+		return "Lite"
+	case strings.Contains(plan, "free"):
+		return "Free"
+	case strings.Contains(plan, "basic"):
+		return "Basic"
+	default:
+		return raw
 	}
-	return slices.ContainsFunc([]string{"super", "pro", "heavy", "lite", "x_basic", "xbasic", "x_premium", "xpremium", "paid", "team", "enterprise"}, func(paid string) bool { return strings.Contains(plan, paid) })
+}
+
+// projectPlan publishes the account's tier in the shared plan_* shape. A paid
+// plan name or a billing window proves paid; a Free verdict is confirmed when
+// the upstream stated it (plan endpoint or an exhaustion refusal) and inferred
+// when it rests on an empty billing profile.
+func projectPlan(fields map[string]any, acc *store.Account) {
+	subscription := strings.TrimSpace(acc.Subscription)
+	if BuildPlanIsPaid(subscription) {
+		provider.PlanProjection(fields, PlanDisplayName(subscription), provider.PlanTierPaid, "")
+		return
+	}
+	if acc.GrokBilling.Weekly.HasUsage || acc.GrokBilling.Monthly.HasLimit {
+		provider.PlanProjection(fields, PlanDisplayName(subscription), provider.PlanTierPaid, "")
+		return
+	}
+	if verdict := InferFreeProfile(acc); verdict.Inferred {
+		confidence := provider.PlanConfidenceConfirmed
+		if verdict.Source == FreeProfileSourceBilling {
+			confidence = provider.PlanConfidenceInferred
+		}
+		provider.PlanProjection(fields, "", provider.PlanTierFree, confidence)
+		return
+	}
+	switch {
+	case subscription == "":
+		provider.PlanProjection(fields, "", provider.PlanTierUnsynced, "")
+	case strings.EqualFold(subscription, "unknown"):
+		provider.PlanProjection(fields, "", provider.PlanTierUnknown, "")
+	default:
+		provider.PlanProjection(fields, PlanDisplayName(subscription), provider.PlanTierUnknown, "")
+	}
 }
 
 // InferFreeProfile decides whether a Build account can be called Free.

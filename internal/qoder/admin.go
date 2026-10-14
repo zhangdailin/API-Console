@@ -328,6 +328,7 @@ func projectQuota(fields map[string]any, acc *store.Account, limit, current floa
 	fields["quota_unit"] = util.FirstNonEmpty(snapshot.Unit, "credits")
 	fields["quota_supported"] = !snapshot.SyncedAt.IsZero()
 	fields["quota_plan"] = snapshot.PlanTier
+	provider.NamedPlanProjection(fields, snapshot.PlanTier, !snapshot.SyncedAt.IsZero())
 	fields["quota_exhausted"] = snapshot.Exhausted
 	fields["quota_upgrade_url"] = snapshot.UpgradeURL
 	fields["quota_reset_at"] = snapshot.ResetAt

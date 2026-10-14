@@ -164,6 +164,46 @@ func PreserveObservedState(acc, existing *store.Account) {
 	PreserveTime(&acc.LastAttempt, existing.LastAttempt)
 }
 
+// Plan tiers published as plan_tier. Every channel reports its subscription in
+// this one shape so the console renders it with one set of labels.
+const (
+	PlanTierFree     = "free"
+	PlanTierPaid     = "paid"
+	PlanTierUnknown  = "unknown"
+	PlanTierUnsynced = "unsynced"
+
+	PlanConfidenceConfirmed = "confirmed"
+	PlanConfidenceInferred  = "inferred"
+)
+
+// PlanProjection records the account's subscription: plan_name is the
+// upstream's plan name (possibly empty), plan_tier is one of the PlanTier
+// values, and plan_confidence says whether a free tier was stated by the
+// upstream or inferred by this gateway.
+func PlanProjection(fields map[string]any, name, tier, confidence string) {
+	fields["plan_name"] = strings.TrimSpace(name)
+	fields["plan_tier"] = tier
+	fields["plan_confidence"] = confidence
+}
+
+// NamedPlanProjection projects a channel whose upstream reports its plan as a
+// name. Before the first successful read the tier is unsynced; a read that
+// named no plan is unknown; a name containing "free" is a stated free tier and
+// any other name is a paid plan.
+func NamedPlanProjection(fields map[string]any, name string, synced bool) {
+	name = strings.TrimSpace(name)
+	switch {
+	case !synced:
+		PlanProjection(fields, name, PlanTierUnsynced, "")
+	case name == "":
+		PlanProjection(fields, "", PlanTierUnknown, "")
+	case strings.Contains(strings.ToLower(name), "free"):
+		PlanProjection(fields, name, PlanTierFree, PlanConfidenceConfirmed)
+	default:
+		PlanProjection(fields, name, PlanTierPaid, "")
+	}
+}
+
 // QuotaProvenance records where a quota number came from and how far it should
 // be trusted, next to the number itself.
 //

@@ -238,6 +238,7 @@ func preserveRuntimeStateOnAdminEdit(acc, existing *store.Account) {
 func projectQuota(fields map[string]any, acc *store.Account, _, _ float64, observedTokens int64, usageObserved bool) {
 	weekly := acc.GrokBilling.Weekly
 	monthly := acc.GrokBilling.Monthly
+	projectPlan(fields, acc)
 	fields["quota_mode"] = "unknown"
 	fields["quota_unit"] = "build_credits"
 	fields["quota_supported"] = false

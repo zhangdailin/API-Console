@@ -229,4 +229,8 @@ func projectQuota(fields map[string]any, acc *store.Account, limit, current floa
 	fields["quota_supported"] = false
 	provider.QuotaProvenance(fields, "unknown", "unknown", "",
 		"Cline 未下发数值额度；达到推理上限时按 429 冷却处理", false, false)
+	// ClinePlan is empty until /users/me/plan answered; a recorded value is
+	// either "free" or the subscriber's plan name.
+	plan := strings.TrimSpace(acc.ClinePlan)
+	provider.NamedPlanProjection(fields, plan, plan != "")
 }

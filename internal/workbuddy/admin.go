@@ -245,6 +245,7 @@ func VerifyAccount(ctx context.Context, acc *store.Account, cfg *config.Config, 
 // so "used" must be derived rather than read from UsageCurrent.
 func projectQuota(fields map[string]any, acc *store.Account, limit, current float64, observedTokens int64, usageObserved bool) {
 	snapshot := acc.WorkBuddyQuota
+	provider.NamedPlanProjection(fields, snapshot.PackageName, !snapshot.SyncedAt.IsZero())
 	quotaLimit := limit
 	if snapshot.Limit > 0 {
 		quotaLimit = snapshot.Limit

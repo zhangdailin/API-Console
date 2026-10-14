@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -726,16 +725,7 @@ func cooldownElapsed(lastAttempt time.Time, cooldown time.Duration, now time.Tim
 }
 
 func isPaidGrokBuildAccount(acc *store.Account) bool {
-	if acc == nil || !strings.EqualFold(strings.TrimSpace(acc.AccountType), "grok") {
-		return false
-	}
-	provider := strings.ToLower(strings.TrimSpace(acc.GrokProvider))
-	credential := strings.ToLower(strings.TrimSpace(acc.CredentialType))
-	if provider != "build" && !(provider == "" && credential == "oauth") {
-		return false
-	}
-	plan := strings.ToLower(strings.TrimSpace(acc.Subscription))
-	return slices.ContainsFunc([]string{"super", "pro", "heavy", "lite", "x_basic", "xbasic", "x_premium", "xpremium", "paid", "team", "enterprise"}, func(paid string) bool { return strings.Contains(plan, paid) })
+	return acc != nil && strings.EqualFold(strings.TrimSpace(acc.AccountType), "grok") && accountpolicy.GrokBuildPlanIsPaid(acc.Subscription)
 }
 
 // resetAccountRuntimeState drops the transient routing verdict so the account is
