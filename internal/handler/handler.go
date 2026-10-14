@@ -410,7 +410,6 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	// Suggestion mode answered and returned above, so the gates below can only be
 	// triggered by tool_choice or by a tool_result-only follow-up; thinking stays
 	// suppressed only by configuration.
-	noThinking := cfg.SuppressThinking
 	gateNoTools := false
 	toolGateReasons := make([]string, 0, 2)
 	toolGateMessage := ""
@@ -565,7 +564,7 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	upstreamCtx, cancelUpstream := util.WithAttemptTimeout(r.Context(), cfg.UpstreamRequestTimeout())
 	defer cancelUpstream()
 	r = r.WithContext(upstreamCtx)
-	sh := newStreamHandler(cfg, w, logger, noThinking, isStream, responseFormat)
+	sh := newStreamHandler(cfg, w, logger, isStream, responseFormat)
 	sh.cancelUpstream = cancelUpstream
 	sh.setAllowedToolNames(declaredToolNames(effectiveTools))
 	if preSelectQoderRequest {

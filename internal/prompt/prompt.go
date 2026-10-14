@@ -7,12 +7,7 @@ import (
 	"encoding/json"
 )
 
-// NOTE:
-// This package intentionally contains ONLY shared schema/types used across the codebase
-// (caching and handlers).
-//
-// Legacy prompt-building implementations (BuildPromptV2*, formatting, summarization, etc.)
-// have been removed in favor of AIClient-only routing.
+// Shared message schemas and content decoding for caching and handlers.
 
 // ImageSource describes where an image comes from.
 type ImageSource struct {

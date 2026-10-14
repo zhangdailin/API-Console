@@ -11,12 +11,7 @@ const (
 	CapabilityResponses = "responses"
 	CapabilityChat      = "chat"
 	CapabilityMessages  = "messages"
-	CapabilityImage     = "image"
-	CapabilityImageEdit = "image_edit"
 	CapabilityVideo     = "video"
-	CapabilityTTS       = "tts"
-	CapabilitySTT       = "stt"
-	CapabilityRealtime  = "realtime"
 )
 
 // ModelStatus accepts only the current canonical states.

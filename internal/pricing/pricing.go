@@ -246,7 +246,7 @@ func scanReservationJSON(body []byte) (model string, inputTokens, outputTokens i
 //
 // Cost reconstruction stores the rate components behind a cost row so an
 // operator can answer "why is this row this expensive" without re-deriving the formula. The
-// stored row keeps the quantities (tokens, images, seconds) and the pricing
+// stored row keeps the token quantities and the pricing
 // model; this reconstructs the components that produced the number.
 
 // ComponentKind names one line of a price.
@@ -256,18 +256,13 @@ const (
 	ComponentUncachedInput ComponentKind = "uncached_input"
 	ComponentCachedInput   ComponentKind = "cached_input"
 	ComponentOutput        ComponentKind = "output"
-	ComponentInputImage    ComponentKind = "input_image"
-	ComponentOutputImage   ComponentKind = "output_image"
-	ComponentOutputSecond  ComponentKind = "output_second"
 )
 
 // Unit is what a component counts.
 type Unit string
 
 const (
-	UnitToken  Unit = "token"
-	UnitImage  Unit = "image"
-	UnitSecond Unit = "second"
+	UnitToken Unit = "token"
 )
 
 // Component is one priced line: quantity times unit price.

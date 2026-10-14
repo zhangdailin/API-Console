@@ -10,7 +10,7 @@ import (
 )
 
 func TestStreamHandler_NoToolsGateSuppressesValidToolCall(t *testing.T) {
-	sh, rec := newStreamTestHandler(t, false, true, adapter.FormatAnthropic)
+	sh, rec := newStreamTestHandler(t, true, adapter.FormatAnthropic)
 
 	sh.setDisallowToolCalls(true)
 	sh.handleMessage(upstream.SSEMessage{
@@ -30,7 +30,7 @@ func TestStreamHandler_NoToolsGateSuppressesValidToolCall(t *testing.T) {
 }
 
 func TestStreamHandler_RejectedWriteDoesNotLeakContent(t *testing.T) {
-	sh, rec := newStreamTestHandler(t, false, true, adapter.FormatAnthropic)
+	sh, rec := newStreamTestHandler(t, true, adapter.FormatAnthropic)
 
 	sh.setAllowedToolNames(nil)
 	sh.setSurfaceToolRejects(true)

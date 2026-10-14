@@ -66,7 +66,7 @@ func (h *Handler) auditChatOutcome(ctx context.Context, acc *store.Account, req 
 	provider := ""
 	if acc != nil {
 		accountID = acc.ID
-		provider = ProviderForAccount(acc)
+		provider = ProviderBuild
 	}
 	usageSource := result.UsageSource
 	if usageSource == "" {

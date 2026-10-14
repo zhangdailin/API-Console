@@ -10,31 +10,23 @@ import (
 	"orchids-api/internal/store"
 )
 
-// ProviderBuild is the only Grok plane this gateway serves: the Build (OAuth
-// CLI) upstream. All retired provider planes have been removed.
+// ProviderBuild identifies the Grok Build OAuth CLI upstream.
 const ProviderBuild = "build"
 
 const modelSnapshotTTL = 6 * time.Hour
 
-// ProviderForAccount reports the plane an account belongs to. Every Grok
-// account is a Build account now, so legacy rows (and any stored provider value)
-// normalise to Build.
-func ProviderForAccount(acc *store.Account) string {
-	if acc == nil || !strings.EqualFold(strings.TrimSpace(acc.AccountType), "grok") {
-		return ""
-	}
-	return ProviderBuild
+func isGrokAccount(acc *store.Account) bool {
+	return acc != nil && strings.EqualFold(strings.TrimSpace(acc.AccountType), "grok")
 }
 
 func NormalizeProvider(acc *store.Account) bool {
-	if acc == nil || !strings.EqualFold(strings.TrimSpace(acc.AccountType), "grok") {
+	if !isGrokAccount(acc) {
 		return false
 	}
-	provider := ProviderForAccount(acc)
-	if strings.EqualFold(strings.TrimSpace(acc.GrokProvider), provider) {
+	if strings.EqualFold(strings.TrimSpace(acc.GrokProvider), ProviderBuild) {
 		return false
 	}
-	acc.GrokProvider = provider
+	acc.GrokProvider = ProviderBuild
 	return true
 }
 
@@ -51,7 +43,7 @@ func AccountSupportsModel(acc *store.Account, modelID string) bool {
 }
 
 func CLIModelsNeedSync(acc *store.Account, now time.Time) bool {
-	if ProviderForAccount(acc) != ProviderBuild || len(acc.GrokModels) == 0 || acc.GrokModelsSyncedAt.IsZero() {
+	if !isGrokAccount(acc) || len(acc.GrokModels) == 0 || acc.GrokModelsSyncedAt.IsZero() {
 		return true
 	}
 	return !now.Before(acc.GrokModelsSyncedAt.Add(modelSnapshotTTL))

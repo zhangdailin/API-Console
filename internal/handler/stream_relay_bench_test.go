@@ -52,7 +52,7 @@ func BenchmarkStreamRelayPipe(b *testing.B) {
 					}
 				}
 			}()
-			sh := newStreamHandler(&config.Config{}, &pipeRelayWriter{Writer: writer, header: make(http.Header)}, nil, false, true, format)
+			sh := newStreamHandler(&config.Config{}, &pipeRelayWriter{Writer: writer, header: make(http.Header)}, nil, true, format)
 			defer sh.release()
 			defer reader.Close()
 			defer writer.Close()

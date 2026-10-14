@@ -25,10 +25,11 @@ func projectQuotaFields(fields map[string]interface{}, acc *store.Account, limit
 		admin.ProjectQuota(fields, acc, limit, current, observedTokens, usageObserved)
 		return
 	}
-	projectLegacyQuota(fields, acc, limit, current, observedTokens, usageObserved)
+	projectRateLimitQuota(fields, acc, limit, current, observedTokens, usageObserved)
 }
 
-func projectLegacyQuota(fields map[string]interface{}, acc *store.Account, limit, current float64, observedTokens int64, usageObserved bool) {
+// projectRateLimitQuota is the fallback for channels without a quota projection.
+func projectRateLimitQuota(fields map[string]interface{}, acc *store.Account, limit, current float64, observedTokens int64, usageObserved bool) {
 	fields["quota_limit"] = limit
 	remaining := current
 	if remaining > limit && limit > 0 {
@@ -40,7 +41,7 @@ func projectLegacyQuota(fields map[string]interface{}, acc *store.Account, limit
 	}
 	fields["quota_used"] = used
 	fields["quota_remaining"] = remaining
-	// A legacy account's numbers come from passive upstream headers, which are a
+	// An unregistered channel's numbers come from passive upstream headers, a
 	// short-lived throttle window rather than a subscription balance.
 	quotaType := "unknown"
 	if limit > 0 {

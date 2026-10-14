@@ -10,26 +10,13 @@ import (
 )
 
 // ChatMessage is one OpenAI-shaped message in the WorkBuddy payload.
-type ChatMessage struct {
-	Role             string     `json:"role"`
-	Content          string     `json:"content"`
-	ReasoningContent string     `json:"reasoning_content,omitempty"`
-	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID       string     `json:"tool_call_id,omitempty"`
-}
+type ChatMessage = upstream.ChatMessage
 
 // ToolCall is the OpenAI tool-call shape used both inbound and outbound.
-type ToolCall struct {
-	ID       string           `json:"id"`
-	Type     string           `json:"type"`
-	Function ToolCallFunction `json:"function"`
-}
+type ToolCall = upstream.ToolCall
 
 // ToolCallFunction carries the tool name and JSON-encoded arguments.
-type ToolCallFunction struct {
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
-}
+type ToolCallFunction = upstream.ToolCallFunction
 
 // WorkBuddy's gateway blocks a request that declares a first-party Anthropic
 // client with HTTP 400 code=11128 ("Illegal API invocation from an unapproved
@@ -141,7 +128,7 @@ func buildMessages(req upstream.UpstreamRequest) []ChatMessage {
 
 		switch role {
 		case "assistant":
-			if converted, ok := convertAssistantMessage(msg, pendingToolCalls); ok {
+			if converted, ok := upstream.ConvertAssistantMessage(msg, pendingToolCalls); ok {
 				out = append(out, converted)
 			}
 		default:
@@ -223,45 +210,6 @@ func reasoningForReplay(msg prompt.Message) string {
 		return strings.TrimSpace(msg.ReasoningContent)
 	}
 	return ""
-}
-
-// convertAssistantMessage maps text, thinking and tool_use blocks onto one
-// assistant message.
-func convertAssistantMessage(msg prompt.Message, pendingToolCalls map[string]bool) (ChatMessage, bool) {
-	message := ChatMessage{Role: "assistant", ReasoningContent: strings.TrimSpace(msg.ReasoningContent)}
-	var text []string
-	for _, block := range msg.Content.GetBlocks() {
-		switch block.Type {
-		case "text":
-			if strings.TrimSpace(block.Text) != "" {
-				text = append(text, block.Text)
-			}
-		case "thinking":
-			if message.ReasoningContent == "" {
-				message.ReasoningContent = strings.TrimSpace(block.Thinking)
-			}
-		case "tool_use":
-			name := strings.TrimSpace(block.Name)
-			if name == "" {
-				continue
-			}
-			id := strings.TrimSpace(block.ID)
-			if id == "" {
-				id = NewToolCallID()
-			}
-			message.ToolCalls = append(message.ToolCalls, ToolCall{
-				ID:   id,
-				Type: "function",
-				Function: ToolCallFunction{
-					Name:      name,
-					Arguments: util.CompactToolInput(block.Input),
-				},
-			})
-			pendingToolCalls[id] = true
-		}
-	}
-	message.Content = strings.Join(text, "\n")
-	return message, message.Content != "" || len(message.ToolCalls) > 0 || message.ReasoningContent != ""
 }
 
 // convertBlockMessage maps user/system blocks, splitting tool_result blocks

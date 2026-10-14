@@ -69,8 +69,7 @@ func (h *Handler) persistGrokQuotaSync(job grokQuotaSyncJob) {
 	tokens := parseBuildRateLimitWindow(headers, "tokens")
 	hasBuildHeaders := requests.HasLimit || requests.HasRemaining || !requests.ResetAt.IsZero() || tokens.HasLimit || tokens.HasRemaining || !tokens.ResetAt.IsZero()
 	if info == nil && !hasBuildHeaders {
-		provider := ProviderForAccount(&job.account)
-		if _, err := h.lb.Store.ConsumeGrokQuota(ctx, job.account.ID, provider, float64(job.requests)); err != nil {
+		if _, err := h.lb.Store.ConsumeGrokQuota(ctx, job.account.ID, ProviderBuild, float64(job.requests)); err != nil {
 			slog.Warn("grok local quota decrement failed", "account_id", job.account.ID, "error", err)
 		}
 		return
@@ -81,9 +80,8 @@ func (h *Handler) persistGrokQuotaSync(job grokQuotaSyncJob) {
 		return
 	}
 	NormalizeProvider(latest)
-	provider := ProviderForAccount(latest)
 	changed := false
-	if provider == ProviderBuild {
+	if isGrokAccount(latest) {
 		changed = ApplyBuildRateLimits(latest, headers)
 	} else {
 		changed = info != nil && ApplyQuotaInfo(latest, info)

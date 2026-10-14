@@ -91,8 +91,8 @@ func TestEnsureResolvedModelCapability_RejectsPersistedCapabilityMismatch(t *tes
 	}); err != nil {
 		t.Fatalf("CreateModel() error = %v", err)
 	}
-	testutil.NoError(t, h.ensureResolvedModelCapability(context.Background(), "grok-5", ModelSpec{ID: "grok-5", Upstream: UpstreamCLI}, store.CapabilityResponses), "Responses capability error = %v")
-	err := h.ensureResolvedModelCapability(context.Background(), "grok-5", ModelSpec{ID: "grok-5", Upstream: UpstreamCLI}, store.CapabilityChat)
+	testutil.NoError(t, h.ensureResolvedModelCapability(context.Background(), "grok-5", ModelSpec{ID: "grok-5"}, store.CapabilityResponses), "Responses capability error = %v")
+	err := h.ensureResolvedModelCapability(context.Background(), "grok-5", ModelSpec{ID: "grok-5"}, store.CapabilityChat)
 	testutil.Error(t, err)
 }
 
@@ -108,7 +108,6 @@ func TestResolveConversationModel_AppliesPersistedRoute(t *testing.T) {
 	}
 	spec, ok := h.resolveConversationModel(context.Background(), "future-build-chat")
 	testutil.True(t, ok, "model was not resolved")
-	testutil.Equal(t, spec.Upstream, UpstreamCLI)
 	testutil.Equal(t, spec.UpstreamModel, "grok-routed-build")
 }
 

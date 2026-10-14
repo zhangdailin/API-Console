@@ -6,23 +6,11 @@ import (
 	"orchids-api/internal/modelcatalog"
 )
 
-// UpstreamKind selects which Grok upstream protocol serves a model.
-type UpstreamKind int
-
-const (
-	// UpstreamAuto is the unspecified zero value; it does not select an upstream.
-	UpstreamAuto UpstreamKind = iota
-	// UpstreamCLI is cli-chat-proxy.grok.com/v1 + OAuth Bearer.
-	UpstreamCLI
-)
-
 // ModelSpec defines one public model and how it maps to Grok upstream fields.
 type ModelSpec struct {
 	ID            string
 	Name          string
 	UpstreamModel string
-	// Upstream explicitly routes the model; served models use UpstreamCLI.
-	Upstream UpstreamKind
 	// AliasReasoningEffort is populated only while resolving an effort-suffixed
 	// model variant and is copied into the request before normalization.
 	AliasReasoningEffort string
@@ -36,7 +24,7 @@ func ResolveModelAlias(modelID string, catalogs ...[]modelcatalog.Profile) (Mode
 	id := normalizeModelID(modelID)
 	profiles := modelcatalog.Aggregate(catalogs...)
 	makeSpec := func(p modelcatalog.Profile) ModelSpec {
-		return ModelSpec{ID: normalizeModelID(p.ModelID), Name: p.ModelID, UpstreamModel: p.ModelID, Upstream: UpstreamCLI}
+		return ModelSpec{ID: normalizeModelID(p.ModelID), Name: p.ModelID, UpstreamModel: p.ModelID}
 	}
 	for _, profile := range profiles {
 		if normalizeModelID(profile.ModelID) == id && id != "" {

@@ -13,7 +13,7 @@ import (
 )
 
 func TestStreamHandler_TokensUsed_OverridesEstimation(t *testing.T) {
-	sh, _ := newStreamTestHandler(t, false, false, adapter.FormatAnthropic)
+	sh, _ := newStreamTestHandler(t, false, adapter.FormatAnthropic)
 
 	sh.setUsageTokens(10, -1)
 	sh.handleMessage(upstream.SSEMessage{Type: "model", Event: map[string]any{"type": "tokens-used", "inputTokens": float64(12), "outputTokens": float64(34)}})
@@ -24,7 +24,7 @@ func TestStreamHandler_TokensUsed_OverridesEstimation(t *testing.T) {
 }
 
 func TestStreamHandler_UsageMissingFieldsKeepLocalEstimate(t *testing.T) {
-	sh := newStreamHandler(&config.Config{}, newFlushRecorder(), debug.New(false, false), false, false, adapter.FormatAnthropic)
+	sh := newStreamHandler(&config.Config{}, newFlushRecorder(), debug.New(false, false), false, adapter.FormatAnthropic)
 	defer sh.release()
 	sh.inputTokens, sh.outputTokens = 31, 17
 	sh.applyUpstreamUsageTokens(map[string]interface{}{"output_tokens": 9, "credits": 0.5})
@@ -36,7 +36,7 @@ func TestStreamHandler_UsageMissingFieldsKeepLocalEstimate(t *testing.T) {
 }
 
 func TestStreamHandler_DetailedUsageIsAssignedIdempotently(t *testing.T) {
-	sh := newStreamHandler(&config.Config{}, newFlushRecorder(), debug.New(false, false), false, false, adapter.FormatAnthropic)
+	sh := newStreamHandler(&config.Config{}, newFlushRecorder(), debug.New(false, false), false, adapter.FormatAnthropic)
 	defer sh.release()
 	usage := map[string]interface{}{
 		"inputTokens": 1000, "outputTokens": 20, "cacheReadTokens": 900,
@@ -53,7 +53,7 @@ func TestStreamHandler_DetailedUsageIsAssignedIdempotently(t *testing.T) {
 }
 
 func TestStreamHandler_FinalOutputTokens_MatchChunkedText(t *testing.T) {
-	sh, _ := newStreamTestHandler(t, false, false, adapter.FormatAnthropic)
+	sh, _ := newStreamTestHandler(t, false, adapter.FormatAnthropic)
 
 	sh.handleMessage(upstream.SSEMessage{Type: "model", Event: map[string]any{"type": "text-start"}})
 	sh.handleMessage(upstream.SSEMessage{Type: "model", Event: map[string]any{"type": "text-delta", "delta": "hel"}})
@@ -66,7 +66,7 @@ func TestStreamHandler_FinalOutputTokens_MatchChunkedText(t *testing.T) {
 }
 
 func TestStreamHandler_KeepAlive_NoPanic(t *testing.T) {
-	sh, rec := newStreamTestHandler(t, false, true, adapter.FormatAnthropic)
+	sh, rec := newStreamTestHandler(t, true, adapter.FormatAnthropic)
 
 	// should not write once terminal state is set
 	sh.mu.Lock()
@@ -89,7 +89,7 @@ func TestStreamHandler_KeepAlive_NoPanic(t *testing.T) {
 }
 
 func TestStreamHandler_ToolRejectionExplainsZeroOutput(t *testing.T) {
-	sh, rec := newStreamTestHandler(t, false, true, adapter.FormatAnthropic)
+	sh, rec := newStreamTestHandler(t, true, adapter.FormatAnthropic)
 
 	sh.setSurfaceToolRejects(true)
 	sh.setDisallowToolCalls(true)
@@ -128,14 +128,14 @@ func TestResponseMessageID_AnthropicKeepsMessagePrefix(t *testing.T) {
 	testutil.Falsef(t, !strings.HasPrefix(id, "msg_"), "id=%q want msg_ prefix", id)
 }
 
-func TestStreamHandler_ReasoningCountsAsUpstreamOutputWhenSuppressed(t *testing.T) {
-	sh, _ := newStreamTestHandler(t, true, true, adapter.FormatAnthropic)
+func TestStreamHandler_ReasoningCountsAsOutputAndReachesClient(t *testing.T) {
+	sh, rec := newStreamTestHandler(t, true, adapter.FormatAnthropic)
 
 	sh.handleMessage(upstream.SSEMessage{
 		Type:  "model.reasoning-delta",
 		Event: map[string]any{"delta": "already generated and potentially billed"},
 	})
 
-	testutil.False(t, !sh.hasAnyOutput(), "suppressed reasoning must count as upstream output to prevent a billed retry")
-	testutil.False(t, sh.hasVisibleOutput(), "suppressed reasoning must not become visible client output")
+	testutil.True(t, sh.hasAnyOutput(), "reasoning must count as upstream output to prevent a billed retry")
+	testutil.MustContain(t, rec.buf.String(), "already generated and potentially billed")
 }

@@ -69,9 +69,6 @@ func ExtractCompactionSummary(response map[string]interface{}) string {
 	return extractCompactionSummary(response)
 }
 
-// CompactionStreamError is the typed failure of a summary turn.
-type CompactionStreamError = gatewayCompactionStreamError
-
 // CompactionErrorIsTransient reports whether a summary-turn failure is retryable.
 func CompactionErrorIsTransient(err error) bool { return gatewayCompactionErrorIsTransient(err) }
 
@@ -127,9 +124,6 @@ func CompactionHTTPErrorIsTransient(status int, body string) bool {
 func ParseCompactionStream(data []byte) (gatewayCompactionSample, error) {
 	return parseGatewayCompactionStream(data)
 }
-
-// CompactionSample is one parsed summary-turn sample.
-type CompactionSample = gatewayCompactionSample
 
 // ErrCompactionDegenerate marks a summary the model could not produce.
 var ErrCompactionDegenerate = errGatewayCompactionDegenerate

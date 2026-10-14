@@ -1,6 +1,7 @@
 package grok
 
 import (
+	"context"
 	"orchids-api/internal/chatwire"
 	"testing"
 
@@ -57,17 +58,11 @@ func TestResolveModelAcceptsCurrentBuildModels(t *testing.T) {
 	}
 }
 
-func TestGrok45RoutesToBuildCLI(t *testing.T) {
-	spec, ok := ResolveModel("grok-4.5", []modelcatalog.Profile{{ModelID: "grok-4.5"}})
-	testutil.True(t, ok, "ResolveModel(grok-4.5) = false, want true")
-	testutil.False(t, !modelRoutedToCLI(spec, &config.Config{}), "grok-4.5 should route through the official Build CLI OAuth path")
-}
-
 func TestLegacyCLIModelListCannotRouteImplicitModel(t *testing.T) {
 	var cfg config.Config
 	testutil.NoError(t, json.Unmarshal([]byte(`{"grok_cli_model_ids":["implicit-model"]}`), &cfg))
-	testutil.False(t, modelRoutedToCLI(ModelSpec{ID: "implicit-model"}, &cfg), "legacy model list must not route models without explicit Build capability")
-	testutil.False(t, !modelRoutedToCLI(ModelSpec{ID: "dynamic-build", Upstream: UpstreamCLI}, &cfg), "dynamically discovered Build models must stay routed to CLI")
+	_, ok := (&Handler{cfg: &cfg}).resolveConversationModel(context.Background(), "implicit-model")
+	testutil.False(t, ok, "a config model list cannot grant an unobserved route")
 }
 
 // TestChatCompletionsRequestValidateLeavesSamplingToUpstream pins that Validate
@@ -199,30 +194,23 @@ func TestChatCompletionsRequestUnmarshalLooseTypes(t *testing.T) {
 	}
 }
 
-// TestApplyDefaultChatStream covers the four shapes of the defaulting rule: an
-// absent stream (and stream:null) takes the configured default, an explicit value
-// survives, and a Stream=false config overrides the default.
+// TestApplyDefaultChatStream preserves explicit values and defaults to streaming.
 func TestApplyDefaultChatStream(t *testing.T) {
-	streamFalse := false
 	cases := []struct {
-		name         string
-		configStream *bool
-		stream       bool
-		provided     bool
-		want         bool
+		name     string
+		stream   bool
+		provided bool
+		want     bool
 	}{
 		{name: "absent stream takes the default", want: true},
 		{name: "null stream takes the default", want: true},
 		{name: "explicit stream=false is not overridden", stream: false, provided: true, want: false},
-		{name: "config override", configStream: &streamFalse, want: false},
+		{name: "explicit stream=true is preserved", stream: true, provided: true, want: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := &config.Config{}
 			config.ApplyDefaults(cfg)
-			if tc.configStream != nil {
-				cfg.Stream = tc.configStream
-			}
 			h := &Handler{cfg: cfg}
 			req := chatwire.Request{Stream: tc.stream, StreamProvided: tc.provided}
 			h.applyDefaultChatStream(&req)

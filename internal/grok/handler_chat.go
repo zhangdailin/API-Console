@@ -3,6 +3,7 @@ package grok
 import (
 	"net/http"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/config"
 	"strings"
 	"time"
 
@@ -12,15 +13,10 @@ import (
 	"orchids-api/internal/store"
 )
 
-// Chat completions. The only Grok upstream this gateway speaks here is the Build
-// (OAuth CLI) plane; the legacy website and developer planes were removed,
-// so every conversation model is served by the native Responses bridge.
+// Chat completions use the native Grok Build Responses bridge.
 
 func (h *Handler) defaultChatStream() bool {
-	if h == nil || h.configSnapshot() == nil {
-		return true
-	}
-	return h.configSnapshot().ChatDefaultStream()
+	return config.ChatDefaultStream
 }
 
 func (h *Handler) applyDefaultChatStream(req *chatwire.Request) {

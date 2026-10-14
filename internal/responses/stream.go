@@ -31,19 +31,7 @@ type StreamOptions struct {
 	ToolNamespaces ToolNamespaces
 	// onComplete receives the terminal response object after it is built.
 	OnComplete func(map[string]interface{})
-	// SearchHook turns a provider-private search delta into a Responses output
-	// item. Nil means the channel has no private search traffic, so the
-	// translator stays free of provider knowledge.
-	SearchHook SearchItemHook
 }
-
-// SearchItemHook reports the output item a chat delta carries for a provider's
-// private search channel. It returns a nil value when the delta has none.
-//
-// The hook exists because a search item is the one part of a chat stream that
-// has no Responses equivalent: it is injected by this gateway's own
-// provider-to-chat layer, under a private key the protocol never defines.
-type SearchItemHook func(delta map[string]interface{}) (identity string, value map[string]interface{}, done bool)
 
 // WriteStreamFromChatReader is the translation itself.
 func WriteStreamFromChatReader(w http.ResponseWriter, request CreateRequest, reader io.Reader, opts StreamOptions) {
@@ -55,7 +43,6 @@ func WriteStreamFromChatReader(w http.ResponseWriter, request CreateRequest, rea
 	thoughts := map[string]*chatResponseItem{}
 	tools := map[int]*chatResponseItem{}
 	callIDs := map[string]bool{}
-	searches := map[string]*chatResponseItem{}
 	var message *chatResponseItem
 	textIndex, refusalIndex := -1, -1
 	var text, refusal strings.Builder
@@ -185,31 +172,6 @@ func WriteStreamFromChatReader(w http.ResponseWriter, request CreateRequest, rea
 				}
 				activeThought = ""
 			}
-			// A provider-private search delta becomes a Responses output item
-			// only when the caller registered a hook. x_grok_search is Grok
-			// Build's private spelling; the hook keeps that knowledge out of
-			// this package.
-			if opts.SearchHook != nil {
-				key, value, done := opts.SearchHook(delta)
-				if value != nil {
-					state := searches[key]
-					if state == nil {
-						state = add(value)
-						searches[key] = state
-					}
-					for k, v := range value {
-						if k != "id" && k != "status" {
-							state.value[k] = v
-						}
-					}
-					if done {
-						state.closed = true
-						state.value["status"] = value["status"]
-					}
-					meaningful = true
-					activeThought = ""
-				}
-			}
 			for _, kind := range []string{"content", "refusal"} {
 				value := StreamString(delta[kind])
 				if value == "" {
@@ -337,11 +299,7 @@ func WriteStreamFromChatReader(w http.ResponseWriter, request CreateRequest, rea
 	}
 	for _, item := range items {
 		kind := StreamString(item.value["type"])
-		itemStatus := status
-		if kind == "web_search_call" && item.closed {
-			itemStatus = ParseLooseStringAny(item.value["status"])
-		}
-		item.value["status"] = itemStatus
+		item.value["status"] = status
 		switch kind {
 		case "reasoning":
 			part := map[string]interface{}{"type": "summary_text", "text": item.text.String()}

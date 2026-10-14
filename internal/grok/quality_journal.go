@@ -48,7 +48,7 @@ func (h *Handler) auditQualityCheck(ctx context.Context, acc *store.Account, req
 	}
 	metadata := map[string]interface{}{
 		"mode": mode, "max_attempts": policy.MaxAttempts,
-		"hold_timeout_ms": policy.HoldTimeout.Milliseconds(), "on_exhausted": policy.OnExhausted,
+		"hold_timeout_ms": policy.HoldTimeout.Milliseconds(), "on_exhausted": qualityRetryFailOpen,
 		"visible_chars": outcome.Quality.VisibleChars, "reasoning_chars": outcome.Quality.ReasoningChars,
 		"encrypted_chars": outcome.Quality.EncryptedChars, "first_visible_ms": outcome.Quality.FirstVisibleMS,
 	}
@@ -65,7 +65,7 @@ func (h *Handler) auditQualityCheck(ctx context.Context, acc *store.Account, req
 	logger.Log(ctx, audit.Event{
 		Kind: audit.KindRequest, RequestID: middleware.GetRequestID(ctx), Action: "grok_quality_check",
 		APIKeyID: middleware.APIKeyID(ctx), AccountID: accountID, Model: req.Model, Channel: "grok",
-		Provider: ProviderForAccount(acc), Attempt: attempt, Status: status, Duration: duration,
+		Provider: ProviderBuild, Attempt: attempt, Status: status, Duration: duration,
 		ReasoningTokens: int(outcome.Quality.ReasoningTokens), Metadata: metadata,
 	})
 }
@@ -78,7 +78,7 @@ func (h *Handler) auditQualityRetry(ctx context.Context, previous, next *store.A
 	logger.Log(ctx, audit.Event{
 		Kind: audit.KindRequest, RequestID: middleware.GetRequestID(ctx), Action: "grok_quality_retry",
 		APIKeyID: middleware.APIKeyID(ctx), AccountID: next.ID, Model: req.Model, Channel: "grok",
-		Provider: ProviderForAccount(next), Attempt: attempt, Status: "retrying",
+		Provider: ProviderBuild, Attempt: attempt, Status: "retrying",
 		Metadata: map[string]interface{}{"from_account_id": previous.ID, "to_account_id": next.ID},
 	})
 }
@@ -121,7 +121,7 @@ func (h *Handler) auditQualityDegraded(ctx context.Context, acc *store.Account, 
 	logger.Log(ctx, audit.Event{
 		Kind: audit.KindRequest, RequestID: requestID, Action: "grok_quality_degraded",
 		APIKeyID: middleware.APIKeyID(ctx), AccountID: accountID, Model: model, Channel: "grok",
-		Provider: ProviderForAccount(acc), Attempt: turn.Attempt, Status: "degraded", UsageSource: usageSource,
+		Provider: ProviderBuild, Attempt: turn.Attempt, Status: "degraded", UsageSource: usageSource,
 		Details:         outcome.WithheldReason,
 		InputTokens:     responses.InterfaceToInt(outcome.Usage["prompt_tokens"]),
 		OutputTokens:    responses.InterfaceToInt(outcome.Usage["completion_tokens"]),
@@ -148,8 +148,6 @@ const (
 	// qualityResolutionDeliveredDegraded: the last withheld turn was delivered
 	// anyway, because the policy fails open or no other account could serve it.
 	qualityResolutionDeliveredDegraded = "delivered_degraded"
-	// qualityResolutionRejected: the policy fails closed and the client got 502.
-	qualityResolutionRejected = "rejected"
 	// qualityResolutionUndeliverable: nothing was held to deliver; 502.
 	qualityResolutionUndeliverable = "undeliverable"
 )
@@ -198,7 +196,7 @@ func (h *Handler) auditQualityResolution(ctx context.Context, acc *store.Account
 	slog.Log(ctx, level, "grok quality hold: request resolved",
 		"request_id", requestID, "account_id", accountID, "model", model,
 		"resolution", resolution, "stopped", stopped, "withheld_attempts", withheld,
-		"max_attempts", policy.MaxAttempts, "on_exhausted", policy.OnExhausted)
+		"max_attempts", policy.MaxAttempts, "on_exhausted", qualityRetryFailOpen)
 
 	logger := h.auditLoggerSnapshot()
 	if logger == nil {
@@ -208,7 +206,7 @@ func (h *Handler) auditQualityResolution(ctx context.Context, acc *store.Account
 		"withheld_attempts": withheld,
 		"reasons":           reasons,
 		"max_attempts":      policy.MaxAttempts,
-		"on_exhausted":      policy.OnExhausted,
+		"on_exhausted":      qualityRetryFailOpen,
 		// delivered_degraded is the one outcome where the client received an
 		// answer the classifier refused.
 		"client_received_degraded": resolution == qualityResolutionDeliveredDegraded,
@@ -219,7 +217,7 @@ func (h *Handler) auditQualityResolution(ctx context.Context, acc *store.Account
 	logger.Log(ctx, audit.Event{
 		Kind: audit.KindRequest, RequestID: requestID, Action: "grok_quality_resolution",
 		APIKeyID: middleware.APIKeyID(ctx), AccountID: accountID, Model: model, Channel: "grok",
-		Provider: ProviderForAccount(acc), Attempt: withheld, Status: resolution, Details: stopped,
+		Provider: ProviderBuild, Attempt: withheld, Status: resolution, Details: stopped,
 		Metadata: metadata,
 	})
 }
@@ -253,7 +251,7 @@ func (h *Handler) auditQualityGuard(ctx context.Context, acc *store.Account, req
 	}
 	logger.Log(ctx, audit.Event{
 		Kind: audit.KindSystem, RequestID: middleware.GetRequestID(ctx), Action: "grok_quality_guard",
-		AccountID: acc.ID, Model: model, Channel: "grok", Provider: ProviderForAccount(acc),
+		AccountID: acc.ID, Model: model, Channel: "grok", Provider: ProviderBuild,
 		Target: "account:" + strconv.FormatInt(acc.ID, 10), Status: string(action),
 		Details: acc.StatusMessage, Metadata: metadata,
 	})

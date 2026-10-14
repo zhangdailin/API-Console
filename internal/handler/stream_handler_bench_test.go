@@ -40,7 +40,7 @@ func newBenchmarkStreamHandler(b *testing.B) *streamHandler {
 	cfg := &config.Config{DebugEnabled: false}
 	logger := debug.New(false, false)
 	b.Cleanup(func() { logger.Close() })
-	sh := newStreamHandler(cfg, newDiscardFlushResponseWriter(), logger, false, true, adapter.FormatAnthropic)
+	sh := newStreamHandler(cfg, newDiscardFlushResponseWriter(), logger, true, adapter.FormatAnthropic)
 	b.Cleanup(sh.release)
 	return sh
 }
@@ -346,7 +346,7 @@ func BenchmarkStreamingRelayTextDeltaFrame(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				sh := newStreamHandler(cfg, newDiscardFlushResponseWriter(), logger, false, true, adapter.FormatAnthropic)
+				sh := newStreamHandler(cfg, newDiscardFlushResponseWriter(), logger, true, adapter.FormatAnthropic)
 				for j := 0; j < framesPerRun; j++ {
 					sh.handleMessage(msg)
 				}

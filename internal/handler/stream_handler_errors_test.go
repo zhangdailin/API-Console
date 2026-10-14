@@ -32,7 +32,7 @@ func TestStreamFlushFailureCancelsAndDoesNotEmitSuccessfulTerminal(t *testing.T)
 		target := &terminalFlushFailureWriter{ResponseRecorder: httptest.NewRecorder(), failure: failure}
 		logger := debug.New(false, false)
 		defer logger.Close()
-		sh := newStreamHandler(&config.Config{}, target, logger, false, true, format)
+		sh := newStreamHandler(&config.Config{}, target, logger, true, format)
 		defer sh.release()
 		canceled := false
 		sh.cancelUpstream = func() { canceled = true }
@@ -47,7 +47,7 @@ func TestStreamFlushFailureCancelsAndDoesNotEmitSuccessfulTerminal(t *testing.T)
 
 func TestInjectNoAvailableAccountError_RateLimitAnswers429(t *testing.T) {
 	rec := httptest.NewRecorder()
-	sh := newStreamHandler(&config.Config{}, rec, debug.New(false, false), true, false, adapter.FormatAnthropic)
+	sh := newStreamHandler(&config.Config{}, rec, debug.New(false, false), false, adapter.FormatAnthropic)
 
 	sh.InjectNoAvailableAccountError(
 		`upstream API error: status=429, body={"code":"rate-limited","message":"You have hit the rate limit."}`,
@@ -71,7 +71,7 @@ func TestInjectNoAvailableAccountError_RateLimitAnswers429(t *testing.T) {
 // same thing, and the upstream's own text never reaches the client.
 func TestInjectNoAvailableAccountError_CreditExhaustionIsChannelNeutral(t *testing.T) {
 	rec := httptest.NewRecorder()
-	sh := newStreamHandler(&config.Config{}, rec, debug.New(false, false), true, false, adapter.FormatAnthropic)
+	sh := newStreamHandler(&config.Config{}, rec, debug.New(false, false), false, adapter.FormatAnthropic)
 
 	sh.InjectNoAvailableAccountError(
 		`workbuddy API error: status=429, message={"error":{"data":{"code":14018,"msg":"Credits exhausted. Please visit the link below to purchase add-on packs"}}}`,
@@ -95,7 +95,7 @@ func TestInjectNoAvailableAccountError_CreditExhaustionIsChannelNeutral(t *testi
 // uncommitted response still answers with a real status.
 func TestInjectNoAvailableAccountError_StreamingReportsInBandError(t *testing.T) {
 	rec := httptest.NewRecorder()
-	sh := newStreamHandler(&config.Config{}, rec, debug.New(false, false), true, true, adapter.FormatAnthropic)
+	sh := newStreamHandler(&config.Config{}, rec, debug.New(false, false), true, adapter.FormatAnthropic)
 	// Commit the response the way a started stream does: the opening frame is
 	// written lazily now, so a stream only becomes unrevistable once it has begun.
 	// Opening without content keeps this test about the in-band report rather than
@@ -128,7 +128,7 @@ func TestInjectNoAvailableAccountError_StreamingReportsInBandError(t *testing.T)
 func TestStreamError_OpenAIFormatRespectsWhetherTheStreamStarted(t *testing.T) {
 	t.Run("nothing sent yet answers with a status", func(t *testing.T) {
 		rec := httptest.NewRecorder()
-		sh := newStreamHandler(&config.Config{}, rec, debug.New(false, false), true, true, adapter.FormatOpenAI)
+		sh := newStreamHandler(&config.Config{}, rec, debug.New(false, false), true, adapter.FormatOpenAI)
 
 		sh.InjectNoAvailableAccountError(`upstream API error: status=429`, errors.New("no enabled accounts available"))
 
@@ -140,7 +140,7 @@ func TestStreamError_OpenAIFormatRespectsWhetherTheStreamStarted(t *testing.T) {
 
 	t.Run("after content it terminates the stream in band", func(t *testing.T) {
 		rec := httptest.NewRecorder()
-		sh := newStreamHandler(&config.Config{}, rec, debug.New(false, false), true, true, adapter.FormatOpenAI)
+		sh := newStreamHandler(&config.Config{}, rec, debug.New(false, false), true, adapter.FormatOpenAI)
 		sh.handleMessage(upstream.SSEMessage{
 			Type:  "model.text-delta",
 			Event: map[string]any{"delta": "partial"},
@@ -158,7 +158,7 @@ func TestStreamHandler_TerminalWriteFailureOverridesClaimedSuccess(t *testing.T)
 	writer := &failingResponseWriter{err: errors.New("client connection closed")}
 	logger := debug.New(false, false)
 	defer logger.Close()
-	sh := newStreamHandler(&config.Config{}, writer, logger, false, true, adapter.FormatAnthropic)
+	sh := newStreamHandler(&config.Config{}, writer, logger, true, adapter.FormatAnthropic)
 	defer sh.release()
 
 	sh.finishResponse("end_turn")
@@ -169,7 +169,7 @@ func TestStreamHandler_TerminalWriteFailureOverridesClaimedSuccess(t *testing.T)
 }
 
 func TestStreamHandler_TerminalStateAndKeepAliveAreRaceSafe(t *testing.T) {
-	sh, _ := newStreamTestHandler(t, false, true, adapter.FormatAnthropic)
+	sh, _ := newStreamTestHandler(t, true, adapter.FormatAnthropic)
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -200,7 +200,7 @@ func TestStreamHandler_TerminalStateAndKeepAliveAreRaceSafe(t *testing.T) {
 // indistinguishable from an answer.
 func TestReportRequestFailure_ClientRejectionAnswers400(t *testing.T) {
 	rec := httptest.NewRecorder()
-	sh := newStreamHandler(&config.Config{}, rec, debug.New(false, false), true, false, adapter.FormatAnthropic)
+	sh := newStreamHandler(&config.Config{}, rec, debug.New(false, false), false, adapter.FormatAnthropic)
 
 	sh.reportRequestFailure("probe", "client", "The upstream rejected the request parameters or model. Check the request and model selection.", 0)
 

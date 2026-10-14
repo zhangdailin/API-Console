@@ -203,17 +203,17 @@ func TestAppendSSEPayloadBuildersMatchMarshal(t *testing.T) {
 
 // newStreamTestHandler builds a stream handler over a flushing recorder for a
 // test, and tears the logger and handler down with it.
-func newStreamTestHandler(t *testing.T, streaming, toolMode bool, format adapter.ResponseFormat) (*streamHandler, *flushRecorder) {
+func newStreamTestHandler(t *testing.T, streaming bool, format adapter.ResponseFormat) (*streamHandler, *flushRecorder) {
 	t.Helper()
 	rec := newFlushRecorder()
 	logger := debug.New(false, false)
-	sh := newStreamHandler(&config.Config{DebugEnabled: false}, rec, logger, streaming, toolMode, format)
+	sh := newStreamHandler(&config.Config{DebugEnabled: false}, rec, logger, streaming, format)
 	t.Cleanup(func() { sh.release(); logger.Close() })
 	return sh, rec
 }
 
 func TestStreamHandler_TextFlow_AnthropicSSE(t *testing.T) {
-	sh, rec := newStreamTestHandler(t, false, true, adapter.FormatAnthropic)
+	sh, rec := newStreamTestHandler(t, true, adapter.FormatAnthropic)
 
 	// seed a message_start so the stream resembles real output. For
 	// "message_start" the live writer deliberately skips ensureMessageStartLocked,
@@ -234,7 +234,7 @@ func TestStreamHandler_TextFlow_AnthropicSSE(t *testing.T) {
 }
 
 func TestStreamHandler_OpenAI_SendsDONEOnStop(t *testing.T) {
-	sh, rec := newStreamTestHandler(t, false, true, adapter.FormatOpenAI)
+	sh, rec := newStreamTestHandler(t, true, adapter.FormatOpenAI)
 
 	sh.finishResponse("end_turn")
 	out := rec.buf.String()
@@ -265,7 +265,7 @@ func TestExtractThinkingSignature(t *testing.T) {
 }
 
 func TestStreamHandler_CoalescesNonTextFlushes(t *testing.T) {
-	sh, rec := newStreamTestHandler(t, false, true, adapter.FormatAnthropic)
+	sh, rec := newStreamTestHandler(t, true, adapter.FormatAnthropic)
 
 	// The live writers take an explicit flush hint; writeSSEBytesLocked, the live
 	// content_block_stop writer, derives its hint from shouldFlushSSEImmediately,
@@ -306,7 +306,7 @@ func TestStreamHandler_CoalescesNonTextFlushes(t *testing.T) {
 
 func TestStreamHandler_FirstReasoningDeltaFlushesWithoutNextEvent(t *testing.T) {
 	for _, format := range []adapter.ResponseFormat{adapter.FormatAnthropic, adapter.FormatOpenAI} {
-		sh, rec := newStreamTestHandler(t, false, true, format)
+		sh, rec := newStreamTestHandler(t, true, format)
 		sh.handleMessage(upstream.SSEMessage{Type: "model", Event: map[string]any{"type": "reasoning-start"}})
 		before := rec.flushes
 		sh.handleMessage(upstream.SSEMessage{Type: "model", Event: map[string]any{"type": "reasoning-delta", "delta": "first thought"}})
@@ -321,7 +321,7 @@ type shortFrameWriter struct{ flushRecorder }
 func (w *shortFrameWriter) Write(p []byte) (int, error) { return len(p) - 1, nil }
 
 func TestStreamHandler_FrameShortWriteCancelsUpstream(t *testing.T) {
-	sh, _ := newStreamTestHandler(t, false, true, adapter.FormatAnthropic)
+	sh, _ := newStreamTestHandler(t, true, adapter.FormatAnthropic)
 	w := &shortFrameWriter{}
 	sh.w = w
 	cancelled := false
@@ -336,7 +336,7 @@ func TestStreamHandler_FrameShortWriteCancelsUpstream(t *testing.T) {
 }
 
 func TestStreamHandler_FinishResponse_SuppressesGenericEmptyFallbackWhenRequested(t *testing.T) {
-	sh, rec := newStreamTestHandler(t, false, true, adapter.FormatAnthropic)
+	sh, rec := newStreamTestHandler(t, true, adapter.FormatAnthropic)
 
 	sh.finishResponse("end_turn")
 

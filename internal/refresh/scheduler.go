@@ -13,9 +13,6 @@ import (
 	"orchids-api/internal/store"
 )
 
-// ProviderHealthRefreshInterval is how often a channel catalog is re-read.
-const ProviderHealthRefreshInterval = provider.HealthRefreshInterval
-
 // Hub is shared by the admin check path and the refresh scheduler.
 var Hub = refreshqueue.Default()
 
@@ -36,14 +33,7 @@ func maintainAccounts(ctx context.Context, env provider.Env, accounts []*store.A
 
 // StartTokenRefreshLoop refreshes account credentials on their own schedule.
 func StartTokenRefreshLoop(ctx context.Context, configSnapshot func() *config.Config, s *store.Store, lb *loadbalancer.LoadBalancer) {
-	cfg := configSnapshot()
-	if cfg == nil || !cfg.AutoRefreshToken {
-		return
-	}
-	interval := time.Duration(cfg.TokenRefreshInterval) * time.Minute
-	if interval <= 0 {
-		interval = 30 * time.Minute
-	}
+	interval := config.TokenRefreshInterval
 	slog.Debug("Auto refresh token enabled", "interval", interval.String())
 
 	refreshAccounts := func() {

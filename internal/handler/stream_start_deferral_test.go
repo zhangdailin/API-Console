@@ -64,7 +64,7 @@ func TestSharedRefusalRecoversInsideSingleRequest(t *testing.T) {
 // or a failure can no longer be answered with a status.
 func TestStreamOpensOnlyWhenThereIsSomethingToSend(t *testing.T) {
 	rec := newFlushRecorder()
-	sh := newStreamHandler(&config.Config{}, rec, debug.New(false, false), true, true, adapter.FormatAnthropic)
+	sh := newStreamHandler(&config.Config{}, rec, debug.New(false, false), true, adapter.FormatAnthropic)
 	defer sh.release()
 	sh.pendingModel = "qwen3.8-flash"
 
@@ -89,7 +89,7 @@ func TestStreamOpensOnlyWhenThereIsSomethingToSend(t *testing.T) {
 // a queue refusal even after the watchdog's first 15-second tick.
 func TestKeepAliveDoesNotCommitSilentStream(t *testing.T) {
 	rec := newFlushRecorder()
-	sh := newStreamHandler(&config.Config{}, rec, debug.New(false, false), true, true, adapter.FormatAnthropic)
+	sh := newStreamHandler(&config.Config{}, rec, debug.New(false, false), true, adapter.FormatAnthropic)
 	defer sh.release()
 	sh.pendingModel = "qwen3.8-flash"
 
@@ -103,7 +103,7 @@ func TestKeepAliveDoesNotCommitSilentStream(t *testing.T) {
 // after an actual content block has committed the response.
 func TestKeepAliveContinuesAfterStreamOpens(t *testing.T) {
 	rec := newFlushRecorder()
-	sh := newStreamHandler(&config.Config{}, rec, debug.New(false, false), true, true, adapter.FormatAnthropic)
+	sh := newStreamHandler(&config.Config{}, rec, debug.New(false, false), true, adapter.FormatAnthropic)
 	defer sh.release()
 	sh.pendingModel = "qwen3.8-flash"
 	sh.handleMessage(upstream.SSEMessage{Type: "model.text-delta", Event: map[string]any{"delta": "hello"}})
@@ -116,7 +116,7 @@ func TestKeepAliveContinuesAfterStreamOpens(t *testing.T) {
 // client receives a stop for a message that never started.
 func TestTerminalOnlyResponseStillOpensTheStream(t *testing.T) {
 	rec := newFlushRecorder()
-	sh := newStreamHandler(&config.Config{}, rec, debug.New(false, false), true, true, adapter.FormatAnthropic)
+	sh := newStreamHandler(&config.Config{}, rec, debug.New(false, false), true, adapter.FormatAnthropic)
 	defer sh.release()
 	sh.pendingModel = "qwen3.8-flash"
 

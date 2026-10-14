@@ -215,7 +215,6 @@ func newToolValidationHandler(t *testing.T) *streamHandler {
 		&config.Config{},
 		httptest.NewRecorder(),
 		debug.New(false, false),
-		false,
 		false, // non-stream mode for easier assertions
 		adapter.FormatAnthropic,
 	)

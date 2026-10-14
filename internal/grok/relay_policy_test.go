@@ -168,7 +168,7 @@ func TestRelayChatSamplingAndEffortAreClientOwned(t *testing.T) {
 		temperature, topP := 3.0, 1.5
 		req := &chatwire.Request{Model: "grok-4.5", Messages: []chatwire.Message{{Role: "user", Content: "original"}}, ReasoningEffort: &effort, Temperature: &temperature, TopP: &topP}
 		testutil.NoError(t, req.Validate())
-		payload, err := (&Handler{}).responsesPayloadFromChat(ModelSpec{ID: req.Model, UpstreamModel: req.Model, Upstream: UpstreamCLI}, req, true)
+		payload, err := (&Handler{}).responsesPayloadFromChat(ModelSpec{ID: req.Model, UpstreamModel: req.Model}, req, true)
 		testutil.NoError(t, err)
 		testutil.Falsef(t, payload["reasoning"].(map[string]interface{})["effort"] != tc.want || payload["temperature"] != temperature || payload["top_p"] != topP, "effort=%q payload=%v", tc.effort, payload)
 	}
@@ -184,7 +184,7 @@ func TestRelayBuildEffortAliasesFollowModelContract(t *testing.T) {
 	} {
 		effort := tc.effort
 		req := &chatwire.Request{Model: tc.model, Messages: []chatwire.Message{{Role: "user", Content: "hi"}}, ReasoningEffort: &effort}
-		payload, err := (&Handler{}).responsesPayloadFromChat(ModelSpec{ID: tc.model, UpstreamModel: tc.model, Upstream: UpstreamCLI}, req, true)
+		payload, err := (&Handler{}).responsesPayloadFromChat(ModelSpec{ID: tc.model, UpstreamModel: tc.model}, req, true)
 		testutil.NoError(t, err)
 		reasoning, _ := payload["reasoning"].(map[string]interface{})
 		if tc.want == "" {

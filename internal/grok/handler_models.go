@@ -97,7 +97,7 @@ func (h *Handler) resolveConversationModel(ctx context.Context, modelID string) 
 	}
 	catalogs := make([][]modelcatalog.Profile, 0, len(accounts))
 	for _, acc := range accounts {
-		if ProviderForAccount(acc) != ProviderBuild || !store.AccountAuthActive(acc) || strings.TrimSpace(acc.StatusCode) == "401" {
+		if !isGrokAccount(acc) || !store.AccountAuthActive(acc) || strings.TrimSpace(acc.StatusCode) == "401" {
 			continue
 		}
 		catalogs = append(catalogs, modelpolicy.GrokAccountCatalog(acc))
@@ -109,7 +109,7 @@ func (h *Handler) resolveConversationModel(ctx context.Context, modelID string) 
 	spec.AliasReasoningEffort = effort
 	spec = h.applyPersistedRoute(ctx, spec)
 	for _, acc := range accounts {
-		if ProviderForAccount(acc) == ProviderBuild && store.AccountAuthActive(acc) && strings.TrimSpace(acc.StatusCode) != "401" && AccountSupportsModel(acc, spec.UpstreamModel) && h.routeAllowsAccount(ctx, spec.ID, acc.ID) {
+		if isGrokAccount(acc) && store.AccountAuthActive(acc) && strings.TrimSpace(acc.StatusCode) != "401" && AccountSupportsModel(acc, spec.UpstreamModel) && h.routeAllowsAccount(ctx, spec.ID, acc.ID) {
 			return spec, true
 		}
 	}
@@ -117,8 +117,8 @@ func (h *Handler) resolveConversationModel(ctx context.Context, modelID string) 
 }
 
 // applyPersistedRoute overlays the control-plane route on an observed model
-// shape. Media/voice flags remain catalog-owned, while provider and upstream
-// identity are operator-controlled and survive restarts in the model store.
+// shape. Capabilities remain catalog-owned, while the upstream model name is
+// operator-controlled and survives restarts in the model store.
 func (h *Handler) applyPersistedRoute(ctx context.Context, spec ModelSpec) ModelSpec {
 	if h == nil || h.lb == nil || h.lb.Store == nil || strings.TrimSpace(spec.ID) == "" {
 		return spec
@@ -129,10 +129,8 @@ func (h *Handler) applyPersistedRoute(ctx context.Context, spec ModelSpec) Model
 	}
 	upstream := strings.TrimSpace(model.UpstreamModel)
 	upstream = util.FirstNonEmptyUntrimmed(upstream, spec.UpstreamModel)
-	// Build is the only Grok plane this gateway serves, so a stored route row can
-	// only refine the upstream model name.
+	// Build route rows refine the upstream model name.
 	if strings.EqualFold(strings.TrimSpace(model.Provider), ProviderBuild) && upstream != "" {
-		spec.Upstream = UpstreamCLI
 		spec.UpstreamModel = upstream
 	}
 	return spec
@@ -148,10 +146,8 @@ func (h *Handler) ensureResolvedModelEnabled(ctx context.Context, modelID string
 	}
 	// Dynamic Build capabilities are authoritative even before the admin model
 	// table has been reconciled by the next catalog refresh.
-	if spec.Upstream == UpstreamCLI {
-		if dynamic, ok := h.resolveConversationModel(ctx, modelID); ok && strings.EqualFold(dynamic.UpstreamModel, spec.UpstreamModel) {
-			return nil
-		}
+	if dynamic, ok := h.resolveConversationModel(ctx, modelID); ok && strings.EqualFold(dynamic.UpstreamModel, spec.UpstreamModel) {
+		return nil
 	}
 	return err
 }

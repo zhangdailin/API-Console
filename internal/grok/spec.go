@@ -40,7 +40,7 @@ func spec() provider.Spec {
 // catalogEligible reports whether an account can read the Build catalog: a
 // Build OAuth account that still holds a token to present.
 func catalogEligible(acc *store.Account) bool {
-	if acc == nil || ProviderForAccount(acc) != ProviderBuild || !strings.EqualFold(strings.TrimSpace(acc.CredentialType), "oauth") {
+	if acc == nil || !isGrokAccount(acc) || !strings.EqualFold(strings.TrimSpace(acc.CredentialType), "oauth") {
 		return false
 	}
 	return strings.TrimSpace(acc.OAuthAccessToken) != "" || strings.TrimSpace(acc.OAuthRefreshToken) != ""

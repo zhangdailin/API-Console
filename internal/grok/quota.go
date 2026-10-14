@@ -222,7 +222,7 @@ func BuildPlanIsPaid(subscription string) bool {
 // fact. Free is inferred only from a successful zero-value billing profile or from
 // the upstream's own plan name.
 func InferFreeProfile(acc *store.Account) FreeProfileVerdict {
-	if acc == nil || ProviderForAccount(acc) != ProviderBuild || BuildPlanIsPaid(acc.Subscription) {
+	if acc == nil || !isGrokAccount(acc) || BuildPlanIsPaid(acc.Subscription) {
 		return FreeProfileVerdict{}
 	}
 	if !acc.GrokFreeQuota.ConfirmedAt.IsZero() {
@@ -251,7 +251,7 @@ var freeQuotaExhaustionPattern = regexp.MustCompile(`(?i)tokens\s*\(actual/limit
 // account must be left untouched. A refusal without a readable pair is still recorded:
 // it confirms the account is on Free, which keeps the estimated window honest.
 func ApplyFreeQuotaExhaustion(acc *store.Account, body []byte) bool {
-	if acc == nil || ProviderForAccount(acc) != ProviderBuild {
+	if acc == nil || !isGrokAccount(acc) {
 		return false
 	}
 	text := strings.ToLower(string(body))

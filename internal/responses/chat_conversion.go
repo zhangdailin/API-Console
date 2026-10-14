@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"orchids-api/internal/chatwire"
 	"orchids-api/internal/httpserver"
-	"slices"
 
 	"strings"
 	"time"
@@ -406,12 +405,7 @@ func responsesReasoningEffort(reasoning map[string]interface{}) *string {
 
 // ObjectFromChat projects standard Chat completion fields.
 func ObjectFromChat(model string, chat map[string]interface{}) map[string]interface{} {
-	return ObjectFromChatWithExtras(model, chat, nil)
-}
-
-// ObjectFromChatWithExtras permits provider-owned output projections.
-func ObjectFromChatWithExtras(model string, chat map[string]interface{}, extras func(map[string]interface{}) []interface{}) map[string]interface{} {
-	output := OutputFromChat(chat, extras)
+	output := OutputFromChat(chat)
 	finish := ""
 	if choices := InterfaceSlice(chat["choices"]); len(choices) > 0 {
 		choice, _ := choices[0].(map[string]interface{})
@@ -428,14 +422,12 @@ func ObjectFromChatWithExtras(model string, chat map[string]interface{}, extras 
 	}
 	for _, raw := range output {
 		item, _ := raw.(map[string]interface{})
-		if item["type"] != "web_search_call" {
-			item["status"] = status
-		}
+		item["status"] = status
 	}
 	return result
 }
 
-func OutputFromChat(chat map[string]interface{}, extras func(map[string]interface{}) []interface{}) []interface{} {
+func OutputFromChat(chat map[string]interface{}) []interface{} {
 	out := []interface{}{}
 	choices := InterfaceSlice(chat["choices"])
 	if len(choices) == 0 {
@@ -446,26 +438,17 @@ func OutputFromChat(chat map[string]interface{}, extras func(map[string]interfac
 	if message == nil {
 		return out
 	}
-	if extras != nil {
-		out = append(out, extras(message)...)
-	}
-	hasReasoning := slices.ContainsFunc(out, func(raw interface{}) bool {
-		item, _ := raw.(map[string]interface{})
-		return item["type"] == "reasoning"
-	})
-	if !hasReasoning {
-		text := StreamString(FirstNonNil(message["reasoning_content"], message["reasoning"]))
-		signature := StreamString(message["reasoning_encrypted_content"])
-		if text != "" || signature != "" {
-			item := map[string]interface{}{"id": "rs_" + util.RandomHex(12), "type": "reasoning", "status": "completed", "summary": []interface{}{}}
-			if text != "" {
-				item["summary"] = []interface{}{map[string]interface{}{"type": "summary_text", "text": text}}
-			}
-			if signature != "" {
-				item["encrypted_content"] = signature
-			}
-			out = append(out, item)
+	text := StreamString(FirstNonNil(message["reasoning_content"], message["reasoning"]))
+	signature := StreamString(message["reasoning_encrypted_content"])
+	if text != "" || signature != "" {
+		item := map[string]interface{}{"id": "rs_" + util.RandomHex(12), "type": "reasoning", "status": "completed", "summary": []interface{}{}}
+		if text != "" {
+			item["summary"] = []interface{}{map[string]interface{}{"type": "summary_text", "text": text}}
 		}
+		if signature != "" {
+			item["encrypted_content"] = signature
+		}
+		out = append(out, item)
 	}
 	for _, raw := range InterfaceSlice(message["tool_calls"]) {
 		call, _ := raw.(map[string]interface{})

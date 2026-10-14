@@ -127,9 +127,9 @@ func main() {
 			slog.Debug("Config loaded from Redis")
 		}
 	}
-	slog.Info("Media storage initialized", "directory", cfg.MediaDir)
+	slog.Info("Runtime state directory initialized", "directory", cfg.MediaDir)
 
-	lb := loadbalancer.NewWithCacheTTL(s, time.Duration(cfg.LoadBalancerCacheTTL)*time.Second)
+	lb := loadbalancer.NewWithCacheTTL(s, config.LoadBalancerCacheTTL)
 
 	// Connection tracker: use Redis when available
 	var accountTracker loadbalancer.ConnTracker

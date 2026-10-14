@@ -25,7 +25,7 @@ import (
 //
 // The hold is bounded in every direction: a timeout (default 30s), a byte cap,
 // and a bounded retry budget (default 6 accounts). The last attempt is
-// fail-open by default, so a pool of equally strange accounts still answers
+// fail-open, so a pool of equally strange accounts still answers
 // instead of failing a request the upstream completed.
 const (
 	qualityHoldMaxAttemptsDefault = 6
@@ -50,8 +50,7 @@ const (
 	qualityMinEncryptedChars               = int64(256)
 	qualityEncryptedCharsPerReasoningToken = int64(4)
 
-	qualityRetryFailOpen   = "fail_open"
-	qualityRetryFailClosed = "fail_closed"
+	qualityRetryFailOpen = "fail_open"
 )
 
 // tokensFromChars applies the gateway's rune/4 text estimate, the same one the
@@ -81,16 +80,13 @@ const (
 	qualityActionDeliver     qualityRetryAction = "deliver"
 	qualityActionDeliverLast qualityRetryAction = "deliver_last"
 	qualityActionRetry       qualityRetryAction = "retry"
-	qualityActionReject      qualityRetryAction = "reject"
 )
 
-// qualityHoldPolicy is the runtime withhold/retry configuration.
+// qualityHoldPolicy bounds withholding and retries; exhaustion always delivers.
 type qualityHoldPolicy struct {
-	Enabled         bool
 	MaxAttempts     int
 	HoldTimeout     time.Duration
 	MinOutput       int64
-	OnExhausted     string
 	AccountCooldown time.Duration
 }
 
@@ -107,16 +103,7 @@ func normalizeQualityHoldPolicy(policy qualityHoldPolicy) qualityHoldPolicy {
 	if policy.AccountCooldown <= 0 {
 		policy.AccountCooldown = qualityCooldown
 	}
-	if !strings.EqualFold(strings.TrimSpace(policy.OnExhausted), qualityRetryFailOpen) {
-		policy.OnExhausted = qualityRetryFailClosed
-	} else {
-		policy.OnExhausted = qualityRetryFailOpen
-	}
 	return policy
-}
-
-func (p qualityHoldPolicy) failOpen() bool {
-	return normalizeQualityHoldPolicy(p).OnExhausted == qualityRetryFailOpen
 }
 
 // qualityStreamSignals is what one upstream turn observed, expressed in the
@@ -317,9 +304,9 @@ func classifyQualityHoldReason(sig qualityStreamSignals, minOutput int64) (quali
 	return qualityWait, ""
 }
 
-// decideQualityRetry caps withhold recovery at maxAttempts. The last attempt is
-// fail-open unless the deployment asked for fail-closed.
-func decideQualityRetry(verdict qualityVerdict, attemptIndex, maxAttempts int, onExhausted string) qualityRetryAction {
+// decideQualityRetry caps withhold recovery at maxAttempts and delivers the last
+// withheld response when that budget is spent.
+func decideQualityRetry(verdict qualityVerdict, attemptIndex, maxAttempts int) qualityRetryAction {
 	if verdict != qualityWithhold {
 		return qualityActionDeliver
 	}
@@ -332,23 +319,17 @@ func decideQualityRetry(verdict qualityVerdict, attemptIndex, maxAttempts int, o
 	if attemptIndex < maxAttempts-1 {
 		return qualityActionRetry
 	}
-	if normalizeQualityHoldPolicy(qualityHoldPolicy{OnExhausted: onExhausted}).failOpen() {
-		return qualityActionDeliverLast
-	}
-	return qualityActionReject
+	return qualityActionDeliverLast
 }
 
-// boundQualityRetry turns a retry into deliver-last or reject when the routing
+// boundQualityRetry turns a retry into deliver-last when the routing
 // loop has no account left, so a held body is never dropped by continuing into
 // an exhausted loop.
-func boundQualityRetry(action qualityRetryAction, hasNextRoutingAttempt bool, onExhausted string) qualityRetryAction {
+func boundQualityRetry(action qualityRetryAction, hasNextRoutingAttempt bool) qualityRetryAction {
 	if action != qualityActionRetry || hasNextRoutingAttempt {
 		return action
 	}
-	if normalizeQualityHoldPolicy(qualityHoldPolicy{OnExhausted: onExhausted}).failOpen() {
-		return qualityActionDeliverLast
-	}
-	return qualityActionReject
+	return qualityActionDeliverLast
 }
 
 // qualityRequestReplayUnsafe reports whether replaying this request on another

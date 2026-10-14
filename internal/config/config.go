@@ -46,8 +46,7 @@ type Config struct {
 	StreamFlushIntervalMs       int            `json:"stream_flush_interval_ms,omitempty"`
 
 	// ── Hardcoded fields (set unconditionally by ApplyHardcoded) ──
-	DebugLogSSE      bool `json:"-"`
-	SuppressThinking bool `json:"-"`
+	DebugLogSSE bool `json:"-"`
 
 	// ── WorkBuddy international backend (www.workbuddy.ai) ──
 	// Overridable for self-hosted regional deployments and for tests that need a
@@ -116,28 +115,17 @@ type Config struct {
 
 	// Internal operation policy, initialized by ApplyHardcoded. JSON cannot
 	// override these values. Catalog reads and tests may use shorter limits.
-	Stream             *bool `json:"-"`
-	MaxRetries         int   `json:"-"`
-	RetryDelay         int   `json:"-"`
-	AccountSwitchCount int   `json:"-"`
-	// Quality-hold policy. The gateway withholds a degraded reasoning turn
-	// instead of streaming it, then retries it on another account. Holding is on
-	// by default and fails open once the retry budget is spent.
-	QualityHoldEnabled     *bool    `json:"-"`
-	QualityHoldMaxAttempts int      `json:"-"`
-	QualityHoldTimeoutMs   int      `json:"-"`
-	QualityHoldOnExhausted string   `json:"-"`
-	RequestTimeout         int      `json:"-"`
-	TokenRefreshInterval   int      `json:"-"`
-	AutoRefreshToken       bool     `json:"-"`
-	LoadBalancerCacheTTL   int      `json:"-"`
-	ConcurrencyLimit       int      `json:"concurrency_limit,omitempty"`
-	ProxyURL               string   `json:"proxy_url"`
-	ProxyHTTP              string   `json:"proxy_http"`
-	ProxyHTTPS             string   `json:"proxy_https"`
-	ProxyUser              string   `json:"proxy_user"`
-	ProxyPass              string   `json:"proxy_pass"`
-	ProxyBypass            []string `json:"proxy_bypass"`
+	MaxRetries         int      `json:"-"`
+	RetryDelay         int      `json:"-"`
+	AccountSwitchCount int      `json:"-"`
+	RequestTimeout     int      `json:"-"`
+	ConcurrencyLimit   int      `json:"concurrency_limit,omitempty"`
+	ProxyURL           string   `json:"proxy_url"`
+	ProxyHTTP          string   `json:"proxy_http"`
+	ProxyHTTPS         string   `json:"proxy_https"`
+	ProxyUser          string   `json:"proxy_user"`
+	ProxyPass          string   `json:"proxy_pass"`
+	ProxyBypass        []string `json:"proxy_bypass"`
 }
 
 // EgressNodeConfig describes one egress exit node for the Grok proxy pool.
@@ -151,7 +139,7 @@ type EgressNodeConfig struct {
 }
 
 // Clone returns a deep copy suitable for publishing as an immutable runtime
-// snapshot. Config contains pointer and slice fields, so a plain struct copy
+// snapshot. Config contains slice and map fields, so a plain struct copy
 // would still let a later request mutate data observed by concurrent readers.
 func (c *Config) Clone() *Config {
 	if c == nil {
@@ -159,7 +147,6 @@ func (c *Config) Clone() *Config {
 	}
 
 	clone := *c
-	clone.Stream = cloneBool(c.Stream)
 	clone.TrustedProxies = append([]string(nil), c.TrustedProxies...)
 	clone.GrokEgressNodes = append([]EgressNodeConfig(nil), c.GrokEgressNodes...)
 	clone.ProxyBypass = append([]string(nil), c.ProxyBypass...)
@@ -169,14 +156,6 @@ func (c *Config) Clone() *Config {
 			clone.ProviderConcurrencyLimits[key] = value
 		}
 	}
-	return &clone
-}
-
-func cloneBool(value *bool) *bool {
-	if value == nil {
-		return nil
-	}
-	clone := *value
 	return &clone
 }
 
@@ -278,19 +257,10 @@ func ApplyDefaults(cfg *Config) {
 // ApplyHardcoded initializes internal runtime policy. These fields are never
 // read from or written to file, Redis or management JSON.
 func ApplyHardcoded(cfg *Config) {
-	vTrue := true
-	cfg.Stream = &vTrue
 	cfg.MaxRetries = GenerationMaxRetries
 	cfg.RetryDelay = 1000
 	cfg.AccountSwitchCount = 20
 	cfg.RequestTimeout = int(InferenceRequestTimeout.Seconds())
-	cfg.QualityHoldEnabled = nil
-	cfg.QualityHoldMaxAttempts = 0
-	cfg.QualityHoldTimeoutMs = 0
-	cfg.QualityHoldOnExhausted = ""
-	cfg.TokenRefreshInterval = 1
-	cfg.AutoRefreshToken = true
-	cfg.LoadBalancerCacheTTL = 5
 	cfg.ConcurrencyLimit = max(1, boundedDefault(cfg.ConcurrencyLimit, 100, 1000000))
 	cfg.DebugLogSSE = cfg.DebugEnabled
 }
@@ -298,8 +268,6 @@ func ApplyHardcoded(cfg *Config) {
 func (c *Config) VerboseDiagnosticsEnabled() bool {
 	return c != nil && c.DebugEnabled && c.VerboseDiagnostics
 }
-
-func (c *Config) ChatDefaultStream() bool { return c == nil || c.Stream == nil || *c.Stream }
 
 // GrokCLIBaseURLOrDefault returns the Build CLI proxy base URL, defaulting to
 // the official gateway.

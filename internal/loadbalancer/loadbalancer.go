@@ -13,12 +13,13 @@ import (
 
 	"orchids-api/internal/accountpolicy"
 	"orchids-api/internal/channel"
+	"orchids-api/internal/config"
 	"orchids-api/internal/store"
 
 	"golang.org/x/sync/singleflight"
 )
 
-const defaultCacheTTL = 5 * time.Second
+const defaultCacheTTL = config.LoadBalancerCacheTTL
 
 // DefaultAccountConcurrency is the per-account in-flight ceiling every provider
 // falls back to when the account carries no explicit max_concurrent. A single

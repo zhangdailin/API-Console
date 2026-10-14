@@ -62,7 +62,7 @@ func (h *Handler) markAccountStatus(ctx context.Context, acc *store.Account, err
 	if err != nil && isResourceExhaustedError(err) && acc != nil {
 		cooldown := accountpolicy.CooldownRateLimitBase
 		if meta := ParseRateLimitMetadata([]byte(err.Error())); meta != nil {
-			identity := ProviderForAccount(acc) + ":" + rateLimitIdentity(withRateLimitAccount(ctx, acc), "")
+			identity := ProviderBuild + ":" + rateLimitIdentity(withRateLimitAccount(ctx, acc), "")
 			if remaining := teamCooldown.RetryAfterFor(meta.Scope, identity, meta.Model); remaining > 0 {
 				cooldown = accountpolicy.BoundRateLimitCooldown(remaining)
 			} else if meta.RetryAfter > 0 {
@@ -94,13 +94,13 @@ func (h *Handler) markAccountStatus(ctx context.Context, acc *store.Account, err
 			if h.lb != nil && h.lb.Store != nil {
 				_ = h.lb.Store.UpdateAccount(ctx, acc)
 			}
-			h.unbindAffinity(ctx, ProviderForAccount(acc), acc.ID)
+			h.unbindAffinity(ctx, ProviderBuild, acc.ID)
 			return
 		}
 	}
 	// The credential cannot serve this session any more: drop the affinity so the
 	// next turn picks a different account instead of coming back here.
-	h.unbindAffinity(ctx, ProviderForAccount(acc), acc.ID)
+	h.unbindAffinity(ctx, ProviderBuild, acc.ID)
 	h.base.MarkAccountStatus(ctx, acc, err)
 }
 
@@ -185,7 +185,7 @@ func accountUsableForModel(ctx context.Context, acc *store.Account) bool {
 	// A Build Free refusal is authoritative for the whole included-usage
 	// window. Do not send the account back to the upstream every minute while
 	// its confirmed 24-hour reset is still in the future.
-	if ProviderForAccount(acc) == ProviderBuild && !acc.GrokFreeQuota.ResetAt.IsZero() && time.Now().Before(acc.GrokFreeQuota.ResetAt) {
+	if isGrokAccount(acc) && !acc.GrokFreeQuota.ResetAt.IsZero() && time.Now().Before(acc.GrokFreeQuota.ResetAt) {
 		return false
 	}
 	// A credential parked by the quality guard stays out of rotation until its

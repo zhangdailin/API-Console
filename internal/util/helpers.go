@@ -9,17 +9,6 @@ import (
 	"time"
 )
 
-// WithDefaultTimeout creates a context with timeout if not already set
-func WithDefaultTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
-	if timeout <= 0 {
-		return context.WithCancel(ctx)
-	}
-	if _, ok := ctx.Deadline(); ok {
-		return context.WithCancel(ctx)
-	}
-	return context.WithTimeout(ctx, timeout)
-}
-
 // WithAttemptTimeout bounds this operation even when the parent has a longer
 // deadline. Zero disables the local bound without discarding parent cancellation.
 func WithAttemptTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {

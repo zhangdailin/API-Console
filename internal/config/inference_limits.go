@@ -12,4 +12,7 @@ const (
 	SharedRefusalWaitBudget   = 60 * time.Second
 	QoderQueueRetryInterval   = 5 * time.Second
 	GenerationMaxRetries      = 20
+	ChatDefaultStream         = true
+	TokenRefreshInterval      = time.Minute
+	LoadBalancerCacheTTL      = 5 * time.Second
 )

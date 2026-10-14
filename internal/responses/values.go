@@ -1,23 +1,34 @@
 package responses
 
-import (
-	"fmt"
-	"strings"
-)
+import "orchids-api/internal/chatwire"
 
 // ParseLooseStringAny renders an arbitrary JSON-decoded value as a trimmed
 // string. A Responses payload routinely carries a number or a bool where the
 // protocol says string, and a nil must read as "" rather than "<nil>", so the
 // loose read is the only safe one on this boundary.
 func ParseLooseStringAny(value interface{}) string {
-	switch v := value.(type) {
-	case nil:
-		return ""
-	case string:
-		return strings.TrimSpace(v)
-	default:
-		return strings.TrimSpace(fmt.Sprint(v))
-	}
+	return chatwire.ParseLooseStringAny(value)
+}
+
+// ParseLooseBoolAnyForField uses the shared scalar parser and names the field
+// in validation errors.
+func ParseLooseBoolAnyForField(value interface{}, field string) (bool, error) {
+	return chatwire.ParseLooseBoolAnyForField(value, field)
+}
+
+// ParseLooseBoolAny reads the stream field through the shared scalar parser.
+func ParseLooseBoolAny(value interface{}) (bool, error) {
+	return chatwire.ParseLooseBoolAny(value)
+}
+
+// ParseLooseIntAny reads an integer through the shared scalar parser.
+func ParseLooseIntAny(value interface{}) (int, error) {
+	return chatwire.ParseLooseIntAny(value)
+}
+
+// ParseLooseFloatAny reads an optional float through the shared scalar parser.
+func ParseLooseFloatAny(value interface{}) (*float64, error) {
+	return chatwire.ParseLooseFloatAny(value)
 }
 
 // InterfaceMaps reads a JSON array as a slice of maps, accepting both the

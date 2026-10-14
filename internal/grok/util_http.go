@@ -1,8 +1,6 @@
 package grok
 
-// Shared HTTP plumbing used by the Build (OAuth CLI) plane and by the account
-// bookkeeping code. The retired website client that used to live next to these
-// helpers was removed together with the Web SSO plane.
+// Shared HTTP plumbing for Grok Build and account bookkeeping.
 
 import (
 	"compress/flate"

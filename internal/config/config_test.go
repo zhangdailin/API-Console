@@ -12,7 +12,6 @@ func TestConfigDefaults(t *testing.T) {
 	var cfg Config
 	ApplyDefaults(&cfg)
 
-	testutil.Equal(t, cfg.ChatDefaultStream(), true)
 	testutil.Equal(t, cfg.ResponseStoreTTL, 720)
 	testutil.Equal(t, cfg.MediaDir, "data"+string(filepath.Separator)+"tmp")
 	testutil.Equal(t, cfg.GrokCLIClientVersionOrDefault(), "1.0.40")

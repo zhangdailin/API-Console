@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"orchids-api/internal/chatwire"
-	"orchids-api/internal/responses"
 	"strings"
 	"sync"
 	"testing"
@@ -26,7 +25,7 @@ func TestResolveConversationModelUsesAccountBuildCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	spec, ok := h.resolveConversationModel(context.Background(), "grok-future-account-model")
-	testutil.Falsef(t, !ok || spec.Upstream != UpstreamCLI || spec.UpstreamModel != "grok-future-account-model", "dynamic spec=%#v,%v", spec, ok)
+	testutil.Falsef(t, !ok || spec.UpstreamModel != "grok-future-account-model", "dynamic spec=%#v,%v", spec, ok)
 	_, ok = h.resolveConversationModel(context.Background(), "arbitrary-unadvertised-model")
 	testutil.False(t, ok, "unadvertised model must not become an upstream probe")
 	if err := s.CreateModel(context.Background(), &store.Model{
@@ -39,38 +38,30 @@ func TestResolveConversationModelUsesAccountBuildCatalog(t *testing.T) {
 	testutil.Error(t, err)
 }
 
-func TestResponsesStreamTranslationIsIncremental(t *testing.T) {
+func TestNativeResponsesRelayIsIncremental(t *testing.T) {
 	reader, writer := io.Pipe()
+	t.Cleanup(func() { _ = reader.Close(); _ = writer.Close() })
 	recorder := newObservedStreamWriter("response.output_text.delta")
 	done := make(chan struct{})
 	go func() {
-		writeResponsesStreamFromChatReaderRequestWithHook(recorder, responses.CreateRequest{Model: "grok-4.6"}, reader, nil)
-		close(done)
+		defer close(done)
+		_, _, _ = copyNativeCLIResponseAndCaptureModel(recorder, reader, "text/event-stream", "grok-4.6")
 	}()
-
-	_, _ = io.WriteString(writer, "data: {\"choices\":[{\"delta\":{\"content\":\"first\"}}]}\n\n")
+	_, err := io.WriteString(writer, parityText("first"))
+	testutil.NoError(t, err)
 	select {
 	case <-recorder.observed:
 	case <-time.After(time.Second):
-		t.Fatal("first Responses delta was buffered until stream completion")
+		t.Fatal("native Responses delta was buffered until completion")
 	}
+	_, err = io.WriteString(writer, parityTerminal("response.completed"))
+	testutil.NoError(t, err)
 	_ = writer.Close()
 	select {
 	case <-done:
 	case <-time.After(time.Second):
-		t.Fatal("translator did not finish")
+		t.Fatal("native relay did not finish")
 	}
-}
-
-func TestResponsesStreamAggregatesFragmentedToolArguments(t *testing.T) {
-	raw := "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{\\\"x\\\":\"}}]}}]}\n\n" +
-		"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"1}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n" +
-		"data: [DONE]\n\n"
-	recorder := httptest.NewRecorder()
-	writeResponsesStreamFromChatReaderRequestWithHook(recorder, responses.CreateRequest{Model: "grok-4.6"}, strings.NewReader(raw), nil)
-	body := recorder.Body.String()
-	testutil.Equal(t, strings.Count(body, "event: response.output_item.added"), 1)
-	testutil.MustContain(t, body, `"arguments":"{\"x\":1}"`)
 }
 
 type observedStreamWriter struct {

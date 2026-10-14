@@ -100,7 +100,7 @@ func TestRelayIdempotencyKeyIsCallerScoped(t *testing.T) {
 func TestRelayRepeatedTextIsNotFiltered(t *testing.T) {
 	for _, streaming := range []bool{false, true} {
 		rec := httptest.NewRecorder()
-		h := newStreamHandler(&config.Config{}, rec, debug.New(false, false), false, streaming, adapter.FormatAnthropic)
+		h := newStreamHandler(&config.Config{}, rec, debug.New(false, false), streaming, adapter.FormatAnthropic)
 		text := "Hi! How can I help you today?"
 		h.handleMessage(upstream.SSEMessage{Type: "model.text-start", Event: map[string]interface{}{}})
 		for i := 0; i < 3; i++ {
@@ -120,7 +120,7 @@ func TestRelayRepeatedToolCallsHaveIndependentIDs(t *testing.T) {
 	for _, format := range []adapter.ResponseFormat{adapter.FormatAnthropic, adapter.FormatOpenAI} {
 		for _, streaming := range []bool{false, true} {
 			rec := httptest.NewRecorder()
-			h := newStreamHandler(&config.Config{}, rec, debug.New(false, false), false, streaming, format)
+			h := newStreamHandler(&config.Config{}, rec, debug.New(false, false), streaming, format)
 			for _, id := range []string{"call_one", "call_two"} {
 				h.handleMessage(upstream.SSEMessage{Type: "model.tool-call", Event: map[string]interface{}{"toolCallId": id, "toolName": "Write", "input": `{"file_path":"repeat.txt","content":"same content"}`}})
 			}

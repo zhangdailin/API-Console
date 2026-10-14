@@ -55,7 +55,6 @@ type streamHandler struct {
 	// Configuration
 	config              *config.Config
 	isStream            bool
-	suppressThinking    bool
 	useUpstreamUsage    bool
 	responseFormat      adapter.ResponseFormat
 	disallowToolCalls   bool
@@ -146,7 +145,6 @@ func newStreamHandler(
 	cfg *config.Config,
 	w http.ResponseWriter,
 	logger *debug.Logger,
-	suppressThinking bool,
 	isStream bool,
 	responseFormat adapter.ResponseFormat,
 ) *streamHandler {
@@ -158,13 +156,12 @@ func newStreamHandler(
 	}
 
 	h := &streamHandler{
-		config:           cfg,
-		w:                w,
-		flusher:          flusher,
-		isStream:         isStream,
-		logger:           logger,
-		suppressThinking: suppressThinking,
-		responseFormat:   responseFormat,
+		config:         cfg,
+		w:              w,
+		flusher:        flusher,
+		isStream:       isStream,
+		logger:         logger,
+		responseFormat: responseFormat,
 
 		blockIndex:               -1,
 		responseText:             perf.AcquireStringBuilder(),
@@ -273,9 +270,6 @@ func (h *streamHandler) resetRoundState() {
 }
 
 func (h *streamHandler) ensureBlock(blockType string) int {
-	if blockType == "thinking" && h.suppressThinking {
-		return -1
-	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -444,18 +438,6 @@ func (h *streamHandler) handleMessage(msg upstream.SSEMessage) {
 			if data, ok := msg.Event["data"]; ok {
 				slog.Warn("SSE Error Payload", "type", eventKey, "data", data)
 			}
-		}
-	}
-	if h.suppressThinking {
-		if strings.HasPrefix(eventKey, "model.reasoning-") {
-			if eventKey == "model.reasoning-delta" {
-				if delta, _ := msg.Event["delta"].(string); delta != "" {
-					h.mu.Lock()
-					h.hasReasoningOutput = true
-					h.mu.Unlock()
-				}
-			}
-			return
 		}
 	}
 

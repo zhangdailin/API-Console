@@ -16,7 +16,7 @@ Go version comes from `go.mod` (currently 1.26.9). Redis is required at runtime.
 
 - **Code and code comments: English.** Identifiers, log messages, error strings
   visible to clients and comments are English.
-- **Docs under `docs/` and the READMEs: Chinese**, with `README_EN.md` as the
+- **Docs under `docs/` and `README_CN.md`: Chinese**, with `README.md` as the
   English counterpart.
 - Legacy Chinese comments remain in some older files; new and edited comments
   should be English.

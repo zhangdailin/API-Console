@@ -29,33 +29,17 @@ func ErrStreamIdle(label string) error {
 	return actual.(error)
 }
 
-// MonitorReadIdle interrupts a response body that produces no bytes for the
-// configured window. Active long-running streams are unaffected.
-func MonitorReadIdle(body io.ReadCloser, idle time.Duration, cancel context.CancelFunc, label string) io.ReadCloser {
-	if body == nil || idle <= 0 || cancel == nil {
-		return body
-	}
-	monitored := &readIdleBody{
-		body: body, cancel: cancel, idle: idle,
-		timeoutErr: ErrStreamIdle(label), done: make(chan struct{}),
-	}
-	go monitored.watch()
-	return monitored
-}
-
 type readIdleBody struct {
-	progressMu   sync.Mutex
-	progressOnly bool
-	readStarted  time.Time
-	readElapsed  time.Duration
-	body         io.ReadCloser
-	cancel       context.CancelFunc
-	idle         time.Duration
-	timeoutErr   error
-	lastRead     atomic.Int64
-	timedOut     atomic.Bool
-	done         chan struct{}
-	once         sync.Once
+	progressMu  sync.Mutex
+	readStarted time.Time
+	readElapsed time.Duration
+	body        io.ReadCloser
+	cancel      context.CancelFunc
+	idle        time.Duration
+	timeoutErr  error
+	timedOut    atomic.Bool
+	done        chan struct{}
+	once        sync.Once
 }
 
 // MonitorProgressIdle lets the parser reset the budget only for useful events.
@@ -64,7 +48,7 @@ func MonitorProgressIdle(body io.ReadCloser, idle time.Duration, cancel context.
 	if body == nil || idle <= 0 || cancel == nil {
 		return body, func() {}
 	}
-	b := &readIdleBody{body: body, cancel: cancel, idle: idle, timeoutErr: ErrStreamIdle(label), done: make(chan struct{}), progressOnly: true}
+	b := &readIdleBody{body: body, cancel: cancel, idle: idle, timeoutErr: ErrStreamIdle(label), done: make(chan struct{})}
 	go b.watch()
 	return b, func() {
 		b.progressMu.Lock()
@@ -79,20 +63,15 @@ func MonitorProgressIdle(body io.ReadCloser, idle time.Duration, cancel context.
 func (b *readIdleBody) Read(p []byte) (int, error) {
 	// Only wait time inside Read counts. A slow downstream must not expire an
 	// upstream stream while its consumer is processing the previous frame.
-	if b.progressOnly {
+	b.progressMu.Lock()
+	b.readStarted = time.Now()
+	b.progressMu.Unlock()
+	defer func() {
 		b.progressMu.Lock()
-		b.readStarted = time.Now()
+		b.readElapsed += time.Since(b.readStarted)
+		b.readStarted = time.Time{}
 		b.progressMu.Unlock()
-		defer func() {
-			b.progressMu.Lock()
-			b.readElapsed += time.Since(b.readStarted)
-			b.readStarted = time.Time{}
-			b.progressMu.Unlock()
-		}()
-	} else {
-		b.lastRead.Store(time.Now().UnixNano())
-		defer b.lastRead.Store(0)
-	}
+	}()
 	n, err := b.body.Read(p)
 	if err != nil && b.timedOut.Load() {
 		return n, b.timeoutErr
@@ -118,14 +97,9 @@ func (b *readIdleBody) watch() {
 	for {
 		select {
 		case <-ticker.C:
-			stalled := false
-			if b.progressOnly {
-				b.progressMu.Lock()
-				stalled = !b.readStarted.IsZero() && b.readElapsed+time.Since(b.readStarted) >= b.idle
-				b.progressMu.Unlock()
-			} else if started := b.lastRead.Load(); started != 0 {
-				stalled = time.Since(time.Unix(0, started)) >= b.idle
-			}
+			b.progressMu.Lock()
+			stalled := !b.readStarted.IsZero() && b.readElapsed+time.Since(b.readStarted) >= b.idle
+			b.progressMu.Unlock()
 			if stalled {
 				b.timedOut.Store(true)
 				b.cancel()

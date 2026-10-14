@@ -5,7 +5,6 @@ import (
 	"orchids-api/internal/audit"
 	"orchids-api/internal/chatwire"
 	"orchids-api/internal/responses"
-	"strings"
 	"time"
 )
 
@@ -94,26 +93,9 @@ func (c *buildQualityHold) markReasoningStarted() {
 	}
 }
 
-// qualityHoldPolicy reads the deployment's withhold policy. The feature is on by
-// default: it is the only thing that stops a degraded account from dumping into
-// a client, and it fails open at the end of its retry budget.
+// qualityHoldPolicy withholds degraded turns and fails open at the retry limit.
 func (h *Handler) qualityHoldPolicy() qualityHoldPolicy {
-	policy := qualityHoldPolicy{Enabled: true, OnExhausted: qualityRetryFailOpen}
-	cfg := h.configSnapshot()
-	if cfg == nil {
-		return normalizeQualityHoldPolicy(policy)
-	}
-	if cfg.QualityHoldEnabled != nil {
-		policy.Enabled = *cfg.QualityHoldEnabled
-	}
-	policy.MaxAttempts = cfg.QualityHoldMaxAttempts
-	if cfg.QualityHoldTimeoutMs > 0 {
-		policy.HoldTimeout = time.Duration(cfg.QualityHoldTimeoutMs) * time.Millisecond
-	}
-	if strings.TrimSpace(cfg.QualityHoldOnExhausted) != "" {
-		policy.OnExhausted = cfg.QualityHoldOnExhausted
-	}
-	return normalizeQualityHoldPolicy(policy)
+	return normalizeQualityHoldPolicy(qualityHoldPolicy{})
 }
 
 // shouldHoldQualityTurn reports whether this request and plane take part in the
@@ -124,8 +106,7 @@ func (h *Handler) shouldHoldQualityTurn(req *chatwire.Request, provider string) 
 	if h == nil || req == nil {
 		return false
 	}
-	policy := h.qualityHoldPolicy()
-	if !policy.Enabled || provider != ProviderBuild {
+	if provider != ProviderBuild {
 		return false
 	}
 	return qualityExpectsReasoning(req, req.ReasoningReplay)

@@ -198,27 +198,6 @@
 
 #keysList { overflow-x: auto; }
 
-.key-display {
-  padding: 1px var(--space-2);
-  border: 1px solid var(--accent-line);
-  border-radius: var(--radius-sm);
-  background: var(--accent-soft);
-  color: var(--text-main);
-  font-family: var(--font-mono);
-}
-
-.config-key-tip { color: var(--text-soft); }
-
-.config-key-tip {
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border-color);
-  border-left: 3px solid var(--info);
-  border-radius: var(--radius-md);
-  background: var(--info-soft);
-  font-size: 0.8rem;
-  line-height: 1.6;
-}
-
 .config-auth-card {
   margin-top: var(--space-5);
   margin-bottom: var(--space-6);
