@@ -210,8 +210,8 @@ func cloneReplayItemWithCallID(item map[string]any, callID string) map[string]an
 }
 
 func lastAssistantReplayMessage(input []any) (map[string]any, bool) {
-	for _, i := range slices.Backward(input) {
-		item, ok := i.(map[string]any)
+	for _, entry := range slices.Backward(input) {
+		item, ok := entry.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -430,8 +430,8 @@ func replayInsertIndex(input []any, items []any) int {
 			}
 		}
 	}
-	for index, i := range slices.Backward(input) {
-		item, ok := i.(map[string]any)
+	for index, entry := range slices.Backward(input) {
+		item, ok := entry.(map[string]any)
 		if !ok {
 			continue
 		}

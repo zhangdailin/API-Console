@@ -2,15 +2,85 @@ package api
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"orchids-api/internal/middleware"
+	"orchids-api/internal/testutil"
 )
+
+type flowStreamRecorder struct {
+	*httptest.ResponseRecorder
+	mu sync.Mutex
+}
+
+func (w *flowStreamRecorder) Write(data []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.ResponseRecorder.Write(data)
+}
+
+func (w *flowStreamRecorder) frameCount() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return strings.Count(w.Body.String(), "event: flow\n")
+}
+
+func TestOpsFlowCoalescesBurstsAndPreservesHeartbeat(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		tracker := middleware.NewFlowTracker()
+		a := &API{flowTracker: tracker}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		response := &flowStreamRecorder{ResponseRecorder: httptest.NewRecorder()}
+		request := httptest.NewRequest(http.MethodGet, "/api/ops/flow?channel=workbuddy", nil).WithContext(ctx)
+		done := make(chan struct{})
+		started := time.Now()
+		go func() {
+			defer close(done)
+			a.HandleOpsFlow(response, request)
+		}()
+		synctest.Wait()
+		frames := response.frameCount
+		testutil.Equal(t, frames(), 1)
+		checkBound := func() {
+			t.Helper()
+			maximum := 1 + int(time.Since(started)/flowPushInterval)
+			testutil.Falsef(t, frames() > maximum, "got %d frames in %s; maximum %d", frames(), time.Since(started), maximum)
+		}
+		track := tracker.Track(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
+		// Repeated start, first-write and finish notifications cross the heartbeat
+		// boundary while staying much more frequent than the push interval.
+		for range 15 {
+			for range 100 {
+				track(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/workbuddy/v1/chat/completions", nil))
+			}
+			synctest.Wait()
+			checkBound()
+			time.Sleep(flowPushInterval / 2)
+			synctest.Wait()
+			checkBound()
+		}
+		testutil.True(t, frames() > 1, "event snapshots were never delivered")
+		// Drain the final burst before checking that idle heartbeats still send.
+		time.Sleep(2 * flowPushInterval)
+		synctest.Wait()
+		beforeHeartbeat := frames()
+		time.Sleep(time.Second)
+		synctest.Wait()
+		testutil.True(t, frames() > beforeHeartbeat, "idle heartbeat was lost")
+		checkBound()
+		cancel()
+		<-done
+	})
+}
 
 func TestOpsFlowPushesStartAndFinish(t *testing.T) {
 	tracker := middleware.NewFlowTracker()
