@@ -79,13 +79,12 @@ const (
 
 // Client is one WorkBuddy account's upstream client.
 type Client struct {
-	httpClient       *http.Client
-	baseURL          string
-	requestTimeout   time.Duration
-	streamIdle       time.Duration
-	defaultMaxTokens int
-	account          *store.Account
-	accountStore     AccountUpdater
+	httpClient     *http.Client
+	baseURL        string
+	requestTimeout time.Duration
+	streamIdle     time.Duration
+	account        *store.Account
+	accountStore   AccountUpdater
 
 	creds   Credentials
 	updater *tokenUpdater
@@ -113,13 +112,12 @@ func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
 		accountSnapshot = &copied
 	}
 	return &Client{
-		httpClient:       httpclient.GetSharedHTTPClientWithLimits(proxyKey+"|workbuddy-chat", timeout, proxyFunc, cfg != nil && cfg.WorkBuddyHTTP2Enabled, cfg),
-		baseURL:          baseURL,
-		requestTimeout:   timeout,
-		streamIdle:       config.SharedStreamIdleTimeout,
-		defaultMaxTokens: config.WorkBuddyDefaultMaxTokens,
-		account:          accountSnapshot,
-		creds:            ResolveCredentials(acc),
+		httpClient:     httpclient.GetSharedHTTPClientWithLimits(proxyKey+"|workbuddy-chat", timeout, proxyFunc, cfg != nil && cfg.WorkBuddyHTTP2Enabled, cfg),
+		baseURL:        baseURL,
+		requestTimeout: timeout,
+		streamIdle:     config.SharedStreamIdleTimeout,
+		account:        accountSnapshot,
+		creds:          ResolveCredentials(acc),
 	}
 }
 
@@ -269,12 +267,13 @@ func (c *Client) buildBody(req upstream.UpstreamRequest) ([]byte, error) {
 	// leave cache selection and parallel tool scheduling to the upstream.
 	if req.MaxTokens != nil {
 		body["max_tokens"] = *req.MaxTokens
-	} else {
-		budget := c.defaultMaxTokens
-		if budget <= 0 {
-			budget = 8192
+	} else if c.account != nil {
+		// Reasoning shares this budget with the answer. Default to the selected
+		// account's observed model limit for their combined output.
+		_, output := CatalogContextWindows(c.account.WorkBuddyModelIDs)
+		if observed := output[strings.ToLower(model)]; observed > 0 {
+			body["max_tokens"] = observed
 		}
-		body["max_tokens"] = budget
 	}
 	if req.Temperature != nil {
 		body["temperature"] = *req.Temperature

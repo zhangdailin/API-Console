@@ -131,7 +131,6 @@ func TestRemovedGenerationSettingsCannotOverrideFixedPolicy(t *testing.T) {
 	testutil.Equal(t, cfg.RequestTimeout, int(InferenceRequestTimeout.Seconds()))
 	testutil.Equal(t, cfg.MaxRetries, GenerationMaxRetries)
 	testutil.Equal(t, FirstGenerationTimeout.Seconds(), float64(180))
-	testutil.Equal(t, WorkBuddyDefaultMaxTokens, 8192)
 	raw, err := json.Marshal(cfg)
 	testutil.NoError(t, err)
 	testutil.MustNotContainAny(t, string(raw), "anonymous_allow_ips", "first_token_timeout_seconds", "workbuddy_default_max_tokens", "shared_stream_idle_timeout_seconds", "qoder_queue_wait_budget_ms", "request_timeout", "max_retries", "quality_hold_enabled")
