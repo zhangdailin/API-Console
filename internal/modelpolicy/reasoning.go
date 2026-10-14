@@ -1,6 +1,7 @@
 package modelpolicy
 
 import (
+	"orchids-api/internal/accountpolicy"
 	"orchids-api/internal/modelcatalog"
 	"orchids-api/internal/store"
 	"strings"
@@ -33,7 +34,7 @@ func GrokModelProfiles(model *store.Model, accounts []*store.Account) []modelcat
 	}
 	catalogs := make([][]modelcatalog.Profile, 0, len(accounts))
 	for _, acc := range accounts {
-		if acc == nil || !acc.Enabled || !strings.EqualFold(strings.TrimSpace(acc.AccountType), "grok") || !store.AccountAuthActive(acc) || strings.TrimSpace(acc.StatusCode) == "401" || !model.AllowsAccount(acc.ID) {
+		if acc == nil || !acc.Enabled || !accountpolicy.IsGrokAccount(acc) || !store.AccountAuthActive(acc) || strings.TrimSpace(acc.StatusCode) == "401" || !model.AllowsAccount(acc.ID) {
 			continue
 		}
 		for _, profile := range GrokAccountCatalog(acc) {

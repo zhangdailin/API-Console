@@ -69,7 +69,7 @@ func (h *Handler) openCLIAccountSessionByID(ctx context.Context, accountID int64
 	if err != nil {
 		return nil, fmt.Errorf("stored response account is unavailable: %w", err)
 	}
-	if acc == nil || !acc.Enabled || !isGrokAccount(acc) || !AccountSupportsModel(acc, modelID) || !h.routeAllowsAccount(ctx, modelID, acc.ID) || !accountUsableForModel(ctx, acc) || accountpolicy.AccountHeld(acc, time.Now()) || !h.accountCapacityAvailable(acc) {
+	if acc == nil || !acc.Enabled || !accountpolicy.IsGrokAccount(acc) || !AccountSupportsModel(acc, modelID) || !h.routeAllowsAccount(ctx, modelID, acc.ID) || !accountUsableForModel(ctx, acc) || accountpolicy.AccountHeld(acc, time.Now()) || !h.accountCapacityAvailable(acc) {
 		return nil, fmt.Errorf("stored response account is unavailable")
 	}
 	token := strings.TrimSpace(acc.OAuthAccessToken)
@@ -109,7 +109,7 @@ func (h *Handler) openCLIAccountSession(ctx context.Context, excludeIDs []int64,
 		// generic reason here: grok holds a model for its own windows (a free-usage
 		// window, an inference cap), and naming those as "the plan does not cover
 		// the model" would describe them worse than the existing wording does.
-		if acc == nil || !isGrokAccount(acc) || !AccountSupportsModel(acc, modelID) {
+		if acc == nil || !accountpolicy.IsGrokAccount(acc) || !AccountSupportsModel(acc, modelID) {
 			return loadbalancer.ErrAccountNotEligible
 		}
 		if !accountUsableForModel(ctx, acc) || !h.routeAllowsAccount(ctx, modelID, acc.ID) {

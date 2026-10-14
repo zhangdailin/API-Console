@@ -109,7 +109,7 @@ func buildMessages(req upstream.UpstreamRequest) []chatMessage {
 				// trips its role/content validation.
 				continue
 			}
-			out = append(out, chatMessage{Role: role, Content: text, ReasoningContent: reasoningForReplay(msg)})
+			out = append(out, chatMessage{Role: role, Content: text, ReasoningContent: upstream.ReasoningForReplay(msg)})
 			continue
 		}
 
@@ -131,13 +131,6 @@ func buildMessages(req upstream.UpstreamRequest) []chatMessage {
 		out = append(out, chatMessage{Role: "user", Content: text})
 	}
 	return out
-}
-
-func reasoningForReplay(msg prompt.Message) string {
-	if strings.EqualFold(strings.TrimSpace(msg.Role), "assistant") {
-		return strings.TrimSpace(msg.ReasoningContent)
-	}
-	return ""
 }
 
 // convertBlockMessage maps user/system blocks, splitting tool_result blocks

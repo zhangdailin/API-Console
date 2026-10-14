@@ -29,6 +29,15 @@ type ToolCallFunction struct {
 	Arguments string `json:"arguments"`
 }
 
+// ReasoningForReplay returns the reasoning an assistant turn carried as plain
+// text, so a channel can send it back with the history; other roles carry none.
+func ReasoningForReplay(msg prompt.Message) string {
+	if strings.EqualFold(strings.TrimSpace(msg.Role), "assistant") {
+		return strings.TrimSpace(msg.ReasoningContent)
+	}
+	return ""
+}
+
 // ConvertAssistantMessage maps text, thinking and tool-use blocks onto one
 // assistant message and records calls awaiting tool results.
 func ConvertAssistantMessage(msg prompt.Message, pendingToolCalls map[string]bool) (ChatMessage, bool) {

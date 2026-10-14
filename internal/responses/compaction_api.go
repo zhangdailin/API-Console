@@ -75,9 +75,6 @@ func CompactionErrorIsTransient(err error) bool { return gatewayCompactionErrorI
 // CompactionBlobError is the typed failure of opening a sealed blob.
 type CompactionBlobError = compactionBlobError
 
-// CompactionCleanSummary normalizes a summary the model produced.
-func CompactionCleanSummary(raw string) string { return cleanGatewayCompactionSummary(raw) }
-
 // IsDegenerateCompactionSummary reports whether a summary is unusable.
 func IsDegenerateCompactionSummary(summary string) bool {
 	return isDegenerateGatewayCompactionSummary(summary)
@@ -137,6 +134,3 @@ const ClientCompactionPromptMarker = clientCompactionPromptMarker
 
 // CompactionPrefix marks a blob this gateway sealed.
 const CompactionPrefix = gatewayCompactionPrefix
-
-// MinCompactionRunes is the shortest usable summary.
-const MinCompactionRunes = minGatewayCompactionRunes

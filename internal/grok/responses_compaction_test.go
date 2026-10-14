@@ -197,21 +197,6 @@ func TestBuildGatewayCompactionResponseShape(t *testing.T) {
 	testutil.Equal(t, completedResponse["status"], "completed")
 }
 
-// asError is a tiny local alias so the test does not have to import errors just
-// for one assertion.
-func asError(err error, target any) bool {
-	switch typed := target.(type) {
-	case **responses.CompactionBlobError:
-		blobErr, ok := err.(*responses.CompactionBlobError)
-		if ok {
-			*typed = blobErr
-		}
-		return ok
-	default:
-		return false
-	}
-}
-
 // A compaction_trigger turn with streaming enabled must come back as a synthetic
 // SSE sequence, not as a buffered JSON body: Codex holds the connection open.
 func TestHandleResponsesCompactionTriggerStreamsSyntheticEvents(t *testing.T) {

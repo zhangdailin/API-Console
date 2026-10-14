@@ -185,7 +185,7 @@ func accountUsableForModel(ctx context.Context, acc *store.Account) bool {
 	// A Build Free refusal is authoritative for the whole included-usage
 	// window. Do not send the account back to the upstream every minute while
 	// its confirmed 24-hour reset is still in the future.
-	if isGrokAccount(acc) && !acc.GrokFreeQuota.ResetAt.IsZero() && time.Now().Before(acc.GrokFreeQuota.ResetAt) {
+	if accountpolicy.IsGrokAccount(acc) && !acc.GrokFreeQuota.ResetAt.IsZero() && time.Now().Before(acc.GrokFreeQuota.ResetAt) {
 		return false
 	}
 	// A credential parked by the quality guard stays out of rotation until its

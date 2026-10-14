@@ -3,6 +3,7 @@ package grok
 import (
 	"context"
 	"fmt"
+	"orchids-api/internal/accountpolicy"
 	"orchids-api/internal/modelcatalog"
 	"orchids-api/internal/modelpolicy"
 	"orchids-api/internal/store"
@@ -97,7 +98,7 @@ func (h *Handler) resolveConversationModel(ctx context.Context, modelID string) 
 	}
 	catalogs := make([][]modelcatalog.Profile, 0, len(accounts))
 	for _, acc := range accounts {
-		if !isGrokAccount(acc) || !store.AccountAuthActive(acc) || strings.TrimSpace(acc.StatusCode) == "401" {
+		if !accountpolicy.IsGrokAccount(acc) || !store.AccountAuthActive(acc) || strings.TrimSpace(acc.StatusCode) == "401" {
 			continue
 		}
 		catalogs = append(catalogs, modelpolicy.GrokAccountCatalog(acc))
@@ -109,7 +110,7 @@ func (h *Handler) resolveConversationModel(ctx context.Context, modelID string) 
 	spec.AliasReasoningEffort = effort
 	spec = h.applyPersistedRoute(ctx, spec)
 	for _, acc := range accounts {
-		if isGrokAccount(acc) && store.AccountAuthActive(acc) && strings.TrimSpace(acc.StatusCode) != "401" && AccountSupportsModel(acc, spec.UpstreamModel) && h.routeAllowsAccount(ctx, spec.ID, acc.ID) {
+		if accountpolicy.IsGrokAccount(acc) && store.AccountAuthActive(acc) && strings.TrimSpace(acc.StatusCode) != "401" && AccountSupportsModel(acc, spec.UpstreamModel) && h.routeAllowsAccount(ctx, spec.ID, acc.ID) {
 			return spec, true
 		}
 	}

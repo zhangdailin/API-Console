@@ -310,7 +310,7 @@ func Classify(acc *store.Account, err error, model string) Verdict {
 		}
 	case "403", "404":
 		cooldown := CooldownBlocked
-		if isGrok(acc) {
+		if IsGrokAccount(acc) {
 			// Grok answers 403 for transient upstream denials, which clear quickly.
 			cooldown = CooldownBlockedGro
 		}
@@ -481,7 +481,7 @@ func isModelScopedFailure(lower string) bool {
 // must be concrete: waiting cannot repair a credential the upstream retired.
 func credentialMessage(acc *store.Account) string {
 	switch {
-	case isGrok(acc):
+	case IsGrokAccount(acc):
 		return "上游拒绝该 Grok Build OAuth 授权，请在账号管理中重新完成官方登录"
 	case acc != nil && strings.EqualFold(strings.TrimSpace(acc.AccountType), "workbuddy"):
 		return "上游拒绝该 WorkBuddy 授权，请在账号管理中重新完成 OAuth 登录"
@@ -492,7 +492,8 @@ func credentialMessage(acc *store.Account) string {
 	}
 }
 
-func isGrok(acc *store.Account) bool {
+// IsGrokAccount reports whether an account belongs to the Grok channel.
+func IsGrokAccount(acc *store.Account) bool {
 	return acc != nil && strings.EqualFold(strings.TrimSpace(acc.AccountType), "grok")
 }
 
@@ -573,7 +574,7 @@ func CooldownFor(acc *store.Account) time.Duration {
 		// says the allowance is back.
 		return CooldownPayment
 	case "403", "404":
-		if isGrok(acc) {
+		if IsGrokAccount(acc) {
 			return CooldownBlockedGro
 		}
 		return CooldownBlocked

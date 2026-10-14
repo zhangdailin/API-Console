@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"orchids-api/internal/accountpolicy"
 	"orchids-api/internal/store"
 	"time"
 )
@@ -81,7 +82,7 @@ func (h *Handler) persistGrokQuotaSync(job grokQuotaSyncJob) {
 	}
 	NormalizeProvider(latest)
 	changed := false
-	if isGrokAccount(latest) {
+	if accountpolicy.IsGrokAccount(latest) {
 		changed = ApplyBuildRateLimits(latest, headers)
 	} else {
 		changed = info != nil && ApplyQuotaInfo(latest, info)

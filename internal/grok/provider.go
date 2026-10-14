@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"orchids-api/internal/accountpolicy"
 	"orchids-api/internal/modelcatalog"
 	"orchids-api/internal/store"
 )
@@ -15,12 +16,8 @@ const ProviderBuild = "build"
 
 const modelSnapshotTTL = 6 * time.Hour
 
-func isGrokAccount(acc *store.Account) bool {
-	return acc != nil && strings.EqualFold(strings.TrimSpace(acc.AccountType), "grok")
-}
-
 func NormalizeProvider(acc *store.Account) bool {
-	if !isGrokAccount(acc) {
+	if !accountpolicy.IsGrokAccount(acc) {
 		return false
 	}
 	if strings.EqualFold(strings.TrimSpace(acc.GrokProvider), ProviderBuild) {
@@ -43,7 +40,7 @@ func AccountSupportsModel(acc *store.Account, modelID string) bool {
 }
 
 func CLIModelsNeedSync(acc *store.Account, now time.Time) bool {
-	if !isGrokAccount(acc) || len(acc.GrokModels) == 0 || acc.GrokModelsSyncedAt.IsZero() {
+	if !accountpolicy.IsGrokAccount(acc) || len(acc.GrokModels) == 0 || acc.GrokModelsSyncedAt.IsZero() {
 		return true
 	}
 	return !now.Before(acc.GrokModelsSyncedAt.Add(modelSnapshotTTL))

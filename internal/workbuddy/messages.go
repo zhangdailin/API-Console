@@ -117,12 +117,12 @@ func buildMessages(req upstream.UpstreamRequest) []ChatMessage {
 			if role == "system" {
 				text = filterClientSystemText(text)
 			}
-			if strings.TrimSpace(text) == "" && reasoningForReplay(msg) == "" {
+			if strings.TrimSpace(text) == "" && upstream.ReasoningForReplay(msg) == "" {
 				// Keep an assistant reasoning item for its tool turn; an empty
 				// message without either text or reasoning carries nothing.
 				continue
 			}
-			out = append(out, ChatMessage{Role: role, Content: text, ReasoningContent: reasoningForReplay(msg)})
+			out = append(out, ChatMessage{Role: role, Content: text, ReasoningContent: upstream.ReasoningForReplay(msg)})
 			continue
 		}
 
@@ -203,13 +203,6 @@ func mergeAssistantToolTurns(messages []ChatMessage) []ChatMessage {
 		start = end
 	}
 	return out
-}
-
-func reasoningForReplay(msg prompt.Message) string {
-	if strings.EqualFold(strings.TrimSpace(msg.Role), "assistant") {
-		return strings.TrimSpace(msg.ReasoningContent)
-	}
-	return ""
 }
 
 // convertBlockMessage maps user/system blocks, splitting tool_result blocks

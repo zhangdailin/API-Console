@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"orchids-api/internal/accountpolicy"
 	"orchids-api/internal/provider"
 	"orchids-api/internal/store"
 )
@@ -69,7 +70,7 @@ func (h *Handler) observedModelContextWindows(ctx context.Context) *modelContext
 		if acc == nil {
 			continue
 		}
-		if strings.EqualFold(strings.TrimSpace(acc.AccountType), "grok") {
+		if accountpolicy.IsGrokAccount(acc) {
 			for _, profile := range acc.GrokModelCatalog {
 				key := contextKey("grok", profile.ModelID)
 				// A public route may select any eligible account, so publish the
