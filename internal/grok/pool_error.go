@@ -19,6 +19,7 @@ import (
 const (
 	grokResponseAccountUnavailableMessage = "No Grok account is currently available for this response. Retry later, or check the account pool in Admin UI."
 	grokModelAccountUnavailableMessage    = "No upstream account is currently available for this model. Retry later or add capacity."
+	grokFreeUsageExhaustedMessage         = "The selected upstream account has exhausted its included free usage for this model. Retry later or use another model."
 )
 
 // grokPoolAnswer is one answer to a pool failure: the status and code a client
@@ -93,6 +94,9 @@ func grokUpstreamFailureMessage(err error) string {
 	if err == nil {
 		return apperrors.PublicMessage("")
 	}
+	if isFreeUsageExhaustedError(err) {
+		return grokFreeUsageExhaustedMessage
+	}
 	if !isUpstreamFailure(err) {
 		return err.Error()
 	}
@@ -126,5 +130,9 @@ func writeGrokUpstreamFailure(w http.ResponseWriter, status int, err error) {
 	if errors.As(err, &typed) && (status == http.StatusUnauthorized || status == http.StatusForbidden) {
 		status = http.StatusServiceUnavailable
 	}
-	writeResponsesAPIError(w, status, "upstream_error", grokUpstreamFailureMessage(err))
+	code := "upstream_error"
+	if isFreeUsageExhaustedError(err) {
+		status, code = http.StatusTooManyRequests, "free_usage_exhausted"
+	}
+	writeResponsesAPIError(w, status, code, grokUpstreamFailureMessage(err))
 }

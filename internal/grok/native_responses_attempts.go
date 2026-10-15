@@ -84,14 +84,18 @@ func (h *Handler) serveNativeResponses(w http.ResponseWriter, r *http.Request, s
 	}
 	policy := h.qualityHoldPolicy()
 	for attempt := 1; ; attempt++ {
-		// Hosted tools may already have executed; continuations name state owned
-		// by the original account. Neither permits cross-account replay.
+		// Hosted tools may already have executed unless the upstream explicitly
+		// rejected the free allowance before generation. Continuations always
+		// remain on their creating account, including after such a rejection.
 		unsafe := pinned || chatwire.ParseLooseStringAny(immutable["previous_response_id"]) != "" || qualityRequestReplayUnsafe(nativeQualityRequest(spec.ID, immutable))
 		limit := remaining
-		if unsafe {
+		var allowSwitch func(error) bool
+		if pinned || chatwire.ParseLooseStringAny(immutable["previous_response_id"]) != "" {
 			limit = 1
+		} else if unsafe {
+			allowSwitch = isFreeUsageExhaustedError
 		}
-		resp, failure := h.retryWithAccountSwitchLimit(ctx, sess, 1500*time.Millisecond, request, openNext, nil, limit)
+		resp, failure := h.retryWithAccountSwitchWhen(ctx, sess, 1500*time.Millisecond, request, openNext, nil, limit, allowSwitch)
 		if failure != nil {
 			result.Err = failure
 			writeGrokUpstreamFailure(w, upstreamHTTPResponseStatus(failure), failure)

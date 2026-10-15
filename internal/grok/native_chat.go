@@ -559,11 +559,11 @@ func (h *Handler) serveNativeChat(ctx context.Context, w http.ResponseWriter, re
 	// reasons lists the detector behind each withheld attempt, in order.
 	var reasons []string
 	for attempt := 0; ; attempt++ {
-		limit := remaining
+		var allowSwitch func(error) bool
 		if replayUnsafe {
-			limit = 1
+			allowSwitch = isFreeUsageExhaustedError
 		}
-		resp, err := h.retryWithAccountSwitchLimit(ctx, sess, 1500*time.Millisecond, request, openNext, nil, limit)
+		resp, err := h.retryWithAccountSwitchWhen(ctx, sess, 1500*time.Millisecond, request, openNext, nil, remaining, allowSwitch)
 		body, withheld := h.finishUpstreamChat(ctx, w, req, sess, logger, provider, endpoint, func() http.Header {
 			return h.cliHeaders(sess.acc, sess.token)
 		}, payload, resp, err, attempt+1)
@@ -673,6 +673,10 @@ func (h *Handler) retryWithAccountSwitch(ctx context.Context, sess *chatAccountS
 }
 
 func (h *Handler) retryWithAccountSwitchLimit(ctx context.Context, sess *chatAccountSession, switchPace time.Duration, doRequest func() (*http.Response, error), openNext func(used []int64) (*chatAccountSession, error), onSwitch func() error, hardLimit int) (*http.Response, error) {
+	return h.retryWithAccountSwitchWhen(ctx, sess, switchPace, doRequest, openNext, onSwitch, hardLimit, nil)
+}
+
+func (h *Handler) retryWithAccountSwitchWhen(ctx context.Context, sess *chatAccountSession, switchPace time.Duration, doRequest func() (*http.Response, error), openNext func(used []int64) (*chatAccountSession, error), onSwitch func() error, hardLimit int, allowSwitch func(error) bool) (*http.Response, error) {
 	maxAttempts := h.accountSwitchBudget()
 	if hardLimit > 0 && maxAttempts > hardLimit {
 		maxAttempts = hardLimit
@@ -701,7 +705,7 @@ func (h *Handler) retryWithAccountSwitchLimit(ctx context.Context, sess *chatAcc
 		if markAllGrokAccountStatuses(err) {
 			h.markAccountStatus(ctx, sess.acc, err)
 		}
-		if !shouldSwitchGrokAccount(err) || attempt >= maxAttempts {
+		if !shouldSwitchGrokAccount(err) || attempt >= maxAttempts || (allowSwitch != nil && !allowSwitch(err)) {
 			return nil, err
 		}
 

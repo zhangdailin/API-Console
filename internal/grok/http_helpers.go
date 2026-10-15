@@ -89,6 +89,13 @@ func writeGrokUpstreamError(w http.ResponseWriter, err error) {
 		writeGrokError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if isFreeUsageExhaustedError(err) {
+		if retryAfter := upstreamRetryAfterSeconds(err); retryAfter > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+		}
+		writeGrokErrorCode(w, http.StatusTooManyRequests, "free_usage_exhausted", grokFreeUsageExhaustedMessage)
+		return
+	}
 	text := err.Error()
 	category := apperrors.ClassifyUpstreamError(text).Category
 	status := apperrors.StatusForCategory(category)

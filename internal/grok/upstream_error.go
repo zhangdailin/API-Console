@@ -1,6 +1,7 @@
 package grok
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,20 @@ import (
 )
 
 const maxUpstreamBodyBytes = 4096
+
+// Only this structured rejection proves that the request was refused before
+// generation. A bare 429, transport error or successful tool turn cannot prove
+// that replaying a hosted tool request is safe.
+func isFreeUsageExhaustedError(err error) bool {
+	var upstream *grokUpstreamError
+	if !errors.As(err, &upstream) || upstream == nil || upstream.status != http.StatusTooManyRequests {
+		return false
+	}
+	var rejection struct {
+		Code string `json:"code"`
+	}
+	return json.Unmarshal([]byte(upstream.body), &rejection) == nil && rejection.Code == "subscription:free-usage-exhausted"
+}
 
 // grokUpstreamError is a typed Grok upstream failure that preserves the HTTP
 // status, a sanitized copy of the response headers, and a bounded body so
