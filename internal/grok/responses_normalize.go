@@ -66,6 +66,25 @@ func normalizeBuildResponsesPayload(payload map[string]any) error {
 	}
 	tools := responses.InterfaceMaps(payload["tools"])
 	tools = normalizeBuildFunctionTools(tools)
+	for i, tool := range tools {
+		if tool["type"] != "web_search" {
+			continue
+		}
+		if raw, exists := tool["external_web_access"]; exists {
+			enabled, ok := raw.(bool)
+			if !ok {
+				return fmt.Errorf("tools[%d].external_web_access must be a boolean", i)
+			}
+			if !enabled {
+				return fmt.Errorf("tools[%d].external_web_access=false is not supported by Grok Build; omit the web search tool to disable external access", i)
+			}
+			// Build supports external search but rejects this OpenAI control.
+			// Copy before removal so retries and caller-owned tools stay intact.
+			tool = responses.CloneStringInterfaceMap(tool)
+			delete(tool, "external_web_access")
+			tools[i] = tool
+		}
+	}
 	if len(tools) == 0 {
 		delete(payload, "tools")
 		delete(payload, "tool_choice")

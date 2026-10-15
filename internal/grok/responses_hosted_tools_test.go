@@ -1,11 +1,57 @@
 package grok
 
 import (
+	"encoding/json"
 	"orchids-api/internal/chatwire"
 	"orchids-api/internal/responses"
 	"orchids-api/internal/testutil"
+	"strings"
 	"testing"
 )
+
+func TestBuildWebSearchExternalAccessCompatibility(t *testing.T) {
+	for _, route := range []string{"responses", "chat"} {
+		t.Run(route, func(t *testing.T) {
+			search := map[string]any{"type": "web_search", "external_web_access": true,
+				"filters": map[string]any{"allowed_domains": []any{"example.com"}}}
+			function := map[string]any{"type": "function", "name": "lookup", "parameters": map[string]any{"type": "object"}}
+			tools := []map[string]any{search, function}
+			before, _ := json.Marshal(tools)
+			payload := map[string]any{"model": "grok-4.7", "input": "search", "tools": tools}
+			var err error
+			if route == "chat" {
+				payload, err = (&Handler{}).responsesPayloadFromChat(ModelSpec{UpstreamModel: "grok-4.7"}, &chatwire.Request{
+					Messages: []chatwire.Message{{Role: "user", Content: "search"}}, ResponsesTools: tools,
+				}, true)
+			} else {
+				err = normalizeBuildResponsesPayload(payload)
+			}
+			testutil.NoError(t, err)
+			wire := responses.InterfaceMaps(payload["tools"])
+			testutil.Equal(t, len(wire), 3)
+			if _, exists := wire[0]["external_web_access"]; exists {
+				t.Fatal("Build must not receive external_web_access")
+			}
+			gotFilters, _ := json.Marshal(wire[0]["filters"])
+			wantFilters, _ := json.Marshal(search["filters"])
+			testutil.Equal(t, string(gotFilters), string(wantFilters))
+			testutil.Equal(t, wire[1]["name"], "lookup")
+			testutil.Equal(t, wire[2]["type"], "x_search")
+			after, _ := json.Marshal(tools)
+			testutil.Equal(t, string(after), string(before))
+		})
+	}
+	for _, value := range []any{false, "true", nil, 1} {
+		payload := map[string]any{"tools": []map[string]any{{"type": "web_search", "external_web_access": value}}}
+		err := normalizeBuildResponsesPayload(payload)
+		if err == nil || !strings.Contains(err.Error(), "tools[0].external_web_access") {
+			t.Fatalf("external_web_access=%v: expected explicit local rejection, got %v", value, err)
+		}
+		if hasBuildHostedTool(responses.InterfaceMaps(payload["tools"]), "x_search") {
+			t.Fatal("rejected web search must not enable an X search route")
+		}
+	}
+}
 
 // responsesSearchRequest is what the Grok tools Build sends when the operator
 // switches Web search and X search on: both hosted tools travel in the Responses
