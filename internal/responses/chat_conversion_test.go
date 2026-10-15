@@ -14,6 +14,23 @@ import (
 	"time"
 )
 
+func TestResponsesSessionMetadataSurvivesChatRoundTrip(t *testing.T) {
+	var req CreateRequest
+	testutil.NoError(t, json.Unmarshal([]byte(`{"model":"m","input":"Inspect source","conversation_id":"conversation","metadata":{"session_id":"session"},"client_metadata":{"thread_id":"thread","turn_id":"turn"}}`), &req))
+	chat, err := ChatRequestFromResponses(req)
+	testutil.NoError(t, err)
+	raw, err := json.Marshal(chat)
+	testutil.NoError(t, err)
+	var roundTrip chatwire.Request
+	testutil.NoError(t, json.Unmarshal(raw, &roundTrip))
+	testutil.Equal(t, roundTrip.ConversationID, "conversation")
+	testutil.Equal(t, roundTrip.Metadata["session_id"], "session")
+	testutil.Equal(t, roundTrip.ClientMetadata["thread_id"], "thread")
+	testutil.Equal(t, roundTrip.ClientMetadata["turn_id"], "turn")
+	roundTrip.ClientMetadata["thread_id"] = "changed"
+	testutil.Equal(t, req.ClientMetadata["thread_id"], "thread")
+}
+
 func TestResponsesObjectFromChat_ConvertsMessageAndToolCalls(t *testing.T) {
 	chat := map[string]any{
 		"model": "grok-4.20-0309",

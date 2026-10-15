@@ -68,6 +68,9 @@ type Spec struct {
 	// Capabilities answers catalog questions for the shared pipeline.
 	Capabilities Capabilities
 
+	// ConversationAffinity keeps successive turns on an eligible account.
+	ConversationAffinity bool
+
 	Probe *Probe
 
 	// Catalog reads the channel's upstream model catalog.

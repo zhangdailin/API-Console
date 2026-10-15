@@ -13,7 +13,8 @@ import (
 )
 
 type accountSelectionOptions struct {
-	ModelID string
+	ModelID            string
+	PreferredAccountID int64
 }
 
 // acquireAccountSelection is the form the request path uses: it returns the
@@ -135,8 +136,9 @@ func (h *Handler) selectAccountRecordWithOptions(ctx context.Context, targetChan
 	// honorsModelCooldown already covers the qoder and workbuddy channels; cline
 	// is the one extra channel whose catalog the filter below understands.
 	needsFilter := model != "" && (honorsModelCooldown(channel) || channel == "cline")
+	var filter loadbalancer.AccountFilter
 	if needsFilter {
-		return h.loadBalancer.GetNextAccountExcludingByChannelWithTrackerFilter(ctx, failedAccountIDs, targetChannel, h.connTracker, func(acc *store.Account) error {
+		filter = func(acc *store.Account) error {
 			if channel == "cline" && !provider.SupportsModel("cline", acc, model) {
 				return loadbalancer.ErrAccountNotEligible
 			}
@@ -178,9 +180,9 @@ func (h *Handler) selectAccountRecordWithOptions(ctx context.Context, targetChan
 				return nil
 			}
 			return loadbalancer.ErrAccountNotEligible
-		})
+		}
 	}
-	return h.loadBalancer.GetNextAccountExcludingByChannelWithTracker(ctx, failedAccountIDs, targetChannel, h.connTracker)
+	return h.loadBalancer.GetNextAccountWithPreference(ctx, failedAccountIDs, targetChannel, h.connTracker, filter, opts.PreferredAccountID)
 }
 
 func effectiveAccountConcurrencyLimit(acc *store.Account) int64 {

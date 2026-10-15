@@ -20,9 +20,10 @@ func init() { provider.Register(spec()) }
 // spec describes the Qoder channel to the rest of the gateway.
 func spec() provider.Spec {
 	return provider.Spec{
-		ID:           channel.Qoder,
-		NewClient:    newProviderClient,
-		Capabilities: capabilities{},
+		ID:                   channel.Qoder,
+		NewClient:            newProviderClient,
+		Capabilities:         capabilities{},
+		ConversationAffinity: true,
 		Probe: &provider.Probe{
 			Subject:  "Qoder control plane",
 			Endpoint: DefaultOpenAPIBaseURL,

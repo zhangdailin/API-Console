@@ -124,6 +124,12 @@ func (lb *LoadBalancer) GetNextAccountExcludingByChannelWithTracker(ctx context.
 }
 
 func (lb *LoadBalancer) GetNextAccountExcludingByChannelWithTrackerFilter(ctx context.Context, excludeIDs []int64, channel string, tracker ConnTracker, filter AccountFilter) (*store.Account, error) {
+	return lb.GetNextAccountWithPreference(ctx, excludeIDs, channel, tracker, filter, 0)
+}
+
+// GetNextAccountWithPreference applies the normal eligibility and capacity
+// checks before honoring a conversation's preferred account.
+func (lb *LoadBalancer) GetNextAccountWithPreference(ctx context.Context, excludeIDs []int64, channel string, tracker ConnTracker, filter AccountFilter, preferredID int64) (*store.Account, error) {
 	accounts, err := lb.getEnabledAccounts(ctx)
 	if err != nil {
 		return nil, err
@@ -155,13 +161,6 @@ func (lb *LoadBalancer) GetNextAccountExcludingByChannelWithTrackerFilter(ctx co
 		excludeSet[id] = true
 	}
 
-	// Every channel including Qoder selects from the whole pool. Qoder accounts
-	// are equal, interchangeable credentials behind a per-account daily quota,
-	// and Qoder fingerprints each account as its own machine, so the pool is
-	// meant to be used in parallel: a pinned primary drains one free account's
-	// allowance while the rest of the pool sits idle and then serves the whole
-	// channel at a single account's failure rate.
-	//
 	// A large pool is examined in rotating windows rather than in full. Every
 	// request paying for a scan and availability check of thousands of accounts
 	// is what made the pool expensive to grow; the window wraps, so every
@@ -226,6 +225,19 @@ func (lb *LoadBalancer) GetNextAccountExcludingByChannelWithTrackerFilter(ctx co
 			filtered = append(filtered, acc)
 		}
 		return len(filtered) > 0
+	}
+	if preferredID != 0 {
+		for _, candidate := range accounts {
+			if candidate.ID == preferredID {
+				if scan([]*store.Account{candidate}) {
+					if selected := lb.selectAccountWithTracker(filtered, tracker); selected != nil {
+						return selected, nil
+					}
+				}
+				filtered = nil
+				break
+			}
+		}
 	}
 	if !scan(scanned) && len(scanned) != len(accounts) {
 		// Nothing usable in this window: fall back to the whole pool once.

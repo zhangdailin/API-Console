@@ -42,6 +42,8 @@ type Request struct {
 	PromptCacheKey    string           `json:"prompt_cache_key,omitempty"`
 	MCPServers        []map[string]any `json:"mcp_servers,omitempty"`
 	Metadata          map[string]any   `json:"metadata,omitempty"`
+	ClientMetadata    map[string]any   `json:"client_metadata,omitempty"`
+	ConversationID    string           `json:"conversation_id,omitempty"`
 	ServiceTier       string           `json:"service_tier,omitempty"`
 	OutputConfig      map[string]any   `json:"output_config,omitempty"`
 	ThinkingConfig    map[string]any   `json:"thinking_config,omitempty"`

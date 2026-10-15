@@ -98,6 +98,7 @@ type ClaudeRequest struct {
 	ConversationID      string           `json:"conversation_id"`
 	ConversationIDAlt   string           `json:"conversationId"`
 	Metadata            map[string]any   `json:"metadata"`
+	ClientMetadata      map[string]any   `json:"client_metadata,omitempty"`
 	// ReasoningEffort is the OpenAI-style effort hint. A catalog publishes models
 	// as "<family>-<effort>", so a client that asks for the family name plus an
 	// effort must have it resolved onto the catalog entry.
@@ -437,8 +438,10 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	failedAccountSet := make(map[int64]struct{})
 
 	var e *messageExecution
+	affinity := prepareRequestAffinity(r, req, targetChannel)
 	apiClient, currentAccount, releaseClient, trackedAccountID, err := h.acquireReservedAccountSelection(r.Context(), targetChannel, true, failedAccountIDs, accountSelectionOptions{
-		ModelID: strings.TrimSpace(req.Model),
+		ModelID:            strings.TrimSpace(req.Model),
+		PreferredAccountID: h.preferredAccount(r.Context(), affinity),
 	})
 	// The client is held for the whole request: a credential change during it
 	// retires the client and closes it here, after the request finished.
@@ -621,8 +624,12 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	e = &messageExecution{h: h, r: r, cfg: cfg, sh: sh, req: req, mappedModel: mappedModel, targetChannel: targetChannel, forcedChannel: forcedChannel, traceID: traceID, conversationKey: conversationKey, builtPrompt: builtPrompt, effort: effort, verboseDiagnostics: verboseDiagnostics, gateNoTools: gateNoTools, upstreamMessages: upstreamMessages, effectiveTools: effectiveTools, structured: structured, logger: logger, apiClient: apiClient, currentAccount: currentAccount, releaseClient: releaseClient, trackedAccountID: trackedAccountID, failedAccountIDs: failedAccountIDs, failedAccountSet: failedAccountSet}
+	e.affinity = affinity
 	e.run()
 	r, currentAccount, releaseClient, trackedAccountID = e.r, e.currentAccount, e.releaseClient, e.trackedAccountID
 
 	h.finishMessages(w, r, sh, req, currentAccount, forcedChannel, isStream, responseFormat, startTime)
+	if returned, failed := sh.terminalState(); returned && !failed {
+		h.rememberAccount(r.Context(), affinity, currentAccount)
+	}
 }

@@ -121,6 +121,9 @@ func metadataString(metadata map[string]any, keys ...string) string {
 }
 
 func headerValue(r *http.Request, keys ...string) string {
+	if r == nil {
+		return ""
+	}
 	for _, key := range keys {
 		if value := strings.TrimSpace(r.Header.Get(key)); value != "" {
 			return value

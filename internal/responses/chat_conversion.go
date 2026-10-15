@@ -97,6 +97,8 @@ func ChatRequestFromResponses(req CreateRequest) (chatwire.Request, error) {
 		MaxTokens:         req.MaxOutputTokens,
 		PromptCacheKey:    req.PromptCacheKey,
 		Metadata:          CloneStringInterfaceMap(req.Metadata),
+		ClientMetadata:    CloneStringInterfaceMap(req.ClientMetadata),
+		ConversationID:    req.ConversationID,
 		// Include and the output format used to be dropped here while the native
 		// Grok path forwarded them, so the same request produced reasoning
 		// summaries and structured output on one channel and neither on the

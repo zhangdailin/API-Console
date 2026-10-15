@@ -78,7 +78,56 @@ func buildMessages(req upstream.UpstreamRequest) ([]chatMessage, string) {
 		}
 		out = append(out, chatMessage{Role: "user", Content: text})
 	}
-	return out, systemText
+	return mergeAssistantToolTurns(out), systemText
+}
+
+// Responses splits one assistant tool turn into reasoning, text and call items.
+// Reassemble adjacent items containing calls without crossing other roles.
+// Opaque replay items have no array merge contract; retain the original run if
+// it contains multiple items or other metadata that cannot be combined safely.
+func mergeAssistantToolTurns(messages []chatMessage) []chatMessage {
+	out := make([]chatMessage, 0, len(messages))
+	for start := 0; start < len(messages); {
+		if messages[start].Role != "assistant" {
+			out = append(out, messages[start])
+			start++
+			continue
+		}
+		end := start
+		hasCalls, mergeable, replayItems := false, true, 0
+		for end < len(messages) && messages[end].Role == "assistant" {
+			message := messages[end]
+			hasCalls = hasCalls || len(message.ToolCalls) > 0
+			if len(message.ReasoningItem) > 0 {
+				replayItems++
+			}
+			mergeable = mergeable && len(message.Contents) == 0 && len(message.Meta) == 0 && message.Name == "" && message.ToolCallID == ""
+			end++
+		}
+		if end == start+1 || !hasCalls || !mergeable || replayItems > 1 {
+			out = append(out, messages[start:end]...)
+		} else {
+			merged := chatMessage{Role: "assistant"}
+			var text, reasoning []string
+			for _, message := range messages[start:end] {
+				if message.Content != "" {
+					text = append(text, message.Content)
+				}
+				if message.Reasoning != "" {
+					reasoning = append(reasoning, message.Reasoning)
+				}
+				if len(message.ReasoningItem) > 0 {
+					merged.ReasoningItem = message.ReasoningItem
+				}
+				merged.ToolCalls = append(merged.ToolCalls, message.ToolCalls...)
+			}
+			merged.Content = strings.Join(text, "\n")
+			merged.Reasoning = strings.Join(reasoning, "\n")
+			out = append(out, merged)
+		}
+		start = end
+	}
+	return out
 }
 
 // normalRole folds the roles the gateway accepts. An unknown role becomes user

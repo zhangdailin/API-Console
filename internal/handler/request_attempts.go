@@ -44,12 +44,16 @@ type messageExecution struct {
 	trackedAccountID   int64
 	failedAccountIDs   []int64
 	failedAccountSet   map[int64]struct{}
+	affinity           requestAffinity
 }
 
 func (e *messageExecution) run() {
 	// A per-request chat session id, reused across account switches so the
 	// upstream keeps one conversation for this downstream request.
 	chatSessionID := "chat_" + randomSessionID()
+	if e.affinity.SessionID != "" {
+		chatSessionID = e.affinity.SessionID
+	}
 	maxRetries := max(e.cfg.MaxRetries, 0)
 	retryDelay := time.Duration(e.cfg.RetryDelay) * time.Millisecond
 	retriesRemaining := maxRetries
@@ -93,6 +97,9 @@ func (e *messageExecution) run() {
 		ConversationID:    explicitConversationID(e.r, e.req),
 		TraceID:           middleware.GetTraceID(e.r.Context()),
 		ChatSessionID:     chatSessionID,
+	}
+	if e.affinity.SessionID != "" {
+		upstreamReq.ConversationID = e.affinity.SessionID
 	}
 	primaryHandler := func(msg upstream.SSEMessage) {
 		if msg.Type == "model.text-delta" || msg.Type == "model.reasoning-delta" || msg.Type == "model.tool-call" {

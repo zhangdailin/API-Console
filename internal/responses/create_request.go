@@ -26,6 +26,8 @@ type CreateRequest struct {
 	PreviousResponseID string           `json:"previous_response_id,omitempty"`
 	Store              *bool            `json:"store,omitempty"`
 	Metadata           map[string]any   `json:"metadata,omitempty"`
+	ClientMetadata     map[string]any   `json:"client_metadata,omitempty"`
+	ConversationID     string           `json:"conversation_id,omitempty"`
 	Truncation         string           `json:"truncation,omitempty"`
 	Include            []string         `json:"include,omitempty"`
 	Background         *bool            `json:"background,omitempty"`

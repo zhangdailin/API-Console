@@ -11,6 +11,9 @@ import (
 func (r *Request) UnmarshalJSON(data []byte) error {
 	type rawRequest struct {
 		Model               string           `json:"model"`
+		ClientMetadata      map[string]any   `json:"client_metadata,omitempty"`
+		Metadata            map[string]any   `json:"metadata,omitempty"`
+		ConversationID      string           `json:"conversation_id,omitempty"`
 		Messages            []Message        `json:"messages"`
 		Stream              any              `json:"stream"`
 		Thinking            *string          `json:"thinking,omitempty"`
@@ -75,6 +78,9 @@ func (r *Request) UnmarshalJSON(data []byte) error {
 	}
 
 	r.Model = raw.Model
+	r.ClientMetadata = raw.ClientMetadata
+	r.Metadata = raw.Metadata
+	r.ConversationID = raw.ConversationID
 	r.Messages = raw.Messages
 	r.Stream = stream
 	r.StreamProvided = streamProvided
