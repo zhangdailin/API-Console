@@ -58,6 +58,7 @@ func normalizeBuildResponsesPayload(payload map[string]any) error {
 	// include the upstream never returns encrypted_content, and `store:false` is
 	// the zero-data-retention default the reference implementation documents.
 	applyBuildResponseDefaults(payload)
+	normalizeBuildReasoningInput(payload)
 	if raw, ok := payload["response_format"].(map[string]any); ok {
 		delete(payload, "response_format")
 		if _, exists := payload["text"]; !exists {

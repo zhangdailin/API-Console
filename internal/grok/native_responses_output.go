@@ -20,6 +20,11 @@ func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader,
 	if len(mappings) > 0 {
 		namespaces = mappings[0]
 	}
+	return copyNativeResponseWithQuality(w, body, contentType, model, namespaces, nil)
+}
+
+func copyNativeResponseWithQuality(w http.ResponseWriter, body io.Reader, contentType, model string, namespaces responses.ToolNamespaces, quality *nativeResponseQuality) (responseID string, captured []byte, result chatOutcome) {
+	result.Quality.FirstVisibleMS = -1
 	// The streaming capture is a bounded side buffer for usage/model recovery;
 	// only the non-streaming body needs the larger ceiling.
 	fullCapture := newBoundedResponseCapture(8 << 20)
@@ -55,6 +60,16 @@ func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader,
 			result.UsageSource = audit.UsageSourceUpstream
 		}
 		result.Finish, result.Err = responses.TerminalFinish("", response)
+		if quality != nil && result.Err == nil {
+			quality.observeResponse(response, &result)
+			if err := quality.check(true); err != nil {
+				result.Err = err
+				return
+			}
+			if result.Withheld {
+				return
+			}
+		}
 		// Preserve JSON bytes unless restoring tool identities or masking errors.
 		// Partial SSE events also need strict-client supplementation below.
 		changed := namespaces.RestoreEnvelope(response)
@@ -103,6 +118,7 @@ func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader,
 			}
 
 		}
+		quality.observe(event, kind, &result)
 		changed := namespaces.RestoreEnvelope(event)
 		changed = supplementResponsesEvent(event, compat) || changed
 		if redactResponseError(event) || changed {
@@ -140,7 +156,18 @@ func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader,
 			}
 			result.Finish, result.Err = responses.TerminalFinish(kind, response)
 			terminal = true
+			if result.Err == nil && quality != nil {
+				if err := quality.check(true); err != nil {
+					result.Err = err
+				}
+			}
 			return io.EOF // A logical terminal must not wait for the socket to close.
+		}
+		if quality != nil {
+			if err := quality.check(false); err != nil {
+				result.Err = err
+				return err
+			}
 		}
 		return nil
 	})

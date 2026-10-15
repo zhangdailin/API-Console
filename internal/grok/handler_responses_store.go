@@ -32,7 +32,6 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 	// model context. Keep the upstream model on every selection/request/retry so a
 	// model-scoped Free refusal cannot be escalated into a 24-hour account block.
 	r = r.WithContext(WithRequestModel(r.Context(), spec.UpstreamModel))
-	started := time.Now()
 	if err := validatePayloadReasoning(payload); err != nil {
 		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
@@ -115,58 +114,12 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 		reasoning["effort"] = spec.AliasReasoningEffort
 		payload["reasoning"] = reasoning
 	}
-	call := func() (*http.Response, error) {
-		if pinned {
-			return h.doCLIPinnedResponsesAt(r.Context(), sess, payload, spec.UpstreamModel, upstreamPath)
-		}
-		return h.doCLIWithAutoSwitchAt(r.Context(), sess, payload, spec.UpstreamModel, upstreamPath)
-	}
-	resp, err := call()
-	if err != nil && isReasoningReplayDecodeError(err) && !preservesClientCompaction(payload, err) {
-		// Upstream rejected opaque reasoning it could not decode. Recovery stays
-		// on the same account and plane: drop only the undecodable ciphers while
-		// keeping readable summaries, and clear the server-side replay first so
-		// the same stale cipher is never injected again. Client-held compaction
-		// state is never rewritten.
-		if session := sessionFromContext(r.Context()); session.Key != "" {
-			h.clearReasoningReplay(r.Context(), modelID, session.Key)
-		}
-		if stripInjectedReasoningReplay(payload) {
-			retryResp, retryErr := call()
-			if retryErr == nil && retryResp != nil {
-				retryResp.Header.Set("X-Grok2API-Reasoning-Recovery", "reasoning_encrypted_content_retry")
-			}
-			resp, err = retryResp, retryErr
-		}
-	}
-	if err != nil {
-		if markAllGrokAccountStatuses(err) {
-			h.markAccountStatus(r.Context(), sess.acc, err)
-		}
-		writeGrokUpstreamFailure(w, upstreamHTTPResponseStatus(err), err)
-		return
-	}
-	defer resp.Body.Close()
-	h.syncGrokQuota(sess.acc, resp.Header)
-	// A non-streaming body is validated before the upstream status is committed;
-	// otherwise malformed JSON locks the client into a misleading 200.
-	if !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
-		raw, validationErr := readAndValidateNativeResponse(resp.Body)
-		if validationErr != nil {
-			writeResponsesAPIError(w, http.StatusBadGateway, "upstream_error", validationErr.Error())
-			return
-		}
-		resp.Body = io.NopCloser(strings.NewReader(string(raw)))
-	}
-	copyNativeCLIResponseHeaders(w.Header(), resp.Header)
-	w.WriteHeader(resp.StatusCode)
-	responseID, captured, result := copyNativeCLIResponseAndCaptureModel(w, resp.Body, resp.Header.Get("Content-Type"), modelID, namespaces)
-	h.auditChatOutcome(r.Context(), sess.acc, &chatwire.Request{Model: modelID, StartedAt: started}, result)
+	responseID, captured, result := h.serveNativeResponses(w, r, sess, pinned, spec, payload, upstreamPath, namespaces)
 	if session := sessionFromContext(r.Context()); session.Replay && len(captured) > 0 && result.Err == nil {
 		h.captureReasoningReplay(r.Context(), modelID, session.Key, captured)
 	}
 
-	if !saveOwnership || ownerHash == "" || responseID == "" || resp.StatusCode < 200 || resp.StatusCode >= 300 || result.Err != nil {
+	if !saveOwnership || ownerHash == "" || responseID == "" || result.Err != nil {
 		return
 	}
 	// A continuation request only carries this turn's input; the history lives in

@@ -68,17 +68,21 @@ func TestRelayNativeContextAndUpstreamDecisions(t *testing.T) {
 				"model": "grok-4.6", "stream": false, "prompt_cache_key": "client-session",
 				// The gateway now applies the Build defaults: store=false for
 				// zero-data-retention, and the encrypted-reasoning include that makes
-				// a replay chain possible at all. Everything the client sent is still
-				// relayed verbatim.
+				// a replay chain possible at all. Use canonical reasoning input here;
+				// null/output-only field cleanup has dedicated coverage.
 				"store":              false,
 				"include":            []any{"reasoning.encrypted_content"},
 				"reasoning":          map[string]any{"effort": "future-effort"},
 				"context_management": []any{map[string]any{"type": "compaction", "compact_threshold": float64(50000)}},
 				"input": []any{
-					map[string]any{"type": "reasoning", "encrypted_content": "client-reasoning"},
+					map[string]any{"type": "reasoning", "summary": []any{}, "encrypted_content": "client-reasoning"},
 					map[string]any{"type": "compaction", "encrypted_content": "client-native-compaction"},
 					map[string]any{"role": "user", "content": strings.Repeat("完整上下文，不要摘要。", 2000)},
 				},
+			}
+			if tc.name == "answer_without_reasoning" {
+				// A caller explicitly disabling reasoning must still get a plain answer.
+				payload["reasoning"] = map[string]any{"effort": "none"}
 			}
 			body, _ := json.Marshal(payload)
 			rec := httptest.NewRecorder()

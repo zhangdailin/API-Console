@@ -468,17 +468,11 @@ func stripInjectedReasoningReplay(payload map[string]any) bool {
 			continue
 		}
 		if item != nil && strings.EqualFold(chatwire.ParseLooseStringAny(item["type"]), "reasoning") && chatwire.ParseLooseStringAny(item["encrypted_content"]) != "" {
-			// A reasoning item without its proof is not portable. Preserve its
-			// readable summary as an ordinary assistant message instead.
-			parts := []any{}
-			for _, summary := range responses.InterfaceMaps(item["summary"]) {
-				if value := chatwire.ParseLooseStringAny(summary["text"]); value != "" {
-					parts = append(parts, map[string]any{"type": "output_text", "text": value})
-				}
-			}
+			// Keep the historical plan explicitly labelled; unlabelled summaries
+			// teach the model that private analysis is an ordinary public answer.
 			changed = true
-			if len(parts) > 0 {
-				next = append(next, map[string]any{"type": "message", "role": "assistant", "content": parts})
+			if summary := portableReasoningSummary(item); summary != nil {
+				next = append(next, summary)
 			}
 			continue
 		}
