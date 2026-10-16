@@ -23,6 +23,7 @@ func TestCollectedQualityDoesNotInventStreamTiming(t *testing.T) {
 	}{
 		{name: "plaintext with high reasoning ratio", reasoning: "considering the request", reasoningTokens: 90, outputTokens: 100},
 		{name: "cipher-only with billed reasoning", encrypted: strings.Repeat("x", 512), reasoningTokens: 100, outputTokens: 110},
+		{name: "short cipher with billed reasoning", encrypted: strings.Repeat("x", 216), reasoningTokens: 32, outputTokens: 40},
 		{name: "missing reasoning", outputTokens: 10, withheld: true, reason: qualityReasonNoReasoning},
 		{name: "cipher-only with zero reasoning bill", encrypted: strings.Repeat("x", 512), outputTokens: 10, withheld: true, reason: qualityReasonCipherDrool},
 	}
@@ -70,9 +71,11 @@ func TestCollectedQualityDoesNotInventStreamTiming(t *testing.T) {
 				testutil.Equal(t, len(checks), 2)
 				testutil.Equal(t, checks[1].Status, "passed")
 				testutil.EqualAny(t, checks[1].Metadata["first_visible_ms"], int64(-1))
-				if tc.reasoning != "" {
-					testutil.Equal(t, len(journal.byAction("grok_quality_guard")), 0)
-				}
+				testutil.Equal(t, len(journal.byAction("grok_quality_guard")), 0)
+				saved, err := h.lb.Store.GetAccount(context.Background(), accounts[0].ID)
+				testutil.NoError(t, err)
+				testutil.Equal(t, saved.QualityFailures, 0)
+				testutil.True(t, saved.QualityCooldownUntil.IsZero(), "passed response must not park its account")
 			}
 		})
 	}

@@ -142,6 +142,7 @@ func (c *CLIClient) doResponsesAt(ctx context.Context, acc *store.Account, path 
 	}
 	ctx = withRateLimitAccount(ctx, acc)
 	modelID := strings.TrimSpace(fmt.Sprint(payload["model"]))
+	ctx = WithRequestModel(ctx, modelID)
 	if err := waitScopedRateLimit(ctx, ProviderBuild, acc.OAuthAccessToken, modelID, c.cfg.GrokRequestsPerSecond()); err != nil {
 		return nil, err
 	}
@@ -171,7 +172,7 @@ func (c *CLIClient) doResponsesAt(ctx context.Context, acc *store.Account, path 
 			// refusal is the only place the real actual/limit pair appears. Record it
 			// before the throttle bookkeeping, which would otherwise be the only thing
 			// this refusal leaves behind.
-			c.noteConfirmedFreeQuota(ctx, acc, raw)
+			c.noteConfirmedFreeQuota(ctx, acc, resp.StatusCode, raw)
 			if meta := noteScopedRateLimit(ctx, ProviderBuild, acc.OAuthAccessToken, modelID, resp.StatusCode, resp.Header, raw); meta != nil {
 				// Keep the selected account's durable diagnostic state in sync. The
 				// in-memory team/model registry remains authoritative for waiting;
@@ -203,7 +204,7 @@ func (c *CLIClient) doResponsesAt(ctx context.Context, acc *store.Account, path 
 		// A spent Free allowance is not always reported as a 429: the same refusal can
 		// arrive as a 402/403, and it is the only place the real actual/limit pair
 		// appears.
-		c.noteConfirmedFreeQuota(ctx, acc, raw)
+		c.noteConfirmedFreeQuota(ctx, acc, resp.StatusCode, raw)
 		recordCLIUpstreamStatus(resp.StatusCode)
 		return nil, newCLIUpstreamError(resp.StatusCode, headerCopy, raw)
 	}
@@ -214,8 +215,14 @@ func (c *CLIClient) doResponsesAt(ctx context.Context, acc *store.Account, path 
 // It is deliberately fire-and-forget: a refusal that cannot be written back must not
 // turn into a request failure, and it must not overwrite anything when the response
 // was not a Free refusal at all.
-func (c *CLIClient) noteConfirmedFreeQuota(ctx context.Context, acc *store.Account, body []byte) {
+func (c *CLIClient) noteConfirmedFreeQuota(ctx context.Context, acc *store.Account, status int, body []byte) {
 	if c == nil || c.oauth == nil || c.oauth.store == nil || acc == nil || acc.ID == 0 {
+		return
+	}
+	// Error prose can mention free usage during transient outages or permission
+	// failures. Only an explicit exhaustion code on a quota refusal may park a
+	// model for the included-usage window.
+	if (status != http.StatusTooManyRequests && status != http.StatusPaymentRequired && status != http.StatusForbidden) || !hasFreeUsageExhaustionCode(body) {
 		return
 	}
 	// A refusal that names one model ("... free usage for model X") is not an

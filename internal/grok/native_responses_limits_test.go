@@ -27,7 +27,9 @@ func TestNativeRecoveryAndQualitySharePhysicalBudget(t *testing.T) {
 		if item["content"] != "Prior model reasoning summary:\nold plan" {
 			t.Error("recovery sent an unlabelled plan")
 		}
-		_ = json.NewEncoder(w).Encode(nativeQualityFixture(false))
+		response := nativeQualityFixture(false)
+		response["output"] = response["output"].([]any)[:1]
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
 	h, acc := parityBuildHandler(t, server)

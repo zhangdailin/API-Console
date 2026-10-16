@@ -51,6 +51,7 @@ func (h *Handler) auditQualityCheck(ctx context.Context, acc *store.Account, req
 		"hold_timeout_ms": policy.HoldTimeout.Milliseconds(), "on_exhausted": qualityRetryFailOpen,
 		"visible_chars": outcome.Quality.VisibleChars, "reasoning_chars": outcome.Quality.ReasoningChars,
 		"encrypted_chars": outcome.Quality.EncryptedChars, "first_visible_ms": outcome.Quality.FirstVisibleMS,
+		"visible_duration_ms": outcome.Quality.visibleDurationMS(),
 	}
 	if mode == "native" {
 		metadata["on_exhausted"] = "fail_closed"
@@ -111,7 +112,7 @@ func (h *Handler) auditQualityDegraded(ctx context.Context, acc *store.Account, 
 		"mode", turn.Mode, "attempt", turn.Attempt, "reason", outcome.WithheldReason, "guard", string(turn.Guard),
 		"visible_chars", outcome.Quality.VisibleChars, "reasoning_chars", outcome.Quality.ReasoningChars,
 		"encrypted_chars", outcome.Quality.EncryptedChars, "reasoning_tokens", outcome.Quality.ReasoningTokens,
-		"first_visible_ms", outcome.Quality.FirstVisibleMS)
+		"first_visible_ms", outcome.Quality.FirstVisibleMS, "visible_duration_ms", outcome.Quality.visibleDurationMS())
 
 	logger := h.auditLoggerSnapshot()
 	if logger == nil {
@@ -130,15 +131,16 @@ func (h *Handler) auditQualityDegraded(ctx context.Context, acc *store.Account, 
 		OutputTokens:    responses.InterfaceToInt(outcome.Usage["completion_tokens"]),
 		ReasoningTokens: int(outcome.Quality.ReasoningTokens),
 		Metadata: map[string]any{
-			"mode":             turn.Mode,
-			"reason":           outcome.WithheldReason,
-			"guard":            string(turn.Guard),
-			"visible_chars":    outcome.Quality.VisibleChars,
-			"reasoning_chars":  outcome.Quality.ReasoningChars,
-			"encrypted_chars":  outcome.Quality.EncryptedChars,
-			"first_visible_ms": outcome.Quality.FirstVisibleMS,
-			"tool_calls":       outcome.Quality.ToolCalls,
-			"withheld":         true,
+			"mode":                turn.Mode,
+			"reason":              outcome.WithheldReason,
+			"guard":               string(turn.Guard),
+			"visible_chars":       outcome.Quality.VisibleChars,
+			"reasoning_chars":     outcome.Quality.ReasoningChars,
+			"encrypted_chars":     outcome.Quality.EncryptedChars,
+			"first_visible_ms":    outcome.Quality.FirstVisibleMS,
+			"visible_duration_ms": outcome.Quality.visibleDurationMS(),
+			"tool_calls":          outcome.Quality.ToolCalls,
+			"withheld":            true,
 		},
 	})
 }
@@ -236,15 +238,16 @@ func (h *Handler) auditQualityGuard(ctx context.Context, acc *store.Account, req
 		model = req.Model
 	}
 	metadata := map[string]any{
-		"failures":          acc.QualityFailures,
-		"previous_failures": previousFailures,
-		"disable_threshold": qualityDisableThreshold,
-		"account_enabled":   acc.Enabled,
-		"visible_chars":     outcome.Quality.VisibleChars,
-		"reasoning_chars":   outcome.Quality.ReasoningChars,
-		"encrypted_chars":   outcome.Quality.EncryptedChars,
-		"reasoning_tokens":  outcome.Quality.ReasoningTokens,
-		"first_visible_ms":  outcome.Quality.FirstVisibleMS,
+		"failures":            acc.QualityFailures,
+		"previous_failures":   previousFailures,
+		"disable_threshold":   qualityDisableThreshold,
+		"account_enabled":     acc.Enabled,
+		"visible_chars":       outcome.Quality.VisibleChars,
+		"reasoning_chars":     outcome.Quality.ReasoningChars,
+		"encrypted_chars":     outcome.Quality.EncryptedChars,
+		"reasoning_tokens":    outcome.Quality.ReasoningTokens,
+		"first_visible_ms":    outcome.Quality.FirstVisibleMS,
+		"visible_duration_ms": outcome.Quality.visibleDurationMS(),
 		// A turn can be penalised without being withheld (it was already
 		// streamed, or the hold is off) and withheld without being penalised.
 		"withheld": outcome.Withheld,

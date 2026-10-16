@@ -57,6 +57,11 @@ func (p accountPatch) mergeIdentity() {
 	u.Weight = acc.Weight
 	u.MaxConcurrent = acc.MaxConcurrent
 	u.Enabled = acc.Enabled
+	if strings.EqualFold(u.AccountType, "grok") && acc.QualityRevision < existing.QualityRevision {
+		// A stale request cannot re-enable a credential disabled by a newer
+		// atomic quality verdict. A current admin snapshot can still enable it.
+		u.Enabled = existing.Enabled
+	}
 	u.Token = acc.Token
 	u.Subscription = acc.Subscription
 }

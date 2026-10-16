@@ -42,7 +42,7 @@ func TestClassifyQualityHold(t *testing.T) {
 			// 18190/18183 dumps answered in under two seconds and leaked through
 			// the minimum-output check.
 			name: "cipher blob then a fast answer is withheld even when short",
-			sig:  qualityStreamSignals{HasThinking: true, EncryptedBytes: 400, EncryptedFloor: 256, VisibleTokens: 5, FirstVisible: true, VisibleFlushMS: 150},
+			sig:  qualityStreamSignals{HasThinking: true, EncryptedBytes: 400, EncryptedFloor: 256, VisibleTokens: 5, FirstVisible: true, VisibleFlushMS: 150, Terminal: true},
 			want: qualityWithhold,
 		},
 		{
@@ -73,7 +73,7 @@ func TestClassifyQualityHold(t *testing.T) {
 			name: "reasoning stub then a short dump is withheld (burst)",
 			sig: qualityStreamSignals{
 				ReasoningStarted: true, ReasoningTokens: 954, VisibleTokens: 1,
-				FirstVisible: true, VisibleFlushMS: 30,
+				FirstVisible: true, VisibleFlushMS: 30, Terminal: true,
 			},
 			want: qualityWithhold,
 		},
@@ -81,7 +81,7 @@ func TestClassifyQualityHold(t *testing.T) {
 			name: "large encrypted blob then a fast answer is withheld (fake encrypted dump)",
 			sig: qualityStreamSignals{
 				HasThinking: true, EncryptedBytes: int64(len(dumpEncrypted)), VisibleTokens: 1,
-				FirstVisible: true, VisibleFlushMS: 1800,
+				FirstVisible: true, VisibleFlushMS: 1800, Terminal: true,
 			},
 			want: qualityWithhold,
 		},
@@ -89,7 +89,7 @@ func TestClassifyQualityHold(t *testing.T) {
 			name: "plaintext reasoning dumped in 1ms with an 80% bill is withheld",
 			sig: qualityStreamSignals{
 				HasThinking: true, HasReasoningDelta: true, ReasoningTokens: 900,
-				OutputTokens: 1000, VisibleTokens: 25, FirstVisible: true, VisibleFlushMS: 1,
+				OutputTokens: 1000, VisibleTokens: 25, FirstVisible: true, VisibleFlushMS: 1, Terminal: true,
 			},
 			want: qualityWithhold,
 		},

@@ -51,8 +51,8 @@ func (c *buildQualityHold) signals(terminal bool) qualityStreamSignals {
 		UsageReported:   c.outcome.UsageSource == audit.UsageSourceUpstream,
 		// Timing-based detectors require observed text arrival, not just a
 		// character count. Completed JSON bodies keep FirstVisibleMS at -1.
-		FirstVisible:     quality.VisibleChars > 0 && quality.FirstVisibleMS >= 0,
-		VisibleFlushMS:   quality.FirstVisibleMS,
+		FirstVisible:     quality.VisibleChars > 0 && quality.VisibleTimingObserved,
+		VisibleFlushMS:   quality.visibleDurationMS(),
 		Terminal:         terminal || quality.Terminal,
 		HoldExpired:      c.expired,
 		ReasoningStarted: c.reasoningStarted,
@@ -60,7 +60,7 @@ func (c *buildQualityHold) signals(terminal bool) qualityStreamSignals {
 	}
 	sig.HasReasoningDelta = quality.ReasoningChars > 0
 	sig.EncryptedFloor = encryptedThinkingFloor(0, 0, quality.ReasoningTokens)
-	sig.HasThinking = sig.HasReasoningDelta || qualityMeetsEncryptedFloor(sig)
+	sig.HasThinking = sig.HasReasoningDelta || qualityHasBilledEncryptedReasoning(sig) || qualityMeetsEncryptedFloor(sig)
 	return sig
 }
 
@@ -82,6 +82,8 @@ func (c *buildQualityHold) step(terminal bool) (verdict qualityVerdict, waiting 
 	result, reason := classifyQualityHoldReason(sig, c.policy.MinOutput)
 	if result == qualityWithhold {
 		c.reason = reason
+	} else {
+		c.reason = ""
 	}
 	return result, result == qualityWait
 }

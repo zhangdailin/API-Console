@@ -66,3 +66,37 @@ func TestHandleAccounts_PostRejectsEmptyGrokOAuth(t *testing.T) {
 	testutil.Equal(t, rec.Code, http.StatusBadRequest)
 	testutil.MustContain(t, rec.Body.String(), "missing oauth token")
 }
+
+func TestHandleAccountByID_PutEnabledAfterAtomicQualityVerdict(t *testing.T) {
+	a, s, cleanup := newTestAPI(t)
+	defer cleanup()
+	ctx := context.Background()
+	acc := &store.Account{AccountType: "grok", CredentialType: "oauth", OAuthAccessToken: "keep-access", Enabled: true, Name: "quality-admin"}
+	if err := s.CreateAccount(ctx, acc); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := s.ApplyAccountQuality(ctx, acc.ID, store.AccountQualityUpdate{Reason: "no_reasoning", CooldownUntil: time.Now().Add(time.Hour), DisableThreshold: 2}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, enabled := range []bool{true, false} {
+		body := `{"account_type":"grok","credential_type":"oauth","name":"quality-admin","enabled":false}`
+		if enabled {
+			body = strings.Replace(body, `"enabled":false`, `"enabled":true`, 1)
+		}
+		req := httptest.NewRequest(http.MethodPut, "/api/accounts/"+strconv.FormatInt(acc.ID, 10), strings.NewReader(body))
+		rec := httptest.NewRecorder()
+		a.HandleAccountByID(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("admin update failed: %d %s", rec.Code, rec.Body.String())
+		}
+		saved, err := s.GetAccount(ctx, acc.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if saved.Enabled != enabled || saved.QualityRevision != 2 || saved.QualityFailures != 2 || saved.OAuthAccessToken != "keep-access" {
+			t.Fatalf("admin change lost or rewrote runtime verdict: enabled=%v revision=%d failures=%d", saved.Enabled, saved.QualityRevision, saved.QualityFailures)
+		}
+	}
+}

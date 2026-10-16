@@ -19,12 +19,13 @@ type nativeResponseQuality struct {
 	result    *chatOutcome
 	reasoning map[string]int64
 	encrypted map[string]int64
+	toolCalls map[string]struct{}
 }
 
 func newNativeResponseQuality(w http.ResponseWriter, policy qualityHoldPolicy) *nativeResponseQuality {
 	hold := newBuildQualityHold(w, policy, nil)
 	hold.writer.failOnOverflow = true
-	return &nativeResponseQuality{hold: hold, reasoning: map[string]int64{}, encrypted: map[string]int64{}}
+	return &nativeResponseQuality{hold: hold, reasoning: map[string]int64{}, encrypted: map[string]int64{}, toolCalls: map[string]struct{}{}}
 }
 
 func (q *nativeResponseQuality) observe(event map[string]any, kind string, result *chatOutcome) {
@@ -42,9 +43,7 @@ func (q *nativeResponseQuality) observe(event map[string]any, kind string, resul
 	switch kind {
 	case "response.output_text.delta", "response.refusal.delta":
 		if text, _ := event["delta"].(string); text != "" {
-			if result.Quality.VisibleChars == 0 {
-				result.Quality.FirstVisibleMS = time.Since(q.hold.started).Milliseconds()
-			}
+			result.Quality.observeVisible(time.Since(q.hold.started).Milliseconds())
 			result.Quality.VisibleChars += int64(utf8.RuneCountInString(text))
 		}
 	case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
@@ -54,6 +53,7 @@ func (q *nativeResponseQuality) observe(event map[string]any, kind string, resul
 		}
 	case "response.output_item.added", "response.output_item.done":
 		item, _ := event["item"].(map[string]any)
+		q.observeToolCall(item, result)
 		if item["type"] == "reasoning" {
 			q.hold.markReasoningStarted()
 			id := chatwire.ParseLooseStringAny(item["id"])
@@ -96,10 +96,23 @@ func (q *nativeResponseQuality) observeResponse(response map[string]any, result 
 		result.Quality.ReasoningTokens = int64(responses.InterfaceToInt(details["reasoning_tokens"]))
 	}
 	for _, item := range responses.InterfaceMaps(response["output"]) {
-		if item["type"] == "function_call" {
-			result.Quality.ToolCalls++
-		}
+		q.observeToolCall(item, result)
 	}
+}
+
+func (q *nativeResponseQuality) observeToolCall(item map[string]any, result *chatOutcome) {
+	if item["type"] != "function_call" {
+		return
+	}
+	id := chatwire.ParseLooseStringAny(item["call_id"])
+	if id == "" {
+		id = chatwire.ParseLooseStringAny(item["id"])
+	}
+	if id == "" {
+		return
+	}
+	q.toolCalls[id] = struct{}{}
+	result.Quality.ToolCalls = len(q.toolCalls)
 }
 
 func (q *nativeResponseQuality) check(terminal bool) error {
@@ -118,6 +131,13 @@ func (q *nativeResponseQuality) check(terminal bool) error {
 		}
 	}
 	verdict, _ := q.hold.step(terminal)
+	// A tool turn may include a short explanation without a reasoning item.
+	// Missing reasoning alone is not evidence that the credential is degraded.
+	// Keep the other dump detectors active even when a tool call is present.
+	if terminal && verdict == qualityWithhold && q.hold.reason == qualityReasonNoReasoning && q.result.Quality.ToolCalls > 0 {
+		q.hold.reason = ""
+		return q.hold.writer.Commit()
+	}
 	if verdict == qualityWithhold {
 		// Wait for terminal usage and tool evidence before discarding a turn.
 		if terminal {

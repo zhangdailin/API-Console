@@ -79,6 +79,9 @@ func (h *Handler) openCLIAccountSessionByID(ctx context.Context, accountID int64
 	if token == "" {
 		return nil, fmt.Errorf("stored response account token is empty")
 	}
+	if err := scopedRateLimitCooldown(withRateLimitAccount(ctx, acc), ProviderBuild, token, modelID); err != nil {
+		return nil, err
+	}
 	release, reserved := h.reserveAccount(acc)
 	if !reserved {
 		return nil, fmt.Errorf("stored response account is at its concurrency limit")
@@ -103,7 +106,18 @@ func (h *Handler) openCLIAccountSession(ctx context.Context, excludeIDs []int64,
 			pinned.Close()
 		}
 	}
-	acc, err := h.lb.GetNextAccountExcludingByChannelWithTrackerFilter(ctx, excludeIDs, "grok", h.connTrackerSnapshot(), func(acc *store.Account) error {
+	snapshot := &cooldownSnapshot{}
+	prepare := func(accounts []*store.Account) error {
+		var queries []cooldownQuery
+		for _, acc := range accounts {
+			if acc == nil || containsAccountID(excludeIDs, acc.ID) || !accountpolicy.IsGrokAccount(acc) || !AccountSupportsModel(acc, modelID) || !accountUsableForModel(ctx, acc) {
+				continue
+			}
+			queries = append(queries, cooldownQueries(ctx, acc, modelID)...)
+		}
+		return snapshot.prepare(ctx, queries)
+	}
+	match := func(acc *store.Account) error {
 		// A model this credential is cooling down for must not be retried on the
 		// same account; the account's other models stay eligible. The pool gets the
 		// generic reason here: grok holds a model for its own windows (a free-usage
@@ -115,8 +129,14 @@ func (h *Handler) openCLIAccountSession(ctx context.Context, excludeIDs []int64,
 		if !accountUsableForModel(ctx, acc) || !h.routeAllowsAccount(ctx, modelID, acc.ID) {
 			return loadbalancer.ErrAccountNotEligible
 		}
+		// Sibling accounts can look healthy while their shared team is cooling
+		// down. Skip them before they consume the request's attempt budget.
+		if snapshot.check(ctx, cooldownQueries(ctx, acc, modelID)) != nil {
+			return loadbalancer.ErrModelThrottled
+		}
 		return nil
-	})
+	}
+	acc, err := h.lb.GetNextAccountWithPreparedFilter(ctx, excludeIDs, "grok", h.connTrackerSnapshot(), loadbalancer.PreparedAccountFilter{Prepare: prepare, Match: match})
 	if err != nil {
 		return nil, err
 	}

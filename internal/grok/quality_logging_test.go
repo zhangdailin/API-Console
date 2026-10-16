@@ -401,7 +401,7 @@ func TestClassifyQualityHoldReasonNamesTheDetector(t *testing.T) {
 			qualityStreamSignals{EncryptedBytes: 100, EncryptedFloor: 256, VisibleTokens: 50, Terminal: true, FirstVisible: true, VisibleFlushMS: 5000},
 			qualityReasonCipherDrool},
 		{"plaintext reasoning that is nearly the whole output, dumped at once",
-			qualityStreamSignals{HasThinking: true, HasReasoningDelta: true, FirstVisible: true, VisibleFlushMS: 100, ReasoningTokens: 90, OutputTokens: 100, VisibleTokens: 10},
+			qualityStreamSignals{HasThinking: true, HasReasoningDelta: true, FirstVisible: true, Terminal: true, VisibleFlushMS: 100, ReasoningTokens: 90, OutputTokens: 100, VisibleTokens: 10},
 			qualityReasonFastReasoningRatio},
 		{"an answer with no thinking of any kind",
 			qualityStreamSignals{VisibleTokens: 50, Terminal: true, FirstVisible: true, VisibleFlushMS: 5000},

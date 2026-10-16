@@ -133,3 +133,33 @@ func (b *redisGrokLimits) waitPacing(ctx context.Context, identity string, rate 
 		}
 	}
 }
+
+// cooldownsRemaining reads one selection window in one network round trip.
+// The timeout is bounded by the caller so canceled requests do no further I/O.
+func (b *redisGrokLimits) cooldownsRemaining(ctx context.Context, queries []cooldownQuery) (map[cooldownQuery]time.Duration, error) {
+	result := make(map[cooldownQuery]time.Duration, len(queries))
+	if ctx.Err() != nil {
+		return result, context.Cause(ctx)
+	}
+	if b == nil || b.client == nil || len(queries) == 0 {
+		return result, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	commands := make([]*redis.DurationCmd, len(queries))
+	_, err := b.client.Pipelined(ctx, func(pipe redis.Pipeliner) error {
+		for i, q := range queries {
+			commands[i] = pipe.PTTL(ctx, b.key("cooldown", string(q.scope), q.identity, q.model))
+		}
+		return nil
+	})
+	if err != nil {
+		return result, err
+	}
+	for i, q := range queries {
+		if remaining := commands[i].Val(); remaining > 0 {
+			result[q] = remaining
+		}
+	}
+	return result, nil
+}

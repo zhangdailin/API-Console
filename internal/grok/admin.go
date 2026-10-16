@@ -216,6 +216,12 @@ func preserveRuntimeStateOnAdminEdit(acc, existing *store.Account) {
 	acc.UsageLimit = existing.UsageLimit
 	acc.StatusCode = existing.StatusCode
 	acc.StatusMessage = existing.StatusMessage
+	// Forms omit runtime verdicts. Keep the server's revision so an explicit
+	// admin enable/disable is not mistaken for an old in-flight request.
+	acc.QualityRevision = existing.QualityRevision
+	acc.QualityFailures = existing.QualityFailures
+	acc.QualityCooldownUntil = existing.QualityCooldownUntil
+	acc.QualityReason = existing.QualityReason
 	acc.LastAttempt = existing.LastAttempt
 	acc.VerifiedAt = existing.VerifiedAt
 	acc.QuotaResetAt = existing.QuotaResetAt

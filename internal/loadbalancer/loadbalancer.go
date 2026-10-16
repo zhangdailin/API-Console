@@ -130,6 +130,24 @@ func (lb *LoadBalancer) GetNextAccountExcludingByChannelWithTrackerFilter(ctx co
 // GetNextAccountWithPreference applies the normal eligibility and capacity
 // checks before honoring a conversation's preferred account.
 func (lb *LoadBalancer) GetNextAccountWithPreference(ctx context.Context, excludeIDs []int64, channel string, tracker ConnTracker, filter AccountFilter, preferredID int64) (*store.Account, error) {
+	return lb.getNextAccountWithPreference(ctx, excludeIDs, channel, tracker, filter, preferredID, nil)
+}
+
+// PreparedAccountFilter batches request-scoped observations before filtering a
+// scan window. Prepare may be called again for a full-pool fallback.
+type PreparedAccountFilter struct {
+	Prepare func([]*store.Account) error
+	Match   AccountFilter
+}
+
+func (lb *LoadBalancer) GetNextAccountWithPreparedFilter(ctx context.Context, excludeIDs []int64, channel string, tracker ConnTracker, filter PreparedAccountFilter) (*store.Account, error) {
+	return lb.getNextAccountWithPreference(ctx, excludeIDs, channel, tracker, filter.Match, 0, filter.Prepare)
+}
+
+func (lb *LoadBalancer) getNextAccountWithPreference(ctx context.Context, excludeIDs []int64, channel string, tracker ConnTracker, filter AccountFilter, preferredID int64, prepare func([]*store.Account) error) (*store.Account, error) {
+	if ctx.Err() != nil {
+		return nil, context.Cause(ctx)
+	}
 	accounts, err := lb.getEnabledAccounts(ctx)
 	if err != nil {
 		return nil, err
@@ -175,7 +193,27 @@ func (lb *LoadBalancer) GetNextAccountWithPreference(ctx context.Context, exclud
 		}
 	}
 
+	var scanErr error
 	scan := func(candidates []*store.Account) bool {
+		if ctx.Err() != nil {
+			scanErr = context.Cause(ctx)
+			return false
+		}
+		if strings.EqualFold(channel, "grok") {
+			lb.mu.RLock()
+			copies := make([]*store.Account, len(candidates))
+			for i, acc := range candidates {
+				copies[i] = acc.Clone()
+			}
+			lb.mu.RUnlock()
+			candidates = copies
+		}
+		if prepare != nil {
+			if err := prepare(candidates); err != nil {
+				scanErr = err
+				return false
+			}
+		}
 		// Reset per pass: the whole-pool fallback re-scans accounts the window
 		// already counted, and doubling the counters would let one pool look like
 		// two (and flip which reason is reported for an empty one).
@@ -183,6 +221,10 @@ func (lb *LoadBalancer) GetNextAccountWithPreference(ctx context.Context, exclud
 		rateLimitedUnavailable, allowanceParked = 0, 0
 		filterWithheld, filterThrottled, filterUnavailable = 0, 0, 0
 		for _, acc := range candidates {
+			if ctx.Err() != nil {
+				scanErr = context.Cause(ctx)
+				return false
+			}
 			if excludeSet[acc.ID] {
 				continue
 			}
@@ -235,13 +277,19 @@ func (lb *LoadBalancer) GetNextAccountWithPreference(ctx context.Context, exclud
 					}
 				}
 				filtered = nil
+				if scanErr != nil {
+					return nil, scanErr
+				}
 				break
 			}
 		}
 	}
-	if !scan(scanned) && len(scanned) != len(accounts) {
+	if !scan(scanned) && scanErr == nil && len(scanned) != len(accounts) {
 		// Nothing usable in this window: fall back to the whole pool once.
 		scan(accounts)
+	}
+	if scanErr != nil {
+		return nil, scanErr
 	}
 	accounts = filtered
 

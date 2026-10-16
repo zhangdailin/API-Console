@@ -81,6 +81,8 @@ type Account struct {
 	// The first offence parks the credential for a cooldown; a repeat disables
 	// it, mirroring the Grok quality guard.
 	QualityFailures int `json:"quality_failures,omitempty"`
+	// QualityRevision protects a newer failure from a stale healthy result.
+	QualityRevision uint64 `json:"quality_revision,omitempty"`
 	// QualityCooldownUntil parks a credential whose responses are degraded.
 	QualityCooldownUntil time.Time `json:"quality_cooldown_until"`
 	// QualityReason belongs to the quality verdict, not the HTTP status message.
@@ -353,6 +355,7 @@ type accountStore interface {
 	CreateAccount(ctx context.Context, acc *Account) error
 	UpdateAccount(ctx context.Context, acc *Account) error
 	UpdateAccountQuality(ctx context.Context, id int64, failures int, cooldownUntil time.Time, reason string) error
+	ApplyAccountQuality(ctx context.Context, id int64, update AccountQualityUpdate) (AccountQualityResult, error)
 	UpdateWorkBuddyCredentials(ctx context.Context, id int64, patch WorkBuddyCredentialPatch) error
 	UpdateQoderAccount(ctx context.Context, id int64, patch QoderAccountPatch) error
 	UpdateClineCredentials(ctx context.Context, id int64, patch ClineCredentialPatch) error

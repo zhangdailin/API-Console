@@ -34,6 +34,11 @@ func TestNativeResponsesQualityRetriesWithoutLeakingAnalysis(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				n := calls.Add(1)
 				response := nativeQualityFixture(n > 1)
+				if n == 1 {
+					// A legitimate tool turn need not include reasoning. This fixture
+					// exercises a text-only answer that must still be withheld.
+					response["output"] = response["output"].([]any)[:1]
+				}
 				if !streaming {
 					w.Header().Set("Content-Type", "application/json")
 					_ = json.NewEncoder(w).Encode(response)
@@ -89,7 +94,9 @@ func TestNativeResponsesQualityNeverReplaysUnsafeOrPinnedTurns(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls.Add(1)
 				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(nativeQualityFixture(false))
+				response := nativeQualityFixture(false)
+				response["output"] = response["output"].([]any)[:1]
+				_ = json.NewEncoder(w).Encode(response)
 			}))
 			defer server.Close()
 			h, acc := parityBuildHandler(t, server)

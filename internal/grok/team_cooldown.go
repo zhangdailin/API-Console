@@ -71,6 +71,16 @@ func (r *teamCooldownRegistry) Note(scope RateLimitScope, teamID, model string, 
 // RetryAfterFor returns the remaining cooldown for a scope+team+model, or 0 if
 // none is active. An expired entry is removed.
 func (r *teamCooldownRegistry) RetryAfterFor(scope RateLimitScope, teamID, model string) time.Duration {
+	remaining := r.localRetryAfterFor(scope, teamID, model)
+	if backend := grokLimitsBackend(); backend != nil {
+		if shared := backend.cooldownRemaining(scope, teamID, model); shared > remaining {
+			remaining = shared
+		}
+	}
+	return remaining
+}
+
+func (r *teamCooldownRegistry) localRetryAfterFor(scope RateLimitScope, teamID, model string) time.Duration {
 	if strings.TrimSpace(teamID) == "" {
 		return 0
 	}
@@ -87,12 +97,6 @@ func (r *teamCooldownRegistry) RetryAfterFor(scope RateLimitScope, teamID, model
 		remaining = cur.until.Sub(now)
 	}
 	r.mu.Unlock()
-	// As in Note, never hold the process-local mutex across Redis I/O.
-	if backend := grokLimitsBackend(); backend != nil {
-		if shared := backend.cooldownRemaining(scope, teamID, model); shared > remaining {
-			remaining = shared
-		}
-	}
 	return remaining
 }
 

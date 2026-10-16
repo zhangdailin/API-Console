@@ -40,7 +40,7 @@ func TestAccountSecretFieldsAreComplete(t *testing.T) {
 	for name := range strings.FieldsSeq(`
 		ID Name AccountType UserID AgentMode Email Weight MaxConcurrent Enabled
 		Subscription UsageCurrent UsageTotal UsageLimit TokensToday TokensDate
-		StatusCode AuthStatus RateLimitFailures QualityFailures QualityCooldownUntil QualityReason
+		StatusCode AuthStatus RateLimitFailures QualityFailures QualityRevision QualityCooldownUntil QualityReason
 		StatusMessage LastAttempt VerifiedAt ClearVerifiedAt QuotaResetAt RequestCount
 		LastUsedAt CreatedAt UpdatedAt CredentialType OAuthExpiresAt TeamID
 		GrokProvider GrokModels GrokModelCatalog GrokModelsSyncedAt GrokBilling

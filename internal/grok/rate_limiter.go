@@ -121,22 +121,31 @@ func rateLimitIdentity(ctx context.Context, token string) string {
 	return "token:" + credentialAffinity(token)
 }
 
+// scopedRateLimitCooldown checks the shared cooldown without consuming a pacing
+// token, so account selection and request dispatch use the same eligibility rule.
+func scopedRateLimitCooldown(ctx context.Context, provider, token, model string) error {
+	if ctx.Err() != nil {
+		return context.Cause(ctx)
+	}
+	queries := identityCooldownQueries(provider+":"+rateLimitIdentity(ctx, token), model)
+	snapshot := &cooldownSnapshot{}
+	if err := snapshot.prepare(ctx, queries); err != nil {
+		return err
+	}
+	return snapshot.check(ctx, queries)
+}
+
 // waitScopedRateLimit rejects an active team/account+model cooldown immediately,
 // then consumes one pacing token. Request paths must rotate accounts instead of
 // parking a request goroutine until an upstream 429 window expires.
 func waitScopedRateLimit(ctx context.Context, provider, token, model string, rate float64) error {
-	identity := provider + ":" + rateLimitIdentity(ctx, token)
-	for _, scope := range []RateLimitScope{RateLimitScopeRPS, RateLimitScopeRPM} {
-		for _, target := range util.UniqueStrings([]string{model, "*"}) {
-			if remaining := teamCooldown.RetryAfterFor(scope, identity, target); remaining > 0 {
-				return newSyntheticCooldownError(identity, target, remaining)
-			}
-		}
+	if err := scopedRateLimitCooldown(ctx, provider, token, model); err != nil {
+		return err
 	}
 	if rate <= 0 {
 		return nil
 	}
-	endpointKey := identity
+	endpointKey := provider + ":" + rateLimitIdentity(ctx, token)
 	if backend := grokLimitsBackend(); backend != nil {
 		if err := backend.waitPacing(ctx, endpointKey, rate); err == nil {
 			slog.Debug("Rate limiter: distributed token acquired", "endpoint", endpointKey)

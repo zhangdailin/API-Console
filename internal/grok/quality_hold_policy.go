@@ -132,8 +132,8 @@ type qualityStreamSignals struct {
 	UsageReported  bool
 	// FirstVisible marks that visible text has arrived at all.
 	FirstVisible bool
-	// VisibleFlushMS is how long the visible text took to arrive after the turn
-	// started. Negative means its arrival timing was not observed.
+	// VisibleFlushMS measures the interval between the first and last text
+	// deltas. Negative means streaming timing was not observed.
 	VisibleFlushMS int64
 	Terminal       bool
 	HoldExpired    bool
@@ -161,7 +161,16 @@ func encryptedThinkingFloor(minChars, charsPerToken, reasoningTokens int64) int6
 }
 
 func qualityFastFlush(sig qualityStreamSignals, limitMS int64) bool {
-	return sig.FirstVisible && sig.VisibleFlushMS >= 0 && sig.VisibleFlushMS < limitMS
+	// Before the terminal event a short interval only means the response has
+	// just started. It cannot establish that the whole answer was a dump.
+	return sig.Terminal && sig.FirstVisible && sig.VisibleFlushMS >= 0 && sig.VisibleFlushMS < limitMS
+}
+
+// A billed encrypted reasoning item may be shorter than a byte-per-token
+// estimate. Its size alone must not turn a completed reasoning turn into a
+// no_reasoning failure. Dump detectors still evaluate timing and usage.
+func qualityHasBilledEncryptedReasoning(sig qualityStreamSignals) bool {
+	return sig.EncryptedBytes > 0 && sig.ReasoningTokens > 0
 }
 
 func qualityMeetsEncryptedFloor(sig qualityStreamSignals) bool {

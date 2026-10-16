@@ -21,6 +21,18 @@ func TestQualityDegradedDetection(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "billed encrypted reasoning without a plaintext summary",
+			sig: qualitySignals{ExpectReasoning: true, VisibleChars: 200, EncryptedChars: 216,
+				ReasoningTokens: 32, Terminal: true, FirstVisibleMS: -1},
+			want: false,
+		},
+		{
+			name: "cipher without a reasoning bill is not proof",
+			sig: qualitySignals{ExpectReasoning: true, VisibleChars: 200, EncryptedChars: 512,
+				Terminal: true, FirstVisibleMS: -1},
+			want: true,
+		},
+		{
 			name: "no reasoning despite the request",
 			sig:  qualitySignals{ExpectReasoning: true, VisibleChars: 200, Terminal: true, FirstVisibleMS: 500},
 			want: true,

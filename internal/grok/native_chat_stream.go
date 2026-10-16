@@ -216,9 +216,7 @@ func (h *Handler) streamBuildChatHolding(w http.ResponseWriter, req *chatwire.Re
 		text.WriteString(value)
 		outcome.Quality.VisibleChars += int64(len(value))
 		outcome.SawText = true
-		if outcome.Quality.FirstVisibleMS < 0 {
-			outcome.Quality.FirstVisibleMS = time.Since(outcomeStarted).Milliseconds()
-		}
+		outcome.Quality.observeVisible(time.Since(outcomeStarted).Milliseconds())
 		return emit(map[string]any{"content": value}, "", nil)
 	}
 	emitArgs := func(tc *responseToolState, value string, snapshot bool) error {

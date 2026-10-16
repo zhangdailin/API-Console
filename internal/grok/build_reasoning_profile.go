@@ -5,8 +5,6 @@ import (
 	"maps"
 	"strings"
 
-	"encoding/json"
-
 	"orchids-api/internal/chatwire"
 	"orchids-api/internal/modelcatalog"
 	"orchids-api/internal/store"
@@ -24,23 +22,6 @@ type buildReasoningProfileError struct {
 
 func (e *buildReasoningProfileError) Error() string {
 	return fmt.Sprintf("reasoning.effort %q is not supported by model %s on the selected Build account; supported values: %s", e.effort, e.model, strings.Join(e.supported, ", "))
-}
-
-// cloneBuildPayload makes an attempt-local payload. Retry normalization may
-// edit nested reasoning state, so a shallow map copy is not sufficient.
-func cloneBuildPayload(payload map[string]any) (map[string]any, error) {
-	if payload == nil {
-		return map[string]any{}, nil
-	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
-	var cloned map[string]any
-	if err := json.Unmarshal(raw, &cloned); err != nil {
-		return nil, err
-	}
-	return cloned, nil
 }
 
 func buildCatalogProfile(acc *store.Account, upstreamModel string) (modelcatalog.Profile, bool) {

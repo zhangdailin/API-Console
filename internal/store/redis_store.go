@@ -82,11 +82,12 @@ func newRedisStore(addr, password string, db int, prefix string, credentialKey [
 		poolSize = min(poolSizes[0], 4096)
 	}
 	client := redis.NewClient(&redis.Options{
-		Addr:         addr,
-		Password:     password,
-		DB:           db,
-		PoolSize:     poolSize,
-		MinIdleConns: min(20, poolSize),
+		Addr:                  addr,
+		Password:              password,
+		DB:                    db,
+		PoolSize:              poolSize,
+		MinIdleConns:          min(20, poolSize),
+		ContextTimeoutEnabled: true,
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -268,6 +269,9 @@ func (s *redisStore) UpdateAccountQuality(ctx context.Context, id int64, failure
 		reason = ""
 	}
 	return s.updateAccountAtomic(ctx, id, func(existing *Account) error {
+		if existing.QualityFailures != failures || !existing.QualityCooldownUntil.Equal(cooldownUntil) || existing.QualityReason != strings.TrimSpace(reason) {
+			existing.QualityRevision++
+		}
 		existing.QualityFailures = failures
 		existing.QualityCooldownUntil = cooldownUntil
 		existing.QualityReason = strings.TrimSpace(reason)
@@ -283,7 +287,9 @@ func (s *redisStore) updateAccountAtomic(ctx context.Context, id int64, mutate f
 		return nil
 	}
 	key := s.accountsKey(id)
-	for range 8 {
+	// A normal Grok account admits ten concurrent requests; eight retries can
+	// abandon a verdict while that initial burst is still making progress.
+	for range 32 {
 		var previous *Account
 		err := s.client.Watch(ctx, func(tx *redis.Tx) error {
 			value, err := tx.Get(ctx, key).Bytes()

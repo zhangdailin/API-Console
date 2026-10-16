@@ -61,7 +61,9 @@ type qualitySignals struct {
 	// FirstVisibleMS is when the first visible text arrived, measured from the
 	// start of the turn. Negative means no arrival time was observed, including
 	// completed JSON responses that expose no upstream streaming timestamps.
-	FirstVisibleMS int64
+	FirstVisibleMS        int64
+	LastVisibleMS         int64
+	VisibleTimingObserved bool
 	// Terminal is true when the response reached a terminal event.
 	Terminal bool
 	// ToolCalls is the number of tool calls produced.
@@ -85,11 +87,29 @@ func qualityDegraded(sig qualitySignals) bool {
 	// late burst is the flagship dump shape.
 	if sig.ReasoningTokens >= qualityBurstReasoning &&
 		sig.VisibleChars > 0 && sig.VisibleChars < qualityBurstVisible &&
-		sig.FirstVisibleMS >= 0 && sig.FirstVisibleMS < qualityBurstFlushMS {
+		sig.visibleDurationMS() >= 0 && sig.visibleDurationMS() < qualityBurstFlushMS {
 		return true
+	}
+	if qualityHasBilledEncryptedReasoning(qualityStreamSignals{EncryptedBytes: sig.EncryptedChars, ReasoningTokens: sig.ReasoningTokens}) {
+		return false
 	}
 	// No reasoning at all despite an explicit request.
 	return sig.ReasoningChars <= 0
+}
+
+func (sig *qualitySignals) observeVisible(at int64) {
+	if !sig.VisibleTimingObserved {
+		sig.FirstVisibleMS = at
+	}
+	sig.LastVisibleMS = at
+	sig.VisibleTimingObserved = true
+}
+
+func (sig qualitySignals) visibleDurationMS() int64 {
+	if !sig.VisibleTimingObserved || sig.LastVisibleMS < sig.FirstVisibleMS {
+		return -1
+	}
+	return sig.LastVisibleMS - sig.FirstVisibleMS
 }
 
 // qualityExpectsReasoning reports whether the request asked for reasoning.
@@ -130,33 +150,28 @@ func (h *Handler) applyQualityGuard(ctx context.Context, acc *store.Account, sig
 	if reason == "" {
 		reason = qualityReasonNoReasoning
 	}
-	action := qualityGuardParked
-	acc.QualityFailures++
-	acc.QualityReason = reason
-	acc.QualityCooldownUntil = time.Now().UTC().Add(qualityCooldown)
-	if acc.QualityFailures >= qualityDisableThreshold {
-		action = qualityGuardDisabled
-		acc.Enabled = false
-		acc.StatusMessage = "disabled after repeated degraded responses (" + reason + ")"
-		slog.Warn("grok quality guard: credential disabled after repeated degraded responses",
-			"request_id", middleware.GetRequestID(ctx), "account_id", acc.ID, "failures", acc.QualityFailures)
-	} else {
-		acc.StatusMessage = "parked after a degraded response (" + reason + ")"
-		slog.Warn("grok quality guard: credential parked after a degraded response",
-			"request_id", middleware.GetRequestID(ctx), "account_id", acc.ID, "failures", acc.QualityFailures,
-			"cooldown_until", acc.QualityCooldownUntil.Format(time.RFC3339))
-	}
-	// The verdict needs its own writer: UpdateAccount copies a fixed field list
-	// that does not include the quality fields, so going through it parked the
-	// credential only in memory. The Enabled change from a second offence still
-	// travels through UpdateAccount.
-	if err := h.lb.Store.UpdateAccountQuality(ctx, acc.ID, acc.QualityFailures, acc.QualityCooldownUntil, reason); err != nil {
+	result, err := h.lb.Store.ApplyAccountQuality(ctx, acc.ID, store.AccountQualityUpdate{
+		ExpectedRevision: acc.QualityRevision, Reason: reason,
+		CooldownUntil: time.Now().UTC().Add(qualityCooldown), DisableThreshold: qualityDisableThreshold,
+	})
+	if err != nil {
 		slog.Warn("grok quality guard: failed to persist the account verdict", "account_id", acc.ID, "error", err)
+		return qualityGuardNone
 	}
-	if acc.ID != 0 {
-		if err := h.lb.Store.UpdateAccount(ctx, acc); err != nil {
-			slog.Warn("grok quality guard: failed to persist the account state", "account_id", acc.ID, "error", err)
-		}
+	syncAccountQuality(acc, result)
+	if !result.Applied {
+		return qualityGuardNone
+	}
+	h.lb.InvalidateAccounts([]int64{acc.ID})
+	action := qualityGuardParked
+	if result.Failures >= qualityDisableThreshold {
+		action = qualityGuardDisabled
+		slog.Warn("grok quality guard: credential disabled after repeated degraded responses",
+			"request_id", middleware.GetRequestID(ctx), "account_id", acc.ID, "failures", result.Failures)
+	} else {
+		slog.Warn("grok quality guard: credential parked after a degraded response",
+			"request_id", middleware.GetRequestID(ctx), "account_id", acc.ID, "failures", result.Failures,
+			"cooldown_until", result.CooldownUntil.Format(time.RFC3339))
 	}
 	return action
 }
@@ -168,15 +183,28 @@ func (h *Handler) clearQualityGuard(ctx context.Context, acc *store.Account) qua
 	if h == nil || acc == nil || h.lb == nil || h.lb.Store == nil || acc.QualityFailures == 0 {
 		return qualityGuardNone
 	}
-	slog.Info("grok quality guard: credential cleared after a healthy response",
-		"request_id", middleware.GetRequestID(ctx), "account_id", acc.ID, "previous_failures", acc.QualityFailures)
-	acc.QualityFailures = 0
-	acc.QualityCooldownUntil = time.Time{}
-	acc.QualityReason = ""
-	if err := h.lb.Store.UpdateAccountQuality(ctx, acc.ID, 0, time.Time{}, ""); err != nil {
+	result, err := h.lb.Store.ApplyAccountQuality(ctx, acc.ID, store.AccountQualityUpdate{ExpectedRevision: acc.QualityRevision})
+	if err != nil {
 		slog.Warn("grok quality guard: failed to clear the account verdict", "account_id", acc.ID, "error", err)
+		return qualityGuardNone
 	}
+	syncAccountQuality(acc, result)
+	if !result.Applied {
+		return qualityGuardNone
+	}
+	h.lb.InvalidateAccounts([]int64{acc.ID})
+	slog.Info("grok quality guard: credential cleared after a healthy response",
+		"request_id", middleware.GetRequestID(ctx), "account_id", acc.ID, "previous_failures", result.PreviousFailures)
 	return qualityGuardCleared
+}
+
+func syncAccountQuality(acc *store.Account, result store.AccountQualityResult) {
+	acc.QualityFailures = result.Failures
+	acc.QualityRevision = result.Revision
+	acc.QualityCooldownUntil = result.CooldownUntil
+	acc.QualityReason = result.Reason
+	acc.Enabled = result.Enabled
+	acc.StatusMessage = result.StatusMessage
 }
 
 // applyBuildQualityGuard feeds one finished turn into the quality policy and
@@ -209,12 +237,20 @@ func (h *Handler) applyBuildQualityGuard(ctx context.Context, acc *store.Account
 			reason = qualityReasonNoReasoning
 		}
 		action = h.applyQualityGuard(ctx, acc, outcome.Quality, reason)
+	case outcome.QualityChecked:
+		// The hold already evaluated timing, usage and encrypted reasoning.
+		// A second, narrower classifier must not park a credential whose turn
+		// just passed that check.
+		action = h.clearQualityGuard(ctx, acc)
 	case qualityDegraded(outcome.Quality):
 		action = h.applyQualityGuard(ctx, acc, outcome.Quality, "")
 	default:
 		action = h.clearQualityGuard(ctx, acc)
 	}
 	if action != qualityGuardNone {
+		if action == qualityGuardParked || action == qualityGuardDisabled {
+			previous = acc.QualityFailures - 1
+		}
 		h.auditQualityGuard(ctx, acc, req, outcome, action, previous)
 	}
 	return action
