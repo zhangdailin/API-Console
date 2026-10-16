@@ -17,8 +17,7 @@ import (
 )
 
 const (
-	maxDebugStreamLogBytes int64 = 8 << 20
-	maxDebugLogDirectories       = 512
+	maxDebugLogDirectories = 512
 )
 
 var debugLoggerCreateCount atomic.Uint64
@@ -215,12 +214,8 @@ func (l *Logger) appendStream(file **os.File, written *int64, name, data string)
 }
 
 func (l *Logger) writeLimitedStream(file *os.File, written *int64, data string) {
-	if file == nil || written == nil || *written >= maxDebugStreamLogBytes {
+	if file == nil || written == nil {
 		return
-	}
-	remaining := maxDebugStreamLogBytes - *written
-	if int64(len(data)) > remaining {
-		data = data[:remaining]
 	}
 	n, _ := io.WriteString(file, data)
 	*written += int64(n)

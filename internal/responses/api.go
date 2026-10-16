@@ -5,10 +5,6 @@ import (
 	"strings"
 )
 
-// MaxEventBytes bounds one SSE frame. A scanner with no bound lets a single
-// upstream frame allocate arbitrary memory in the gateway.
-const MaxEventBytes = 8 << 20
-
 // ReadSSEBytes consumes whole SSE frames, including multi-line data, while
 // keeping payloads as bytes. Callers that decode JSON can therefore pass the
 // payload straight to json.Unmarshal without a string -> []byte round trip.

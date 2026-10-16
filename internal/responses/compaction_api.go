@@ -33,7 +33,6 @@ const (
 // summary turn.
 const (
 	CompactionMaxAttempts = gatewayCompactionMaxAttempts
-	MaxCompactionSummary  = maxGatewayCompactionSummary
 )
 
 // ClassifyCompactionPayload decides whether a payload is a compaction turn.

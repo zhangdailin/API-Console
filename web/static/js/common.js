@@ -1,11 +1,14 @@
 // Common JavaScript functions
 
-function setSidebarAccountStats(total, normal, abnormal) {
+function setSidebarAccountStats(total, normal, abnormal, limited = 0) {
   const footerTotal = document.getElementById("footerTotal");
   if (footerTotal) footerTotal.textContent = String(total || 0);
 
   const footerNormal = document.getElementById("footerNormal");
   if (footerNormal) footerNormal.textContent = String(normal || 0);
+
+  const footerLimited = document.getElementById("footerLimited");
+  if (footerLimited) footerLimited.textContent = String(limited || 0);
 
   const footerAbnormal = document.getElementById("footerAbnormal");
   if (footerAbnormal) footerAbnormal.textContent = String(abnormal || 0);
@@ -145,12 +148,30 @@ function getAccountQualityStatus(acc, now = Date.now()) {
   };
 }
 
+// Model holds are scoped capacity restrictions, not a retired credential.
+function getAccountModelCooldowns(acc, now = Date.now()) {
+  if (normalizeSidebarAccountType(acc) !== 'grok') return [];
+  const holds = acc?.model_cooldowns;
+  if (!holds || typeof holds !== 'object' || Array.isArray(holds)) return [];
+  return Object.entries(holds).map(([model, raw]) => ({ model, until: Date.parse(String(raw || '')),
+    reason: acc?.model_cooldown_reasons?.[model] || '' }))
+    .filter(hold => Number.isFinite(hold.until) && hold.until > now)
+    .sort((a, b) => a.until - b.until || a.model.localeCompare(b.model));
+}
+
+function isAccountCapacityLimited(acc) {
+  return Boolean(acc && !isSidebarAccountAbnormal(acc) &&
+    (isQuotaOnlyStatus(acc) || getAccountModelCooldowns(acc).length));
+}
+
 function isSidebarAccountAbnormal(acc) {
   if (!acc || !acc.enabled) return true;
 
   if (getAccountQualityStatus(acc).cooling) return true;
 
   if (isQuotaOnlyStatus(acc)) { return false; }
+
+  if (normalizeSidebarStatusCode(acc.status_code) === "429" && getAccountModelCooldowns(acc).length) return !hasSidebarAccountCredential(acc);
 
   if (normalizeSidebarStatusCode(acc.status_code)) { return true; }
 
@@ -161,8 +182,9 @@ function computeSidebarAccountStats(accounts) {
   const list = Array.isArray(accounts) ? accounts : [];
   const total = list.length;
   const abnormal = list.filter(isSidebarAccountAbnormal).length;
-  const normal = Math.max(0, total - abnormal);
-  return { total, normal, abnormal };
+  const limited = list.filter(isAccountCapacityLimited).length;
+  const normal = Math.max(0, total - abnormal - limited);
+  return { total, normal, abnormal, limited };
 }
 
 async function refreshSidebarAccountStats() {
@@ -172,7 +194,7 @@ async function refreshSidebarAccountStats() {
   try {
     const accounts = await ConsoleAPI.json("/api/accounts", {}, { array: true });
     const stats = computeSidebarAccountStats(accounts);
-    setSidebarAccountStats(stats.total, stats.normal, stats.abnormal);
+    setSidebarAccountStats(stats.total, stats.normal, stats.abnormal, stats.limited);
   } catch (err) { console.debug("Failed to refresh sidebar account stats:", err); }
 }
 

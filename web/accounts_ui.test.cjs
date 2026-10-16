@@ -992,6 +992,8 @@ test('账号管理 and 运维总览 count the same 异常 accounts from one pred
   const sidebar = context.computeSidebarAccountStats(rows);
   assert.equal(sidebar.abnormal, 3, 'disabled, 401 and missing-credential rows are the only faults');
   assert.equal(sidebar.total, 8);
+  assert.equal(sidebar.limited, 4, 'quota restrictions have a separate count');
+  assert.equal(sidebar.normal, 1, 'only unrestricted accounts count as normal');
 
   // … and 账号管理 must land on the same number now that updateStats() defers to
   // the shared predicate instead of computing its own verdict.
@@ -1100,4 +1102,52 @@ test('quality details ignore unrelated providers and do not render arbitrary rea
   assert.equal(context.evaluateAccountStatus(other).text, '正常');
   assert.equal(context.isSidebarAccountAbnormal(other), false);
   assert.equal(context.buildQualityMarkup(other), '');
+});
+
+
+test('Grok model cooldown is visible without an HTTP error or exhausted weekly allowance', () => {
+  const { context, node } = loadUI();
+  const until = new Date(Date.now() + 3600000).toISOString();
+  const row = { id: 78, account_type: 'grok', enabled: true, has_credential: true,
+    status_code: '', quota_supported: true, quota_limit: 100, quota_remaining: 54,
+    model_cooldowns: { 'grok-4.7': until }, model_cooldown_reasons: { 'grok-4.7': 'throttled' } };
+  for (const status_code of ['', '429']) {
+    const account = { ...row, status_code };
+    const badge = context.evaluateAccountStatus(account);
+    assert.equal(badge.text, '模型冷却');
+    assert.equal(badge.modelCooling, true);
+    assert.equal(context.isAccountAbnormal(account), false, 'temporary capacity holds must not be deleted by clear abnormal');
+    assert.equal(context.isSidebarAccountAbnormal(account), false);
+    const detail = context.buildCooldownMarkup(account);
+    assert.match(detail, /grok-4.7/);
+    assert.match(detail, /冷却至/);
+    assert.match(detail, /到期后复检/);
+    assert.doesNotMatch(detail, /恢复/);
+    const stats = context.computeSidebarAccountStats([account]);
+    assert.equal(stats.normal, 0);
+    assert.equal(stats.limited, 1);
+    assert.equal(stats.abnormal, 0);
+  }
+  vm.runInContext('accounts = ' + JSON.stringify([row]), context);
+  context.renderAccounts(); context.updateStats();
+  assert.equal(node('enabledAccounts').textContent, 0);
+  assert.equal(node('limitedAccounts').textContent, 1);
+  assert.equal(node('footerLimited').textContent, '1');
+  assert.equal(context.evaluateAccountStatus({ ...row, status_code: '401' }).text, '未授权');
+  assert.equal(context.evaluateAccountStatus({ ...row, status_code: '429', quality_cooldown_until: until }).text, '质量冷却');
+});
+
+test('expired or invalid model holds do not hide recovered account availability', () => {
+  const { context } = loadUI();
+  const row = { id: 49, account_type: 'grok', enabled: true, has_credential: true,
+    model_cooldowns: { 'grok-4.7': '2000-01-01T00:00:00Z', 'other': 'invalid' } };
+  assert.equal(context.getAccountModelCooldowns(row).length, 0);
+  assert.equal(context.evaluateAccountStatus(row).text, '正常');
+  assert.equal(context.buildCooldownMarkup(row), '');
+  assert.equal(context.computeSidebarAccountStats([row]).normal, 1);
+  const until = new Date(Date.now() + 3600000).toISOString();
+  const mixed = { ...row, model_cooldowns: { 'grok-4.7': until, 'expired': '2000-01-01T00:00:00Z' } };
+  assert.equal(context.getAccountModelCooldowns(mixed).length, 1);
+  assert.doesNotMatch(context.buildCooldownMarkup(mixed), /expired/);
+  assert.equal(context.evaluateAccountStatus({ ...mixed, enabled: false }).text, '禁用');
 });

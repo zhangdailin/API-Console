@@ -10,15 +10,11 @@ import (
 	"strings"
 )
 
-// MaxJSONBodyBytes bounds the request body of every JSON endpoint: an unbounded
-// Decode lets one client allocate arbitrary memory inside the gateway.
-const MaxJSONBodyBytes = 32 << 20
-
 // DecodeJSONBody decodes the request body into v and writes the standard error
-// response on failure: 415 for a non-JSON content type, 413 for an oversized
-// body, 408 for a request-body read timeout and 400 for malformed JSON.
+// response on failure: 415 for a non-JSON content type, 408 for a request-body
+// read timeout and 400 for malformed JSON. No default body size ceiling applies.
 func DecodeJSONBody(w http.ResponseWriter, r *http.Request, v any) bool {
-	return DecodeJSONBodyLimit(w, r, v, MaxJSONBodyBytes)
+	return DecodeJSONBodyLimit(w, r, v, 0)
 }
 
 // DecodeJSONBodyLimit lets small public endpoints use a stricter allocation bound.
@@ -34,7 +30,7 @@ func DecodeJSONBodyLimit(w http.ResponseWriter, r *http.Request, v any, limit in
 			return false
 		}
 	}
-	if r.Body != nil {
+	if limit > 0 {
 		r.Body = http.MaxBytesReader(w, r.Body, limit)
 	}
 	decoder := json.NewDecoder(r.Body)
@@ -52,16 +48,14 @@ func DecodeJSONBodyLimit(w http.ResponseWriter, r *http.Request, v any, limit in
 	return true
 }
 
-// ReadBoundedJSONBody reads a JSON request body under the shared limit. It
-// writes the 413/408/400 response itself and returns an error so the caller only
-// has to return: an unbounded io.ReadAll lets one client allocate arbitrary
-// memory inside the gateway.
+// ReadBoundedJSONBody retains its compatibility name but reads the complete body.
+// Read failures are returned and reported to the caller without partial input.
 func ReadBoundedJSONBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
 	if r == nil || r.Body == nil {
 		WriteError(w, http.StatusBadRequest, "invalid json")
 		return nil, errors.New("empty body")
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxJSONBodyBytes))
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeJSONBodyError(w, err)
 		return nil, err

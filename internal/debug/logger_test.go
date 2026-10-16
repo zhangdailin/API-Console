@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -66,4 +67,19 @@ func TestLoggerLogUpstreamRequestRedactsCredentials(t *testing.T) {
 	// Windows does not expose Unix permission bits through os.FileMode.
 	got := info.Mode().Perm()
 	testutil.Falsef(t, runtime.GOOS != "windows" && got != 0600, "debug log permissions=%o want 600", got)
+}
+
+func TestDebugStreamPreservesBeyondFormerLimit(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "stream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	var written int64
+	data := strings.Repeat("x", 9<<20)
+	(&Logger{}).writeLimitedStream(f, &written, data)
+	info, err := f.Stat()
+	if err != nil || written != int64(len(data)) || info.Size() != int64(len(data)) {
+		t.Fatal("debug stream truncated", written, err)
+	}
 }

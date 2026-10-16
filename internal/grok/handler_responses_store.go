@@ -21,12 +21,6 @@ import (
 	"orchids-api/internal/store"
 )
 
-// maxNativeResponsesBytes bounds a buffered non-streaming native Build
-// Responses body. The reference implementation allows 128 MiB; the previous
-// 8 MiB rejected a long reasoning turn as an upstream fault, and the client
-// then retried a request that had already succeeded upstream.
-const maxNativeResponsesBytes = 128 << 20
-
 func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Request, modelID string, spec ModelSpec, payload map[string]any, upstreamPath string, saveOwnership bool) {
 	// Native Responses bypasses the chat handler that normally installs Grok's
 	// model context. Keep the upstream model on every selection/request/retry so a
@@ -315,8 +309,8 @@ func (h *Handler) deleteStoredResponse(r *http.Request, responseID, ownerHash st
 }
 
 func readAndValidateNativeResponse(body io.Reader) ([]byte, error) {
-	raw, err := io.ReadAll(io.LimitReader(body, maxNativeResponsesBytes+1))
-	if err != nil || len(raw) > maxNativeResponsesBytes {
+	raw, err := io.ReadAll(body)
+	if err != nil {
 		return nil, fmt.Errorf("upstream response unavailable")
 	}
 	var response map[string]any
@@ -324,25 +318,6 @@ func readAndValidateNativeResponse(body io.Reader) ([]byte, error) {
 		return nil, fmt.Errorf("invalid upstream response")
 	}
 	return raw, nil
-}
-
-// boundedResponseCapture keeps at most limit bytes of a stream, so reasoning
-// replay can still be captured when the full body is too large to buffer. Every
-// write is reported complete, so the bound never truncates the caller's stream.
-type boundedResponseCapture struct {
-	data  []byte
-	limit int
-}
-
-func newBoundedResponseCapture(limit int) *boundedResponseCapture {
-	return &boundedResponseCapture{limit: limit, data: make([]byte, 0, min(limit, 64*1024))}
-}
-
-func (c *boundedResponseCapture) Write(p []byte) (int, error) {
-	if remaining := c.limit - len(c.data); remaining > 0 {
-		c.data = append(c.data, p[:min(len(p), remaining)]...)
-	}
-	return len(p), nil
 }
 
 func writeResponsesAPIError(w http.ResponseWriter, status int, code, message string) {

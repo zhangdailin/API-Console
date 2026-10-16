@@ -23,18 +23,14 @@ import (
 // a withheld turn was never written, which is what makes retrying it on another
 // account possible at all.
 //
-// The hold is bounded in every direction: a timeout (default 30s), a byte cap,
-// and a bounded retry budget (default 6 accounts). The last attempt is
+// The hold uses a timeout (default 30s) and a retry budget (default 6 accounts).
+// Buffered content has no fixed byte ceiling. The last attempt is
 // fail-open, so a pool of equally strange accounts still answers
 // instead of failing a request the upstream completed.
 const (
 	qualityHoldMaxAttemptsDefault = 6
 	qualityHoldTimeoutDefault     = 30 * time.Second
 	qualityHoldMinOutputDefault   = int64(8)
-	// qualityHoldMaxBytes caps what one withheld turn may buffer. Beyond it the
-	// turn is delivered rather than held: an unbounded buffer would turn a
-	// degraded account into an out-of-memory event.
-	qualityHoldMaxBytes = 8 << 20
 
 	// Dump shapes. The thresholds are token counts; the gateway measures the text
 	// it saw and converts it with the same rune/4 estimate its usage accounting
@@ -131,7 +127,9 @@ type qualityStreamSignals struct {
 	EncryptedFloor int64
 	UsageReported  bool
 	// FirstVisible marks that visible text has arrived at all.
-	FirstVisible bool
+	FirstVisible          bool
+	FirstVisibleMS        int64
+	VisibleTimingObserved bool
 	// VisibleFlushMS measures the interval between the first and last text
 	// deltas. Negative means streaming timing was not observed.
 	VisibleFlushMS int64
@@ -185,13 +183,28 @@ func qualityMeetsEncryptedFloor(sig qualityStreamSignals) bool {
 }
 
 func qualityHasDumpBill(sig qualityStreamSignals) bool {
-	return sig.ReasoningTokens >= qualityBurstReasoning || qualityMeetsEncryptedFloor(sig)
+	// When usage explicitly reports a modest reasoning bill, cipher size is not
+	// evidence of an excessive bill. Encryption overhead can exceed the floor
+	// even for an ordinary short answer delivered in a single delta.
+	if sig.ReasoningTokens > 0 {
+		return sig.ReasoningTokens >= qualityBurstReasoning
+	}
+	return qualityMeetsEncryptedFloor(sig)
+}
+
+// A completed, promptly generated response with billed encrypted reasoning is
+// not a late dump merely because its short answer fits in a single delta.
+func qualityHasPromptBilledReasoning(sig qualityStreamSignals) bool {
+	return sig.Terminal && sig.VisibleTimingObserved && !sig.HoldExpired &&
+		sig.VisibleTokens > 0 && sig.VisibleTokens < qualityBurstVisible &&
+		sig.FirstVisibleMS >= 0 && sig.FirstVisibleMS < qualityBurstFlushMS &&
+		qualityHasBilledEncryptedReasoning(sig)
 }
 
 // qualityIsBurstDump is the late greeting: a short visible answer dumped after a
 // long hold with a large reasoning bill.
 func qualityIsBurstDump(sig qualityStreamSignals) bool {
-	if sig.HasReasoningDelta {
+	if sig.HasReasoningDelta || qualityHasPromptBilledReasoning(sig) {
 		return false
 	}
 	shortVisible := sig.VisibleTokens > 0 && sig.VisibleTokens < qualityBurstVisible
@@ -205,7 +218,7 @@ func qualityIsBurstDump(sig qualityStreamSignals) bool {
 // bill is followed by the whole visible answer within two seconds. The visible
 // size is not a gate: dumps shorter than the minimum output leaked through it.
 func qualityIsFakeEncryptedDump(sig qualityStreamSignals) bool {
-	if sig.HasReasoningDelta {
+	if sig.HasReasoningDelta || qualityHasPromptBilledReasoning(sig) {
 		return false
 	}
 	return qualityFastFlush(sig, qualityFakeEncFlushMS) && qualityHasDumpBill(sig)

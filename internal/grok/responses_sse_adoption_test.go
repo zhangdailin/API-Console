@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"orchids-api/internal/responses"
 	"orchids-api/internal/testutil"
 	"strings"
 	"testing"
@@ -74,12 +73,15 @@ func TestResponsesNativeOutcomeShortWriteAndStickyFailure(t *testing.T) {
 	testutil.Fail(t, result.Err == nil || result.Finish != "error", result)
 }
 
-func TestResponsesNativeAuditBoundsWholeMultilineFrame(t *testing.T) {
-	line := "data: " + strings.Repeat("a", 64<<10) + "\n"
-	recorder := httptest.NewRecorder()
-	_, capture, result := copyNativeCLIResponseAndCaptureModel(recorder, strings.NewReader(strings.Repeat(line, 130)), "text/event-stream", "grok-4.6")
-	if result.Err == nil || len(capture) > responses.MaxEventBytes || !strings.Contains(recorder.Body.String(), "response.failed") {
-		t.Fatal("multiline audit accumulation is unbounded", result)
+func TestResponsesNativeLargeSingleAndMultilineFrames(t *testing.T) {
+	for _, separator := range []string{"", "\ndata: "} {
+		payload := strings.Repeat("a", 9<<20)
+		frame := "event: response.completed\ndata: {\"type\":\"response.completed\",\"padding\":\"" + payload + "\"," + separator + "\"response\":{\"id\":\"large\",\"status\":\"completed\"}}\n\n"
+		recorder := httptest.NewRecorder()
+		id, capture, result := copyNativeCLIResponseAndCaptureModel(recorder, strings.NewReader(frame), "text/event-stream", "grok-4.6")
+		if result.Err != nil || id != "large" || !strings.Contains(recorder.Body.String(), payload) || !bytes.Contains(capture, []byte(payload)) {
+			t.Fatal("large response lost", result.Err)
+		}
 	}
 }
 

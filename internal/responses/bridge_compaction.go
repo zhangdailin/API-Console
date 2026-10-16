@@ -160,10 +160,6 @@ func ResponsesBridgeCompactHandler(chat http.HandlerFunc, opts BridgeOptions) ht
 			WriteAPIError(w, http.StatusBadGateway, "invalid_upstream_response", "summary did not complete")
 			return
 		}
-		if len(summary) > MaxCompactionSummary {
-			WriteAPIError(w, http.StatusBadGateway, "invalid_upstream_response", "summary exceeds compaction limit")
-			return
-		}
 		id := "cmp_" + CompactionRandomHex(16)
 		state, _ := json.Marshal(bridgeCompactionRecord{Summary: summary, Model: req.Model, Channel: bridgeCompactionChannel(r.URL.Path)})
 		if err := opts.StoreFor().SaveStoredResponse(r.Context(), &store.StoredResponse{ResponseID: id, OwnerHash: OwnerHash(r.Context()), Provider: bridgeCompactionProvider, Body: state, CreatedAt: time.Now()}, opts.TTLOrDefault()); err != nil {

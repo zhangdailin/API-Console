@@ -294,7 +294,7 @@ function evaluateAccountStatus(acc) {
   if (!acc.enabled) { return { normal: false, text: '禁用', color: '#fb7185', bg: 'rgba(251, 113, 133, 0.16)', tip: '账号已禁用' }; }
   const statusCode = normalizeSidebarStatusCode(acc.status_code);
   const quality = getAccountQualityStatus(acc);
-  if (quality.cooling && (!statusCode || isQuotaOnlyStatus(acc))) {
+  if (quality.cooling && (!statusCode || isQuotaOnlyStatus(acc) || (statusCode === '429' && getAccountModelCooldowns(acc).length))) {
     return { normal: false, text: '质量冷却', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.16)', tip: 'Grok 质量检查已将账号暂时移出调度' };
   }
   // A bare "401" or "429" hides the actionable cause (retired grant vs. a
@@ -306,6 +306,12 @@ function evaluateAccountStatus(acc) {
     const type = normalizeAccountType(acc);
     const providerName = accountTypeLabel(type);
     return { normal: true, text: '额度不足', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.16)', tip: providerName + ' 额度已用尽或余额不足，调度器会暂时跳过该账号 (剩余 0 / ' + limitText + ')', quotaOnly: true };
+  }
+  const modelHolds = getAccountModelCooldowns(acc);
+  if (modelHolds.length && (!statusCode || statusCode === '429') && hasSidebarAccountCredential(acc)) {
+    const models = modelHolds.map(hold => hold.model).join('、');
+    return { normal: true, limited: true, modelCooling: true, text: '模型冷却', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.16)',
+      tip: models + ' 暂停调度；其他模型是否可用取决于各自额度和授权' };
   }
   if (statusCode) {
     // When the server recorded a reason, it is the actionable text; the generic
@@ -778,16 +784,22 @@ function cooldownRecoveryAt(acc) {
 function buildCooldownMarkup(acc) {
   if (!acc.enabled) return "";
   const badge = evaluateAccountStatus(acc);
-  if (badge.normal) return "";
+  const holds = getAccountModelCooldowns(acc);
+  const modelLines = holds.map(hold => {
+    const when = new Date(hold.until).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+    const state = hold.reason === 'unavailable' ? '暂不可用' : '冷却';
+    return `<div class="account-cooldown-until" style="font-size:0.68rem;color:#b45309;margin-top:2px">${escapeHtml(hold.model)} ${state}至 ${escapeHtml(when)}（${escapeHtml(formatRemainingCompact(hold.until - Date.now()))}；到期后复检）</div>`;
+  }).join('');
+  if (badge.normal && !badge.quotaOnly) return modelLines;
   const at = cooldownRecoveryAt(acc);
-  if (!at) return "";
+  if (!at) return modelLines;
   const remaining = at - Date.now();
   const when = new Date(at).toLocaleString("zh-CN", {
     month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
   });
   const tail = remaining > 0 ? `（${formatRemainingCompact(remaining)}）` : "（已到期，等待下一次调度）";
   const label = getAccountQualityStatus(acc).cooling ? `冷却至 ${when}` : `预计 ${when} 恢复`;
-  return `<div class="account-cooldown-until" style="font-size:0.68rem;color:#64748b;margin-top:2px">${escapeHtml(label)}${escapeHtml(tail)}</div>`;
+  return modelLines + `<div class="account-cooldown-until" style="font-size:0.68rem;color:#64748b;margin-top:2px">${escapeHtml(label)}${escapeHtml(tail)}</div>`;
 }
 
 // formatRemainingCompact renders a cooldown span as hours/minutes.
@@ -969,13 +981,15 @@ function updateStats() {
 
   document.getElementById("totalAccounts").textContent = total;
   document.getElementById("enabledAccounts").textContent = normal;
+  const limitedAccounts = document.getElementById("limitedAccounts");
+  if (limitedAccounts) limitedAccounts.textContent = stats.limited;
   document.getElementById("disabledAccounts").textContent = abnormal;
 
   // Attempt to update selected if element exists (it should)
   updateSelectedCount();
 
   // Update sidebar footer
-  setSidebarAccountStats(stats.total, stats.normal, stats.abnormal);
+  setSidebarAccountStats(stats.total, stats.normal, stats.abnormal, stats.limited);
 }
 
 // Update selected count

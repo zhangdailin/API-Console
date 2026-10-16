@@ -13,13 +13,14 @@ import (
 	"time"
 )
 
-func TestRefactorNativeUsageSurvivesFullCaptureOverflow(t *testing.T) {
+func TestRefactorNativeUsageAndFullCaptureBeyondFormerLimit(t *testing.T) {
 	frame := parityFrame("response.in_progress", map[string]any{"padding": strings.Repeat("a", 128<<10)})
 	stream := strings.Repeat(frame, 70) + parityFrame("response.completed", map[string]any{"response": map[string]any{
 		"id": "resp_a", "status": "completed", "usage": map[string]any{"input_tokens": 100, "output_tokens": 10},
 	}})
-	id, captured, result := copyNativeCLIResponseAndCaptureModel(httptest.NewRecorder(), strings.NewReader(stream), "text/event-stream", "grok-4.6")
-	testutil.Fail(t, id != "resp_a" || len(captured) != responses.MaxEventBytes || result.Err != nil || responses.InterfaceToInt(result.Usage["completion_tokens"]) != 10, id, len(captured), result)
+	rec := httptest.NewRecorder()
+	id, captured, result := copyNativeCLIResponseAndCaptureModel(rec, strings.NewReader(stream), "text/event-stream", "grok-4.6")
+	testutil.Fail(t, id != "resp_a" || len(captured) <= 8<<20 || string(captured) != rec.Body.String() || result.Err != nil || responses.InterfaceToInt(result.Usage["completion_tokens"]) != 10, id, len(captured), result)
 }
 
 type refactorErrorReader struct{ err error }

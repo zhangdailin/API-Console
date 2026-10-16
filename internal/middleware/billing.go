@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -27,10 +26,6 @@ const DefaultBillingReservationTTL = 30 * time.Minute
 // billingReleaseTimeout bounds the release issued from a request's deferred
 // cleanup, which must still happen when the client already disconnected.
 const billingReleaseTimeout = 5 * time.Second
-
-// maxBillingBodyBytes bounds the request body buffered for cost estimation.
-// Budgeted requests exceeding it are rejected before any upstream work.
-const maxBillingBodyBytes = 8 << 20
 
 // BillingReservation is the hold one request took against its client key. The
 // request-scoped pointer is mutated by SettleAPIKeyBilling so the deferred
@@ -219,11 +214,7 @@ func APIKeyBillingReservation(next http.HandlerFunc, reserver APIKeyBillingReser
 		}
 		body, err := readBillingBody(r)
 		if err != nil {
-			status, code := http.StatusBadRequest, "invalid_request_body"
-			if errors.Is(err, errBillingBodyTooLarge) {
-				status, code = http.StatusRequestEntityTooLarge, "request_too_large"
-			}
-			writeAPIKeyError(w, status, err.Error(), code)
+			writeAPIKeyError(w, http.StatusBadRequest, err.Error(), "invalid_request_body")
 			return
 		}
 		if len(body) == 0 {
@@ -302,8 +293,6 @@ func billingRequestPath(path string) bool {
 	return false
 }
 
-var errBillingBodyTooLarge = errors.New("Budgeted inference request exceeds the 8 MiB body limit")
-
 // readBillingBody restores accepted bytes and rejects incomplete estimation.
 func readBillingBody(r *http.Request) ([]byte, error) {
 	if r == nil || r.Body == nil {
@@ -311,12 +300,9 @@ func readBillingBody(r *http.Request) ([]byte, error) {
 	}
 	original := r.Body
 	defer original.Close()
-	raw, err := io.ReadAll(io.LimitReader(original, maxBillingBodyBytes+1))
+	raw, err := io.ReadAll(original)
 	if err != nil {
 		return nil, fmt.Errorf("Could not read request body")
-	}
-	if len(raw) > maxBillingBodyBytes {
-		return nil, errBillingBodyTooLarge
 	}
 	r.Body = io.NopCloser(bytes.NewReader(raw))
 	r.ContentLength = int64(len(raw))

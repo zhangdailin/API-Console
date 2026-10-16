@@ -89,7 +89,7 @@ func (h *Handler) handleGatewayCompaction(w http.ResponseWriter, r *http.Request
 			return
 		}
 		h.syncGrokQuota(sess.acc, resp.Header)
-		data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxNativeResponsesBytes+1))
+		data, readErr := io.ReadAll(resp.Body)
 		status := resp.StatusCode
 		_ = resp.Body.Close()
 		sess.Close()
@@ -108,10 +108,6 @@ func (h *Handler) handleGatewayCompaction(w http.ResponseWriter, r *http.Request
 				continue
 			}
 			writeResponsesAPIError(w, upstreamHTTPResponseStatus(lastErr), "upstream_error", "upstream compaction request failed")
-			return
-		}
-		if len(data) > maxNativeResponsesBytes {
-			writeResponsesAPIError(w, http.StatusBadGateway, "compaction_failed", "upstream compaction response was too large")
 			return
 		}
 		parsed, parseErr := responses.ParseCompactionStream(data)

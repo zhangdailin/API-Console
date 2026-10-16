@@ -248,3 +248,15 @@ func TestOptimizationAccountSelectionUsesOneCooldownPipeline(t *testing.T) {
 		t.Fatal("canceled selection performed cooldown reads")
 	}
 }
+
+func TestPromptBilledSingleDeltaIsNotDegraded(t *testing.T) {
+	for _, bill := range []int64{73, 82, 120} {
+		result := chatOutcome{Quality: qualitySignals{ExpectReasoning: true, Terminal: true, VisibleChars: 20, EncryptedChars: 600, ReasoningTokens: bill}}
+		result.Quality.observeVisible(1244)
+		hold := newBuildQualityHold(httptest.NewRecorder(), qualityHoldPolicy{}, &result)
+		verdict, _ := hold.step(true)
+		if verdict != qualityDeliver || qualityDegraded(result.Quality) {
+			t.Fatalf("healthy short answer rejected: bill=%d verdict=%s", bill, verdict)
+		}
+	}
+}

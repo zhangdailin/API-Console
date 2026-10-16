@@ -51,12 +51,14 @@ func (c *buildQualityHold) signals(terminal bool) qualityStreamSignals {
 		UsageReported:   c.outcome.UsageSource == audit.UsageSourceUpstream,
 		// Timing-based detectors require observed text arrival, not just a
 		// character count. Completed JSON bodies keep FirstVisibleMS at -1.
-		FirstVisible:     quality.VisibleChars > 0 && quality.VisibleTimingObserved,
-		VisibleFlushMS:   quality.visibleDurationMS(),
-		Terminal:         terminal || quality.Terminal,
-		HoldExpired:      c.expired,
-		ReasoningStarted: c.reasoningStarted,
-		OutputTokens:     int64(responses.InterfaceToInt(c.outcome.Usage["completion_tokens"])),
+		FirstVisible:          quality.VisibleChars > 0 && quality.VisibleTimingObserved,
+		FirstVisibleMS:        quality.FirstVisibleMS,
+		VisibleTimingObserved: quality.VisibleTimingObserved,
+		VisibleFlushMS:        quality.visibleDurationMS(),
+		Terminal:              terminal || quality.Terminal,
+		HoldExpired:           c.expired,
+		ReasoningStarted:      c.reasoningStarted,
+		OutputTokens:          int64(responses.InterfaceToInt(c.outcome.Usage["completion_tokens"])),
 	}
 	sig.HasReasoningDelta = quality.ReasoningChars > 0
 	sig.EncryptedFloor = encryptedThinkingFloor(0, 0, quality.ReasoningTokens)
@@ -68,11 +70,6 @@ func (c *buildQualityHold) signals(terminal bool) qualityStreamSignals {
 // reading upstream.
 func (c *buildQualityHold) step(terminal bool) (verdict qualityVerdict, waiting bool) {
 	if c == nil || c.writer == nil {
-		return qualityDeliver, false
-	}
-	if c.writer.Buffered() >= qualityHoldMaxBytes {
-		// Too large to hold: deliver rather than grow without bound. The writer
-		// commits on overflow, so the verdict is delivered here too.
 		return qualityDeliver, false
 	}
 	if !c.expired && time.Since(c.started) >= c.policy.HoldTimeout {

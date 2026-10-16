@@ -40,11 +40,15 @@ func TestGatewayCompactionCodecRoundTripAndRejections(t *testing.T) {
 	otherCodec := NewCompactionCodec(mustCipher(t, "fedcba9876543210fedcba9876543210"))
 	_, _, _, err = otherCodec.decode("session-a", blob)
 	testutil.Error(t, err)
-	// Size limits are enforced on both ends.
+	// Empty summaries remain invalid; large summaries must round-trip.
 	_, err = codec.Encode("s", "")
 	testutil.Error(t, err)
-	_, err = codec.Encode("s", strings.Repeat("x", maxGatewayCompactionSummary+1))
-	testutil.Error(t, err)
+	large := strings.Repeat("x", 9<<20)
+	largeBlob, err := codec.Encode("s", large)
+	testutil.NoError(t, err, "large encode")
+	decoded, _, _, err := codec.Decode("s", largeBlob)
+	testutil.NoError(t, err, "large decode")
+	testutil.Equal(t, decoded, large)
 }
 
 func mustCipher(t *testing.T, key string) *secureblob.Cipher {

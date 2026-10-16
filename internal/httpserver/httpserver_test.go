@@ -73,9 +73,9 @@ func TestDecodeJSONBodyRequiresOneCompleteValue(t *testing.T) {
 
 func TestDecodeJSONBodyEnforcesLimitAfterValidPrefix(t *testing.T) {
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/", strings.NewReader("{}"+strings.Repeat(" ", MaxJSONBodyBytes)))
+	req := httptest.NewRequest("POST", "/", strings.NewReader("{}"+strings.Repeat(" ", 1024)))
 	var value map[string]any
-	if DecodeJSONBody(rec, req, &value) || rec.Code != http.StatusRequestEntityTooLarge {
+	if DecodeJSONBodyLimit(rec, req, &value, 1024) || rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("oversized suffix accepted: %d", rec.Code)
 	}
 }
@@ -212,5 +212,17 @@ func BenchmarkWriteSSE_Bytes(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		writer.Body.Reset()
 		WriteSSEBytes(writer, "demo", data)
+	}
+}
+
+func TestJSONBodyAcceptsBeyondFormerLimit(t *testing.T) {
+	body := "{}" + strings.Repeat(" ", 33<<20)
+	var value map[string]any
+	if !DecodeJSONBody(httptest.NewRecorder(), httptest.NewRequest("POST", "/", strings.NewReader(body)), &value) {
+		t.Fatal("large JSON rejected")
+	}
+	got, err := ReadBoundedJSONBody(httptest.NewRecorder(), httptest.NewRequest("POST", "/", strings.NewReader(body)))
+	if err != nil || string(got) != body {
+		t.Fatal("large JSON changed", err)
 	}
 }

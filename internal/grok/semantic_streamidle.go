@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"orchids-api/internal/responses"
 	"orchids-api/internal/util"
 	"strings"
 	"sync"
@@ -224,8 +223,6 @@ type buildSSEActivityDetector struct {
 	scanOffset int
 	eventName  string
 	data       []byte
-	eventBytes int
-	overLimit  bool
 	firstLine  bool
 }
 
@@ -256,11 +253,7 @@ func (d *buildSSEActivityDetector) Observe(chunk []byte) bool {
 		}
 		d.observeLine(line)
 	}
-	if len(d.pending)+d.eventBytes > responses.MaxEventBytes {
-		d.pending = nil
-		d.scanOffset = 0
-		d.overLimit = true
-	} else if len(d.pending) == 0 {
+	if len(d.pending) == 0 {
 		// Drop references to a large consumed backing array between events.
 		d.pending = nil
 		d.scanOffset = 0
@@ -269,14 +262,7 @@ func (d *buildSSEActivityDetector) Observe(chunk []byte) bool {
 }
 
 func (d *buildSSEActivityDetector) observeLine(line []byte) {
-	d.eventBytes += len(line)
-	if d.eventBytes > responses.MaxEventBytes {
-		d.overLimit = true
-		d.eventName = ""
-		d.data = nil
-		return
-	}
-	if d.overLimit || len(line) == 0 || line[0] == ':' {
+	if len(line) == 0 || line[0] == ':' {
 		return
 	}
 	field, value, found := bytes.Cut(line, []byte{':'})
@@ -296,7 +282,7 @@ func (d *buildSSEActivityDetector) observeLine(line []byte) {
 
 func (d *buildSSEActivityDetector) finishEvent() bool {
 	active := false
-	if !d.overLimit && len(d.data) > 0 {
+	if len(d.data) > 0 {
 		var payload struct {
 			Type  string `json:"type"`
 			Delta string `json:"delta"`
@@ -326,7 +312,5 @@ func (d *buildSSEActivityDetector) finishEvent() bool {
 	}
 	d.eventName = ""
 	d.data = nil
-	d.eventBytes = 0
-	d.overLimit = false
 	return active
 }

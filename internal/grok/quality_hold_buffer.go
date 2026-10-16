@@ -24,8 +24,6 @@ type deferredResponseWriter struct {
 	body      bytes.Buffer
 	committed bool
 	discarded bool
-	// Native Responses fail closed on an unverified oversized body.
-	failOnOverflow bool
 }
 
 func newDeferredResponseWriter(target http.ResponseWriter) *deferredResponseWriter {
@@ -73,19 +71,6 @@ func (d *deferredResponseWriter) Write(p []byte) (int, error) {
 		target := d.target
 		d.mu.Unlock()
 		return target.Write(p)
-	}
-	if d.body.Len()+len(p) > qualityHoldMaxBytes {
-		if d.failOnOverflow {
-			d.mu.Unlock()
-			return 0, errQualityBufferLimit
-		}
-		// The cap is enforced by delivering early rather than by refusing the
-		// write: the upstream turn is legitimate, it is just too large to hold.
-		d.mu.Unlock()
-		if err := d.Commit(); err != nil {
-			return 0, err
-		}
-		return d.target.Write(p)
 	}
 	n, err := d.body.Write(p)
 	d.mu.Unlock()

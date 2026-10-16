@@ -83,6 +83,14 @@ func qualityDegraded(sig qualitySignals) bool {
 	if sig.VisibleChars < qualityMinVisible && sig.ReasoningChars <= 0 {
 		return false
 	}
+	if qualityHasPromptBilledReasoning(qualityStreamSignals{
+		Terminal: sig.Terminal, VisibleTimingObserved: sig.VisibleTimingObserved,
+		VisibleTokens:  tokensFromChars(sig.VisibleChars),
+		FirstVisibleMS: sig.FirstVisibleMS, EncryptedBytes: sig.EncryptedChars,
+		ReasoningTokens: sig.ReasoningTokens,
+	}) {
+		return false
+	}
 	// A large reasoning bill with almost no visible output that arrived in one
 	// late burst is the flagship dump shape.
 	if sig.ReasoningTokens >= qualityBurstReasoning &&

@@ -3,13 +3,10 @@ package responses
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"io"
 
 	"orchids-api/internal/util"
 )
-
-const maxEventBytes = 8 << 20
 
 type SSEEvent struct {
 	Event        string
@@ -131,10 +128,9 @@ func ConsumeSSE(source io.Reader, handle func(SSEEvent) error) error {
 	scanner := bufio.NewScanner(source)
 	buffer := util.AcquireStreamBuffer()
 	defer util.ReleaseStreamBuffer(buffer)
-	scanner.Buffer(buffer[:], maxEventBytes)
+	scanner.Buffer(buffer[:], int(^uint(0)>>1))
 	scanner.Split(splitLinesKeepingEnd)
 	event := SSEEvent{}
-	eventBytes := 0
 	firstLine := true
 	var rawFrame []byte
 	flush := func() error {
@@ -145,7 +141,6 @@ func ConsumeSSE(source io.Reader, handle func(SSEEvent) error) error {
 		current := event
 		current.raw = append([]byte(nil), rawFrame...)
 		event = SSEEvent{}
-		eventBytes = 0
 		rawFrame = rawFrame[:0]
 		return handle(current)
 	}
@@ -167,10 +162,6 @@ func ConsumeSSE(source io.Reader, handle func(SSEEvent) error) error {
 				return err
 			}
 			continue
-		}
-		eventBytes += len(line)
-		if eventBytes > maxEventBytes {
-			return fmt.Errorf("grok Build Responses SSE 单事件超过 %d MiB", maxEventBytes>>20)
 		}
 		field, value, found := bytes.Cut(line, []byte(":"))
 		if found && len(value) > 0 && value[0] == ' ' {

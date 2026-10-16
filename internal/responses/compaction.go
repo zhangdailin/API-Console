@@ -36,7 +36,6 @@ import (
 const (
 	gatewayCompactionPrefix      = "g2a_compact_v1."
 	gatewayCompactionVersion     = 1
-	maxGatewayCompactionSummary  = 8 << 20
 	minGatewayCompactionRunes    = 500
 	gatewayCompactionMaxAttempts = 3
 	gatewayCompactionRetryDelay  = 3 * time.Second
@@ -96,7 +95,7 @@ func (c *gatewayCompactionCodec) encode(session, summary string) (string, error)
 	if !c.available() {
 		return "", fmt.Errorf("compaction codec unavailable")
 	}
-	if summary == "" || len(summary) > maxGatewayCompactionSummary {
+	if summary == "" {
 		return "", fmt.Errorf("compaction summary size is invalid")
 	}
 	data, err := json.Marshal(gatewayCompactionEnvelope{Version: gatewayCompactionVersion, Session: session, Summary: summary})
@@ -130,7 +129,7 @@ func (c *gatewayCompactionCodec) decode(session, blob string) (summary string, o
 	if err := json.Unmarshal([]byte(plain), &envelope); err != nil {
 		return "", true, false, fmt.Errorf("decode gateway compaction payload: %w", err)
 	}
-	if envelope.Version != gatewayCompactionVersion || envelope.Summary == "" || len(envelope.Summary) > maxGatewayCompactionSummary {
+	if envelope.Version != gatewayCompactionVersion || envelope.Summary == "" {
 		return "", true, false, fmt.Errorf("gateway compaction payload is invalid")
 	}
 	return envelope.Summary, true, envelope.Session != session, nil

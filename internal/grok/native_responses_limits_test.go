@@ -3,7 +3,6 @@ package grok
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -61,9 +60,9 @@ func TestNativeRecoveryAndQualitySharePhysicalBudget(t *testing.T) {
 func TestNativeQualityBufferAndDownstreamFailure(t *testing.T) {
 	rec := httptest.NewRecorder()
 	q := newNativeResponseQuality(rec, qualityHoldPolicy{})
-	_, err := q.hold.writer.Write(make([]byte, qualityHoldMaxBytes+1))
-	if !errors.Is(err, errQualityBufferLimit) || rec.Body.Len() != 0 || q.hold.writer.Committed() {
-		t.Fatal("unverified buffer overflow failed open")
+	_, err := q.hold.writer.Write(make([]byte, 9<<20))
+	if err != nil || rec.Body.Len() != 0 || q.hold.writer.Committed() {
+		t.Fatal("large unverified buffer failed")
 	}
 	q = newNativeResponseQuality(compatShortWriter{httptest.NewRecorder()}, qualityHoldPolicy{})
 	response := nativeQualityFixture(true)

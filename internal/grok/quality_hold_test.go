@@ -27,6 +27,12 @@ func TestClassifyQualityHold(t *testing.T) {
 		sig  qualityStreamSignals
 		want qualityVerdict
 	}{
+
+		{
+			name: "short single-delta answer with modest billed encrypted reasoning delivers",
+			sig:  qualityStreamSignals{HasThinking: true, EncryptedBytes: 315, EncryptedFloor: 292, ReasoningTokens: 73, VisibleTokens: 5, FirstVisible: true, VisibleFlushMS: 0, Terminal: true},
+			want: qualityDeliver,
+		},
 		{
 			name: "plaintext reasoning releases immediately",
 			sig:  qualityStreamSignals{HasThinking: true, HasReasoningDelta: true, ReasoningTokens: 10, VisibleTokens: 3},
@@ -186,19 +192,22 @@ func TestDeferredResponseWriterParksWithoutRevealing(t *testing.T) {
 	testutil.Equal(t, rec.Body.String(), "degraded dump")
 }
 
-func TestDeferredResponseWriterOverflowDelivers(t *testing.T) {
+func TestDeferredResponseWriterLargeHoldPreservesContent(t *testing.T) {
 	rec := httptest.NewRecorder()
 	deferred := newDeferredResponseWriter(rec)
 	chunk := make([]byte, 1<<20)
 	for i := range chunk {
 		chunk[i] = 'x'
 	}
-	for range (qualityHoldMaxBytes >> 20) + 1 {
+	for range 9 {
 		_, err := deferred.Write(chunk)
 		testutil.CheckNoError(t, err)
 	}
-	// Past the cap the response is delivered instead of buffered without bound.
-	testutil.NotEqual(t, rec.Body.Len(), 0)
+	// Large content remains held until an explicit verdict commits it.
+	testutil.Equal(t, rec.Body.Len(), 0)
+	testutil.Equal(t, deferred.Buffered(), 9<<20)
+	testutil.NoError(t, deferred.Commit(), "commit large hold")
+	testutil.Equal(t, rec.Body.Len(), 9<<20)
 }
 
 func TestQualityHoldPolicyDefaults(t *testing.T) {

@@ -1,7 +1,6 @@
 package grok
 
 import (
-	"errors"
 	"net/http"
 	"time"
 	"unicode/utf8"
@@ -9,8 +8,6 @@ import (
 	"orchids-api/internal/chatwire"
 	"orchids-api/internal/responses"
 )
-
-var errQualityBufferLimit = errors.New("unverified native response exceeded the quality buffer limit")
 
 // Native Responses use the same classifier as Chat, but never fail open with a
 // response already classified as degraded. Releasing frames is irreversible.
@@ -24,7 +21,6 @@ type nativeResponseQuality struct {
 
 func newNativeResponseQuality(w http.ResponseWriter, policy qualityHoldPolicy) *nativeResponseQuality {
 	hold := newBuildQualityHold(w, policy, nil)
-	hold.writer.failOnOverflow = true
 	return &nativeResponseQuality{hold: hold, reasoning: map[string]int64{}, encrypted: map[string]int64{}, toolCalls: map[string]struct{}{}}
 }
 
@@ -118,9 +114,6 @@ func (q *nativeResponseQuality) observeToolCall(item map[string]any, result *cha
 func (q *nativeResponseQuality) check(terminal bool) error {
 	if q == nil || q.result == nil || q.hold.writer.Committed() {
 		return nil
-	}
-	if q.hold.writer.Buffered() >= qualityHoldMaxBytes {
-		return errQualityBufferLimit
 	}
 	if terminal {
 		q.result.Quality.Terminal = q.result.Err == nil

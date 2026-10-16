@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -250,17 +251,17 @@ func TestAPIKeyBillingReservationReleasesAfterClientDisconnect(t *testing.T) {
 type cancelKey struct{}
 
 // Large whitespace before the model cannot bypass an exhausted budget.
-func TestAPIKeyBillingReservationRejectsOversizedBody(t *testing.T) {
+func TestAPIKeyBillingReservationEnforcesBudgetForLargeBody(t *testing.T) {
 	for _, body := range []string{
-		`{"model":"grok-4.6","messages":[{"role":"user","content":"` + strings.Repeat("x", maxBillingBodyBytes) + `"}]}`,
-		`{` + strings.Repeat(" ", maxBillingBodyBytes) + `"model":"grok-4.6","messages":[]}`,
+		`{"model":"grok-4.6","messages":[{"role":"user","content":"` + strings.Repeat("x", (9<<20)) + `"}]}`,
+		`{` + strings.Repeat(" ", (9<<20)) + `"model":"grok-4.6","messages":[]}`,
 	} {
 		ledger := &stubBillingLedger{limit: 1, used: 1}
 		called := false
 		handler := APIKeyBillingReservation(func(http.ResponseWriter, *http.Request) { called = true }, ledger, time.Minute)
 		out := httptest.NewRecorder()
 		handler(out, billingRequest("POST", "/grok/v1/chat/completions", body, &APIKeyPrincipal{ID: 1, BillingLimitUSDTicks: 1}, "oversize"))
-		testutil.Equal(t, out.Code, http.StatusRequestEntityTooLarge)
+		testutil.Equal(t, out.Code, http.StatusPaymentRequired)
 		testutil.False(t, called)
 		testutil.Equal(t, len(ledger.held), 0)
 	}
@@ -347,4 +348,17 @@ func TestBillingReservationConcurrentSettleIsIdempotent(t *testing.T) {
 	done.Wait()
 	testutil.True(t, held.Settled())
 	testutil.Equal(t, len(ledger.settles), 1)
+}
+
+func TestBillingBodyPreservesLargeInput(t *testing.T) {
+	body := strings.Repeat("x", 9<<20)
+	req := httptest.NewRequest("POST", "/", strings.NewReader(body))
+	got, err := readBillingBody(req)
+	if err != nil || string(got) != body {
+		t.Fatal("billing body changed", err)
+	}
+	restored, err := io.ReadAll(req.Body)
+	if err != nil || string(restored) != body {
+		t.Fatal("billing body not restored", err)
+	}
 }

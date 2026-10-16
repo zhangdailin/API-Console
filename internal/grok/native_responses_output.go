@@ -1,6 +1,7 @@
 package grok
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,21 +26,18 @@ func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader,
 
 func copyNativeResponseWithQuality(w http.ResponseWriter, body io.Reader, contentType, model string, namespaces responses.ToolNamespaces, quality *nativeResponseQuality) (responseID string, captured []byte, result chatOutcome) {
 	result.Quality.FirstVisibleMS = -1
-	// The streaming capture is a bounded side buffer for usage/model recovery;
-	// only the non-streaming body needs the larger ceiling.
-	fullCapture := newBoundedResponseCapture(8 << 20)
+	// Keep the complete delivered response for replay and usage recovery.
+	fullCapture := new(bytes.Buffer)
 	defer func() {
-		captured = fullCapture.data
+		captured = fullCapture.Bytes()
 		if result.Err != nil {
 			result.Finish = "error"
 		}
 	}()
 	if !strings.Contains(strings.ToLower(contentType), "text/event-stream") {
-		raw, readErr := io.ReadAll(io.LimitReader(body, maxNativeResponsesBytes+1))
+		raw, readErr := io.ReadAll(body)
 		if readErr != nil {
-			result.Err = fmt.Errorf("upstream response could not be read within the response limit: %w", readErr)
-		} else if len(raw) > maxNativeResponsesBytes {
-			result.Err = fmt.Errorf("upstream response could not be read within the response limit")
+			result.Err = fmt.Errorf("upstream response could not be read: %w", readErr)
 		}
 		if result.Err != nil {
 			writeResponsesAPIError(w, http.StatusBadGateway, "upstream_error", "Upstream response unavailable")
