@@ -1,153 +1,154 @@
-const { test } = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const vm = require('./test-support.cjs');
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const vm=require('node:vm');
+const modelSource=fs.readFileSync(__dirname+'/static/js/ops-flow-model.js','utf8');
+const controllerSource=fs.readFileSync(__dirname+'/static/js/ops-flow.js','utf8');
+function model(){const context=vm.createContext({});vm.runInContext(modelSource,context);return context.FlowScreenModel;}
+const start=Date.parse('2026-10-17T06:00:00Z');
+function snapshot(at=start, overrides={}) {
+ const routes=['workbuddy','cline','qoder','grok'].flatMap(channel=>['chat','responses','messages'].map(protocol=>({channel,protocol,active:0,started:0,completed:0,qps:0,input_tps:0,output_tps:0,usage_available:true})));
+ routes[4]={...routes[4],active:2,started:12,completed:10,qps:.4,input_tps:40,output_tps:10};
+ const empty={samples:0,p50_ms:null,p95_ms:null};
+ const stats={completed:10,failed:2,failure_rate:.2,waiting:1,responding:1,observed:10,usage_reported:8,retried:2,attempts:12,account_switches:1,retry_wait_ms:2000,queue_wait_ms:1000,longest_active_ms:3000,rate_limited:1,timeouts:0,stream_errors:1,canceled:0,
+  first_generation:{samples:8,p50_ms:100,p95_ms:1200},first_visible:empty,body_ttfb:empty,duration:{samples:10,p50_ms:2000,p95_ms:4000},http_phases:{dns_ms:{samples:2,avg_ms:0}}};
+ return {available:true,instance_started:'one',sampled_at:new Date(at).toISOString(),routes,nodes:Object.fromEntries(['gateway','workbuddy','cline','qoder','grok','chat','responses','messages'].map(key=>[key,{...stats}])),...overrides};
+}
+function pools(at=start,scope='') { return {available:true,sampled_at:new Date(at).toISOString(),rows:['workbuddy','cline','qoder','grok'].filter(key=>!scope||scope===key).map(channel=>({channel,accounts_available:2,accounts_enabled:3,capacity_available:true,capacity_slots:20,occupied_slots:5,model_cooldowns:1}))}; }
 
-test('SSE starts only the matching route, keeps short requests visible and clears stale activity', () => {
-  const nodes = new Map();
-  const node = id => {
-    if (!nodes.has(id)) {
-      const classes = new Set();
-      nodes.set(id, { value: '', textContent: '', listeners: {},
-        classList: { add: x => classes.add(x), remove: x => classes.delete(x), contains: x => classes.has(x), toggle: (x,on) => on ? classes.add(x) : classes.delete(x) },
-        addEventListener(type, fn) { this.listeners[type] = fn; },
-      });
-    }
-    return nodes.get(id);
+test('flow scope and totals count admitted routes once, and separate output from input tokens',()=>{
+ const M=model(),data=snapshot();
+ const all=M.normalize(data,''),cline=M.normalize(data,'cline');
+ assert.equal(all.routes.length,12);assert.equal(cline.routes.length,3);
+ assert.equal(M.rate(M.rowsFor(all,'gateway')).active,2);
+ assert.equal(M.rate(M.rowsFor(all,'gateway')).qps,.4);
+ assert.equal(M.rate(M.rowsFor(all,'gateway')).output,10);
+ assert.equal(M.rate(M.rowsFor(cline,'responses')).output,10);
+ data.routes[4].usage_available=false;
+ assert.equal(M.rate(M.rowsFor(M.normalize(data,''),'gateway')).output,null);
+ assert.equal(M.number(0),'0');assert.equal(M.percent(null),'暂无样本');assert.equal(M.milliseconds(0),'0 ms');
+});
+test('invalid, duplicate and empty snapshots cannot look like idle traffic',()=>{
+ const M=model(),data=snapshot();
+ assert.equal(M.normalize({...data,available:false},''),null);
+ assert.equal(M.normalize({...data,routes:[]},''),null);
+ assert.equal(M.normalize({...data,routes:[data.routes[0],data.routes[0]]},''),null);
+ assert.equal(M.normalize({...data,sampled_at:'bad'},''),null);
+ assert.equal(M.normalize({...data,instance_started:''},''),null);
+ assert.equal(M.normalize({...data,routes:data.routes.slice(1)},''),null);
+ assert.equal(M.normalize({...data,nodes:null},''),null);
+ assert.equal(M.normalize({...data,routes:[{...data.routes[0],active:null}]},''),null);
+ assert.equal(M.normalize({...data,routes:[{...data.routes[0],channel:'unknown'}]},''),null);
+});
+test('incoming and completion pulses use positive counter deltas and reset across instances',()=>{
+ const M=model(),previous=snapshot(),next=snapshot(start+1000);next.routes[4].started+=3;next.routes[4].completed+=1;
+ const diff=M.deltas(previous,next);
+ assert.equal(diff.get('cline').incoming,3);assert.equal(diff.get('responses').outgoing,1);assert.equal(diff.get('gateway').incoming,3);assert.equal(diff.get('grok').incoming,0);
+ assert.equal(M.deltas(previous,{...next,instance_started:'two'}).get('gateway').incoming,0);
+ next.routes[4].started=0;assert.equal(M.deltas(previous,next).get('cline').incoming,0);
+});
+test('pool observations expire, stay scoped and never invent capacity',()=>{
+ const M=model(),data=pools();
+ const cline=M.pool(data,'cline','',start+1000,start);assert.equal(cline.available,2);assert.equal(cline.occupied,5);
+ assert.equal(M.pool(data,'gateway','',start+1000,start).capacity,80);
+ assert.equal(M.pool(pools(start,'cline'),'gateway','cline',start+1000,start).capacity,20);
+ assert.equal(M.pool(data,'cline','',start+30000,start).fresh,false);
+ assert.equal(M.pool({...data,rows:[]},'gateway','',start,start).fresh,false);
+ data.rows[1].capacity_available=false;assert.equal(M.pool(data,'cline','',start,start).capacity,null);assert.equal(M.pool(data,'cline','',start,start).available,2);
+});
+test('trend has a bounded 60-second buffer and leaves outage gaps disconnected',()=>{
+ const M=model(),trend=new M.Trend();trend.add(start,{qps:0,active:2});trend.add(start+3000,{qps:4,active:1});
+ const values=trend.values(start+3000);assert.equal(values.length,60);assert.equal(values[57],null);assert.equal(values[58],null);
+ assert.equal((trend.path('qps',start+3000).match(/M/g)||[]).length,2);
+ trend.add(start+3000,{qps:9,active:3});assert.equal(trend.values(start+3000).at(-1).qps,9);
+ for(let i=4;i<100;i++)trend.add(start+i*1000,{qps:i,active:1});
+ assert.equal(trend.points.size,60);assert.equal(trend.values(start+99000).length,60);
+ trend.clear();assert.equal(trend.path('qps',start+99000).trim(),'');
+});
+
+function harness({fetchPools,search=''}={}) {
+ let clock=start,timerID=0,focus=null;const timers=new Map(),nodes=new Map(),streams=[],windowEvents={},documentEvents={},requests=[];
+ function element(id='',tag='div') {
+  const classes=new Set();let text='';
+  const node={id,tagName:tag.toUpperCase(),children:[],dataset:{},value:'',hidden:false,disabled:false,open:false,attributes:{},
+   style:{setProperty(key,value){this[key]=value;}},classList:{add:key=>classes.add(key),remove:key=>classes.delete(key),contains:key=>classes.has(key),toggle:(key,on)=>on?classes.add(key):classes.delete(key)},listeners:{},
+   addEventListener(type,fn){(this.listeners[type]||=[]).push(fn);},setAttribute(key,value){this.attributes[key]=String(value);},getAttribute(key){return this.attributes[key];},
+   appendChild(child){this.children.push(child);return child;},focus(){focus=this;},
+   get textContent(){return text+this.children.map(child=>child.textContent).join(' ');},set textContent(value){text=String(value);this.children=[];},
+   get options(){return this.children.filter(child=>child.tagName==='OPTION');},
+   querySelector(selector){if(selector==='span')return this.span||(this.span=element());if(selector==='details')return this.details||(this.details=element());if(selector==='.flow-stat-failed')return get('failed-stat');return null;},
+   querySelectorAll(selector){if(selector==='path')return this.paths||(this.paths=[element(),element(),element(),element()]);if(selector==='[data-flow-node]')return [...keys.map(key=>get('opsNode-'+key))];if(selector==='[data-flow-tab]')return [get('flowTabOverview'),get('flowTabDetails')];return [];},
+   getBoundingClientRect(){return{left:0,right:100,top:0,bottom:100,width:100,height:100};},
+   showModal(){this.open=true;},close(){this.open=false;this.emit('close',{});},
+   emit(type,event={}){for(const fn of this.listeners[type]||[])fn(event);},dispatchEvent(event){this.emit(event.type,event);return true;},
   };
-  const streams = [];
-  const timers = new Map();
-  let clock = 1000;
-  let timerID = 0;
-  const context = vm.createContext({
-    document: { readyState: 'complete', hidden: false, getElementById: node, querySelectorAll: () => [], addEventListener() {} },
-    window: { addEventListener() {}, setTimeout: fn => { timers.set(++timerID,fn); return timerID; }, clearTimeout: id => timers.delete(id) },
-    Date: { now: () => clock },
-    EventSource: class {
-      constructor(url) { this.url = url; streams.push(this); this.listeners = {}; }
-      addEventListener(type, fn) { this.listeners[type] = fn; }
-      close() { this.closed = true; }
-    },
-  });
-  vm.runInContext(fs.readFileSync(__dirname+'/static/js/ops-flow.js','utf8'), context);
-  const send = (active, started, completed) => streams.at(-1).listeners.flow({ data: JSON.stringify({ available:true, instance_started:'instance1', routes:[{channel:'cline',protocol:'responses',active,started,completed,qps:0.4,tps:52.8,input_tps:40,output_tps:12.8,usage_available:true}] }) });
-  const glowing = key => node('opsWire-'+key).classList.contains('is-flowing');
-  send(0,0,0);
-  assert(!glowing('cline'));
-  send(1,1,0);
-  assert(glowing('cline')); assert(glowing('responses')); assert(!glowing('chat')); assert(!glowing('grok'));
-  assert.equal(node('opsFlowActive').textContent, '1 个进行中');
-  assert.equal(node('opsNodeQps-cline').textContent, '0.40');
-  assert.equal(node('opsNodeTps-cline').textContent, '12.8');
-  assert.equal(node('opsGatewayTps').textContent, '12.8');
-  send(0,1,1);
-  assert(glowing('cline'), 'short requests get one visible traversal');
-  clock += 1100;
-  [...timers.values()].forEach(fn => fn());
-  assert(!glowing('cline'));
-  send(1,2,1);
-  streams.at(-1).onerror();
-  assert(!glowing('cline'), 'lost connections must clear old active counts');
-  assert.equal(node('opsFlowActive').textContent,'— 个进行中');
-  node('opsChannel').value = 'grok';
-  node('opsChannel').listeners.change();
-  assert(streams[0].closed);
-  assert.equal(streams.at(-1).url, '/api/ops/flow?channel=grok');
+  if(id)nodes.set(id,node);return node;
+ }
+ const keys=['workbuddy','cline','qoder','grok','gateway','chat','responses','messages'];
+ const get=id=>nodes.get(id)||element(id);
+ for(const key of keys)get('opsNode-'+key).dataset.flowNode=key;
+ get('flowTabOverview').dataset.flowTab='overview';get('flowTabDetails').dataset.flowTab='details';
+ const root=get('opsFlowScreen');
+ function timeout(fn,delay=0,repeat=0){const id=++timerID;timers.set(id,{fn,time:clock+delay,repeat});return id;}
+ function advance(ms){const end=clock+ms;let steps=0;while(true){const next=[...timers].filter(([,t])=>t.time<=end).sort((a,b)=>a[1].time-b[1].time)[0];if(!next)break;if(++steps>10000)throw Error('timer loop');clock=next[1].time;timers.delete(next[0]);if(next[1].repeat)timers.set(next[0],{...next[1],time:clock+next[1].repeat});next[1].fn();}clock=end;}
+ class Clock extends Date{static now(){return clock;}}
+ const document={readyState:'complete',hidden:false,body:{style:{}},fullscreenElement:null,getElementById:get,createElement:tag=>element('',tag),addEventListener(type,fn){(documentEvents[type]||=[]).push(fn);}};
+ const window={location:{search},setTimeout:(fn,delay)=>timeout(fn,delay),clearTimeout:id=>timers.delete(id),setInterval:(fn,delay)=>timeout(fn,delay,delay),clearInterval:id=>timers.delete(id),requestAnimationFrame:fn=>timeout(fn,16),cancelAnimationFrame:id=>timers.delete(id),addEventListener(type,fn){(windowEvents[type]||=[]).push(fn);},matchMedia:()=>({matches:false,addEventListener(){}}),scrollTo(){},scrollY:0};
+ const context=vm.createContext({console,Date:Clock,AbortController,URLSearchParams,Event:class{constructor(type){this.type=type;}},document,window,
+  ConsoleUI:{el:get,setText:(id,text)=>{get(id).textContent=text;},make:(tag,css,text='')=>{const n=element('',tag);n.textContent=text;return n;}},
+  ConsoleAPI:{json:async(url,options)=>{requests.push({url,options});return fetchPools?fetchPools(url,options):pools(clock,new URL(url,'http://local').searchParams.get('channel')||'');}},
+  EventSource:class{constructor(url){this.url=url;this.listeners={};this.closed=false;streams.push(this);}addEventListener(type,fn){this.listeners[type]=fn;}close(){this.closed=true;}},
+ });
+ vm.runInContext(modelSource,context);vm.runInContext(controllerSource,context);
+ const send=data=>streams.at(-1).listeners.flow({data:JSON.stringify(data)});
+ async function settle(){for(let i=0;i<8;i++)await Promise.resolve();advance(220);}
+ return{context,document,window,root,get,streams,timers,requests,advance,send,settle,time:()=>clock,focus:()=>focus,
+  hide(){document.hidden=true;(documentEvents.visibilitychange||[]).forEach(fn=>fn());},show(){document.hidden=false;(documentEvents.visibilitychange||[]).forEach(fn=>fn());},pagehide(){(windowEvents.pagehide||[]).forEach(fn=>fn());}};
+}
+
+test('bookmarked scope applies to the first connection, pool request and both selectors',async()=>{
+ const h=harness({search:'?tab=ops&channel=cline'});await h.settle();
+ assert.equal(h.streams.length,1);assert.equal(h.streams[0].url,'/api/ops/flow?channel=cline');
+ assert.equal(h.requests[0].url,'/api/ops/pools?channel=cline');
+ assert.equal(h.get('opsChannel').value,'cline');assert.equal(h.get('flowChannel').value,'cline');
 });
-
-
-test('topology removes standby, minute-window and peak/average panels', () => {
-  const template = fs.readFileSync(__dirname+'/templates/pages/ops.html','utf8');
-  assert.doesNotMatch(template, /opsGauge|opsLiveTabs|opsLiveQps|opsLiveTps|opsSpark/);
-  for (const provider of ['workbuddy','cline','qoder','grok']) {
-    assert(template.includes('opsNodeQps-'+provider));
-    assert(template.includes('opsNodeTps-'+provider));
-  }
+test('screen retains last observations on outage, stops animation, and expires snapshots without an error event',async()=>{
+ const h=harness();h.send(snapshot(h.time()));await h.settle();
+ assert.equal(h.get('flowTotal-active').textContent,'2');assert.equal(h.get('flowTotal-tps').textContent,'10.0');
+ assert.equal(h.root.dataset.live,'true');assert.equal(h.get('opsNode-cline').classList.contains('is-flowing'),true);
+ h.advance(5100);assert.equal(h.root.dataset.live,'false');assert.match(h.get('opsFlowStatus').textContent,/过期/);assert.equal(h.get('flowTotal-active').textContent,'2');assert.equal(h.get('opsWire-cline').classList.contains('is-flowing'),false);
+ h.send(snapshot(h.time()));await h.settle();assert.equal(h.root.dataset.live,'true');
+ h.streams.at(-1).onerror();await h.settle();assert.match(h.get('opsFlowStatus').textContent,/重连/);assert.equal(h.get('flowTotal-active').textContent,'2');assert.equal(h.get('opsWire-cline').classList.contains('has-out'),false);
 });
-
-test('node health and details preserve missing samples, output rate and fresh capacity', () => {
-  const nodes = new Map(), streams = [], windowEvents = {};
-  let clock = 1700000000000;
-  class Clock extends Date { static now() { return clock; } }
-  function element(id = '') {
-    let text = '';
-    const classes = new Set();
-    const item = { children: [], listeners: {}, value: '',
-      set id(value) { nodes.set(value, this); },
-      get textContent() { return text + this.children.map(child => child.textContent).join(' '); },
-      set textContent(value) { text = String(value); this.children = []; },
-      appendChild(child) { this.children.push(child); return child; },
-      replaceChildren() { this.children = []; text = ''; },
-      addEventListener(type, fn) { this.listeners[type] = fn; },
-      setAttribute() {}, querySelector() { return null; },
-      classList: { add:x=>classes.add(x), remove:x=>classes.delete(x), contains:x=>classes.has(x), toggle:(x,on)=>on?classes.add(x):classes.delete(x) },
-    };
-    if (id) nodes.set(id, item);
-    return item;
-  }
-  const node = id => nodes.get(id) || element(id);
-  const buttons = ['cline', 'grok', 'gateway', 'responses'].map(key => {
-    const button = node('opsNode-'+key); button.getAttribute = () => key; return button;
-  });
-  const context = vm.createContext({
-    Date: Clock,
-    document: { readyState:'complete', hidden:false, getElementById:node, createElement:()=>element(), querySelectorAll:()=>buttons, addEventListener(){} },
-    window: { addEventListener(type,fn) { windowEvents[type]=fn; }, setTimeout(){return 1;}, clearTimeout(){} },
-    EventSource: class { constructor(url){this.url=url;this.listeners={};streams.push(this);} addEventListener(type,fn){this.listeners[type]=fn;} close(){this.closed=true;} },
-  });
-  vm.runInContext(fs.readFileSync(__dirname+'/static/js/ops-flow.js','utf8'), context);
-  const emptyDistribution = {samples:0,p50_ms:null,p95_ms:null};
-  const stats = {completed:10,failed:2,failure_rate:.2,rate_limited:1,stream_errors:1,timeouts:0,canceled:0,waiting:1,responding:1,longest_active_ms:3000,
-    observed:10,usage_reported:8,retried:2,attempts:12,account_switches:1,retry_wait_ms:2000,queue_wait_ms:1000,
-    first_generation:{samples:8,p50_ms:100,p95_ms:1200}, first_visible:emptyDistribution, body_ttfb:emptyDistribution,
-    duration:{samples:10,p50_ms:2000,p95_ms:4000}, http_phases:{dns_ms:{samples:2,avg_ms:10}}};
-  const payload = {available:true,instance_started:'one',latency_window_seconds:900,window_seconds:60,routes:[{channel:'cline',protocol:'responses',active:2,started:12,completed:10,qps:.4,input_tps:40,output_tps:10,tps:50,usage_available:true}],
-    nodes:{cline:stats,responses:stats,gateway:stats,grok:{...stats,completed:0,failed:0,failure_rate:null,first_generation:emptyDistribution,body_ttfb:{samples:1,p50_ms:2997,p95_ms:2997}}}};
-  const send = value => streams.at(-1).listeners.flow({data:JSON.stringify(value)});
-  send(payload);
-  assert.equal(node('opsNodeTps-cline').textContent,'10.0', 'output TPS must exclude input tokens');
-  assert.equal(node('opsNodeLatency-cline').textContent,'首生成 P95 1.2 s');
-  assert.equal(node('opsNodeLatency-grok').textContent,'正文 TTFB P95 3.0 s', 'nonstream latency must be shown even after 60-second counters expire');
-  assert(node('opsNodeLatency-grok').title.includes('近 15 分钟'));
-  assert(node('opsNodeLatency-grok').title.includes('1 个非流式样本'));
-  assert.equal(node('opsNodeFailure-cline').textContent,'失败 20.0%');
-  assert(node('opsNodeFailure-cline').classList.contains('is-degraded'));
-  assert.equal(node('opsNodeFailure-grok').textContent,'失败 —', 'missing evidence must not be healthy zero');
-  node('opsNode-cline').listeners.click();
-  let detail = node('opsFlowDetailFacts').textContent;
-  assert(detail.includes('P50 100 ms / P95 1.2 s · 8 样本'));
-  assert(detail.includes('可见首字延迟 — · 近 15 分钟无可见文本样本'));
-  assert(node('opsFlowDetailTitle').textContent.includes('延迟近 15 分钟 · 错误与等待近 60 秒'));
-  assert(detail.includes('1 尚未输出 / 1 已开始输出'));
-  assert(detail.includes('2 个请求重试 · 12 次尝试 · 1 次切号'));
-  assert(detail.includes('重试 200 ms · 其中排队 100 ms'));
-  assert(detail.includes('DNS 10 ms（2 次）'));
-  assert(!detail.includes('TLS 0'));
-  windowEvents['ops:pool']({detail:[{channel:'cline',capacity_available:true,capacity_sampled_at:new Date(clock).toISOString(),accounts_available:2,accounts_enabled:3,capacity_slots:20,occupied_slots:5}]});
-  assert(node('opsFlowDetailFacts').textContent.includes('5/20 可用池槽位占用（25.0%）'));
-  clock+=31000; send(payload);
-  assert(node('opsFlowDetailFacts').textContent.includes('容量快照未就绪或已过期'));
-  send({...payload,nodes:{...payload.nodes,cline:{...stats,body_ttfb:{samples:1,p50_ms:8287,p95_ms:8287}}}});
-  assert.equal(node('opsNodeLatency-cline').textContent,'首生成 P95 1.2 s', 'mixed requests keep distinct distributions and prefer streaming');
-  assert(node('opsNodeLatency-cline').title.includes('正文 TTFB P95 8.3 s'));
-  assert(node('opsFlowDetailFacts').textContent.includes('P50 8.3 s / P95 8.3 s · 1 样本'));
-  send({...payload,nodes:{...payload.nodes,cline:{...stats,first_generation:emptyDistribution,body_ttfb:{samples:1,p50_ms:0,p95_ms:0}}}});
-  assert.equal(node('opsNodeLatency-cline').textContent,'正文 TTFB P95 0 ms', 'measured zero is valid');
-  send({...payload,nodes:{...payload.nodes,cline:{...stats,first_generation:emptyDistribution}}});
-  assert.equal(node('opsNodeLatency-cline').textContent,'P95 无近期样本');
-  assert(node('opsNodeLatency-cline').title.includes('请求结束后计入'));
-  assert(node('opsFlowDetailFacts').textContent.includes('近 15 分钟无流式首生成样本'));
-  send({...payload,latency_window_seconds:undefined});
-  assert(node('opsNodeLatency-cline').title.includes('近 1 分钟'), 'older server metadata must not claim a 15-minute window');
-  send({...payload,routes:[{...payload.routes[0],usage_available:false}]});
-  assert.equal(node('opsNodeTps-cline').textContent,'—');
-  const old=streams.at(-1);
-  node('opsChannel').value='grok'; node('opsChannel').listeners.change();
-  old.listeners.flow({data:JSON.stringify(payload)});
-  assert.equal(node('opsFlowActive').textContent,'— 个进行中');
-  assert.equal(node('opsNodeFailure-cline').textContent,'失败 —');
-  assert.equal(node('opsNodeLatency-cline').textContent,'P95 范围外');
-  assert.equal(node('opsNodeLatency-grok').textContent,'P95 待采集');
-  send({available:false,routes:[]});
-  assert.equal(node('opsFlowDetailFacts').textContent,'');
+test('scope changes replace a single SSE connection, ignore stale pool replies and reset trends',async()=>{
+ const pending=[];const h=harness({fetchPools:(url,options)=>new Promise(resolve=>pending.push({url,options,resolve}))});
+ h.send(snapshot(h.time()));await h.settle();
+ const old=h.streams[0];h.get('flowChannel').value='grok';h.get('flowChannel').emit('change');
+ assert(old.closed);assert.equal(h.streams.filter(stream=>!stream.closed).length,1);assert.equal(h.streams.at(-1).url,'/api/ops/flow?channel=grok');assert.equal(h.get('opsChannel').value,'grok');
+ assert(pending[0].options.signal.aborted);pending[0].resolve(pools(h.time()));pending[1].resolve(pools(h.time(),'grok'));
+ h.send(snapshot(h.time()));await h.settle();
+ assert.equal(h.get('flowTotal-active').textContent,'0');assert.equal(h.get('opsNode-cline').disabled,true);assert.equal(h.get('flowPool-grok').textContent,'2/3 可用账号');
+ old.listeners.flow({data:JSON.stringify(snapshot(h.time()))});await h.settle();assert.equal(h.get('flowTotal-active').textContent,'0');
+});
+test('background and page lifecycle stop timers and polling and reconnect once on return',async()=>{
+ const h=harness();h.send(snapshot(h.time()));await h.settle();h.hide();await Promise.resolve();await Promise.resolve();
+ assert.equal(h.streams.filter(stream=>!stream.closed).length,0);assert.equal(h.timers.size,0);
+ const calls=h.requests.length;h.advance(60000);assert.equal(h.requests.length,calls);
+ h.show();h.show();await h.settle();assert.equal(h.streams.filter(stream=>!stream.closed).length,1);assert.equal(h.requests.length,calls+1);
+ h.pagehide();await Promise.resolve();assert.equal(h.streams.filter(stream=>!stream.closed).length,0);
+});
+test('high-frequency snapshots coalesce and drawer details preserve distinct latency cohorts',async()=>{
+ const h=harness();for(let i=0;i<100;i++)h.send(snapshot(h.time(),{sampled_at:new Date(h.time()).toISOString()}));await h.settle();
+ assert.equal(h.streams.length,1);assert(h.timers.size<=4);assert.equal(h.get('opsFlowDetailFacts').children.length,8);
+ h.get('opsNode-cline').emit('click');assert.equal(h.get('flowDrawer').open,true);assert.match(h.get('flowDetailedFacts').textContent,/P50 100 ms \/ P95 1.2 s · 8 样本/);assert.match(h.get('flowDetailedFacts').textContent,/非流式正文 TTFB.*暂无样本/);
+ assert.match(h.get('flowDetailedFacts').textContent,/DNS 0 ms/);
+ const next=snapshot(h.time());next.nodes.cline.first_generation={samples:0,p50_ms:null,p95_ms:null};next.nodes.cline.body_ttfb={samples:1,p50_ms:0,p95_ms:0};h.send(next);await h.settle();
+ assert.match(h.get('flowDetailedFacts').textContent,/P50 0 ms \/ P95 0 ms/);
+ h.get('flowDrawerClose').emit('click');assert.equal(h.get('flowDrawer').open,false);assert.equal(h.focus(),h.get('opsNode-cline'));
+});
+test('pool refresh failures do not close the flow stream and capacity becomes unknown after 30 seconds',async()=>{
+ let fail=false;const h=harness({fetchPools:async()=>{if(fail)throw Error('unavailable');return pools(start);}});
+ h.send(snapshot(h.time()));await h.settle();assert.match(h.get('flowCapacity-cline').textContent,/5\/20/);
+ fail=true;h.advance(15000);await h.settle();assert.equal(h.streams.filter(stream=>!stream.closed).length,1);assert.match(h.get('flowCapacity-cline').textContent,/5\/20/);
+ h.advance(16000);h.send(snapshot(h.time()));await h.settle();assert.equal(h.get('flowCapacity-cline').textContent,'槽位 —');assert.match(h.get('flowPool-cline').textContent,/读取失败/);assert.equal(h.root.dataset.live,'true');
 });

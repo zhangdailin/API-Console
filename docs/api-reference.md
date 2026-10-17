@@ -131,6 +131,8 @@ Chat 桥接写递增 sequence_number，便于客户端识别顺序；当前没�
 | `/api/config/save` | POST 增量配置补丁 |
 | `/api/export` / `/api/import` | 账号导出 / 恢复；导出文件包含可恢复凭据 |
 | `/api/ops/overview` | GET 指标、窗口、渠道模型视图、健康与覆盖信息 |
+| `/api/ops/flow` | GET SSE 实时请求快照，支持 `channel`，200ms 合并推送、空闲时约每秒更新 |
+| `/api/ops/pools` | GET 只读账号池汇总，支持 `channel`，不读取历史聚合、不刷新凭据 |
 | `/api/ops/runtime` | GET 进程与宿主运行指标 |
 | `/api/ops/alerts/rules` | GET / PUT 告警规则 |
 | `/api/journal/records` | GET 请求 / 操作 / 系统日志及关联尝试 |
@@ -140,6 +142,14 @@ Chat 桥接写递增 sequence_number，便于客户端识别顺序；当前没�
 | `/api/system/update`、`rollback` | POST 异步系统操作，见升级手册 |
 
 API Key 创建和轮换时返回完整秘密，并使用主密钥派生的独立加密用途保存密文；认证继续使用哈希。管理员可通过 secret 接口读取，列表仅返回掩码及 secret_available。加密能力未配置、密文损坏或解密失败时明确报错，不回退明文。轮换原子替换密文、哈希及索引，使旧 Key 立即失效；列表掩码不能用于调用。前端创建默认消费不限额，编辑不提交预算字段，已有后台预算策略继续生效。支持模型白名单、请求限速、有效期、并发及预算；空模型白名单兼容解释为不限模型。费用预留和结算用整数 USD ticks，1 USD 为 100 亿 ticks。
+
+### 实时账号池汇总
+
+`GET /api/ops/pools` 使用与运维概览相同的管理会话认证，响应禁止缓存。可选 `channel=workbuddy|cline|qoder|grok`；不传时固定返回四个渠道（包括无账号渠道）。非法渠道返回 400，非 GET 返回 405，账号或共享占用读取失败返回 503，不返回伪造的空闲容量。
+
+响应顶层为 `available:true`、`sampled_at`（UTC RFC3339）、`capacity_scope:"account_pool"` 和 `rows`。每行含 `channel`、`accounts_enabled`、`accounts_available`、`accounts_needing_login`、`model_cooldowns`、`concurrency_available` 和 `capacity_available`。占用可读取时另有 `active_requests`；容量可计算时另有 `capacity_slots`、`occupied_slots` 和 `capacity_sampled_at`。未知容量不补零，也不返回账号 ID、名称或凭据。
+
+容量沿用现有账号策略与有效并发上限：仅对启用且未被账号级策略暂停的账号计算槽位；`active_requests` 则包含渠道账号上仍未结束的占用。容量未扣模型级限制，且共享 Redis 的占用可能包含其他实例，不能与单实例 SSE 的进行中请求强行等同。页面每 15 秒读取，30 秒后标记过期，读取失败不影响 SSE。
 
 ### 管理登录示例
 

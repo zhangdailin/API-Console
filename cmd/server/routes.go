@@ -202,6 +202,7 @@ func registerRoutes(
 	mux.HandleFunc("/api/ops/alerts/rules", sessionAuth(apiHandler.HandleOpsAlertRules))
 	mux.HandleFunc("/api/ops/runtime", sessionAuth(apiHandler.HandleOpsRuntime))
 	mux.HandleFunc("/api/ops/flow", sessionAuth(apiHandler.HandleOpsFlow))
+	mux.HandleFunc("/api/ops/pools", sessionAuth(apiHandler.HandleOpsPools))
 	// Journal: one filtered endpoint for request, operation, and system entries,
 	// with the upstream attempts of each request joined in.
 	mux.HandleFunc("/api/journal/records", sessionAuth(apiHandler.HandleJournalRecords))

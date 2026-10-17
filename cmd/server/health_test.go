@@ -23,7 +23,7 @@ func TestHealthReportsEveryRemainingProvider(t *testing.T) {
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
 	testutil.Equal(t, rec.Code, http.StatusOK)
-	for _, endpoint := range []string{"/api/system/version", "/api/system/check-updates", "/api/system/operation", "/api/system/update", "/api/system/rollback"} {
+	for _, endpoint := range []string{"/api/ops/pools", "/api/system/version", "/api/system/check-updates", "/api/system/operation", "/api/system/update", "/api/system/rollback"} {
 		response := httptest.NewRecorder()
 		request := httptest.NewRequest(http.MethodGet, endpoint, nil)
 		mux.ServeHTTP(response, request)

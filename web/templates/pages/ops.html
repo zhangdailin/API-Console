@@ -2,6 +2,7 @@
 {{template "doc-head.html" .}}
   {{template "page-styles.html" .}}
   <link rel="stylesheet" href="{{.AdminPath}}/css/ops.css?v={{.AssetVersion}}">
+  <link rel="stylesheet" href="{{.AdminPath}}/css/ops-flow.css?v={{.AssetVersion}}">
 </head>
 
 <body>
@@ -47,78 +48,105 @@
       </div>
     </header>
 
-    <p class="hint">顶部时间范围用于请求统计、趋势、分布和告警事件；拓扑速率使用最近 5 秒实时数据，资源与活跃请求 / 账号显示当前状态。模型筛选仅作用于下方状态表。</p>
+    <p class="hint">顶部时间范围用于请求统计、趋势、分布和告警事件；拓扑使用固定的实时窗口，资源与活跃请求 / 账号显示当前状态。模型筛选仅作用于下方状态表。</p>
 
     <section class="ops-top">
-      <article class="ops-card ops-hero ops-flow-card">
-        <div class="ops-card-head">
-          <h2>实时流量拓扑</h2>
-          <span class="ops-hint" id="opsHeroHint">实时事件推送</span>
-        </div>
-        <div class="ops-flow-toolbar">
-          <span><i class="ops-flow-status-dot" id="opsFlowDot"></i><span id="opsFlowStatus">连接实时流量…</span></span>
-          <span class="ops-hint">速率近 5 秒 · 延迟近 15 分钟 · 失败近 60 秒 · 当前实例 · 点击节点查看详情</span>
-        </div>
-        <div class="ops-flow-scroll">
-          <div class="ops-flow-map" aria-label="上游平台经网关连接下游 API 的实时流量拓扑">
-            <div class="ops-flow-heading ops-flow-heading-left">上游平台</div>
-            <div class="ops-flow-heading ops-flow-heading-center">我们的网关</div>
-            <div class="ops-flow-heading ops-flow-heading-right">下游接口</div>
-            <svg class="ops-flow-wires" viewBox="0 0 1000 500" preserveAspectRatio="none" aria-hidden="true">
-              <g id="opsWire-workbuddy" class="ops-flow-wire"><path d="M 250 85 C 325 85, 325 250, 400 250"/><path class="ops-flow-packet" d="M 250 85 C 325 85, 325 250, 400 250"/><path class="ops-flow-glow" d="M 250 85 C 325 85, 325 250, 400 250"/></g>
-              <g id="opsWire-cline" class="ops-flow-wire"><path d="M 250 195 C 325 195, 325 250, 400 250"/><path class="ops-flow-packet" d="M 250 195 C 325 195, 325 250, 400 250"/><path class="ops-flow-glow" d="M 250 195 C 325 195, 325 250, 400 250"/></g>
-              <g id="opsWire-qoder" class="ops-flow-wire"><path d="M 250 305 C 325 305, 325 250, 400 250"/><path class="ops-flow-packet" d="M 250 305 C 325 305, 325 250, 400 250"/><path class="ops-flow-glow" d="M 250 305 C 325 305, 325 250, 400 250"/></g>
-              <g id="opsWire-grok" class="ops-flow-wire"><path d="M 250 415 C 325 415, 325 250, 400 250"/><path class="ops-flow-packet" d="M 250 415 C 325 415, 325 250, 400 250"/><path class="ops-flow-glow" d="M 250 415 C 325 415, 325 250, 400 250"/></g>
-              <g id="opsWire-chat" class="ops-flow-wire"><path d="M 600 250 C 675 250, 675 130, 750 130"/><path class="ops-flow-packet" d="M 600 250 C 675 250, 675 130, 750 130"/><path class="ops-flow-glow" d="M 600 250 C 675 250, 675 130, 750 130"/></g>
-              <g id="opsWire-responses" class="ops-flow-wire"><path d="M 600 250 C 675 250, 675 250, 750 250"/><path class="ops-flow-packet" d="M 600 250 C 675 250, 675 250, 750 250"/><path class="ops-flow-glow" d="M 600 250 C 675 250, 675 250, 750 250"/></g>
-              <g id="opsWire-messages" class="ops-flow-wire"><path d="M 600 250 C 675 250, 675 370, 750 370"/><path class="ops-flow-packet" d="M 600 250 C 675 250, 675 370, 750 370"/><path class="ops-flow-glow" d="M 600 250 C 675 250, 675 370, 750 370"/></g>
-            </svg>
-            <button type="button" class="ops-flow-node ops-flow-upstream" id="opsNode-workbuddy" data-flow-node="workbuddy" style="--node-y:17.0%">
-              <span class="ops-flow-icon ops-flow-icon-workbuddy" aria-hidden="true">W</span>
-              <span class="ops-flow-node-body"><strong>WorkBuddy</strong><span class="ops-flow-rates"><span><b id="opsNodeQps-workbuddy">—</b><small>QPS</small></span><span><b id="opsNodeTps-workbuddy">—</b><small>输出 TPS</small></span></span><span class="ops-flow-current" id="opsNodeMetric-workbuddy">等待实时数据</span></span>
-              <i class="ops-flow-node-dot" aria-hidden="true"></i>
-            </button>
-            <button type="button" class="ops-flow-node ops-flow-upstream" id="opsNode-cline" data-flow-node="cline" style="--node-y:39.0%">
-              <span class="ops-flow-icon ops-flow-icon-cline" aria-hidden="true">C</span>
-              <span class="ops-flow-node-body"><strong>Cline</strong><span class="ops-flow-rates"><span><b id="opsNodeQps-cline">—</b><small>QPS</small></span><span><b id="opsNodeTps-cline">—</b><small>输出 TPS</small></span></span><span class="ops-flow-current" id="opsNodeMetric-cline">等待实时数据</span></span>
-              <i class="ops-flow-node-dot" aria-hidden="true"></i>
-            </button>
-            <button type="button" class="ops-flow-node ops-flow-upstream" id="opsNode-qoder" data-flow-node="qoder" style="--node-y:61.0%">
-              <span class="ops-flow-icon ops-flow-icon-qoder" aria-hidden="true">Q</span>
-              <span class="ops-flow-node-body"><strong>Qoder</strong><span class="ops-flow-rates"><span><b id="opsNodeQps-qoder">—</b><small>QPS</small></span><span><b id="opsNodeTps-qoder">—</b><small>输出 TPS</small></span></span><span class="ops-flow-current" id="opsNodeMetric-qoder">等待实时数据</span></span>
-              <i class="ops-flow-node-dot" aria-hidden="true"></i>
-            </button>
-            <button type="button" class="ops-flow-node ops-flow-upstream" id="opsNode-grok" data-flow-node="grok" style="--node-y:83.0%">
-              <span class="ops-flow-icon ops-flow-icon-grok" aria-hidden="true">G</span>
-              <span class="ops-flow-node-body"><strong>Grok</strong><span class="ops-flow-rates"><span><b id="opsNodeQps-grok">—</b><small>QPS</small></span><span><b id="opsNodeTps-grok">—</b><small>输出 TPS</small></span></span><span class="ops-flow-current" id="opsNodeMetric-grok">等待实时数据</span></span>
-              <i class="ops-flow-node-dot" aria-hidden="true"></i>
-            </button>
-            <button type="button" class="ops-flow-node ops-flow-gateway" id="opsNode-gateway" data-flow-node="gateway">
-              <span class="ops-flow-icon ops-flow-icon-gateway" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01M11 7h6M11 17h6"/></svg></span>
-              <span class="ops-flow-orbit" aria-hidden="true"></span><small class="ops-flow-gateway-label">GATEWAY</small><strong>API Console</strong><span id="opsFlowActive">— 个进行中</span><span class="ops-flow-rates ops-flow-gateway-rates"><span><b id="opsGatewayQps">—</b><small>QPS</small></span><span><b id="opsGatewayTps">—</b><small>输出 TPS</small></span></span>
-            </button>
-            <button type="button" class="ops-flow-node ops-flow-downstream" id="opsNode-chat" data-flow-node="chat" style="--node-y:26.0%">
-              <span class="ops-flow-icon ops-flow-icon-chat" aria-hidden="true">O</span>
-              <span class="ops-flow-node-body"><strong>OpenAI · Chat</strong><code>/chat/completions</code><span class="ops-flow-rates"><span><b id="opsNodeQps-chat">—</b><small>QPS</small></span><span><b id="opsNodeTps-chat">—</b><small>输出 TPS</small></span></span><span class="ops-flow-current" id="opsNodeMetric-chat">等待实时数据</span></span>
-              <i class="ops-flow-node-dot" aria-hidden="true"></i>
-            </button>
-            <button type="button" class="ops-flow-node ops-flow-downstream" id="opsNode-responses" data-flow-node="responses" style="--node-y:50.0%">
-              <span class="ops-flow-icon ops-flow-icon-responses" aria-hidden="true">O</span>
-              <span class="ops-flow-node-body"><strong>OpenAI · Responses</strong><code>/responses</code><span class="ops-flow-rates"><span><b id="opsNodeQps-responses">—</b><small>QPS</small></span><span><b id="opsNodeTps-responses">—</b><small>输出 TPS</small></span></span><span class="ops-flow-current" id="opsNodeMetric-responses">等待实时数据</span></span>
-              <i class="ops-flow-node-dot" aria-hidden="true"></i>
-            </button>
-            <button type="button" class="ops-flow-node ops-flow-downstream" id="opsNode-messages" data-flow-node="messages" style="--node-y:74.0%">
-              <span class="ops-flow-icon ops-flow-icon-messages" aria-hidden="true">A</span>
-              <span class="ops-flow-node-body"><strong>Claude · Messages</strong><code>/messages</code><span class="ops-flow-rates"><span><b id="opsNodeQps-messages">—</b><small>QPS</small></span><span><b id="opsNodeTps-messages">—</b><small>输出 TPS</small></span></span><span class="ops-flow-current" id="opsNodeMetric-messages">等待实时数据</span></span>
-              <i class="ops-flow-node-dot" aria-hidden="true"></i>
-            </button>
+      <article class="flow-screen" id="opsFlowScreen" aria-label="实时流量态势大屏">
+        <header class="flow-header">
+          <div><div class="flow-eyebrow"><span class="flow-live-dot" id="opsFlowDot"></span> LIVE TRAFFIC <span class="flow-instance">当前实例</span></div><h2>实时流量态势<span class="flow-title-dot">.</span></h2></div>
+          <div class="flow-controls">
+            <label class="sr-only" for="flowChannel">拓扑渠道筛选</label><select id="flowChannel" aria-label="拓扑渠道筛选"><option value="">全部渠道</option><option value="workbuddy">WorkBuddy</option><option value="cline">Cline</option><option value="qoder">Qoder</option><option value="grok">Grok</option></select>
+            <button type="button" id="flowMotion" aria-pressed="true">动画开启</button>
+            <button type="button" id="flowFullscreen" aria-label="全屏查看实时拓扑"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg><span>全屏</span></button>
           </div>
+        </header>
+        <div class="flow-connection"><span id="opsFlowStatus" role="status">正在连接实时流量…</span><span id="flowUpdated">尚未收到数据</span><span id="flowScope">全部渠道</span></div>
+        <div class="flow-summary" aria-label="实时关键指标">
+          <div class="flow-stat flow-stat-qps"><div><span>请求速率</span><small>近 5 秒</small></div><p><strong id="flowTotal-qps">—</strong><span>req/s</span></p></div>
+          <div class="flow-stat flow-stat-active"><div><span>进行中请求</span><small>当前</small></div><p><strong id="flowTotal-active">—</strong><span>个</span></p></div>
+          <div class="flow-stat flow-stat-waiting"><div><span>等待输出</span><small>当前</small></div><p><strong id="flowTotal-waiting">—</strong><span>个</span></p></div>
+          <div class="flow-stat flow-stat-responding"><div><span>已开始输出</span><small>当前</small></div><p><strong id="flowTotal-responding">—</strong><span>个</span></p></div>
+          <div class="flow-stat flow-stat-failed"><div><span>近期失败</span><small>近 60 秒</small></div><p><strong id="flowTotal-failed">—</strong><span>次</span></p></div>
+          <div class="flow-stat flow-stat-tps"><div><span>上报输出</span><small>近 5 秒 · 上游上报</small></div><p><strong id="flowTotal-tps">—</strong><span>token/s</span></p></div>
         </div>
-        <div id="opsFlowDetail" class="ops-flow-detail">
-          <strong id="opsFlowDetailTitle">点击节点查看性能指标</strong>
-          <div id="opsFlowDetailFacts" class="ops-flow-facts"></div>
-          <details class="ops-flow-note"><summary>指标口径与范围</summary><p>只统计通过鉴权与准入的生成请求。输出 TPS 随上游用量上报更新，未上报显示 —，不是逐字生成速度。延迟按近 15 分钟结束的请求统计，每条渠道 × 协议最多保留最近 256 个样本，分位数合并原始样本计算。节点有流式样本时显示首生成 P95，只有非流式样本时显示正文 TTFB P95，两类数据独立统计。首生成包含推理与工具，首字仅统计可见文本；正文 TTFB 不代表真实首生成。无近期样本可能是请求尚未结束、样本已过期或没有有效的输出时延。失败、重试、等待与 HTTP 阶段按近 60 秒结束的请求统计，样本数可能与延迟不同。排队等待为网关实际等待，属于重试等待的一部分；HTTP 阶段可能重叠。账号容量随概览刷新，槽位可能包含其他实例，未扣模型级限制。</p></details>
+        <div class="flow-board" id="flowBoard">
+          <svg class="flow-wires" id="flowWires" aria-hidden="true"><defs><filter id="flowWireGlow"><feGaussianBlur stdDeviation="2.5"/></filter></defs>
+            <g id="opsWire-workbuddy" class="flow-wire" data-wire="workbuddy"><path class="flow-wire-base"/><path class="flow-wire-active"/><path class="flow-wire-in"/><path class="flow-wire-out"/></g>
+            <g id="opsWire-cline" class="flow-wire" data-wire="cline"><path class="flow-wire-base"/><path class="flow-wire-active"/><path class="flow-wire-in"/><path class="flow-wire-out"/></g>
+            <g id="opsWire-qoder" class="flow-wire" data-wire="qoder"><path class="flow-wire-base"/><path class="flow-wire-active"/><path class="flow-wire-in"/><path class="flow-wire-out"/></g>
+            <g id="opsWire-grok" class="flow-wire" data-wire="grok"><path class="flow-wire-base"/><path class="flow-wire-active"/><path class="flow-wire-in"/><path class="flow-wire-out"/></g>
+            <g id="opsWire-chat" class="flow-wire" data-wire="chat"><path class="flow-wire-base"/><path class="flow-wire-active"/><path class="flow-wire-in"/><path class="flow-wire-out"/></g>
+            <g id="opsWire-responses" class="flow-wire" data-wire="responses"><path class="flow-wire-base"/><path class="flow-wire-active"/><path class="flow-wire-in"/><path class="flow-wire-out"/></g>
+            <g id="opsWire-messages" class="flow-wire" data-wire="messages"><path class="flow-wire-base"/><path class="flow-wire-active"/><path class="flow-wire-in"/><path class="flow-wire-out"/></g>
+          </svg>
+          <section class="flow-column flow-channels" aria-label="上游渠道与账号池"><div class="flow-column-title"><span>上游渠道</span><span>账号池汇总</span></div>
+            <button type="button" class="flow-node flow-channel" id="opsNode-workbuddy" data-flow-node="workbuddy" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
+              <span class="flow-node-head"><span class="flow-brand" aria-hidden="true">W</span><strong>WorkBuddy</strong><span class="flow-node-state" id="flowState-workbuddy">等待数据</span><span class="flow-node-chevron" aria-hidden="true">↗</span></span>
+              <span class="flow-node-metrics"><span><b id="opsNodeQps-workbuddy">—</b><small>req/s · 近5秒</small></span><span><b id="flowActive-workbuddy">—</b><small>进行中</small></span><span class="flow-node-tokens"><b id="opsNodeTps-workbuddy">—</b><small>上报 token/s</small></span></span>
+              <span class="flow-pool-line"><span id="flowPool-workbuddy">可用账号 —</span><span id="flowCapacity-workbuddy">槽位 —</span></span><span class="flow-capacity-track"><span id="flowCapacityBar-workbuddy"></span></span>
+            </button>
+            <button type="button" class="flow-node flow-channel" id="opsNode-cline" data-flow-node="cline" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
+              <span class="flow-node-head"><span class="flow-brand" aria-hidden="true">C</span><strong>Cline</strong><span class="flow-node-state" id="flowState-cline">等待数据</span><span class="flow-node-chevron" aria-hidden="true">↗</span></span>
+              <span class="flow-node-metrics"><span><b id="opsNodeQps-cline">—</b><small>req/s · 近5秒</small></span><span><b id="flowActive-cline">—</b><small>进行中</small></span><span class="flow-node-tokens"><b id="opsNodeTps-cline">—</b><small>上报 token/s</small></span></span>
+              <span class="flow-pool-line"><span id="flowPool-cline">可用账号 —</span><span id="flowCapacity-cline">槽位 —</span></span><span class="flow-capacity-track"><span id="flowCapacityBar-cline"></span></span>
+            </button>
+            <button type="button" class="flow-node flow-channel" id="opsNode-qoder" data-flow-node="qoder" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
+              <span class="flow-node-head"><span class="flow-brand" aria-hidden="true">Q</span><strong>Qoder</strong><span class="flow-node-state" id="flowState-qoder">等待数据</span><span class="flow-node-chevron" aria-hidden="true">↗</span></span>
+              <span class="flow-node-metrics"><span><b id="opsNodeQps-qoder">—</b><small>req/s · 近5秒</small></span><span><b id="flowActive-qoder">—</b><small>进行中</small></span><span class="flow-node-tokens"><b id="opsNodeTps-qoder">—</b><small>上报 token/s</small></span></span>
+              <span class="flow-pool-line"><span id="flowPool-qoder">可用账号 —</span><span id="flowCapacity-qoder">槽位 —</span></span><span class="flow-capacity-track"><span id="flowCapacityBar-qoder"></span></span>
+            </button>
+            <button type="button" class="flow-node flow-channel" id="opsNode-grok" data-flow-node="grok" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
+              <span class="flow-node-head"><span class="flow-brand" aria-hidden="true">G</span><strong>Grok</strong><span class="flow-node-state" id="flowState-grok">等待数据</span><span class="flow-node-chevron" aria-hidden="true">↗</span></span>
+              <span class="flow-node-metrics"><span><b id="opsNodeQps-grok">—</b><small>req/s · 近5秒</small></span><span><b id="flowActive-grok">—</b><small>进行中</small></span><span class="flow-node-tokens"><b id="opsNodeTps-grok">—</b><small>上报 token/s</small></span></span>
+              <span class="flow-pool-line"><span id="flowPool-grok">可用账号 —</span><span id="flowCapacity-grok">槽位 —</span></span><span class="flow-capacity-track"><span id="flowCapacityBar-grok"></span></span>
+            </button>
+          </section>
+          <section class="flow-center" aria-label="网关"><div class="flow-column-title">统一网关</div>
+            <button type="button" class="flow-node flow-gateway" id="opsNode-gateway" data-flow-node="gateway" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
+              <span class="flow-reactor" aria-hidden="true"><svg viewBox="0 0 160 160"><circle class="flow-orbit-a" cx="80" cy="80" r="68"/><circle class="flow-orbit-b" cx="80" cy="80" r="55"/><path class="flow-core" d="M80 41 114 60v40l-34 19-34-19V60Z"/><path class="flow-core-lines" d="m46 60 34 20 34-20M80 80v39"/><circle cx="80" cy="80" r="5" class="flow-core-dot"/></svg></span>
+              <span class="flow-gateway-label">API CONSOLE</span><strong id="flowGatewayActive">—</strong><span id="opsFlowActive">等待实时数据</span>
+              <span class="flow-gateway-split"><span><b id="flowGatewayWaiting">—</b><small>等待输出</small></span><span><b id="flowGatewayResponding">—</b><small>已开始输出</small></span></span>
+            </button>
+            <p class="flow-center-note"><span class="flow-note-desktop">右向左接收请求<br>左向右返回响应</span><span class="flow-note-mobile">向上接收请求 · 向下返回响应</span></p>
+          </section>
+          <section class="flow-column flow-protocols" aria-label="调用接口"><div class="flow-column-title"><span>调用接口</span><span>流量分布</span></div>
+            <button type="button" class="flow-node flow-protocol" id="opsNode-chat" data-flow-node="chat" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
+              <span class="flow-node-head"><span class="flow-brand" aria-hidden="true">O</span><strong>Chat Completions</strong><span class="flow-node-chevron" aria-hidden="true">↗</span></span><code>/chat/completions</code>
+              <span class="flow-node-metrics"><span><b id="opsNodeQps-chat">—</b><small>req/s · 近5秒</small></span><span><b id="flowActive-chat">—</b><small>进行中</small></span></span>
+              <span class="flow-pool-line"><span>请求占比 · 近5秒</span><b id="flowShare-chat">—</b></span><span class="flow-capacity-track"><span id="flowShareBar-chat"></span></span>
+            </button>
+            <button type="button" class="flow-node flow-protocol" id="opsNode-responses" data-flow-node="responses" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
+              <span class="flow-node-head"><span class="flow-brand" aria-hidden="true">R</span><strong>Responses</strong><span class="flow-node-chevron" aria-hidden="true">↗</span></span><code>/responses</code>
+              <span class="flow-node-metrics"><span><b id="opsNodeQps-responses">—</b><small>req/s · 近5秒</small></span><span><b id="flowActive-responses">—</b><small>进行中</small></span></span>
+              <span class="flow-pool-line"><span>请求占比 · 近5秒</span><b id="flowShare-responses">—</b></span><span class="flow-capacity-track"><span id="flowShareBar-responses"></span></span>
+            </button>
+            <button type="button" class="flow-node flow-protocol" id="opsNode-messages" data-flow-node="messages" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
+              <span class="flow-node-head"><span class="flow-brand" aria-hidden="true">A</span><strong>Messages</strong><span class="flow-node-chevron" aria-hidden="true">↗</span></span><code>/messages</code>
+              <span class="flow-node-metrics"><span><b id="opsNodeQps-messages">—</b><small>req/s · 近5秒</small></span><span><b id="flowActive-messages">—</b><small>进行中</small></span></span>
+              <span class="flow-pool-line"><span>请求占比 · 近5秒</span><b id="flowShare-messages">—</b></span><span class="flow-capacity-track"><span id="flowShareBar-messages"></span></span>
+            </button>
+          </section>
         </div>
+        <div class="flow-bottom">
+          <section class="flow-trend"><header><h3>请求速率</h3><span>近60秒 · 每秒取样</span><b id="flowTrendQpsValue">—</b></header><svg viewBox="0 0 360 64" preserveAspectRatio="none" role="img" aria-label="最近60秒请求速率趋势"><path class="flow-chart-grid" d="M0 12H360M0 34H360M0 56H360"/><path id="flowTrendQps" class="flow-chart-line"/></svg><span id="flowTrendNote">等待实时采样</span></section>
+          <section class="flow-trend"><header><h3>进行中请求</h3><span>近60秒 · 每秒取样</span><b id="flowTrendActiveValue">—</b></header><svg viewBox="0 0 360 64" preserveAspectRatio="none" role="img" aria-label="最近60秒进行中请求趋势"><path class="flow-chart-grid" d="M0 12H360M0 34H360M0 56H360"/><path id="flowTrendActive" class="flow-chart-line flow-chart-secondary"/></svg><span>空白表示未采样或连接中断</span></section>
+          <section class="flow-incidents"><header><h3>异常与恢复</h3><span>近60秒 · 已结束请求</span></header><div class="flow-incident-grid">
+            <div><span>限流</span><strong id="flowIncident-rate_limited">—</strong></div>
+            <div><span>超时</span><strong id="flowIncident-timeouts">—</strong></div>
+            <div><span>流中断</span><strong id="flowIncident-stream_errors">—</strong></div>
+            <div><span>取消</span><strong id="flowIncident-canceled">—</strong></div>
+            <div><span>重试</span><strong id="flowIncident-retried">—</strong></div>
+            <div><span>切换账号</span><strong id="flowIncident-account_switches">—</strong></div>
+          </div><p id="flowQualityNote">尚未收到数据</p></section>
+        </div>
+        <footer class="flow-footnote"><span>光轨表示汇总活动，不是逐请求或逐 Token 回放</span><button type="button" id="flowHelpOpen">数据口径与范围 ↗</button></footer>
+        <dialog class="flow-drawer" id="flowDrawer" aria-labelledby="opsFlowDetailTitle">
+          <div class="flow-drawer-head"><div><span class="flow-eyebrow">TRAFFIC INSIGHT</span><h3 id="opsFlowDetailTitle">节点详情</h3></div><button type="button" id="flowDrawerClose" aria-label="关闭节点详情">×</button></div>
+          <p id="flowDetailScope" class="flow-detail-scope"></p>
+          <div class="flow-detail-tabs" role="tablist" aria-label="详情分类"><button type="button" id="flowTabOverview" role="tab" aria-selected="true" aria-controls="flowOverviewPanel" tabindex="0" data-flow-tab="overview">概览</button><button type="button" id="flowTabDetails" role="tab" aria-selected="false" aria-controls="flowDetailsPanel" tabindex="-1" data-flow-tab="details">详细指标</button></div>
+          <div id="flowOverviewPanel" role="tabpanel" aria-labelledby="flowTabOverview"><div id="opsFlowDetailFacts" class="flow-facts"></div></div>
+          <div id="flowDetailsPanel" role="tabpanel" aria-labelledby="flowTabDetails" hidden><div id="flowDetailedFacts" class="flow-facts"></div><details class="flow-definitions"><summary>数据口径与范围</summary><p>当前请求状态和流量仅统计本实例通过鉴权与准入的生成请求。速率为近5秒滚动值；输出 token/s 随上游用量上报更新，不是逐字生成速度。失败与重试按近60秒结束的请求统计，不同原因可能重叠。延迟使用近15分钟结束请求保留的原始样本，每条渠道×协议最多256个；首生成包含推理与工具，可见首字只统计文本，非流式正文 TTFB 独立展示。账号池来自共享容量观测，可能包含其他实例占用；未扣除模型级限制。历史时间选择和模型筛选不改变本图窗口。</p></details></div>
+        </dialog>
       </article>
 
       <div class="ops-kpi-grid" id="opsKpis" aria-live="polite"></div>
@@ -259,6 +287,7 @@
     </details>
 
     {{template "page-scripts.html" .}}
+    <script src="{{.AdminPath}}/js/ops-flow-model.js?v={{.AssetVersion}}"></script>
     <script src="{{.AdminPath}}/js/ops-flow.js?v={{.AssetVersion}}"></script>
     <script src="{{.AdminPath}}/js/ops.js?v={{.AssetVersion}}"></script>
   </main>

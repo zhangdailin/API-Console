@@ -1,228 +1,290 @@
-// Live animation is driven by SSE handler start/finish events, independently of
-// the 15-second historical metrics refresh.
-(function () {
-  const { el, setText, make } = ConsoleUI;
-  const upstreams = ['workbuddy', 'cline', 'qoder', 'grok'];
-  const protocols = ['chat', 'responses', 'messages'];
-  const names = { workbuddy: 'WorkBuddy', cline: 'Cline', qoder: 'Qoder', grok: 'Grok',
-    chat: 'OpenAI Chat Completions', responses: 'OpenAI Responses', messages: 'Claude Messages', gateway: 'API Console' };
-  let source = null;
-  let snapshot = null;
-  let previous = null;
-  let selected = '';
-  let pulseTimer = null;
-  let pools = null;
-  const pulseUntil = new Map();
+// The screen consumes bounded snapshots. Animation is aggregate activity, never
+// a reconstruction of individual requests or a per-token generation meter.
+(() => {
+  const M = FlowScreenModel;
+  const {el,make,setText}=ConsoleUI;
+  let root, source=null, snapshot=null, pools=null, lastReceived=0, poolReceived=0;
+  let connected=false, message='正在连接实时流量…', selected='', detailTab='overview';
+  let currentScope='', motion=true, reduced=false, poolError=false, nextPoolAt=0;
+  let tickTimer=null, pulseTimer=null, paintTimer=null, frame=null, layoutFrame=null, lastPaint=0;
+  let poolController=null, poolSequence=0, poolInFlight=false, resizeObserver=null;
+  let fallbackFullscreen=false, priorOverflow='', priorScroll=0, fullscreenTrigger=null;
+  let opener=null;
+  const pulses=new Map(), trend=new M.Trend(), overviewFacts=new Map(), detailedFacts=new Map();
+  const raf=callback=>window.requestAnimationFrame?window.requestAnimationFrame(callback):window.setTimeout(callback,16);
+  const caf=id=>window.cancelAnimationFrame?window.cancelAnimationFrame(id):window.clearTimeout(id);
+  const now=()=>Date.now();
+  function live(){return connected && snapshot!=null && now()-lastReceived<5000 && !document.hidden;}
+  function rows(key){return M.rowsFor(snapshot,key);}
+  function stats(key){return snapshot?.nodes?.[key]||null;}
+  function pool(key){return M.pool(pools,key,currentScope,now(),poolReceived);}
+  function outside(key){return M.channels.includes(key) && currentScope && currentScope!==key;}
+  function clock(value){const date=new Date(value);return Number.isFinite(date.getTime())?date.toLocaleTimeString('zh-CN',{hour12:false}):'—';}
+  function field(map,key,value){const entry=map.get(key);if(entry && entry.value.textContent!==String(value))entry.value.textContent=value;}
+  function bar(id,ratio){el(id)?.style.setProperty('width',(ratio==null?0:Math.max(0,Math.min(1,ratio))*100)+'%');}
+  function statusText(){if(document.hidden)return '页面在后台，实时采集已暂停';if(!connected)return message;if(now()-lastReceived>=5000)return '数据已过期，等待新快照';return '实时推送已连接';}
 
-  function scope() { return (el('opsChannel') || {}).value || ''; }
-  function rowsFor(key) {
-    return ((snapshot && snapshot.routes) || []).filter(row => key === 'gateway' || row.channel === key || row.protocol === key);
+  function schedule(){
+    if(document.hidden || frame!=null || paintTimer!=null)return;
+    const wait=Math.max(0,200-(now()-lastPaint));
+    if(wait>0){paintTimer=window.setTimeout(()=>{paintTimer=null;schedule();},wait);return;}
+    frame=raf(()=>{frame=null;lastPaint=now();render();});
   }
-  function sum(rows, field) { return rows.reduce((total, row) => total + Number(row[field] || 0), 0); }
-  function rates(rows) {
-    const known = rows.length > 0 && rows.every(row => row.usage_available === true);
-    return { qps: sum(rows, 'qps').toFixed(2), input: known ? sum(rows, 'input_tps').toFixed(1) : '—',
-      tps: known ? sum(rows, 'output_tps').toFixed(1) : '—' };
+  function pulse(key,delta){
+    const previous=pulses.get(key)||{incoming:0,outgoing:0};
+    if(delta.incoming>0)previous.incoming=now()+1100;
+    if(delta.outgoing>0)previous.outgoing=now()+1300;
+    pulses.set(key,previous);
   }
-  function metrics(key) { return snapshot && snapshot.nodes ? snapshot.nodes[key] : null; }
-  function ms(value) {
-    if (value == null || !Number.isFinite(Number(value))) return '—';
-    return Number(value) < 1000 ? Math.round(value) + ' ms' : (Number(value) / 1000).toFixed(1) + ' s';
+  function sample(){
+    const rate=M.rate(rows('gateway'));
+    trend.add(now(),live()?{qps:rate.qps,active:rate.active}:null);
   }
-  function percent(value) { return value == null ? '—' : (Number(value) * 100).toFixed(1) + '%'; }
-  function latencyWindow() {
-    return '近 ' + (snapshot?.latency_window_seconds ?? snapshot?.window_seconds ?? 900) / 60 + ' 分钟';
+  function accept(payload){
+    const next=M.normalize(payload,currentScope);
+    if(!next){connected=false;message='实时数据无效，等待恢复';pulses.clear();sample();schedule();return;}
+    if(snapshot?.instance_started===next.instance_started && Date.parse(next.sampled_at)<Date.parse(snapshot.sampled_at))return;
+    if(snapshot && snapshot.instance_started!==next.instance_started){trend.clear();pulses.clear();}
+    const delta=M.deltas(snapshot,next);
+    snapshot=next;lastReceived=now();connected=true;
+    for(const [key,value] of delta)pulse(key,value);
+    sample();schedule();
   }
-  function distribution(value, missing) {
-    return value && value.samples > 0 ? 'P50 ' + ms(value.p50_ms) + ' / P95 ' + ms(value.p95_ms) + ' · ' + value.samples + ' 样本'
-      : '— · ' + latencyWindow() + (missing || '无样本');
+  function related(){
+    if(!selected || selected==='gateway')return new Set(M.keys);
+    const result=new Set([selected,'gateway']);
+    for(const row of rows(selected)) if(row.started>0 || row.active>0){result.add(row.channel);result.add(row.protocol);}
+    return result;
   }
-  function nodeLatency(stats, filtered) {
-    if (filtered) return { text: 'P95 范围外', title: '当前渠道筛选范围外' };
-    if (!stats) return { text: 'P95 待采集', title: '实时延迟数据尚未就绪' };
-    const valid = value => value?.samples > 0 && value.p95_ms != null && Number.isFinite(Number(value.p95_ms));
-    const generation = valid(stats.first_generation), body = valid(stats.body_ttfb);
-    const details = [];
-    if (generation) details.push('首生成 P95 ' + ms(stats.first_generation.p95_ms) + ' · ' + stats.first_generation.samples + ' 个流式样本');
-    if (body) details.push('正文 TTFB P95 ' + ms(stats.body_ttfb.p95_ms) + ' · ' + stats.body_ttfb.samples + ' 个非流式样本');
-    return {
-      text: generation ? '首生成 P95 ' + ms(stats.first_generation.p95_ms)
-        : body ? '正文 TTFB P95 ' + ms(stats.body_ttfb.p95_ms) : 'P95 无近期样本',
-      title: latencyWindow() + ' · ' + (details.join('；') || '没有有效的流式首生成或非流式正文 TTFB 样本，请求结束后计入') +
-        (generation && body ? '；节点优先显示首生成，两类样本独立统计' : ''),
-    };
-  }
-  function poolFact() {
-    if (!upstreams.includes(selected) && selected !== 'gateway') return null;
-    const rows = (pools || []).filter(row => selected === 'gateway' ? !scope() || row.channel === scope() : row.channel === selected);
-    const fresh = rows.length > 0 && rows.every(row => row.capacity_available === true &&
-      Number.isFinite(Date.parse(row.capacity_sampled_at)) && Date.now() - Date.parse(row.capacity_sampled_at) < 30000);
-    if (!fresh) return ['账号容量', '— · 容量快照未就绪或已过期'];
-    const capacity = sum(rows, 'capacity_slots'), occupied = sum(rows, 'occupied_slots');
-    return ['账号容量', sum(rows, 'accounts_available') + '/' + sum(rows, 'accounts_enabled') + ' 可用账号 · ' + occupied + '/' + capacity +
-      ' 可用池槽位占用' + (capacity > 0 ? '（' + (occupied / capacity * 100).toFixed(1) + '%）' : '') +
-      ' · ' + new Date(rows[0].capacity_sampled_at).toLocaleTimeString() + ' 采样'];
-  }
-  function flowing(key, on) {
-    ['opsNode-', 'opsWire-'].forEach(prefix => {
-      const node = el(prefix + key);
-      if (node) node.classList.toggle('is-flowing', on);
-    });
-  }
-  function renderDetail() {
-    if (!selected) return;
-    const rows = rowsFor(selected);
-    setText('opsFlowDetailTitle', names[selected] + (snapshot ? rows.length ? ' · 当前实例 · 延迟' + latencyWindow() + ' · 错误与等待近 60 秒' : ' · 当前筛选范围外' : ' · 实时连接尚未就绪'));
-    const container = el('opsFlowDetailFacts');
-    if (!container) return;
-    container.replaceChildren();
-    if (!snapshot || !rows.length) return;
-    const stats = metrics(selected), rate = rates(rows);
-    const facts = [
-      ['实时速率', 'QPS ' + rate.qps + ' · 输入 ' + rate.input + ' / 输出 ' + rate.tps + ' token/s'],
-      ['请求状态', sum(rows, 'active') + ' 进行中' + (stats ? ' · ' + stats.waiting + ' 尚未输出 / ' + stats.responding + ' 已开始输出' : '')],
-      ['实例累计', '接收 ' + sum(rows, 'started') + ' · 已结束 ' + sum(rows, 'completed')],
-    ];
-    if (stats) {
-      facts.push(
-        ['首生成延迟', distribution(stats.first_generation, '无流式首生成样本')],
-        ['可见首字延迟', distribution(stats.first_visible, '无可见文本样本')],
-        ['请求总时长', distribution(stats.duration, '无结束请求样本')],
-        ['非流式正文 TTFB', distribution(stats.body_ttfb, '无非流式正文样本')],
-        ['失败状态', percent(stats.failure_rate) + ' · ' + stats.failed + '/' + stats.completed + ' 失败 · 最终 429/529 ' + stats.rate_limited + ' · 流中断 ' + stats.stream_errors + ' · 超时 ' + stats.timeouts + ' · 取消 ' + stats.canceled],
-        ['上游用量覆盖', stats.usage_reported + '/' + stats.completed + ' 个已结束请求'],
-        ['重试与切号', stats.observed > 0 ? stats.retried + ' 个请求重试 · ' + stats.attempts + ' 次尝试 · ' + stats.account_switches + ' 次切号' : '— · 未采集'],
-        ['平均等待', stats.observed > 0 ? '重试 ' + ms(stats.retry_wait_ms / stats.observed) + ' · 其中排队 ' + ms(stats.queue_wait_ms / stats.observed) + ' · ' + stats.observed + ' 个请求' : '— · 未采集'],
-        ['最长进行时长', sum(rows, 'active') > 0 ? ms(stats.longest_active_ms) : '— · 无进行中请求'],
-      );
-      const labels = { dns_ms: 'DNS', tcp_ms: 'TCP', tls_ms: 'TLS', connection_wait_ms: '取连接', response_headers_ms: '响应头' };
-      const phases = Object.entries(labels).flatMap(([key, label]) => {
-        const phase = (stats.http_phases || {})[key];
-        return phase && phase.samples > 0 ? [label + ' ' + ms(phase.avg_ms) + '（' + phase.samples + ' 次）'] : [];
-      });
-      facts.push(['上游连接阶段均值', phases.join(' · ') || '— · 未采集']);
+  function render(){
+    if(!root)return;
+    const fresh=live(), rate=M.rate(rows('gateway')), total=stats('gateway');
+    root.dataset.live=String(fresh);root.dataset.motion=String(motion);root.dataset.reducedMotion=String(reduced);
+    setText('opsFlowStatus',statusText());
+    setText('flowUpdated',snapshot?'最近观测 '+clock(snapshot.sampled_at):'尚未收到数据');
+    setText('flowScope',currentScope?M.names[currentScope]:'全部渠道');
+    const totals={qps:snapshot?M.number(rate.qps,2):'—',active:snapshot?M.number(rate.active):'—',waiting:M.number(total?.waiting),responding:M.number(total?.responding),failed:M.number(total?.failed),tps:snapshot?(rate.output==null?'待上报':M.number(rate.output,1)):'—'};
+    for(const [key,value]of Object.entries(totals))setText('flowTotal-'+key,value);
+    root.querySelector('.flow-stat-failed')?.classList.toggle('is-degraded',(total?.failed||0)>0);
+    setText('flowGatewayActive',totals.active);setText('flowGatewayWaiting',totals.waiting);setText('flowGatewayResponding',totals.responding);
+    setText('opsFlowActive',snapshot?(fresh?'进行中请求':'上次观测 · 进行中'):'等待实时数据');
+    const highlight=related();let nextPulse=Infinity;
+    for(const key of M.keys){
+      const node=el('opsNode-'+key),wire=el('opsWire-'+key),rates=M.rate(rows(key)),metric=stats(key),out=!!outside(key);
+      const value=pulses.get(key)||{};
+      const incoming=fresh&&!out&&value.incoming>now(), outgoing=fresh&&!out&&(value.outgoing>now()||(metric?.responding||0)>0);
+      const active=fresh&&!out&&rates.active>0;
+      if(value.incoming>now())nextPulse=Math.min(nextPulse,value.incoming);
+      if(value.outgoing>now())nextPulse=Math.min(nextPulse,value.outgoing);
+      node?.classList.toggle('is-flowing',active||incoming||outgoing);
+      node?.classList.toggle('is-selected',selected===key);
+      node?.classList.toggle('is-outside',out);
+      node?.setAttribute('aria-pressed',String(selected===key));
+      if(node)node.disabled=out;
+      if(wire){
+        wire.classList.toggle('is-flowing',active||incoming||outgoing);
+        wire.classList.toggle('has-in',incoming);wire.classList.toggle('has-out',outgoing);
+        wire.classList.toggle('is-selected',!!selected&&highlight.has(key));
+        wire.classList.toggle('is-outside',out||(!!selected&&!highlight.has(key)));
+        wire.style.setProperty('--flow-speed',Math.max(.4,1.4/(1+Math.log2(rates.qps+1)/3)).toFixed(2)+'s');
+      }
+      if(key==='gateway')continue;
+      setText('opsNodeQps-'+key,snapshot&&!out?M.number(rates.qps,2):'—');
+      setText('flowActive-'+key,snapshot&&!out?M.number(rates.active):'—');
+      if(M.channels.includes(key)){
+        setText('opsNodeTps-'+key,snapshot&&!out?(rates.output==null?'待上报':M.number(rates.output,1)):'—');
+        const capacity=pool(key);
+        setText('flowPool-'+key,out?'当前筛选范围外':capacity.fresh?`${M.number(capacity.available)}/${M.number(capacity.enabled)} 可用账号`:(poolError?'账号池读取失败':'账号池未就绪或已过期'));
+        setText('flowCapacity-'+key,!out&&capacity.capacityKnown?`槽位 ${M.number(capacity.occupied)}/${M.number(capacity.capacity)}`:'槽位 —');
+        bar('flowCapacityBar-'+key,!out&&capacity.capacityKnown&&capacity.capacity>0?capacity.occupied/capacity.capacity:null);
+        const state=out?'范围外':!fresh?(snapshot?'上次数据':'等待数据'):rates.active>0?'有流量':capacity.fresh&&capacity.enabled===0?'未启用':capacity.fresh&&capacity.available===0?'池受限':metric?.failed>0?'近期失败':'空闲';
+        setText('flowState-'+key,state);
+        el('flowState-'+key)?.classList.toggle('is-warning',state==='池受限'||state==='近期失败');
+        if(el('flowPool-'+key))el('flowPool-'+key).title=poolError?'刷新失败，保留上次采样；30秒后过期':capacity.fresh?'账号池采样 '+clock(capacity.sampledAt)+'；未扣除模型级限制':'';
+      }else{
+        const share=snapshot&&rate.qps>0?rates.qps/rate.qps:null;
+        setText('flowShare-'+key,share==null?(snapshot?'暂无流量':'—'):M.percent(share));
+        bar('flowShareBar-'+key,share);
+      }
     }
-    const pool = poolFact();
-    if (pool) facts.push(pool);
-    if (upstreams.includes(selected)) facts.push(['按下游接口', protocols.map(key => names[key] + ' ' + sum(rows.filter(row => row.protocol === key), 'active')).join(' / ')]);
-    facts.forEach(([label, value]) => {
-      const fact = make('div', 'ops-flow-fact');
-      fact.appendChild(make('span', 'ops-flow-fact-label', label));
-      fact.appendChild(make('span', 'ops-flow-fact-value', value));
-      container.appendChild(fact);
+    if(pulseTimer!=null)window.clearTimeout(pulseTimer);
+    pulseTimer=fresh&&Number.isFinite(nextPulse)?window.setTimeout(()=>{pulseTimer=null;schedule();},Math.max(1,nextPulse-now()+1)):null;
+    renderTrends();renderIncidents(total);renderDetail();
+  }
+  function renderTrends(){
+    for(const [id,key]of [['flowTrendQps','qps'],['flowTrendActive','active']])el(id)?.setAttribute('d',trend.path(key,now()));
+    const points=trend.values(now()).filter(Boolean), last=points.at(-1);
+    setText('flowTrendQpsValue',last?M.number(last.qps,2)+' req/s':'—');setText('flowTrendActiveValue',last?M.number(last.active)+' 个':'—');
+    setText('flowTrendNote',points.length?'已采样 '+points.length+'/60 秒 · 缺失区间留空':'等待实时采样');
+  }
+  function renderIncidents(metric){
+    for(const key of ['rate_limited','timeouts','stream_errors','canceled','retried','account_switches']){
+      setText('flowIncident-'+key,M.number(metric?.[key]));
+      el('flowIncident-'+key)?.classList.toggle('is-degraded',(metric?.[key]||0)>0);
+    }
+    setText('flowQualityNote',!metric?'尚未收到数据':metric.completed===0?'近60秒暂无结束请求样本':`${M.number(metric.completed)} 个请求结束 · 失败率 ${M.percent(metric.failure_rate)}${live()?'':' · 上次观测'}`);
+  }
+  const overviewLabels={rate:'请求速率 · 近5秒',active:'请求状态 · 当前',usage:'上报用量速率 · 近5秒',total:'实例累计',failure:'失败记录 · 近60秒',accounts:'账号池',capacity:'共享账号池槽位',routes:'关联流量'};
+  const detailLabels={generation:'首生成延迟 · 近15分钟',visible:'可见首字延迟 · 近15分钟',body:'非流式正文 TTFB · 近15分钟',duration:'请求总时长 · 近15分钟',retry:'重试与切号 · 近60秒',wait:'平均等待 · 近60秒',longest:'最长进行时长 · 当前',coverage:'用量上报覆盖 · 近60秒',phases:'HTTP 阶段均值 · 近60秒'};
+  function facts(container,labels,target){
+    if(!container)return;
+    for(const [key,label]of Object.entries(labels)){
+      const card=make('div','flow-fact'),title=make('span','',label),value=make('strong','','—');
+      card.appendChild(title);card.appendChild(value);container.appendChild(card);target.set(key,{card,value});
+    }
+  }
+  function distribution(value){return value?.samples>0&&M.numeric(value.p50_ms)!=null&&M.numeric(value.p95_ms)!=null?`P50 ${M.milliseconds(value.p50_ms)} / P95 ${M.milliseconds(value.p95_ms)} · ${M.number(value.samples)} 样本`:'暂无样本';}
+  function renderDetail(){
+    if(!selected)return;
+    const out=outside(selected), metric=out?null:stats(selected), data=out?[]:rows(selected),rate=M.rate(data),capacity=pool(selected);
+    setText('opsFlowDetailTitle',M.names[selected]);
+    setText('flowDetailScope',`${currentScope?M.names[currentScope]:'全部渠道'} · 当前实例 · ${out?'当前筛选范围外':live()?'实时观测':snapshot?'上次观测，数据已过期':'等待数据'}${snapshot?' · '+clock(snapshot.sampled_at):''}`);
+    const known=snapshot&&!out;
+    field(overviewFacts,'rate',known?M.number(rate.qps,2)+' req/s':'—');
+    field(overviewFacts,'active',known?`${M.number(rate.active)} 进行中 · ${M.number(metric?.waiting)} 等待输出 · ${M.number(metric?.responding)} 已开始输出`:'—');
+    field(overviewFacts,'usage',known&&rate.output!=null?`输入 ${data.every(row=>M.numeric(row.input_tps)!=null)?M.number(M.sum(data,'input_tps'),1):'待上报'} / 输出 ${M.number(rate.output,1)} token/s；上游用量上报，不是逐字生成速度`:'待上报');
+    field(overviewFacts,'total',known?`接收 ${M.number(M.sum(data,'started'))} · 结束 ${M.number(M.sum(data,'completed'))}`:'—');
+    field(overviewFacts,'failure',metric?`${M.number(metric.failed)}/${M.number(metric.completed)} 失败 · ${M.percent(metric.failure_rate)} · 限流 ${M.number(metric.rate_limited)} · 超时 ${M.number(metric.timeouts)} · 流中断 ${M.number(metric.stream_errors)} · 取消 ${M.number(metric.canceled)}`:'暂无样本');
+    for(const key of ['accounts','capacity'])if(overviewFacts.get(key))overviewFacts.get(key).card.hidden=M.protocols.includes(selected);
+    field(overviewFacts,'accounts',!out&&capacity.fresh?`${M.number(capacity.available)}/${M.number(capacity.enabled)} 可用账号 · ${M.number(capacity.modelCooldowns)} 个模型限制 · ${clock(capacity.sampledAt)} 采样${poolError?' · 刷新失败，保留上次采样':''}`:'账号池未就绪或已过期');
+    field(overviewFacts,'capacity',!out&&capacity.capacityKnown?`${M.number(capacity.occupied)}/${M.number(capacity.capacity)} 可用池槽位占用 · 可能包含其他实例占用，未扣模型级限制`:'容量未采集或已过期');
+    const other=M.channels.includes(selected)?M.protocols:M.channels;
+    field(overviewFacts,'routes',known?other.map(key=>`${M.names[key]} ${M.number(M.sum(data.filter(row=>row.channel===key||row.protocol===key),'active'))} 进行中`).join(' / '):'—');
+    for(const [key,metricKey]of [['generation','first_generation'],['visible','first_visible'],['body','body_ttfb'],['duration','duration']])field(detailedFacts,key,distribution(metric?.[metricKey]));
+    field(detailedFacts,'retry',metric?.observed>0?`${M.number(metric.retried)} 个请求重试 · ${M.number(metric.attempts)} 次尝试 · ${M.number(metric.account_switches)} 次切号`:'未采集');
+    field(detailedFacts,'wait',metric?.observed>0?`重试 ${M.milliseconds(metric.retry_wait_ms/metric.observed)} · 其中排队 ${M.milliseconds(metric.queue_wait_ms/metric.observed)} · ${M.number(metric.observed)} 请求`:'未采集');
+    field(detailedFacts,'longest',known&&rate.active>0?M.milliseconds(metric?.longest_active_ms):'无进行中请求');
+    field(detailedFacts,'coverage',metric?`${M.number(metric.usage_reported)}/${M.number(metric.completed)} 个已结束请求`:'未采集');
+    const labels={dns_ms:'DNS',tcp_ms:'TCP',tls_ms:'TLS',connection_wait_ms:'取连接',response_headers_ms:'响应头'};
+    field(detailedFacts,'phases',Object.entries(labels).flatMap(([key,label])=>metric?.http_phases?.[key]?.samples>0?[label+' '+M.milliseconds(metric.http_phases[key].avg_ms)+'（'+M.number(metric.http_phases[key].samples)+'次）']:[]).join(' · ')||'未采集');
+  }
+  function tab(value){
+    detailTab=value;
+    const overview=value==='overview';
+    el('flowOverviewPanel').hidden=!overview;el('flowDetailsPanel').hidden=overview;
+    for(const [id,on]of [['flowTabOverview',overview],['flowTabDetails',!overview]]){
+      el(id).setAttribute('aria-selected',String(on));el(id).tabIndex=on?0:-1;
+    }
+  }
+  function openDetail(key,trigger,details=false){
+    selected=key;opener=trigger;tab(details?'details':detailTab);renderDetail();schedule();
+    const drawer=el('flowDrawer');
+    if(!drawer.open){drawer.showModal();el('flowDrawerClose').focus();}
+    if(details){const definitions=drawer.querySelector('details');if(definitions)definitions.open=true;}
+  }
+  function closeDetail(){el('flowDrawer').close();}
+  function layout(){
+    if(!root || document.hidden)return;
+    const board=el('flowBoard'),svg=el('flowWires');if(!board||!svg)return;
+    const rect=board.getBoundingClientRect(),gateway=el('opsNode-gateway')?.getBoundingClientRect();
+    if(!gateway||!rect.width||!rect.height)return;
+    svg.setAttribute('viewBox',`0 0 ${rect.width} ${rect.height}`);
+    for(const key of [...M.channels,...M.protocols]){
+      const node=el('opsNode-'+key)?.getBoundingClientRect();if(!node)continue;
+      const left=M.channels.includes(key),x1=(left?node.right:gateway.right)-rect.left,x2=(left?gateway.left:node.left)-rect.left;
+      const y1=(left?node.top+node.height/2:gateway.top+gateway.height/2)-rect.top,y2=(left?gateway.top+gateway.height/2:node.top+node.height/2)-rect.top;
+      const bend=Math.max(12,(x2-x1)*.5),path=`M ${x1} ${y1} C ${x1+bend} ${y1}, ${x2-bend} ${y2}, ${x2} ${y2}`;
+      el('opsWire-'+key)?.querySelectorAll('path').forEach(item=>item.setAttribute('d',path));
+    }
+  }
+  function scheduleLayout(){if(document.hidden)return;if(layoutFrame==null)layoutFrame=raf(()=>{layoutFrame=null;layout();});}
+  async function loadPools(){
+    if(document.hidden||poolInFlight)return;
+    const id=++poolSequence, scope=currentScope,controller=new AbortController();poolController=controller;poolInFlight=true;nextPoolAt=now()+15000;
+    const timeout=window.setTimeout(()=>controller.abort(),6000);
+    try{
+      const result=await ConsoleAPI.json('/api/ops/pools'+(scope?'?channel='+encodeURIComponent(scope):''),{signal:controller.signal,cache:'no-store'});
+      if(id!==poolSequence||document.hidden||scope!==currentScope)return;
+      const expected=scope?[scope]:M.channels;
+      if(result?.available!==true||!Number.isFinite(Date.parse(result.sampled_at))||!Array.isArray(result.rows)||result.rows.length!==expected.length||expected.some(key=>result.rows.filter(row=>row.channel===key).length!==1))throw new Error('invalid pool snapshot');
+      pools=result;poolReceived=now();poolError=false;
+    }catch(error){if(id===poolSequence&&!document.hidden){poolError=true;}}
+    finally{window.clearTimeout(timeout);if(id===poolSequence){poolController=null;poolInFlight=false;schedule();}}
+  }
+  function abortPools(){poolSequence++;poolController?.abort();poolController=null;poolInFlight=false;}
+  function disconnect(){
+    if(source)source.close();source=null;connected=false;
+    if(pulseTimer!=null)window.clearTimeout(pulseTimer);pulseTimer=null;pulses.clear();
+  }
+  function connect(){
+    disconnect();message='正在连接实时流量…';schedule();
+    if(document.hidden)return;
+    if(typeof EventSource==='undefined'){message='浏览器不支持实时推送';schedule();return;}
+    const stream=new EventSource('/api/ops/flow'+(currentScope?'?channel='+encodeURIComponent(currentScope):''));source=stream;
+    stream.addEventListener('flow',event=>{if(source!==stream)return;try{accept(JSON.parse(event.data));}catch(_){connected=false;message='实时数据解析失败，等待恢复';pulses.clear();schedule();}});
+    stream.onerror=()=>{if(source!==stream)return;connected=false;message='实时连接中断，自动重连中';pulses.clear();sample();schedule();};
+  }
+  function changeScope(value){
+    const scope=M.channels.includes(value)?value:'';
+    if(scope===currentScope)return;
+    currentScope=scope;snapshot=null;pools=null;lastReceived=0;poolReceived=0;poolError=false;trend.clear();pulses.clear();
+    el('flowChannel').value=scope;abortPools();connect();loadPools();
+    if(selected&&outside(selected)){selected='';el('flowDrawer').open&&closeDetail();}
+  }
+  function heartbeat(){
+    sample();schedule();if(now()>=nextPoolAt&&!poolInFlight)loadPools();
+  }
+  function stop(){
+    disconnect();abortPools();resizeObserver?.disconnect();if(tickTimer!=null)window.clearInterval(tickTimer);tickTimer=null;
+    if(paintTimer!=null)window.clearTimeout(paintTimer);paintTimer=null;
+    if(frame!=null)caf(frame);frame=null;
+    if(layoutFrame!=null)caf(layoutFrame);layoutFrame=null;
+  }
+  function start(){
+    if(document.hidden||tickTimer!=null)return;
+    if(resizeObserver){resizeObserver.observe(el('flowBoard'));root.querySelectorAll('[data-flow-node]').forEach(node=>resizeObserver.observe(node));}
+    connect();loadPools();tickTimer=window.setInterval(heartbeat,1000);scheduleLayout();
+  }
+  function fullscreenState(){
+    const expanded=document.fullscreenElement===root||fallbackFullscreen;
+    el('flowFullscreen').querySelector('span').textContent=expanded?'退出全屏':'全屏';
+    el('flowFullscreen').setAttribute('aria-label',expanded?'退出拓扑全屏':'全屏查看实时拓扑');
+    scheduleLayout();
+    if(!expanded){window.scrollTo?.(0,priorScroll);fullscreenTrigger?.focus({preventScroll:true});}
+  }
+  async function fullscreen(){
+    if(fallbackFullscreen){root.classList.remove('is-maximized');document.body.style.overflow=priorOverflow;fallbackFullscreen=false;fullscreenState();return;}
+    if(document.fullscreenElement===root){await document.exitFullscreen();return;}
+    priorScroll=window.scrollY;fullscreenTrigger=el('flowFullscreen');
+    if(root.requestFullscreen){try{await root.requestFullscreen();return;}catch(_){/* Use in-page expansion when fullscreen permission is unavailable. */}}
+    priorOverflow=document.body.style.overflow;document.body.style.overflow='hidden';root.classList.add('is-maximized');fallbackFullscreen=true;fullscreenState();
+  }
+  function init(){
+    root=el('opsFlowScreen');if(!root)return;
+    const outer=el('opsChannel');
+    if(outer)for(const key of M.channels)if(!Array.from(outer.options).some(option=>option.value===key)){const option=make('option','',M.names[key]);option.value=key;outer.appendChild(option);}
+    const bookmarked=new URLSearchParams(window.location?.search||'').get('channel');
+    currentScope=M.channels.includes(bookmarked)?bookmarked:M.channels.includes(outer?.value)?outer.value:'';
+    if(outer)outer.value=currentScope;
+    el('flowChannel').value=currentScope;
+    facts(el('opsFlowDetailFacts'),overviewLabels,overviewFacts);facts(el('flowDetailedFacts'),detailLabels,detailedFacts);
+    root.querySelectorAll('[data-flow-node]').forEach(button=>button.addEventListener('click',()=>openDetail(button.dataset.flowNode,button)));
+    el('flowDrawerClose').addEventListener('click',closeDetail);
+    el('flowDrawer').addEventListener('click',event=>{if(event.target===el('flowDrawer')){const rect=event.target.getBoundingClientRect();if(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom)closeDetail();}});
+    el('flowDrawer').addEventListener('close',()=>{selected='';opener?.focus({preventScroll:true});schedule();});
+    root.querySelectorAll('[data-flow-tab]').forEach(button=>{
+      button.addEventListener('click',()=>tab(button.dataset.flowTab));
+      button.addEventListener('keydown',event=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();tab(event.key==='Home'?'overview':event.key==='End'?'details':detailTab==='overview'?'details':'overview');el(detailTab==='overview'?'flowTabOverview':'flowTabDetails').focus();}});
     });
-  }
-  function render() {
-    const now = Date.now();
-    let nextPulse = 0;
-    [...upstreams, ...protocols, 'gateway'].forEach(key => {
-      const rows = rowsFor(key);
-      const active = sum(rows, 'active');
-      const until = pulseUntil.get(key) || 0;
-      const rate = rates(rows);
-      const stats = metrics(key);
-      const filtered = upstreams.includes(key) && scope() && scope() !== key;
-      const latency = nodeLatency(stats, filtered);
-      setText('opsNodeLatency-' + key, latency.text);
-      const latencyNode = el('opsNodeLatency-' + key);
-      if (latencyNode) latencyNode.title = latency.title;
-      setText('opsNodeFailure-' + key, stats && !filtered ? '失败 ' + percent(stats.failure_rate) : '失败 —');
-      const health = el('opsNodeFailure-' + key);
-      if (health) health.classList.toggle('is-degraded', !!stats && !filtered && stats.failed > 0);
-      flowing(key, !!snapshot && (active > 0 || until > now));
-      if (until > now) nextPulse = Math.max(nextPulse, until - now);
-      if (key === 'gateway') {
-        setText('opsFlowActive', snapshot ? active + ' 个进行中' : '— 个进行中');
-        setText('opsGatewayQps', snapshot ? rate.qps : '—');
-        setText('opsGatewayTps', snapshot ? rate.tps : '—');
-      } else {
-        setText('opsNodeMetric-' + key, filtered ? '当前筛选范围外' : snapshot
-          ? active + ' 个请求进行中' : '等待实时数据');
-        setText('opsNodeQps-' + key, snapshot && !filtered ? rate.qps : '—');
-        setText('opsNodeTps-' + key, snapshot && !filtered ? rate.tps : '—');
-      }
+    el('flowHelpOpen').addEventListener('click',()=>openDetail('gateway',el('flowHelpOpen'),true));
+    el('flowMotion').addEventListener('click',()=>{motion=!motion;el('flowMotion').setAttribute('aria-pressed',String(motion));el('flowMotion').textContent=motion?'动画开启':'动画关闭';schedule();});
+    el('flowFullscreen').addEventListener('click',()=>fullscreen().catch(()=>{}));
+    document.addEventListener('fullscreenchange',fullscreenState);
+    document.addEventListener('keydown',event=>{if(event.key==='Escape'&&fallbackFullscreen&&!el('flowDrawer').open)fullscreen();});
+    const media=window.matchMedia?.('(prefers-reduced-motion: reduce)');reduced=!!media?.matches;
+    media?.addEventListener?.('change',event=>{reduced=event.matches;schedule();});
+    el('flowChannel').addEventListener('change',()=>{
+      const value=el('flowChannel').value,outer=el('opsChannel');
+      if(outer&&outer.value!==value){outer.value=value;outer.dispatchEvent(new Event('change',{bubbles:true}));}
+      changeScope(value);
     });
-    renderDetail();
-    if (pulseTimer) window.clearTimeout(pulseTimer);
-    pulseTimer = nextPulse ? window.setTimeout(render, nextPulse + 20) : null;
+    el('opsChannel')?.addEventListener('change',()=>changeScope(el('opsChannel').value));
+    document.addEventListener('visibilitychange',()=>{if(document.hidden){stop();sample();render();}else start();});
+    window.addEventListener('pagehide',()=>{stop();if(fallbackFullscreen){document.body.style.overflow=priorOverflow;fallbackFullscreen=false;root.classList.remove('is-maximized');}});
+    window.addEventListener('pageshow',start);
+    window.addEventListener('resize',scheduleLayout);
+    if(typeof ResizeObserver!=='undefined')resizeObserver=new ResizeObserver(scheduleLayout);
+    render();start();
   }
-  function accept(payload) {
-    if (!payload || !payload.available || !Array.isArray(payload.routes)) { unavailable('实时数据不可用'); return; }
-    const sameInstance = previous && previous.instance_started === payload.instance_started;
-    if (!sameInstance) pulseUntil.clear();
-    const old = new Map(sameInstance ? previous.routes.map(row => [row.channel + ':' + row.protocol, row.started]) : []);
-    payload.routes.forEach(row => {
-      // Keep even a sub-frame request visible for one trip along the wire.
-      if (sameInstance && row.started > (old.get(row.channel + ':' + row.protocol) || 0)) {
-        [row.channel, row.protocol, 'gateway'].forEach(key => pulseUntil.set(key, Date.now() + 1000));
-      }
-    });
-    snapshot = payload;
-    previous = payload;
-    setText('opsFlowStatus', '实时推送已连接');
-    const dot = el('opsFlowDot');
-    if (dot) dot.classList.add('is-live');
-    render();
-  }
-  function unavailable(message) {
-    snapshot = null;
-    previous = null;
-    pulseUntil.clear();
-    setText('opsFlowStatus', message);
-    const dot = el('opsFlowDot');
-    if (dot) dot.classList.remove('is-live');
-    render();
-  }
-  function disconnect() {
-    if (source) source.close();
-    source = null;
-    if (pulseTimer) window.clearTimeout(pulseTimer);
-    pulseTimer = null;
-  }
-  function connect() {
-    disconnect();
-    unavailable('连接实时流量…');
-    if (document.hidden) return;
-    if (typeof EventSource === 'undefined') { unavailable('浏览器不支持实时推送'); return; }
-    const stream = new EventSource('/api/ops/flow' + (scope() ? '?channel=' + encodeURIComponent(scope()) : ''));
-    source = stream;
-    stream.addEventListener('flow', event => {
-      if (source !== stream) return;
-      try { accept(JSON.parse(event.data)); } catch (_) { unavailable('实时数据解析失败'); }
-    });
-    // EventSource reconnects automatically; stale requests stop glowing at once.
-    stream.onerror = () => { if (source === stream) unavailable('实时连接中断，正在重连…'); };
-  }
-  function init() {
-    document.querySelectorAll('[data-flow-node]').forEach(button => {
-      const key = button.getAttribute('data-flow-node');
-      const health = make('span', 'ops-flow-health');
-      ['Latency', 'Failure'].forEach(metric => {
-        const value = make('span', '', metric === 'Latency' ? 'P95 待采集' : '失败 —');
-        value.id = 'opsNode' + metric + '-' + key;
-        health.appendChild(value);
-      });
-      (button.querySelector('.ops-flow-node-body') || button).appendChild(health);
-      button.addEventListener('click', () => {
-        selected = button.getAttribute('data-flow-node');
-        document.querySelectorAll('[data-flow-node]').forEach(node => {
-          const on = node.getAttribute('data-flow-node') === selected;
-          node.classList.toggle('is-selected', on);
-          node.setAttribute('aria-pressed', String(on));
-        });
-        renderDetail();
-      });
-    });
-    const channel = el('opsChannel');
-    if (channel) channel.addEventListener('change', connect);
-    window.addEventListener('ops:pool', event => { pools = Array.isArray(event.detail) ? event.detail : null; renderDetail(); });
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) { disconnect(); unavailable('页面在后台，实时推送已暂停'); }
-      else connect();
-    });
-    window.addEventListener('pagehide', disconnect);
-    connect();
-  }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-  else init();
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
 })();

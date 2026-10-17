@@ -35,6 +35,9 @@ go test -race -count=1 -p 1 -timeout 15m ./...
 | provider-performance.ps1 | 本地基准参数包装，恢复环境变量 |
 | deploy-orchids.sh | 旧主机部署示例，不是完整业务验收 |
 | verify-coding-protocols.py | 特定主机绑定的历史真实上游验证工具 |
+| preview-flow.go | 仅监听 loopback 的实时拓扑模板预览，不连接 Redis 或上游 |
+| verify-flow-screen.cjs | Playwright 驱动真实浏览器，检查拓扑布局、交互和异常状态并输出截图 / 视频 |
+| flow-screen-fixture.cjs | 供浏览器验收与离线演示使用的显式模拟流量 |
 
 上次仅评估了移出生产验证脚本的建议，当前文件仍在仓库。不能通过删整个 scripts 目录精简仓库而不同时修 CI / release 引用。
 
@@ -51,6 +54,14 @@ go test -race -count=1 -p 1 -timeout 15m ./...
 | 部署验收 | 指定运行映像和服务行为 | 下一次升级或历史数据完整性 |
 
 报告应写清命令、平台、数据源、通过 / 失败 / 未运行，保留上游排队等未完成项。不要把测试数量的历史值写成当前固定事实。
+
+### 实时拓扑浏览器验收
+
+先启动 `go run scripts/preview-flow.go`，另一个终端执行 `node scripts/verify-flow-screen.cjs`。需要可用的 Playwright 包、Chromium 和 Playwright 的 FFmpeg；可通过 `PLAYWRIGHT_MODULE` 指向现有 Playwright 安装，通过 `CHROME_BIN` 指定 Chrome 路径。此预览仅监听 `127.0.0.1:3099`，不提供真实管理 API。静态资源使用 Go embed，修改资源后须重启预览进程。
+
+验收脚本向真实浏览器注入明确的模拟 SSE 与账号池响应，覆盖无账号、等待输出、持续输出、突发、失败、断线、实例重启和池读取失败，以及主题、全屏、键盘、减少动态效果、1920 / 1440 / 4K / 390px 布局。单元测试另检查后台清理、计时器边界、趋势缺口和池数据过期。
+
+默认产物保存到被 Git 忽略的 `docs/verification/flow-screen-20261017/`，可用 `FLOW_ARTIFACTS` 指定其他目录。包含 `browser-report.json`、各尺寸截图、`flow-screen-demo.webm` 和可离线打开的 `interactive-demo.html`。模拟演示验证展示与交互，不证明真实上游性能。服务器部署与 GitHub 发布需另行安排。
 
 ## 5. 协议变更重点
 
