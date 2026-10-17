@@ -202,8 +202,8 @@ func TestConsumeStreamOversizedTextFallbackDegradesToText(t *testing.T) {
 }
 
 // TestBuildChatBodyCarriesThinkingSwitch pins the reasoning wire contract: a
-// reasoning-capable model row leaves thinking off by default, explicit client
-// effort enables it, and "none" turns it off. A non-reasoning model must
+// reasoning-capable model row supplies the default, explicit client effort
+// overrides it, and "none" turns it off. A non-reasoning model must
 // not grow a default thinking flag or effort.
 func TestBuildChatBodyCarriesThinkingSwitch(t *testing.T) {
 	reasoning := modelEntry{Key: "qwen-plus", Source: "system", IsReasoning: true}
@@ -238,12 +238,13 @@ func TestBuildChatBodyCarriesThinkingSwitch(t *testing.T) {
 	_, present = params["reasoning_effort"]
 	testutil.Falsef(t, present, "qfmodel default carried reasoning_effort: %#v", params)
 
-	// "none" disables thinking explicitly.
+	// "none" disables every thinking switch explicitly.
 	body = decodeChatBodyForTestWithModel(t, reasoning, upstream.UpstreamRequest{ReasoningEffort: "none"})
 	params, _ = body["parameters"].(map[string]any)
 	testutil.Equal(t, params["enable_thinking"], false)
-	_, present = params["reasoning_effort"]
-	testutil.Falsef(t, present, "none must not forward an effort level, got %#v", params["reasoning_effort"])
+	testutil.Equal(t, params["reasoning_effort"], "none")
+	testutil.EqualAny(t, params["max_thinking_tokens"], float64(0))
+	testutil.Equal(t, body["model_config"].(map[string]any)["is_reasoning"], false)
 }
 
 func decodeChatBodyForTestWithModel(t *testing.T, model modelEntry, req upstream.UpstreamRequest) map[string]any {

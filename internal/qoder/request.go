@@ -190,14 +190,15 @@ type chatToolCall struct {
 }
 
 type chatParameters struct {
-	ResponseFormat  map[string]any `json:"response_format,omitempty"`
-	MaxTokens       int            `json:"max_tokens"`
-	Temperature     *float64       `json:"temperature,omitempty"`
-	TopP            *float64       `json:"top_p,omitempty"`
-	Stop            *[]string      `json:"stop,omitempty"`
-	ContextLength   int            `json:"context_length,omitempty"`
-	EnableThinking  *bool          `json:"enable_thinking,omitempty"`
-	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
+	ResponseFormat    map[string]any `json:"response_format,omitempty"`
+	MaxTokens         int            `json:"max_tokens"`
+	Temperature       *float64       `json:"temperature,omitempty"`
+	TopP              *float64       `json:"top_p,omitempty"`
+	Stop              *[]string      `json:"stop,omitempty"`
+	ContextLength     int            `json:"context_length,omitempty"`
+	EnableThinking    *bool          `json:"enable_thinking,omitempty"`
+	ReasoningEffort   string         `json:"reasoning_effort,omitempty"`
+	MaxThinkingTokens *int           `json:"max_thinking_tokens,omitempty"`
 }
 
 func buildChatBodyProfile(req upstream.UpstreamRequest, model modelEntry, sessionID, requestID, requestSetID, clientVersion, aliyunUserType, businessProduct string) ([]byte, error) {
@@ -226,18 +227,18 @@ func buildChatBodyProfile(req upstream.UpstreamRequest, model modelEntry, sessio
 	if contextLength > 0 {
 		parameters.ContextLength = contextLength
 	}
-	// The reference gateway leaves reasoning off by default even for a catalog
-	// row marked is_reasoning=true; it enables model_config.is_reasoning only
-	// when the caller explicitly requests thinking. Keep client-specified effort
-	// intact so this changes only requests that supplied no reasoning preference.
+	// The catalog supplies the default; explicit client effort overrides every
+	// thinking switch together so the gateway never receives contradictory flags.
 	effort := strings.ToLower(strings.TrimSpace(req.ReasoningEffort))
-	if effort != "" && effort != "none" {
-		thinking := true
+	if effort != "" {
+		thinking := effort != "none"
+		model.IsReasoning = thinking
 		parameters.EnableThinking = &thinking
 		parameters.ReasoningEffort = effort
-	} else if effort == "none" {
-		thinking := false
-		parameters.EnableThinking = &thinking
+		if !thinking {
+			zero := 0
+			parameters.MaxThinkingTokens = &zero
+		}
 	}
 	tools := normalizeToolDefinitions(req)
 	toolChoice, parallelTools := normalizeToolControls(req, len(tools) > 0)

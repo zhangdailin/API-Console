@@ -804,8 +804,8 @@ test('the Qoder quota tooltip carries the plan, the reset and the upgrade link',
   const cell = row.children.find((candidate) => candidate.className === 'col-quota');
   assert.equal(strip(cell.innerHTML), '0 / 300 (剩余)');
   assert.equal(cell.title, [
-    '计划: Pro Trial', '单位: credits', '口径: 当前窗口剩余 / 窗口额度',
-    '该账号额度已用尽，窗口重置后自动恢复',
+    '计划: Pro Trial', '单位: credits', '口径: 可用额度池合计剩余 / 合计额度',
+    '上游已判定额度耗尽或可用余额为零，刷新额度后确认恢复',
     `重置: ${new Date(account.quota_reset_at).toLocaleString()}`,
     `升级: ${account.quota_upgrade_url}`,
   ].join(' · '));
@@ -1150,4 +1150,22 @@ test('expired or invalid model holds do not hide recovered account availability'
   assert.equal(context.getAccountModelCooldowns(mixed).length, 1);
   assert.doesNotMatch(context.buildCooldownMarkup(mixed), /expired/);
   assert.equal(context.evaluateAccountStatus({ ...mixed, enabled: false }).text, '禁用');
+});
+
+test('Qoder quota pool tooltip keeps unavailable organization credits separate', () => {
+  const { context } = loadUI();
+  const lines = Array.from(context.qoderQuotaPoolLines({ quota_pools: {
+    plan: { known: true, available: true, limit: 100, remaining: 0 },
+    add_on: { known: true, available: true, limit: 200, remaining: 190 },
+    organization: { known: true, available: false, limit: 500, remaining: 470 },
+  } }));
+  assert.equal(lines.length, 3);
+  assert.match(lines[0], /套餐额度: 0 \/ 100/);
+  assert.match(lines[1], /加购额度: 190 \/ 200/);
+  assert.match(lines[2], /组织资源包: 470 \/ 500（不可用，不计入合计）/);
+  assert.equal(context.qoderQuotaPoolLines({}).length, 0);
+  assert.equal(context.qoderQuotaPoolLines({ quota_pools: {
+    plan: { known: true, available: true, limit: 0, remaining: 0 },
+    add_on: { known: false, limit: 100, remaining: 80 },
+  } }).length, 0);
 });

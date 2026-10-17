@@ -563,8 +563,9 @@ function renderAccounts() {
           tdQuota.title = [
             quota.plan ? `计划: ${quota.plan}` : "",
             `单位: ${quota.unit || "credits"}`,
-            "口径: 当前窗口剩余 / 窗口额度",
-            quota.exhausted ? "该账号额度已用尽，窗口重置后自动恢复" : "",
+            "口径: 可用额度池合计剩余 / 合计额度",
+            ...qoderQuotaPoolLines(acc),
+            quota.exhausted ? "上游已判定额度耗尽或可用余额为零，刷新额度后确认恢复" : "",
             quota.resetAt ? `重置: ${new Date(quota.resetAt).toLocaleString()}` : "",
             quota.upgradeUrl ? `升级: ${quota.upgradeUrl}` : "",
           ].filter(Boolean).join(" · ");
@@ -674,6 +675,17 @@ function renderAccounts() {
   updateSelectedCount();
 
   bindAccountActions(container);
+}
+
+// qoderQuotaPoolLines keeps individual pool balances separate from the aggregate.
+function qoderQuotaPoolLines(account) {
+  const names = { plan: "套餐额度", add_on: "加购额度", organization: "组织资源包" };
+  return Object.entries(names).flatMap(([key, label]) => {
+    const pool = account?.quota_pools?.[key];
+    if (!pool?.known || !(pool.limit > 0)) return [];
+    const state = pool.available ? "" : "（不可用，不计入合计）";
+    return [`${label}: ${formatCredit(pool.remaining)} / ${formatCredit(pool.limit)}${state}`];
+  });
 }
 
 // formatCredit renders meter values that the upstream reports with fractions.

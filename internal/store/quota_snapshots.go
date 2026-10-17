@@ -4,25 +4,39 @@ import (
 	"time"
 )
 
+// QoderCreditPool retains one observed allowance source without sharing mutable
+// pointers between account snapshots. Known distinguishes absence from zero.
+type QoderCreditPool struct {
+	Known     bool    `json:"known"`
+	Available bool    `json:"available"`
+	Limit     float64 `json:"limit"`
+	Used      float64 `json:"used"`
+	Remaining float64 `json:"remaining"`
+	Unit      string  `json:"unit,omitempty"`
+}
+
 // QoderQuotaSnapshot is one Qoder credit/plan observation.
 //
 // Exhausted is the gateway's own verdict and is authoritative over the
 // arithmetic: an account whose counters have not refreshed can still be flagged
 // spent, which is what makes it usable as a scheduling signal.
 type QoderQuotaSnapshot struct {
-	Limit          float64   `json:"limit,omitempty"`
-	Remaining      float64   `json:"remaining,omitempty"`
-	Used           float64   `json:"used,omitempty"`
-	Exhausted      bool      `json:"exhausted,omitempty"`
-	PlanTier       string    `json:"plan_tier,omitempty"`
-	UserType       string    `json:"user_type,omitempty"`
-	PaidPlan       bool      `json:"paid_plan,omitempty"`
-	Unit           string    `json:"unit,omitempty"`
-	UpgradeURL     string    `json:"upgrade_url,omitempty"`
-	ResetAt        time.Time `json:"reset_at"`
-	PeriodEnd      time.Time `json:"period_end"`
-	LastKnownLimit float64   `json:"last_known_limit,omitempty"`
-	SyncedAt       time.Time `json:"synced_at"`
+	PlanQuota      QoderCreditPool `json:"plan_quota"`
+	AddOnQuota     QoderCreditPool `json:"add_on_quota"`
+	OrgQuota       QoderCreditPool `json:"org_quota"`
+	Limit          float64         `json:"limit,omitempty"`
+	Remaining      float64         `json:"remaining,omitempty"`
+	Used           float64         `json:"used,omitempty"`
+	Exhausted      bool            `json:"exhausted,omitempty"`
+	PlanTier       string          `json:"plan_tier,omitempty"`
+	UserType       string          `json:"user_type,omitempty"`
+	PaidPlan       bool            `json:"paid_plan,omitempty"`
+	Unit           string          `json:"unit,omitempty"`
+	UpgradeURL     string          `json:"upgrade_url,omitempty"`
+	ResetAt        time.Time       `json:"reset_at"`
+	PeriodEnd      time.Time       `json:"period_end"`
+	LastKnownLimit float64         `json:"last_known_limit,omitempty"`
+	SyncedAt       time.Time       `json:"synced_at"`
 }
 
 // ResyncAt reports when the snapshot should be refreshed again. A quota that is

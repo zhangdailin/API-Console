@@ -68,3 +68,47 @@ func TestProviderClientHoldsTheStoreOnlyWhenGiven(t *testing.T) {
 	withoutStore := newProviderClient(acc, &config.Config{}, nil).(*Client)
 	testutil.True(t, withoutStore.accountStore == nil, "a nil store must not become a non-nil interface")
 }
+
+// A stale exhaustion verdict must recover when a fresh account-level read
+// reports spendable add-on credits, including after Redis serialization.
+func TestRefreshQuotaPersistsPoolsAndClearsInferredReset(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/quota/usage":
+			_, _ = w.Write([]byte(`{"isQuotaExceeded":false,"userQuota":{"total":100,"used":100,"remaining":0},"addOnQuota":{"total":200,"used":10,"remaining":190},"orgResourcePackage":{"cap":500,"used":30,"remaining":470,"available":false}}`))
+		case "/api/v2/user/plan":
+			_, _ = w.Write([]byte(`{"plan_tier_name":"Pro","is_paid_plan":true,"start_date":1758508788374}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	mini := miniredis.RunT(t)
+	s, err := store.New(store.Options{RedisAddr: mini.Addr(), RedisPrefix: "qoder-pool-refresh:"})
+	testutil.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	acc := signedTestAccount()
+	acc.Enabled = true
+	acc.StatusCode = store.AccountStatusQoderQuotaExhausted
+	acc.QuotaResetAt = time.Now().Add(time.Hour).Truncate(time.Second)
+	acc.QoderQuota = store.QoderQuotaSnapshot{Exhausted: true, ResetAt: acc.QuotaResetAt, SyncedAt: time.Now().Add(-time.Hour)}
+	testutil.NoError(t, s.CreateAccount(t.Context(), acc))
+	cfg := &config.Config{QoderOpenAPIBaseURL: server.URL, QoderOAuthBaseURL: server.URL, QoderInferenceURL: server.URL}
+	refreshQuota(t.Context(), provider.Env{Config: cfg, Store: s}, acc)
+	got, err := s.GetAccount(t.Context(), acc.ID)
+	testutil.NoError(t, err)
+	testutil.Equal(t, got.StatusCode, "")
+	testutil.Equal(t, got.QoderQuota.Exhausted, false)
+	testutil.Equal(t, got.UsageLimit, 300)
+	testutil.Equal(t, got.UsageCurrent, 190)
+	testutil.False(t, !got.QoderQuota.ResetAt.IsZero() || !got.QuotaResetAt.IsZero(), "fresh unknown boundary kept the inferred reset")
+	testutil.Equal(t, got.QoderQuota.AddOnQuota.Remaining, 190)
+	testutil.Equal(t, got.QoderQuota.OrgQuota.Remaining, 470)
+	testutil.Equal(t, got.QoderQuota.OrgQuota.Available, false)
+	fields := map[string]any{}
+	projectQuota(fields, got, 0, 0, 0, false)
+	pools := fields["quota_pools"].(map[string]store.QoderCreditPool)
+	testutil.Equal(t, pools["add_on"].Known, true)
+	testutil.Equal(t, pools["organization"].Available, false)
+	testutil.EqualAny(t, fields["quota_remaining"], float64(190))
+}

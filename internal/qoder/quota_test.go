@@ -95,17 +95,14 @@ func TestQuotaExhaustedWithoutNumbersIsStillExhausted(t *testing.T) {
 	testutil.False(t, !quota.Exhausted, "Exhausted = false despite the upstream verdict")
 }
 
-// TestNextDailyBoundary proves the reset is derived, not invented.
-func TestNextDailyBoundary(t *testing.T) {
-	t.Parallel()
-
-	start := timeDate(2026, 9, 21, 16, 0, 0)
-	now := timeDate(2026, 9, 22, 3, 0, 0)
-	next := nextDailyBoundary(start, now)
-	want := timeDate(2026, 9, 22, 16, 0, 0)
-	testutil.Falsef(t, !next.Equal(want), "nextDailyBoundary() = %v, want %v", next, want)
-	// A boundary already in the future is returned unchanged.
-	future := timeDate(2026, 10, 1, 0, 0, 0)
-	got := nextDailyBoundary(future, now)
-	testutil.Falsef(t, !got.Equal(future), "nextDailyBoundary(future) = %v, want %v", got, future)
+// A missing or non-expiring reset stays unknown instead of becoming a daily
+// schedule inferred from a subscription start date.
+func TestReportedQuotaReset(t *testing.T) {
+	for _, value := range []int64{0, -1, 253402214400000, 253402214400} {
+		testutil.Falsef(t, !reportedQuotaReset(value).IsZero(), "unexpected reset for %d", value)
+	}
+	want := timeDate(2026, 11, 1, 0, 0, 0)
+	for _, value := range []int64{want.Unix(), want.UnixMilli()} {
+		testutil.Falsef(t, !reportedQuotaReset(value).Equal(want), "reset for %d differs from %v", value, want)
+	}
 }

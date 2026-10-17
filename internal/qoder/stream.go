@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,7 +32,9 @@ import (
 
 // streamEnvelope is the outer SSE frame.
 type streamEnvelope struct {
+	gatewayFailure
 	Headers         map[string][]string `json:"headers"`
+	Error           json.RawMessage     `json:"error"`
 	Body            string              `json:"body"`
 	StatusCodeValue int                 `json:"statusCodeValue"`
 	StatusCode      string              `json:"statusCode"`
@@ -39,6 +42,7 @@ type streamEnvelope struct {
 
 // streamChunk is the inner OpenAI-shaped chunk.
 type streamChunk struct {
+	gatewayFailure
 	ID      string `json:"id"`
 	Object  string `json:"object"`
 	Created int64  `json:"created"`
@@ -175,9 +179,7 @@ func parseQuotaNotice(kind, payload string) *QuotaNotice {
 			UpgradeURL:  strings.TrimSpace(n.Extras.UpgradeURL),
 			PricingURL:  strings.TrimSpace(n.Extras.PricingURL),
 		}
-		if n.Extras.NextResetAt > 0 {
-			notice.NextResetAt = time.Unix(normalizeMillis(n.Extras.NextResetAt), 0)
-		}
+		notice.NextResetAt = reportedQuotaReset(n.Extras.NextResetAt)
 		return notice
 	}
 	return nil
@@ -340,9 +342,7 @@ func consumeStreamObserved(body io.Reader, onMessage func(upstream.SSEMessage), 
 			return false
 		}
 		if strings.EqualFold(strings.TrimSpace(frame.event), "error") {
-			if streamErr == nil {
-				streamErr = fmt.Errorf("qoder stream reported an error event")
-			}
+			streamErr = streamErrorEvent([]byte(frame.data))
 			return false
 		}
 
@@ -421,6 +421,10 @@ func consumeStreamObserved(body io.Reader, onMessage func(upstream.SSEMessage), 
 			return false
 		}
 		if strings.TrimSpace(envelope.Body) == "" {
+			if failure := envelope.gatewayFailure.classify([]byte(payload), len(envelope.Error) > 0 && string(envelope.Error) != "null"); failure != nil {
+				streamErr = failure
+				return false
+			}
 			return true
 		}
 		if strings.TrimSpace(envelope.Body) == "[DONE]" {
@@ -448,7 +452,6 @@ func consumeStreamObserved(body io.Reader, onMessage func(upstream.SSEMessage), 
 			slog.Warn("qoder control frame", "provider", "qoder", "kind", kind, "payload", bodySnippet(notice))
 			return true
 		}
-
 		var chunk streamChunk
 		if err := json.Unmarshal([]byte(envelope.Body), &chunk); err != nil {
 			// The upstream reports some refusals as a JSON array rather than a
@@ -456,6 +459,10 @@ func consumeStreamObserved(body io.Reader, onMessage func(upstream.SSEMessage), 
 			// gave, and that reason is the one thing that makes the refusal
 			// actionable.
 			streamErr = fmt.Errorf("qoder stream protocol error: invalid body: %w (upstream body: %s)", err, bodySnippet(envelope.Body))
+			return false
+		}
+		if failure := chunk.gatewayFailure.classify([]byte(envelope.Body), false); failure != nil {
+			streamErr = failure
 			return false
 		}
 		if chunk.Error != nil && strings.TrimSpace(chunk.Error.Message) != "" {
@@ -560,6 +567,51 @@ func consumeStreamObserved(body io.Reader, onMessage func(upstream.SSEMessage), 
 		return result, ErrStreamTruncated
 	}
 	return result, nil
+}
+
+// gatewayFailure is embedded into both wire layers so recognizing failures does
+// not require another decode of normal chunks.
+type gatewayFailure struct {
+	Success *bool           `json:"success"`
+	Code    json.RawMessage `json:"code"`
+	MsgCode json.RawMessage `json:"msgCode"`
+	Message string          `json:"message"`
+	MsgInfo string          `json:"msgInfo"`
+}
+
+func (frame gatewayFailure) classify(raw []byte, forced bool) error {
+	// Normal chunks take this allocation-free branch; error recognition does
+	// not add a second JSON decode to the high-frequency token path.
+	if !forced && (frame.Success == nil || *frame.Success) {
+		return nil
+	}
+	code := util.FirstNonEmpty(stringOfCode(frame.Code), stringOfCode(frame.MsgCode))
+	if !forced && (code == "" || code == "0") && frame.Message == "" && frame.MsgInfo == "" {
+		return nil
+	}
+	status, _ := strconv.Atoi(code)
+	if status < 400 || status > 599 {
+		status = http.StatusBadGateway
+	}
+	return classifyStatus(status, "", raw)
+}
+
+func streamErrorEvent(raw []byte) error {
+	var frame struct {
+		gatewayFailure
+		Body   string `json:"body"`
+		Status int    `json:"statusCodeValue"`
+	}
+	if json.Unmarshal(raw, &frame) != nil {
+		return fmt.Errorf("qoder stream reported an error event")
+	}
+	if frame.Body != "" {
+		if frame.Status >= 400 && frame.Status <= 599 {
+			return classifyStatus(frame.Status, "", []byte(frame.Body))
+		}
+		return streamErrorEvent([]byte(frame.Body))
+	}
+	return frame.gatewayFailure.classify(raw, true)
 }
 
 // ErrModelRateLimited marks Qoder's text-form model/account-pool throttle.

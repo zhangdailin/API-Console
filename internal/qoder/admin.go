@@ -332,6 +332,11 @@ func projectQuota(fields map[string]any, acc *store.Account, limit, current floa
 	fields["quota_exhausted"] = snapshot.Exhausted
 	fields["quota_upgrade_url"] = snapshot.UpgradeURL
 	fields["quota_reset_at"] = snapshot.ResetAt
+	fields["quota_pools"] = map[string]store.QoderCreditPool{
+		"plan":         snapshot.PlanQuota,
+		"add_on":       snapshot.AddOnQuota,
+		"organization": snapshot.OrgQuota,
+	}
 	// The gateway reports the window total itself, so a snapshot's windowLimit is
 	// known even when it is zero (a Free plan with nothing left). Passing
 	// limitKnown=false here would make consumers treat a reported window as an
