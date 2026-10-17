@@ -83,6 +83,8 @@ curl http://127.0.0.1:3002/workbuddy/v1/responses \
 
 不应假定所有原生响应默认 store:true。Grok 适配有自己的默认与资源策略；桥接保存终止对象，上游原生正文和本地所有权记录也不同。
 
+Codex 多代理的显式 `agent_message` 和带完整任务信封的用户消息会先转换成普通用户文本，避免委派正文因嵌套 `encrypted_content` 被丢弃；真正的推理密文不参与此转换。输入格式、限制及压缩支持见[多代理协议说明](coding-protocol-capabilities.md#5-工具声明与历史)。
+
 ## 3. 响应资源
 
 | 方法 | 相对路径 | 语义 |

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"orchids-api/internal/responses"
 	"time"
@@ -57,6 +58,15 @@ func (h *Handler) handleGatewayCompaction(w http.ResponseWriter, r *http.Request
 		return
 	}
 	sessionKey := sessionFromContext(r.Context()).Key
+	input, inputErr := responses.NormalizeAgentMessages(payload["input"])
+	if inputErr != nil {
+		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", inputErr.Error())
+		return
+	}
+	payload = maps.Clone(payload)
+	if _, exists := payload["input"]; exists {
+		payload["input"] = input
+	}
 	sample := responses.PrepareCompactionSample(payload)
 	sample["model"] = spec.UpstreamModel
 

@@ -62,6 +62,10 @@ strict:false 和 json_object 不执行相同强制校验。答案围栏与外围
 
 桥接不能无损接受任意未知 item、外部密文或原生托管工具。工具参数增量应聚合后再执行；缺 finish / DONE、参数错误和截断不能伪装完整成功。
 
+Codex 多代理任务支持两种输入：显式 `type: "agent_message"`，以及 `role: "user"` 消息中先出现 `Message Type:`、后出现 `Payload:` 的文本信封。仅在这些任务格式里，将嵌套 `type: "encrypted_content"` 块中的明文转为 `input_text`，保留文字、分块顺序和图片/文件引用；不限定模型名。显式 agent_message 降为普通 user 消息，不向上游转发 author、recipient 等代理内部字段，不提升为 system/developer 指令。四渠道的流式和非流式 Responses，以及摘要压缩路径使用相同转换；已有 namespace 函数映射继续生效。
+
+该兼容转换不具备解密能力，不修改 `reasoning` 或 `compaction` 项里的真实密文。Chat 桥接遇到无法识别为任务的嵌套 encrypted_content 会返回 400，避免继续成功调用却丢失正文；Grok 原生路径对这些非任务内容保留透传，由上游判定支持情况。空白、非字符串的任务块和不支持的 agent 内容明确报错，错误中不回显任务文字，也不新增任务正文日志。存储的原始输入不因转换而被原地修改。
+
 ## 6. Responses 生命周期
 
 桥接输出 sequence_number 逐事件递增。它只保证输出顺序标识，当前未实现持久事件回放和基于 Last-Event-ID 的自动断线恢复。

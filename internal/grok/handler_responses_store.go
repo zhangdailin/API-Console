@@ -45,6 +45,14 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 	}
 	// Store client input before flattening; input_items must never expose wire names.
 	storedPayload := responses.CloneStringInterfaceMap(payload)
+	input, inputErr := responses.NormalizeAgentMessages(payload["input"])
+	if inputErr != nil {
+		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", inputErr.Error())
+		return
+	}
+	if _, exists := payload["input"]; exists {
+		payload["input"] = input
+	}
 	namespaces, namespaceErr := responses.NormalizeNamespacePayload(payload)
 	if namespaceErr != nil {
 		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", namespaceErr.Error())

@@ -122,6 +122,11 @@ func ResponsesBridgeHandler(chat http.HandlerFunc, opts BridgeOptions) http.Hand
 			return
 		}
 		storedRequest := req
+		req.Input, err = NormalizeAgentMessages(req.Input)
+		if err != nil {
+			WriteAPIError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
+			return
+		}
 		namespaces, err := NormalizeBridgedNamespaces(&req)
 		if err != nil {
 			WriteAPIError(w, http.StatusBadRequest, "invalid_request_error", err.Error())

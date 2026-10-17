@@ -135,9 +135,14 @@ func InputToMessages(input any) ([]chatwire.Message, error) {
 	return InputToMessagesMode(input, true)
 }
 
-// Native identity extraction never changes the payload sent upstream. Unknown
-// items remain in that original payload; only the chat bridge rejects them.
+// Native identity extraction uses portable agent task text without mutating
+// caller-owned input. Unknown items stay native; only the chat bridge rejects them.
 func InputToMessagesMode(input any, strict bool) ([]chatwire.Message, error) {
+	var err error
+	input, err = NormalizeAgentMessages(input)
+	if err != nil {
+		return nil, err
+	}
 	switch v := input.(type) {
 	case nil:
 		return nil, fmt.Errorf("input is required")
@@ -232,6 +237,14 @@ func InputToMessagesMode(input any, strict bool) ([]chatwire.Message, error) {
 					ReasoningContent: responsesReasoningSummary(item), ReasoningEncryptedContent: chatwire.ParseLooseStringAny(item["encrypted_content"]),
 				})
 			case "message":
+				if strict {
+					for partIndex, raw := range InterfaceSlice(item["content"]) {
+						part, _ := raw.(map[string]any)
+						if strings.EqualFold(strings.TrimSpace(chatwire.ParseLooseStringAny(part["type"])), "encrypted_content") {
+							return nil, fmt.Errorf("input[%d].content[%d]: encrypted content requires an agent task envelope or a native Responses provider", index, partIndex)
+						}
+					}
+				}
 				role := chatwire.ParseLooseStringAny(item["role"])
 				if role == "" {
 					role = "user"

@@ -50,6 +50,13 @@ func hasBuildHostedTool(tools []map[string]any, kind string) bool {
 }
 
 func normalizeBuildResponsesPayload(payload map[string]any) error {
+	input, err := responses.NormalizeAgentMessages(payload["input"])
+	if err != nil {
+		return err
+	}
+	if _, exists := payload["input"]; exists {
+		payload["input"] = input
+	}
 	if err := responses.ValidateToolsAndHistory(payload); err != nil {
 		return err
 	}

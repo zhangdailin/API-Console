@@ -42,6 +42,27 @@ func TestBridgeStillRejectsEncryptedInput(t *testing.T) {
 	}
 }
 
+func TestBridgeRejectsUnrecognizedEncryptedMessageBeforeCallingChat(t *testing.T) {
+	for _, channel := range []string{"workbuddy", "qoder", "cline"} {
+		for _, endpoint := range []string{"/responses", "/responses/compact"} {
+			called := false
+			chat := func(http.ResponseWriter, *http.Request) { called = true }
+			bridge := ResponsesBridgeHandler(chat, BridgeOptions{})
+			if endpoint == "/responses/compact" {
+				bridge = ResponsesBridgeCompactHandler(chat, BridgeOptions{})
+			}
+			rec := httptest.NewRecorder()
+			bridge(rec, httptest.NewRequest(http.MethodPost, "/"+channel+"/v1"+endpoint, strings.NewReader(`{"model":"test","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"Payload:"},{"type":"encrypted_content","encrypted_content":"private-proof-must-not-be-echoed"}]}]}`)))
+			if called || rec.Code != http.StatusBadRequest {
+				t.Fatalf("%s%s: status=%d called=%t", channel, endpoint, rec.Code, called)
+			}
+			if strings.Contains(rec.Body.String(), "private-proof-must-not-be-echoed") {
+				t.Fatal("error echoed opaque input")
+			}
+		}
+	}
+}
+
 func TestBridgeDisablesHostedSearchWithoutInventingFunction(t *testing.T) {
 	for _, channel := range []string{"qoder", "workbuddy", "cline"} {
 		var mu sync.Mutex
