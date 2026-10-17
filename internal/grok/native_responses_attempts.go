@@ -12,6 +12,7 @@ import (
 	"orchids-api/internal/chatwire"
 	"orchids-api/internal/middleware"
 	"orchids-api/internal/responses"
+	"orchids-api/internal/upstream"
 )
 
 func nativeQualityRequest(model string, payload map[string]any) *chatwire.Request {
@@ -28,6 +29,7 @@ func nativeQualityRequest(model string, payload map[string]any) *chatwire.Reques
 // input and rejected output never establishes response ownership or replay.
 func (h *Handler) serveNativeResponses(w http.ResponseWriter, r *http.Request, sess *chatAccountSession, pinned bool, spec ModelSpec, payload map[string]any, path string, namespaces responses.ToolNamespaces) (responseID string, captured []byte, result chatOutcome) {
 	ctx := r.Context()
+	ctx, _ = upstream.WithAttemptBudget(ctx, h.configSnapshot().InferencePolicy().MaxAttempts)
 	immutable, err := cloneBuildPayload(payload)
 	if err != nil {
 		writeGrokUpstreamError(w, err)
@@ -137,6 +139,7 @@ func (h *Handler) serveNativeResponses(w http.ResponseWriter, r *http.Request, s
 			if result.Err == nil {
 				result.Err = quality.hold.writer.Commit()
 			}
+			quality.hold.recordTiming(&result)
 			status := "passed"
 			if result.Err != nil {
 				status = "error"
@@ -152,6 +155,7 @@ func (h *Handler) serveNativeResponses(w http.ResponseWriter, r *http.Request, s
 			return
 		}
 		quality.hold.writer.Discard()
+		quality.hold.recordTiming(&result)
 		h.auditChatOutcome(ctx, sess.acc, req, result)
 		h.auditQualityDegraded(ctx, sess.acc, req, result, qualityWithheldTurn{Mode: "native", Attempt: attempt, Guard: guard})
 		if unsafe || remaining <= 0 || attempt >= policy.MaxAttempts || ctx.Err() != nil {

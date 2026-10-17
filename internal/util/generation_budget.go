@@ -11,6 +11,7 @@ type generationBudget struct {
 	mu       sync.Mutex
 	timer    *time.Timer
 	finished bool
+	deadline time.Time
 }
 
 // WithFirstGenerationTimeout bounds pre-generation work across all attempts.
@@ -20,6 +21,7 @@ func WithFirstGenerationTimeout(parent context.Context, timeout time.Duration) (
 	b := &generationBudget{}
 	ctx = context.WithValue(ctx, generationBudgetKey{}, b)
 	if timeout > 0 {
+		b.deadline = time.Now().Add(timeout)
 		b.timer = time.AfterFunc(timeout, func() {
 			b.mu.Lock()
 			defer b.mu.Unlock()
@@ -30,6 +32,26 @@ func WithFirstGenerationTimeout(parent context.Context, timeout time.Duration) (
 		})
 	}
 	return ctx, func() { MarkGenerationProgress(ctx); cancel(context.Canceled) }
+}
+
+// RetryWaitFits rejects waits that cannot finish before an active request or
+// first-generation deadline. It never shortens an upstream Retry-After hint.
+func RetryWaitFits(ctx context.Context, wait time.Duration) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	end := time.Now().Add(max(wait, 0))
+	if deadline, ok := ctx.Deadline(); ok && !end.Before(deadline) {
+		return false
+	}
+	if b, ok := ctx.Value(generationBudgetKey{}).(*generationBudget); ok {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		if !b.finished && !b.deadline.IsZero() && !end.Before(b.deadline) {
+			return false
+		}
+	}
+	return true
 }
 
 func MarkGenerationProgress(ctx context.Context) {

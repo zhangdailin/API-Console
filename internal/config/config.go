@@ -37,6 +37,7 @@ type Config struct {
 	DeploymentInstance          string         `json:"deployment_instance_id,omitempty"`
 	MediaDir                    string         `json:"media_dir,omitempty"`
 	CacheStrategy               string         `json:"cache_strategy"`
+	InferenceProfile            string         `json:"inference_profile,omitempty"`
 	UpstreamMaxConnsPerHost     int            `json:"upstream_max_conns_per_host,omitempty"`
 	UpstreamMaxIdleConnsPerHost int            `json:"upstream_max_idle_conns_per_host,omitempty"`
 	ClineHTTP2Enabled           bool           `json:"cline_http2_enabled,omitempty"`
@@ -197,6 +198,9 @@ func Load(path string) (*Config, string, error) {
 	}
 
 	ApplyDefaults(&cfg)
+	if err := ValidateInferenceProfile(&cfg); err != nil {
+		return nil, "", err
+	}
 	if err := ValidateProxyConfig(&cfg); err != nil {
 		return nil, "", fmt.Errorf("invalid proxy config: %w", err)
 	}
@@ -257,12 +261,16 @@ func ApplyDefaults(cfg *Config) {
 	ApplyHardcoded(cfg)
 }
 
-// ApplyHardcoded initializes internal runtime policy. These fields are never
-// read from or written to file, Redis or management JSON.
+// ApplyHardcoded initializes numeric runtime limits from a bounded preset.
+// Only the profile name is persisted; individual generation limits cannot be
+// overridden through file, Redis or management JSON.
 func ApplyHardcoded(cfg *Config) {
-	cfg.MaxRetries = GenerationMaxRetries
+	if ValidateInferenceProfile(cfg) == nil {
+		cfg.InferenceProfile = cfg.InferencePolicy().Name
+	}
+	cfg.MaxRetries = cfg.InferencePolicy().MaxAttempts - 1
 	cfg.RetryDelay = 1000
-	cfg.AccountSwitchCount = 20
+	cfg.AccountSwitchCount = cfg.InferencePolicy().MaxAccounts
 	cfg.RequestTimeout = int(InferenceRequestTimeout.Seconds())
 	cfg.ConcurrencyLimit = max(1, boundedDefault(cfg.ConcurrencyLimit, 100, 1000000))
 	cfg.DebugLogSSE = cfg.DebugEnabled

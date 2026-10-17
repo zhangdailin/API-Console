@@ -34,6 +34,12 @@ func (h *Handler) auditChatOutcome(ctx context.Context, acc *store.Account, req 
 	prompt, _ := usage["prompt_tokens_details"].(map[string]any)
 	completion, _ := usage["completion_tokens_details"].(map[string]any)
 	metadata := map[string]any{"finish_reason": result.Finish, "visible_output": result.SawText}
+	metadata["inference_profile"] = h.configSnapshot().InferencePolicy().Name
+	metadata["quality_delivery_mode"] = "quality"
+	if cfg := h.configSnapshot(); cfg != nil && cfg.GrokLowLatency {
+		metadata["quality_delivery_mode"] = "low_latency"
+	}
+	addQualityTiming(metadata, result)
 	if result.QualityChecked {
 		metadata["quality_checked_attempts"] = result.QualityAttempt
 		metadata["quality_check_status"] = "passed"

@@ -27,6 +27,44 @@ type buildQualityHold struct {
 	reason string
 }
 
+// Timings are relative to the start of upstream body consumption, not ingress.
+// Unknown content/release timings stay -1 instead of looking like a zero delay.
+type qualityHoldTiming struct {
+	HeldMS, FirstContentMS, ReleaseMS, AddedDelayMS int64
+}
+
+func (c *buildQualityHold) recordTiming(result *chatOutcome) {
+	if c == nil || c.writer == nil || result == nil {
+		return
+	}
+	released := c.writer.releaseTime()
+	end := released
+	if end.IsZero() {
+		end = time.Now()
+	}
+	timing := &qualityHoldTiming{HeldMS: max(end.Sub(c.started).Milliseconds(), 0), FirstContentMS: -1, ReleaseMS: -1, AddedDelayMS: -1}
+	if !released.IsZero() {
+		timing.ReleaseMS = timing.HeldMS
+	}
+	if !result.FirstToken.IsZero() {
+		timing.FirstContentMS = max(result.FirstToken.Sub(c.started).Milliseconds(), 0)
+		// A discarded attempt has no delivery delay: it never reached the client.
+		if !released.IsZero() {
+			timing.AddedDelayMS = max(released.Sub(result.FirstToken).Milliseconds(), 0)
+		}
+	}
+	result.QualityTiming = timing
+}
+
+func addQualityTiming(metadata map[string]any, result chatOutcome) {
+	if timing := result.QualityTiming; timing != nil {
+		metadata["quality_hold_ms"] = timing.HeldMS
+		metadata["quality_upstream_first_content_ms"] = timing.FirstContentMS
+		metadata["quality_release_ms"] = timing.ReleaseMS
+		metadata["quality_added_delay_ms"] = timing.AddedDelayMS
+	}
+}
+
 func newBuildQualityHold(w http.ResponseWriter, policy qualityHoldPolicy, outcome *chatOutcome) *buildQualityHold {
 	return &buildQualityHold{
 		writer:  newDeferredResponseWriter(w),

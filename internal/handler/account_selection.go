@@ -130,6 +130,16 @@ func (h *Handler) selectAccountRecordWithOptions(ctx context.Context, targetChan
 	needsFilter := model != "" && (honorsModelCooldown(channel) || channel == "cline")
 	var filter loadbalancer.AccountFilter
 	if needsFilter {
+		// Model billing is request-wide, not account-specific. Resolve lazily so
+		// healthy accounts need no Redis read, and scan/fallback passes share it.
+		var billingRead, currentFree bool
+		isCurrentFree := func() bool {
+			if !billingRead {
+				billingRead = true
+				currentFree = h.isCurrentFreeModel(ctx, channel, model)
+			}
+			return currentFree
+		}
 		filter = func(acc *store.Account) error {
 			if channel == "cline" && !provider.SupportsModel("cline", acc, model) {
 				return loadbalancer.ErrAccountNotEligible
@@ -147,7 +157,7 @@ func (h *Handler) selectAccountRecordWithOptions(ctx context.Context, targetChan
 			switch strings.TrimSpace(acc.StatusCode) {
 			case "402":
 				if channel == "qoder" {
-					if provider.IsFreeModel("qoder", acc, model) && h.isCurrentFreeModel(ctx, "qoder", model) {
+					if provider.IsFreeModel("qoder", acc, model) && isCurrentFree() {
 						return nil
 					}
 					return loadbalancer.ErrAccountNotEligible
@@ -159,7 +169,7 @@ func (h *Handler) selectAccountRecordWithOptions(ctx context.Context, targetChan
 					return loadbalancer.ErrAccountNotEligible
 				}
 			case store.AccountStatusQoderQuotaExhausted:
-				if channel == "qoder" && provider.IsFreeModel("qoder", acc, model) && h.isCurrentFreeModel(ctx, "qoder", model) {
+				if channel == "qoder" && provider.IsFreeModel("qoder", acc, model) && isCurrentFree() {
 					return nil
 				}
 				return loadbalancer.ErrAccountNotEligible

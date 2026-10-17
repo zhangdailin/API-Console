@@ -34,3 +34,31 @@ func TestSelectAccountRecord_ExhaustedQoderRequiresExplicitAccountFreeFactor(t *
 	got, err := h.selectAccountRecordWithOptions(ctx, "qoder", nil, accountSelectionOptions{ModelID: "qwen3.8-flash"})
 	testutil.Falsef(t, err != nil || got.ID != acc.ID, "free selection got=%v err=%v", got, err)
 }
+
+func TestQoderBillingLookupIsSharedAcrossCandidatesButNotSelections(t *testing.T) {
+	h, s, mini := setupModelValidationHandler(t)
+	ctx := context.Background()
+	for range 32 {
+		acc := &store.Account{AccountType: "qoder", QoderRefreshToken: "test-refresh", Enabled: true, Weight: 1,
+			StatusCode:    store.AccountStatusQoderQuotaExhausted,
+			QoderModelIDs: []string{`{"key":"free","name":"free","price_factor":0}`}}
+		testutil.NoError(t, s.CreateAccount(ctx, acc))
+	}
+	model := &store.Model{Channel: "Qoder", ModelID: "free", Name: "free", Status: store.ModelStatusAvailable, BillingTier: "free"}
+	testutil.NoError(t, s.CreateModel(ctx, model))
+	selectAccount := func() error {
+		_, err := h.selectAccountRecordWithOptions(ctx, "qoder", nil, accountSelectionOptions{ModelID: "free"})
+		return err
+	}
+	// Warm the account cache so the count isolates model reads.
+	testutil.NoError(t, selectAccount())
+	before := mini.CommandCount()
+	testutil.NoError(t, selectAccount())
+	testutil.Equal(t, mini.CommandCount()-before, 2)
+	model.BillingTier = "metered"
+	testutil.NoError(t, s.UpdateModel(ctx, model))
+	before = mini.CommandCount()
+	testutil.CheckError(t, selectAccount())
+	// Repeated fallback scans must also reuse the negative billing result.
+	testutil.Equal(t, mini.CommandCount()-before, 2)
+}

@@ -18,7 +18,7 @@ func (e hintedRetryError) RetryAfter() time.Duration { return e.delay }
 func TestUpstreamRetryAfterReadsWrappedHint(t *testing.T) {
 	err := fmt.Errorf("wrapped: %w", hintedRetryError{delay: 7 * time.Second})
 	testutil.Equal(t, upstreamRetryAfter(err), 7*time.Second)
-	testutil.Equal(t, upstreamRetryAfter(hintedRetryError{delay: time.Minute}), 30*time.Second)
+	testutil.Equal(t, upstreamRetryAfter(hintedRetryError{delay: time.Minute}), time.Minute)
 	testutil.Equal(t, upstreamRetryAfter(errors.New("plain")), 0)
 }
 

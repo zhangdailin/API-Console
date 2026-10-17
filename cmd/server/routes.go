@@ -100,7 +100,7 @@ func registerRoutes(
 			// concurrency must not hold budget) and before the handler runs, so a
 			// key whose limit cannot cover the request is answered 402 instead.
 			middleware.APIKeyConcurrencyWithTracker(
-				middleware.APIKeyBillingReservation(middleware.InferenceBudget(flowTracker.Track(coalesceFlush(next))), s, middleware.DefaultBillingReservationTTL),
+				middleware.APIKeyBillingReservation(middleware.InferenceBudgetWithConfig(flowTracker.Track(coalesceFlush(next)), currentConfig), s, middleware.DefaultBillingReservationTTL),
 				accountTracker,
 			),
 		)

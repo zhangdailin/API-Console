@@ -22,6 +22,7 @@
   "grok_cli_oauth_token_url": "https://auth.x.ai/oauth2/token",
   "grok_build_rps": 0,
   "grok_low_latency": false,
+  "inference_profile": "standard",
   "cache_strategy": "mix",
   "shared_refusal_wait_budget_ms": 0,
   "account_reservation_wait_budget_ms": 0,

@@ -3,6 +3,7 @@ package refresh
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"orchids-api/internal/accountevents"
@@ -16,17 +17,63 @@ import (
 // Hub is shared by the admin check path and the refresh scheduler.
 var Hub = refreshqueue.Default()
 
+const (
+	maintenanceConcurrency = 4
+	maintenanceTimeout     = time.Minute
+)
+
 // maintainAccounts hands every account to its own channel. The channel checks
 // its catalog, quota and credential cadence before contacting the upstream, so
 // this loop knows nothing about any of them. An account whose channel is not
 // registered, or offers no maintenance, is left alone.
 func maintainAccounts(ctx context.Context, env provider.Env, accounts []*store.Account) {
+	runMaintenance(ctx, accounts, maintenanceConcurrency, func(ctx context.Context, acc *store.Account) {
+		if spec, ok := provider.Lookup(acc.AccountType); ok && spec.Maintain != nil {
+			spec.Maintain(ctx, env, acc)
+		}
+	})
+}
+
+// runMaintenance bounds upstream work and isolates slow or panicking accounts.
+// A tick completes before another tick starts; channel refresh leases continue
+// to serialize maintenance with administrative and request-time refreshes.
+func runMaintenance(ctx context.Context, accounts []*store.Account, concurrency int, maintain func(context.Context, *store.Account)) {
+	jobs := make(chan *store.Account)
+	var workers sync.WaitGroup
+	for range min(max(concurrency, 1), len(accounts)) {
+		workers.Go(func() {
+			for acc := range jobs {
+				if ctx.Err() != nil {
+					return
+				}
+				func() {
+					accountCtx, cancel := context.WithTimeout(ctx, maintenanceTimeout)
+					defer cancel()
+					defer func() {
+						if recover() != nil {
+							slog.Error("Account maintenance panicked", "account_id", acc.ID)
+						}
+					}()
+					maintain(accountCtx, acc)
+				}()
+			}
+		})
+	}
+	seen := make(map[int64]struct{}, len(accounts))
+	defer workers.Wait()
+	defer close(jobs)
 	for _, acc := range accounts {
 		if acc == nil {
 			continue
 		}
-		if spec, ok := provider.Lookup(acc.AccountType); ok && spec.Maintain != nil {
-			spec.Maintain(ctx, env, acc)
+		if _, exists := seen[acc.ID]; exists {
+			continue
+		}
+		seen[acc.ID] = struct{}{}
+		select {
+		case <-ctx.Done():
+			return
+		case jobs <- acc:
 		}
 	}
 }
@@ -41,7 +88,7 @@ func StartTokenRefreshLoop(ctx context.Context, configSnapshot func() *config.Co
 		if cfg == nil {
 			return
 		}
-		refreshCtx := store.WithAccountChangeOrigin(context.Background(), store.AccountChangeOriginScheduler)
+		refreshCtx := store.WithAccountChangeOrigin(ctx, store.AccountChangeOriginScheduler)
 		accounts, err := s.GetEnabledAccounts(refreshCtx)
 		if err != nil {
 			slog.Error("Auto refresh token: list accounts failed", "error", err)

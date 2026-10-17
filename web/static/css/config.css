@@ -317,3 +317,7 @@
 .key-catalog-status { justify-content:space-between; margin:var(--space-4) 0; font-size:.85rem; }
 @media(max-width:900px) { .key-form-grid { grid-template-columns:1fr; } .key-toolbar-actions { width:100%; } .key-actions { min-width:0; } .key-list { overflow:visible; } .key-list-footer .pagination { flex-wrap:wrap; } }
 @media(prefers-reduced-motion:reduce) { .key-loading { animation:none; } }
+#groupInference .toggle:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}

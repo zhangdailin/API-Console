@@ -22,6 +22,7 @@ import (
 	"orchids-api/internal/grok/egress"
 	"orchids-api/internal/modelcatalog"
 	"orchids-api/internal/store"
+	"orchids-api/internal/upstream"
 	"orchids-api/internal/util"
 )
 
@@ -156,7 +157,7 @@ func (c *CLIClient) doResponsesAt(ctx context.Context, acc *store.Account, path 
 			return resp, nil
 		}
 		raw, headerCopy := readBoundedResponse(resp)
-		if resp.StatusCode == http.StatusUnauthorized && !authRetried && c.oauth != nil && strings.TrimSpace(acc.OAuthRefreshToken) != "" {
+		if resp.StatusCode == http.StatusUnauthorized && !authRetried && upstream.RemainingAttempts(ctx) != 0 && c.oauth != nil && strings.TrimSpace(acc.OAuthRefreshToken) != "" {
 			authRetried = true
 			if _, refreshErr := c.oauth.ForceRefresh(ctx, acc); refreshErr == nil {
 				continue
@@ -569,7 +570,17 @@ func (c *CLIClient) request(ctx context.Context, acc *store.Account, method, end
 	attempt := debug.BeginUpstream(ctx, method, endpoint, req.Header, body)
 	req = attempt.TraceRequest(req)
 	resp, err := doUpstreamHTTP(req, func(req *http.Request) (*http.Response, error) {
-		return c.doCLIRequest(requestCtx, acc, req)
+		finish, err := upstream.BeginAttempt(requestCtx)
+		if err != nil {
+			return nil, err
+		}
+		response, err := c.doCLIRequest(requestCtx, acc, req)
+		attemptErr := err
+		if err == nil && response.StatusCode >= 400 {
+			attemptErr = fmt.Errorf("upstream HTTP status %d", response.StatusCode)
+		}
+		finish(attemptErr)
+		return response, err
 	}, config.GrokStreamIdleTimeout, upstreamIdleBuildSemantic)
 	headerMu.Lock()
 	headerFinished = true

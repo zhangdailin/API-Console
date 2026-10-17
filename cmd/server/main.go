@@ -131,6 +131,8 @@ func run() error {
 			slog.Warn("Failed to load config from Redis, using file config", "error", err)
 		} else if err := config.ValidateProxyConfig(savedCfg); err != nil {
 			slog.Warn("Invalid proxy config from Redis, using file config", "error", err)
+		} else if err := config.ValidateInferenceProfile(savedCfg); err != nil {
+			slog.Warn("Invalid inference profile from Redis, using file config", "error", err)
 		} else {
 			*cfg = *savedCfg
 			config.ApplyDefaults(cfg)

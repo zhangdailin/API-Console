@@ -54,7 +54,8 @@ func (e *messageExecution) run() {
 	if e.affinity.SessionID != "" {
 		chatSessionID = e.affinity.SessionID
 	}
-	maxRetries := max(e.cfg.MaxRetries, 0)
+	policy := e.cfg.InferencePolicy()
+	maxRetries := min(max(e.cfg.MaxRetries, 0), policy.MaxAttempts-1)
 	retryDelay := time.Duration(e.cfg.RetryDelay) * time.Millisecond
 	retriesRemaining := maxRetries
 	budgetCtx, attemptBudget := upstream.WithAttemptBudget(e.r.Context(), maxRetries+1)
@@ -109,6 +110,7 @@ func (e *messageExecution) run() {
 		e.sh.handleMessage(msg)
 	}
 	var attempt int
+	attemptedAccounts := make(map[int64]struct{})
 	for {
 		if returned, _ := e.sh.terminalState(); returned {
 			return
@@ -120,6 +122,7 @@ func (e *messageExecution) run() {
 		accountType, accountName := "", ""
 		if e.currentAccount != nil {
 			accountID, accountType, accountName = e.currentAccount.ID, e.currentAccount.AccountType, e.currentAccount.Name
+			attemptedAccounts[accountID] = struct{}{}
 		}
 		if e.verboseDiagnostics {
 			slog.Debug(
@@ -278,6 +281,11 @@ func (e *messageExecution) run() {
 				errClass.Category, apperrors.PublicMessage(errStr), upstreamRetryAfter(err))
 			return
 		}
+		if verdict.SwitchAccount && len(attemptedAccounts) >= policy.MaxAccounts {
+			e.sh.reportRequestFailure("Reporting that the account attempt budget is exhausted",
+				errClass.Category, apperrors.PublicMessage(errStr), upstreamRetryAfter(err))
+			return
+		}
 		retriesRemaining--
 		slog.Warn(
 			"Retrying upstream request without prior output",
@@ -378,6 +386,11 @@ func (e *messageExecution) run() {
 		}
 		if sharedRefusalWait > 0 {
 			retryDelayForAttempt = min(sharedRefusalSleepForChannel(sharedRefusalWait, e.targetChannel, errClass.Category), waitBudget-sharedRefusalWaited)
+		}
+		if !util.RetryWaitFits(e.r.Context(), retryDelayForAttempt) {
+			e.sh.reportRequestFailure("Retry wait cannot fit within the remaining request budget",
+				errClass.Category, apperrors.PublicMessage(errStr), upstreamRetryAfter(err))
+			return
 		}
 		// Holding this account's concurrency slot through the wait starves the
 		// pool: the slot is reserved for the whole request, so ten requests

@@ -112,7 +112,8 @@ These are load-bearing. A change that "simplifies" any of them is a bug.
    inference, compaction and response-resource route requires a managed API key,
    including loopback and requests forwarded by trusted proxies. Removed
    `anonymous_allow_ips` and `inference_auth_enabled` settings cannot bypass it.
-   Generation budgets and delays are fixed in `internal/config/inference_limits.go`;
+   Generation ceilings and bounded standard/interactive profiles are fixed in
+   `internal/config/inference_limits.go`; `inference_profile` selects a preset,
    explicit client output-token controls remain protocol data.
 2. **Credentials never reach clients or logs.** Not in error bodies, not in
    admin responses, not in logs or diagnostics. Redaction is enforced by

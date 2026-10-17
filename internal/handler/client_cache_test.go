@@ -118,6 +118,7 @@ func TestGetOrCreateAccountClient_ConfigSaveOnlyRebuildsForClientInputs(t *testi
 		{"debug SSE", func(c *config.Config) { c.DebugLogSSE = true }},
 		{"max retries", func(c *config.Config) { c.MaxRetries = 5 }},
 		{"retry delay", func(c *config.Config) { c.RetryDelay = 1234 }},
+		{"inference profile", func(c *config.Config) { c.InferenceProfile = "interactive" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			next := *h.configSnapshot()

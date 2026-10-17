@@ -230,6 +230,34 @@ func TestHandleConfigSaveRejectsRemovedSettingsWithoutChangingState(t *testing.T
 	}
 }
 
+func TestConfigInferenceProfileAndGrokModeRoundTrip(t *testing.T) {
+	a, s, _ := setupConfigAPI(t)
+	rec := httptest.NewRecorder()
+	a.HandleConfigSave(rec, httptest.NewRequest(http.MethodPost, "/api/config/save", strings.NewReader(`{"inference_profile":"interactive","grok_low_latency":true}`)))
+	testutil.Equal(t, rec.Code, http.StatusOK)
+	testutil.MustContain(t, rec.Body.String(), `"code":0`)
+	cfg := a.ConfigSnapshot()
+	testutil.Equal(t, cfg.MaxRetries, 3)
+	testutil.Equal(t, cfg.AccountSwitchCount, 3)
+	testutil.True(t, cfg.GrokLowLatency)
+	raw, err := s.GetSetting(context.Background(), "config")
+	testutil.NoError(t, err)
+	var saved config.Config
+	testutil.NoError(t, json.Unmarshal([]byte(raw), &saved))
+	testutil.Equal(t, saved.InferenceProfile, "interactive")
+	testutil.True(t, saved.GrokLowLatency)
+	config.ApplyDefaults(&saved)
+	testutil.Equal(t, saved.MaxRetries, 3)
+	before := a.ConfigSnapshot()
+	rec = httptest.NewRecorder()
+	a.HandleConfigSave(rec, httptest.NewRequest(http.MethodPost, "/api/config/save", strings.NewReader(`{"inference_profile":"invalid","grok_low_latency":false}`)))
+	testutil.Equal(t, rec.Code, http.StatusBadRequest)
+	testutil.Equal(t, a.ConfigSnapshot(), before)
+	afterRaw, err := s.GetSetting(context.Background(), "config")
+	testutil.NoError(t, err)
+	testutil.Equal(t, afterRaw, raw)
+}
+
 func TestPersistConfigRejectsMalformedProxy(t *testing.T) {
 	a, s, cleanup := newTestAPI(t)
 	defer cleanup()

@@ -20,6 +20,7 @@ import (
 )
 
 type chatOutcome struct {
+	QualityTiming  *qualityHoldTiming
 	QualityChecked bool
 	QualityAttempt int
 	// Withheld marks a turn the quality hold refused to deliver. Nothing was
@@ -123,6 +124,9 @@ func (h *Handler) streamBuildChatHolding(w http.ResponseWriter, req *chatwire.Re
 			if details, _ := outcome.Usage["completion_tokens_details"].(map[string]any); details != nil {
 				outcome.Quality.ReasoningTokens = int64(responses.InterfaceToInt(details["reasoning_tokens"]))
 			}
+		}
+		if hold != nil {
+			hold.recordTiming(&outcome)
 		}
 	}()
 	var output io.Writer = deadlineResponseWriter{ResponseWriter: w}

@@ -11,7 +11,7 @@
     <section class="header-section" id="configHeader">
       <div>
         <h1>配置管理</h1>
-        <p>按分组管理后台凭据与代理网络；改动后底部保存栏会显示未保存数量。</p>
+        <p>管理后台凭据、请求策略与代理网络；改动后底部保存栏会显示未保存数量。</p>
       </div>
     </section>
 
@@ -26,6 +26,7 @@
           <div class="config-nav-head">配置分组</div>
           <a class="config-nav-link active" href="#groupOverview" data-nav-group="groupOverview">概览</a>
           <a class="config-nav-link" href="#groupAuth" data-nav-group="groupAuth">认证与密钥</a>
+          <a class="config-nav-link" href="#groupInference" data-nav-group="groupInference">请求策略</a>
           <a class="config-nav-link" href="#groupProxy" data-nav-group="groupProxy">代理</a>
         </nav>
 
@@ -37,7 +38,7 @@
               <span class="mini-badge">只读</span>
             </div>
             <p class="settings-card-note">
-              这一页把配置拆成认证与密钥、代理两组；密钥类字段带「密钥」标记。
+              配置分为认证与密钥、请求策略、代理；密钥类字段带「密钥」标记。
               改动任意字段后，底部保存栏显示未保存数量，保存成功才成为新的对比基准。
             </p>
             <div class="settings-card-body">
@@ -75,6 +76,36 @@
                 </div>
               </div>
 
+            </div>
+          </section>
+
+          <section class="settings-card" id="groupInference">
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">请求策略</h2>
+              <span class="mini-badge">新请求生效</span>
+            </div>
+            <div class="settings-card-body">
+              <div class="form-row">
+                <div class="form-row-label">
+                  <label class="form-label" for="cfg_inference_profile">恢复策略</label>
+                  <span class="helper-text">标准档保留较长恢复窗口；交互优先更早返回繁忙或失败，拥堵时成功率可能降低。所有渠道生效。</span>
+                </div>
+                <div class="form-row-control">
+                  <select id="cfg_inference_profile" class="form-input">
+                    <option value="standard">标准：兼顾恢复成功率</option>
+                    <option value="interactive">交互优先：减少等待和重试</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-row-label">
+                  <label class="form-label" for="cfg_grok_low_latency">Grok 低延迟</label>
+                  <span class="helper-text">直接交付上游内容，跳过输出前质量暂存与质量重试；异常结果仍会记录，但可能已被客户端收到。默认关闭。</span>
+                </div>
+                <div class="form-row-control">
+                  <label class="toggle"><input type="checkbox" id="cfg_grok_low_latency" aria-label="Grok 低延迟"><span class="toggle-slider"></span></label>
+                </div>
+              </div>
             </div>
           </section>
 

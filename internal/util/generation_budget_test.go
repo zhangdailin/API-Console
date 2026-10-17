@@ -3,6 +3,7 @@ package util
 import (
 	"context"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -21,6 +22,26 @@ func TestGenerationBudgetStopsAtOutputAndPreservesParent(t *testing.T) {
 	if context.Cause(ctx) != context.DeadlineExceeded {
 		t.Fatal(context.Cause(ctx))
 	}
+}
+
+func TestRetryWaitFitsActiveBudgetsWithoutChangingRetryAfter(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		parent, end := context.WithTimeout(context.Background(), time.Minute)
+		defer end()
+		ctx, cancel := WithFirstGenerationTimeout(parent, 10*time.Second)
+		defer cancel()
+		if !RetryWaitFits(ctx, time.Second) || RetryWaitFits(ctx, 15*time.Second) {
+			t.Fatal("first-generation deadline ignored")
+		}
+		MarkGenerationProgress(ctx)
+		if !RetryWaitFits(ctx, 15*time.Second) || RetryWaitFits(ctx, time.Minute) {
+			t.Fatal("parent deadline ignored after progress")
+		}
+		cancel()
+		if RetryWaitFits(ctx, 0) {
+			t.Fatal("canceled context admitted retry")
+		}
+	})
 }
 
 func TestGenerationBudgetExpiresAndCanBeDisabled(t *testing.T) {

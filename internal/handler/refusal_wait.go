@@ -22,9 +22,6 @@ func upstreamRetryAfter(err error) time.Duration {
 	if delay <= 0 {
 		return 0
 	}
-	if delay > 30*time.Second {
-		return 30 * time.Second
-	}
 	return delay
 }
 

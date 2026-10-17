@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"orchids-api/internal/middleware"
 	"sync"
+	"time"
 )
 
 // deferredResponseWriter buffers a response until it is committed.
@@ -18,12 +19,13 @@ import (
 type deferredResponseWriter struct {
 	target http.ResponseWriter
 
-	mu        sync.Mutex
-	header    http.Header
-	status    int
-	body      bytes.Buffer
-	committed bool
-	discarded bool
+	mu          sync.Mutex
+	header      http.Header
+	status      int
+	body        bytes.Buffer
+	committed   bool
+	committedAt time.Time
+	discarded   bool
 }
 
 func newDeferredResponseWriter(target http.ResponseWriter) *deferredResponseWriter {
@@ -128,6 +130,7 @@ func (d *deferredResponseWriter) Commit() error {
 	}
 	header, status, body := d.header, d.status, d.body.Bytes()
 	d.committed = true
+	d.committedAt = time.Now()
 	target := d.target
 	d.mu.Unlock()
 
@@ -151,6 +154,12 @@ func (d *deferredResponseWriter) Commit() error {
 		return err
 	}
 	return nil
+}
+
+func (d *deferredResponseWriter) releaseTime() time.Time {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.committedAt
 }
 
 // Discard drops the held response. Every later write is swallowed, so a caller

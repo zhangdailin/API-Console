@@ -53,6 +53,7 @@ func (h *Handler) auditQualityCheck(ctx context.Context, acc *store.Account, req
 		"encrypted_chars": outcome.Quality.EncryptedChars, "first_visible_ms": outcome.Quality.FirstVisibleMS,
 		"visible_duration_ms": outcome.Quality.visibleDurationMS(),
 	}
+	addQualityTiming(metadata, outcome)
 	if mode == "native" {
 		metadata["on_exhausted"] = "fail_closed"
 	}

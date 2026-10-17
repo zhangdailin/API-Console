@@ -173,6 +173,7 @@ func TestQualityHoldJournalsAWithheldTurnAndItsRecovery(t *testing.T) {
 			testutil.Equal(t, event.Status, "quality_degraded")
 			testutil.Equal(t, event.AccountID, degradedAcc.ID)
 			testutil.EqualAny(t, event.Metadata["quality_reason"], row.Details)
+			testutil.EqualAny(t, event.Metadata["quality_release_ms"], int64(-1))
 			continue
 		}
 		deliveredRequests++
@@ -231,6 +232,10 @@ func TestHealthyTurnJournalsQualityCheckProcess(t *testing.T) {
 	testutil.Equal(t, checks[1].Status, "passed")
 	testutil.EqualAny(t, requests[0].Metadata["quality_check_status"], "passed")
 	testutil.EqualAny(t, requests[0].Metadata["quality_checked_attempts"], 1)
+	testutil.True(t, requests[0].Metadata["quality_hold_ms"] != nil)
+	testutil.True(t, requests[0].Metadata["quality_upstream_first_content_ms"].(int64) >= 0)
+	testutil.True(t, requests[0].Metadata["quality_release_ms"].(int64) >= 0)
+	testutil.True(t, requests[0].Metadata["quality_added_delay_ms"].(int64) >= 0)
 	testutil.MustNotContainAny(t, journal.dump(t), "healthy answer", "jwt-user-healthy")
 }
 

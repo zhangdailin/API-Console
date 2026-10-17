@@ -17,6 +17,7 @@ import (
 	"orchids-api/internal/audit"
 	"orchids-api/internal/debug"
 	"orchids-api/internal/store"
+	"orchids-api/internal/upstream"
 	"orchids-api/internal/util"
 )
 
@@ -467,13 +468,14 @@ func (h *Handler) finishUpstreamChat(ctx context.Context, w http.ResponseWriter,
 	hold := &buildQualityHold{
 		writer:  deferred,
 		policy:  h.qualityHoldPolicy(),
-		started: time.Now(),
+		started: qualityStarted,
 		outcome: &result,
 	}
 	// The hold's verdict comes first: the guard has to know the turn was
 	// withheld, and the request row has to say so instead of looking like a
 	// delivered answer.
 	if verdict, _ := hold.step(true); verdict == qualityWithhold {
+		hold.recordTiming(&result)
 		result.Withheld = true
 		result.WithheldReason = hold.reason
 		result.Quality.Terminal = true
@@ -482,12 +484,14 @@ func (h *Handler) finishUpstreamChat(ctx context.Context, w http.ResponseWriter,
 		h.auditQualityDegraded(ctx, sess.acc, req, result, qualityWithheldTurn{Mode: "collected", Attempt: qualityAttempt, Guard: guard})
 		return parkWithOutcome(deferred, result), true
 	}
+	if commitErr := deferred.Commit(); commitErr != nil {
+		result.Err = commitErr
+		slog.Debug("held response commit failed", "error", commitErr)
+	}
+	hold.recordTiming(&result)
 	finishQualityCheck(&result)
 	h.applyBuildQualityGuard(ctx, sess.acc, req, result)
 	h.auditChatOutcome(ctx, sess.acc, req, result)
-	if commitErr := deferred.Commit(); commitErr != nil {
-		slog.Debug("held response commit failed", "error", commitErr)
-	}
 	return nil, false
 }
 
@@ -499,6 +503,8 @@ func (h *Handler) serveNativeChat(ctx context.Context, w http.ResponseWriter, re
 	if req.StartedAt.IsZero() {
 		req.StartedAt = time.Now()
 	}
+	// Authentication replays and reasoning recovery spend this same HTTP budget.
+	ctx, _ = upstream.WithAttemptBudget(ctx, h.configSnapshot().InferencePolicy().MaxAttempts)
 	payload, err := h.responsesPayloadFromChat(spec, req, true)
 	if err != nil {
 		writeGrokUpstreamError(w, err)
@@ -716,6 +722,9 @@ func (h *Handler) retryWithAccountSwitchWhen(ctx context.Context, sess *chatAcco
 			// would serialize the same-team skip and hide the cooldown outcome.
 			pace = 0
 		}
+		if !util.RetryWaitFits(ctx, pace) {
+			return nil, err
+		}
 		if !util.SleepWithContext(ctx, pace) {
 			return nil, context.Cause(ctx)
 		}
@@ -736,8 +745,12 @@ func (h *Handler) retryWithAccountSwitchWhen(ctx context.Context, sess *chatAcco
 }
 
 func (h *Handler) accountSwitchBudget() int {
-	if cfg := h.configSnapshot(); cfg != nil && cfg.AccountSwitchCount > 0 {
-		return min(cfg.AccountSwitchCount, maxAccountSwitchBudget)
+	if cfg := h.configSnapshot(); cfg != nil {
+		limit := min(cfg.InferencePolicy().MaxAccounts, maxAccountSwitchBudget)
+		if cfg.AccountSwitchCount > 0 {
+			limit = min(limit, cfg.AccountSwitchCount)
+		}
+		return limit
 	}
 	return defaultAccountSwitchBudget
 }

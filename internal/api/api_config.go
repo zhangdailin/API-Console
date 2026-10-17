@@ -151,7 +151,7 @@ func (a *API) HandleConfigSave(w http.ResponseWriter, r *http.Request) {
 	current := a.config.Load()
 	newCfg, err := buildConfigFromPatch(r, current)
 	if err != nil {
-		if errors.Is(err, errRetiredCacheSetting) || errors.Is(err, errFixedRuntimeSetting) {
+		if errors.Is(err, errRetiredCacheSetting) || errors.Is(err, errFixedRuntimeSetting) || errors.Is(err, config.ErrInvalidInferenceProfile) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -262,6 +262,9 @@ func buildConfigFromPatch(r *http.Request, current *config.Config) (*config.Conf
 	if err := json.Unmarshal(raw, &newCfg); err != nil {
 		return nil, err
 	}
+	if err := config.ValidateInferenceProfile(&newCfg); err != nil {
+		return nil, err
+	}
 	return &newCfg, nil
 }
 
@@ -271,7 +274,7 @@ func normalizeConfigPatchValue(key string, value any) any {
 	}
 
 	switch key {
-	case "debug_enabled", "qoder_http2_enabled", "cline_http2_enabled", "workbuddy_http2_enabled":
+	case "debug_enabled", "qoder_http2_enabled", "cline_http2_enabled", "workbuddy_http2_enabled", "grok_low_latency":
 		if b, ok := parseBoolish(value); ok {
 			return b
 		}
@@ -364,6 +367,9 @@ func (a *API) persistConfig(ctx context.Context, current, newCfg *config.Config)
 		return fmt.Errorf("admin password must not be empty")
 	}
 	config.ApplyHardcoded(storedCfg)
+	if err := config.ValidateInferenceProfile(storedCfg); err != nil {
+		return err
+	}
 	if err := config.ValidateProxyConfig(storedCfg); err != nil {
 		return fmt.Errorf("proxy config: %w", err)
 	}

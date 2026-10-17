@@ -113,12 +113,11 @@ func TestSharedRefusalWaitEdges(t *testing.T) {
 	testutil.CheckEqual(t, sharedRefusalWait(500*time.Millisecond, 3), 500*time.Millisecond)
 }
 
-// TestSharedRefusalWaitIsCappedByTheHandler documents that the wait the retry
-// loop actually spends is the handler's capped reading of the hint, so a shared
-// refusal cannot park a request goroutine on an absurd upstream value.
-func TestSharedRefusalWaitIsCappedByTheHandler(t *testing.T) {
+// Preserve the hint for ordinary throttles; the cumulative shared-refusal
+// budget and request deadlines independently bound queue probes.
+func TestRetryAfterPreservesLongHints(t *testing.T) {
 	t.Parallel()
 
 	testutil.Equal(t, upstreamRetryAfter(hintedRetryError{delay: 30 * time.Second}), 30*time.Second)
-	testutil.Equal(t, upstreamRetryAfter(hintedRetryError{delay: 4 * time.Hour}), 30*time.Second)
+	testutil.Equal(t, upstreamRetryAfter(hintedRetryError{delay: 4 * time.Hour}), 4*time.Hour)
 }
