@@ -246,6 +246,10 @@ func shortRequestTrace(hash string) string {
 }
 
 func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
+	h.handleMessages(w, r, nil, nil)
+}
+
+func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request, prepared *ClaudeRequest, bodyBytes []byte) {
 	forcedChannel := channelFromPath(r.URL.Path)
 	if forcedChannel == "" {
 		apperrors.New("not_found_error", "Provider route not found", http.StatusNotFound).WriteResponse(w)
@@ -278,23 +282,28 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req ClaudeRequest
-	if maxRequestBytes > 0 {
-		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBytes)
-	}
-	bodyBytes, err := io.ReadAll(r.Body)
-	if err != nil {
+	var err error
+	if prepared != nil {
+		req = *prepared
+	} else {
 		if maxRequestBytes > 0 {
-			if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-				apperrors.New("invalid_request_error", "Request body too large", http.StatusRequestEntityTooLarge).WriteResponse(w)
-				return
-			}
+			r.Body = http.MaxBytesReader(w, r.Body, maxRequestBytes)
 		}
-		apperrors.New("invalid_request_error", "Invalid request body", http.StatusBadRequest).WriteResponse(w)
-		return
-	}
-	if err := json.Unmarshal(bodyBytes, &req); err != nil {
-		apperrors.New("invalid_request_error", "Invalid request body", http.StatusBadRequest).WriteResponse(w)
-		return
+		bodyBytes, err = io.ReadAll(r.Body)
+		if err != nil {
+			if maxRequestBytes > 0 {
+				if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+					apperrors.New("invalid_request_error", "Request body too large", http.StatusRequestEntityTooLarge).WriteResponse(w)
+					return
+				}
+			}
+			apperrors.New("invalid_request_error", "Invalid request body", http.StatusBadRequest).WriteResponse(w)
+			return
+		}
+		if err := json.Unmarshal(bodyBytes, &req); err != nil {
+			apperrors.New("invalid_request_error", "Invalid request body", http.StatusBadRequest).WriteResponse(w)
+			return
+		}
 	}
 	if !middleware.APIKeyAllowsModel(r.Context(), req.Model) {
 		apperrors.New("permission_error", "API key is not allowed to use model "+strings.TrimSpace(req.Model), http.StatusForbidden).WriteResponse(w)

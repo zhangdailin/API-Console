@@ -57,9 +57,6 @@ const DefaultReasoningEffort = "high"
 
 const (
 	defaultModel   = "default-model"
-	clientVersion  = "5.5.4"
-	cliVersion     = "2.137.1"
-	clientUA       = "WorkBuddy/" + clientVersion + " WorkBuddy AI/" + clientVersion + " CLI/" + cliVersion
 	originReferer  = "https://www.workbuddy.ai"
 	defaultSystem  = "You are a helpful assistant."
 	minRefreshLead = time.Minute
@@ -171,7 +168,7 @@ func (c *Client) runChat(ctx context.Context, req upstream.UpstreamRequest, time
 	if err != nil {
 		return fmt.Errorf("failed to create workbuddy request: %w", err)
 	}
-	applyChatHeaders(httpReq, accessToken, c.creds.UID, req.ConversationID, req.RequestID, req.TraceID)
+	applyChatHeaders(httpReq, accessToken, c.creds.UID)
 
 	attempt := debug.BeginUpstream(ctx, httpReq.Method, httpReq.URL.String(), httpReq.Header, body)
 	httpReq = attempt.TraceRequest(httpReq)
@@ -197,13 +194,13 @@ func (c *Client) runChat(ctx context.Context, req upstream.UpstreamRequest, time
 	monitored, progress := httpclient.MonitorProgressIdle(resp.Body, c.streamIdle, cancel, "workbuddy")
 	resp.Body = monitored
 	result, err := consumeStream(resp.Body, func(msg upstream.SSEMessage) {
-		if msg.Type == "model.text-delta" || msg.Type == "model.reasoning-delta" || msg.Type == "model.tool-call" {
+		if msg.Type == "model.text-delta" || msg.Type == "model.reasoning-delta" || msg.Type == "model.tool-call" || msg.Type == "model.tool-call-delta" {
 			progress()
 		}
 		if onMessage != nil {
 			onMessage(msg)
 		}
-	})
+	}, req.StreamToolDeltas)
 	if err != nil {
 		if typed, ok := err.(*APIError); ok && typed.RetryDelay == 0 {
 			typed.RetryDelay = parseRetryAfter(resp.Header.Get("Retry-After"))

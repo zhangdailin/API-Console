@@ -136,7 +136,7 @@ func registerRoutes(
 	if cfg != nil && cfg.ResponseStoreTTL > 0 {
 		responseStoreTTL = time.Duration(cfg.ResponseStoreTTL) * time.Hour
 	}
-	bridgeOptions := responses.BridgeOptions{Store: s, TTL: responseStoreTTL}
+	bridgeOptions := responses.BridgeOptions{Store: s, TTL: responseStoreTTL, ExecuteChat: h.HandleChatRequest}
 	channelResponses := responses.ResponsesBridgeHandler(h.HandleMessages, bridgeOptions)
 	channelResponsesSub := responses.ResponsesChannelSubpath(h.HandleMessages, bridgeOptions)
 	registerWithPrefixes(mux, channelPrefixes, "/responses", inferenceAuth(channelResponses))

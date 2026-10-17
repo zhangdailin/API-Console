@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -215,4 +216,24 @@ func TestSharedRefusalWaitBudgetIsBounded(t *testing.T) {
 	got = wallClock(windows + 1)
 	testutil.Falsef(t, got < edgeOriginTimeout, "refusing the third window gives up %v of headroom; it should be the edge that forces the bound", edgeOriginTimeout-got)
 
+}
+
+func TestSharedRefusalConfiguredBudgetStopsBeforeRetry(t *testing.T) {
+	for _, budget := range []int{-1, 100} {
+		t.Run(fmt.Sprint(budget), func(t *testing.T) {
+			cfg := &config.Config{RequestTimeout: 30, MaxRetries: 3, RetryDelay: 1, SharedRefusalWaitBudgetMs: budget}
+			h := NewWithLoadBalancer(cfg, nil)
+			defer h.Close()
+			stub := &sharedRefusalUpstream{}
+			h.client = stub
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			req := httptest.NewRequest(http.MethodPost, "http://x/qoder/v1/chat/completions", strings.NewReader(`{"model":"qwen3.8-flash","messages":[{"role":"user","content":"hi"}],"stream":true}`)).WithContext(ctx)
+			rec := httptest.NewRecorder()
+			h.HandleMessages(rec, req)
+			if ctx.Err() != nil || stub.calls != 1 || rec.Code != http.StatusTooManyRequests {
+				t.Fatalf("calls=%d status=%d context=%v body=%s", stub.calls, rec.Code, ctx.Err(), rec.Body.String())
+			}
+		})
+	}
 }

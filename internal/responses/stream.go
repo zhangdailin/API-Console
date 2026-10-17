@@ -33,6 +33,15 @@ type StreamOptions struct {
 	OnComplete func(map[string]any)
 }
 
+// chatStreamChunk decodes only fields consumed by the bridge. In particular,
+// per-frame IDs, model names, timestamps and vendor metadata need no allocations.
+// Keep the consumed values dynamically typed to preserve compatibility checks.
+type chatStreamChunk struct {
+	Choices any `json:"choices"`
+	Usage   any `json:"usage"`
+	Error   any `json:"error"`
+}
+
 // WriteStreamFromChatReader is the translation itself.
 func WriteStreamFromChatReader(w http.ResponseWriter, request CreateRequest, reader io.Reader, opts StreamOptions) {
 	httpserver.StreamResponseHeaders(w)
@@ -109,20 +118,25 @@ func WriteStreamFromChatReader(w http.ResponseWriter, request CreateRequest, rea
 			sawDone = true
 			return io.EOF
 		}
-		var chunk map[string]any
+		var chunk *chatStreamChunk
 		if err := json.Unmarshal(data, &chunk); err != nil {
 			return fmt.Errorf("invalid chat SSE: %w", err)
 		}
 		if chunk == nil {
 			return fmt.Errorf("chat SSE must be an object")
 		}
-		if chunk["error"] != nil || event == "error" {
-			return Failure(chunk)
+		if chunk.Error != nil || event == "error" {
+			// Error events can carry a message outside the error field.
+			var failure map[string]any
+			if err := json.Unmarshal(data, &failure); err != nil {
+				return err
+			}
+			return Failure(failure)
 		}
-		if u, ok := chunk["usage"].(map[string]any); ok {
+		if u, ok := chunk.Usage.(map[string]any); ok {
 			usage = UsageFromChat(u)
 		}
-		for _, raw := range InterfaceSlice(chunk["choices"]) {
+		for _, raw := range InterfaceSlice(chunk.Choices) {
 			choice, ok := raw.(map[string]any)
 			if !ok {
 				return fmt.Errorf("invalid chat choice")

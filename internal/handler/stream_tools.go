@@ -177,3 +177,42 @@ func validToolCallInput(name, input string) bool {
 	var object map[string]json.RawMessage
 	return json.Unmarshal([]byte(input), &object) == nil && object != nil
 }
+
+// emitIncrementalTool publishes arguments as they arrive. The provider validates
+// the completed JSON before sending model.tool-call, which closes this block.
+func (h *streamHandler) emitIncrementalTool(event map[string]any) {
+	if !h.isStream {
+		return
+	}
+	id, _ := event["toolCallId"].(string)
+	name, _ := event["toolName"].(string)
+	delta, _ := event["delta"].(string)
+	if id == "" || name == "" || h.toolCallHandled[id] {
+		return
+	}
+	idx, exists := h.streamingTools[id]
+	if !exists {
+		if !h.shouldAcceptToolCall(toolCall{id: id, name: name, input: "{}"}) {
+			return
+		}
+		h.closeActiveBlock()
+		h.addOutputTokens(name)
+		h.mu.Lock()
+		if h.streamingTools == nil {
+			h.streamingTools = make(map[string]int)
+		}
+		h.blockIndex++
+		idx = h.blockIndex
+		h.streamingTools[id] = idx
+		h.toolCallEmitted[id] = struct{}{}
+		h.toolCallCount++
+		h.writeSSEContentBlockStartToolUseLocked(idx, id, name, false)
+		h.mu.Unlock()
+	}
+	h.addOutputTokens(delta)
+	if delta != "" {
+		h.mu.Lock()
+		h.writeSSEContentBlockDeltaInputJSONLocked(idx, delta, false)
+		h.mu.Unlock()
+	}
+}

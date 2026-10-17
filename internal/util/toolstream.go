@@ -36,8 +36,10 @@ func NewThinkingSignature(prefix string) string {
 // ToolCall accumulates one streamed tool call. Arguments arrive across several
 // deltas, so they are buffered and read only once the call is emitted.
 type ToolCall struct {
-	ID   string
-	Name string
+	StreamStarted bool
+	StreamedBytes int
+	ID            string
+	Name          string
 	// Arguments holds every argument fragment seen for this call, in arrival
 	// order. It is exported so a stream reader can hand the buffer to
 	// the emitter without copying; only the accumulator writes to it.

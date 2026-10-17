@@ -51,9 +51,6 @@ func buildChatBody(req upstream.UpstreamRequest, model string) ([]byte, error) {
 	// The upstream needs a reasoning_effort on every request, so the default
 	// stands in when the client did not state one; a stated effort wins.
 	effort := strings.ToLower(strings.TrimSpace(req.ReasoningEffort))
-	if effort == "none" {
-		effort = ""
-	}
 	effort = util.FirstNonEmptyUntrimmed(effort, DefaultReasoningEffort)
 	body := chatBody{
 		ResponseFormat: req.ChatResponseFormat(), PromptCacheKey: req.PromptCacheKey,

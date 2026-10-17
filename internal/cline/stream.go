@@ -2,6 +2,7 @@ package cline
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"strings"
@@ -46,9 +47,10 @@ func newThinkingSignature() string { return util.NewThinkingSignature("cline-v1"
 
 // streamChunk is one `data:` line of the SSE response.
 type streamChunk struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	Model   string `json:"model"`
+	Data    json.RawMessage `json:"data"`
+	ID      string          `json:"id"`
+	Object  string          `json:"object"`
+	Model   string          `json:"model"`
 	Choices []struct {
 		Index        int    `json:"index"`
 		FinishReason string `json:"finish_reason"`
@@ -121,7 +123,7 @@ func (s *clineThinkingSplitter) feed(content string, final bool, emitReasoning, 
 }
 
 // consumeStream parses the SSE body and forwards deltas to the caller.
-func consumeStream(body io.Reader, toolsEnabled bool, onMessage func(upstream.SSEMessage)) (streamResult, error) {
+func consumeStream(body io.Reader, toolsEnabled bool, onMessage func(upstream.SSEMessage), streamToolDeltas ...bool) (streamResult, error) {
 	scanner := bufio.NewScanner(body)
 	buffer := util.AcquireStreamBuffer()
 	defer util.ReleaseStreamBuffer(buffer)
@@ -162,39 +164,47 @@ func consumeStream(body io.Reader, toolsEnabled bool, onMessage func(upstream.SS
 			return err
 		}
 		upstream.EmitTextDelta(onMessage, text, &result.SawMeaningfulEvent)
-		upstream.EmitToolCalls(onMessage, tools.CompleteAll(), &result.SawMeaningfulEvent, &result.ToolCallCount)
+		calls := tools.CompleteAll()
+		if err := upstream.ValidateStreamedTools(calls); err != nil {
+			return err
+		}
+		upstream.EmitToolCalls(onMessage, calls, &result.SawMeaningfulEvent, &result.ToolCallCount)
 		return nil
 	}
 
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, ":") {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 || bytes.HasPrefix(line, []byte(":")) {
 			continue
 		}
-		if !strings.HasPrefix(line, "data:") {
+		if !bytes.HasPrefix(line, []byte("data:")) {
 			continue
 		}
-		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if payload == "[DONE]" {
+		payload := bytes.TrimSpace(line[len("data:"):])
+		if bytes.Equal(payload, []byte("[DONE]")) {
 			sawFinish = true
 			break
 		}
-		if payload == "" {
+		if len(payload) == 0 {
 			continue
 		}
 
 		// Some chunks arrive wrapped in {"data":{...}}; the delta has to be read
 		// out of the envelope before it can be decoded as a chunk.
 		var chunk streamChunk
-		if err := json.Unmarshal([]byte(payload), &chunk); err != nil || !chunkLooksDecoded(payload) {
-			unwrapped, ok := unwrapEnvelope(payload)
-			if !ok {
-				return result, fmt.Errorf("cline stream protocol error: invalid chunk")
-			}
-			if err := json.Unmarshal([]byte(unwrapped), &chunk); err != nil || !chunkLooksDecoded(unwrapped) {
+		if err := json.Unmarshal(payload, &chunk); err != nil {
+			return result, fmt.Errorf("cline stream protocol error: invalid chunk")
+		}
+		if !chunk.decoded() && len(chunk.Data) > 0 {
+			inner := chunk.Data
+			chunk = streamChunk{}
+			if err := json.Unmarshal(inner, &chunk); err != nil || (!chunk.decoded() && !chunkLooksDecoded(string(inner))) {
 				return result, fmt.Errorf("cline stream protocol error: invalid wrapped chunk")
 			}
+		} else if !chunk.decoded() && !chunkLooksDecoded(string(payload)) {
+			return result, fmt.Errorf("cline stream protocol error: invalid chunk")
 		}
+
 		if msg := strings.TrimSpace(chunk.Error.Message); msg != "" {
 			return result, fmt.Errorf("cline stream error: %s", msg)
 		}
@@ -221,6 +231,9 @@ func consumeStream(body io.Reader, toolsEnabled bool, onMessage func(upstream.SS
 			state := tools.Add(call.Index, call.ID, call.Function.Name, call.Function.Arguments)
 			if toolsEnabled {
 				controlRecovery.observe(state)
+			}
+			if len(streamToolDeltas) > 0 && streamToolDeltas[0] {
+				upstream.EmitToolDelta(onMessage, state)
 			}
 		}
 		if delta.Content != "" {
@@ -279,4 +292,10 @@ func unwrapEnvelope(payload string) (string, bool) {
 		return "", false
 	}
 	return inner, true
+}
+
+// Only unusual empty/null frames need the legacy presence probe. Ordinary
+// deltas, usage, errors and wrapped frames are decoded once at each level.
+func (c *streamChunk) decoded() bool {
+	return c.Choices != nil || c.Usage != nil || c.ID != "" || c.Object != "" || c.Model != "" || c.Error.Message != ""
 }

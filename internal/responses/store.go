@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"orchids-api/internal/chatwire"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +31,8 @@ type Store interface {
 // storage. Without one the bridge still serves stateless requests, which is what
 // Codex does by default (it resends the whole conversation every turn).
 type BridgeOptions struct {
+	// ExecuteChat optionally avoids re-reading and re-decoding the internal request.
+	ExecuteChat func(http.ResponseWriter, *http.Request, chatwire.Request, []byte)
 	// Store is the shared response store. Nil falls back to the process-wide
 	// in-process store, so the bridge keeps store=true, previous_response_id and
 	// resource retrieval working on a gateway started without a response

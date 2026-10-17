@@ -107,6 +107,7 @@ func (c *Client) FetchQuota(ctx context.Context) (*Quota, error) {
 		return nil, err
 	}
 	applyHeaders(req, accessToken, c.creds.UID, "application/json")
+	req.Header.Set("User-Agent", billingUA)
 
 	resp, raw, err := httpclient.DoReadBody(c.httpClient, req, 8<<20)
 	if err != nil {

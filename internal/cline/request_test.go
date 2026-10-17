@@ -493,6 +493,6 @@ func TestBuildChatBodyHonorsClientReasoningEffort(t *testing.T) {
 		Messages:        []prompt.Message{{Role: "user", Content: prompt.MessageContent{Text: "hi"}}},
 	}, "z-ai/glm-5.3-flash")
 	testutil.NoError(t, err, "buildChatBody() error = %v")
-	testutil.MustNotContain(t, string(body), `"reasoning_effort":"none"`)
-	testutil.MustContain(t, string(body), `"reasoning_effort":"high"`)
+	testutil.MustContain(t, string(body), `"reasoning_effort":"none"`)
+	testutil.MustNotContain(t, string(body), `"reasoning_effort":"high"`)
 }

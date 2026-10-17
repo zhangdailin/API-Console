@@ -44,7 +44,10 @@ type Config struct {
 	DiagnosticsSampleEvery      int            `json:"diagnostics_sample_every,omitempty"`
 	DiagnosticsMaxConcurrent    int            `json:"diagnostics_max_concurrent,omitempty"`
 	ProviderConcurrencyLimits   map[string]int `json:"provider_concurrency_limits,omitempty"`
-	StreamFlushIntervalMs       int            `json:"stream_flush_interval_ms,omitempty"`
+	// Wait budgets: zero preserves defaults; negative disables waiting.
+	SharedRefusalWaitBudgetMs      int `json:"shared_refusal_wait_budget_ms,omitempty"`
+	AccountReservationWaitBudgetMs int `json:"account_reservation_wait_budget_ms,omitempty"`
+	StreamFlushIntervalMs          int `json:"stream_flush_interval_ms,omitempty"`
 
 	// ── Hardcoded fields (set unconditionally by ApplyHardcoded) ──
 	DebugLogSSE bool `json:"-"`
@@ -108,6 +111,7 @@ type Config struct {
 	GrokCLIOAuthClientID    string  `json:"grok_cli_oauth_client_id,omitempty"`
 	GrokCLIOAuthDeviceURL   string  `json:"grok_cli_oauth_device_url,omitempty"`
 	GrokCLIOAuthTokenURL    string  `json:"grok_cli_oauth_token_url,omitempty"`
+	GrokLowLatency          bool    `json:"grok_low_latency,omitempty"`
 	GrokBuildRPS            float64 `json:"grok_build_rps,omitempty"`
 
 	// ── Grok Build egress proxy pool ──

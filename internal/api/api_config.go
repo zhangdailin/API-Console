@@ -275,7 +275,7 @@ func normalizeConfigPatchValue(key string, value any) any {
 		if b, ok := parseBoolish(value); ok {
 			return b
 		}
-	case "redis_db", "redis_pool_size", "concurrency_limit", "upstream_max_conns_per_host", "upstream_max_idle_conns_per_host", "diagnostics_sample_every", "diagnostics_max_concurrent", "stream_flush_interval_ms":
+	case "redis_db", "redis_pool_size", "concurrency_limit", "upstream_max_conns_per_host", "upstream_max_idle_conns_per_host", "diagnostics_sample_every", "diagnostics_max_concurrent", "stream_flush_interval_ms", "shared_refusal_wait_budget_ms", "account_reservation_wait_budget_ms":
 		if i, ok := parseIntish(value); ok {
 			return i
 		}

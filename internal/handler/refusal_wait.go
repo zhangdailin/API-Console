@@ -77,16 +77,14 @@ func isSharedUpstreamRefusalClass(class apperrors.UpstreamErrorClass) bool {
 		class.Category == "upstream_queue"
 }
 
-// Shared refusals are charged only for queue sleeps; jitter remains separate.
+// Default budget used when no per-deployment override is configured.
 const sharedRefusalTotalWaitBudget = config.SharedRefusalWaitBudget
 
 // sharedRefusalWaitAllowedWithin reports whether one more wait of next fits
 // inside the explicit budget after spending already on waits. It is a plain
 // comparison so the bound can be tested without spending the waits themselves.
 //
-// next is the upstream's own hint, without the jitter that will be added to the
-// actual sleep: jitter exists to decorrelate wake-ups, not to consume budget, so
-// charging it here made the last reachable window unreachable.
+// next is the probe interval; the caller also charges bounded jitter after sleeping.
 func sharedRefusalWaitAllowedWithin(already, next, budget time.Duration) bool {
 	if next <= 0 {
 		return false

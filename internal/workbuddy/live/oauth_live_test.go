@@ -33,7 +33,7 @@ func TestLive_StartAuthLogin(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	state, authURL, err := client.StartAuthLogin(ctx, "5.5.2")
+	state, authURL, err := client.StartAuthLogin(ctx, workbuddy.LoginClientVersion)
 	testutil.NoError(t, err, "StartAuthLogin() error = %v")
 	testutil.NotEqual(t, state, "")
 	parsed, err := url.Parse(authURL)
@@ -42,10 +42,10 @@ func TestLive_StartAuthLogin(t *testing.T) {
 	testutil.Equal(t, parsed.Path, "/login")
 	testutil.Equal(t, parsed.Query().Get("state"), state)
 	testutil.Equal(t, parsed.Query().Get("platform"), "workbuddy-ai")
-	testutil.Equal(t, parsed.Query().Get("version"), "5.5.2")
+	testutil.Equal(t, parsed.Query().Get("version"), workbuddy.LoginClientVersion)
 	t.Logf("state=%s url=%s", state, authURL)
 
-	creds, err := client.PollAuthLogin(ctx, state)
-	testutil.Error(t, err, "PollAuthLogin() = %+v, want a pending result")
+	_, err = client.PollAuthLogin(ctx, state)
+	testutil.Error(t, err, "PollAuthLogin should return a pending error")
 	testutil.Falsef(t, !errors.Is(err, workbuddy.ErrAuthPending), "PollAuthLogin() error = %v, want ErrAuthPending", err)
 }

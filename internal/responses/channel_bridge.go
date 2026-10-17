@@ -153,8 +153,13 @@ func ResponsesBridgeHandler(chat http.HandlerFunc, opts BridgeOptions) http.Hand
 		subReq.Body = io.NopCloser(bytes.NewReader(raw))
 		subReq.ContentLength = int64(len(raw))
 
+		invokeChat := chat
+		if opts.ExecuteChat != nil {
+			invokeChat = func(w http.ResponseWriter, r *http.Request) { opts.ExecuteChat(w, r, chatReq, raw) }
+			subReq.Body = http.NoBody
+		}
 		if chatReq.Stream {
-			httpserver.StreamThroughChat(subReq, chat, func(status int, header http.Header, reader io.Reader) {
+			httpserver.StreamThroughChat(subReq, invokeChat, func(status int, header http.Header, reader io.Reader) {
 				if status < 200 || status >= 300 {
 					maps.Copy(w.Header(), header)
 					w.WriteHeader(status)
@@ -170,7 +175,7 @@ func ResponsesBridgeHandler(chat http.HandlerFunc, opts BridgeOptions) http.Hand
 		}
 
 		rec := httpserver.NewCaptureResponseWriter()
-		chat(rec, subReq)
+		invokeChat(rec, subReq)
 		if rec.Code < 200 || rec.Code >= 300 {
 			copyCapturedResponse(w, rec)
 			return

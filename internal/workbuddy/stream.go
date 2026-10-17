@@ -2,6 +2,7 @@ package workbuddy
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"net/http"
@@ -71,7 +72,7 @@ type streamChunk struct {
 }
 
 // consumeStream parses the SSE body and forwards deltas to the caller.
-func consumeStream(body io.Reader, onMessage func(upstream.SSEMessage)) (streamResult, error) {
+func consumeStream(body io.Reader, onMessage func(upstream.SSEMessage), streamToolDeltas ...bool) (streamResult, error) {
 	scanner := bufio.NewScanner(body)
 	buffer := util.AcquireStreamBuffer()
 	defer util.ReleaseStreamBuffer(buffer)
@@ -83,42 +84,47 @@ func consumeStream(body io.Reader, onMessage func(upstream.SSEMessage)) (streamR
 
 	emitText := func(text string) { upstream.EmitTextDelta(onMessage, text, &result.SawMeaningfulEvent) }
 
-	emitTools := func() {
-		upstream.EmitToolCalls(onMessage, tools.CompleteAll(), &result.SawMeaningfulEvent, &result.ToolCallCount)
+	emitTools := func() error {
+		calls := tools.CompleteAll()
+		if err := upstream.ValidateStreamedTools(calls); err != nil {
+			return err
+		}
+		upstream.EmitToolCalls(onMessage, calls, &result.SawMeaningfulEvent, &result.ToolCallCount)
+		return nil
 	}
 
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, ":") {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 || bytes.HasPrefix(line, []byte(":")) {
 			continue
 		}
-		if !strings.HasPrefix(line, "data:") {
+		if !bytes.HasPrefix(line, []byte("data:")) {
 			// Some edge responses keep HTTP 200 but return the business envelope as
 			// plain JSON rather than SSE. Preserve that code instead of degrading it
 			// to a generic "no events" protocol error.
-			if strings.HasPrefix(line, "{") {
+			if bytes.HasPrefix(line, []byte("{")) {
 				var env envelope
-				if json.Unmarshal([]byte(line), &env) == nil && env.Code != 0 {
-					return result, apiError(http.StatusOK, []byte(line))
+				if json.Unmarshal(line, &env) == nil && env.Code != 0 {
+					return result, apiError(http.StatusOK, line)
 				}
 			}
 			continue
 		}
-		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if payload == "[DONE]" {
+		payload := bytes.TrimSpace(line[len("data:"):])
+		if bytes.Equal(payload, []byte("[DONE]")) {
 			sawDone = true
 			break
 		}
-		if payload == "" {
+		if len(payload) == 0 {
 			continue
 		}
 
 		var chunk streamChunk
-		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+		if err := json.Unmarshal(payload, &chunk); err != nil {
 			return result, fmt.Errorf("workbuddy stream protocol error: invalid JSON: %w", err)
 		}
 		if chunk.Code != 0 {
-			return result, apiError(http.StatusOK, []byte(payload))
+			return result, apiError(http.StatusOK, payload)
 		}
 		if msg := strings.TrimSpace(chunk.Error.Message); msg != "" {
 			return result, fmt.Errorf("workbuddy stream error: %s", msg)
@@ -149,7 +155,10 @@ func consumeStream(body io.Reader, onMessage func(upstream.SSEMessage)) (streamR
 		}
 		for _, call := range delta.ToolCalls {
 			result.SawMeaningfulEvent = true
-			tools.Add(call.Index, call.ID, call.Function.Name, call.Function.Arguments)
+			state := tools.Add(call.Index, call.ID, call.Function.Name, call.Function.Arguments)
+			if len(streamToolDeltas) > 0 && streamToolDeltas[0] {
+				upstream.EmitToolDelta(onMessage, state)
+			}
 		}
 		// OpenAI-style tool arguments can span several deltas. Emitting on the
 		// first delta loses every later fragment and produces invalid JSON. A
@@ -157,7 +166,9 @@ func consumeStream(body io.Reader, onMessage func(upstream.SSEMessage)) (streamR
 		if reason := strings.TrimSpace(chunk.Choices[0].FinishReason); reason != "" {
 			result.FinishReasonValue = reason
 			sawFinish = true
-			emitTools()
+			if err := emitTools(); err != nil {
+				return result, err
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {

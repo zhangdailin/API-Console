@@ -4,6 +4,7 @@ import (
 	"context"
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -66,4 +67,49 @@ func TestCachedCountsNeverOverrideAtomicLimit(t *testing.T) {
 	a.GetCounts([]int64{1})
 	testutil.False(t, !b.TryAcquire(1, 1), "first acquire")
 	testutil.False(t, a.TryAcquire(1, 1), "cached zero bypassed atomic admission")
+}
+
+type countPipelineHook struct{ commands atomic.Int64 }
+
+func (*countPipelineHook) DialHook(next redis.DialHook) redis.DialHook          { return next }
+func (*countPipelineHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook { return next }
+func (h *countPipelineHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return func(ctx context.Context, cmds []redis.Cmder) error {
+		for _, cmd := range cmds {
+			if cmd.Name() == "zcard" || cmd.Name() == "zremrangebyscore" {
+				h.commands.Add(1)
+			}
+		}
+		return next(ctx, cmds)
+	}
+}
+
+func TestRedisCountBatchDeduplicatesAndPreservesCallerOrder(t *testing.T) {
+	mini := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mini.Addr()})
+	defer client.Close()
+	hook := &countPipelineHook{}
+	client.AddHook(hook)
+	tracker := NewRedisConnTracker(client, "dedup:")
+	defer tracker.Close()
+	if err := client.Ping(context.Background()).Err(); err != nil {
+		t.Fatal(err)
+	}
+	ids := []int64{2, 1, 2, 1}
+	before := hook.commands.Load()
+	got := tracker.GetCounts(ids)
+	if got[1] != 0 || got[2] != 0 || len(got) != 2 {
+		t.Fatalf("counts: %v", got)
+	}
+	if n := hook.commands.Load() - before; n != 4 {
+		t.Fatalf("got %d Redis commands, want two per distinct account", n)
+	}
+	if ids[0] != 2 || ids[1] != 1 || ids[2] != 2 || ids[3] != 1 {
+		t.Fatalf("mutated caller IDs: %v", ids)
+	}
+	before = hook.commands.Load()
+	tracker.GetCounts([]int64{1, 2})
+	if n := hook.commands.Load() - before; n != 0 {
+		t.Fatalf("cache hit sent %d Redis commands", n)
+	}
 }

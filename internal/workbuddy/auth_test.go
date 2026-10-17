@@ -136,56 +136,53 @@ func TestRunChat_SendsSystemFirstAndSurfacesBusinessError(t *testing.T) {
 	testutil.False(t, err == nil, "runChat() error = nil, want the failure surfaced")
 }
 
-func TestApplyChatHeaders_MatchesDesktopFingerprintAndReusesTurnID(t *testing.T) {
+func TestApplyChatHeadersMatches584AndRefreshesIdentity(t *testing.T) {
 	t.Parallel()
-
-	const (
-		conversationID = "conv-camel"
-		turnID         = "client-req-1"
-		traceID        = "client-trace"
-	)
-	headers := make([]http.Header, 0, 2)
+	var previous http.Header
 	for range 2 {
 		req := httptest.NewRequest(http.MethodPost, DefaultBaseURL+"/v2/chat/completions", nil)
-		applyChatHeaders(req, "access", "uid-1", conversationID, turnID, traceID)
-		headers = append(headers, req.Header.Clone())
-	}
-
-	want := map[string]string{
-		"Accept":                    "application/json, text/event-stream",
-		"Accept-Language":           "en-US",
-		"Authorization":             "Bearer access",
-		"Origin":                    originReferer,
-		"Referer":                   originReferer + "/",
-		"User-Agent":                clientUA,
-		"X-Agent-Purpose":           "conversation",
-		"X-CodeBuddy-Request":       "1",
-		"X-Conversation-ID":         conversationID,
-		"X-Conversation-Request-ID": turnID,
-		"X-Domain":                  "www.workbuddy.ai",
-		"X-IDE-Name":                "WorkBuddy",
-		"X-IDE-Type":                "WorkBuddy",
-		"X-IDE-Version":             clientVersion,
-		"X-No-Enterprise-Id":        "1",
-		"X-Product":                 "WorkBuddy",
-		"X-Root-Request-ID":         turnID,
-		"X-Trace-ID":                traceID,
-		"X-User-Id":                 "uid-1",
-	}
-	for i, header := range headers {
-		for name, expected := range want {
-			testutil.CheckEqual(t, header.Get(name), expected)
+		req.Header.Set("X-Machine-ID", "old-machine")
+		req.Header.Set("X-Session-ID", "old-session")
+		applyChatHeaders(req, "access", "uid-1")
+		h := req.Header
+		for key, want := range map[string]string{
+			"Accept": "application/json, text/event-stream", "Accept-Language": "en-US",
+			"Authorization": "Bearer access", "Origin": originReferer, "Referer": originReferer + "/",
+			"User-Agent":      "WorkBuddy/5.8.4 workbuddy-ai/5.8.4 CLI/2.161.0",
+			"X-Agent-Purpose": "conversation", "X-Agent-Intent": "craft", "X-Agent-Type": "main",
+			"X-Private-Data": "true", "X-CodeBuddy-Request": "1", "X-Domain": "www.workbuddy.ai",
+			"X-IDE-Name": "WorkBuddy", "X-IDE-Type": "WorkBuddy", "X-IDE-Version": "5.8.4",
+			"X-No-Enterprise-Id": "1", "X-Product": "SaaS", "X-User-Id": "uid-1",
+			"X-Machine-ID": "", "X-Session-ID": "", "X-B3-Sampled": "1",
+		} {
+			if got := h.Get(key); got != want {
+				t.Errorf("%s=%q, want %q", key, got, want)
+			}
 		}
-		messageID := header.Get("X-Conversation-Message-ID")
-		testutil.CheckFalsef(t, len(messageID) != 32 || validWorkBuddyTraceID(messageID) == "", "request %d message id = %q, want 32 hex", i+1, messageID)
-		testutil.CheckEqual(t, header.Get("X-Request-ID"), messageID)
-		got := header.Get("X-B3-TraceId")
-		testutil.CheckFalsef(t, len(got) != 32 || validWorkBuddyTraceID(got) == "", "request %d X-B3-TraceId = %q, want valid fallback", i+1, got)
-		testutil.CheckEqual(t, header.Get("X-B3-SpanId"), messageID[:16])
-		testutil.CheckEqual(t, header.Get("X-B3-Sampled"), "1")
+		conv := h.Get("X-Conversation-ID")
+		if len(conv) != 36 || conv[8] != '-' || conv[13] != '-' || conv[18] != '-' || conv[23] != '-' {
+			t.Fatalf("invalid conversation UUID: %q", conv)
+		}
+		for _, key := range []string{"X-Conversation-ID", "X-Conversation-Request-ID", "X-Root-Request-ID", "X-Conversation-Message-ID", "X-Request-ID", "X-Trace-ID"} {
+			value := strings.ReplaceAll(h.Get(key), "-", "")
+			if len(value) != 32 || validWorkBuddyTraceID(value) == "" || value[12] != '7' || !strings.ContainsRune("89ab", rune(value[16])) {
+				t.Fatalf("%s invalid UUIDv7: %q", key, value)
+			}
+			if previous != nil && previous.Get(key) == h.Get(key) {
+				t.Errorf("%s reused across attempts", key)
+			}
+		}
+		trace, span := h.Get("X-Trace-ID"), h.Get("X-B3-SpanId")
+		if len(span) != 16 || validWorkBuddyTraceID(span) == "" {
+			t.Fatalf("invalid span %q", span)
+		}
+		testutil.Equal(t, h.Get("X-Request-ID"), h.Get("X-Conversation-Message-ID"))
+		testutil.Equal(t, h.Get("X-Root-Request-ID"), h.Get("X-Conversation-Request-ID"))
+		testutil.Equal(t, h.Get("X-B3-TraceId"), trace)
+		testutil.Equal(t, h.Get("traceparent"), "00-"+trace+"-"+span+"-01")
+		testutil.Equal(t, h.Get("b3"), trace+"-"+span+"-1")
+		previous = h.Clone()
 	}
-	first, second := headers[0].Get("X-Conversation-Message-ID"), headers[1].Get("X-Conversation-Message-ID")
-	testutil.Falsef(t, first == second, "message id was reused across attempts: %q", first)
 }
 
 func TestBuildBody_IncludesUsageAndCamelCaseConversationID(t *testing.T) {
@@ -310,5 +307,31 @@ func TestSilentRequestKeepsChainOfThoughtPrivate(t *testing.T) {
 func TestResolveCredentialsIgnoresGenericSlots(t *testing.T) {
 	for _, raw := range []string{"opaque", "accessToken=access; refreshToken=refresh", `{"auth":{"accessToken":"access","refreshToken":"refresh"}}`} {
 		testutil.False(t, ResolveCredentials(&store.Account{ClientCookie: raw, Token: raw, RefreshToken: raw}).HasCredential(), "generic credentials must not migrate")
+	}
+}
+
+func TestRunChatCreatesFreshWireIdentityForRepeatedConversation(t *testing.T) {
+	captured := make(chan http.Header, 2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured <- r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = io.WriteString(w, `{"code":6004,"msg":"usage exceeds frequency limit"}`)
+	}))
+	defer srv.Close()
+	client := NewFromAccount(&store.Account{WorkBuddyUID: "uid-1", WorkBuddyAccessToken: "access", WorkBuddyExpiresAt: time.Now().Add(time.Hour)}, nil)
+	client.baseURL = srv.URL
+	client.httpClient = srv.Client()
+	payload := upstream.UpstreamRequest{Model: "hy3", ConversationID: "client-conversation", RequestID: "client-request", TraceID: "client-trace", Messages: []prompt.Message{userMessage(t, "hi")}}
+	for range 2 {
+		if err := client.runChat(context.Background(), payload, time.Second, nil, nil); err == nil {
+			t.Fatal("upstream refusal was lost")
+		}
+	}
+	first, second := <-captured, <-captured
+	for _, key := range []string{"X-Conversation-ID", "X-Conversation-Request-ID", "X-Request-ID", "X-Trace-ID"} {
+		if first.Get(key) == "" || first.Get(key) == second.Get(key) || strings.HasPrefix(first.Get(key), "client-") {
+			t.Errorf("%s did not get fresh wire identity: %q / %q", key, first.Get(key), second.Get(key))
+		}
 	}
 }

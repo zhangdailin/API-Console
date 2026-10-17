@@ -146,26 +146,26 @@ type Message struct {
 	ReasoningItem    json.RawMessage `json:"reasoning_item,omitempty"`
 }
 
-type openAIToolCallFunction struct {
+type ChatToolFunction struct {
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
 }
 
-type openAIToolCall struct {
-	Index    *int                   `json:"index,omitempty"`
-	ID       string                 `json:"id"`
-	Type     string                 `json:"type"`
-	Function openAIToolCallFunction `json:"function"`
+type ChatToolCall struct {
+	Index    *int             `json:"index,omitempty"`
+	ID       string           `json:"id"`
+	Type     string           `json:"type"`
+	Function ChatToolFunction `json:"function"`
 }
 
 func (m *Message) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		Role             string           `json:"role"`
-		Content          json.RawMessage  `json:"content"`
-		ToolCalls        []openAIToolCall `json:"tool_calls,omitempty"`
-		ToolCallID       string           `json:"tool_call_id,omitempty"`
-		ReasoningContent string           `json:"reasoning_content,omitempty"`
-		ReasoningItem    json.RawMessage  `json:"reasoning_item,omitempty"`
+		Role             string          `json:"role"`
+		Content          json.RawMessage `json:"content"`
+		ToolCalls        []ChatToolCall  `json:"tool_calls,omitempty"`
+		ToolCallID       string          `json:"tool_call_id,omitempty"`
+		ReasoningContent string          `json:"reasoning_content,omitempty"`
+		ReasoningItem    json.RawMessage `json:"reasoning_item,omitempty"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -182,12 +182,16 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	switch strings.ToLower(strings.TrimSpace(raw.Role)) {
+	return m.normalizeChatTools(raw.ToolCalls, raw.ToolCallID)
+}
+
+func (m *Message) normalizeChatTools(calls []ChatToolCall, toolID string) error {
+	switch strings.ToLower(strings.TrimSpace(m.Role)) {
 	case "assistant":
-		if len(raw.ToolCalls) == 0 {
+		if len(calls) == 0 {
 			return nil
 		}
-		blocks := make([]ContentBlock, 0, len(raw.ToolCalls)+1)
+		blocks := make([]ContentBlock, 0, len(calls)+1)
 		if m.Content.IsString() {
 			if text := m.Content.GetText(); strings.TrimSpace(text) != "" {
 				blocks = append(blocks, ContentBlock{Type: "text", Text: text})
@@ -195,7 +199,7 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 		} else if len(m.Content.GetBlocks()) > 0 {
 			blocks = append(blocks, m.Content.GetBlocks()...)
 		}
-		for _, call := range raw.ToolCalls {
+		for _, call := range calls {
 			name := strings.TrimSpace(call.Function.Name)
 			if name == "" {
 				continue
@@ -219,7 +223,7 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 		}
 		m.Content = MessageContent{Blocks: []ContentBlock{{
 			Type:      "tool_result",
-			ToolUseID: strings.TrimSpace(raw.ToolCallID),
+			ToolUseID: strings.TrimSpace(toolID),
 			Content:   content,
 		}}}
 	}
@@ -253,4 +257,24 @@ type SystemItem struct {
 	Type         string        `json:"type"`
 	Text         string        `json:"text"`
 	CacheControl *CacheControl `json:"cache_control,omitempty"`
+}
+
+// FromChat converts internal chat messages without serializing long text histories.
+func FromChat(role string, content any, reasoning string, calls []ChatToolCall, toolID string) (Message, error) {
+	m := Message{Role: role, ReasoningContent: reasoning}
+	switch content := content.(type) {
+	case nil:
+	case string:
+		m.Content.Text = content
+	default:
+		raw, err := json.Marshal(content)
+		if err != nil {
+			return m, err
+		}
+		if err := json.Unmarshal(raw, &m.Content); err != nil {
+			return m, err
+		}
+	}
+	err := m.normalizeChatTools(calls, toolID)
+	return m, err
 }

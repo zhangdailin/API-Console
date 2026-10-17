@@ -21,7 +21,7 @@ const (
 	loginInterval = 2 * time.Second
 	// LoginClientVersion is appended to the login URL, as the desktop client
 	// does.
-	LoginClientVersion = "5.5.2"
+	LoginClientVersion = clientVersion
 )
 
 // loginPort is the official WorkBuddy (www.workbuddy.ai) browser authorization

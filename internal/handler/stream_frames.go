@@ -95,25 +95,13 @@ func (h *streamHandler) flushSSEWithLenLocked(event string, dataLen int, immedia
 	if h.flusher == nil {
 		return
 	}
-	// Do not wait for a batch before delivering the first reasoning or tool
-	// delta. Low-cadence streams may take seconds to produce the next frame.
-	if event == "content_block_delta" && !h.firstContentDeltaFlushed {
+	// The outer CoalesceStreamFlush owns the bounded batching timer. Always
+	// signal it, including sparse reasoning deltas, so no frame waits for
+	// another upstream event merely to reach the downstream client.
+	if event == "content_block_delta" {
 		h.firstContentDeltaFlushed = true
-		immediate = true
 	}
-	if force || immediate {
-		h.deferredFlushFrames = 0
-		h.deferredFlushBytes = 0
-		h.flushStreamLocked()
-		return
-	}
-	h.deferredFlushFrames++
-	h.deferredFlushBytes += len(event) + dataLen + len(sseEventPrefix) + len(sseDataJoin) + len(sseLineBreak)
-	if h.deferredFlushFrames >= sseDeferredFlushFrameThreshold || h.deferredFlushBytes >= sseDeferredFlushByteThreshold {
-		h.deferredFlushFrames = 0
-		h.deferredFlushBytes = 0
-		h.flushStreamLocked()
-	}
+	h.flushStreamLocked()
 }
 
 func (h *streamHandler) flushStreamLocked() {

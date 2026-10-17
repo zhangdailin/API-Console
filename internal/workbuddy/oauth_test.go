@@ -92,8 +92,8 @@ func TestStartAuthLogin_AppendsClientVersion(t *testing.T) {
 	client := NewFromAccount(&store.Account{}, nil)
 	client.baseURL = srv.URL
 
-	state, authURL, err := client.StartAuthLogin(context.Background(), "5.5.2")
+	state, authURL, err := client.StartAuthLogin(context.Background(), LoginClientVersion)
 	testutil.NoError(t, err, "StartAuthLogin() error = %v")
 	testutil.Equal(t, state, "state-1")
-	testutil.MustContain(t, authURL, "version=5.5.2")
+	testutil.MustContain(t, authURL, "version=5.8.4")
 }

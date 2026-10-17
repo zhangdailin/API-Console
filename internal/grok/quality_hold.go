@@ -105,6 +105,9 @@ func (h *Handler) shouldHoldQualityTurn(req *chatwire.Request, provider string) 
 	if h == nil || req == nil {
 		return false
 	}
+	if cfg := h.configSnapshot(); cfg != nil && cfg.GrokLowLatency {
+		return false
+	}
 	if provider != ProviderBuild {
 		return false
 	}

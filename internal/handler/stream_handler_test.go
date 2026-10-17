@@ -264,44 +264,18 @@ func TestExtractThinkingSignature(t *testing.T) {
 	testutil.Equal(t, extractThinkingSignature(e2), "sig2")
 }
 
-func TestStreamHandler_CoalescesNonTextFlushes(t *testing.T) {
-	sh, rec := newStreamTestHandler(t, true, adapter.FormatAnthropic)
-
-	// The live writers take an explicit flush hint; writeSSEBytesLocked, the live
-	// content_block_stop writer, derives its hint from shouldFlushSSEImmediately,
-	// so these frames go through the same writer with the same hint source.
-	writeFrame := func(event string, data []byte) {
-		sh.mu.Lock()
-		defer sh.mu.Unlock()
-		sh.writeSSEBytesLockedWithHint(event, data, shouldFlushSSEImmediately(event, data))
+func TestStreamHandlerFlushesEverySparseReasoningDelta(t *testing.T) {
+	for _, format := range []adapter.ResponseFormat{adapter.FormatAnthropic, adapter.FormatOpenAI} {
+		sh, rec := newStreamTestHandler(t, true, format)
+		sh.handleMessage(upstream.SSEMessage{Type: "model", Event: map[string]any{"type": "reasoning-start"}})
+		for _, delta := range []string{"first", "second", "third"} {
+			before := rec.flushes
+			sh.handleMessage(upstream.SSEMessage{Type: "model", Event: map[string]any{"type": "reasoning-delta", "delta": delta}})
+			if rec.flushes <= before || !strings.Contains(rec.buf.String(), delta) {
+				t.Fatalf("format %v: sparse delta %q did not flush", format, delta)
+			}
+		}
 	}
-
-	writeFrame("message_start", []byte(`{"type":"message_start"}`))
-	testutil.Equal(t, rec.flushes, 1)
-
-	thinkingData, err := appendSSEContentBlockDeltaThinking(nil, 0, "step")
-	testutil.NoError(t, err, "marshal thinking delta: %v")
-	// The seed above wrote the opening frame without marking the stream started
-	// (production's writeMessageStartLocked is what sets messageStartWritten), so
-	// the first delta also emits the deferred opening frame and flushes it. The
-	// first delta itself must also flush, without waiting for another frame.
-	writeFrame("content_block_delta", thinkingData)
-	testutil.Equal(t, rec.flushes, 3)
-
-	// The remaining deferred thinking frames below the threshold add no flush.
-	for range sseDeferredFlushFrameThreshold - 1 {
-		writeFrame("content_block_delta", thinkingData)
-	}
-	testutil.Equal(t, rec.flushes, 3)
-
-	// The frame that reaches sseDeferredFlushFrameThreshold flushes the batch.
-	writeFrame("content_block_delta", thinkingData)
-	testutil.Equal(t, rec.flushes, 4)
-
-	textData, err := marshalSSEContentBlockDeltaTextBytes(0, "hi")
-	testutil.NoError(t, err, "marshal text delta: %v")
-	writeFrame("content_block_delta", textData)
-	testutil.Equal(t, rec.flushes, 5)
 }
 
 func TestStreamHandler_FirstReasoningDeltaFlushesWithoutNextEvent(t *testing.T) {

@@ -54,28 +54,20 @@ func (h *Handler) acquireAccountSelection(ctx context.Context, targetChannel str
 func (h *Handler) acquireReservedAccountSelection(ctx context.Context, targetChannel string, channelRequired bool, failedAccountIDs []int64, opts accountSelectionOptions) (UpstreamClient, *store.Account, func(), int64, error) {
 	excluded := append([]int64(nil), failedAccountIDs...)
 	full := make(map[int64]struct{})
-	// Account leases are held for the complete upstream request. When another
-	// request is just finishing, an immediate second selection can observe all
-	// accounts at their hard limit and turn a transient race into a 503. Give
-	// releases a bounded, cancellable window to become visible before failing.
-	// The two-second window matches the busy retry used by Qoder and is still
-	// short enough that a genuinely saturated pool fails promptly.
-	const (
-		reservationRetries    = 8
-		reservationRetryDelay = 250 * time.Millisecond
-	)
-	reservationAttempt := 0
+	waitBudget := h.configSnapshot().ReservationWaitBudget()
+	var waited time.Duration
 	for {
 		client, account, release, err := h.acquireAccountSelection(ctx, targetChannel, channelRequired, excluded, opts)
 		if err != nil {
-			if reservationAttempt < reservationRetries && strings.Contains(err.Error(), "all matching accounts are at their concurrency limit") {
-				reservationAttempt++
+			if waited < waitBudget && strings.Contains(err.Error(), "all matching accounts are at their concurrency limit") {
 				// Rebuild the exclusion set from caller-supplied failures. Entries in
 				// full only represent accounts that lost a reservation race and may
 				// be available again on the next pass.
 				excluded = append([]int64(nil), failedAccountIDs...)
 				clear(full)
-				timer := time.NewTimer(reservationRetryDelay)
+				delay := min(250*time.Millisecond, waitBudget-waited)
+				waited += delay
+				timer := time.NewTimer(delay)
 				select {
 				case <-ctx.Done():
 					if !timer.Stop() {

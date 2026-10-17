@@ -309,7 +309,7 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	if logger != nil && !logger.Capturing() {
 		logger.LogUpstreamRequest(url, map[string]string{"provider": "cline", "model": model}, body)
 	}
-	return c.runChat(ctx, url, body, logicalTaskID(req.RequestID), creds, onMessage)
+	return c.runChat(upstream.WithToolDeltas(ctx, req.StreamToolDeltas), url, body, logicalTaskID(req.RequestID), creds, onMessage)
 }
 
 // runChat performs one upstream call, except that an initial 401 gets one token
@@ -407,7 +407,7 @@ func (c *Client) attemptChat(ctx context.Context, url string, body []byte, taskI
 		if emit != nil {
 			emit(m)
 		}
-	})
+	}, upstream.ToolDeltasEnabled(ctx))
 }
 
 // requestCarriesTools keeps fallback parsing disabled for plain-text requests:

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -272,18 +273,37 @@ func (t *RedisConnTracker) GetCounts(accountIDs []int64) map[int64]int64 {
 	if len(missing) == 0 {
 		return result
 	}
+	// Account scan windows and preference selection can reorder identical sets.
+	// Canonical keys allow concurrent callers to share one Redis round trip.
+	slices.Sort(missing)
+	missing = slices.Compact(missing)
 	var key strings.Builder
 	for _, id := range missing {
 		key.WriteString(strconv.FormatInt(id, 10))
 		key.WriteByte(',')
 	}
 	value, _, _ := t.countGroup.Do(key.String(), func() (any, error) {
-		counts := t.fetchCounts(missing)
+		// Another flight may have filled the cache after our initial snapshot.
+		// Recheck inside the flight to avoid back-to-back identical pipelines.
+		counts := make(map[int64]int64, len(missing))
+		pending := make([]int64, 0, len(missing))
+		now := time.Now()
+		t.countMu.Lock()
+		for _, id := range missing {
+			if cached, ok := t.countCache[id]; ok && now.Before(cached.expires) {
+				counts[id] = cached.count
+			} else {
+				pending = append(pending, id)
+			}
+		}
+		t.countMu.Unlock()
+		fetched := t.fetchCounts(pending)
+		maps.Copy(counts, fetched)
 		t.countMu.Lock()
 		if t.countCache == nil || len(t.countCache) > 65536 {
 			t.countCache = make(map[int64]cachedConnCount)
 		}
-		for id, count := range counts {
+		for id, count := range fetched {
 			t.countCache[id] = cachedConnCount{count, time.Now().Add(50 * time.Millisecond)}
 		}
 		t.countMu.Unlock()

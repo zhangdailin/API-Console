@@ -4,6 +4,7 @@ import "orchids-api/internal/prompt"
 
 // UpstreamRequest is the shared request representation for upstream providers.
 type UpstreamRequest struct {
+	StreamToolDeltas  bool
 	Prompt            string
 	Model             string
 	Messages          []prompt.Message

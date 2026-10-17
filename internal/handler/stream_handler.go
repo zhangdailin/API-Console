@@ -19,14 +19,12 @@ import (
 )
 
 const (
-	sseEventPrefix                 = "event: "
-	sseDataPrefix                  = "data: "
-	sseLineBreak                   = "\n\n"
-	sseDataJoin                    = "\ndata: "
-	sseDoneLine                    = "data: [DONE]\n\n"
-	sseKeepAlive                   = ": keep-alive\n\n"
-	sseDeferredFlushFrameThreshold = 4
-	sseDeferredFlushByteThreshold  = 2048
+	sseEventPrefix = "event: "
+	sseDataPrefix  = "data: "
+	sseLineBreak   = "\n\n"
+	sseDataJoin    = "\ndata: "
+	sseDoneLine    = "data: [DONE]\n\n"
+	sseKeepAlive   = ": keep-alive\n\n"
 )
 
 var (
@@ -116,8 +114,6 @@ type streamHandler struct {
 	contentBlocks            []map[string]any
 	pendingThinkingSig       string
 	hasTextOutput            bool
-	deferredFlushFrames      int
-	deferredFlushBytes       int
 	firstContentDeltaFlushed bool
 	openAIChunkScratch       []byte
 	sseFrameScratch          []byte
@@ -127,6 +123,7 @@ type streamHandler struct {
 	pendingToolCalls    []toolCall
 	toolCallHandled     map[string]bool
 	toolCallEmitted     map[string]struct{}
+	streamingTools      map[string]int
 	toolCallCount       int
 	suppressedToolCalls int
 
@@ -253,6 +250,7 @@ func (h *streamHandler) resetRoundState() {
 	h.pendingToolCalls = nil
 	clear(h.toolCallHandled)
 	clear(h.toolCallEmitted)
+	clear(h.streamingTools)
 	h.toolCallCount = 0
 	h.outputTokens = 0
 	h.cachedInputTokens = 0
@@ -264,8 +262,6 @@ func (h *streamHandler) resetRoundState() {
 	h.useUpstreamUsage = false
 	h.finalStopReason = ""
 	h.hasTextOutput = false
-	h.deferredFlushFrames = 0
-	h.deferredFlushBytes = 0
 	h.firstContentDeltaFlushed = false
 }
 
@@ -558,6 +554,9 @@ func (h *streamHandler) handleMessage(msg upstream.SSEMessage) {
 	case "model.text-end":
 		h.closeActiveBlock()
 
+	case "model.tool-call-delta":
+		h.emitIncrementalTool(msg.Event)
+
 	case "model.tool-call":
 		toolID, _ := msg.Event["toolCallId"].(string)
 		toolName, _ := msg.Event["toolName"].(string)
@@ -573,6 +572,13 @@ func (h *streamHandler) handleMessage(msg upstream.SSEMessage) {
 			return
 		}
 		h.toolCallHandled[toolID] = true
+		if idx, ok := h.streamingTools[toolID]; ok {
+			h.mu.Lock()
+			h.writeSSEContentBlockStopLocked(idx, false)
+			h.mu.Unlock()
+			delete(h.streamingTools, toolID)
+			return
+		}
 		if h.isStream {
 			h.emitToolUseFromInput(toolID, toolName, inputStr)
 			return

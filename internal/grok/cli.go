@@ -260,6 +260,11 @@ func (c *CLIClient) doResponsesOnceAt(ctx context.Context, acc *store.Account, p
 	}
 	path = "/" + strings.TrimLeft(strings.TrimSpace(path), "/")
 	headers := http.Header{"Content-Type": {"application/json"}}
+	if stream, _ := payload["stream"].(bool); stream {
+		headers.Set("Accept", "text/event-stream")
+		// Avoid compression buffering between the upstream and the SSE reader.
+		headers.Set("Accept-Encoding", "identity")
+	}
 	if session, _ := payload["prompt_cache_key"].(string); strings.TrimSpace(session) != "" {
 		// The Build gateway expects session identity as a UUID. A raw sha256 hex
 		// string is not one: the upstream then treats the session as unstable and
