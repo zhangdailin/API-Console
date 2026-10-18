@@ -375,3 +375,25 @@ func TestClassify_SpentBalanceOnQoderKeepsTheFreeTierState(t *testing.T) {
 
 	testutil.Equal(t, verdict.Status, store.AccountStatusQoderQuotaExhausted)
 }
+
+// Billing timestamps must neither shorten daily holds nor strand credentials
+// until subscription expiry, including records written before this fix.
+func TestQoderDailyCountIgnoresBillingReset(t *testing.T) {
+	for _, billing := range []time.Duration{-time.Hour, 8 * time.Hour, 14 * 24 * time.Hour} {
+		t.Run(billing.String(), func(t *testing.T) {
+			acc := &store.Account{AccountType: "qoder", Enabled: true,
+				QuotaResetAt: time.Now().Add(billing),
+				QoderQuota:   store.QoderQuotaSnapshot{ResetAt: time.Now().Add(billing)}}
+			v := Classify(acc, errors.New("Billing daily count exceeded"), "efficient")
+			testutil.Equal(t, v.Cooldown, 24*time.Hour)
+			v.Apply(acc)
+			testutil.Equal(t, acc.QuotaResetAt, v.At.Add(24*time.Hour))
+			testutil.Equal(t, CooldownFor(acc), 24*time.Hour)
+			// Simulate a legacy record or a later subscription quota refresh.
+			acc.QuotaResetAt = v.At.Add(billing)
+			testutil.True(t, AccountHeld(acc, v.At.Add(23*time.Hour)))
+			testutil.False(t, AccountHeld(acc, v.At.Add(24*time.Hour)))
+			testutil.False(t, AccountHeld(acc, v.At.Add(25*time.Hour)))
+		})
+	}
+}

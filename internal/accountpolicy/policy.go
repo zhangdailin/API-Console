@@ -40,6 +40,7 @@ const (
 	CooldownRateLimitMax  = 30 * time.Minute
 	// CooldownRateLimit is retained as the first-failure/default alias.
 	CooldownRateLimit  = CooldownRateLimitBase
+	CooldownQoderDaily = 24 * time.Hour
 	CooldownPayment    = 24 * time.Hour
 	CooldownBlocked    = 24 * time.Hour
 	CooldownBlockedGro = 10 * time.Minute
@@ -117,7 +118,7 @@ func (v Verdict) Apply(acc *store.Account) {
 			acc.RateLimitFailures++
 			if v.Cooldown > 0 {
 				reset := at.Add(v.Cooldown)
-				if reset.After(acc.QuotaResetAt) {
+				if isQoderDailyCount(acc) || reset.After(acc.QuotaResetAt) {
 					acc.QuotaResetAt = reset
 				}
 			}
@@ -176,17 +177,12 @@ func Classify(acc *store.Account, err error, model string) Verdict {
 			Retryable: true, SwitchAccount: true, Cooldown: cooldown, At: now}
 	}
 
-	// The Qoder daily *request count* can run out while the credit meter still
-	// reports a positive balance. It is not an ordinary 30-second throttle:
-	// keep this credential out of rotation until the next known reset, or use
-	// a bounded day-long fallback when the upstream supplied no reset.
+	// The quota snapshot's reset is the subscription/credit period boundary,
+	// not a daily request-count reset. Without a daily reset from the upstream,
+	// retry after a bounded day from the refusal, regardless of credit balance.
 	if strings.EqualFold(accountType(acc), "qoder") && strings.Contains(lower, "billing daily count exceeded") {
-		cooldown := CooldownPayment
-		if acc != nil && !acc.QoderQuota.ResetAt.IsZero() && acc.QoderQuota.ResetAt.After(now) {
-			cooldown = acc.QoderQuota.ResetAt.Sub(now)
-		}
 		return Verdict{Status: "429", Message: message, Scope: ScopeAccount,
-			Retryable: true, SwitchAccount: true, Cooldown: cooldown, At: now}
+			Retryable: true, SwitchAccount: true, Cooldown: CooldownQoderDaily, At: now}
 	}
 
 	// A plan/allowance refusal is about this account and this model, not the
@@ -520,6 +516,11 @@ func AccountHeld(acc *store.Account, now time.Time) bool {
 	if acc.LastAttempt.IsZero() {
 		return true
 	}
+	// Also repair routing of legacy records whose QuotaResetAt contains the
+	// subscription expiry. Quota refreshes may still write that billing date.
+	if isQoderDailyCount(acc) {
+		return now.Before(acc.LastAttempt.Add(CooldownQoderDaily))
+	}
 	until := acc.LastAttempt.Add(CooldownFor(acc))
 	// QuotaResetAt is an explicit deadline somebody recorded: the rate-limit
 	// reset for a 429/402, or the short server-fault hold the gateway applies
@@ -541,8 +542,7 @@ func AccountHeld(acc *store.Account, now time.Time) bool {
 			// hours), not an ordinary throttle. Preserve the upstream deadline;
 			// the generic 30m ceiling only guards billing-cycle timestamps that
 			// accidentally leak into normal rate-limit state.
-			if apperrors.IsClineInferenceCap(strings.ToLower(acc.StatusMessage)) ||
-				(strings.EqualFold(acc.AccountType, "qoder") && strings.Contains(strings.ToLower(acc.StatusMessage), "billing daily count exceeded")) {
+			if apperrors.IsClineInferenceCap(strings.ToLower(acc.StatusMessage)) {
 				until = acc.QuotaResetAt
 			} else if ceiling := acc.LastAttempt.Add(CooldownRateLimitMax); ceiling.Before(acc.QuotaResetAt) {
 				until = ceiling
@@ -556,6 +556,12 @@ func AccountHeld(acc *store.Account, now time.Time) bool {
 	return now.Before(until)
 }
 
+func isQoderDailyCount(acc *store.Account) bool {
+	return acc != nil && strings.EqualFold(acc.AccountType, "qoder") &&
+		strings.TrimSpace(acc.StatusCode) == "429" &&
+		strings.Contains(strings.ToLower(acc.StatusMessage), "billing daily count exceeded")
+}
+
 // CooldownFor returns the cooldown the account's current status implies.
 func CooldownFor(acc *store.Account) time.Duration {
 	if acc == nil {
@@ -565,6 +571,9 @@ func CooldownFor(acc *store.Account) time.Duration {
 	case "401":
 		return CredentialReverify
 	case "429":
+		if isQoderDailyCount(acc) {
+			return CooldownQoderDaily
+		}
 		return RateLimitCooldown(acc.RateLimitFailures)
 	case "402":
 		// WorkBuddy reaches this with a status only when its allowance is gone: a
