@@ -207,9 +207,9 @@ func buildChatBodyProfile(req upstream.UpstreamRequest, model modelEntry, sessio
 	}
 	messages, systemText := buildMessages(req)
 
-	// Preserve explicit client controls; use the reference output budget only
-	// when the caller omitted it.
-	parameters := chatParameters{MaxTokens: 32000, Temperature: req.Temperature, TopP: req.TopP}
+	// Preserve explicit client controls; use the catalog's output cap only when
+	// the caller omitted it.
+	parameters := chatParameters{MaxTokens: model.defaultMaxOutputTokens(), Temperature: req.Temperature, TopP: req.TopP}
 	parameters.ResponseFormat = req.ChatResponseFormat()
 	if req.MaxTokens != nil {
 		parameters.MaxTokens = *req.MaxTokens
@@ -227,8 +227,10 @@ func buildChatBodyProfile(req upstream.UpstreamRequest, model modelEntry, sessio
 	if contextLength > 0 {
 		parameters.ContextLength = contextLength
 	}
-	// The catalog supplies the default; explicit client effort overrides every
-	// thinking switch together so the gateway never receives contradictory flags.
+	// The catalog supplies the default, read the way the official client reads
+	// it; explicit client effort overrides every thinking switch together so
+	// the gateway never receives contradictory flags.
+	model.IsReasoning = model.reasoningDefault()
 	effort := strings.ToLower(strings.TrimSpace(req.ReasoningEffort))
 	if effort != "" {
 		thinking := effort != "none"

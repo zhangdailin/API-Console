@@ -410,10 +410,12 @@ func consumeStreamObserved(body io.Reader, onMessage func(upstream.SSEMessage), 
 				// capacity problem and not a credential problem: the client gets
 				// a 400 straight away, and no account is marked rate-limited.
 				streamErr = contentPolicyError(detail)
+			case envelope.StatusCodeValue == http.StatusUnauthorized || envelope.StatusCodeValue == http.StatusForbidden:
+				// Checked before the client-fault markers, which include
+				// authentication_error: a credential verdict must reach the refresh.
+				streamErr = fmt.Errorf("%w: %s", errUpstreamUnauthorized, detail)
 			case IsClientFault(envelope.Body):
 				streamErr = fmt.Errorf("%w: %s", ErrClientFault, detail)
-			case envelope.StatusCodeValue == http.StatusUnauthorized || envelope.StatusCodeValue == http.StatusForbidden:
-				streamErr = fmt.Errorf("%w: %s", errUpstreamUnauthorized, detail)
 			case IsTransientUpstreamStatus(envelope.StatusCodeValue, envelope.Body):
 				// The gateway's own provider fault. It is worth one bounded
 				// retry on this account, and it must not be read as a
@@ -425,6 +427,10 @@ func consumeStreamObserved(body io.Reader, onMessage func(upstream.SSEMessage), 
 			return false
 		}
 		if strings.TrimSpace(envelope.Body) == "" {
+			if envelope.gatewayFailure.loginExpired() {
+				streamErr = loginExpiredError(envelope.gatewayFailure)
+				return false
+			}
 			if failure := envelope.gatewayFailure.classify([]byte(payload), len(envelope.Error) > 0 && string(envelope.Error) != "null"); failure != nil {
 				streamErr = failure
 				return false
@@ -463,6 +469,10 @@ func consumeStreamObserved(body io.Reader, onMessage func(upstream.SSEMessage), 
 			// gave, and that reason is the one thing that makes the refusal
 			// actionable.
 			streamErr = fmt.Errorf("qoder stream protocol error: invalid body: %w (upstream body: %s)", err, bodySnippet(envelope.Body))
+			return false
+		}
+		if chunk.gatewayFailure.loginExpired() {
+			streamErr = loginExpiredError(chunk.gatewayFailure)
 			return false
 		}
 		if failure := chunk.gatewayFailure.classify([]byte(envelope.Body), false); failure != nil {
@@ -608,6 +618,20 @@ func (frame gatewayFailure) classify(raw []byte, forced bool) error {
 		status = http.StatusBadGateway
 	}
 	return classifyStatus(status, "", raw)
+}
+
+// loginExpiredCode is the gateway's business code for an expired login. It can
+// arrive inside a 200 envelope with no success flag, which classify ignores, so
+// the stream would otherwise end as a truncation instead of reaching the refresh.
+const loginExpiredCode = "105"
+
+func (frame gatewayFailure) loginExpired() bool {
+	return stringOfCode(frame.Code) == loginExpiredCode || stringOfCode(frame.MsgCode) == loginExpiredCode
+}
+
+func loginExpiredError(frame gatewayFailure) error {
+	detail := util.FirstNonEmpty(frame.Message, frame.MsgInfo, "login expired")
+	return fmt.Errorf("%w: %s", errUpstreamUnauthorized, detail)
 }
 
 func streamErrorEvent(raw []byte) error {

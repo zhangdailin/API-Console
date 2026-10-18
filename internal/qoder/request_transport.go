@@ -254,12 +254,16 @@ func classifyStatus(status int, retryAfter string, raw []byte) error {
 	if IsContentPolicy(string(raw)) {
 		return &attemptStreamError{err: contentPolicyError(wrapped.Error())}
 	}
+	// A 401/403 is a credential verdict even when its body names an
+	// authentication_error or permission_error type: reading those markers as a
+	// client fault skipped the refresh and failed a recoverable request as a 400.
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		return &attemptStreamError{err: fmt.Errorf("%w: %v", errUpstreamUnauthorized, wrapped), unauth: true}
+	}
 	if IsClientFault(string(raw)) {
 		return &attemptStreamError{err: fmt.Errorf("%w: %v", ErrClientFault, wrapped)}
 	}
 	switch status {
-	case http.StatusUnauthorized, http.StatusForbidden:
-		return &attemptStreamError{err: fmt.Errorf("%w: %v", errUpstreamUnauthorized, wrapped), unauth: true}
 	case http.StatusRequestTimeout, http.StatusTooManyRequests:
 		return &attemptStreamError{err: wrapped, retryable: true, wait: retryAfterDelay(retryAfter)}
 	}

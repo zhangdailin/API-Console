@@ -113,15 +113,8 @@ func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
 		client.account = &copied
 	}
 	client.creds = ResolveCredentials(client.account)
-	if client.machineID == "" {
-		// An account-less or freshly completed credential may not carry the
-		// device identity yet; the resolved credential is the other place it
-		// travels, and a login result always sets it.
-		client.machineID = strings.TrimSpace(client.creds.MachineID)
-	}
 	if acc != nil {
 		client.machineID = strings.TrimSpace(acc.QoderMachineID)
-		// Derive runtime ciphertext from the current international identity.
 	}
 	client.applyFingerprint()
 	return client
@@ -321,8 +314,8 @@ func (c *Client) runChat(ctx context.Context, url string, body []byte, model mod
 				return err
 			}
 			// A replay with the original request id is rejected as a duplicate even
-			// though the bearer changed. Give the repaired attempt a fresh identity
-			// and explicitly mark it as a retry.
+			// though the bearer changed. Give the repaired attempt a fresh request
+			// id; is_retry stays false, as on the official client's queued attempts.
 			requestID, err = newUUID(c.entropy)
 			if err != nil {
 				return err

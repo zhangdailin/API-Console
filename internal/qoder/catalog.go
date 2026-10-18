@@ -1,10 +1,12 @@
 package qoder
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"encoding/json"
@@ -44,6 +46,11 @@ type modelEntry struct {
 	PriceFactor    *float64 `json:"price_factor,omitempty"`
 	MaxInputTokens int      `json:"max_input_tokens"`
 	OrgTags        []string `json:"organization_tags"`
+	// MaxOutputTokens and ThinkingConfig stay raw: the gateway has sent the cap
+	// as a number and as a string, and one undecodable field must not fail the
+	// whole catalog read. See defaultMaxOutputTokens and reasoningDefault.
+	MaxOutputTokens json.RawMessage `json:"max_output_tokens,omitempty"`
+	ThinkingConfig  json.RawMessage `json:"thinking_config,omitempty"`
 	// Preserve opaque upstream tier data, including fields we cannot interpret.
 	ContextConfig json.RawMessage `json:"context_config,omitempty"`
 	// Snapshot-only sidecar: additional distinct context_config values observed
@@ -55,6 +62,49 @@ type modelEntry struct {
 // means enabled: the field is an opt-out, and treating absence as disabled would
 // hide every model from a deployment that omits it.
 func (m modelEntry) enabled() bool { return m.Enable == nil || *m.Enable }
+
+// fallbackMaxOutputTokens is the completion cap the official client uses when a
+// catalog row carries no usable max_output_tokens.
+const fallbackMaxOutputTokens = 32000
+
+// defaultMaxOutputTokens is the completion cap sent when the caller set none.
+// The official client reads it from the catalog row and falls back to 32000
+// only for a missing or non-positive value; a fixed 32000 overshoots models
+// whose cap is lower.
+func (m modelEntry) defaultMaxOutputTokens() int {
+	raw := bytes.TrimSpace(m.MaxOutputTokens)
+	if len(raw) == 0 {
+		return fallbackMaxOutputTokens
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		raw = []byte(strings.TrimSpace(text))
+	}
+	value, err := strconv.ParseInt(string(raw), 10, 64)
+	if err != nil || value <= 0 || value > 1<<53-1 {
+		return fallbackMaxOutputTokens
+	}
+	return int(value)
+}
+
+// reasoningDefault reports whether the model thinks when the caller sent no
+// reasoning effort. The official client lets thinking_config decide: an object
+// enables thinking exactly when its "enabled" block is present and non-null, an
+// unrecognised non-null shape cannot rule thinking out, and only a missing or
+// null block falls back to is_reasoning. The gateway ships rows that contradict
+// the flag (is_reasoning=false beside a populated enabled block).
+func (m modelEntry) reasoningDefault() bool {
+	raw := bytes.TrimSpace(m.ThinkingConfig)
+	if len(raw) == 0 || string(raw) == "null" {
+		return m.IsReasoning
+	}
+	var config map[string]json.RawMessage
+	if json.Unmarshal(raw, &config) != nil {
+		return true
+	}
+	enabled, ok := config["enabled"]
+	return ok && string(bytes.TrimSpace(enabled)) != "null"
+}
 
 // Catalog is a resolved model catalog.
 type Catalog struct {

@@ -32,6 +32,7 @@ import (
 	"bytes"
 	"fmt"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -421,6 +422,10 @@ func apiError(method, rawURL string, status int, raw []byte) error {
 	return fmt.Errorf("qoder API error: %s", strings.Join(parts, ", "))
 }
 
+// busyCodeField matches the busy business code as a code or msgCode value, in
+// either string or number form, over markerText-normalized input.
+var busyCodeField = regexp.MustCompile(`"(?:code|msgcode)"\s*:\s*"?` + busyCode + `(?:[^0-9]|$)`)
+
 // sharedQueueRefusal reports whether a failure describes an upstream-wide
 // queue/service refusal, whatever shape the envelope arrived in.
 //
@@ -431,10 +436,15 @@ func apiError(method, rawURL string, status int, raw []byte) error {
 // worse, dropped the wait the upstream had asked for, so every retry came back
 // before the queue cleared. Matching the payload itself makes the classification
 // independent of how many times the gateway nested it.
+//
+// The business code is matched only as the value of a code/msgCode field. A bare
+// substring match also fired on any millisecond timestamp or trace id that
+// happened to contain the digits, turning a credential rejection into a busy
+// verdict that skipped the refresh.
 func sharedQueueRefusal(values ...string) bool {
 	for _, value := range values {
 		lower := markerText(value)
-		if strings.Contains(lower, busyCode) ||
+		if busyCodeField.MatchString(lower) ||
 			strings.Contains(lower, `"isqueued":true`) ||
 			strings.Contains(lower, `"serviceavailable":false`) {
 			return true
