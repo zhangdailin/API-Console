@@ -109,7 +109,8 @@ func TestAssistantTurnMergePreservesExplicitToolControls(t *testing.T) {
 				{Role: "assistant", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{{Type: "tool_use", ID: "call", Name: "read_file", Input: map[string]any{"path": "main.go"}}}}},
 			},
 		})
-		testutil.False(t, !reflect.DeepEqual(body["tool_choice"], choice), "tool choice changed")
+		parameters := body["parameters"].(map[string]any)
+		testutil.False(t, !reflect.DeepEqual(parameters["tool_choice"], choice), "tool choice changed")
 		testutil.Equal(t, body["parallel_tool_calls"], false)
 		messages := body["messages"].([]any)
 		testutil.Equal(t, len(messages), 1)

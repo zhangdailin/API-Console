@@ -11,15 +11,22 @@ import (
 // The exact status_message stored for production Qoder account 22.
 const sharedRefusalMessage = `qoder upstream rejected the credential: {"code":"10605","message":"{\"isQueued\":true,\"modelKey\":\"qfmodel\",\"queueCount\":0,\"queueType\":\"p3\",\"retryAfterSeconds\":30,\"serviceAvailable\":false,\"waitTime\":30}"}`
 
-func TestQoderQueueUsesFixedProbeInterval(t *testing.T) {
+func TestQoderQueueHonorsUpstreamRetryWindow(t *testing.T) {
 	wait := sharedRefusalWaitForChannel(30*time.Second, 1, "qoder", "upstream_queue")
-	testutil.Equal(t, wait, 5*time.Second)
-	testutil.True(t, sharedRefusalWaitAllowedWithin(55*time.Second, wait, sharedRefusalTotalWaitBudget))
+	testutil.Equal(t, wait, 30*time.Second)
+	testutil.True(t, sharedRefusalWaitAllowedWithin(30*time.Second, wait, sharedRefusalTotalWaitBudget))
+	testutil.False(t, sharedRefusalWaitAllowedWithin(55*time.Second, wait, sharedRefusalTotalWaitBudget))
 	testutil.False(t, sharedRefusalWaitAllowedWithin(time.Minute, wait, sharedRefusalTotalWaitBudget))
+	testutil.False(t, sharedRefusalWaitAllowedWithin(time.Second, time.Duration(1<<63-1), sharedRefusalTotalWaitBudget))
 	testutil.Equal(t, sharedRefusalSleepForChannel(wait, "qoder", "upstream_queue"), wait)
 	testutil.Equal(t, sharedRefusalWaitForChannel(30*time.Second, 1, "qoder", "rate_limit"), 30*time.Second)
 	testutil.Equal(t, sharedRefusalWaitForChannel(30*time.Second, 1, "workbuddy", "upstream_queue"), sharedRefusalWait(30*time.Second, 1))
 	testutil.Equal(t, sharedRefusalWaitForChannel(0, 1, "qoder", "upstream_queue"), time.Duration(0))
+	for _, hint := range []time.Duration{time.Second, 7 * time.Second, time.Minute} {
+		for retry := 1; retry <= 4; retry++ {
+			testutil.Equal(t, sharedRefusalWaitForChannel(hint, retry, "qoder", "upstream_queue"), hint)
+		}
+	}
 }
 
 // TestSharedRefusalClassIsRecognised pins the signal the retry loop uses. A

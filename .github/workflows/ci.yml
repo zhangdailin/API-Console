@@ -95,6 +95,11 @@ jobs:
       - name: Run tests
         run: go test ./... -cover -count=1 -p 1
 
+      # Compile the opt-in probe and test its acceptance criteria with local
+      # fixtures. Real upstream requests still require QODER_PROBE=1 explicitly.
+      - name: Test Qoder live probe acceptance
+        run: go test -tags live ./internal/qoder -run '^(TestLiveProbe|TestProbeGeneration.*)$' -count=1
+
       - name: Setup Node
         uses: actions/setup-node@v7
         with:

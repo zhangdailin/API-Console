@@ -101,7 +101,6 @@ type chatBody struct {
 	System            string          `json:"system"`
 	Messages          []chatMessage   `json:"messages"`
 	Tools             []any           `json:"tools"`
-	ToolChoice        any             `json:"tool_choice,omitempty"`
 	Parameters        any             `json:"parameters"`
 	ParallelToolCalls *bool           `json:"parallel_tool_calls,omitempty"`
 }
@@ -190,6 +189,7 @@ type chatToolCall struct {
 }
 
 type chatParameters struct {
+	ToolChoice        any            `json:"tool_choice,omitempty"`
 	ResponseFormat    map[string]any `json:"response_format,omitempty"`
 	MaxTokens         int            `json:"max_tokens"`
 	Temperature       *float64       `json:"temperature,omitempty"`
@@ -242,6 +242,7 @@ func buildChatBodyProfile(req upstream.UpstreamRequest, model modelEntry, sessio
 	}
 	tools := normalizeToolDefinitions(req)
 	toolChoice, parallelTools := normalizeToolControls(req, len(tools) > 0)
+	parameters.ToolChoice = toolChoice
 
 	body := chatBody{
 		Business: businessInfo{
@@ -273,7 +274,6 @@ func buildChatBodyProfile(req upstream.UpstreamRequest, model modelEntry, sessio
 		System:            systemText,
 		Messages:          messages,
 		Tools:             tools,
-		ToolChoice:        toolChoice,
 		Parameters:        parameters,
 		ParallelToolCalls: parallelTools,
 	}

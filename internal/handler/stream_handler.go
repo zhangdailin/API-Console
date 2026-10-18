@@ -12,6 +12,7 @@ import (
 	"orchids-api/internal/adapter"
 	"orchids-api/internal/config"
 	"orchids-api/internal/debug"
+	"orchids-api/internal/httpserver"
 	"orchids-api/internal/logutil"
 	"orchids-api/internal/perf"
 	"orchids-api/internal/tiktoken"
@@ -206,7 +207,9 @@ func (h *streamHandler) writeKeepAlive() {
 	if !h.messageStartWritten {
 		return
 	}
-	if _, err := h.w.Write(sseKeepAliveBytes); err != nil {
+	// Heartbeats need the same fresh transport deadline as content frames.
+	// Otherwise a quiet upstream outlives the last content write's deadline.
+	if _, err := (httpserver.DeadlineResponseWriter{ResponseWriter: h.w}).Write(sseKeepAliveBytes); err != nil {
 		h.markWriteErrorLocked("keep-alive", err)
 		return
 	}
@@ -612,8 +615,9 @@ func (h *streamHandler) handleMessage(msg upstream.SSEMessage) {
 			toolUseEmitted
 		h.mu.Unlock()
 
-		// Force stopReason to tool_use if we have emitted tool calls
-		if toolUseEmitted {
+		// A token-limited turn stays incomplete even if it contains tool calls.
+		// Infer tool_use only when the upstream otherwise ended normally.
+		if toolUseEmitted && stopReason == "end_turn" {
 			stopReason = "tool_use"
 		}
 

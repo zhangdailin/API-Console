@@ -31,7 +31,7 @@ func planCooldownHandler(t *testing.T, model string, cool func(acc *store.Accoun
 	t.Cleanup(func() { _ = s.Close() })
 
 	ctx := context.Background()
-	acc := &store.Account{Name: "qoder-1", AccountType: "qoder", QoderRefreshToken: "rt", Enabled: true, Weight: 1}
+	acc := &store.Account{Name: "qoder-1", AccountType: "qoder", QoderModelIDs: []string{model}, QoderRefreshToken: "rt", Enabled: true, Weight: 1}
 	testutil.NoError(t, s.CreateAccount(ctx, acc), "CreateAccount() error = %v")
 	cool(acc)
 	testutil.NoError(t, s.UpdateAccount(ctx, acc), "UpdateAccount() error = %v")

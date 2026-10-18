@@ -24,12 +24,24 @@ import (
 // counts the attempts so a test can tell a single probe from a spent budget.
 type sharedRefusalUpstream struct {
 	calls int
+	wait  time.Duration
 }
 
 func (m *sharedRefusalUpstream) SendRequestWithPayload(_ context.Context, req upstream.UpstreamRequest, _ func(upstream.SSEMessage), _ *debug.Logger) error {
 	m.calls++
+	if m.wait > 0 {
+		return sharedRefusalHint{wait: m.wait}
+	}
 	return errors.New(`qoder upstream rejected the credential: {"code":"10605","message":"{\"isQueued\":true,\"serviceAvailable\":false,\"retryAfterSeconds\":30}"}`)
 }
+
+type sharedRefusalHint struct{ wait time.Duration }
+
+func (e sharedRefusalHint) Error() string {
+	return `qoder gateway is busy: {"code":"10605","isQueued":true,"serviceAvailable":false}`
+}
+
+func (e sharedRefusalHint) RetryAfter() time.Duration { return e.wait }
 
 // recoveringRefusalUpstream succeeds after its queue probe so the retry path
 // must return an answer without requiring another client-side request.
@@ -224,7 +236,7 @@ func TestSharedRefusalConfiguredBudgetStopsBeforeRetry(t *testing.T) {
 			cfg := &config.Config{RequestTimeout: 30, MaxRetries: 3, RetryDelay: 1, SharedRefusalWaitBudgetMs: budget}
 			h := NewWithLoadBalancer(cfg, nil)
 			defer h.Close()
-			stub := &sharedRefusalUpstream{}
+			stub := &sharedRefusalUpstream{wait: 30 * time.Second}
 			h.client = stub
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()

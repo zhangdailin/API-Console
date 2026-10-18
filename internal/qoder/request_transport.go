@@ -157,7 +157,7 @@ func (c *Client) attemptChat(ctx context.Context, url string, body []byte, model
 		if m.Type == "model.reasoning-delta" {
 			latency.Mark("first_reasoning_ms")
 		}
-		if m.Type == "model.tool-call" {
+		if m.Type == "model.tool-call" || m.Type == "model.tool-call-delta" {
 			latency.Mark("first_tool_ms")
 		}
 		if originalEmit != nil {
@@ -192,7 +192,7 @@ func (c *Client) attemptChat(ctx context.Context, url string, body []byte, model
 		if emit != nil {
 			emit(m)
 		}
-	}, func() { latency.Mark("first_sse_ms") })
+	}, func() { latency.Mark("first_sse_ms") }, upstream.ToolDeltasEnabled(ctx))
 	for _, key := range []string{"firstTokenDuration", "totalDuration", "serverDuration"} {
 		if v, ok := result.Usage[key]; ok {
 			latency.Set("upstream_"+key, v)
@@ -277,22 +277,22 @@ func classifyStatus(status int, retryAfter string, raw []byte) error {
 	return &attemptStreamError{err: wrapped}
 }
 
-// busyWait reads the gateway's own backoff hint, capped so a hostile or buggy
-// value cannot park a request indefinitely.
+// busyWait preserves the gateway's minimum backoff. The handler's cumulative
+// wait budget decides whether it can retry; shortening the hint retries early.
 func busyWait(retryAfter string, raw []byte) time.Duration {
 	if delay := retryAfterDelay(retryAfter); delay > 0 {
 		return delay
 	}
 	if seconds := nestedInt64(raw, "retryAfterSeconds", 0); seconds > 0 {
-		return capWait(time.Duration(seconds) * time.Second)
+		return saturatingWait(seconds, time.Second)
 	}
 	if millis := nestedInt64(raw, "retryAfterMs", 0); millis > 0 {
-		return capWait(time.Duration(millis) * time.Millisecond)
+		return saturatingWait(millis, time.Millisecond)
 	}
 	if wait := nestedInt64(raw, "waitTime", 0); wait > 0 {
 		// waitTime has historically been milliseconds, while the explicitly named
 		// retryAfterSeconds is seconds.
-		return capWait(time.Duration(wait) * time.Millisecond)
+		return saturatingWait(wait, time.Millisecond)
 	}
 	return 2 * time.Second
 }
@@ -302,7 +302,9 @@ func nestedInt64(raw []byte, key string, depth int) int64 {
 		return 0
 	}
 	var value any
-	if json.Unmarshal(bytes.TrimSpace(raw), &value) != nil {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if !json.Valid(raw) || decoder.Decode(&value) != nil {
 		return 0
 	}
 	var walk func(any, int) int64
@@ -314,8 +316,9 @@ func nestedInt64(raw []byte, key string, depth int) int64 {
 		case map[string]any:
 			if rawValue, ok := typed[key]; ok {
 				switch number := rawValue.(type) {
-				case float64:
-					return int64(number)
+				case json.Number:
+					parsed, _ := number.Int64()
+					return parsed
 				case string:
 					parsed, _ := strconv.ParseInt(strings.TrimSpace(number), 10, 64)
 					return parsed
@@ -334,7 +337,9 @@ func nestedInt64(raw []byte, key string, depth int) int64 {
 			}
 		case string:
 			var nested any
-			if json.Unmarshal([]byte(strings.TrimSpace(typed)), &nested) == nil {
+			decoder := json.NewDecoder(strings.NewReader(typed))
+			decoder.UseNumber()
+			if json.Valid([]byte(typed)) && decoder.Decode(&nested) == nil {
 				return walk(nested, level+1)
 			}
 		}
@@ -346,15 +351,16 @@ func nestedInt64(raw []byte, key string, depth int) int64 {
 func retryAfterDelay(value string) time.Duration { return retryAfterDelayAt(value, time.Now()) }
 
 func retryAfterDelayAt(value string, now time.Time) time.Duration {
-	return httpclient.ParseRetryAfter(value, now, 30*time.Second)
+	return httpclient.ParseRetryAfter(value, now, 0)
 }
 
-func capWait(wait time.Duration) time.Duration {
-	if wait > 30*time.Second {
-		return 30 * time.Second
-	}
-	if wait < 0 {
+func saturatingWait(value int64, unit time.Duration) time.Duration {
+	if value <= 0 {
 		return 0
 	}
-	return wait
+	const maximum = time.Duration(1<<63 - 1)
+	if value > int64(maximum/unit) {
+		return maximum
+	}
+	return time.Duration(value) * unit
 }

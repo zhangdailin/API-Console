@@ -21,8 +21,8 @@ import (
 //     observation of what the account may run: publishing it would advertise
 //     models the account never had, and it would hide a gateway that stopped
 //     answering the catalog read.
-//   - With no snapshot, routing reports ErrNoUpstreamCatalog, so the operator
-//     sees "refresh models" instead of a model that cannot be served.
+//   - With no snapshot, the pool skips the account. Direct client resolution
+//     reports ErrNoUpstreamCatalog so the operator sees "refresh models".
 
 // ErrNoUpstreamCatalog reports that no upstream catalog has been observed for
 // the account. It is a state rather than a failure: the fix is a model refresh

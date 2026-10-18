@@ -81,7 +81,7 @@ const sharedRefusalTotalWaitBudget = config.SharedRefusalWaitBudget
 // inside the explicit budget after spending already on waits. It is a plain
 // comparison so the bound can be tested without spending the waits themselves.
 //
-// next is the probe interval; the caller also charges bounded jitter after sleeping.
+// next is the upstream delay; the caller also charges bounded jitter after sleeping.
 func sharedRefusalWaitAllowedWithin(already, next, budget time.Duration) bool {
 	if next <= 0 {
 		return false
@@ -89,18 +89,16 @@ func sharedRefusalWaitAllowedWithin(already, next, budget time.Duration) bool {
 	if budget <= 0 {
 		budget = sharedRefusalTotalWaitBudget
 	}
-	return already+next <= budget
+	return already >= 0 && already <= budget && next <= budget-already
 }
 
-// Qoder queue gates are probed at a fixed interval. Other refusals retain their
-// early-probe schedule. No positive hint means no gateway wait.
+// Qoder's retry hint is a minimum delay, including for queue admission. Probing
+// earlier only repeats the refused request inside the same resource window.
+// Other channels retain their existing early-probe schedule.
 func sharedRefusalWaitForChannel(hint time.Duration, retry int, channel, category string) time.Duration {
 	if strings.EqualFold(strings.TrimSpace(channel), "qoder") {
 		if hint <= 0 {
 			return 0
-		}
-		if category == "upstream_queue" {
-			return config.QoderQueueRetryInterval
 		}
 		return hint
 	}

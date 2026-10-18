@@ -56,26 +56,40 @@ func TestRuntimeFieldsAccessorRoundTrip(t *testing.T) {
 	testutil.False(t, !(RuntimeFields{EncryptUserInfo: "a", Key: "b"}).Complete(), "Complete() = false for a full pair")
 }
 
-func TestReferenceRuntimeIdentityIncludesTokensAndAccountClass(t *testing.T) {
-	entropy := newRecordingSource(bytes.Repeat([]byte{0x31}, 16), bytes.Repeat([]byte{0x32}, 512))
-	fields, err := referenceRuntimeFieldsFor(entropy, referenceRuntimeFieldInput{
-		Name: "Test User", Aid: "uid-1", UID: "uid-1", UserType: "personal_professional_trial",
-		SecurityOAuthToken: "access-secret", RefreshToken: "refresh-secret",
-	})
+// The field set comes from @qoder-ai/qodercli 1.0.45's
+// regenerateRuntimeFields, independently of the PAT reference bridge.
+func TestInternationalRuntimeIdentityFieldSet(t *testing.T) {
+	for _, agreed := range []bool{false, true} {
+		entropy := newRecordingSource(bytes.Repeat([]byte{0x31}, 16), bytes.Repeat([]byte{0x32}, 512))
+		fields, err := runtimeFieldsFor(entropy, runtimeFieldInput{
+			UID: "uid-1", OrganizationID: "org-1", OrganizationTags: []string{"team"}, DataPolicyAgreed: &agreed,
+		})
+		testutil.NoError(t, err)
+		key := []byte("3131313131313131")
+		sealed, err := base64.StdEncoding.DecodeString(fields.EncryptUserInfo)
+		testutil.NoError(t, err)
+		block, err := aes.NewCipher(key)
+		testutil.NoError(t, err)
+		plaintext := make([]byte, len(sealed))
+		cipher.NewCBCDecrypter(block, key).CryptBlocks(plaintext, sealed)
+		var identity map[string]any
+		testutil.NoError(t, json.Unmarshal(unpadPKCS7(t, plaintext), &identity))
+		testutil.Equal(t, len(identity), 4)
+		testutil.Equal(t, identity["uid"], "uid-1")
+		testutil.Equal(t, identity["organization_id"], "org-1")
+		testutil.Equal(t, identity["data_policy_agreed"].(bool), agreed)
+		testutil.Equal(t, identity["organization_tags"].([]any)[0], "team")
+	}
+}
+
+func TestInternationalRuntimeOmitsUnobservedMetadata(t *testing.T) {
+	fields, err := runtimeFieldsFor(newRecordingSource(bytes.Repeat([]byte{0x31}, 1024)), runtimeFieldInput{UID: "0123456789abcdef0123456789abcdef"})
 	testutil.NoError(t, err)
-	testutil.False(t, !fields.Complete(), "reference runtime pair incomplete")
-	key := []byte("3131313131313131") // hex of the reference's first 8 random bytes
 	sealed, err := base64.StdEncoding.DecodeString(fields.EncryptUserInfo)
 	testutil.NoError(t, err)
-	block, err := aes.NewCipher(key)
-	testutil.NoError(t, err)
-	plaintext := make([]byte, len(sealed))
-	cipher.NewCBCDecrypter(block, key).CryptBlocks(plaintext, sealed)
-	var identity map[string]string
-	testutil.NoError(t, json.Unmarshal(unpadPKCS7(t, plaintext), &identity))
-	if len(identity) != 9 || identity["security_oauth_token"] != "access-secret" || identity["refresh_token"] != "refresh-secret" || identity["aid"] != "uid-1" || identity["user_type"] != "personal_professional_trial" {
-		t.Fatalf("reference identity field shape mismatch: keys=%d aid=%q user_type=%q", len(identity), identity["aid"], identity["user_type"])
-	}
+	// Independently confirmed with the official 1.0.45 WASM: a UID-only JSON
+	// identity of this size is 48 bytes after AES-CBC padding.
+	testutil.Equal(t, len(sealed), 48)
 }
 
 func unpadPKCS7(t *testing.T, padded []byte) []byte {

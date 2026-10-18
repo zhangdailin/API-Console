@@ -83,7 +83,7 @@ func TestResponsesAffinitySurvivesReplicaAndTurnChanges(t *testing.T) {
 			h.SetConfig(cfg)
 			ctx := context.Background()
 			for range 2 {
-				testutil.NoError(t, s.CreateAccount(ctx, &store.Account{AccountType: "qoder", QoderRefreshToken: "test-token", Enabled: true, Weight: 1}))
+				testutil.NoError(t, s.CreateAccount(ctx, &store.Account{AccountType: "qoder", QoderModelIDs: []string{"m"}, QoderRefreshToken: "test-token", Enabled: true, Weight: 1}))
 			}
 			publishModel(t, s, &store.Model{Channel: "Qoder", ModelID: "m"})
 			var seen []struct {
@@ -148,8 +148,8 @@ func TestResponsesAffinitySurvivesReplicaAndTurnChanges(t *testing.T) {
 func TestPreferredAccountStillRequiresEligibilityAndCapacity(t *testing.T) {
 	h, s, mini := setupModelValidationHandler(t)
 	ctx := context.Background()
-	preferred := &store.Account{AccountType: "qoder", QoderRefreshToken: "test-token", Enabled: true, Weight: 1, MaxConcurrent: 1}
-	spare := &store.Account{AccountType: "qoder", QoderRefreshToken: "test-token", Enabled: true, Weight: 1}
+	preferred := &store.Account{AccountType: "qoder", QoderModelIDs: []string{"m"}, QoderRefreshToken: "test-token", Enabled: true, Weight: 1, MaxConcurrent: 1}
+	spare := &store.Account{AccountType: "qoder", QoderModelIDs: []string{"m"}, QoderRefreshToken: "test-token", Enabled: true, Weight: 1}
 	testutil.NoError(t, s.CreateAccount(ctx, preferred))
 	testutil.NoError(t, s.CreateAccount(ctx, spare))
 	affinity := requestAffinity{Provider: "qoder", Model: "m", Key: "scoped-key"}

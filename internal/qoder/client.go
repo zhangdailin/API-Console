@@ -60,8 +60,8 @@ type Client struct {
 	creds   Credentials
 	runtime RuntimeFields
 
-	// Reference COSY encrypted identity embeds the access/refresh token; unlike
-	// the old CLI runtime pair, it must be rederived when either rotates.
+	// Rebuild runtime material after credential rotation, as the international
+	// CLI does when it refreshes its authentication context.
 	runtimeAccessToken  string
 	runtimeRefreshToken string
 	requestTimeout      time.Duration
@@ -121,7 +121,7 @@ func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
 	}
 	if acc != nil {
 		client.machineID = strings.TrimSpace(acc.QoderMachineID)
-		// Derive runtime ciphertext from the current reference identity.
+		// Derive runtime ciphertext from the current international identity.
 	}
 	client.applyFingerprint()
 	return client
@@ -230,7 +230,7 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	prepTrace.Mark("body_ready_ms")
 	prepTrace.Finish(nil)
 	prepTrace = nil
-	return c.runChat(ctx, url, body, model, requestID, fields, onMessage)
+	return c.runChat(upstream.WithToolDeltas(ctx, req.StreamToolDeltas), url, body, model, requestID, fields, onMessage)
 }
 
 // runChat performs one upstream attempt. The shared request handler owns
@@ -525,8 +525,8 @@ func (c *Client) ensureRuntimeFields(ctx context.Context, creds Credentials) (Ru
 	}
 	c.runtimeMu.Lock()
 	defer c.runtimeMu.Unlock()
-	// The reference identity includes both tokens. Reuse the pair only while
-	// they still match; a refresh must not sign new tokens with stale ciphertext.
+	// A credential refresh starts a new authentication context, even though
+	// this protocol version does not put the tokens inside the identity.
 	if fields := c.runtimeSnapshot(); fields.Complete() && c.runtimeTokensMatch(creds) {
 		return fields, nil
 	}
@@ -535,14 +535,12 @@ func (c *Client) ensureRuntimeFields(ctx context.Context, creds Credentials) (Ru
 		// the identity is known.
 		return RuntimeFields{}, fmt.Errorf("qoder account has no user id yet; sign in again")
 	}
-	fields, err := referenceRuntimeFieldsFor(c.entropy, referenceRuntimeFieldInput{
-		Name:               creds.Name,
-		Aid:                creds.UID,
-		UID:                creds.UID,
-		OrganizationID:     creds.OrgID,
-		UserType:           aliyunUserTypeOr(c.aliyunUserType()),
-		SecurityOAuthToken: creds.AccessToken,
-		RefreshToken:       creds.RefreshToken,
+	agreed := c.dataPolicyAgreed()
+	fields, err := runtimeFieldsFor(c.entropy, runtimeFieldInput{
+		UID:              creds.UID,
+		OrganizationID:   creds.OrgID,
+		OrganizationTags: filterTags(creds.OrgTags),
+		DataPolicyAgreed: &agreed,
 	})
 	if err != nil {
 		return RuntimeFields{}, err
@@ -817,6 +815,7 @@ func (c *Client) ApplyProfile(profile Profile) {
 	c.stateMu.Lock()
 	defer c.stateMu.Unlock()
 	oldUID, oldName, oldOrg := c.creds.UID, c.creds.Name, c.creds.OrgID
+	oldTags := c.creds.OrgTags
 	if uid := strings.TrimSpace(profile.UID); uid != "" {
 		c.creds.UID = uid
 		if c.account != nil {
@@ -847,7 +846,7 @@ func (c *Client) ApplyProfile(profile Profile) {
 			c.account.QoderOrganizationTags = append([]string(nil), profile.OrgTags...)
 		}
 	}
-	if oldUID != c.creds.UID || oldName != c.creds.Name || oldOrg != c.creds.OrgID {
+	if oldUID != c.creds.UID || oldName != c.creds.Name || oldOrg != c.creds.OrgID || !slices.Equal(oldTags, c.creds.OrgTags) {
 		c.runtime = RuntimeFields{}
 		c.runtimeAccessToken = ""
 		c.runtimeRefreshToken = ""
@@ -867,8 +866,8 @@ func (c *Client) CurrentAccessToken(ctx context.Context) (string, error) {
 	return creds.AccessToken, nil
 }
 
-// PrepareCurrentRuntimeFields refreshes first: runtime ciphertext includes both
-// tokens and must be derived for the final pair, not the consumed login pair.
+// PrepareCurrentRuntimeFields refreshes first, then derives runtime material
+// for the final authentication context rather than the consumed login grant.
 func (c *Client) PrepareCurrentRuntimeFields(ctx context.Context) error {
 	if c == nil {
 		return fmt.Errorf("qoder client is nil")

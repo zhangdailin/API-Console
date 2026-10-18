@@ -25,7 +25,7 @@ func TestReferenceRuntimeIdentityRebuiltAfterTokenRotation(t *testing.T) {
 	client.storeCredentials(rotated, true, initial.RefreshToken)
 	after, err := client.ensureRuntimeFields(context.Background(), rotated)
 	testutil.NoError(t, err)
-	testutil.False(t, after == before || !after.Complete(), "runtime identity was not renewed when the embedded tokens rotated")
+	testutil.False(t, after == before || !after.Complete(), "runtime identity was not renewed after the credential rotated")
 }
 
 // TestEnsureRuntimeFieldsDerivesOnce proves the pair is derived on demand and

@@ -56,9 +56,15 @@ func newProviderClient(acc *store.Account, cfg *config.Config, s *store.Store) p
 
 type capabilities struct{}
 
-// SupportsModel is always true: the channel resolves the name against the
-// account catalog itself and refuses an unknown one.
-func (capabilities) SupportsModel(*store.Account, string) bool { return true }
+// SupportsModel uses the same observed catalog required by the request builder.
+// Accounts without a usable snapshot cannot serve inference yet.
+func (capabilities) SupportsModel(acc *store.Account, model string) bool {
+	if acc == nil || len(acc.QoderModelIDs) == 0 {
+		return false
+	}
+	_, err := catalogFromIDs(acc.QoderModelIDs).Resolve(model)
+	return err == nil
+}
 
 func (capabilities) IsFreeModel(acc *store.Account, model string) bool {
 	if acc == nil {

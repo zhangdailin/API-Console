@@ -102,7 +102,7 @@ Cline 套餐只读取官方 `/users/me/plan` 的 `success=true`、`data.plan` �
 |---|---|---|
 | WorkBuddy | `workbuddy_base_url`、`workbuddy_http2_enabled` | 默认国际服务；HTTP/2 是传输设置 |
 | Qoder | `qoder_oauth_base_url`、`qoder_openapi_base_url`、`qoder_inference_base_url` | 浏览器、控制面和生成主机各自配置 |
-| Qoder | `qoder_client_id`、`qoder_client_version`、`qoder_http2_enabled` | 使用 reference 协议；旧 qoder_protocol_profile 字段被忽略 |
+| Qoder | `qoder_client_id`、`qoder_client_version`、`qoder_http2_enabled` | runtime 身份遵循国际 CLI 1.0.45 的 UID、组织及数据策略结构；旧 qoder_protocol_profile 字段被忽略 |
 | Cline | `cline_api_base_url`、`cline_workos_client_id`、`cline_workos_authorize_url`、`cline_workos_token_url`、`cline_http2_enabled` | API 与 WorkOS 授权分别配置 |
 | Grok | `grok_cli_base_url`、`grok_cli_user_agent`、`grok_cli_client_version`、`grok_cli_client_identifier` | 默认 Build CLI 网关和 CLI 身份 |
 | Grok | `grok_cli_oauth_client_id`、`grok_cli_oauth_device_url`、`grok_cli_oauth_token_url` | 默认 auth.x.ai 的设备授权与交换端点 |
@@ -150,7 +150,7 @@ Grok 语义空闲按有效生成事件衡量，keepalive 不延长时钟；下�
 | WorkBuddy / Qoder / Cline 语义流空闲 | 300 秒 |
 | Grok 语义流空闲 | 120 秒 |
 | 共享拒绝排队睡眠预算 | 默认 60 秒，可通过 `shared_refusal_wait_budget_ms` 缩短或关闭 |
-| Qoder 已分类队列闸门探测间隔 | 5 秒 |
+| Qoder 已分类队列闸门重试间隔 | 遵守上游 Retry-After 提示，不提前探测 |
 | 共享生成重试上限 | 20 次重试，认证重放占同一尝试预算 |
 
 首生成包括文本、推理和工具进展，不等同可见首字；生成进展后停止该计时。成功非流 JSON 的响应头释放流式看门狗，完整正文仍受总期限约束。心跳、角色和纯用量不刷新语义空闲，父取消始终有效。内部目录读取保留更短的操作期限，不开放为用户配置。

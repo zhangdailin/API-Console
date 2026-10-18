@@ -301,17 +301,21 @@ func readSSE(reader io.Reader, fn func(sseFrame) bool) error {
 	return nil
 }
 
-func consumeStreamObserved(body io.Reader, onMessage func(upstream.SSEMessage), onFrame func()) (streamResult, error) {
+func consumeStreamObserved(body io.Reader, onMessage func(upstream.SSEMessage), onFrame func(), streamToolDeltas ...bool) (streamResult, error) {
 	result := streamResult{}
 	tools := util.NewToolCallAccumulator()
 	emitText := func(text string) { upstream.EmitTextDelta(onMessage, text, &result.SawMeaningfulEvent) }
 
-	emitTools := func() {
+	emitTools := func() error {
 		completed := tools.CompleteAll()
 		for _, call := range completed {
 			call.Arguments = normalizeCommandEscalation(call.Name, call.Arguments)
 		}
+		if err := upstream.ValidateStreamedTools(completed); err != nil {
+			return err
+		}
 		upstream.EmitToolCalls(onMessage, completed, &result.SawMeaningfulEvent, &result.ToolCallCount)
+		return nil
 	}
 
 	sawFinish := false
@@ -540,13 +544,21 @@ func consumeStreamObserved(body io.Reader, onMessage func(upstream.SSEMessage), 
 		}
 		for _, call := range delta.ToolCalls {
 			result.SawMeaningfulEvent = true
-			tools.Add(call.Index, call.ID, call.Function.Name, call.Function.Arguments)
+			state := tools.Add(call.Index, call.ID, call.Function.Name, call.Function.Arguments)
+			// Command arguments are normalized once complete; publishing their
+			// fragments first would give the client a different final payload.
+			if len(streamToolDeltas) > 0 && streamToolDeltas[0] && !commandEscalationTool(state.Name) {
+				upstream.EmitToolDelta(onMessage, state)
+			}
 		}
 		if reason != "" && reason != "null" {
 			result.FinishReasonValue = reason
 			// Arguments can span several deltas, so calls are only emitted once
 			// the choice says it is done.
-			emitTools()
+			if err := emitTools(); err != nil {
+				streamErr = err
+				return false
+			}
 		}
 		return true
 	})
@@ -560,7 +572,9 @@ func consumeStreamObserved(body io.Reader, onMessage func(upstream.SSEMessage), 
 	if checkingRateLimitText && rateLimitText.Len() > 0 {
 		emitText(rateLimitText.String())
 	}
-	emitTools()
+	if err := emitTools(); err != nil {
+		return result, err
+	}
 	if !sawFinish {
 		// An EOF without a finish event means the connection was cut
 		// mid-answer. Reporting success here would truncate silently.

@@ -26,3 +26,15 @@ func TestProfileUpdateInvalidatesRuntimeAndFinalizesLatestTokens(t *testing.T) {
 	testutil.False(t, account.QoderRuntimeInfo == initial.EncryptUserInfo || account.QoderRuntimeInfo == "", "runtime was not regenerated")
 	testutil.False(t, account.QoderRuntimeInfo != client.RuntimeFields().EncryptUserInfo || account.QoderRuntimeKey != client.RuntimeFields().Key, "final account lacks regenerated runtime pair")
 }
+
+func TestOrganizationTagUpdateInvalidatesRuntime(t *testing.T) {
+	client := NewFromAccount(signedTestAccount(), nil)
+	_, err := client.ensureRuntimeFields(t.Context(), client.currentCredentials())
+	testutil.NoError(t, err)
+	initial := client.RuntimeFields()
+	client.ApplyProfile(Profile{OrgTags: []string{"new-team"}})
+	testutil.False(t, client.RuntimeFields().Complete(), "organization tag update retained stale runtime identity")
+	_, err = client.ensureRuntimeFields(t.Context(), client.currentCredentials())
+	testutil.NoError(t, err)
+	testutil.False(t, client.RuntimeFields() == initial, "organization tag update did not regenerate runtime identity")
+}

@@ -282,9 +282,9 @@ func normalizeToolDefinitions(req upstream.UpstreamRequest) []any {
 }
 
 // normalizeToolControls maps both OpenAI and Anthropic tool selection shapes to
-// the OpenAI-compatible fields accepted by Qoder's chat endpoint. Tool controls
-// belong at the top level of the request; placing tool_choice under parameters
-// makes the gateway treat an otherwise valid tool request as ordinary chat.
+// the OpenAI-compatible fields accepted by Qoder's chat endpoint. The
+// international CLI 1.0.45 places tool_choice inside parameters; the tool
+// declarations and parallel_tool_calls remain separate top-level fields.
 func normalizeToolControls(req upstream.UpstreamRequest, toolsEnabled bool) (any, *bool) {
 	if !toolsEnabled || req.NoTools {
 		return nil, nil

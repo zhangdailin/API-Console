@@ -58,15 +58,15 @@ func sampleQoderTool() map[string]any {
 	}
 }
 
-func TestBuildChatBodyPlacesToolControlsAtTopLevel(t *testing.T) {
+func TestBuildChatBodyPlacesToolChoiceInParameters(t *testing.T) {
 	t.Parallel()
 	body := decodeChatBodyForTest(t, upstream.UpstreamRequest{
 		Tools: []any{sampleQoderTool()},
 	})
-	testutil.Equal(t, body["tool_choice"], "auto")
 	parameters, _ := body["parameters"].(map[string]any)
-	_, exists := parameters["tool_choice"]
-	testutil.Falsef(t, exists, "parameters.tool_choice must be absent: %#v", parameters)
+	testutil.Equal(t, parameters["tool_choice"], "auto")
+	_, exists := body["tool_choice"]
+	testutil.Falsef(t, exists, "top-level tool_choice must be absent")
 	tools, _ := body["tools"].([]any)
 	testutil.Equal(t, len(tools), 1)
 }
@@ -81,7 +81,8 @@ func TestBuildChatBodyNormalizesAnthropicToolControls(t *testing.T) {
 			"disable_parallel_tool_use": true,
 		},
 	})
-	choice, _ := body["tool_choice"].(map[string]any)
+	parameters := body["parameters"].(map[string]any)
+	choice, _ := parameters["tool_choice"].(map[string]any)
 	function, _ := choice["function"].(map[string]any)
 	testutil.Equal(t, choice["type"], "function")
 	testutil.Equal(t, function["name"], "read_file")

@@ -55,35 +55,29 @@ type RuntimeFields struct {
 	Key string
 }
 
-// referenceRuntimeFieldInput matches the reference bridge's encrypted
-// AuthIdentity. Values (including unknown metadata) are strings, and empty
-// keys are serialized instead of omitted. Tokens must never be logged.
-type referenceRuntimeFieldInput struct {
-	Name               string `json:"name"`
-	Aid                string `json:"aid"`
-	UID                string `json:"uid"`
-	YxUID              string `json:"yx_uid"`
-	OrganizationID     string `json:"organization_id"`
-	OrganizationName   string `json:"organization_name"`
-	UserType           string `json:"user_type"`
-	SecurityOAuthToken string `json:"security_oauth_token"`
-	RefreshToken       string `json:"refresh_token"`
+// runtimeFieldInput matches the international CLI 1.0.45 input to
+// generate_runtime_auth_fields. Browser OAuth tokens are not part of this
+// version's runtime identity; the PAT bridge uses a different field set.
+// Optional organization metadata is omitted until it has been observed.
+type runtimeFieldInput struct {
+	UID              string   `json:"uid"`
+	OrganizationID   string   `json:"organization_id,omitempty"`
+	OrganizationTags []string `json:"organization_tags,omitempty"`
+	DataPolicyAgreed *bool    `json:"data_policy_agreed,omitempty"`
 }
 
-// referenceRuntimeFieldsFor uses the same random temp-key and encrypted
-// identity layout as qoder2api's cosy.NewSession.
-func referenceRuntimeFieldsFor(entropy source, in referenceRuntimeFieldInput) (RuntimeFields, error) {
+func runtimeFieldsFor(entropy source, in runtimeFieldInput) (RuntimeFields, error) {
 	if entropy == nil {
 		entropy = cryptoSource{}
 	}
 	var raw [16]byte
 	if _, err := io.ReadFull(entropy, raw[:]); err != nil {
-		return RuntimeFields{}, fmt.Errorf("read reference runtime entropy: %w", err)
+		return RuntimeFields{}, fmt.Errorf("read runtime entropy: %w", err)
 	}
 	key := []byte(hex.EncodeToString(raw[:])[:16])
 	plaintext, err := json.Marshal(in)
 	if err != nil {
-		return RuntimeFields{}, fmt.Errorf("marshal reference runtime identity: %w", err)
+		return RuntimeFields{}, fmt.Errorf("marshal runtime identity: %w", err)
 	}
 	sealed, err := aesCBCEncryptPKCS7(plaintext, key)
 	if err != nil {
@@ -95,7 +89,7 @@ func referenceRuntimeFieldsFor(entropy source, in referenceRuntimeFieldInput) (R
 	}
 	wrapped, err := rsaEncryptPKCS1v15WithSource(entropy, publicKey, key)
 	if err != nil {
-		return RuntimeFields{}, fmt.Errorf("wrap reference runtime key: %w", err)
+		return RuntimeFields{}, fmt.Errorf("wrap runtime key: %w", err)
 	}
 	return RuntimeFields{EncryptUserInfo: base64.StdEncoding.EncodeToString(sealed), Key: base64.StdEncoding.EncodeToString(wrapped)}, nil
 }

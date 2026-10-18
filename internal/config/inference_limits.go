@@ -13,7 +13,6 @@ const (
 	SharedStreamIdleTimeout = 300 * time.Second
 	GrokStreamIdleTimeout   = 120 * time.Second
 	SharedRefusalWaitBudget = 60 * time.Second
-	QoderQueueRetryInterval = 5 * time.Second
 	GenerationMaxRetries    = 20
 	ChatDefaultStream       = true
 	TokenRefreshInterval    = time.Minute

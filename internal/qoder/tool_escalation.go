@@ -8,16 +8,7 @@ import (
 // normalizeCommandEscalation drops an orphan approval explanation from known
 // command tools. It never changes the command or invents an escalation request.
 func normalizeCommandEscalation(name, arguments string) string {
-	name = strings.ToLower(strings.TrimSpace(name))
-	if i := strings.LastIndex(name, "__"); i >= 0 {
-		name = name[i+2:]
-	}
-	if i := strings.LastIndex(name, "."); i >= 0 {
-		name = name[i+1:]
-	}
-	switch name {
-	case "bash", "exec_command", "run_command", "execute_command", "run_terminal_command", "run_shell_command":
-	default:
+	if !commandEscalationTool(name) {
 		return arguments
 	}
 	var fields map[string]json.RawMessage
@@ -45,4 +36,20 @@ func normalizeCommandEscalation(name, arguments string) string {
 		return arguments
 	}
 	return string(encoded)
+}
+
+func commandEscalationTool(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if i := strings.LastIndex(name, "__"); i >= 0 {
+		name = name[i+2:]
+	}
+	if i := strings.LastIndex(name, "."); i >= 0 {
+		name = name[i+1:]
+	}
+	switch name {
+	case "bash", "exec_command", "run_command", "execute_command", "run_terminal_command", "run_shell_command":
+		return true
+	default:
+		return false
+	}
 }

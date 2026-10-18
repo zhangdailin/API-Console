@@ -40,20 +40,26 @@ func TestClassifyStatus(t *testing.T) {
 	}
 }
 
-func TestRetryAfterDelaySupportsHTTPDateAndCapsSafely(t *testing.T) {
+func TestRetryAfterDelayPreservesHintsAndSaturatesSafely(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
 	testutil.Equal(t, retryAfterDelayAt(now.Add(7*time.Second).Format(http.TimeFormat), now), 7*time.Second)
 	testutil.Equal(t, retryAfterDelayAt(now.Add(-time.Second).Format(http.TimeFormat), now), 0)
-	testutil.Equal(t, retryAfterDelayAt("9223372036854775807", now), 30*time.Second)
+	testutil.Equal(t, retryAfterDelayAt("120", now), 2*time.Minute)
+	testutil.Equal(t, retryAfterDelayAt(now.Add(2*time.Minute).Format(http.TimeFormat), now), 2*time.Minute)
+	testutil.Equal(t, retryAfterDelayAt("9223372036854775807", now), time.Duration(1<<63-1))
 }
 
-// TestBusyWaitIsCapped proves a hostile or buggy backoff hint cannot park a
-// request indefinitely.
-func TestBusyWaitIsCapped(t *testing.T) {
+// Long hints reach the handler intact so its finite budget can decline a retry.
+// Saturate before multiplication: overflow must never become an early retry.
+func TestBusyWaitPreservesHintsAndSaturates(t *testing.T) {
 	t.Parallel()
 
-	testutil.Equal(t, busyWait("", []byte(`{"retryAfterMs":600000}`)), 30*time.Second)
+	testutil.Equal(t, busyWait("", []byte(`{"retryAfterMs":600000}`)), 10*time.Minute)
+	testutil.Equal(t, busyWait("", []byte(`{"retryAfterSeconds":120}`)), 2*time.Minute)
+	testutil.Equal(t, busyWait("", []byte(`{"message":"{\"retryAfterSeconds\":120}"}`)), 2*time.Minute)
+	testutil.Equal(t, busyWait("", []byte(`{"retryAfterSeconds":9223372036854775807}`)), time.Duration(1<<63-1))
+	testutil.Equal(t, busyWait("", []byte(`{"retryAfterMs":"9223372036854775807"}`)), time.Duration(1<<63-1))
 	testutil.Equal(t, busyWait("", []byte(`{"message":"{\"retryAfterSeconds\":29,\"serviceAvailable\":false}"}`)), 29*time.Second)
 	testutil.Equal(t, busyWait("", []byte(`{"queue":{"isQueued":true,"waitTime":1500}}`)), 1500*time.Millisecond)
 	testutil.Equal(t, busyWait("7", nil), 7*time.Second)

@@ -41,7 +41,8 @@ func TestReferenceRuntimeUsesCurrentIdentity(t *testing.T) {
 	creds := c.currentCredentials()
 	got, err := c.ensureRuntimeFields(context.Background(), creds)
 	testutil.NoError(t, err)
-	want, err := referenceRuntimeFieldsFor(newRecordingSource(entropy), referenceRuntimeFieldInput{Name: creds.Name, Aid: creds.UID, UID: creds.UID, OrganizationID: creds.OrgID, UserType: aliyunUserTypeOr(c.aliyunUserType()), SecurityOAuthToken: creds.AccessToken, RefreshToken: creds.RefreshToken})
+	agreed := c.dataPolicyAgreed()
+	want, err := runtimeFieldsFor(newRecordingSource(entropy), runtimeFieldInput{UID: creds.UID, OrganizationID: creds.OrgID, OrganizationTags: filterTags(creds.OrgTags), DataPolicyAgreed: &agreed})
 	testutil.Equal(t, err, nil)
 	testutil.Equal(t, got, want)
 	// A new client derives its own pair instead of trusting stored ciphertext.

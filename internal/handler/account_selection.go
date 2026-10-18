@@ -141,8 +141,8 @@ func (h *Handler) selectAccountRecordWithOptions(ctx context.Context, targetChan
 			return currentFree
 		}
 		filter = func(acc *store.Account) error {
-			if channel == "cline" && !provider.SupportsModel("cline", acc, model) {
-				return loadbalancer.ErrAccountNotEligible
+			if !provider.SupportsModel(channel, acc, model) {
+				return loadbalancer.ErrModelUnavailable
 			}
 			if honorsModelCooldown(channel) {
 				// The verdict that recorded the cooldown travels with it, so an
