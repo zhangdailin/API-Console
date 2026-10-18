@@ -383,7 +383,20 @@ func latestUserText(req upstream.UpstreamRequest) string {
 
 // Scope explicit conversation identities to the account without retaining raw IDs.
 func conversationSessionID(uid, conversation string) string {
-	sum := sha256.Sum256([]byte("qoder-session\x00" + uid + "\x00" + conversation))
+	return scopedUUID("qoder-session", uid, conversation)
+}
+
+// taskSetID derives request_set_id (and business.id) from the downstream
+// request, so the shared handler's retries of one request present one task:
+// the capture keeps request_set_id constant across the requests of a task while
+// request_id changes. A fresh set id on every retry made each 10605 queue retry
+// look like a new task to the gateway.
+func taskSetID(uid, downstreamRequestID string) string {
+	return scopedUUID("qoder-task", uid, downstreamRequestID)
+}
+
+func scopedUUID(namespace, uid, value string) string {
+	sum := sha256.Sum256([]byte(namespace + "\x00" + uid + "\x00" + value))
 	sum[6] = (sum[6] & 0x0f) | 0x80
 	sum[8] = (sum[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%x-%x-%x-%x-%x", sum[:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])

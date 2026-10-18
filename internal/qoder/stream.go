@@ -459,7 +459,9 @@ func consumeStreamObserved(body io.Reader, onMessage func(upstream.SSEMessage), 
 					"next_reset_at", quotaNotice.NextResetAt.Format(time.RFC3339),
 				)
 			}
-			slog.Warn("qoder control frame", "provider", "qoder", "kind", kind, "payload", bodySnippet(notice))
+			// Advisory frames such as quota_low arrive on most replies of a
+			// low-balance account; at WARN they drowned the request errors.
+			slog.Debug("qoder control frame", "provider", "qoder", "kind", kind, "payload", bodySnippet(notice))
 			return true
 		}
 		var chunk streamChunk

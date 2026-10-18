@@ -202,6 +202,9 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	if err != nil {
 		return err
 	}
+	if anchor := strings.TrimSpace(req.RequestID); anchor != "" {
+		requestSetID = taskSetID(creds.UID, anchor)
+	}
 	if conversation := strings.TrimSpace(req.ConversationID); conversation != "" {
 		sessionID = conversationSessionID(creds.UID, conversation)
 	} else if conversation := strings.TrimSpace(req.ChatSessionID); conversation != "" {

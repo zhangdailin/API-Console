@@ -88,3 +88,40 @@ func TestSkillRequestControlsAndSharedRetry(t *testing.T) {
 		}
 	}
 }
+
+// A 10605 queue refusal is retried by the shared handler with a new
+// SendRequestWithPayload call. Both calls carry the same downstream RequestID
+// and must present one task to the gateway: same request_set_id and
+// business.id, fresh request_id.
+func TestSkillBusyRetryKeepsTaskIdentity(t *testing.T) {
+	var bodies []chatBody
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		encoded, _ := io.ReadAll(r.Body)
+		raw, err := decodeBody(encoded)
+		testutil.NoError(t, err)
+		var body chatBody
+		testutil.NoError(t, json.Unmarshal(raw, &body))
+		bodies = append(bodies, body)
+		if len(bodies) == 1 {
+			w.WriteHeader(401)
+			_, _ = io.WriteString(w, `{"code":"10605","message":"{\"isQueued\":true,\"retryAfterSeconds\":30}"}`)
+			return
+		}
+		_, _ = io.WriteString(w, envelope(`{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}`)+"event:finish\ndata: {}\n\n")
+	}))
+	defer server.Close()
+	client := NewFromAccount(signedTestAccount(), nil)
+	setTestEndpoints(client, server.URL, server.URL, server.URL)
+	req := upstream.UpstreamRequest{Model: "Qwen3.7-Max", Prompt: "hello", RequestID: "downstream-1"}
+	err := client.SendRequestWithPayload(context.Background(), req, nil, nil)
+	testutil.Falsef(t, !isRetryable(err), "first attempt err = %v, want a retryable busy refusal", err)
+	testutil.NoError(t, client.SendRequestWithPayload(context.Background(), req, nil, nil))
+	testutil.Equal(t, len(bodies), 2)
+	testutil.Equal(t, bodies[0].RequestSetID, bodies[1].RequestSetID)
+	testutil.Equal(t, bodies[0].Business.ID, bodies[1].Business.ID)
+	testutil.Falsef(t, bodies[0].RequestID == bodies[1].RequestID, "retry reused request_id %s", bodies[0].RequestID)
+
+	other := upstream.UpstreamRequest{Model: "Qwen3.7-Max", Prompt: "hello", RequestID: "downstream-2"}
+	testutil.NoError(t, client.SendRequestWithPayload(context.Background(), other, nil, nil))
+	testutil.Falsef(t, bodies[2].RequestSetID == bodies[0].RequestSetID, "another downstream request reused the task id")
+}

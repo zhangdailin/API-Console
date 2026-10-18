@@ -45,3 +45,13 @@ func TestTextCacheHintSurvivesWireEncoding(t *testing.T) {
 	parts := body.Messages[0].Contents
 	testutil.Falsef(t, parts[0].CacheControl == nil || parts[0].CacheControl.Type != "ephemeral" || parts[1].Text != "question", "cache hint lost: %+v", parts)
 }
+
+// Retries of one downstream request keep one task identity (request_set_id and
+// business.id) while every attempt gets a fresh request_id; another downstream
+// request or another account is another task.
+func TestDownstreamRetriesShareTaskSetID(t *testing.T) {
+	first := taskSetID("account-a", "request-1")
+	testutil.Equal(t, first, taskSetID("account-a", "request-1"))
+	testutil.False(t, first == taskSetID("account-b", "request-1") || first == taskSetID("account-a", "request-2"), "task ids leaked between accounts or requests")
+	testutil.False(t, first == conversationSessionID("account-a", "request-1"), "task and session ids share a namespace")
+}
