@@ -32,6 +32,16 @@
           &nbsp;&nbsp;启用账号
         </label>
       </div>
+      <div class="form-group" id="autoCheckinGroup" hidden>
+        <label class="form-label">
+          <label class="toggle">
+            <input type="checkbox" id="autoCheckin" />
+            <span class="toggle-slider"></span>
+          </label>
+          &nbsp;&nbsp;每日自动签到
+        </label>
+        <small class="helper-text">每天（服务器时间）自动领取一次签到积分；失败后每小时重试。</small>
+      </div>
       <button type="submit" class="btn btn-primary modal-submit">
         保存
       </button>

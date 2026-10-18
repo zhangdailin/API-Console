@@ -60,6 +60,7 @@ func adminPort() *provider.Admin {
 		},
 		ErrMissingCredential: ErrMissingCredential,
 		Login:                loginPort(),
+		Checkin:              checkinAccount,
 	}
 }
 

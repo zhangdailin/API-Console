@@ -377,6 +377,44 @@ async function checkAccount(id, silent = false, actionText = "刷新") {
   return succeeded;
 }
 
+const CHECKIN_STATUS_TEXT = { success: "签到成功", already: "今日已签到", skipped: "暂无可签到活动", failed: "签到失败" };
+
+// checkinTooltip states the last outcome and whether the daily schedule is on.
+function checkinTooltip(acc) {
+  const last = acc.checkin || {};
+  const lines = ["领取今日积分（每日签到）"];
+  if (last.attempted_at && !String(last.attempted_at).startsWith("0001")) {
+    lines.push(`上次: ${formatTime(last.attempted_at)} · ${CHECKIN_STATUS_TEXT[last.status] || last.status || ""}`);
+    if (last.message) lines.push(last.message);
+  } else {
+    lines.push("尚未签到");
+  }
+  lines.push(acc.auto_checkin ? "自动签到: 已开启" : "自动签到: 未开启（在编辑中开启）");
+  return lines.join("\n");
+}
+
+// Claim today's reward for one account. The outcome is recorded server-side
+// whatever happens, so the row is refreshed from the response either way.
+async function checkinAccount(id, button) {
+  if (button) button.disabled = true;
+  try {
+    const result = await ConsoleAPI.json(`/api/accounts/${encodeURIComponent(id)}/checkin`, { method: "POST" });
+    if (result && result.account) accounts = accounts.map(a => (a.id === id ? result.account : a));
+    const outcome = (result && result.checkin) || {};
+    const kind = outcome.status === "success" ? "success" : "info";
+    showToast(`账号 ${id}: ${outcome.message || CHECKIN_STATUS_TEXT[outcome.status] || "签到完成"}`, kind);
+  } catch (err) {
+    showToast(`账号 ${id} 签到失败: ${err.message || err}`, "error");
+    try {
+      const latest = await ConsoleAPI.json(`/api/accounts/${encodeURIComponent(id)}`);
+      accounts = accounts.map(a => (a.id === id ? latest : a));
+    } catch (_) { /* the toast already reported the failure */ }
+  } finally {
+    if (button) button.disabled = false;
+    renderAccounts();
+  }
+}
+
 // Clear abnormal accounts
 async function clearAbnormalAccounts() {
   const abnormal = accounts.filter((acc) => matchesCurrentPlatform(acc) && isAccountAbnormal(acc));
@@ -655,6 +693,16 @@ function renderAccounts() {
 
     actionWrap.appendChild(edit);
     actionWrap.appendChild(refresh);
+    if (acc.checkin_supported) {
+      const checkin = document.createElement("button");
+      checkin.type = "button";
+      checkin.className = "action-icon";
+      checkin.dataset.action = "checkin";
+      checkin.dataset.id = encodeData(acc.id);
+      checkin.title = checkinTooltip(acc);
+      checkin.textContent = "签到";
+      actionWrap.appendChild(checkin);
+    }
     actionWrap.appendChild(del);
     tdActions.appendChild(actionWrap);
     tr.appendChild(tdActions);
@@ -937,6 +985,7 @@ function bindAccountActions(container) {
     const id = parseDataId(actionEl.dataset.id || "");
     if (actionEl.dataset.action === "edit") editAccount(id);
     if (actionEl.dataset.action === "refresh") refreshToken(id);
+    if (actionEl.dataset.action === "checkin") checkinAccount(id, actionEl);
     if (actionEl.dataset.action === "delete") deleteAccount(id);
   };
   container.onchange = (e) => {
@@ -1039,6 +1088,11 @@ function openModal(account = null) {
   title.textContent = account ? "编辑账号" : "添加账号";
   document.getElementById("accountId").value = account ? account.id : "";
   document.getElementById("enabled").checked = account ? account.enabled : true;
+  const autoCheckinGroup = document.getElementById("autoCheckinGroup");
+  if (autoCheckinGroup) {
+    autoCheckinGroup.hidden = !(account && account.checkin_supported);
+    document.getElementById("autoCheckin").checked = Boolean(account && account.auto_checkin);
+  }
   setAccountModalType(account ? normalizeAccountType(account) : selectedPlatformAccountType(typeEl));
   if (typeof window.syncToggleStates === "function") window.syncToggleStates();
   ConsoleUI.modal("accountModal", true);
@@ -1089,6 +1143,8 @@ async function saveAccount(e) {
     }
     const existing = accounts.find((account) => String(account.id) === String(id));
     const data = { account_type: type, weight: existing ? (parseInt(existing.weight, 10) || 1) : 1, enabled: document.getElementById("enabled").checked };
+    // Sent only for a channel with a check-in: an absent field keeps the stored choice.
+    if (existing && existing.checkin_supported) data.auto_checkin = document.getElementById("autoCheckin").checked;
     if (type === "grok") {
       data.credential_type = "oauth";
       data.grok_provider = "build";

@@ -21,5 +21,9 @@ func (acc *Account) Clone() *Account {
 	copy.QoderModelIDs = slices.Clone(acc.QoderModelIDs)
 	copy.QoderOrganizationTags = slices.Clone(acc.QoderOrganizationTags)
 	copy.ClineModelIDs = slices.Clone(acc.ClineModelIDs)
+	if acc.AutoCheckin != nil {
+		enabled := *acc.AutoCheckin
+		copy.AutoCheckin = &enabled
+	}
 	return &copy
 }

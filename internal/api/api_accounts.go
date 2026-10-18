@@ -187,8 +187,13 @@ func (a *API) HandleAccountByID(w http.ResponseWriter, r *http.Request) {
 
 	isCheck := len(parts) > 1 && parts[1] == "check"
 	isUsage := len(parts) > 1 && parts[1] == "usage"
-	if len(parts) > 2 || (len(parts) > 1 && !(isCheck || isUsage)) {
+	isCheckin := len(parts) > 1 && parts[1] == "checkin"
+	if len(parts) > 2 || (len(parts) > 1 && !(isCheck || isUsage || isCheckin)) {
 		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+	if isCheckin {
+		a.handleAccountCheckin(w, r, account)
 		return
 	}
 

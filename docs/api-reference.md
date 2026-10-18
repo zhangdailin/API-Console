@@ -120,7 +120,8 @@ Chat 桥接写递增 sequence_number，便于客户端识别顺序；当前没�
 | `/api/logout` | 清除当前会话与 cookie |
 | `/api/providers` | GET 当前提供者注册表 |
 | `/api/accounts` | GET 列表、POST 创建；各通道创建限制以授权路径为准 |
-| `/api/accounts/{id}` | GET / PUT / DELETE；账号编辑及刷新分支以处理器为准 |
+| `/api/accounts/{id}` | GET / PUT / DELETE；账号编辑及刷新分支以处理器为准。PUT 可带 `auto_checkin`（布尔）开关每日自动签到，省略则保持原值 |
+| `/api/accounts/{id}/checkin` | POST 立即执行一次每日签到（仅 `checkin_supported` 为 true 的通道，目前为 Qoder），返回 `{checkin, account}`；上游失败为 502，并附 `error.message`。结果记录在账号的 `checkin` 字段 |
 | `/api/keys` | GET 列表、POST 创建 |
 | `/api/keys/{id}` | PATCH 策略、DELETE 删除 |
 | `/api/keys/{id}/secret` | GET 管理员按需读取完整秘密，禁止缓存；内容不可用返回 503 |

@@ -1169,3 +1169,36 @@ test('Qoder quota pool tooltip keeps unavailable organization credits separate',
     add_on: { known: false, limit: 100, remaining: 80 },
   } }).length, 0);
 });
+
+test('check-in posts the action and saves the auto check-in choice only where supported', async () => {
+  const { context, node } = loadUI();
+  vm.runInContext('accounts = [{ id: 7, account_type: "qoder", weight: 1, has_credential: true, checkin_supported: true, auto_checkin: false }]', context);
+  const calls = [];
+  const toasts = [];
+  context.showToast = (message, kind) => toasts.push({ message, kind });
+  context.renderAccounts = () => {};
+  context.fetch = async (url, options = {}) => {
+    calls.push({ url, method: options.method || 'GET', body: options.body });
+    return {
+      ok: true,
+      headers: { get: () => 'application/json' },
+      json: async () => ({ checkin: { status: 'success', message: '签到成功 +100 积分' }, account: { id: 7, account_type: 'qoder', checkin_supported: true, checkin: { status: 'success' } } }),
+    };
+  };
+  await context.checkinAccount(7, null);
+  assert.deepEqual(calls.map(({ url, method }) => ({ url, method })), [{ url: '/api/accounts/7/checkin', method: 'POST' }]);
+  assert.equal(toasts.at(-1).kind, 'success');
+  assert.match(toasts.at(-1).message, /\+100/);
+  assert.equal(vm.runInContext('accounts[0].checkin.status', context), 'success');
+
+  node('accountType').value = 'qoder';
+  node('accountId').value = '7';
+  node('enabled').checked = true;
+  node('autoCheckin').checked = true;
+  context.closeModal = () => {};
+  context.loadAccounts = () => {};
+  calls.length = 0;
+  context.fetch = async (url, options) => { calls.push({ url, body: options.body }); return { ok: true }; };
+  await context.saveAccount({ preventDefault() {} });
+  assert.deepEqual(JSON.parse(calls[0].body), { account_type: 'qoder', weight: 1, enabled: true, auto_checkin: true });
+});

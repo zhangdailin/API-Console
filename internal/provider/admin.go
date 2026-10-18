@@ -68,6 +68,42 @@ type Admin struct {
 	// Login is the channel's browser authorization flow, or nil when the
 	// channel is not added that way.
 	Login *Login
+
+	// Checkin claims the account's daily reward, or is nil when the channel
+	// offers none. It reports the outcome and does not persist it: the caller
+	// records it with store.RecordAccountCheckin. A failure is an error, never
+	// a status.
+	Checkin func(ctx context.Context, env Env, acc *store.Account) (CheckinResult, error)
+}
+
+// Check-in outcomes. Already and Skipped are successful calls: the reward was
+// claimed earlier today, or nothing is claimable today.
+const (
+	CheckinSuccess = "success"
+	CheckinAlready = "already"
+	CheckinSkipped = "skipped"
+	CheckinFailed  = "failed"
+)
+
+// CheckinOutcome is the stored form of one check-in call. A failure is kept
+// as status failed with its reason, so the console shows why a day has no
+// claim.
+func CheckinOutcome(result CheckinResult, err error, at time.Time) store.AccountCheckin {
+	if err != nil {
+		message := err.Error()
+		if runes := []rune(message); len(runes) > 300 {
+			message = string(runes[:300])
+		}
+		return store.AccountCheckin{AttemptedAt: at, Status: CheckinFailed, Message: message}
+	}
+	return store.AccountCheckin{AttemptedAt: at, Status: result.Status, Message: result.Message, RewardCredits: result.RewardCredits}
+}
+
+// CheckinResult is one check-in outcome.
+type CheckinResult struct {
+	Status        string  `json:"status"`
+	Message       string  `json:"message"`
+	RewardCredits float64 `json:"reward_credits,omitempty"`
 }
 
 // Login is a browser or device authorization flow: open an official page, poll

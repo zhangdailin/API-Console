@@ -148,6 +148,13 @@ type Account struct {
 	// and read, so rolling the gateway back cannot turn every account that
 	// carries a cooldown into an undecodable document.
 	ModelCooldownReasons map[string]ModelCooldownReason `json:"model_cooldown_reasons,omitempty"`
+	// AutoCheckin opts the account into its channel's scheduled daily check-in.
+	// It is a pointer so a partial update that never mentions it keeps the
+	// stored choice; nil means "not set", which is off.
+	AutoCheckin *bool `json:"auto_checkin,omitempty"`
+	// Checkin is the outcome of the most recent check-in attempt. It is written
+	// only through RecordAccountCheckin, never by an ordinary account update.
+	Checkin AccountCheckin `json:"checkin,omitzero"`
 
 	// WorkBuddyAccessToken is the short-lived Keycloak bearer token of a
 	// WorkBuddy (www.workbuddy.ai) account. WorkBuddyRefreshToken is the
@@ -319,6 +326,21 @@ type GrokCredentialPatch struct {
 	UserID, Email, Name, TeamID string
 }
 
+// AccountCheckin is one daily check-in outcome. Status is "success",
+// "already" (claimed earlier today), "skipped" (nothing claimable today) or
+// "failed".
+type AccountCheckin struct {
+	AttemptedAt   time.Time `json:"attempted_at"`
+	Status        string    `json:"status,omitempty"`
+	Message       string    `json:"message,omitempty"`
+	RewardCredits float64   `json:"reward_credits,omitempty"`
+}
+
+// AutoCheckinEnabled reports whether the account opted into scheduled check-in.
+func (acc *Account) AutoCheckinEnabled() bool {
+	return acc != nil && acc.AutoCheckin != nil && *acc.AutoCheckin
+}
+
 // QoderAccountPatch contains the independently refreshed Qoder client state.
 // Nil slices mean "not changed"; the remaining zero values keep the stored
 // value, matching the provider's rotated-credential semantics.
@@ -358,6 +380,7 @@ type accountStore interface {
 	ApplyAccountQuality(ctx context.Context, id int64, update AccountQualityUpdate) (AccountQualityResult, error)
 	UpdateWorkBuddyCredentials(ctx context.Context, id int64, patch WorkBuddyCredentialPatch) error
 	UpdateQoderAccount(ctx context.Context, id int64, patch QoderAccountPatch) error
+	RecordAccountCheckin(ctx context.Context, id int64, checkin AccountCheckin) error
 	UpdateClineCredentials(ctx context.Context, id int64, patch ClineCredentialPatch) error
 	UpdateGrokCredentials(ctx context.Context, id int64, patch GrokCredentialPatch) error
 	DeleteAccount(ctx context.Context, id int64) error
@@ -528,6 +551,15 @@ func (s *Store) UpdateQoderAccount(ctx context.Context, id int64, patch QoderAcc
 }
 
 // UpdateClineCredentials persists a rotated Cline credential atomically.
+// RecordAccountCheckin stores a check-in outcome. An outcome older than the
+// stored one is discarded, so a slow attempt cannot rewind a newer verdict.
+func (s *Store) RecordAccountCheckin(ctx context.Context, id int64, checkin AccountCheckin) error {
+	if s.accounts != nil {
+		return s.accounts.RecordAccountCheckin(ctx, id, checkin)
+	}
+	return fmt.Errorf("store not configured")
+}
+
 func (s *Store) UpdateClineCredentials(ctx context.Context, id int64, patch ClineCredentialPatch) error {
 	if s.accounts != nil {
 		return s.accounts.UpdateClineCredentials(ctx, id, patch)

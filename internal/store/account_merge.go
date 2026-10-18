@@ -16,7 +16,7 @@ import (
 // The guards are grouped below into one step per subject, each a method on
 // accountPatch, so the merge reads as a list of rules:
 //
-//	mergeIdentity               name, type, weight, concurrency, enabled
+//	mergeIdentity               name, type, weight, concurrency, enabled, auto check-in
 //	mergeUsageMeter             generic usage slots and the WorkBuddy meter
 //	mergeStatusAndVerdict       status, verdict timestamps, quota reset
 //	mergeGrokCredentials        Grok OAuth identity and provider snapshots
@@ -64,6 +64,12 @@ func (p accountPatch) mergeIdentity() {
 	}
 	u.Token = acc.Token
 	u.Subscription = acc.Subscription
+	// The check-in opt-in is a pointer: only a write that states it changes it.
+	// The outcome itself (Checkin) is never merged; RecordAccountCheckin owns it.
+	if acc.AutoCheckin != nil {
+		enabled := *acc.AutoCheckin
+		u.AutoCheckin = &enabled
+	}
 }
 
 func (p accountPatch) mergeUsageMeter() {
