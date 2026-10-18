@@ -175,3 +175,31 @@ func TestCheckinDue(t *testing.T) {
 		testutil.Falsef(t, checkinDue(tc.enabled, tc.last, tc.status, now) != tc.want, "%s: due = %v, want %v", name, !tc.want, tc.want)
 	}
 }
+
+// The list is found wherever the envelope nests it, and a skipped outcome says
+// what the service returned instead of a bare "nothing to claim".
+func TestCheckinReadsNestedListsAndExplainsSkips(t *testing.T) {
+	nested := `{"success":true,"result":{"page":{"records":[{"campaignId":"daily","actionType":"CLAIM_BENEFIT","claimStatus":"CLAIMABLE","benefit":{"kind":"CREDITS","amount":50}}]}}}`
+	server := &campaignServer{
+		list:  func(int) (int, string) { return 200, nested },
+		claim: func(string) (int, string) { return 200, `{"status":"CLAIMED"}` },
+	}
+	result, err := runCheckin(t, server)
+	testutil.NoError(t, err)
+	testutil.Equal(t, result.Status, provider.CheckinSuccess)
+	testutil.Equal(t, result.RewardCredits, 50.0)
+
+	for body, want := range map[string]string{
+		`{"code":0,"items":[]}`: "响应字段: code,items",
+		`{"campaigns":[{"campaignId":"p","actionType":"VISIT_PAGE","claimStatus":"CLAIMABLE","benefit":{"kind":"CREDITS"}}]}`: "VISIT_PAGE/CREDITS/CLAIMABLE",
+	} {
+		server := &campaignServer{
+			list:  func(int) (int, string) { return 200, body },
+			claim: func(string) (int, string) { return 500, "" },
+		}
+		result, err := runCheckin(t, server)
+		testutil.NoError(t, err)
+		testutil.Equal(t, result.Status, provider.CheckinSkipped)
+		testutil.MustContain(t, result.Message, want)
+	}
+}

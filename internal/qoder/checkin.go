@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -92,17 +93,21 @@ func (c *Client) Checkin(ctx context.Context) (provider.CheckinResult, error) {
 }
 
 func (c *Client) checkinWith(ctx context.Context, creds Credentials) (provider.CheckinResult, error) {
-	listed, err := c.listCampaigns(ctx, creds)
+	raw, err := c.campaignRequest(ctx, creds, http.MethodGet, checkinCampaignsPath)
 	if err != nil {
 		var httpErr *checkinHTTPError
 		if errors.As(err, &httpErr) && httpErr.Status == http.StatusNotFound {
-			return provider.CheckinResult{Status: provider.CheckinSkipped, Message: "暂无可签到活动"}, nil
+			return provider.CheckinResult{Status: provider.CheckinSkipped, Message: "暂无可签到活动（活动接口返回 404）"}, nil
 		}
 		return provider.CheckinResult{}, err
 	}
+	listed := campaignsFrom(raw)
 	credits := creditCampaigns(listed)
 	if len(credits) == 0 {
-		return provider.CheckinResult{Status: provider.CheckinSkipped, Message: "暂无可签到活动"}, nil
+		// Say what the service returned: an unexpected shape and a list without
+		// a credit campaign need different fixes, and both used to read as the
+		// same bare "nothing to claim".
+		return provider.CheckinResult{Status: provider.CheckinSkipped, Message: "暂无可签到活动（" + describeCampaigns(raw, listed) + "）"}, nil
 	}
 	var claimable []campaign
 	alreadyClaimed := false
@@ -118,7 +123,7 @@ func (c *Client) checkinWith(ctx context.Context, creds Credentials) (provider.C
 		if alreadyClaimed {
 			return provider.CheckinResult{Status: provider.CheckinAlready, Message: "今日已签到"}, nil
 		}
-		return provider.CheckinResult{Status: provider.CheckinSkipped, Message: "暂无可签到活动"}, nil
+		return provider.CheckinResult{Status: provider.CheckinSkipped, Message: "暂无可签到活动（" + describeCampaigns(raw, listed) + "）"}, nil
 	}
 
 	confirmed, recovered, reward := 0, 0, 0.0
@@ -240,29 +245,72 @@ func checkinMachineCode(machineID string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// campaignsFrom accepts the list at the top level or under data.
+// campaignsFrom finds the campaign list wherever the response nests it: the
+// first array of objects carrying a campaignId, searched breadth-first a few
+// levels deep. The reference read only campaigns, data.campaigns and data[];
+// any other envelope parsed as an empty list and reported "nothing to claim".
 func campaignsFrom(raw []byte) []campaign {
-	var shaped struct {
-		Campaigns []campaign      `json:"campaigns"`
-		Data      json.RawMessage `json:"data"`
-	}
-	if json.Unmarshal(raw, &shaped) != nil {
+	var root any
+	if json.Unmarshal(raw, &root) != nil {
 		return nil
 	}
-	if len(shaped.Campaigns) > 0 {
-		return shaped.Campaigns
-	}
-	var nested struct {
-		Campaigns []campaign `json:"campaigns"`
-	}
-	if json.Unmarshal(shaped.Data, &nested) == nil && len(nested.Campaigns) > 0 {
-		return nested.Campaigns
-	}
-	var list []campaign
-	if json.Unmarshal(shaped.Data, &list) == nil {
-		return list
+	level := []any{root}
+	for depth := 0; depth < 5 && len(level) > 0; depth++ {
+		var next []any
+		for _, node := range level {
+			switch typed := node.(type) {
+			case []any:
+				if isCampaignList(typed) {
+					encoded, _ := json.Marshal(typed)
+					var list []campaign
+					if json.Unmarshal(encoded, &list) == nil {
+						return list
+					}
+				}
+				next = append(next, typed...)
+			case map[string]any:
+				for _, child := range typed {
+					next = append(next, child)
+				}
+			}
+		}
+		level = next
 	}
 	return nil
+}
+
+func isCampaignList(items []any) bool {
+	for _, item := range items {
+		if object, ok := item.(map[string]any); ok {
+			if _, ok := object["campaignId"]; ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// describeCampaigns summarizes a list response for the outcome message:
+// each campaign's action, benefit kind and claim status, or the top-level
+// keys when no list was found. It carries no identifiers or amounts.
+func describeCampaigns(raw []byte, listed []campaign) string {
+	if len(listed) == 0 {
+		var top map[string]json.RawMessage
+		if json.Unmarshal(raw, &top) != nil {
+			return "响应不是 JSON 对象"
+		}
+		keys := make([]string, 0, len(top))
+		for key := range top {
+			keys = append(keys, key)
+		}
+		slices.Sort(keys)
+		return "未找到活动列表，响应字段: " + strings.Join(keys, ",")
+	}
+	parts := make([]string, 0, len(listed))
+	for _, item := range listed {
+		parts = append(parts, util.FirstNonEmpty(item.ActionType, "?")+"/"+util.FirstNonEmpty(item.Benefit.Kind, "?")+"/"+util.FirstNonEmpty(item.ClaimStatus, "?"))
+	}
+	return fmt.Sprintf("共 %d 个活动，无可领积分: %s", len(listed), util.Truncate(strings.Join(parts, "; "), 200))
 }
 
 // creditCampaigns keeps the daily credit campaigns. Other CLAIM_BENEFIT
