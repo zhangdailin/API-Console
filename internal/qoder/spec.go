@@ -24,6 +24,10 @@ func spec() provider.Spec {
 		NewClient:            newProviderClient,
 		Capabilities:         capabilities{},
 		ConversationAffinity: true,
+		// Whether business code 10605 gates the whole upstream or one account
+		// has not been established. Probing a few idle accounts first serves the
+		// per-account case and costs one quick refusal each in the shared case.
+		QueueRefusalAccountProbes: 3,
 		Probe: &provider.Probe{
 			Subject:  "Qoder control plane",
 			Endpoint: DefaultOpenAPIBaseURL,
@@ -165,10 +169,54 @@ func catalogModels(catalog *Catalog) []provider.Model {
 	return out
 }
 
-// maintain keeps one account's catalog and allowance current.
+// maintain keeps one account's credential, catalog and allowance current.
 func maintain(ctx context.Context, env provider.Env, acc *store.Account) {
+	refreshCredential(ctx, env, acc)
 	refreshCatalog(ctx, env, acc)
 	refreshQuota(ctx, env, acc)
+}
+
+// credentialRefreshLead is how far ahead of expiry the scheduler renews an
+// access token. The request path only renews inside RefreshLead, so without
+// this the request that meets an expiring token waits for the OAuth round trip
+// and fails with it.
+const credentialRefreshLead = 5 * time.Minute
+
+func credentialRefreshDue(acc *store.Account, now time.Time) bool {
+	if acc == nil || !store.AccountAuthActive(acc) {
+		return false
+	}
+	creds := ResolveCredentials(acc)
+	if strings.TrimSpace(creds.RefreshToken) == "" || creds.AccessExpiresAt.IsZero() {
+		return false
+	}
+	if !creds.RefreshExpiresAt.IsZero() && now.After(creds.RefreshExpiresAt) {
+		// Only a new login helps; the request path reports that verdict.
+		return false
+	}
+	return creds.AccessExpiresAt.Sub(now) <= credentialRefreshLead
+}
+
+// refreshCredential renews an access token that is about to expire. The
+// rotation goes through the client's refresh path, which serializes with
+// request-time refreshes and persists under the expected refresh token, so a
+// request that renewed first is not renewed again.
+func refreshCredential(ctx context.Context, env provider.Env, acc *store.Account) {
+	if env.Store == nil || !credentialRefreshDue(acc, time.Now()) {
+		return
+	}
+	client := newClientWithStore(acc, env.Config, env.Store)
+	defer client.Close()
+	refreshCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	err := client.RefreshAhead(refreshCtx)
+	cancel()
+	if err != nil {
+		slog.Warn("Auto refresh qoder credential failed; the request path will retry", "account_id", acc.ID, "error", err)
+		return
+	}
+	// Later maintenance steps build their clients from acc; hand them the
+	// rotated credential instead of the one just consumed.
+	client.CopyAccountState(acc)
 }
 
 func catalogRefreshDue(acc *store.Account, now time.Time) bool {

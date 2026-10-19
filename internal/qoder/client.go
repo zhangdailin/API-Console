@@ -117,7 +117,49 @@ func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
 		client.machineID = strings.TrimSpace(acc.QoderMachineID)
 	}
 	client.applyFingerprint()
+	client.adoptStoredRuntime()
 	return client
+}
+
+// adoptStoredRuntime reuses the runtime pair stored beside the credential when
+// it was derived for the identity the account holds now. Without this every
+// rebuilt client (a restart, an account edit) derived and persisted a new pair,
+// which costs the first request an RSA wrap and a store write and presents the
+// upstream with new device material under an unchanged login.
+//
+// The pair is bound to the stored token pair, so a later credential rotation
+// still derives a fresh one, exactly as before. A pair stored without an
+// identity digest, or with one that no longer matches, is not trusted.
+func (c *Client) adoptStoredRuntime() {
+	acc := c.account
+	if acc == nil {
+		return
+	}
+	stored := RuntimeFields{
+		EncryptUserInfo: strings.TrimSpace(acc.QoderRuntimeInfo),
+		Key:             strings.TrimSpace(acc.QoderRuntimeKey),
+		Identity:        strings.TrimSpace(acc.QoderRuntimeIdentity),
+	}
+	if !stored.Complete() || stored.Identity == "" || strings.TrimSpace(c.creds.UID) == "" {
+		return
+	}
+	if runtimeIdentity(c.runtimeInput(c.creds)) != stored.Identity {
+		return
+	}
+	c.runtime = stored
+	c.runtimeAccessToken = c.creds.AccessToken
+	c.runtimeRefreshToken = c.creds.RefreshToken
+}
+
+// runtimeInput is the identity a runtime pair for creds encrypts.
+func (c *Client) runtimeInput(creds Credentials) runtimeFieldInput {
+	agreed := c.dataPolicyAgreed()
+	return runtimeFieldInput{
+		UID:              creds.UID,
+		OrganizationID:   creds.OrgID,
+		OrganizationTags: filterTags(creds.OrgTags),
+		DataPolicyAgreed: &agreed,
+	}
 }
 
 // aliyunUserType returns the account class this account reported, for example
@@ -218,7 +260,8 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 		return err
 	}
 
-	url := chatURL(c.endpoints.inference)
+	hosts := c.endpoints.orderedInferenceHosts(time.Now())
+	url := chatURL(hosts[0])
 	if logger != nil && !logger.Capturing() {
 		logger.LogUpstreamRequest(url, map[string]string{"provider": "qoder", "model": model.Key}, body)
 	}
@@ -226,7 +269,7 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	prepTrace.Mark("body_ready_ms")
 	prepTrace.Finish(nil)
 	prepTrace = nil
-	return c.runChat(upstream.WithToolDeltas(ctx, req.StreamToolDeltas), url, body, model, requestID, fields, onMessage)
+	return c.runChat(upstream.WithToolDeltas(ctx, req.StreamToolDeltas), hosts, body, model, requestID, fields, onMessage)
 }
 
 // runChat performs one upstream attempt. The shared request handler owns
@@ -243,14 +286,16 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 //
 // Anything that has already emitted content is returned immediately: a replay
 // would duplicate the answer, and a usage-only frame would double-count billing.
-func (c *Client) runChat(ctx context.Context, url string, body []byte, model modelEntry, requestID string, fields RuntimeFields, onMessage func(upstream.SSEMessage)) error {
+func (c *Client) runChat(ctx context.Context, hosts []string, body []byte, model modelEntry, requestID string, fields RuntimeFields, onMessage func(upstream.SSEMessage)) error {
 	// Authentication repair has its own one-shot budget; only transient
 	// failures consume the transient retry counter.
 	transientRetries := 0
 	emitted := false
 	refreshed := false
-	// Failover nodes are spent in order, each at most once per request.
-	fallbacks := slices.Clone(c.endpoints.inferenceFallbacks)
+	// hosts is the primary followed by its failover nodes, a recently working
+	// node first. They are spent in order, each at most once per request.
+	host, fallbacks := hosts[0], slices.Clone(hosts[1:])
+	url := chatURL(host)
 	emit := func(msg upstream.SSEMessage) {
 		emitted = true
 		if onMessage != nil {
@@ -261,15 +306,16 @@ func (c *Client) runChat(ctx context.Context, url string, body []byte, model mod
 	for {
 		attemptCredentials := c.currentCredentials()
 		result, err := c.attemptChat(ctx, url, body, model, requestID, fields, attemptCredentials, emit)
+		// A quota_exceeded notice is the upstream's own statement that the
+		// account's allowance is spent, and it is recorded however the attempt
+		// ended. A notice followed by a refusal or a cut stream is the case that
+		// matters most: dropping it left the account routable until the next
+		// periodic sync. The store's freshness guard keeps it from rewinding a
+		// newer synced reading.
+		if result.QuotaNotice != nil {
+			c.recordQuotaNotice(ctx, result.QuotaNotice)
+		}
 		if err == nil {
-			// A quota notice travels with the attempt's result whichever way the
-			// attempt settled, but it is only recorded on a settled stream: the
-			// notice is a statement about the account, and a stream that produced
-			// nothing usable has not proved anything except that the upstream
-			// refused, which its own error already says.
-			if result.QuotaNotice != nil && result.SawMeaningfulEvent {
-				c.recordQuotaNotice(ctx, result.QuotaNotice)
-			}
 			if !result.SawMeaningfulEvent {
 				// A 200 stream that carried nothing is the upstream refusing
 				// quietly. It is reported as an error, not as an empty success,
@@ -278,6 +324,11 @@ func (c *Client) runChat(ctx context.Context, url string, body []byte, model mod
 				return fmt.Errorf("%w: %v", ErrEmptyStream, fmt.Errorf("qoder stream produced no usable events"))
 			}
 			result.emitFinish(onMessage)
+			if host != c.endpoints.inference {
+				// A failover node served the request; start the next ones there
+				// instead of at the primary that just failed.
+				preferInferenceHost(c.endpoints.inference, host, time.Now())
+			}
 			return nil
 		}
 		if emitted {
@@ -330,14 +381,17 @@ func (c *Client) runChat(ctx context.Context, url string, body []byte, model mod
 				return err
 			}
 			continue
-		// The host itself could not be reached: no response arrived, so the
-		// account and the request are not at fault. The official client moves
-		// to its next node; the request gets a fresh id there because the
-		// failed host may still have received it.
-		case isUnreachable(err) && len(fallbacks) > 0:
+		// The host could not be reached, or answered with a provider fault of
+		// its own (5xx, 418, provider_error): neither the account nor the
+		// request is at fault. The official client moves to its next node, and
+		// so does this one before spending a backoff on the same host. The
+		// request gets a fresh id there because the failed host may still have
+		// received it.
+		case (isUnreachable(err) || isTransientError(err)) && len(fallbacks) > 0:
 			next := fallbacks[0]
 			fallbacks = fallbacks[1:]
-			slog.Warn("Qoder inference host unreachable; failing over", "next_host", next, "error", err)
+			slog.Warn("Qoder inference host failed; failing over", "host", host, "next_host", next, "error", err)
+			host = next
 			url = chatURL(next)
 			requestID, err = newUUID(c.entropy)
 			if err != nil {
@@ -471,6 +525,15 @@ func (c *Client) forceRefresh(ctx context.Context, rejected Credentials) error {
 	return err
 }
 
+// RefreshAhead renews the credential before it expires. A credential another
+// caller already renewed is adopted rather than renewed again.
+func (c *Client) RefreshAhead(ctx context.Context) error {
+	if c == nil {
+		return fmt.Errorf("qoder client is nil")
+	}
+	return c.forceRefresh(ctx, c.currentCredentials())
+}
+
 // refresh renews the device credential and persists the rotation.
 func (c *Client) refresh(ctx context.Context, previous Credentials) (Credentials, error) {
 	c.refreshMu.Lock()
@@ -559,20 +622,15 @@ func (c *Client) ensureRuntimeFields(ctx context.Context, creds Credentials) (Ru
 		// the identity is known.
 		return RuntimeFields{}, fmt.Errorf("qoder account has no user id yet; sign in again")
 	}
-	agreed := c.dataPolicyAgreed()
-	fields, err := runtimeFieldsFor(c.entropy, runtimeFieldInput{
-		UID:              creds.UID,
-		OrganizationID:   creds.OrgID,
-		OrganizationTags: filterTags(creds.OrgTags),
-		DataPolicyAgreed: &agreed,
-	})
+	fields, err := runtimeFieldsFor(c.entropy, c.runtimeInput(creds))
 	if err != nil {
 		return RuntimeFields{}, err
 	}
 	if err := c.persistPatch(ctx, store.QoderAccountPatch{
-		RuntimeInfo: fields.EncryptUserInfo,
-		RuntimeKey:  fields.Key,
-		UserID:      creds.UID,
+		RuntimeInfo:     fields.EncryptUserInfo,
+		RuntimeKey:      fields.Key,
+		RuntimeIdentity: fields.Identity,
+		UserID:          creds.UID,
 	}); err != nil {
 		return RuntimeFields{}, err
 	}
@@ -583,6 +641,7 @@ func (c *Client) ensureRuntimeFields(ctx context.Context, creds Credentials) (Ru
 	if c.account != nil {
 		c.account.QoderRuntimeInfo = fields.EncryptUserInfo
 		c.account.QoderRuntimeKey = fields.Key
+		c.account.QoderRuntimeIdentity = fields.Identity
 		if strings.TrimSpace(c.account.QoderUserID) == "" {
 			c.account.QoderUserID = creds.UID
 		}
@@ -940,4 +999,5 @@ func (c *Client) CopyAccountState(acc *store.Account) {
 	acc.QoderOrganizationTags = append([]string(nil), c.account.QoderOrganizationTags...)
 	acc.QoderRuntimeInfo = c.account.QoderRuntimeInfo
 	acc.QoderRuntimeKey = c.account.QoderRuntimeKey
+	acc.QoderRuntimeIdentity = c.account.QoderRuntimeIdentity
 }

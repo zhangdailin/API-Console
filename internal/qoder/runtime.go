@@ -53,6 +53,10 @@ type RuntimeFields struct {
 	// Key is the RSA ciphertext of the AES key, standard base64. It travels in
 	// the Cosy-Key header.
 	Key string
+	// Identity is the digest of the plaintext the pair encrypts. It is not sent
+	// upstream; it lets a later client check that a stored pair still matches
+	// the account's identity before reusing it.
+	Identity string
 }
 
 // runtimeFieldInput matches the international CLI 1.0.45 input to
@@ -79,6 +83,7 @@ func runtimeFieldsFor(entropy source, in runtimeFieldInput) (RuntimeFields, erro
 	if err != nil {
 		return RuntimeFields{}, fmt.Errorf("marshal runtime identity: %w", err)
 	}
+	identity := runtimeIdentityOf(plaintext)
 	sealed, err := aesCBCEncryptPKCS7(plaintext, key)
 	if err != nil {
 		return RuntimeFields{}, err
@@ -91,7 +96,21 @@ func runtimeFieldsFor(entropy source, in runtimeFieldInput) (RuntimeFields, erro
 	if err != nil {
 		return RuntimeFields{}, fmt.Errorf("wrap runtime key: %w", err)
 	}
-	return RuntimeFields{EncryptUserInfo: base64.StdEncoding.EncodeToString(sealed), Key: base64.StdEncoding.EncodeToString(wrapped)}, nil
+	return RuntimeFields{EncryptUserInfo: base64.StdEncoding.EncodeToString(sealed), Key: base64.StdEncoding.EncodeToString(wrapped), Identity: identity}, nil
+}
+
+// runtimeIdentity digests the identity a runtime pair would encrypt.
+func runtimeIdentity(in runtimeFieldInput) string {
+	plaintext, err := json.Marshal(in)
+	if err != nil {
+		return ""
+	}
+	return runtimeIdentityOf(plaintext)
+}
+
+func runtimeIdentityOf(plaintext []byte) string {
+	sum := sha256.Sum256(plaintext)
+	return hex.EncodeToString(sum[:])
 }
 
 // source is the entropy seam. Both the UUID bytes and the RSA padding come from

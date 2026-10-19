@@ -211,6 +211,7 @@ func (p accountPatch) mergeQoderCredentials() {
 		u.QoderMachineID = strings.TrimSpace(acc.QoderMachineID)
 		u.QoderRuntimeInfo = strings.TrimSpace(acc.QoderRuntimeInfo)
 		u.QoderRuntimeKey = strings.TrimSpace(acc.QoderRuntimeKey)
+		u.QoderRuntimeIdentity = strings.TrimSpace(acc.QoderRuntimeIdentity)
 	}
 	patchString(&u.QoderUserID, acc.QoderUserID)
 	patchString(&u.QoderUserName, acc.QoderUserName)

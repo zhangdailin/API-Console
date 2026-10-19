@@ -199,13 +199,16 @@ func (h *streamHandler) writeKeepAlive() {
 	if h.hasReturn {
 		return
 	}
-	// A keep-alive comment must not commit an empty 200 response. The client
-	// can wait for the shared queue without a body; if the retry budget expires,
-	// reportRequestFailure can still return an actual HTTP 429. Opening an
-	// Anthropic message_start here made queue refusals look like interrupted
-	// streams (HTTP 200 plus an in-band error) after 15 silent seconds.
+	// A keep-alive comment does not commit an early response: within
+	// silentCommitAfter the client waits without a body, and a refusal can
+	// still return an actual HTTP 429. Opening the stream on the first tick made
+	// queue refusals look like interrupted streams after 15 silent seconds.
+	// Beyond it the stream is opened anyway, because a proxy in front of the
+	// gateway would otherwise end the request with its own 504.
 	if !h.messageStartWritten {
-		return
+		if time.Since(h.startTime) < silentCommitAfter || !h.ensureMessageStartLocked() {
+			return
+		}
 	}
 	// Heartbeats need the same fresh transport deadline as content frames.
 	// Otherwise a quiet upstream outlives the last content write's deadline.

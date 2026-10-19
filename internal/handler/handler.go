@@ -160,6 +160,16 @@ type openAINonStreamResponse struct {
 }
 
 const keepAliveInterval = 15 * time.Second
+
+// silentCommitAfter is how long a stream may stay uncommitted while the gateway
+// waits for the first upstream event. Deferring the opening frame keeps a real
+// HTTP status for an early refusal, but a reverse proxy in front of the gateway
+// gives up on an origin that sends nothing: Cloudflare answers 504 after about
+// 100 seconds, while queue waits, retries and a slow first token can take
+// longer than that. Past this point the stream is opened and kept alive, and a
+// later failure is reported in band. Retries and account switching are
+// unaffected: they depend on emitted content, not on the open stream.
+const silentCommitAfter = 45 * time.Second
 const maxRequestBytes = 50 * 1024 * 1024 // 50MB
 
 func NewWithLoadBalancer(cfg *config.Config, lb *loadbalancer.LoadBalancer) *Handler {

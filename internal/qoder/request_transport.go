@@ -216,70 +216,92 @@ func (c *Client) attemptChat(ctx context.Context, url string, body []byte, model
 	return result, nil
 }
 
-// classifyStatus turns an HTTP failure into a retry decision. The gateway
-// reports its queue refusal as business code 10605 under a 401, so the code is
-// read before the status: refreshing on a busy verdict would burn the account's
-// token for nothing.
+// classifyStatus turns an HTTP failure into a retry decision.
 func classifyStatus(status int, retryAfter string, raw []byte) error {
-	code := envelopeCode(raw)
 	detail := extractBodyMessage(raw)
 	if detail == "" {
 		detail = util.Truncate(string(raw), 300)
 	}
-	wrapped := apiError(http.MethodPost, "chat", status, raw)
+	return classifyRefusal(refusal{
+		status:     status,
+		code:       envelopeCode(raw),
+		detail:     detail,
+		body:       string(raw),
+		retryAfter: retryAfter,
+		described:  apiError(http.MethodPost, "chat", status, raw),
+	})
+}
 
-	if code == busyCode || sharedQueueRefusal(detail, string(raw)) {
-		return &attemptStreamError{err: fmt.Errorf("%w: %v", ErrBusy, wrapped), busy: true, retryable: true, wait: busyWait(retryAfter, raw)}
-	}
-	// The daily request count is spent, and the gateway reports that under the
-	// same 401/403 envelope it uses for a rejected credential. Reading it as an
-	// authentication failure rotated the account's OAuth token and replayed the
-	// request for a credential that was never the problem.
-	if IsDailyCountExceeded(detail, string(raw)) {
+// refusal is an upstream failure as either wire layer reports it: an HTTP
+// status with its body, or a non-200 envelope inside a 200 stream.
+type refusal struct {
+	status     int
+	code       string
+	detail     string
+	body       string
+	retryAfter string
+	// described is the operator-facing rendering of the whole failure.
+	described error
+}
+
+// classifyRefusal is the one retry decision for an upstream refusal. The HTTP
+// status path and the in-stream envelope path both use it, so the same body
+// reaches the same verdict whichever layer carried it.
+//
+// The gateway reports its queue refusal as business code 10605 under a 401,
+// and several allowance verdicts under 401/403 as well, so business markers are
+// read before the HTTP status: refreshing on any of them would burn the
+// account's token for nothing.
+func classifyRefusal(r refusal) error {
+	body, detail := r.body, r.detail
+	switch {
+	case r.code == busyCode || sharedQueueRefusal(detail, body):
+		// The business code is the usual marker, but the same payload also
+		// arrives under an envelope the code reader cannot unwrap. Read as a
+		// credential rejection it parks a working account and loses the wait
+		// the upstream asked for.
+		return &attemptStreamError{err: fmt.Errorf("%w: %v", ErrBusy, r.described), busy: true, retryable: true, wait: busyWait(r.retryAfter, []byte(body))}
+	case IsDailyCountExceeded(detail, body):
+		// The daily request count is spent, under the same 401/403 envelope
+		// used for a rejected credential. Only another account or the next
+		// reset can serve this request.
 		return &attemptStreamError{err: fmt.Errorf("%w: %s", ErrDailyCountExceeded, detail), retryable: true}
-	}
-	// A 403 that names the pricing page is an entitlement refusal, not a
-	// credential failure: retrying and refreshing both change nothing, and
-	// classifying it as unauthorized would retire a valid account.
-	if DetectNoEntitlement(detail, string(raw)) {
-		return &attemptStreamError{err: entitlementError(string(raw))}
-	}
-	// Business verdicts take precedence over HTTP authentication statuses,
-	// just as they do inside an SSE envelope.
-	if isDuplicateRequest(detail, string(raw)) {
+	case isDuplicateRequest(detail, body):
+		// Replaying the same signed body/request id cannot repair an
+		// idempotency conflict; it only creates a retry storm.
 		return fmt.Errorf("qoder duplicate request")
-	}
-	if hasAgentLimitReset(detail, string(raw)) {
-		return &agentLimitError{resetAt: agentLimitResetAt(detail, string(raw))}
-	}
-	if IsContentPolicy(string(raw)) {
-		return &attemptStreamError{err: contentPolicyError(wrapped.Error())}
-	}
-	// A 401/403 is a credential verdict even when its body names an
-	// authentication_error or permission_error type: reading those markers as a
-	// client fault skipped the refresh and failed a recoverable request as a 400.
-	if status == http.StatusUnauthorized || status == http.StatusForbidden || IsSessionDead(string(raw)) {
-		return &attemptStreamError{err: fmt.Errorf("%w: %v", errUpstreamUnauthorized, wrapped), unauth: true}
-	}
-	if IsClientFault(string(raw)) {
-		return &attemptStreamError{err: fmt.Errorf("%w: %v", ErrClientFault, wrapped)}
-	}
-	switch status {
-	case http.StatusRequestTimeout, http.StatusTooManyRequests:
-		return &attemptStreamError{err: wrapped, retryable: true, wait: retryAfterDelay(retryAfter)}
-	}
-	// A provider-side hiccup wearing any status is worth one bounded retry on
-	// the account that already holds the request.
-	if IsTransientUpstreamStatus(status, string(raw)) {
-		return &attemptStreamError{err: transientError(wrapped.Error()), retryable: true, wait: retryAfterDelay(retryAfter)}
-	}
-	if status >= 500 {
-		return &attemptStreamError{err: wrapped, retryable: true}
+	case hasAgentLimitReset(detail, body):
+		// An allowance deadline carried under 401, not a credential rejection.
+		// It is checked before the entitlement marker because the same payload
+		// can carry the pricing link.
+		return &agentLimitError{resetAt: agentLimitResetAt(detail, body)}
+	case DetectNoEntitlement(detail, body):
+		// The credential was accepted; the account has no plan for this model.
+		// Classified as unauthorized it would retire a working account.
+		return &attemptStreamError{err: entitlementError(body)}
+	case IsContentPolicy(body):
+		// The safety review refused the input: a 400 for the client, and no
+		// account is marked rate-limited.
+		return &attemptStreamError{err: contentPolicyError(detail)}
+	case r.status == http.StatusUnauthorized || r.status == http.StatusForbidden || IsSessionDead(body):
+		// A credential verdict even when the body names an authentication_error
+		// or permission_error type, so it is checked before the client-fault
+		// markers: reading those as a client fault skipped the refresh.
+		return &attemptStreamError{err: fmt.Errorf("%w: %v", errUpstreamUnauthorized, r.described), unauth: true}
+	case IsClientFault(body):
+		return &attemptStreamError{err: fmt.Errorf("%w: %v", ErrClientFault, r.described)}
+	case r.status == http.StatusRequestTimeout || r.status == http.StatusTooManyRequests:
+		return &attemptStreamError{err: r.described, retryable: true, wait: retryAfterDelay(r.retryAfter)}
+	case IsTransientUpstreamStatus(r.status, body):
+		// A provider-side hiccup wearing any status is worth one bounded retry
+		// on the account that already holds the request.
+		return &attemptStreamError{err: transientError(r.described.Error()), retryable: true, wait: retryAfterDelay(r.retryAfter)}
+	case r.status >= 500:
+		return &attemptStreamError{err: r.described, retryable: true}
 	}
 	// The rest are request-side refusals: replaying them changes nothing and
 	// only takes a healthy account out of rotation.
-	_ = detail
-	return &attemptStreamError{err: wrapped}
+	return &attemptStreamError{err: r.described}
 }
 
 // busyWait preserves the gateway's minimum backoff. The handler's cumulative
