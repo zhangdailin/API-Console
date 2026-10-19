@@ -143,7 +143,7 @@ func TestDefaultUpstreamEndpoints(t *testing.T) {
 
 // An unreachable primary moves the request to the next node with a fresh
 // request id; a host that answered, even with an error, is not failed over.
-func TestChatFailsOverOnlyWhenTheHostIsUnreachable(t *testing.T) {
+func TestChatFailsOverWhenTheHostIsUnreachable(t *testing.T) {
 	var requestIDs []string
 	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		encoded, _ := io.ReadAll(r.Body)

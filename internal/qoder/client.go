@@ -260,7 +260,8 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 		return err
 	}
 
-	url := chatURL(c.endpoints.inference)
+	hosts := c.endpoints.orderedInferenceHosts(time.Now())
+	url := chatURL(hosts[0])
 	if logger != nil && !logger.Capturing() {
 		logger.LogUpstreamRequest(url, map[string]string{"provider": "qoder", "model": model.Key}, body)
 	}
@@ -268,7 +269,7 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	prepTrace.Mark("body_ready_ms")
 	prepTrace.Finish(nil)
 	prepTrace = nil
-	return c.runChat(upstream.WithToolDeltas(ctx, req.StreamToolDeltas), url, body, model, requestID, fields, onMessage)
+	return c.runChat(upstream.WithToolDeltas(ctx, req.StreamToolDeltas), hosts, body, model, requestID, fields, onMessage)
 }
 
 // runChat performs one upstream attempt. The shared request handler owns
@@ -285,14 +286,16 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 //
 // Anything that has already emitted content is returned immediately: a replay
 // would duplicate the answer, and a usage-only frame would double-count billing.
-func (c *Client) runChat(ctx context.Context, url string, body []byte, model modelEntry, requestID string, fields RuntimeFields, onMessage func(upstream.SSEMessage)) error {
+func (c *Client) runChat(ctx context.Context, hosts []string, body []byte, model modelEntry, requestID string, fields RuntimeFields, onMessage func(upstream.SSEMessage)) error {
 	// Authentication repair has its own one-shot budget; only transient
 	// failures consume the transient retry counter.
 	transientRetries := 0
 	emitted := false
 	refreshed := false
-	// Failover nodes are spent in order, each at most once per request.
-	fallbacks := slices.Clone(c.endpoints.inferenceFallbacks)
+	// hosts is the primary followed by its failover nodes, a recently working
+	// node first. They are spent in order, each at most once per request.
+	host, fallbacks := hosts[0], slices.Clone(hosts[1:])
+	url := chatURL(host)
 	emit := func(msg upstream.SSEMessage) {
 		emitted = true
 		if onMessage != nil {
@@ -321,6 +324,11 @@ func (c *Client) runChat(ctx context.Context, url string, body []byte, model mod
 				return fmt.Errorf("%w: %v", ErrEmptyStream, fmt.Errorf("qoder stream produced no usable events"))
 			}
 			result.emitFinish(onMessage)
+			if host != c.endpoints.inference {
+				// A failover node served the request; start the next ones there
+				// instead of at the primary that just failed.
+				preferInferenceHost(c.endpoints.inference, host, time.Now())
+			}
 			return nil
 		}
 		if emitted {
@@ -373,14 +381,17 @@ func (c *Client) runChat(ctx context.Context, url string, body []byte, model mod
 				return err
 			}
 			continue
-		// The host itself could not be reached: no response arrived, so the
-		// account and the request are not at fault. The official client moves
-		// to its next node; the request gets a fresh id there because the
-		// failed host may still have received it.
-		case isUnreachable(err) && len(fallbacks) > 0:
+		// The host could not be reached, or answered with a provider fault of
+		// its own (5xx, 418, provider_error): neither the account nor the
+		// request is at fault. The official client moves to its next node, and
+		// so does this one before spending a backoff on the same host. The
+		// request gets a fresh id there because the failed host may still have
+		// received it.
+		case (isUnreachable(err) || isTransientError(err)) && len(fallbacks) > 0:
 			next := fallbacks[0]
 			fallbacks = fallbacks[1:]
-			slog.Warn("Qoder inference host unreachable; failing over", "next_host", next, "error", err)
+			slog.Warn("Qoder inference host failed; failing over", "host", host, "next_host", next, "error", err)
+			host = next
 			url = chatURL(next)
 			requestID, err = newUUID(c.entropy)
 			if err != nil {

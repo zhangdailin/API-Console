@@ -103,7 +103,7 @@ Cline 套餐只读取官方 `/users/me/plan` 的 `success=true`、`data.plan` �
 | 通道 | 字段组 | 说明 |
 |---|---|---|
 | WorkBuddy | `workbuddy_base_url`、`workbuddy_http2_enabled` | 默认国际服务；HTTP/2 是传输设置 |
-| Qoder | `qoder_oauth_base_url`、`qoder_openapi_base_url`、`qoder_inference_base_url` | 浏览器、控制面和生成主机各自配置；生成主机为默认 `api2.qoder.sh` 时，连接级故障（无任何响应）依次切换到 `api1`、`api3`，自定义主机不切换 |
+| Qoder | `qoder_oauth_base_url`、`qoder_openapi_base_url`、`qoder_inference_base_url` | 浏览器、控制面和生成主机各自配置；生成主机为默认 `api2.qoder.sh` 时，无响应的连接级故障和主机自身的服务故障（5xx、418、`provider_error`）依次切换到 `api1`、`api3`；切换成功的节点在 5 分钟内优先使用，之后重新从 `api2` 开始。业务拒绝（如 10605 排队、400）不切换；自定义主机不切换 |
 | Qoder | `qoder_client_id`、`qoder_client_version`、`qoder_http2_enabled` | runtime 身份遵循国际 CLI 1.0.45 的 UID、组织及数据策略结构；旧 qoder_protocol_profile 字段被忽略 |
 | Cline | `cline_api_base_url`、`cline_workos_client_id`、`cline_workos_authorize_url`、`cline_workos_token_url`、`cline_http2_enabled` | API 与 WorkOS 授权分别配置 |
 | Grok | `grok_cli_base_url`、`grok_cli_user_agent`、`grok_cli_client_version`、`grok_cli_client_identifier` | 默认 Build CLI 网关和 CLI 身份 |
