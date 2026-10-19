@@ -219,7 +219,7 @@ func TestCheckinPresentsConfiguredDesktopFingerprint(t *testing.T) {
 	}
 	upstream := httptest.NewServer(server.handler(t))
 	defer upstream.Close()
-	cfg := &config.Config{QoderCheckinDevice: `{"machineToken":"tok","machineType":"typ","machineCode":"cod"}`}
+	cfg := &config.Config{QoderCheckinDevice: `{"machineToken":"tok","machineType":"typ","machineCode":"cod","machineId":"desk-id","machineHostname":"desk-host"}`}
 	client := NewFromAccount(signedTestAccount(), cfg)
 	setTestEndpoints(client, upstream.URL, upstream.URL, upstream.URL)
 	_, err := client.Checkin(context.Background())
@@ -227,5 +227,13 @@ func TestCheckinPresentsConfiguredDesktopFingerprint(t *testing.T) {
 	testutil.Equal(t, server.headers.Get("Cosy-MachineToken"), "tok")
 	testutil.Equal(t, server.headers.Get("Cosy-MachineType"), "typ")
 	testutil.Equal(t, server.headers.Get("Cosy-MachineCode"), "cod")
-	testutil.Equal(t, server.headers.Get("Cosy-MachineId"), "11111111-2222-4333-8444-555555555555")
+	testutil.Equal(t, server.headers.Get("Cosy-MachineId"), "desk-id")
+	testutil.Equal(t, server.headers.Get("Cosy-MachineHostname"), "desk-host")
+	// The desktop capture: client 10 at 0.4.8, served from the OpenAPI origin.
+	testutil.Equal(t, server.headers.Get("Cosy-ClientType"), "10")
+	testutil.Equal(t, server.headers.Get("Cosy-Version"), "0.4.8")
+	testutil.Equal(t, server.headers.Get("Origin"), upstream.URL)
+	testutil.Equal(t, server.headers.Get("Referer"), upstream.URL+"/growth-page/activity-iframe")
+	testutil.MustContain(t, server.headers.Get("User-Agent"), "Qoder/0.4.8")
+	testutil.Equal(t, server.headers.Get("Content-Type"), "")
 }

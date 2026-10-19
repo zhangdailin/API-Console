@@ -39,13 +39,14 @@ import (
 
 const (
 	checkinCampaignsPath = "/sash/api/v1/me/campaigns"
-	// checkinOrigin is the page the desktop client loads the campaign iframe
-	// from for the international service.
-	checkinOrigin = "https://qoder.sh"
-	// checkinClientType and checkinClientVersion identify the desktop client
-	// whose campaign view the service serves.
+	// The campaign view is the desktop client's activity iframe, served from
+	// the OpenAPI host itself. checkinClientType, checkinClientVersion and
+	// checkinUserAgent match a capture of the international desktop client
+	// 0.4.8 claiming the daily credits. The service filters the campaign list
+	// by client; the 0.3.4 version the reference sent saw only a promotion.
 	checkinClientType    = "10"
-	checkinClientVersion = "0.3.4"
+	checkinClientVersion = "0.4.8"
+	checkinUserAgent     = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Qoder/" + checkinClientVersion + " Chrome/150.0.7871.114 Electron/43.1.1 Safari/537.36"
 	// checkinBodyLimit bounds a campaigns response; it is a short JSON list.
 	checkinBodyLimit = 64 << 10
 )
@@ -193,29 +194,43 @@ func (c *Client) campaignRequest(ctx context.Context, creds Credentials, method,
 	if err != nil {
 		return nil, err
 	}
+	// Header order and values follow the desktop capture; the browser-only
+	// fetch metadata is included because the iframe always sends it.
+	req.Header.Set("Sec-Ch-Ua-Platform", `"Windows"`)
+	req.Header.Set("User-Agent", checkinUserAgent)
+	req.Header.Set("Sec-Ch-Ua", `"Not;A=Brand";v="8", "Chromium";v="150"`)
+	req.Header.Set("Sec-Ch-Ua-Mobile", "?0")
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Origin", base)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set("Sec-Fetch-Mode", "cors")
+	req.Header.Set("Sec-Fetch-Dest", "empty")
+	req.Header.Set("Referer", base+"/growth-page/activity-iframe")
+	req.Header.Set("Accept-Language", "zh-CN")
 	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(creds.AccessToken))
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "Qoder")
 	req.Header.Set("Cosy-ClientType", checkinClientType)
 	req.Header.Set("Cosy-Version", checkinClientVersion)
-	req.Header.Set("Cosy-MachineId", c.machineID)
+	req.Header.Set("Cosy-MachineOS", machineOS)
+	machineID := c.machineID
 	if device, ok := parseCheckinDevice(c.checkinDevice); ok {
 		// The configured desktop fingerprint replaces the derived one: the
 		// service withholds the daily credit campaign from any other identity.
+		machineID = util.FirstNonEmpty(device.MachineID, machineID)
+		if device.MachineHostname != "" {
+			req.Header.Set("Cosy-MachineHostname", device.MachineHostname)
+		}
+		req.Header.Set("Cosy-MachineId", machineID)
 		req.Header.Set("Cosy-MachineToken", device.MachineToken)
-		req.Header.Set("Cosy-MachineType", device.MachineType)
 		req.Header.Set("Cosy-MachineCode", device.MachineCode)
+		req.Header.Set("Cosy-MachineType", device.MachineType)
 	} else {
+		req.Header.Set("Cosy-MachineId", machineID)
 		req.Header.Set("Cosy-MachineToken", c.machineTokenOr(c.machineID))
-		req.Header.Set("Cosy-MachineType", c.machineTypeOr(machineSceneType))
 		// The service drops the credit campaign for a partial identity, so the
 		// fourth identity header must always be present.
 		req.Header.Set("Cosy-MachineCode", checkinMachineCode(c.machineID))
+		req.Header.Set("Cosy-MachineType", c.machineTypeOr(machineSceneType))
 	}
-	req.Header.Set("Cosy-MachineOS", machineOS)
-	req.Header.Set("Origin", checkinOrigin)
-	req.Header.Set("Referer", base+"/growth-page/activity-iframe")
 
 	// A refused token is answered with a redirect to a login page; following it
 	// would read that page as the campaign list.
@@ -251,6 +266,11 @@ type checkinDevice struct {
 	MachineToken string `json:"machineToken"`
 	MachineType  string `json:"machineType"`
 	MachineCode  string `json:"machineCode"`
+	// MachineID and MachineHostname are optional: the helper does not print
+	// them, but the desktop client sends both, so an operator may add them
+	// from a capture of the same machine.
+	MachineID       string `json:"machineId,omitempty"`
+	MachineHostname string `json:"machineHostname,omitempty"`
 }
 
 // parseCheckinDevice reads the helper output as pasted: the first JSON object
@@ -268,6 +288,8 @@ func parseCheckinDevice(raw string) (checkinDevice, bool) {
 	device.MachineToken = strings.TrimSpace(device.MachineToken)
 	device.MachineType = strings.TrimSpace(device.MachineType)
 	device.MachineCode = strings.TrimSpace(device.MachineCode)
+	device.MachineID = strings.TrimSpace(device.MachineID)
+	device.MachineHostname = strings.TrimSpace(device.MachineHostname)
 	return device, device.MachineToken != "" && device.MachineType != "" && device.MachineCode != ""
 }
 
