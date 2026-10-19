@@ -85,6 +85,12 @@ type Config struct {
 	// explicit HTTP/2 transport and the default client all answered in the same
 	// 1.5-2.0s window, and the refusals appeared on all three.
 	QoderHTTP2Enabled bool `json:"qoder_http2_enabled,omitempty"`
+	// QoderCheckinDevice is the desktop device fingerprint the daily check-in
+	// presents: the JSON line the official client's umid runtime-info helper
+	// prints ({"machineToken":...,"machineType":...,"machineCode":...}). The
+	// campaigns service shows the daily credit campaign only to that
+	// fingerprint. Empty keeps the login device identity.
+	QoderCheckinDevice string `json:"qoder_checkin_device,omitempty"`
 
 	// ── Cline (api.cline.bot) OAuth channel ──
 	//

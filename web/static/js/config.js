@@ -45,6 +45,7 @@ const CONFIG_TRACKED_FIELDS = [
   "cfg_admin_pass",
   "cfg_proxy_url",
   "cfg_proxy_bypass",
+  "cfg_qoder_checkin_device",
   "cfg_inference_profile",
   "cfg_grok_low_latency",
 ];
@@ -223,6 +224,7 @@ function applyConfigurationPayload(cfg) {
   setConfigControlValue("cfg_proxy_url", cfg.proxy_url || "");
   setConfigControlValue("cfg_proxy_bypass", normalizeProxyBypass(cfg.proxy_bypass).join("\n"));
   setConfigControlValue("cfg_inference_profile", cfg.inference_profile || "standard");
+  setConfigControlValue("cfg_qoder_checkin_device", cfg.qoder_checkin_device || "");
   const lowLatency = document.getElementById("cfg_grok_low_latency");
   if (lowLatency) lowLatency.checked = cfg.grok_low_latency === true;
   syncAllToggleStates();
@@ -257,6 +259,8 @@ async function saveConfiguration() {
     inference_profile: document.getElementById("cfg_inference_profile")?.value || "standard",
     grok_low_latency: !!document.getElementById("cfg_grok_low_latency")?.checked,
   };
+  const checkinDevice = document.getElementById("cfg_qoder_checkin_device");
+  if (checkinDevice) data.qoder_checkin_device = checkinDevice.value.trim();
 	const password = document.getElementById("cfg_admin_pass").value;
 	if (password.trim()) data.admin_password = password;
 

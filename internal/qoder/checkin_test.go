@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"orchids-api/internal/config"
 	"orchids-api/internal/provider"
 	"orchids-api/internal/testutil"
 )
@@ -202,4 +203,29 @@ func TestCheckinReadsNestedListsAndExplainsSkips(t *testing.T) {
 		testutil.Equal(t, result.Status, provider.CheckinSkipped)
 		testutil.MustContain(t, result.Message, want)
 	}
+}
+
+// A configured desktop fingerprint replaces the derived machine headers; the
+// helper output is accepted as pasted, and a partial one is ignored.
+func TestCheckinPresentsConfiguredDesktopFingerprint(t *testing.T) {
+	device, ok := parseCheckinDevice("PS> runtime-info.exe\n" + `{"machineToken":"tok","machineType":"typ","machineCode":"cod","vmInfo":{"isVm":true}}` + "\n")
+	testutil.Falsef(t, !ok || device.MachineToken != "tok" || device.MachineType != "typ" || device.MachineCode != "cod", "parsed %+v, ok=%v", device, ok)
+	_, ok = parseCheckinDevice(`{"machineToken":"tok","machineType":"typ"}`)
+	testutil.Falsef(t, ok, "a partial fingerprint must not be used")
+
+	server := &campaignServer{
+		list:  func(int) (int, string) { return 200, claimedCredits },
+		claim: func(string) (int, string) { return 500, "" },
+	}
+	upstream := httptest.NewServer(server.handler(t))
+	defer upstream.Close()
+	cfg := &config.Config{QoderCheckinDevice: `{"machineToken":"tok","machineType":"typ","machineCode":"cod"}`}
+	client := NewFromAccount(signedTestAccount(), cfg)
+	setTestEndpoints(client, upstream.URL, upstream.URL, upstream.URL)
+	_, err := client.Checkin(context.Background())
+	testutil.NoError(t, err)
+	testutil.Equal(t, server.headers.Get("Cosy-MachineToken"), "tok")
+	testutil.Equal(t, server.headers.Get("Cosy-MachineType"), "typ")
+	testutil.Equal(t, server.headers.Get("Cosy-MachineCode"), "cod")
+	testutil.Equal(t, server.headers.Get("Cosy-MachineId"), "11111111-2222-4333-8444-555555555555")
 }

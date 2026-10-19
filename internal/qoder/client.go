@@ -66,6 +66,9 @@ type Client struct {
 	runtimeRefreshToken string
 	requestTimeout      time.Duration
 	streamIdle          time.Duration
+	// checkinDevice is the configured desktop fingerprint for the daily
+	// check-in (config.QoderCheckinDevice); empty uses the login device.
+	checkinDevice string
 
 	entropy source
 
@@ -90,10 +93,12 @@ func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
 	proxyFunc := http.ProxyFromEnvironment
 	proxyKey := "direct"
 	http2 := false
+	checkinDevice := ""
 	if cfg != nil {
 		proxyFunc = httpclient.ProxyFuncFromConfig(cfg)
 		proxyKey = httpclient.GenerateProxyKeyFromConfig(cfg)
 		http2 = cfg.QoderHTTP2Enabled
+		checkinDevice = cfg.QoderCheckinDevice
 	}
 
 	client := &Client{
@@ -105,6 +110,7 @@ func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
 		requestTimeout: timeout,
 		streamIdle:     config.SharedStreamIdleTimeout,
 		entropy:        cryptoSource{},
+		checkinDevice:  checkinDevice,
 	}
 	if acc != nil {
 		copied := *acc

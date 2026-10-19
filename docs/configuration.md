@@ -103,6 +103,7 @@ Cline 套餐只读取官方 `/users/me/plan` 的 `success=true`、`data.plan` �
 | WorkBuddy | `workbuddy_base_url`、`workbuddy_http2_enabled` | 默认国际服务；HTTP/2 是传输设置 |
 | Qoder | `qoder_oauth_base_url`、`qoder_openapi_base_url`、`qoder_inference_base_url` | 浏览器、控制面和生成主机各自配置 |
 | Qoder | `qoder_client_id`、`qoder_client_version`、`qoder_http2_enabled` | runtime 身份遵循国际 CLI 1.0.45 的 UID、组织及数据策略结构；旧 qoder_protocol_profile 字段被忽略 |
+| Qoder 签到 | `qoder_checkin_device` | 每日签到使用的官方客户端设备指纹，内容为 umid `runtime-info` 输出的一行 JSON（`machineToken` / `machineType` / `machineCode`），可在「系统设置 → Qoder 签到」填写；留空则使用账号登录设备身份，此时签到服务通常不展示每日积分活动 |
 | Cline | `cline_api_base_url`、`cline_workos_client_id`、`cline_workos_authorize_url`、`cline_workos_token_url`、`cline_http2_enabled` | API 与 WorkOS 授权分别配置 |
 | Grok | `grok_cli_base_url`、`grok_cli_user_agent`、`grok_cli_client_version`、`grok_cli_client_identifier` | 默认 Build CLI 网关和 CLI 身份 |
 | Grok | `grok_cli_oauth_client_id`、`grok_cli_oauth_device_url`、`grok_cli_oauth_token_url` | 默认 auth.x.ai 的设备授权与交换端点 |

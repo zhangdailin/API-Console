@@ -28,6 +28,7 @@
           <a class="config-nav-link" href="#groupAuth" data-nav-group="groupAuth">认证与密钥</a>
           <a class="config-nav-link" href="#groupInference" data-nav-group="groupInference">请求策略</a>
           <a class="config-nav-link" href="#groupProxy" data-nav-group="groupProxy">代理</a>
+          <a class="config-nav-link" href="#groupQoderCheckin" data-nav-group="groupQoderCheckin">Qoder 签到</a>
         </nav>
 
         <div class="config-cards">
@@ -135,6 +136,26 @@
                 <div class="form-row-control">
                   <textarea id="cfg_proxy_bypass" class="form-input" rows="3"
                     placeholder="每行一个域名或 CIDR，例如 example.com 或 10.0.0.0/8"></textarea>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-card" id="groupQoderCheckin">
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">Qoder 签到</h2>
+              <span class="mini-badge">每日积分</span>
+            </div>
+            <p class="settings-card-note">签到服务只对官方客户端的设备指纹展示每日积分活动。留空则使用账号登录设备身份。</p>
+            <div class="settings-card-body">
+              <div class="form-row">
+                <div class="form-row-label">
+                  <label class="form-label" for="cfg_qoder_checkin_device">桌面设备指纹 <span class="secret-badge">敏感</span></label>
+                  <span class="helper-text">粘贴官方客户端 umid 目录下 runtime-info 的输出（含 machineToken / machineType / machineCode 的一行 JSON）。所有 Qoder 账号签到时共用该指纹。</span>
+                </div>
+                <div class="form-row-control">
+                  <textarea id="cfg_qoder_checkin_device" class="form-input secret-field" rows="3"
+                    placeholder='{"machineToken":"…","machineType":"…","machineCode":"…"}'></textarea>
                 </div>
               </div>
             </div>

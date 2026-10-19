@@ -200,11 +200,19 @@ func (c *Client) campaignRequest(ctx context.Context, creds Credentials, method,
 	req.Header.Set("Cosy-ClientType", checkinClientType)
 	req.Header.Set("Cosy-Version", checkinClientVersion)
 	req.Header.Set("Cosy-MachineId", c.machineID)
-	req.Header.Set("Cosy-MachineToken", c.machineTokenOr(c.machineID))
-	req.Header.Set("Cosy-MachineType", c.machineTypeOr(machineSceneType))
-	// The service drops the credit campaign for a partial identity, so the
-	// fourth identity header must always be present.
-	req.Header.Set("Cosy-MachineCode", checkinMachineCode(c.machineID))
+	if device, ok := parseCheckinDevice(c.checkinDevice); ok {
+		// The configured desktop fingerprint replaces the derived one: the
+		// service withholds the daily credit campaign from any other identity.
+		req.Header.Set("Cosy-MachineToken", device.MachineToken)
+		req.Header.Set("Cosy-MachineType", device.MachineType)
+		req.Header.Set("Cosy-MachineCode", device.MachineCode)
+	} else {
+		req.Header.Set("Cosy-MachineToken", c.machineTokenOr(c.machineID))
+		req.Header.Set("Cosy-MachineType", c.machineTypeOr(machineSceneType))
+		// The service drops the credit campaign for a partial identity, so the
+		// fourth identity header must always be present.
+		req.Header.Set("Cosy-MachineCode", checkinMachineCode(c.machineID))
+	}
 	req.Header.Set("Cosy-MachineOS", machineOS)
 	req.Header.Set("Origin", checkinOrigin)
 	req.Header.Set("Referer", base+"/growth-page/activity-iframe")
@@ -235,6 +243,32 @@ func (c *Client) campaignRequest(ctx context.Context, creds Credentials, method,
 		return nil, &checkinHTTPError{Status: status, Body: util.Truncate(strings.Join(strings.Fields(string(body)), " "), 200)}
 	}
 	return body, nil
+}
+
+// checkinDevice is the desktop fingerprint the umid runtime-info helper
+// prints. Its vmInfo and any other fields are ignored.
+type checkinDevice struct {
+	MachineToken string `json:"machineToken"`
+	MachineType  string `json:"machineType"`
+	MachineCode  string `json:"machineCode"`
+}
+
+// parseCheckinDevice reads the helper output as pasted: the first JSON object
+// in the text. A fingerprint missing any of the three fields is unusable,
+// because a partial identity is treated as an unofficial client.
+func parseCheckinDevice(raw string) (checkinDevice, bool) {
+	start := strings.IndexByte(raw, '{')
+	if start < 0 {
+		return checkinDevice{}, false
+	}
+	var device checkinDevice
+	if json.NewDecoder(strings.NewReader(raw[start:])).Decode(&device) != nil {
+		return checkinDevice{}, false
+	}
+	device.MachineToken = strings.TrimSpace(device.MachineToken)
+	device.MachineType = strings.TrimSpace(device.MachineType)
+	device.MachineCode = strings.TrimSpace(device.MachineCode)
+	return device, device.MachineToken != "" && device.MachineType != "" && device.MachineCode != ""
 }
 
 // checkinMachineCode derives the stable Cosy-MachineCode for the login device.
