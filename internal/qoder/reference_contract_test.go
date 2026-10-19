@@ -45,11 +45,14 @@ func TestReferenceRuntimeUsesCurrentIdentity(t *testing.T) {
 	want, err := runtimeFieldsFor(newRecordingSource(entropy), runtimeFieldInput{UID: creds.UID, OrganizationID: creds.OrgID, OrganizationTags: filterTags(creds.OrgTags), DataPolicyAgreed: &agreed})
 	testutil.Equal(t, err, nil)
 	testutil.Equal(t, got, want)
-	// A new client derives its own pair instead of trusting stored ciphertext.
+	// A new client reuses stored ciphertext only under the digest of the exact
+	// plaintext it encrypts; a pair without one (an older layout) is re-derived.
 	snapshot := signedTestAccount()
 	c.CopyAccountState(snapshot)
+	testutil.Equal(t, NewFromAccount(snapshot, nil).runtimeSnapshot(), got)
+	snapshot.QoderRuntimeIdentity = ""
 	switched := NewFromAccount(snapshot, nil)
-	testutil.False(t, switched.runtimeSnapshot().Complete(), "new client reused persisted runtime")
+	testutil.False(t, switched.runtimeSnapshot().Complete(), "new client reused a runtime pair of unknown layout")
 }
 
 func TestReferenceChatBodyAndHeadersAgree(t *testing.T) {

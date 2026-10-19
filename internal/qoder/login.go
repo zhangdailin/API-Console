@@ -139,6 +139,7 @@ func BuildLoginAccount(ctx context.Context, cfg *config.Config, loginID, machine
 	}
 	acc.QoderRuntimeInfo = client.RuntimeFields().EncryptUserInfo
 	acc.QoderRuntimeKey = client.RuntimeFields().Key
+	acc.QoderRuntimeIdentity = client.RuntimeFields().Identity
 
 	// The catalog is read from the signed upstream control plane at login. A
 	// failed read leaves the snapshot empty on purpose: the account is saved and

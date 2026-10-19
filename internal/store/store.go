@@ -209,6 +209,11 @@ type Account struct {
 	// the pair it derived at login.
 	QoderRuntimeInfo string `json:"qoder_runtime_info,omitempty"`
 	QoderRuntimeKey  string `json:"qoder_runtime_key,omitempty"`
+	// QoderRuntimeIdentity is a digest of the identity the stored pair encrypts.
+	// The pair itself cannot be decrypted locally, so this is how a rebuilt
+	// client tells whether the stored pair still describes the account before
+	// reusing it instead of deriving new device material.
+	QoderRuntimeIdentity string `json:"qoder_runtime_identity,omitempty"`
 	// QoderModelIDs is the last successful account-scoped model catalog
 	// snapshot. An empty snapshot means "not synced yet", not that the account
 	// supports every model.
@@ -330,6 +335,7 @@ type QoderAccountPatch struct {
 	UserID               string
 	RuntimeInfo          string
 	RuntimeKey           string
+	RuntimeIdentity      string
 	ModelIDs             []string
 	// Quota carries a reading the upstream stated in band — a quota_exceeded
 	// notice multiplexed into a stream — rather than one a sync round fetched.
