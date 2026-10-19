@@ -110,6 +110,8 @@ func (e *messageExecution) run() {
 		e.sh.handleMessage(msg)
 	}
 	var attempt int
+	// queueRefusalProbes counts moves to another account on a queue refusal.
+	var queueRefusalProbes int
 	attemptedAccounts := make(map[int64]struct{})
 	for {
 		if returned, _ := e.sh.terminalState(); returned {
@@ -295,6 +297,13 @@ func (e *messageExecution) run() {
 			"switch_account", verdict.SwitchAccount,
 			"retries_remaining", retriesRemaining,
 		)
+		sharedRefusal := isSharedUpstreamRefusalClass(errClass)
+		if sharedRefusal && !verdict.SwitchAccount && queueRefusalProbes < e.queueRefusalAccountProbes() &&
+			e.moveForQueueRefusal(upstreamReq.Model, attemptedAccounts) {
+			queueRefusalProbes++
+			attempt++
+			continue
+		}
 		if verdict.SwitchAccount && e.currentAccount != nil && e.h.loadBalancer != nil {
 			prevClient := e.apiClient
 			prevAccount := e.currentAccount
@@ -359,7 +368,6 @@ func (e *messageExecution) run() {
 		if hinted := upstreamRetryAfter(err); hinted > retryDelayForAttempt {
 			retryDelayForAttempt = hinted
 		}
-		sharedRefusal := isSharedUpstreamRefusalClass(errClass)
 		// The probe interval must fit; jitter is capped by the remaining budget.
 		sharedRefusalWait := time.Duration(0)
 		if retryDelayForAttempt > 0 && sharedRefusal {
@@ -434,4 +442,56 @@ func (e *messageExecution) run() {
 		}
 		attempt++
 	}
+}
+
+// queueRefusalAccountProbes is the channel's budget of account moves on a queue
+// refusal; see provider.Spec.QueueRefusalAccountProbes.
+func (e *messageExecution) queueRefusalAccountProbes() int {
+	spec, ok := provider.Lookup(e.targetChannel)
+	if !ok {
+		return 0
+	}
+	return max(spec.QueueRefusalAccountProbes, 0)
+}
+
+// moveForQueueRefusal moves a queue-refused request to an account it has not
+// tried yet, and reports whether it did.
+//
+// Nothing is recorded against the refused account: it is neither cooled down
+// nor added to the failed set, so it stays in the pool and remains the place
+// to wait if every probe is refused too. Parking each refused account was what
+// once drained the whole pool on a gate that turned out to be shared. Only an
+// account with a free concurrency slot is taken; the probe waits at most the
+// reservation budget for one, never behind another request's generation.
+func (e *messageExecution) moveForQueueRefusal(model string, tried map[int64]struct{}) bool {
+	if e.currentAccount == nil || e.h.loadBalancer == nil {
+		return false
+	}
+	excluded := append([]int64(nil), e.failedAccountIDs...)
+	for id := range tried {
+		if _, failed := e.failedAccountSet[id]; !failed {
+			excluded = append(excluded, id)
+		}
+	}
+	client, account, release, trackedID, err := e.h.acquireReservedAccountSelection(e.r.Context(), e.targetChannel, true, excluded, accountSelectionOptions{ModelID: model})
+	if err != nil || account == nil {
+		if release != nil {
+			release()
+		}
+		if trackedID != 0 {
+			e.h.releaseTrackedAccount(trackedID)
+		}
+		return false
+	}
+	slog.Warn("Queue refusal; moving to an untried account before waiting",
+		"trace_id", e.traceID, "from_account_id", e.currentAccount.ID, "to_account_id", account.ID)
+	if e.trackedAccountID != 0 {
+		e.h.releaseTrackedAccount(e.trackedAccountID)
+	}
+	previousRelease := e.releaseClient
+	e.apiClient, e.currentAccount, e.releaseClient, e.trackedAccountID = client, account, release, trackedID
+	if previousRelease != nil {
+		previousRelease()
+	}
+	return true
 }

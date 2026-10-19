@@ -24,6 +24,10 @@ func spec() provider.Spec {
 		NewClient:            newProviderClient,
 		Capabilities:         capabilities{},
 		ConversationAffinity: true,
+		// Whether business code 10605 gates the whole upstream or one account
+		// has not been established. Probing a few idle accounts first serves the
+		// per-account case and costs one quick refusal each in the shared case.
+		QueueRefusalAccountProbes: 3,
 		Probe: &provider.Probe{
 			Subject:  "Qoder control plane",
 			Endpoint: DefaultOpenAPIBaseURL,
