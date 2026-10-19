@@ -45,14 +45,11 @@ func TestReferenceRuntimeUsesCurrentIdentity(t *testing.T) {
 	want, err := runtimeFieldsFor(newRecordingSource(entropy), runtimeFieldInput{UID: creds.UID, OrganizationID: creds.OrgID, OrganizationTags: filterTags(creds.OrgTags), DataPolicyAgreed: &agreed})
 	testutil.Equal(t, err, nil)
 	testutil.Equal(t, got, want)
-	// A new client reuses stored ciphertext only under the digest of the exact
-	// plaintext it encrypts; a pair without one (an older layout) is re-derived.
+	// A new client derives its own pair instead of trusting stored ciphertext.
 	snapshot := signedTestAccount()
 	c.CopyAccountState(snapshot)
-	testutil.Equal(t, NewFromAccount(snapshot, nil).runtimeSnapshot(), got)
-	snapshot.QoderRuntimeIdentity = ""
 	switched := NewFromAccount(snapshot, nil)
-	testutil.False(t, switched.runtimeSnapshot().Complete(), "new client reused a runtime pair of unknown layout")
+	testutil.False(t, switched.runtimeSnapshot().Complete(), "new client reused persisted runtime")
 }
 
 func TestReferenceChatBodyAndHeadersAgree(t *testing.T) {
@@ -143,7 +140,7 @@ func TestDefaultUpstreamEndpoints(t *testing.T) {
 
 // An unreachable primary moves the request to the next node with a fresh
 // request id; a host that answered, even with an error, is not failed over.
-func TestChatFailsOverWhenTheHostIsUnreachable(t *testing.T) {
+func TestChatFailsOverOnlyWhenTheHostIsUnreachable(t *testing.T) {
 	var requestIDs []string
 	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		encoded, _ := io.ReadAll(r.Body)

@@ -33,22 +33,25 @@ import (
 // streamEnvelope is the outer SSE frame.
 type streamEnvelope struct {
 	gatewayFailure
-	// The envelope also carries headers and a textual statusCode. Neither is
-	// read, and leaving them out of the struct lets the decoder skip them
-	// instead of allocating a header map per token.
-	Error           json.RawMessage `json:"error"`
-	Body            string          `json:"body"`
-	StatusCodeValue int             `json:"statusCodeValue"`
+	Headers         map[string][]string `json:"headers"`
+	Error           json.RawMessage     `json:"error"`
+	Body            string              `json:"body"`
+	StatusCodeValue int                 `json:"statusCodeValue"`
+	StatusCode      string              `json:"statusCode"`
 }
 
 // streamChunk is the inner OpenAI-shaped chunk.
 type streamChunk struct {
 	gatewayFailure
-	// Only the fields the stream reader acts on are decoded; id, object,
-	// created, model and role are skipped.
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Created int64  `json:"created"`
+	Model   string `json:"model"`
 	Choices []struct {
+		Index        int    `json:"index"`
 		FinishReason string `json:"finish_reason"`
 		Delta        struct {
+			Role             string `json:"role"`
 			Content          string `json:"content"`
 			ReasoningContent string `json:"reasoning_content"`
 			ToolCalls        []struct {
@@ -213,11 +216,10 @@ func (r streamResult) emitFinish(onMessage func(upstream.SSEMessage)) {
 	onMessage(upstream.SSEMessage{Type: "model.finish", Event: event})
 }
 
-// sseFrame is one accumulated SSE event. data aliases the reader's buffer and
-// is valid only for the duration of the callback that receives it.
+// sseFrame is one accumulated SSE event.
 type sseFrame struct {
 	event string
-	data  []byte
+	data  string
 }
 
 // readSSE frames the upstream stream. A `data:` line continues the current
@@ -258,47 +260,37 @@ func readSSE(reader io.Reader, fn func(sseFrame) bool) error {
 	defer util.ReleaseStreamBuffer(buffer)
 	scanner.Buffer(buffer[:], 16*1024*1024)
 
-	// One data buffer serves every frame of the stream; a frame is one line in
-	// practice, so this replaces two allocations per token with none.
-	var event string
-	var data []byte
-	pending := false
+	var event, data strings.Builder
 	flush := func() bool {
-		if !pending {
+		if event.Len() == 0 && data.Len() == 0 {
 			return true
 		}
-		frame := sseFrame{event: event, data: data}
-		event, data, pending = "", data[:0], false
+		frame := sseFrame{event: event.String(), data: data.String()}
+		event.Reset()
+		data.Reset()
 		return fn(frame)
 	}
 
 	for scanner.Scan() {
-		line := bytes.TrimRight(scanner.Bytes(), "\r")
+		line := strings.TrimRight(scanner.Text(), "\r")
 		switch {
-		case len(line) == 0:
+		case line == "":
 			if !flush() {
 				return nil
 			}
-		case line[0] == ':':
+		case strings.HasPrefix(line, ":"):
 			// Comment / keep-alive.
-		case bytes.HasPrefix(line, []byte("event:")):
-			name := string(bytes.TrimSpace(line[len("event:"):]))
-			if event != "" {
-				event += " " + name
-			} else {
-				event = name
+		case strings.HasPrefix(line, "event:"):
+			if event.Len() > 0 {
+				event.WriteByte(' ')
 			}
-			pending = pending || name != ""
-		case bytes.HasPrefix(line, []byte("data:")):
-			value := line[len("data:"):]
-			if len(value) > 0 && value[0] == ' ' {
-				value = value[1:]
+			event.WriteString(strings.TrimSpace(strings.TrimPrefix(line, "event:")))
+		case strings.HasPrefix(line, "data:"):
+			value := strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " ")
+			if data.Len() > 0 {
+				data.WriteByte('\n')
 			}
-			if len(data) > 0 {
-				data = append(data, '\n')
-			}
-			data = append(data, value...)
-			pending = pending || len(data) > 0
+			data.WriteString(value)
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -338,7 +330,7 @@ func consumeStreamObserved(body io.Reader, onMessage func(upstream.SSEMessage), 
 		if strings.EqualFold(strings.TrimSpace(frame.event), "finish") {
 			sawFinish = true
 			var timings map[string]json.RawMessage
-			if json.Unmarshal(frame.data, &timings) == nil {
+			if json.Unmarshal([]byte(frame.data), &timings) == nil {
 				for _, key := range []string{"firstTokenDuration", "totalDuration", "serverDuration"} {
 					if raw, ok := timings[key]; ok {
 						var value int64
@@ -354,21 +346,21 @@ func consumeStreamObserved(body io.Reader, onMessage func(upstream.SSEMessage), 
 			return false
 		}
 		if strings.EqualFold(strings.TrimSpace(frame.event), "error") {
-			streamErr = streamErrorEvent(bytes.Clone(frame.data))
+			streamErr = streamErrorEvent([]byte(frame.data))
 			return false
 		}
 
-		payload := bytes.TrimSpace(frame.data)
-		if len(payload) == 0 {
+		payload := strings.TrimSpace(frame.data)
+		if payload == "" {
 			return true
 		}
-		if string(payload) == "[DONE]" {
+		if payload == "[DONE]" {
 			// Qoder may send usage or an error after this marker.
 			return true
 		}
 
 		var envelope streamEnvelope
-		if err := json.Unmarshal(payload, &envelope); err != nil {
+		if err := json.Unmarshal([]byte(payload), &envelope); err != nil {
 			streamErr = fmt.Errorf("qoder stream protocol error: invalid envelope: %w", err)
 			return false
 		}
@@ -385,13 +377,53 @@ func consumeStreamObserved(body io.Reader, onMessage func(upstream.SSEMessage), 
 			if detail == "" {
 				detail = fmt.Sprintf("upstream status %d", envelope.StatusCodeValue)
 			}
-			streamErr = classifyRefusal(refusal{
-				status:    envelope.StatusCodeValue,
-				code:      code,
-				detail:    detail,
-				body:      envelope.Body,
-				described: fmt.Errorf("qoder upstream error: status=%d, %s", envelope.StatusCodeValue, detail),
-			})
+			switch {
+			case code == busyCode || sharedQueueRefusal(detail, envelope.Body):
+				// The business code is the usual marker, but the same payload also
+				// reaches here under an envelope the code reader cannot unwrap. It
+				// must still classify as busy: read as a credential rejection it
+				// parks a working account, and it loses the wait the upstream asked
+				// for, so the retry comes back before the queue has cleared.
+				busyErr := fmt.Errorf("%w: %s", ErrBusy, detail)
+				streamErr = &attemptStreamError{err: busyErr, busy: true, retryable: true, wait: busyWait("", []byte(envelope.Body))}
+			case IsDailyCountExceeded(detail, envelope.Body):
+				// The account's daily request count is spent. The credential is
+				// valid and the 401/403 envelope must not be read as a rejection of
+				// it: only another account or the next reset can serve this request.
+				streamErr = &attemptStreamError{err: fmt.Errorf("%w: %s", ErrDailyCountExceeded, detail), retryable: true}
+			case isDuplicateRequest(detail, envelope.Body):
+				// Replaying the same signed body/request id cannot repair an
+				// idempotency conflict; it only creates a retry storm.
+				streamErr = fmt.Errorf("qoder duplicate request")
+			case hasAgentLimitReset(detail, envelope.Body):
+				// This business payload is an allowance deadline carried under
+				// 401, not a credential rejection. Refreshing the token is both
+				// useless and harmful (it may rotate a still-valid credential).
+				streamErr = &agentLimitError{resetAt: agentLimitResetAt(detail, envelope.Body)}
+			case DetectNoEntitlement(detail, envelope.Body):
+				// The credential was accepted; the account simply has no plan or
+				// allowance for this model. This must not be classified as an
+				// authentication failure, or a working account is retired.
+				streamErr = entitlementError(envelope.Body)
+			case IsContentPolicy(envelope.Body):
+				// The upstream safety review refused the input. It is not a
+				// capacity problem and not a credential problem: the client gets
+				// a 400 straight away, and no account is marked rate-limited.
+				streamErr = contentPolicyError(detail)
+			case envelope.StatusCodeValue == http.StatusUnauthorized || envelope.StatusCodeValue == http.StatusForbidden || IsSessionDead(envelope.Body):
+				// Checked before the client-fault markers, which include
+				// authentication_error: a credential verdict must reach the refresh.
+				streamErr = fmt.Errorf("%w: %s", errUpstreamUnauthorized, detail)
+			case IsClientFault(envelope.Body):
+				streamErr = fmt.Errorf("%w: %s", ErrClientFault, detail)
+			case IsTransientUpstreamStatus(envelope.StatusCodeValue, envelope.Body):
+				// The gateway's own provider fault. It is worth one bounded
+				// retry on this account, and it must not be read as a
+				// credential rejection.
+				streamErr = &attemptStreamError{err: transientError(fmt.Sprintf("qoder upstream error: status=%d, %s", envelope.StatusCodeValue, detail)), retryable: true}
+			default:
+				streamErr = fmt.Errorf("qoder upstream error: status=%d, %s", envelope.StatusCodeValue, detail)
+			}
 			return false
 		}
 		if strings.TrimSpace(envelope.Body) == "" {
@@ -399,7 +431,7 @@ func consumeStreamObserved(body io.Reader, onMessage func(upstream.SSEMessage), 
 				streamErr = loginExpiredError(envelope.gatewayFailure)
 				return false
 			}
-			if failure := envelope.gatewayFailure.classify(bytes.Clone(payload), len(envelope.Error) > 0 && string(envelope.Error) != "null"); failure != nil {
+			if failure := envelope.gatewayFailure.classify([]byte(payload), len(envelope.Error) > 0 && string(envelope.Error) != "null"); failure != nil {
 				streamErr = failure
 				return false
 			}

@@ -1,7 +1,6 @@
 package qoder
 
 import (
-	"bytes"
 	"errors"
 	"io"
 	"strconv"
@@ -344,14 +343,13 @@ func TestReadSSEHandlesMultilineData(t *testing.T) {
 
 	var frames []sseFrame
 	err := readSSE(strings.NewReader("event: message\ndata: line1\ndata: line2\n\n"), func(frame sseFrame) bool {
-		frame.data = bytes.Clone(frame.data)
 		frames = append(frames, frame)
 		return true
 	})
 	testutil.NoError(t, err, "readSSE() error = %v")
 	testutil.Equal(t, len(frames), 1)
 	testutil.Equal(t, frames[0].event, "message")
-	testutil.Equal(t, string(frames[0].data), "line1\nline2")
+	testutil.Equal(t, frames[0].data, "line1\nline2")
 }
 
 // TestReadSSEPropagatesReadErrors proves a transport failure is visible.

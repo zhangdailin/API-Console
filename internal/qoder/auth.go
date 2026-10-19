@@ -35,7 +35,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"encoding/json"
@@ -188,8 +187,7 @@ func (c Credentials) AccessValid(now time.Time) bool {
 }
 
 // defaultInferenceFallbacks are the official client's failover nodes for the
-// default inference host, tried in order when it cannot be reached or answers
-// with a provider fault of its own. The COSY
+// default inference host, tried in order when it cannot be reached. The COSY
 // signature covers only the path, so a request signed for one node is valid on
 // another.
 var defaultInferenceFallbacks = []string{"https://api1.qoder.sh", "https://api3.qoder.sh"}
@@ -199,61 +197,14 @@ type endpoints struct {
 	oauth     string
 	openAPI   string
 	inference string
-	// inferenceFallbacks follow inference when it is unreachable or faulting.
-	// They apply only to the default host: an operator-chosen host has no known
-	// peers.
+	// inferenceFallbacks follow inference when it is unreachable. They apply
+	// only to the default host: an operator-chosen host has no known peers.
 	inferenceFallbacks []string
 }
 
 // inferenceHosts is the primary inference host followed by its failover nodes.
 func (e endpoints) inferenceHosts() []string {
 	return append([]string{e.inference}, e.inferenceFallbacks...)
-}
-
-// hostPreferenceTTL is how long a failover node that served a request stays
-// first in line. Afterwards requests start at the primary again, which is how
-// the gateway notices that it has recovered.
-const hostPreferenceTTL = 5 * time.Minute
-
-// hostPreferences remembers, per primary host, the failover node that last
-// served a request after the primary failed it. Without it every request
-// started at the failing primary and paid for its fault again before reaching a
-// working node.
-var hostPreferences = struct {
-	sync.Mutex
-	byPrimary map[string]hostPreference
-}{byPrimary: map[string]hostPreference{}}
-
-type hostPreference struct {
-	host  string
-	until time.Time
-}
-
-func preferInferenceHost(primary, host string, now time.Time) {
-	hostPreferences.Lock()
-	hostPreferences.byPrimary[primary] = hostPreference{host: host, until: now.Add(hostPreferenceTTL)}
-	hostPreferences.Unlock()
-}
-
-// orderedInferenceHosts is inferenceHosts with a recently working failover
-// node moved to the front. Every host stays in the list, so a preferred node
-// that fails still falls through to the others, the primary included.
-func (e endpoints) orderedInferenceHosts(now time.Time) []string {
-	hosts := e.inferenceHosts()
-	if len(e.inferenceFallbacks) == 0 {
-		return hosts
-	}
-	hostPreferences.Lock()
-	preference := hostPreferences.byPrimary[e.inference]
-	hostPreferences.Unlock()
-	if preference.host == "" || !now.Before(preference.until) {
-		return hosts
-	}
-	index := slices.Index(hosts, preference.host)
-	if index <= 0 {
-		return hosts
-	}
-	return append([]string{preference.host}, slices.Delete(hosts, index, index+1)...)
 }
 
 func resolveEndpoints(cfg *config.Config) endpoints {

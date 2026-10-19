@@ -374,7 +374,6 @@ func (s *redisStore) UpdateQoderAccount(ctx context.Context, id int64, patch Qod
 		patchString(&acc.QoderUserID, patch.UserID)
 		patchString(&acc.QoderRuntimeInfo, patch.RuntimeInfo)
 		patchString(&acc.QoderRuntimeKey, patch.RuntimeKey)
-		patchString(&acc.QoderRuntimeIdentity, patch.RuntimeIdentity)
 		if patch.ModelIDs != nil {
 			acc.QoderModelIDs = append([]string(nil), patch.ModelIDs...)
 		}

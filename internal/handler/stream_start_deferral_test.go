@@ -112,29 +112,6 @@ func TestKeepAliveDoesNotCommitSilentStream(t *testing.T) {
 	testutil.Falsef(t, !strings.Contains(rec.buf.String(), "Qoder model queue unavailable") || strings.Contains(rec.buf.String(), "event: message_start"), "queue failure was not returned as HTTP error: %q", rec.buf.String())
 }
 
-// TestKeepAliveOpensAStreamSilentPastTheProxyWindow covers a first event that
-// takes longer than a fronting proxy waits for an origin. Without opening the
-// stream, Cloudflare ended such requests with its own 504 after about 100
-// seconds of silence, while the gateway was still waiting on the upstream.
-func TestKeepAliveOpensAStreamSilentPastTheProxyWindow(t *testing.T) {
-	rec := newFlushRecorder()
-	sh := newStreamHandler(&config.Config{}, rec, debug.New(false, false), true, adapter.FormatAnthropic)
-	defer sh.release()
-	sh.pendingModel = "qwen3.8-max"
-	sh.startTime = time.Now().Add(-silentCommitAfter)
-
-	sh.writeKeepAlive()
-	out := rec.buf.String()
-	testutil.False(t, !sh.hasCommitted(), "a stream silent past silentCommitAfter stayed uncommitted")
-	testutil.Equal(t, strings.Count(out, "event: message_start"), 1)
-	testutil.Falsef(t, strings.Index(out, sseKeepAlive) < strings.Index(out, "event: message_start"), "keep-alive preceded the opening frame: %q", out)
-
-	// A refusal after the stream opened is reported in band and closes it.
-	sh.reportRequestFailure("queue refused", "rate_limit", "Qoder model queue unavailable", 0)
-	testutil.MustContain(t, rec.buf.String(), "event: error")
-	testutil.MustContain(t, rec.buf.String(), "Qoder model queue unavailable")
-}
-
 // TestKeepAliveContinuesAfterStreamOpens covers the usual keep-alive behavior
 // after an actual content block has committed the response.
 func TestKeepAliveContinuesAfterStreamOpens(t *testing.T) {

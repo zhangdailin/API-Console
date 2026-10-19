@@ -48,7 +48,7 @@ func TestAccountSecretFieldsAreComplete(t *testing.T) {
 		WorkBuddyExpiresAt WorkBuddyUID ReplaceWorkBuddyCredentials WorkBuddyModelIDs
 		WorkBuddyModelsSyncedAt WorkBuddyQuota QoderExpiresAt ReplaceQoderCredentials
 		QoderMachineID QoderUserID QoderUserName QoderOrganizationID
-		QoderOrganizationTags QoderDataPolicy QoderRuntimeIdentity QoderModelIDs QoderModelsSyncedAt QoderQuota
+		QoderOrganizationTags QoderDataPolicy QoderModelIDs QoderModelsSyncedAt QoderQuota
 		ClineExpiresAt ClineEmail ClinePlan ReplaceClineCredentials ClineModelIDs
 		ClineModelsSyncedAt
 	`) {

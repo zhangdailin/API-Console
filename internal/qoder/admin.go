@@ -120,7 +120,6 @@ func RedactOutput(acc *store.Account) *store.Account {
 	out.QoderRefreshToken = ""
 	out.QoderRuntimeInfo = ""
 	out.QoderRuntimeKey = ""
-	out.QoderRuntimeIdentity = ""
 	// The generic slots are shared with other channels; a Qoder record never
 	// writes them, and clearing them here keeps a legacy row from leaking.
 	out.RefreshToken = ""
@@ -148,7 +147,6 @@ func PreserveCredentialsOnEdit(acc, existing *store.Account) {
 	provider.PreserveTime(&acc.QoderExpiresAt, existing.QoderExpiresAt)
 	provider.PreserveBlank(&acc.QoderRuntimeInfo, existing.QoderRuntimeInfo)
 	provider.PreserveBlank(&acc.QoderRuntimeKey, existing.QoderRuntimeKey)
-	provider.PreserveBlank(&acc.QoderRuntimeIdentity, existing.QoderRuntimeIdentity)
 	// The identity in the runtime plaintext is immutable for a credential: an
 	// edit must not change the UID without re-deriving, or every request would
 	// be signed with material that no longer matches the account.
@@ -261,7 +259,6 @@ func VerifyAccount(ctx context.Context, acc *store.Account, cfg *config.Config, 
 	fields := client.RuntimeFields()
 	acc.QoderRuntimeInfo = fields.EncryptUserInfo
 	acc.QoderRuntimeKey = fields.Key
-	acc.QoderRuntimeIdentity = fields.Identity
 
 	// The catalog comes from the signed upstream control plane. A failed read
 	// leaves the snapshot untouched rather than installing a compiled-in list, so

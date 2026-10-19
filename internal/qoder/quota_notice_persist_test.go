@@ -2,15 +2,11 @@ package qoder
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
-	"orchids-api/internal/prompt"
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
-	"orchids-api/internal/upstream"
 )
 
 // quotaNoticeStore records what a quota-notice write asked the store to persist.
@@ -94,36 +90,4 @@ func TestRecordQuotaNoticeWithoutAResetKeepsTheOldWindow(t *testing.T) {
 	got := fake.patches[0].Quota.ResetAt
 	testutil.CheckFalsef(t, !got.Equal(previous), "ResetAt = %v, want the previous window %v preserved", got, previous)
 	testutil.CheckFalse(t, !acc.QoderQuota.Exhausted, "Exhausted = false, want the verdict recorded even without a boundary")
-}
-
-// TestQuotaNoticeBeforeARefusalIsRecorded covers the stream that states the
-// allowance is spent and then refuses. The notice used to be recorded only on
-// a successful stream, so this account stayed routable until the next sync.
-func TestQuotaNoticeBeforeARefusalIsRecorded(t *testing.T) {
-	notice := `{"headers":{},"body":"[NOTIFICATIONS]#{\"notifications\":[{\"extras\":{\"nextResetAt\":1791397354935},\"notificationType\":\"quota_exceeded\"}]}","statusCodeValue":200}`
-	refusal := `{"body":"{\"message\":\"not found\"}","statusCodeValue":404}`
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("data:" + notice + "\n\ndata:" + refusal + "\n\n"))
-	}))
-	defer server.Close()
-
-	client := NewFromAccount(signedTestAccount(), nil)
-	setTestEndpoints(client, server.URL, server.URL, server.URL)
-	fake := &quotaNoticeStore{}
-	client.SetAccountStore(fake)
-
-	err := client.SendRequestWithPayload(context.Background(), upstream.UpstreamRequest{
-		Model:    "Qwen3.7-Max",
-		Messages: []prompt.Message{{Role: "user", Content: prompt.MessageContent{Text: "hello"}}},
-	}, nil, nil)
-	testutil.Error(t, err)
-
-	recorded := false
-	for _, patch := range fake.patches {
-		if patch.Quota != nil && patch.Quota.Exhausted {
-			recorded = true
-		}
-	}
-	testutil.False(t, !recorded, "quota_exceeded notice before a refusal was not recorded")
 }
