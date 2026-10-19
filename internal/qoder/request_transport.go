@@ -175,7 +175,8 @@ func (c *Client) attemptChat(ctx context.Context, url string, body []byte, model
 	if err != nil {
 		// Only a connection-level hiccup is worth another attempt; a bad URL or
 		// an untrusted certificate would fail identically every time.
-		return streamResult{}, &attemptStreamError{err: fmt.Errorf("send qoder request: %w", err), retryable: IsTransientTransport(err)}
+		transient := IsTransientTransport(err)
+		return streamResult{}, &attemptStreamError{err: fmt.Errorf("send qoder request: %w", err), retryable: transient, unreachable: transient && ctx.Err() == nil}
 	}
 	resp.Body = attempt.CaptureBody(resp.Body)
 	defer func() { _ = resp.Body.Close() }()
@@ -257,7 +258,7 @@ func classifyStatus(status int, retryAfter string, raw []byte) error {
 	// A 401/403 is a credential verdict even when its body names an
 	// authentication_error or permission_error type: reading those markers as a
 	// client fault skipped the refresh and failed a recoverable request as a 400.
-	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+	if status == http.StatusUnauthorized || status == http.StatusForbidden || IsSessionDead(string(raw)) {
 		return &attemptStreamError{err: fmt.Errorf("%w: %v", errUpstreamUnauthorized, wrapped), unauth: true}
 	}
 	if IsClientFault(string(raw)) {

@@ -390,16 +390,6 @@ func (s *redisStore) UpdateQoderAccount(ctx context.Context, id int64, patch Qod
 	})
 }
 
-func (s *redisStore) RecordAccountCheckin(ctx context.Context, id int64, checkin AccountCheckin) error {
-	return s.updateAccountAtomic(ctx, id, func(acc *Account) error {
-		if checkin.AttemptedAt.Before(acc.Checkin.AttemptedAt) {
-			return nil
-		}
-		acc.Checkin = checkin
-		return nil
-	})
-}
-
 func (s *redisStore) UpdateClineCredentials(ctx context.Context, id int64, patch ClineCredentialPatch) error {
 	return s.updateAccountAtomic(ctx, id, func(acc *Account) error {
 		if err := applyCredentialPatch("cline", patch.ExpectedRefreshToken, patch.AccessToken, patch.RefreshToken, patch.ExpiresAt,

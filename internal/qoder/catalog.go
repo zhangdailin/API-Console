@@ -72,9 +72,19 @@ const fallbackMaxOutputTokens = 32000
 // only for a missing or non-positive value; a fixed 32000 overshoots models
 // whose cap is lower.
 func (m modelEntry) defaultMaxOutputTokens() int {
+	if tokens, ok := m.declaredMaxOutputTokens(); ok {
+		return tokens
+	}
+	return fallbackMaxOutputTokens
+}
+
+// declaredMaxOutputTokens reads max_output_tokens as a positive safe integer,
+// accepting the number and the string spelling. ok is false when the row
+// declares no usable value.
+func (m modelEntry) declaredMaxOutputTokens() (int, bool) {
 	raw := bytes.TrimSpace(m.MaxOutputTokens)
 	if len(raw) == 0 {
-		return fallbackMaxOutputTokens
+		return 0, false
 	}
 	var text string
 	if json.Unmarshal(raw, &text) == nil {
@@ -82,28 +92,9 @@ func (m modelEntry) defaultMaxOutputTokens() int {
 	}
 	value, err := strconv.ParseInt(string(raw), 10, 64)
 	if err != nil || value <= 0 || value > 1<<53-1 {
-		return fallbackMaxOutputTokens
+		return 0, false
 	}
-	return int(value)
-}
-
-// reasoningDefault reports whether the model thinks when the caller sent no
-// reasoning effort. The official client lets thinking_config decide: an object
-// enables thinking exactly when its "enabled" block is present and non-null, an
-// unrecognised non-null shape cannot rule thinking out, and only a missing or
-// null block falls back to is_reasoning. The gateway ships rows that contradict
-// the flag (is_reasoning=false beside a populated enabled block).
-func (m modelEntry) reasoningDefault() bool {
-	raw := bytes.TrimSpace(m.ThinkingConfig)
-	if len(raw) == 0 || string(raw) == "null" {
-		return m.IsReasoning
-	}
-	var config map[string]json.RawMessage
-	if json.Unmarshal(raw, &config) != nil {
-		return true
-	}
-	enabled, ok := config["enabled"]
-	return ok && string(bytes.TrimSpace(enabled)) != "null"
+	return int(value), true
 }
 
 // Catalog is a resolved model catalog.
@@ -345,10 +336,24 @@ func catalogToIDs(catalog *Catalog) []string {
 	return ids
 }
 
-// CatalogContextWindows is the legacy default INPUT-budget projection, not a
-// model's total context limit. Unknown tiers never inherit this budget.
-// Every alias reports the budget of the row it actually resolves to.
+// CatalogContextWindows publishes the input window each model is actually
+// served with: the default context tier this channel sends as context_length,
+// bounded by max_input_tokens. Publishing max_input_tokens alone advertised 1M
+// for a model served at its 200K default tier, so a client trusting it kept
+// growing a history the upstream then refused or cut. Every alias reports the
+// row it actually resolves to.
 func CatalogContextWindows(ids []string) map[string]int {
+	return catalogWindows(ids, modelEntry.servedInputTokens)
+}
+
+// CatalogOutputWindows publishes max_output_tokens where the catalog states
+// one. The 32000 fallback is this channel's default, not an observation, so it
+// is never published.
+func CatalogOutputWindows(ids []string) map[string]int {
+	return catalogWindows(ids, modelEntry.declaredOutputTokens)
+}
+
+func catalogWindows(ids []string, measure func(modelEntry) int) map[string]int {
 	catalog := catalogFromIDs(ids)
 	if catalog == nil || catalog.Len() == 0 {
 		return nil
@@ -363,8 +368,11 @@ func CatalogContextWindows(ids []string) map[string]int {
 			// An ambiguous display name must advertise the row that actually
 			// resolves, not the largest budget among unrelated products.
 			resolved, err := catalog.Resolve(name)
-			if err == nil && resolved.MaxInputTokens > 0 {
-				out[name] = resolved.MaxInputTokens
+			if err != nil {
+				continue
+			}
+			if tokens := measure(resolved); tokens > 0 {
+				out[name] = tokens
 			}
 		}
 	}
@@ -372,6 +380,30 @@ func CatalogContextWindows(ids []string) map[string]int {
 		return nil
 	}
 	return out
+}
+
+// servedContextTokens is the context_length a request for this model carries:
+// the default tier, or max_input_tokens when no tier is declared.
+func (m modelEntry) servedContextTokens() int {
+	if tier := m.ContextWindowInfo().DefaultContextTokens; tier > 0 {
+		return tier
+	}
+	return m.MaxInputTokens
+}
+
+// servedInputTokens is the input a request for this model can carry: the
+// served context, never more than max_input_tokens.
+func (m modelEntry) servedInputTokens() int {
+	served := m.servedContextTokens()
+	if m.MaxInputTokens > 0 && (served <= 0 || m.MaxInputTokens < served) {
+		return m.MaxInputTokens
+	}
+	return served
+}
+
+func (m modelEntry) declaredOutputTokens() int {
+	tokens, _ := m.declaredMaxOutputTokens()
+	return tokens
 }
 
 // FetchModels returns the catalog already observed for this account.

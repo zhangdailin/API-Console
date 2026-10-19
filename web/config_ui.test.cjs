@@ -60,9 +60,8 @@ test('save sends security and proxy settings but no local cache settings',async(
  node('cfg_proxy_url').value='http://proxy.example:8080';
  node('cfg_anonymous_allow_ips').value='203.0.113.1';
  node('cfg_proxy_bypass').value='example.com';
- node('cfg_qoder_checkin_device').value='  {"machineToken":"t","machineType":"y","machineCode":"c"}\n';
  await api.saveConfiguration();
- same(saved,{admin_password:'changed',proxy_url:'http://proxy.example:8080',proxy_bypass:['example.com'],inference_profile:'standard',grok_low_latency:false,qoder_checkin_device:'{"machineToken":"t","machineType":"y","machineCode":"c"}'});
+ same(saved,{admin_password:'changed',proxy_url:'http://proxy.example:8080',proxy_bypass:['example.com'],inference_profile:'standard',grok_low_latency:false});
 });
 
 test('configuration page omits simulated cache section, stats and clear actions',()=>{

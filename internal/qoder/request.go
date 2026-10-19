@@ -220,19 +220,20 @@ func buildChatBodyProfile(req upstream.UpstreamRequest, model modelEntry, sessio
 	}
 	// The catalog's default tier is distinct from its input budget and largest
 	// offered tier. Never opt into the largest tier implicitly.
-	contextLength := model.ContextWindowInfo().DefaultContextTokens
-	if contextLength <= 0 {
-		contextLength = model.MaxInputTokens
-	}
-	if contextLength > 0 {
+	// CatalogContextWindows publishes the window derived from this same value,
+	// so a client compacts before the upstream would refuse or cut its input.
+	if contextLength := model.servedContextTokens(); contextLength > 0 {
 		parameters.ContextLength = contextLength
 	}
 	// The catalog supplies the default, read the way the official client reads
 	// it; explicit client effort overrides every thinking switch together so
 	// the gateway never receives contradictory flags.
 	model.IsReasoning = model.reasoningDefault()
-	effort := strings.ToLower(strings.TrimSpace(req.ReasoningEffort))
-	if effort != "" {
+	if requested := strings.TrimSpace(req.ReasoningEffort); requested != "" {
+		// The effort is mapped onto the model's own tiers: the gateway ignores
+		// an unsupported tier instead of rejecting it. An on/off-only model
+		// keeps thinking on and receives no tier.
+		effort := model.normalizeEffort(requested)
 		thinking := effort != "none"
 		model.IsReasoning = thinking
 		parameters.EnableThinking = &thinking

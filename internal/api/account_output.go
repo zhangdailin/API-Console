@@ -25,8 +25,6 @@ type accountOutput struct {
 	// columns consistently without re-deriving each channel's semantics on the
 	// client.
 	Quota map[string]any `json:"-"`
-	// CheckinSupported tells the console the channel offers a daily check-in.
-	CheckinSupported bool `json:"-"`
 }
 
 // MarshalJSON flattens the quota projection into the account object itself.
@@ -48,7 +46,6 @@ func (o accountOutput) MarshalJSON() ([]byte, error) {
 		merged["session_fingerprint"] = o.SessionFingerprint
 	}
 	maps.Copy(merged, o.Quota)
-	merged["checkin_supported"] = o.CheckinSupported
 	// Credentials are write-only. The account API exposes only their presence,
 	// including for create, update and refresh responses.
 	merged["has_credential"] = o.SessionFingerprint != ""
@@ -109,7 +106,6 @@ func normalizeAccountOutputWithUsage(acc *store.Account, usage map[int64]int64) 
 		Account:            &out,
 		SessionFingerprint: sessionFingerprint,
 		Quota:              buildQuotaResponseFieldsWithUsage(&out, usage[out.ID], usage != nil),
-		CheckinSupported:   checkinSupported(out.AccountType),
 	}
 }
 

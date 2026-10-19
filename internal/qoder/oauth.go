@@ -196,8 +196,9 @@ func (c *Client) Refresh(ctx context.Context, refreshToken string) (Credentials,
 	}
 	if resp.StatusCode != http.StatusOK {
 		err := apiError(http.MethodPost, endpoint, resp.StatusCode, raw)
-		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			// The refresh grant itself was refused: no local retry can recover
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden || IsSessionDead(string(raw)) {
+			// The refresh grant itself was refused, or the upstream said the
+			// session is gone under another status: no local retry can recover
 			// it, and the operator has to authorize again.
 			return Credentials{}, fmt.Errorf("%w: %v", ErrReLoginRequired, err)
 		}

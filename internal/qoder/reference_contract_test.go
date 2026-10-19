@@ -124,14 +124,54 @@ func TestDefaultUpstreamEndpoints(t *testing.T) {
 	t.Parallel()
 
 	c := NewFromAccount(signedTestAccount(), nil)
-	want := endpoints{
-		oauth:     "https://qoder.com",
-		openAPI:   "https://openapi.qoder.sh",
-		inference: "https://api2.qoder.sh",
-	}
-	testutil.Equal(t, c.endpoints, want)
+	testutil.Equal(t, c.endpoints.oauth, "https://qoder.com")
+	testutil.Equal(t, c.endpoints.openAPI, "https://openapi.qoder.sh")
+	testutil.Equal(t, c.endpoints.inference, "https://api2.qoder.sh")
+	// api2 stays primary; api1 then api3 are the failover nodes.
+	testutil.Equal(t, strings.Join(c.endpoints.inferenceHosts(), ","), "https://api2.qoder.sh,https://api1.qoder.sh,https://api3.qoder.sh")
+	// An operator-chosen host has no known peers.
+	custom := NewFromAccount(signedTestAccount(), &config.Config{QoderInferenceURL: "https://inference.example"})
+	testutil.Equal(t, len(custom.endpoints.inferenceFallbacks), 0)
 	got, wantURL := chatURL(c.endpoints.inference), "https://api2.qoder.sh"+inferPath+inferQuery
 	testutil.Falsef(t, got != wantURL, "chatURL() = %q, want %q", got, wantURL)
 	got, wantURL = c.endpoints.inference+modelListPath, "https://api2.qoder.sh/algo/api/v2/model/list?Encode=1"
 	testutil.Falsef(t, got != wantURL, "catalog url = %q, want %q", got, wantURL)
+}
+
+// An unreachable primary moves the request to the next node with a fresh
+// request id; a host that answered, even with an error, is not failed over.
+func TestChatFailsOverOnlyWhenTheHostIsUnreachable(t *testing.T) {
+	var requestIDs []string
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		encoded, _ := io.ReadAll(r.Body)
+		raw, err := decodeBody(encoded)
+		testutil.NoError(t, err)
+		var body chatBody
+		testutil.NoError(t, json.Unmarshal(raw, &body))
+		requestIDs = append(requestIDs, body.RequestID)
+		_, _ = io.WriteString(w, envelope(`{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}`)+"event:finish\ndata: {}\n\n")
+	}))
+	defer fallback.Close()
+	dead := httptest.NewServer(http.NotFoundHandler())
+	deadURL := dead.URL
+	dead.Close() // connection refused from here on
+
+	client := NewFromAccount(signedTestAccount(), nil)
+	setTestEndpoints(client, fallback.URL, fallback.URL, deadURL)
+	client.endpoints.inferenceFallbacks = []string{fallback.URL}
+	testutil.NoError(t, client.SendRequestWithPayload(context.Background(), upstream.UpstreamRequest{Model: "Qwen3.7-Max", Prompt: "hello"}, nil, nil))
+	testutil.Equal(t, len(requestIDs), 1)
+
+	// A primary that answers 400 keeps the request; the fallback is not used.
+	answering := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"message":"invalid_parameter_error"}`)
+	}))
+	defer answering.Close()
+	client = NewFromAccount(signedTestAccount(), nil)
+	setTestEndpoints(client, fallback.URL, fallback.URL, answering.URL)
+	client.endpoints.inferenceFallbacks = []string{fallback.URL}
+	err := client.SendRequestWithPayload(context.Background(), upstream.UpstreamRequest{Model: "Qwen3.7-Max", Prompt: "hello"}, nil, nil)
+	testutil.False(t, err == nil, "a 400 must be reported")
+	testutil.Equal(t, len(requestIDs), 1)
 }

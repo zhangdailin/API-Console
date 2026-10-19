@@ -1,6 +1,10 @@
 package qoder
 
 import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -93,4 +97,34 @@ func decodeRegressionBody(t *testing.T, req upstream.UpstreamRequest, model mode
 	var body chatBody
 	testutil.NoError(t, json.Unmarshal(raw, &body))
 	return body
+}
+
+// A dead login session is a credential verdict under any status, and its
+// business code counts only as a code field value.
+func TestSessionDeadMarkersReachTheRefresh(t *testing.T) {
+	for _, body := range []string{
+		`{"code":"TOKEN_EXPIRE","message":"token expired"}`,
+		`{"code":12153,"message":"x"}`,
+		`{"message":"Offline user session not found"}`,
+		`{"body":"{\"msgCode\":\"12153\"}"}`,
+	} {
+		testutil.Falsef(t, !IsSessionDead(body), "%s not recognised as a dead session", body)
+		err := classifyStatus(400, "", []byte(body))
+		testutil.Falsef(t, !isUnauthorized(err), "400 %s: err = %v, want unauthorized", body, err)
+	}
+	for _, body := range []string{`{"timestamp":1792312153000}`, `{"traceId":"a12153b"}`, `{"code":"121530"}`} {
+		testutil.Falsef(t, IsSessionDead(body), "%s wrongly treated as a dead session", body)
+	}
+}
+
+func TestRefreshReportsADeadSessionAsReLogin(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"code":"12153","message":"Offline user session not found"}`))
+	}))
+	defer server.Close()
+	client := NewFromAccount(signedTestAccount(), nil)
+	setTestEndpoints(client, server.URL, server.URL, server.URL)
+	_, err := client.Refresh(context.Background(), "refresh-1")
+	testutil.Falsef(t, !errors.Is(err, ErrReLoginRequired), "err = %v, want ErrReLoginRequired", err)
 }

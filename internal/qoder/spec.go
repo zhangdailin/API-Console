@@ -77,7 +77,7 @@ func (capabilities) ContextWindows(acc *store.Account) (map[string]int, map[stri
 	if acc == nil {
 		return nil, nil
 	}
-	return CatalogContextWindows(acc.QoderModelIDs), nil
+	return CatalogContextWindows(acc.QoderModelIDs), CatalogOutputWindows(acc.QoderModelIDs)
 }
 
 func (capabilities) HonorsModelCooldown() bool { return true }
@@ -165,40 +165,10 @@ func catalogModels(catalog *Catalog) []provider.Model {
 	return out
 }
 
-// maintain keeps one account's catalog and allowance current, and runs the
-// daily check-in for an account that opted in.
+// maintain keeps one account's catalog and allowance current.
 func maintain(ctx context.Context, env provider.Env, acc *store.Account) {
 	refreshCatalog(ctx, env, acc)
 	refreshQuota(ctx, env, acc)
-	autoCheckin(ctx, env, acc)
-}
-
-// checkinAccount is the admin facet's check-in: one client, one claim round.
-func checkinAccount(ctx context.Context, env provider.Env, acc *store.Account) (provider.CheckinResult, error) {
-	client := newClientWithStore(acc, env.Config, env.Store)
-	defer client.Close()
-	return client.Checkin(ctx)
-}
-
-// autoCheckin claims the day's credits once per server-local day. The
-// balance it adds shows up at the next scheduled quota read.
-func autoCheckin(ctx context.Context, env provider.Env, acc *store.Account) {
-	if acc == nil || env.Store == nil || !checkinDue(acc.AutoCheckinEnabled(), acc.Checkin.AttemptedAt, acc.Checkin.Status, time.Now()) {
-		return
-	}
-	refreshqueue.WithLease(acc.ID, func() {
-		checkinCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
-		result, err := checkinAccount(checkinCtx, env, acc)
-		cancel()
-		if err != nil {
-			slog.Warn("Qoder scheduled check-in failed", "account_id", acc.ID, "error", err)
-		} else {
-			slog.Info("Qoder scheduled check-in", "account_id", acc.ID, "status", result.Status, "reward_credits", result.RewardCredits)
-		}
-		if recordErr := env.Store.RecordAccountCheckin(context.WithoutCancel(ctx), acc.ID, provider.CheckinOutcome(result, err, time.Now())); recordErr != nil {
-			slog.Warn("Failed to record Qoder check-in outcome", "account_id", acc.ID, "error", recordErr)
-		}
-	})
 }
 
 func catalogRefreshDue(acc *store.Account, now time.Time) bool {

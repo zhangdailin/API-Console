@@ -410,7 +410,7 @@ func consumeStreamObserved(body io.Reader, onMessage func(upstream.SSEMessage), 
 				// capacity problem and not a credential problem: the client gets
 				// a 400 straight away, and no account is marked rate-limited.
 				streamErr = contentPolicyError(detail)
-			case envelope.StatusCodeValue == http.StatusUnauthorized || envelope.StatusCodeValue == http.StatusForbidden:
+			case envelope.StatusCodeValue == http.StatusUnauthorized || envelope.StatusCodeValue == http.StatusForbidden || IsSessionDead(envelope.Body):
 				// Checked before the client-fault markers, which include
 				// authentication_error: a credential verdict must reach the refresh.
 				streamErr = fmt.Errorf("%w: %s", errUpstreamUnauthorized, detail)

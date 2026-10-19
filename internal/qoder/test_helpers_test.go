@@ -13,6 +13,8 @@ func setTestEndpoints(c *Client, oauth, openAPI, inference string) {
 	c.endpoints.oauth = strings.TrimRight(oauth, "/")
 	c.endpoints.openAPI = strings.TrimRight(openAPI, "/")
 	c.endpoints.inference = strings.TrimRight(inference, "/")
+	// A stub server must never fail over to the real failover nodes.
+	c.endpoints.inferenceFallbacks = nil
 }
 
 func setTestEntropy(c *Client, reader io.Reader) {

@@ -129,6 +129,25 @@ func IsDailyCountExceeded(values ...string) bool {
 	return slices.ContainsFunc(values, func(value string) bool { return strings.Contains(markerText(value), "billing daily count exceeded") })
 }
 
+// sessionDeadMarkers are the upstream's words for a login session that no
+// longer exists. They arrive under statuses other than 401/403 as well, and
+// only a new browser login recovers from them.
+var sessionDeadMarkers = []string{"token_expire", "offline user session not found"}
+
+// sessionDeadCode matches business code 12153 as a code or msgCode value; the
+// bare digits also occur inside timestamps and trace ids.
+var sessionDeadCode = regexp.MustCompile(`"(?:code|msgcode)"\s*:\s*"?12153(?:[^0-9]|$)`)
+
+// IsSessionDead reports whether an upstream payload says the login session is
+// gone, whatever status carried it.
+func IsSessionDead(values ...string) bool {
+	return slices.ContainsFunc(values, func(value string) bool {
+		lower := markerText(value)
+		return sessionDeadCode.MatchString(lower) ||
+			slices.ContainsFunc(sessionDeadMarkers, func(marker string) bool { return strings.Contains(lower, marker) })
+	})
+}
+
 // Credentials is the device credential pair plus the identity observed at login.
 // RefreshToken is the durable secret; AccessToken is short lived and renewable.
 type Credentials struct {
@@ -167,11 +186,25 @@ func (c Credentials) AccessValid(now time.Time) bool {
 	return c.AccessExpiresAt.Sub(now) > RefreshLead
 }
 
+// defaultInferenceFallbacks are the official client's failover nodes for the
+// default inference host, tried in order when it cannot be reached. The COSY
+// signature covers only the path, so a request signed for one node is valid on
+// another.
+var defaultInferenceFallbacks = []string{"https://api1.qoder.sh", "https://api3.qoder.sh"}
+
 // endpoints holds the resolved upstream URLs for one client.
 type endpoints struct {
 	oauth     string
 	openAPI   string
 	inference string
+	// inferenceFallbacks follow inference when it is unreachable. They apply
+	// only to the default host: an operator-chosen host has no known peers.
+	inferenceFallbacks []string
+}
+
+// inferenceHosts is the primary inference host followed by its failover nodes.
+func (e endpoints) inferenceHosts() []string {
+	return append([]string{e.inference}, e.inferenceFallbacks...)
 }
 
 func resolveEndpoints(cfg *config.Config) endpoints {
@@ -180,12 +213,14 @@ func resolveEndpoints(cfg *config.Config) endpoints {
 		openAPI:   DefaultOpenAPIBaseURL,
 		inference: DefaultInferenceURL,
 	}
-	if cfg == nil {
-		return out
+	if cfg != nil {
+		out.oauth = util.FirstNonEmptyURL(cfg.QoderOAuthBaseURL, out.oauth)
+		out.openAPI = util.FirstNonEmptyURL(cfg.QoderOpenAPIBaseURL, out.openAPI)
+		out.inference = util.FirstNonEmptyURL(cfg.QoderInferenceURL, out.inference)
 	}
-	out.oauth = util.FirstNonEmptyURL(cfg.QoderOAuthBaseURL, out.oauth)
-	out.openAPI = util.FirstNonEmptyURL(cfg.QoderOpenAPIBaseURL, out.openAPI)
-	out.inference = util.FirstNonEmptyURL(cfg.QoderInferenceURL, out.inference)
+	if strings.TrimRight(out.inference, "/") == DefaultInferenceURL {
+		out.inferenceFallbacks = append([]string(nil), defaultInferenceFallbacks...)
+	}
 	return out
 }
 

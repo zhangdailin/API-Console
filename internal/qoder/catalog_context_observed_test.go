@@ -48,3 +48,25 @@ func TestObservedContextTierDuplicateMerge(t *testing.T) {
 	info := model.ContextWindowInfo()
 	testutil.Falsef(t, c.Len() != 1 || info.DefaultInputTokens != 180000 || info.DefaultContextTokens != 200000 || info.MaxContextTokens != 1000000, "merged=%+v", info)
 }
+
+// The published window is the context a request is served with, so a client
+// compacts before the upstream refuses or cuts its input: ultimate is served
+// at its 200K default tier, not its 1M max_input_tokens.
+func TestPublishedWindowMatchesServedContext(t *testing.T) {
+	c, err := parseModelList([]byte(observedContextCatalog))
+	testutil.NoError(t, err)
+	ids := catalogToIDs(c)
+	windows := CatalogContextWindows(ids)
+	for key, want := range map[string]int{"ultimate": 200000, "performance": 272000, "qmodel_38max": 180000} {
+		testutil.Falsef(t, windows[key] != want, "%s published %d, want %d", key, windows[key], want)
+		model, err := catalogFromIDs(ids).Resolve(key)
+		testutil.NoError(t, err)
+		body := decodeRegressionBody(t, upstream.UpstreamRequest{Prompt: "hi"}, model)
+		served := int(body.Parameters.(map[string]any)["context_length"].(float64))
+		testutil.Falsef(t, windows[key] > served, "%s published %d above the served context %d", key, windows[key], served)
+	}
+	// No output budget is published unless the catalog declares one.
+	testutil.Falsef(t, CatalogOutputWindows(ids) != nil, "output windows invented: %v", CatalogOutputWindows(ids))
+	declared := catalogToIDs(newCatalog([]modelEntry{{Key: "k", MaxOutputTokens: json.RawMessage(`"16384"`)}}))
+	testutil.Equal(t, CatalogOutputWindows(declared)["k"], 16384)
+}

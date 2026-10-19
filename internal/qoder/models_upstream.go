@@ -3,6 +3,7 @@ package qoder
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"orchids-api/internal/httpclient"
@@ -43,12 +44,24 @@ func (c *Client) FetchUpstreamModels(ctx context.Context) (*Catalog, error) {
 		return nil, err
 	}
 
-	return c.fetchModelListOnce(ctx, creds, fields)
+	// The catalog lives on the inference host, so it fails over the same way
+	// the chat does: only a host that could not be reached at all is skipped.
+	var catalog *Catalog
+	for _, host := range c.endpoints.inferenceHosts() {
+		catalog, err = c.fetchModelListOnce(ctx, creds, fields, host)
+		if err == nil || !errors.Is(err, errInferenceUnreachable) || ctx.Err() != nil {
+			return catalog, err
+		}
+	}
+	return catalog, err
 }
 
-// fetchModelListOnce performs one signed catalog read.
-func (c *Client) fetchModelListOnce(ctx context.Context, creds Credentials, fields RuntimeFields) (*Catalog, error) {
-	url := strings.TrimRight(c.endpoints.inference, "/") + modelListPath
+// errInferenceUnreachable marks a catalog read that got no response at all.
+var errInferenceUnreachable = errors.New("qoder inference host unreachable")
+
+// fetchModelListOnce performs one signed catalog read against one host.
+func (c *Client) fetchModelListOnce(ctx context.Context, creds Credentials, fields RuntimeFields, host string) (*Catalog, error) {
+	url := strings.TrimRight(host, "/") + modelListPath
 
 	reqCtx, cancel := context.WithTimeout(ctx, authRequestTimeout)
 	defer cancel()
@@ -70,6 +83,9 @@ func (c *Client) fetchModelListOnce(ctx context.Context, creds Credentials, fiel
 
 	resp, raw, err := httpclient.DoReadBody(c.control, req, 4<<20)
 	if err != nil {
+		if resp == nil && IsTransientTransport(err) {
+			return nil, fmt.Errorf("%w: %w: %w", ErrAuthUnavailable, errInferenceUnreachable, err)
+		}
 		return nil, fmt.Errorf("%w: %w", ErrAuthUnavailable, err)
 	}
 	if resp.StatusCode != http.StatusOK {

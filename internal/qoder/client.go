@@ -66,9 +66,6 @@ type Client struct {
 	runtimeRefreshToken string
 	requestTimeout      time.Duration
 	streamIdle          time.Duration
-	// checkinDevice is the configured desktop fingerprint for the daily
-	// check-in (config.QoderCheckinDevice); empty uses the login device.
-	checkinDevice string
 
 	entropy source
 
@@ -93,12 +90,10 @@ func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
 	proxyFunc := http.ProxyFromEnvironment
 	proxyKey := "direct"
 	http2 := false
-	checkinDevice := ""
 	if cfg != nil {
 		proxyFunc = httpclient.ProxyFuncFromConfig(cfg)
 		proxyKey = httpclient.GenerateProxyKeyFromConfig(cfg)
 		http2 = cfg.QoderHTTP2Enabled
-		checkinDevice = cfg.QoderCheckinDevice
 	}
 
 	client := &Client{
@@ -110,7 +105,6 @@ func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
 		requestTimeout: timeout,
 		streamIdle:     config.SharedStreamIdleTimeout,
 		entropy:        cryptoSource{},
-		checkinDevice:  checkinDevice,
 	}
 	if acc != nil {
 		copied := *acc
@@ -255,6 +249,8 @@ func (c *Client) runChat(ctx context.Context, url string, body []byte, model mod
 	transientRetries := 0
 	emitted := false
 	refreshed := false
+	// Failover nodes are spent in order, each at most once per request.
+	fallbacks := slices.Clone(c.endpoints.inferenceFallbacks)
 	emit := func(msg upstream.SSEMessage) {
 		emitted = true
 		if onMessage != nil {
@@ -334,6 +330,24 @@ func (c *Client) runChat(ctx context.Context, url string, body []byte, model mod
 				return err
 			}
 			continue
+		// The host itself could not be reached: no response arrived, so the
+		// account and the request are not at fault. The official client moves
+		// to its next node; the request gets a fresh id there because the
+		// failed host may still have received it.
+		case isUnreachable(err) && len(fallbacks) > 0:
+			next := fallbacks[0]
+			fallbacks = fallbacks[1:]
+			slog.Warn("Qoder inference host unreachable; failing over", "next_host", next, "error", err)
+			url = chatURL(next)
+			requestID, err = newUUID(c.entropy)
+			if err != nil {
+				return err
+			}
+			body, err = refreshedReplayBody(body, requestID)
+			if err != nil {
+				return err
+			}
+			continue
 		// A provider-side hiccup is worth a bounded local retry on the account
 		// that already holds the request; switching accounts for the upstream's
 		// own fault takes a healthy account out of rotation for nothing.
@@ -386,7 +400,10 @@ type attemptStreamError struct {
 	retryable bool
 	unauth    bool
 	busy      bool
-	wait      time.Duration
+	// unreachable marks a connection-level failure before any response: the
+	// host, not the request or the account, failed.
+	unreachable bool
+	wait        time.Duration
 }
 
 // RetryAfter exposes the upstream backoff hint to the shared request handler.
@@ -403,6 +420,11 @@ func (e *attemptStreamError) Unwrap() error { return e.err }
 func isUnauthorized(err error) bool {
 	var target *attemptStreamError
 	return errors.As(err, &target) && target.unauth
+}
+
+func isUnreachable(err error) bool {
+	var target *attemptStreamError
+	return errors.As(err, &target) && target.unreachable
 }
 
 func isRetryable(err error) bool {
