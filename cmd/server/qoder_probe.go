@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -24,8 +25,20 @@ func runQoderProbe(args []string, out io.Writer) error {
 	configPath := flags.String("config", "", "Path to config.json/config.yaml")
 	accountID := flags.Int64("account", 0, "Qoder account id (default: the enabled account with the most credits left)")
 	model := flags.String("model", "qwen3.8-flash", "model to probe, as a client would name it")
+	rounds := flags.Int("rounds", 0, "send the selected variants this many times, alternating their order (0: one pass)")
+	interval := flags.Duration("interval", 35*time.Second, "pause before every request in a multi-round comparison")
+	variants := flags.String("variants", "", "comma-separated variant letters to send, e.g. A,E (default: all)")
 	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return err
+	}
+	var letters []string
+	for _, letter := range strings.Split(*variants, ",") {
+		if letter = strings.TrimSpace(letter); letter != "" {
+			letters = append(letters, letter)
+		}
 	}
 
 	cfg, resolvedConfigPath, err := config.Load(*configPath)
@@ -47,7 +60,12 @@ func runQoderProbe(args []string, out io.Writer) error {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer s.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	budget := 10 * time.Minute
+	if *rounds > 1 {
+		perRound := max(len(letters), 7)
+		budget += time.Duration(*rounds*perRound) * (*interval + 90*time.Second)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 	// The running server's settings decide endpoints and proxy, as they do for
 	// real traffic.
@@ -67,7 +85,10 @@ func runQoderProbe(args []string, out io.Writer) error {
 
 	client := qoder.NewFromAccount(acc, cfg)
 	client.SetAccountStore(s) // a token rotated during the probe is persisted
-	results, err := client.ProbeIdentities(ctx, *model)
+	if *rounds > 1 {
+		return runProbeRounds(ctx, client, out, *model, letters, *rounds, *interval)
+	}
+	results, err := client.ProbeRounds(ctx, *model, qoder.ProbeRoundOptions{Rounds: 1, Variants: letters})
 	if err != nil {
 		return err
 	}
@@ -131,4 +152,53 @@ func pickProbeAccount(ctx context.Context, s *store.Store, id int64) (*store.Acc
 // qoderProbeCommand reports whether args name the probe subcommand.
 func qoderProbeCommand(args []string) bool {
 	return len(args) > 0 && args[0] == "qoder-probe"
+}
+
+// runProbeRounds prints each attempt as it lands and then how often each
+// identity was served.
+func runProbeRounds(ctx context.Context, client *qoder.Client, out io.Writer, model string, letters []string, rounds int, interval time.Duration) error {
+	fmt.Fprintf(out, "%d rounds, %s between requests, order alternating each round\n\n", rounds, interval)
+	results, err := client.ProbeRounds(ctx, model, qoder.ProbeRoundOptions{
+		Variants: letters, Rounds: rounds, Interval: interval,
+		Progress: func(round int, r qoder.ProbeResult) {
+			fmt.Fprintf(out, "%s round %2d  %-32s %-7s queue=%s available=%s %s\n", time.Now().Format("15:04:05"), round, r.Variant, r.Outcome,
+				dash(r.QueueType), dash(r.Available), r.Elapsed.Round(time.Millisecond))
+		},
+	})
+	type tally struct {
+		sent, served int
+		queues       map[string]int
+	}
+	tallies := map[string]*tally{}
+	var order []string
+	for _, r := range results {
+		t := tallies[r.Variant]
+		if t == nil {
+			t = &tally{queues: map[string]int{}}
+			tallies[r.Variant] = t
+			order = append(order, r.Variant)
+		}
+		t.sent++
+		if r.Outcome == "served" {
+			t.served++
+		} else {
+			t.queues[dash(r.QueueType)]++
+		}
+	}
+	fmt.Fprintln(out)
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "VARIANT\tSERVED\tSENT\tREFUSED BY QUEUE")
+	for _, name := range order {
+		t := tallies[name]
+		var queues []string
+		for queue, count := range t.queues {
+			queues = append(queues, fmt.Sprintf("%s=%d", queue, count))
+		}
+		slices.Sort(queues)
+		fmt.Fprintf(w, "%s\t%d\t%d\t%s\n", name, t.served, t.sent, dash(strings.Join(queues, " ")))
+	}
+	if flushErr := w.Flush(); flushErr != nil {
+		return flushErr
+	}
+	return err
 }

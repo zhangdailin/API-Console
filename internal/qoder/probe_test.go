@@ -74,3 +74,37 @@ func mustJSON(v any) string {
 	raw, _ := json.Marshal(v)
 	return string(raw)
 }
+
+// TestProbeRoundsAlternatesOrder pins the fairness rule: a gateway that admits
+// the first request after a pause favours whichever identity is sent first, so
+// a repeated comparison flips the order every round.
+func TestProbeRoundsAlternatesOrder(t *testing.T) {
+	var mu sync.Mutex
+	var sent []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		encoded, _ := io.ReadAll(r.Body)
+		raw, _ := decodeBody(encoded)
+		var body map[string]any
+		_ = json.Unmarshal(raw, &body)
+		mu.Lock()
+		sent = append(sent, body["session_type"].(string))
+		mu.Unlock()
+		_, _ = io.WriteString(w, envelope(`{"choices":[{"delta":{"content":"OK"},"finish_reason":"stop"}]}`)+"event:finish\ndata: {}\n\n")
+	}))
+	defer server.Close()
+
+	client := NewFromAccount(signedTestAccount(), nil)
+	setTestEndpoints(client, server.URL, server.URL, server.URL)
+	var progress int
+	results, err := client.ProbeRounds(context.Background(), "Qwen3.7-Max", ProbeRoundOptions{
+		Variants: []string{"A", "e"}, Rounds: 3,
+		Progress: func(int, ProbeResult) { progress++ },
+	})
+	testutil.NoError(t, err)
+	testutil.Equal(t, len(results), 6)
+	testutil.Equal(t, progress, 6)
+	testutil.Equal(t, strings.Join(sent, ","), "qoder_work,qodercli,qodercli,qoder_work,qoder_work,qodercli")
+
+	_, err = client.ProbeRounds(context.Background(), "Qwen3.7-Max", ProbeRoundOptions{Variants: []string{"Z"}})
+	testutil.Error(t, err)
+}

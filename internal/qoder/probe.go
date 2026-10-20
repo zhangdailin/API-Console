@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -120,16 +121,33 @@ func hostName(base string) string {
 // ProbeIdentities sends the probe prompt once per identity and reports where
 // the gateway admitted each one.
 func (c *Client) ProbeIdentities(ctx context.Context, requestedModel string) ([]ProbeResult, error) {
+	return c.ProbeRounds(ctx, requestedModel, ProbeRoundOptions{Rounds: 1})
+}
+
+// ProbeRoundOptions selects a repeated comparison.
+type ProbeRoundOptions struct {
+	// Variants are identity letters ("A", "E"); empty means every identity.
+	Variants []string
+	// Rounds is how many times each selected identity is sent.
+	Rounds int
+	// Interval separates consecutive requests, so every request meets the
+	// gateway after the same pause and none is favoured by its position.
+	Interval time.Duration
+	// Progress, when set, receives each result as it arrives.
+	Progress func(round int, result ProbeResult)
+}
+
+// ProbeRounds sends the selected identities Rounds times. The order flips
+// every round: a single pass always sent the current identity first, and the
+// only request served in four passes was that first one, which a gateway that
+// admits one request per window favours regardless of identity.
+func (c *Client) ProbeRounds(ctx context.Context, requestedModel string, opts ProbeRoundOptions) ([]ProbeResult, error) {
 	if c == nil {
 		return nil, fmt.Errorf("qoder client is nil")
 	}
-	creds, err := c.ensureAccessToken(ctx)
+	identities, err := selectProbeIdentities(c.probeIdentities(c.aliyunUserType()), opts.Variants)
 	if err != nil {
-		return nil, fmt.Errorf("prepare credential: %w", err)
-	}
-	fields, err := c.ensureRuntimeFields(ctx, creds)
-	if err != nil {
-		return nil, fmt.Errorf("prepare runtime fields: %w", err)
+		return nil, err
 	}
 	maxTokens := 16
 	req := upstream.UpstreamRequest{
@@ -141,11 +159,55 @@ func (c *Client) ProbeIdentities(ctx context.Context, requestedModel string) ([]
 	if err != nil {
 		return nil, err
 	}
-	results := make([]ProbeResult, 0, 8)
-	for _, identity := range c.probeIdentities(c.aliyunUserType()) {
-		results = append(results, c.probeOnce(ctx, identity, req, model, creds, fields))
+	rounds := max(opts.Rounds, 1)
+	results := make([]ProbeResult, 0, rounds*len(identities))
+	first := true
+	for round := 1; round <= rounds; round++ {
+		order := slices.Clone(identities)
+		if round%2 == 0 {
+			slices.Reverse(order)
+		}
+		for _, identity := range order {
+			if !first && opts.Interval > 0 {
+				if err := sleepCtx(ctx, opts.Interval); err != nil {
+					return results, err
+				}
+			}
+			first = false
+			// The credential is re-read per request: a long comparison can
+			// outlive one access token.
+			creds, err := c.ensureAccessToken(ctx)
+			if err != nil {
+				return results, fmt.Errorf("prepare credential: %w", err)
+			}
+			fields, err := c.ensureRuntimeFields(ctx, creds)
+			if err != nil {
+				return results, fmt.Errorf("prepare runtime fields: %w", err)
+			}
+			result := c.probeOnce(ctx, identity, req, model, creds, fields)
+			results = append(results, result)
+			if opts.Progress != nil {
+				opts.Progress(round, result)
+			}
+		}
 	}
 	return results, nil
+}
+
+func selectProbeIdentities(all []probeIdentity, letters []string) ([]probeIdentity, error) {
+	if len(letters) == 0 {
+		return all, nil
+	}
+	selected := make([]probeIdentity, 0, len(letters))
+	for _, letter := range letters {
+		letter = strings.ToUpper(strings.TrimSpace(letter))
+		index := slices.IndexFunc(all, func(identity probeIdentity) bool { return strings.HasPrefix(identity.name, letter+" ") })
+		if index < 0 {
+			return nil, fmt.Errorf("unknown probe variant %q", letter)
+		}
+		selected = append(selected, all[index])
+	}
+	return selected, nil
 }
 
 func (c *Client) probeOnce(ctx context.Context, identity probeIdentity, req upstream.UpstreamRequest, model modelEntry, creds Credentials, fields RuntimeFields) ProbeResult {
