@@ -75,3 +75,19 @@ func queueTypeOf(text string) string {
 	}
 	return value
 }
+
+// alignQueueHint replaces a windowed refusal's fixed 30-second hint with the
+// time to the next admission window, for whoever waits after this client has
+// spent its own window retries: the shared handler's next attempt and the
+// Retry-After a final 429 carries. Thirty seconds after a window closes is
+// still outside the next one, so the handler's wait used to buy nothing.
+func (c *Client) alignQueueHint(err error) error {
+	if c == nil || !c.queueWindowRetry || !isWindowedQueueRefusal(err) {
+		return err
+	}
+	var attempt *attemptStreamError
+	if errors.As(err, &attempt) {
+		attempt.wait = nextQueueWindowDelay(queueWindowNow())
+	}
+	return err
+}

@@ -2,6 +2,7 @@ package qoder
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -123,6 +124,11 @@ func TestQueueWindowRetryRespectsTheRequestDeadline(t *testing.T) {
 	testutil.Error(t, err)
 	testutil.Equal(t, calls.Load(), int32(1))
 	testutil.False(t, time.Since(started) > time.Second, "the request slept past its deadline")
+	// The refusal handed back names the next window, not the fixed 30s hint
+	// that would land at :00, outside it.
+	var attempt *attemptStreamError
+	testutil.False(t, !errors.As(err, &attempt), "the refusal lost its retry hint")
+	testutil.Equal(t, attempt.RetryAfter(), 38*time.Second)
 }
 
 // TestQueueWindowRetryIsBounded: the window waits stop at queueWindowMaxWait.

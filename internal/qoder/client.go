@@ -461,7 +461,7 @@ func (c *Client) runChat(ctx context.Context, hosts []string, body []byte, model
 		case c.queueWindowRetry && isWindowedQueueRefusal(err) && windowRetries < queueWindowMaxRetries && upstream.RemainingAttempts(ctx) != 0:
 			delay := nextQueueWindowDelay(queueWindowNow())
 			if windowWaited+delay > queueWindowMaxWait || !util.RetryWaitFits(ctx, delay) {
-				return err
+				return c.alignQueueHint(err)
 			}
 			waitStarted := time.Now()
 			waitErr := sleepCtx(ctx, delay)
@@ -483,7 +483,7 @@ func (c *Client) runChat(ctx context.Context, hosts []string, body []byte, model
 		case isRetryable(err):
 			// Return the typed retryable error to the shared handler. It applies the
 			// configured backoff and can switch accounts without multiplying budgets.
-			return err
+			return c.alignQueueHint(err)
 		default:
 			return err
 		}

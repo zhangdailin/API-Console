@@ -61,6 +61,8 @@ Grok 的 `429 free_usage_exhausted` 表示所选账号的该模型免费额度�
 
 `408 timeout` 且文案为 `request body read timed out` 表示网关在上传阶段没有及时读完请求体，尚未开始上游生成。请求体读取期限为 30 秒，与生成期限不同；检查客户端上传、代理连接和是否能在重试后恢复。此前版本将这类读取超时也返回为 `400 invalid json`，因此须结合请求耗时、诊断中的请求体及上游尝试数判断，不能仅凭旧错误文案归咎于模型或 JSON 格式。
 
+日志中的 `499 client_closed` 表示调用方在网关得到上游答复前主动断开（例如调用方自身的超时），网关并未拒绝请求；网关自身期限到达仍记为 `504 timeout`。此前版本把调用方断开记为 `400`，容易误判为参数错误。Qoder 排队请求可能需要 1–3 分钟，调用方超时建议不少于 180 秒。
+
 Responses 的 `incomplete_details.reason=max_output_tokens` 表示该轮输出预算耗尽，推理也可能消耗全部预算，不能仅凭客户端的“stream disconnected”文案判断网络故障。核对同一 request ID 的实际上游预算、用量和终止事件；只有 `context canceled` 且尚未收到上游响应的记录不能证明 Token 触顶。WorkBuddy 未指定预算时自动使用所选账号上游模型目录公布的上限，缺少有效观察时不发送 `max_tokens`，采用上游默认行为；显式预算继续优先，真实截断仍返回 incomplete。
 
 Grok keepalive 不算有效生成，语义空闲仍可触发；重复生成文本本身不再因次数中止。若重复输出仍结束，应查实际 stop、输出预算、质量策略、上游结束和超时。

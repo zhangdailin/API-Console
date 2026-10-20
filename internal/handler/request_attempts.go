@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"orchids-api/internal/provider"
@@ -169,11 +170,8 @@ func (e *messageExecution) run() {
 			break
 		}
 		if e.r.Context().Err() != nil {
-			category := "client"
-			if context.Cause(e.r.Context()) == context.DeadlineExceeded {
-				category = "timeout"
-			}
-			e.sh.reportRequestFailure("Request deadline or cancellation", category, apperrors.PublicMessage("context deadline exceeded"), 0)
+			category := cancellationCategory(e.r.Context())
+			e.sh.reportRequestFailure("Request deadline or cancellation", category, apperrors.CategoryMessage(category), 0)
 			return
 		}
 		errStr := err.Error()
@@ -411,7 +409,8 @@ func (e *messageExecution) run() {
 			middleware.RecordRetryWait(e.r.Context(), errClass.Category, time.Since(waitStarted))
 		}
 		if !waitCompleted {
-			e.sh.reportRequestFailure("Request canceled during retry wait", "timeout", apperrors.PublicMessage("context deadline exceeded"), 0)
+			category := cancellationCategory(e.r.Context())
+			e.sh.reportRequestFailure("Request canceled during retry wait", category, apperrors.CategoryMessage(category), 0)
 			return
 		}
 		if sharedRefusal {
@@ -434,4 +433,17 @@ func (e *messageExecution) run() {
 		}
 		attempt++
 	}
+}
+
+// cancellationCategory names why a request's context ended: a deadline the
+// gateway applies is a timeout (504), anything else is the caller going away
+// (499). The caller's disconnect used to be filed as "client" and logged as a
+// 400, which read as a malformed request: a Qoder caller with a 125-second
+// timeout produced a run of 400s while its requests were still waiting for the
+// upstream's admission window.
+func cancellationCategory(ctx context.Context) string {
+	if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
+		return "timeout"
+	}
+	return "client_closed"
 }

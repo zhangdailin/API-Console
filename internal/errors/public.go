@@ -12,6 +12,9 @@ func PublicMessage(errText string) string {
 	return messageForCategory(ClassifyUpstreamError(errText).Category)
 }
 
+// CategoryMessage is the client-visible text for an already-known category.
+func CategoryMessage(category string) string { return messageForCategory(category) }
+
 // publicStatusForCategory maps an error category to the HTTP status a client
 // should see. It sits beside messageForCategory so the status and the text a
 // client receives cannot disagree about what went wrong.
@@ -40,13 +43,16 @@ var publicStatusForCategory = map[string]int{
 	"auth":                 http.StatusUnauthorized,
 	"auth_blocked":         http.StatusUnauthorized,
 	"client":               http.StatusBadRequest,
-	"model_unavailable":    http.StatusNotFound,
-	"configuration":        http.StatusServiceUnavailable,
-	"timeout":              http.StatusGatewayTimeout,
-	"network":              http.StatusBadGateway,
-	"server":               http.StatusBadGateway,
-	"protocol":             http.StatusBadGateway,
-	"local_overload":       http.StatusBadGateway,
+	// The caller closed the connection before an answer existed. 499 is the
+	// conventional (nginx) status for it; nobody receives the body.
+	"client_closed":     499,
+	"model_unavailable": http.StatusNotFound,
+	"configuration":     http.StatusServiceUnavailable,
+	"timeout":           http.StatusGatewayTimeout,
+	"network":           http.StatusBadGateway,
+	"server":            http.StatusBadGateway,
+	"protocol":          http.StatusBadGateway,
+	"local_overload":    http.StatusBadGateway,
 	// A strict structured-output request the gateway could not satisfy is a fault
 	// of the model's answer, not of the caller's request: the caller sent a valid
 	// schema and a valid prompt. It is answered as an upstream fault so a client
@@ -75,6 +81,7 @@ var messageForCategoryTable = map[string]string{
 	"upstream_unavailable": "The upstream service for this model is temporarily unavailable. Retry after the indicated delay.",
 	"model_unavailable":    "The requested model is unavailable for the selected upstream accounts.",
 	"client":               "The upstream rejected the request parameters or model. Check the request and model selection.",
+	"client_closed":        "The client closed the request before the upstream answered.",
 	"timeout":              "The upstream stream timed out while waiting for generated output.",
 	"network":              "The gateway lost its connection to the upstream service. Retry later.",
 	"server":               "The upstream service is temporarily unavailable. Retry later.",
