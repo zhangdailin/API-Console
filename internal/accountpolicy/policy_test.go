@@ -172,13 +172,16 @@ func TestAccountHeld_429IgnoresBillingCycleReset(t *testing.T) {
 		QuotaResetAt:      cycleEnd,
 	}
 
-	if !AccountHeld(acc, now.Add(time.Minute)) {
-		// One minute is well inside both the exponential cooldown and the cap.
+	if !AccountHeld(acc, now.Add(30*time.Second)) {
+		// Thirty seconds is inside the exponential cooldown of a second failure.
 		t.Fatal("a freshly rate-limited account must stay held during its cooldown")
 	}
-	if AccountHeld(acc, now.Add(CooldownRateLimitMax+time.Minute)) {
-		t.Fatalf("429 held for %v; a billing-cycle reset must not extend a rate limit past %v",
-			9*24*time.Hour, CooldownRateLimitMax)
+	// The billing-cycle end does not extend the throttle at all: the account
+	// returns once its own cooldown (60s for a second failure) has elapsed, not
+	// at the 30-minute ceiling. Capping it at the ceiling still emptied the
+	// WorkBuddy pool for half an hour after one burst of 14003s.
+	if AccountHeld(acc, now.Add(RateLimitCooldown(2)+time.Second)) {
+		t.Fatalf("429 held past its own %v cooldown by a billing-cycle reset", RateLimitCooldown(2))
 	}
 	testutil.False(t, AccountHeld(acc, now.Add(2*time.Hour)), "account should be back in rotation within the rate-limit ceiling")
 
@@ -395,5 +398,20 @@ func TestQoderDailyCountIgnoresBillingReset(t *testing.T) {
 			testutil.False(t, AccountHeld(acc, v.At.Add(24*time.Hour)))
 			testutil.False(t, AccountHeld(acc, v.At.Add(25*time.Hour)))
 		})
+	}
+}
+
+// TestAccountHeld_429BillingResetChannels pins the scope of the rule above: only
+// channels whose quota sync stores a billing-cycle end in QuotaResetAt ignore a
+// far reset. Elsewhere a far reset is still honoured up to the ceiling.
+func TestAccountHeld_429BillingResetChannels(t *testing.T) {
+	now := time.Now()
+	for _, tc := range []struct {
+		channel  string
+		heldAt10 bool
+	}{{"workbuddy", false}, {"qoder", false}, {"grok", true}, {"cline", true}} {
+		acc := &store.Account{AccountType: tc.channel, StatusCode: "429", LastAttempt: now,
+			RateLimitFailures: 1, QuotaResetAt: now.Add(9 * 24 * time.Hour)}
+		testutil.Equal(t, AccountHeld(acc, now.Add(10*time.Minute)), tc.heldAt10)
 	}
 }

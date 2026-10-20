@@ -545,7 +545,16 @@ func AccountHeld(acc *store.Account, now time.Time) bool {
 			if apperrors.IsClineInferenceCap(strings.ToLower(acc.StatusMessage)) {
 				until = acc.QuotaResetAt
 			} else if ceiling := acc.LastAttempt.Add(CooldownRateLimitMax); ceiling.Before(acc.QuotaResetAt) {
-				until = ceiling
+				// A throttle never records a reset beyond this ceiling (see
+				// BoundRateLimitCooldown), so a later one is not this throttle's.
+				// On a channel whose quota sync stores the billing-cycle end here
+				// it is that date, and capping it still held every throttled
+				// account for the full ceiling: one burst of WorkBuddy 14003s
+				// emptied the pool for thirty minutes. The account's own
+				// exponential cooldown decides instead.
+				if !billingResetInQuotaField(acc) {
+					until = ceiling
+				}
 			} else {
 				until = acc.QuotaResetAt
 			}
@@ -554,6 +563,16 @@ func AccountHeld(acc *store.Account, now time.Time) bool {
 		}
 	}
 	return now.Before(until)
+}
+
+// billingResetInQuotaField reports whether the channel's quota sync writes its
+// billing-cycle end into QuotaResetAt, the field a throttle also uses.
+func billingResetInQuotaField(acc *store.Account) bool {
+	switch strings.ToLower(strings.TrimSpace(accountType(acc))) {
+	case "workbuddy", "qoder":
+		return true
+	}
+	return false
 }
 
 func isQoderDailyCount(acc *store.Account) bool {
