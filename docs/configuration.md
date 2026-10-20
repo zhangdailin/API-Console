@@ -105,6 +105,7 @@ Cline 套餐只读取官方 `/users/me/plan` 的 `success=true`、`data.plan` �
 | WorkBuddy | `workbuddy_base_url`、`workbuddy_http2_enabled` | 默认国际服务；HTTP/2 是传输设置 |
 | Qoder | `qoder_oauth_base_url`、`qoder_openapi_base_url`、`qoder_inference_base_url` | 浏览器、控制面和生成主机各自配置；生成主机为默认 `api2.qoder.sh` 时，无响应的连接级故障和主机自身的服务故障（5xx、418、`provider_error`）依次切换到 `api1`、`api3`；切换成功的节点在 5 分钟内优先使用，之后重新从 `api2` 开始。业务拒绝（如 10605 排队、400）不切换；自定义主机不切换 |
 | Qoder 请求格式 | `qoder_request_profile` | 默认 `qoderwork`（2026-09-29 抓包的 QoderWork 客户端）。设为 `reference` 时，聊天请求完整按参考项目 Qoder-2API-Go 的 CLI 请求发送：`cosy-clienttype 5`、`cosy-version 0.1.43`、`session_type qodercli`、带 `user_type` 和 token 的 COSY 身份、参考的消息与 body 结构。只影响聊天请求，可随时改回；未知值按默认处理 |
+| Qoder 排队窗口重试 | `qoder_queue_window_retry_disabled` | 默认开启。低优先级队列（10605，`queueType` 为 `p3`/`p4`）只在每分钟约第 8–20 秒放行，固定的 `retryAfterSeconds: 30` 常常落在窗口外；开启时被拒请求等到下一个窗口，并在窗口内每 3 秒重试，单个请求累计最多等 130 秒、重试 12 次，且不超过请求期限和尝试次数。设为 `true` 关闭，改回按通用的共享拒绝等待处理 |
 | Qoder | `qoder_client_id`、`qoder_client_version`、`qoder_http2_enabled` | runtime 身份遵循国际 CLI 1.0.45 的 UID、组织及数据策略结构；旧 qoder_protocol_profile 字段被忽略 |
 | Cline | `cline_api_base_url`、`cline_workos_client_id`、`cline_workos_authorize_url`、`cline_workos_token_url`、`cline_http2_enabled` | API 与 WorkOS 授权分别配置 |
 | Grok | `grok_cli_base_url`、`grok_cli_user_agent`、`grok_cli_client_version`、`grok_cli_client_identifier` | 默认 Build CLI 网关和 CLI 身份 |

@@ -73,6 +73,7 @@ type Client struct {
 	// referenceRuntime caches the reference-layout pair for the token pair it
 	// was derived from.
 	profile          string
+	queueWindowRetry bool
 	referenceRuntime RuntimeFields
 	referenceAccess  string
 	referenceRefresh string
@@ -114,10 +115,11 @@ func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
 		streamIdle:     config.SharedStreamIdleTimeout,
 		entropy:        cryptoSource{},
 	}
+	client.profile = RequestProfileQoderWork
+	client.queueWindowRetry = true
 	if cfg != nil {
 		client.profile = resolveRequestProfile(cfg.QoderRequestProfile)
-	} else {
-		client.profile = RequestProfileQoderWork
+		client.queueWindowRetry = !cfg.QoderQueueWindowRetryDisabled
 	}
 	if acc != nil {
 		copied := *acc
@@ -313,6 +315,9 @@ func (c *Client) runChat(ctx context.Context, hosts []string, body []byte, model
 	// Authentication repair has its own one-shot budget; only transient
 	// failures consume the transient retry counter.
 	transientRetries := 0
+	// windowWaited and windowRetries account for queue-window waits.
+	var windowWaited time.Duration
+	windowRetries := 0
 	emitted := false
 	refreshed := false
 	// hosts is the primary followed by its failover nodes, a recently working
@@ -347,6 +352,10 @@ func (c *Client) runChat(ctx context.Context, hosts []string, body []byte, model
 				return fmt.Errorf("%w: %v", ErrEmptyStream, fmt.Errorf("qoder stream produced no usable events"))
 			}
 			result.emitFinish(onMessage)
+			if windowRetries > 0 {
+				slog.Info("Qoder request admitted after waiting for the queue window",
+					"window_retries", windowRetries, "waited", windowWaited)
+			}
 			if host != c.endpoints.inference {
 				// A failover node served the request; start the next ones there
 				// instead of at the primary that just failed.
@@ -437,6 +446,31 @@ func (c *Client) runChat(ctx context.Context, hosts []string, body []byte, model
 			if waitErr != nil {
 				return waitErr
 			}
+			requestID, err = newUUID(c.entropy)
+			if err != nil {
+				return err
+			}
+			body, err = c.replayBody(body, requestID)
+			if err != nil {
+				return err
+			}
+			continue
+		// A low-priority queue admits work only in a short window each minute
+		// (see queue_window.go). Retrying at the window instead of after the
+		// fixed 30s hint is what gets the request in.
+		case c.queueWindowRetry && isWindowedQueueRefusal(err) && windowRetries < queueWindowMaxRetries && upstream.RemainingAttempts(ctx) != 0:
+			delay := nextQueueWindowDelay(queueWindowNow())
+			if windowWaited+delay > queueWindowMaxWait || !util.RetryWaitFits(ctx, delay) {
+				return err
+			}
+			waitStarted := time.Now()
+			waitErr := sleepCtx(ctx, delay)
+			debug.RecordWait(ctx, "qoder_queue_window", delay, time.Since(waitStarted), waitErr != nil)
+			if waitErr != nil {
+				return waitErr
+			}
+			windowWaited += delay
+			windowRetries++
 			requestID, err = newUUID(c.entropy)
 			if err != nil {
 				return err

@@ -89,6 +89,10 @@ type Config struct {
 	// default, the captured QoderWork client) or "reference" (the reference
 	// bridge's CLI request). Unknown values keep the default.
 	QoderRequestProfile string `json:"qoder_request_profile,omitempty"`
+	// QoderQueueWindowRetryDisabled turns off retrying a low-priority queue
+	// refusal (10605, queueType p3/p4) at the gateway's per-minute admission
+	// window; such refusals then follow the generic shared-refusal wait.
+	QoderQueueWindowRetryDisabled bool `json:"qoder_queue_window_retry_disabled,omitempty"`
 
 	// ── Cline (api.cline.bot) OAuth channel ──
 	//
