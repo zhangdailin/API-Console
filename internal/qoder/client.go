@@ -69,6 +69,14 @@ type Client struct {
 
 	entropy source
 
+	// profile is the request shape chat is sent in; see reference_profile.go.
+	// referenceRuntime caches the reference-layout pair for the token pair it
+	// was derived from.
+	profile          string
+	referenceRuntime RuntimeFields
+	referenceAccess  string
+	referenceRefresh string
+
 	refreshMu            sync.Mutex
 	runtimeMu            sync.Mutex
 	stateMu              sync.RWMutex
@@ -105,6 +113,11 @@ func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
 		requestTimeout: timeout,
 		streamIdle:     config.SharedStreamIdleTimeout,
 		entropy:        cryptoSource{},
+	}
+	if cfg != nil {
+		client.profile = resolveRequestProfile(cfg.QoderRequestProfile)
+	} else {
+		client.profile = RequestProfileQoderWork
 	}
 	if acc != nil {
 		copied := *acc
@@ -226,7 +239,7 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	if err != nil {
 		return err
 	}
-	fields, err := c.ensureRuntimeFields(ctx, creds)
+	fields, err := c.chatRuntimeFields(ctx, creds)
 	prepTrace.Mark("runtime_ready_ms")
 	if err != nil {
 		return err
@@ -258,6 +271,16 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	body, err := buildChatBodyProfile(req, model, sessionID, requestID, requestSetID, c.clientVersion, "", sceneBusinessProduct)
 	if err != nil {
 		return err
+	}
+	if c.referenceProfile() {
+		raw, err := decodeBody(body)
+		if err != nil {
+			return err
+		}
+		if raw, err = referenceBody(raw, c.aliyunUserType()); err != nil {
+			return err
+		}
+		body = EncodeBody(raw)
 	}
 
 	hosts := c.endpoints.orderedInferenceHosts(time.Now())
@@ -366,7 +389,7 @@ func (c *Client) runChat(ctx context.Context, hosts []string, body []byte, model
 					"error", refreshErr)
 				return err
 			}
-			if fields, err = c.ensureRuntimeFields(ctx, c.currentCredentials()); err != nil {
+			if fields, err = c.chatRuntimeFields(ctx, c.currentCredentials()); err != nil {
 				return err
 			}
 			// A replay with the original request id is rejected as a duplicate even
@@ -376,7 +399,7 @@ func (c *Client) runChat(ctx context.Context, hosts []string, body []byte, model
 			if err != nil {
 				return err
 			}
-			body, err = refreshedReplayBody(body, requestID)
+			body, err = c.replayBody(body, requestID)
 			if err != nil {
 				return err
 			}
@@ -397,7 +420,7 @@ func (c *Client) runChat(ctx context.Context, hosts []string, body []byte, model
 			if err != nil {
 				return err
 			}
-			body, err = refreshedReplayBody(body, requestID)
+			body, err = c.replayBody(body, requestID)
 			if err != nil {
 				return err
 			}
@@ -418,7 +441,7 @@ func (c *Client) runChat(ctx context.Context, hosts []string, body []byte, model
 			if err != nil {
 				return err
 			}
-			body, err = refreshedReplayBody(body, requestID)
+			body, err = c.replayBody(body, requestID)
 			if err != nil {
 				return err
 			}

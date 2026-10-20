@@ -71,16 +71,6 @@ type Spec struct {
 	// ConversationAffinity keeps successive turns on an eligible account.
 	ConversationAffinity bool
 
-	// QueueRefusalAccountProbes is how many untried accounts a request may move
-	// to when the upstream answers with a queue refusal, before it waits the
-	// refusal out on the account it holds. Zero keeps the wait-in-place policy.
-	//
-	// A queue refusal is treated as shared by every account, so the refused
-	// account records no cooldown either way; probing only matters when the
-	// gate is in fact per account (a busy account beside idle ones), where
-	// waiting in place leaves the idle accounts unused.
-	QueueRefusalAccountProbes int
-
 	Probe *Probe
 
 	// Catalog reads the channel's upstream model catalog.

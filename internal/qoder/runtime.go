@@ -71,6 +71,16 @@ type runtimeFieldInput struct {
 }
 
 func runtimeFieldsFor(entropy source, in runtimeFieldInput) (RuntimeFields, error) {
+	plaintext, err := json.Marshal(in)
+	if err != nil {
+		return RuntimeFields{}, fmt.Errorf("marshal runtime identity: %w", err)
+	}
+	return sealRuntimePlaintext(entropy, plaintext)
+}
+
+// sealRuntimePlaintext encrypts one runtime identity under a fresh AES key and
+// wraps that key for the gateway. Both identity layouts share it.
+func sealRuntimePlaintext(entropy source, plaintext []byte) (RuntimeFields, error) {
 	if entropy == nil {
 		entropy = cryptoSource{}
 	}
@@ -79,10 +89,6 @@ func runtimeFieldsFor(entropy source, in runtimeFieldInput) (RuntimeFields, erro
 		return RuntimeFields{}, fmt.Errorf("read runtime entropy: %w", err)
 	}
 	key := []byte(hex.EncodeToString(raw[:])[:16])
-	plaintext, err := json.Marshal(in)
-	if err != nil {
-		return RuntimeFields{}, fmt.Errorf("marshal runtime identity: %w", err)
-	}
 	identity := runtimeIdentityOf(plaintext)
 	sealed, err := aesCBCEncryptPKCS7(plaintext, key)
 	if err != nil {

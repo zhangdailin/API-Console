@@ -51,7 +51,7 @@ func TestProbeIdentitiesReportsEachQueue(t *testing.T) {
 	setTestEndpoints(client, server.URL, server.URL, server.URL)
 	results, err := client.ProbeIdentities(context.Background(), "Qwen3.7-Max")
 	testutil.NoError(t, err)
-	testutil.Equal(t, len(results), 5)
+	testutil.Equal(t, len(results), 7)
 
 	byName := map[string]ProbeResult{}
 	for _, r := range results {

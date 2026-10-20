@@ -442,6 +442,7 @@ func accountClientFingerprint(acc *store.Account, cfg *config.Config) string {
 		writeInt(cfg.UpstreamMaxConnsPerHost)
 		writeInt(cfg.UpstreamMaxIdleConnsPerHost)
 		writeString(strconv.FormatBool(cfg.QoderHTTP2Enabled))
+		writeString(cfg.QoderRequestProfile)
 		writeString(strconv.FormatBool(cfg.ClineHTTP2Enabled))
 		writeString(strconv.FormatBool(cfg.WorkBuddyHTTP2Enabled))
 		for _, value := range cfg.ProxyBypass {

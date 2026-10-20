@@ -113,7 +113,13 @@ func (c *Client) attemptChat(ctx context.Context, url string, body []byte, model
 	if err != nil {
 		return streamResult{}, &attemptStreamError{err: fmt.Errorf("build qoder request: %w", err)}
 	}
-	if err := c.applyAuthHeadersBytes(req, creds, fields, requestID, model.Key, model.Source, body, signPath(url)); err != nil {
+	applyHeaders := c.applyAuthHeadersBytes
+	if c.referenceProfile() {
+		applyHeaders = func(req *http.Request, creds Credentials, fields RuntimeFields, _, modelKey, modelSource string, body []byte, signedPath string) error {
+			return c.applyReferenceHeaders(req, creds, fields, modelKey, modelSource, body, signedPath)
+		}
+	}
+	if err := applyHeaders(req, creds, fields, requestID, model.Key, model.Source, body, signPath(url)); err != nil {
 		return streamResult{}, &attemptStreamError{err: err}
 	}
 	attempt := debug.BeginUpstream(ctx, req.Method, req.URL.String(), req.Header, body)

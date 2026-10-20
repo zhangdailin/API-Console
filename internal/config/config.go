@@ -85,6 +85,10 @@ type Config struct {
 	// explicit HTTP/2 transport and the default client all answered in the same
 	// 1.5-2.0s window, and the refusals appeared on all three.
 	QoderHTTP2Enabled bool `json:"qoder_http2_enabled,omitempty"`
+	// QoderRequestProfile selects the chat request shape: "qoderwork" (the
+	// default, the captured QoderWork client) or "reference" (the reference
+	// bridge's CLI request). Unknown values keep the default.
+	QoderRequestProfile string `json:"qoder_request_profile,omitempty"`
 
 	// ── Cline (api.cline.bot) OAuth channel ──
 	//

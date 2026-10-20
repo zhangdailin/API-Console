@@ -51,6 +51,10 @@ type probeIdentity struct {
 	version string
 	body    func(map[string]any)
 	headers func(http.Header)
+	// referenceInfo signs with the reference COSY identity layout (which
+	// carries user_type); reference sends the whole reference request.
+	referenceInfo bool
+	reference     bool
 }
 
 // probeIdentities lists the identities compared, the current one first.
@@ -103,6 +107,8 @@ func (c *Client) probeIdentities(userType string) []probeIdentity {
 		{name: "C ide identity", host: primary, version: "1.0.10", body: ide, headers: ideHeaders},
 		{name: "D ide + aliyun_user_type", host: primary, version: "1.0.10", body: both(ide, withUserType), headers: ideHeaders},
 		{name: "E cli identity", host: primary, version: "0.1.43", body: cli, headers: cliHeaders},
+		{name: "H current + reference info", host: primary, version: c.clientVersion, referenceInfo: true},
+		{name: "I full reference request", host: primary, version: referenceCosyVersion, reference: true},
 	}
 	for _, fallback := range c.endpoints.inferenceFallbacks {
 		identities = append(identities,
@@ -216,6 +222,13 @@ func (c *Client) probeOnce(ctx context.Context, identity probeIdentity, req upst
 		result.Outcome, result.Detail = "error", err.Error()
 		return result
 	}
+	if identity.referenceInfo || identity.reference {
+		reference, err := c.referenceRuntimeFields(creds)
+		if err != nil {
+			return fail(err)
+		}
+		fields = reference
+	}
 	requestID, setID, sessionID, err := newChatUUIDs(c.entropy)
 	if err != nil {
 		return fail(err)
@@ -223,6 +236,16 @@ func (c *Client) probeOnce(ctx context.Context, identity probeIdentity, req upst
 	encoded, err := buildChatBodyProfile(req, model, sessionID, requestID, setID, c.clientVersion, "", sceneBusinessProduct)
 	if err != nil {
 		return fail(err)
+	}
+	if identity.reference {
+		raw, err := decodeBody(encoded)
+		if err != nil {
+			return fail(err)
+		}
+		if raw, err = referenceBody(raw, c.aliyunUserType()); err != nil {
+			return fail(err)
+		}
+		encoded = EncodeBody(raw)
 	}
 	if identity.body != nil {
 		raw, err := decodeBody(encoded)
@@ -248,13 +271,17 @@ func (c *Client) probeOnce(ctx context.Context, identity probeIdentity, req upst
 	if err != nil {
 		return fail(err)
 	}
-	if err := c.applyAuthHeadersBytes(httpReq, creds, fields, requestID, model.Key, model.Source, encoded, signPath(url)); err != nil {
+	if identity.reference {
+		if err := c.applyReferenceHeaders(httpReq, creds, fields, model.Key, model.Source, encoded, signPath(url)); err != nil {
+			return fail(err)
+		}
+	} else if err := c.applyAuthHeadersBytes(httpReq, creds, fields, requestID, model.Key, model.Source, encoded, signPath(url)); err != nil {
 		return fail(err)
 	}
 	if identity.headers != nil {
 		identity.headers(httpReq.Header)
 	}
-	if identity.version != c.clientVersion {
+	if !identity.reference && identity.version != c.clientVersion {
 		// The client version is signed into the COSY payload, so a variant that
 		// presents another version has to be signed with it.
 		authorization, err := buildCOSYAuthorization(requestID, fields.EncryptUserInfo, identity.version, fields.Key, httpReq.Header.Get("Cosy-Date"), encoded, signPath(url))

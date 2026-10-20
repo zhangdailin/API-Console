@@ -104,6 +104,7 @@ Cline 套餐只读取官方 `/users/me/plan` 的 `success=true`、`data.plan` �
 |---|---|---|
 | WorkBuddy | `workbuddy_base_url`、`workbuddy_http2_enabled` | 默认国际服务；HTTP/2 是传输设置 |
 | Qoder | `qoder_oauth_base_url`、`qoder_openapi_base_url`、`qoder_inference_base_url` | 浏览器、控制面和生成主机各自配置；生成主机为默认 `api2.qoder.sh` 时，无响应的连接级故障和主机自身的服务故障（5xx、418、`provider_error`）依次切换到 `api1`、`api3`；切换成功的节点在 5 分钟内优先使用，之后重新从 `api2` 开始。业务拒绝（如 10605 排队、400）不切换；自定义主机不切换 |
+| Qoder 请求格式 | `qoder_request_profile` | 默认 `qoderwork`（2026-09-29 抓包的 QoderWork 客户端）。设为 `reference` 时，聊天请求完整按参考项目 Qoder-2API-Go 的 CLI 请求发送：`cosy-clienttype 5`、`cosy-version 0.1.43`、`session_type qodercli`、带 `user_type` 和 token 的 COSY 身份、参考的消息与 body 结构。只影响聊天请求，可随时改回；未知值按默认处理 |
 | Qoder | `qoder_client_id`、`qoder_client_version`、`qoder_http2_enabled` | runtime 身份遵循国际 CLI 1.0.45 的 UID、组织及数据策略结构；旧 qoder_protocol_profile 字段被忽略 |
 | Cline | `cline_api_base_url`、`cline_workos_client_id`、`cline_workos_authorize_url`、`cline_workos_token_url`、`cline_http2_enabled` | API 与 WorkOS 授权分别配置 |
 | Grok | `grok_cli_base_url`、`grok_cli_user_agent`、`grok_cli_client_version`、`grok_cli_client_identifier` | 默认 Build CLI 网关和 CLI 身份 |
@@ -157,7 +158,7 @@ Grok 语义空闲按有效生成事件衡量，keepalive 不延长时钟；下�
 
 首生成包括文本、推理和工具进展，不等同可见首字；生成进展后停止该计时。成功非流 JSON 的响应头释放流式看门狗，完整正文仍受总期限约束。心跳、角色和纯用量不刷新语义空闲，父取消始终有效。内部目录读取保留更短的操作期限，不开放为用户配置。
 
-Qoder 队列闸门（10605）先最多换到 3 个尚未尝试、且有空闲并发槽的账号；换号不给被拒账号记录任何冷却或状态。没有可换的账号后，才在当前账号上有界等待。预算只计排队睡眠（含抖动），网络往返和其他上游处理时间仍消耗首生成及完整期限。普通账号限流保留上游 Retry-After 与账号冷却逻辑。
+Qoder 队列闸门仍在同一个账号上有界等待，不因共享队列拒绝切号。预算只计排队睡眠（含抖动），网络往返和其他上游处理时间仍消耗首生成及完整期限。普通账号限流保留上游 Retry-After 与账号冷却逻辑。
 
 Grok 标准档的传输切号尝试上限为 20；默认开启输出前质量暂存，质量尝试最多 6 次，30 秒是随内容事件检查的策略阈值，并非独立计时器保证的释放期限。不设固定缓冲字节上限。`grok_low_latency: true` 跳过质量暂存和质量重试，保留异常处理、用量及质量审计。Chat/Messages 沿用质量尝试耗尽后交付最后结果的策略；原生 Responses 对已判异常的输出返回 `502 quality_degraded`。Chat/Messages 和原生 Responses 的传输、认证重放、推理解码恢复和质量重试都受同一个实际 HTTP 调用预算约束，标准档最多 21 次、交互档最多 4 次；OAuth 控制面刷新不计生成次数。仅尚未交付且无上游副作用的请求可重放；`previous_response_id` 续接固定原账号，托管工具请求禁止跨账号重放。质量阈值和安全限制不能被任意配置覆盖。
 
