@@ -1,0 +1,263 @@
+package qoder
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+
+	"orchids-api/internal/prompt"
+	"orchids-api/internal/upstream"
+	"orchids-api/internal/util"
+)
+
+// The identity probe answers one question the gateway's refusals cannot: which
+// part of a request decides the queue it is admitted to. Every variant sends
+// the same minimal prompt with the same credential; only the client identity
+// changes (body fields, headers, the version signed into the COSY payload, and
+// the host). Comparing the queue each variant lands in shows which identity the
+// gateway still serves.
+//
+// It is an operator diagnostic, run by hand against one account. It spends at
+// most a few output tokens per variant and never reports a credential.
+
+// ProbeResult is the gateway's answer to one identity variant.
+type ProbeResult struct {
+	Variant string
+	Host    string
+	// Outcome is "served" when the stream produced model output, "queued" for a
+	// 10605 queue refusal, and "error" otherwise.
+	Outcome   string
+	Status    int
+	QueueType string
+	// Available is the refusal's serviceAvailable flag; empty when absent.
+	Available string
+	SubCode   string
+	RetryWait string
+	Detail    string
+	Elapsed   time.Duration
+}
+
+// probeIdentity is one client identity the probe presents.
+type probeIdentity struct {
+	name    string
+	host    string
+	version string
+	body    func(map[string]any)
+	headers func(http.Header)
+}
+
+// probeIdentities lists the identities compared, the current one first.
+func (c *Client) probeIdentities(userType string) []probeIdentity {
+	primary := strings.TrimRight(c.endpoints.inference, "/")
+	withUserType := func(body map[string]any) { body["aliyun_user_type"] = userType }
+	// The pre-capture IDE identity this channel used before 2026-09-29.
+	ide := func(body map[string]any) {
+		body["session_type"] = "qoder"
+		if business, ok := body["business"].(map[string]any); ok {
+			business["product"] = "ide"
+			business["version"] = "1.0.10"
+		}
+	}
+	ideHeaders := func(h http.Header) {
+		h.Set("Cosy-Clienttype", "5")
+		h.Set("Cosy-Business-Product", "ide")
+		h.Set("Cosy-Scene", "assistant")
+		h.Set("Cosy-Version", "1.0.10")
+	}
+	// The Qoder CLI identity the reference bridge presents.
+	cli := func(body map[string]any) {
+		body["session_type"] = "qodercli"
+		body["aliyun_user_type"] = userType
+		delete(body, "is_reply")
+		delete(body, "is_retry")
+		delete(body, "system")
+		if business, ok := body["business"].(map[string]any); ok {
+			for _, key := range []string{"product", "stage", "sub_task", "type", "version"} {
+				delete(business, key)
+			}
+		}
+	}
+	cliHeaders := func(h http.Header) {
+		for _, key := range []string{"Cosy-Scene", "Cosy-Business-Product", "Cosy-Business-Type", "Cosy-Machineos", "Sec-Fetch-Mode", "Accept-Language", "Traceparent", "Cache-Control"} {
+			h.Del(key)
+		}
+		h.Set("Cosy-Clienttype", "5")
+		h.Set("Cosy-Version", "0.1.43")
+		h.Set("Cosy-Data-Policy", "AGREE")
+		h.Set("User-Agent", "Go-http-client/2.0")
+		h.Set("Accept-Encoding", "identity")
+	}
+	both := func(body, extra func(map[string]any)) func(map[string]any) {
+		return func(m map[string]any) { body(m); extra(m) }
+	}
+	identities := []probeIdentity{
+		{name: "A current (qoder_work)", host: primary, version: c.clientVersion},
+		{name: "B current + aliyun_user_type", host: primary, version: c.clientVersion, body: withUserType},
+		{name: "C ide identity", host: primary, version: "1.0.10", body: ide, headers: ideHeaders},
+		{name: "D ide + aliyun_user_type", host: primary, version: "1.0.10", body: both(ide, withUserType), headers: ideHeaders},
+		{name: "E cli identity", host: primary, version: "0.1.43", body: cli, headers: cliHeaders},
+	}
+	for _, fallback := range c.endpoints.inferenceFallbacks {
+		identities = append(identities,
+			probeIdentity{name: "F current on " + hostName(fallback), host: fallback, version: c.clientVersion},
+			probeIdentity{name: "G cli identity on " + hostName(fallback), host: fallback, version: "0.1.43", body: cli, headers: cliHeaders},
+		)
+		break // one fallback node is enough to tell whether the host matters
+	}
+	return identities
+}
+
+func hostName(base string) string {
+	return strings.TrimPrefix(strings.TrimPrefix(base, "https://"), "http://")
+}
+
+// ProbeIdentities sends the probe prompt once per identity and reports where
+// the gateway admitted each one.
+func (c *Client) ProbeIdentities(ctx context.Context, requestedModel string) ([]ProbeResult, error) {
+	if c == nil {
+		return nil, fmt.Errorf("qoder client is nil")
+	}
+	creds, err := c.ensureAccessToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("prepare credential: %w", err)
+	}
+	fields, err := c.ensureRuntimeFields(ctx, creds)
+	if err != nil {
+		return nil, fmt.Errorf("prepare runtime fields: %w", err)
+	}
+	maxTokens := 16
+	req := upstream.UpstreamRequest{
+		Model:     requestedModel,
+		MaxTokens: &maxTokens,
+		Messages:  []prompt.Message{{Role: "user", Content: prompt.MessageContent{Text: "Reply with the single word OK."}}},
+	}
+	model, err := c.resolveModel(req)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]ProbeResult, 0, 8)
+	for _, identity := range c.probeIdentities(c.aliyunUserType()) {
+		results = append(results, c.probeOnce(ctx, identity, req, model, creds, fields))
+	}
+	return results, nil
+}
+
+func (c *Client) probeOnce(ctx context.Context, identity probeIdentity, req upstream.UpstreamRequest, model modelEntry, creds Credentials, fields RuntimeFields) ProbeResult {
+	result := ProbeResult{Variant: identity.name, Host: hostName(identity.host)}
+	fail := func(err error) ProbeResult {
+		result.Outcome, result.Detail = "error", err.Error()
+		return result
+	}
+	requestID, setID, sessionID, err := newChatUUIDs(c.entropy)
+	if err != nil {
+		return fail(err)
+	}
+	encoded, err := buildChatBodyProfile(req, model, sessionID, requestID, setID, c.clientVersion, "", sceneBusinessProduct)
+	if err != nil {
+		return fail(err)
+	}
+	if identity.body != nil {
+		raw, err := decodeBody(encoded)
+		if err != nil {
+			return fail(err)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(raw, &body); err != nil {
+			return fail(err)
+		}
+		identity.body(body)
+		raw, err = json.Marshal(body)
+		if err != nil {
+			return fail(err)
+		}
+		encoded = EncodeBody(raw)
+	}
+
+	url := chatURL(identity.host)
+	attemptCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	httpReq, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, url, bytes.NewReader(encoded))
+	if err != nil {
+		return fail(err)
+	}
+	if err := c.applyAuthHeadersBytes(httpReq, creds, fields, requestID, model.Key, model.Source, encoded, signPath(url)); err != nil {
+		return fail(err)
+	}
+	if identity.headers != nil {
+		identity.headers(httpReq.Header)
+	}
+	if identity.version != c.clientVersion {
+		// The client version is signed into the COSY payload, so a variant that
+		// presents another version has to be signed with it.
+		authorization, err := buildCOSYAuthorization(requestID, fields.EncryptUserInfo, identity.version, fields.Key, httpReq.Header.Get("Cosy-Date"), encoded, signPath(url))
+		if err != nil {
+			return fail(err)
+		}
+		httpReq.Header.Set("Authorization", authorization)
+	}
+
+	started := time.Now()
+	resp, err := c.stream.Do(httpReq)
+	result.Elapsed = time.Since(started)
+	if err != nil {
+		return fail(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	result.Status = resp.StatusCode
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+		return describeProbeRefusal(result, classifyStatus(resp.StatusCode, resp.Header.Get("Retry-After"), raw), raw)
+	}
+	// Stop at the first model output: the probe only needs to know it was served.
+	served := false
+	_, streamErr := consumeStreamObserved(resp.Body, func(m upstream.SSEMessage) {
+		if !served && (m.Type == "model.text-delta" || m.Type == "model.reasoning-delta" || m.Type == "model.tool-call") {
+			served = true
+			cancel()
+		}
+	}, nil)
+	result.Elapsed = time.Since(started)
+	if served {
+		result.Outcome = "served"
+		return result
+	}
+	if streamErr == nil {
+		streamErr = errors.New("stream finished without output")
+	}
+	return describeProbeRefusal(result, streamErr, []byte(streamErr.Error()))
+}
+
+// describeProbeRefusal fills the queue fields a 10605 refusal names.
+func describeProbeRefusal(result ProbeResult, err error, raw []byte) ProbeResult {
+	result.Outcome, result.Detail = "error", util.Truncate(strings.Join(strings.Fields(err.Error()), " "), 240)
+	if errors.Is(err, ErrBusy) {
+		result.Outcome = "queued"
+	}
+	text := strings.ReplaceAll(string(raw)+" "+err.Error(), `\`, "")
+	result.QueueType = probeField(text, "queueType")
+	result.Available = probeField(text, "serviceAvailable")
+	result.SubCode = probeField(text, "subCode")
+	result.RetryWait = probeField(text, "retryAfterSeconds")
+	return result
+}
+
+// probeField reads `"key":value` out of a refusal however deeply it was quoted.
+func probeField(text, key string) string {
+	marker := `"` + key + `":`
+	index := strings.Index(text, marker)
+	if index < 0 {
+		return ""
+	}
+	value := strings.TrimLeft(text[index+len(marker):], ` "`)
+	end := strings.IndexAny(value, `",}`)
+	if end < 0 {
+		return value
+	}
+	return value[:end]
+}
