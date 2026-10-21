@@ -600,3 +600,38 @@ func envelopeCodeDepth(raw []byte, depth int) string {
 	}
 	return ""
 }
+
+// spentHostHold is how long an account skips a host that reported its daily
+// request count spent. The reset time is not reported; after the hold one
+// request finds out again, at the cost of one refusal.
+const spentHostHold = time.Hour
+
+func (c *Client) markHostSpent(host string, now time.Time) {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+	if c.spentHosts == nil {
+		c.spentHosts = map[string]time.Time{}
+	}
+	c.spentHosts[host] = now
+}
+
+// withoutSpentHosts moves the hosts this account recently found spent to the
+// end of the order. They stay in it: when every host is spent, the request
+// still reaches one and the refusal reaches the account policy.
+func (c *Client) withoutSpentHosts(hosts []string, now time.Time) []string {
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+	if len(c.spentHosts) == 0 {
+		return hosts
+	}
+	fresh := make([]string, 0, len(hosts))
+	var spent []string
+	for _, host := range hosts {
+		if at, ok := c.spentHosts[host]; ok && now.Sub(at) < spentHostHold {
+			spent = append(spent, host)
+			continue
+		}
+		fresh = append(fresh, host)
+	}
+	return append(fresh, spent...)
+}

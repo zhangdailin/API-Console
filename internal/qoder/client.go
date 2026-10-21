@@ -74,6 +74,9 @@ type Client struct {
 	// was derived from.
 	profile          string
 	queueWindowRetry bool
+	// spentHosts holds, per inference host, when this account's daily request
+	// count was found spent there; see withoutSpentHosts.
+	spentHosts       map[string]time.Time
 	referenceRuntime RuntimeFields
 	referenceAccess  string
 	referenceRefresh string
@@ -285,7 +288,7 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 		body = EncodeBody(raw)
 	}
 
-	hosts := c.endpoints.orderedInferenceHosts(time.Now())
+	hosts := c.withoutSpentHosts(c.endpoints.orderedInferenceHosts(time.Now()), time.Now())
 	url := chatURL(hosts[0])
 	if logger != nil && !logger.Capturing() {
 		logger.LogUpstreamRequest(url, map[string]string{"provider": "qoder", "model": model.Key}, body)
@@ -323,6 +326,11 @@ func (c *Client) runChat(ctx context.Context, hosts []string, body []byte, model
 	// hosts is the primary followed by its failover nodes, a recently working
 	// node first. They are spent in order, each at most once per request.
 	host, fallbacks := hosts[0], slices.Clone(hosts[1:])
+	// faultFailover records that the host in use was reached by failing over
+	// from a host fault. Only that says something about the hosts themselves;
+	// a failover for one account's spent daily count must not steer every
+	// other account to the same node.
+	faultFailover := false
 	url := chatURL(host)
 	emit := func(msg upstream.SSEMessage) {
 		emitted = true
@@ -356,7 +364,7 @@ func (c *Client) runChat(ctx context.Context, hosts []string, body []byte, model
 				slog.Info("Qoder request admitted after waiting for the queue window",
 					"window_retries", windowRetries, "waited", windowWaited)
 			}
-			if host != c.endpoints.inference {
+			if faultFailover && host != c.endpoints.inference {
 				// A failover node served the request; start the next ones there
 				// instead of at the primary that just failed.
 				preferInferenceHost(c.endpoints.inference, host, time.Now())
@@ -419,11 +427,34 @@ func (c *Client) runChat(ctx context.Context, hosts []string, body []byte, model
 		// so does this one before spending a backoff on the same host. The
 		// request gets a fresh id there because the failed host may still have
 		// received it.
+		// The daily request count is kept per host: an account whose count is
+		// spent on api2 is still admitted on api1 and api3. The request moves
+		// on, and this account skips the spent host for a while. Only when
+		// every host is spent does the refusal reach the account policy, which
+		// holds the account for the day.
+		case errors.Is(err, ErrDailyCountExceeded) && len(fallbacks) > 0:
+			c.markHostSpent(host, time.Now())
+			next := fallbacks[0]
+			fallbacks = fallbacks[1:]
+			slog.Warn("Qoder daily request count spent on this host; trying the next one", "host", host, "next_host", next)
+			host = next
+			faultFailover = false
+			url = chatURL(next)
+			requestID, err = newUUID(c.entropy)
+			if err != nil {
+				return err
+			}
+			body, err = c.replayBody(body, requestID)
+			if err != nil {
+				return err
+			}
+			continue
 		case (isUnreachable(err) || isTransientError(err)) && len(fallbacks) > 0:
 			next := fallbacks[0]
 			fallbacks = fallbacks[1:]
 			slog.Warn("Qoder inference host failed; failing over", "host", host, "next_host", next, "error", err)
 			host = next
+			faultFailover = true
 			url = chatURL(next)
 			requestID, err = newUUID(c.entropy)
 			if err != nil {

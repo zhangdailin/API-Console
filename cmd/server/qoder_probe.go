@@ -161,8 +161,14 @@ func runProbeRounds(ctx context.Context, client *qoder.Client, out io.Writer, mo
 	results, err := client.ProbeRounds(ctx, model, qoder.ProbeRoundOptions{
 		Variants: letters, Rounds: rounds, Interval: interval,
 		Progress: func(round int, r qoder.ProbeResult) {
-			fmt.Fprintf(out, "%s round %2d  %-32s %-7s queue=%s available=%s %s\n", time.Now().Format("15:04:05"), round, r.Variant, r.Outcome,
+			line := fmt.Sprintf("%s round %2d  %-32s %-7s queue=%s available=%s %s", time.Now().Format("15:04:05"), round, r.Variant, r.Outcome,
 				dash(r.QueueType), dash(r.Available), r.Elapsed.Round(time.Millisecond))
+			// An error is not a queue verdict; without its reason the run only
+			// says that something else went wrong (a spent daily count did).
+			if r.Outcome == "error" && r.Detail != "" {
+				line += "  " + probeErrorReason(r.Detail)
+			}
+			fmt.Fprintln(out, line)
 		},
 	})
 	type tally struct {
@@ -179,15 +185,18 @@ func runProbeRounds(ctx context.Context, client *qoder.Client, out io.Writer, mo
 			order = append(order, r.Variant)
 		}
 		t.sent++
-		if r.Outcome == "served" {
+		switch {
+		case r.Outcome == "served":
 			t.served++
-		} else {
+		case r.Outcome == "error":
+			t.queues["error: "+probeErrorReason(r.Detail)]++
+		default:
 			t.queues[dash(r.QueueType)]++
 		}
 	}
 	fmt.Fprintln(out)
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "VARIANT\tSERVED\tSENT\tREFUSED BY QUEUE")
+	fmt.Fprintln(w, "VARIANT\tSERVED\tSENT\tREFUSED BY")
 	for _, name := range order {
 		t := tallies[name]
 		var queues []string
@@ -201,4 +210,17 @@ func runProbeRounds(ctx context.Context, client *qoder.Client, out io.Writer, mo
 		return flushErr
 	}
 	return err
+}
+
+// probeErrorReason shortens an error detail to its reason, so identical
+// errors group in the summary.
+func probeErrorReason(detail string) string {
+	detail = strings.TrimSpace(detail)
+	if index := strings.LastIndex(detail, ": "); index >= 0 && index+2 < len(detail) {
+		detail = detail[index+2:]
+	}
+	if len(detail) > 80 {
+		detail = detail[:80] + "..."
+	}
+	return detail
 }
