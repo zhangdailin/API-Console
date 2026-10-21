@@ -42,6 +42,11 @@ type ProbeResult struct {
 	RetryWait string
 	Detail    string
 	Elapsed   time.Duration
+	// Search mode reads the whole answer: its text, the tools the model
+	// called, and the search-related markers found in the raw stream.
+	Answer        string
+	ToolCalls     []string
+	SearchMarkers []string
 }
 
 // probeIdentity is one client identity the probe presents.
@@ -55,6 +60,8 @@ type probeIdentity struct {
 	// carries user_type); reference sends the whole reference request.
 	referenceInfo bool
 	reference     bool
+	// fullRead reads the whole answer instead of stopping at its first token.
+	fullRead bool
 }
 
 // probeIdentities lists the identities compared, the current one first.
@@ -147,6 +154,9 @@ type ProbeRoundOptions struct {
 	Interval time.Duration
 	// Progress, when set, receives each result as it arrives.
 	Progress func(round int, result ProbeResult)
+	// Search replaces the identity variants with the web-search variants
+	// (see searchIdentities) and asks a question only a search can answer.
+	Search bool
 }
 
 // ProbeRounds sends the selected identities Rounds times. The order flips
@@ -157,15 +167,22 @@ func (c *Client) ProbeRounds(ctx context.Context, requestedModel string, opts Pr
 	if c == nil {
 		return nil, fmt.Errorf("qoder client is nil")
 	}
-	identities, err := selectProbeIdentities(c.probeIdentities(c.aliyunUserType()), opts.Variants)
+	all := c.probeIdentities(c.aliyunUserType())
+	question := "Reply with the single word OK."
+	maxTokens := 16
+	if opts.Search {
+		all = c.searchIdentities()
+		question = searchProbeQuestion
+		maxTokens = 600
+	}
+	identities, err := selectProbeIdentities(all, opts.Variants)
 	if err != nil {
 		return nil, err
 	}
-	maxTokens := 16
 	req := upstream.UpstreamRequest{
 		Model:     requestedModel,
 		MaxTokens: &maxTokens,
-		Messages:  []prompt.Message{{Role: "user", Content: prompt.MessageContent{Text: "Reply with the single word OK."}}},
+		Messages:  []prompt.Message{{Role: "user", Content: prompt.MessageContent{Text: question}}},
 	}
 	model, err := c.resolveModel(req)
 	if err != nil {
@@ -309,6 +326,9 @@ func (c *Client) probeOnce(ctx context.Context, identity probeIdentity, req upst
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 		return describeProbeRefusal(result, classifyStatus(resp.StatusCode, resp.Header.Get("Retry-After"), raw), raw)
 	}
+	if identity.fullRead {
+		return readSearchProbe(result, resp.Body, started)
+	}
 	// Stop at the first model output: the probe only needs to know it was served.
 	served := false
 	_, streamErr := consumeStreamObserved(resp.Body, func(m upstream.SSEMessage) {
@@ -355,4 +375,92 @@ func probeField(text, key string) string {
 		return value
 	}
 	return value[:end]
+}
+
+// searchProbeQuestion can only be answered correctly with a live search, and
+// asks for the source so a searched answer is recognisable.
+const searchProbeQuestion = "Search the web: what is the most recent stable release of the Go programming language, and on what date was it released? Answer in one sentence and give the URL you found it at."
+
+// searchIdentities declares a web search in the ways a client or a model
+// platform might, each passed to the gateway unchanged, so the probe shows
+// whether the gateway runs any of them. S0 declares none and is the baseline.
+func (c *Client) searchIdentities() []probeIdentity {
+	primary := strings.TrimRight(c.endpoints.inference, "/")
+	withTools := func(tools ...any) func(map[string]any) {
+		return func(body map[string]any) { body["tools"] = tools }
+	}
+	enableSearch := func(body map[string]any) {
+		parameters, _ := body["parameters"].(map[string]any)
+		if parameters == nil {
+			parameters = map[string]any{}
+		}
+		parameters["enable_search"] = true
+		body["parameters"] = parameters
+	}
+	return []probeIdentity{
+		{name: "S0 no search tool", host: primary, version: c.clientVersion, fullRead: true},
+		{name: "S1 anthropic web_search_20250305 tool", host: primary, version: c.clientVersion, fullRead: true,
+			body: withTools(map[string]any{"type": "web_search_20250305", "name": "web_search", "max_uses": 5})},
+		{name: "S2 openai web_search tool", host: primary, version: c.clientVersion, fullRead: true,
+			body: withTools(map[string]any{"type": "web_search"})},
+		{name: "S3 parameters.enable_search", host: primary, version: c.clientVersion, fullRead: true, body: enableSearch},
+	}
+}
+
+// searchMarkers are raw-stream words that show a search took place.
+var searchMarkers = []string{"search", "citation", "reference", "url_citation", "\"url\""}
+
+// readSearchProbe reads a whole answer, keeping a bounded copy of the raw
+// stream to look for search evidence the parsed events would not carry.
+func readSearchProbe(result ProbeResult, body io.Reader, started time.Time) ProbeResult {
+	var raw bytes.Buffer
+	tee := io.TeeReader(io.LimitReader(body, 1<<20), &limitedWriter{buf: &raw, limit: 256 << 10})
+	var answer strings.Builder
+	_, streamErr := consumeStreamObserved(tee, func(m upstream.SSEMessage) {
+		switch m.Type {
+		case "model.text-delta":
+			if delta, ok := m.Event["delta"].(string); ok {
+				answer.WriteString(delta)
+			}
+		case "model.tool-call":
+			if name, ok := m.Event["toolName"].(string); ok {
+				result.ToolCalls = append(result.ToolCalls, name)
+			} else {
+				result.ToolCalls = append(result.ToolCalls, fmt.Sprint(m.Event["name"]))
+			}
+		}
+	}, nil, true)
+	result.Elapsed = time.Since(started)
+	result.Answer = util.Truncate(strings.Join(strings.Fields(answer.String()), " "), 400)
+	lower := strings.ToLower(strings.ReplaceAll(raw.String(), `\`, ""))
+	for _, marker := range searchMarkers {
+		if count := strings.Count(lower, marker); count > 0 {
+			result.SearchMarkers = append(result.SearchMarkers, fmt.Sprintf("%s=%d", strings.Trim(marker, `"`), count))
+		}
+	}
+	if result.Answer != "" || len(result.ToolCalls) > 0 {
+		result.Outcome = "served"
+		return result
+	}
+	if streamErr == nil {
+		streamErr = errors.New("stream finished without output")
+	}
+	return describeProbeRefusal(result, streamErr, []byte(streamErr.Error()))
+}
+
+// limitedWriter keeps the first limit bytes written to it and drops the rest.
+type limitedWriter struct {
+	buf   *bytes.Buffer
+	limit int
+}
+
+func (w *limitedWriter) Write(p []byte) (int, error) {
+	if room := w.limit - w.buf.Len(); room > 0 {
+		if len(p) > room {
+			w.buf.Write(p[:room])
+		} else {
+			w.buf.Write(p)
+		}
+	}
+	return len(p), nil
 }

@@ -28,6 +28,7 @@ func runQoderProbe(args []string, out io.Writer) error {
 	rounds := flags.Int("rounds", 0, "send the selected variants this many times, alternating their order (0: one pass)")
 	interval := flags.Duration("interval", 35*time.Second, "pause before every request in a multi-round comparison")
 	variants := flags.String("variants", "", "comma-separated variant letters to send, e.g. A,E (default: all)")
+	search := flags.Bool("search", false, "send the web-search variants S0-S3 and print each full answer")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -86,9 +87,9 @@ func runQoderProbe(args []string, out io.Writer) error {
 	client := qoder.NewFromAccount(acc, cfg)
 	client.SetAccountStore(s) // a token rotated during the probe is persisted
 	if *rounds > 1 {
-		return runProbeRounds(ctx, client, out, *model, letters, *rounds, *interval)
+		return runProbeRounds(ctx, client, out, *model, letters, *rounds, *interval, *search)
 	}
-	results, err := client.ProbeRounds(ctx, *model, qoder.ProbeRoundOptions{Rounds: 1, Variants: letters})
+	results, err := client.ProbeRounds(ctx, *model, qoder.ProbeRoundOptions{Rounds: 1, Variants: letters, Search: *search})
 	if err != nil {
 		return err
 	}
@@ -106,8 +107,19 @@ func runQoderProbe(args []string, out io.Writer) error {
 		if r.Outcome == "error" && r.Detail != "" {
 			fmt.Fprintf(out, "%s: %s\n", r.Variant, r.Detail)
 		}
+		if line := probeAnswerLine(r); line != "" {
+			fmt.Fprintf(out, "%s:%s\n", r.Variant, line)
+		}
 	}
 	return nil
+}
+
+// probeAnswerLine renders what a search-mode answer contained.
+func probeAnswerLine(r qoder.ProbeResult) string {
+	if r.Outcome != "served" || (r.Answer == "" && len(r.ToolCalls) == 0 && len(r.SearchMarkers) == 0) {
+		return ""
+	}
+	return fmt.Sprintf("\n    tools=%s markers=%s\n    answer: %s", dash(strings.Join(r.ToolCalls, ",")), dash(strings.Join(r.SearchMarkers, " ")), dash(r.Answer))
 }
 
 func dash(value string) string {
@@ -156,10 +168,10 @@ func qoderProbeCommand(args []string) bool {
 
 // runProbeRounds prints each attempt as it lands and then how often each
 // identity was served.
-func runProbeRounds(ctx context.Context, client *qoder.Client, out io.Writer, model string, letters []string, rounds int, interval time.Duration) error {
+func runProbeRounds(ctx context.Context, client *qoder.Client, out io.Writer, model string, letters []string, rounds int, interval time.Duration, search bool) error {
 	fmt.Fprintf(out, "%d rounds, %s between requests, order alternating each round\n\n", rounds, interval)
 	results, err := client.ProbeRounds(ctx, model, qoder.ProbeRoundOptions{
-		Variants: letters, Rounds: rounds, Interval: interval,
+		Variants: letters, Rounds: rounds, Interval: interval, Search: search,
 		Progress: func(round int, r qoder.ProbeResult) {
 			line := fmt.Sprintf("%s round %2d  %-32s %-7s queue=%s available=%s %s", time.Now().Format("15:04:05"), round, r.Variant, r.Outcome,
 				dash(r.QueueType), dash(r.Available), r.Elapsed.Round(time.Millisecond))
@@ -168,6 +180,7 @@ func runProbeRounds(ctx context.Context, client *qoder.Client, out io.Writer, mo
 			if r.Outcome == "error" && r.Detail != "" {
 				line += "  " + probeErrorReason(r.Detail)
 			}
+			line += probeAnswerLine(r)
 			fmt.Fprintln(out, line)
 		},
 	})
