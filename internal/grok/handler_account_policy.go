@@ -246,6 +246,13 @@ func shouldSwitchGrokAccount(err error) bool {
 	if status == "401" || status == "429" || isSharedGrokRateLimitError(err) {
 		return true
 	}
+	// A spent account ("personal-team-blocked:spending-limit", 402 "You have
+	// run out of credits") is this account's problem; another account can
+	// serve the request. Not switching answered the caller with the refusal
+	// while healthy accounts sat idle in the pool.
+	if upstreamStatus(err) == http.StatusPaymentRequired || apperrors.IsCreditExhaustion(err.Error()) {
+		return true
+	}
 	if status := upstreamStatus(err); status == http.StatusBadGateway ||
 		status == http.StatusServiceUnavailable ||
 		status == http.StatusGatewayTimeout ||

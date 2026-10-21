@@ -86,6 +86,10 @@ type streamHandler struct {
 	// sent, so a failed attempt can still be answered with a real HTTP status
 	// instead of an in-band error on a stream the client has already accepted.
 	messageStartWritten bool
+	// nonStreamKeepAlive enables whitespace keep-alives for a non-streaming
+	// answer; nonStreamOpened records that the response has been opened by one.
+	nonStreamKeepAlive bool
+	nonStreamOpened    bool
 	// pendingModel is the model the deferred opening frame reports.
 	pendingModel             string
 	hasReasoningOutput       bool
@@ -192,6 +196,7 @@ func (h *streamHandler) hasCommitted() bool {
 
 func (h *streamHandler) writeKeepAlive() {
 	if !h.isStream {
+		h.writeNonStreamKeepAlive()
 		return
 	}
 	h.mu.Lock()
@@ -631,5 +636,31 @@ func (h *streamHandler) handleMessage(msg upstream.SSEMessage) {
 
 		h.closeActiveBlock()
 		h.finishResponse(stopReason)
+	}
+}
+
+// writeNonStreamKeepAlive keeps a silent non-streaming answer alive once it
+// has waited nonStreamOpenAfter: the first write opens the response (status
+// 200) with padding, later ones add a newline. The JSON answer follows the
+// whitespace when it is ready. A failure after the response opened can no
+// longer change the status; its JSON error body still follows.
+func (h *streamHandler) writeNonStreamKeepAlive() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !h.nonStreamKeepAlive || h.hasReturn || h.requestFailed || time.Since(h.startTime) < nonStreamOpenAfter {
+		return
+	}
+	chunk := []byte("\n")
+	if !h.nonStreamOpened {
+		chunk = nonStreamOpenPadding
+	}
+	writer := httpserver.DeadlineResponseWriter{ResponseWriter: h.w}
+	if _, err := writer.Write(chunk); err != nil {
+		h.markWriteErrorLocked("nonstream-keep-alive", err)
+		return
+	}
+	h.nonStreamOpened = true
+	if err := writer.FlushError(); err != nil {
+		h.markWriteErrorLocked("nonstream-keep-alive", err)
 	}
 }

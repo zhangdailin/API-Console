@@ -170,9 +170,14 @@ func refreshCLIAccount(ctx context.Context, cfg *config.Config, s *store.Store, 
 		}
 		if token != "" {
 			acc.OAuthAccessToken = token
-			acc.StatusCode = ""
 			acc.AuthStatus = store.AccountAuthStatusActive
-			acc.LastAttempt = time.Time{}
+			// A renewed token answers a credential verdict only. Clearing every
+			// status put an account parked for its spent credits (402) back into
+			// rotation each time its token was renewed.
+			if credentialStatus(acc.StatusCode) {
+				acc.StatusCode = ""
+				acc.LastAttempt = time.Time{}
+			}
 		}
 	}
 
@@ -198,4 +203,14 @@ func cliBillingNeedsSync(acc *store.Account, now time.Time) bool {
 		return true
 	}
 	return now.Sub(acc.GrokBilling.SyncedAt) >= provider.HealthRefreshInterval
+}
+
+// credentialStatus reports an account status that a renewed credential
+// resolves: an authentication refusal.
+func credentialStatus(status string) bool {
+	switch strings.TrimSpace(status) {
+	case "", "401":
+		return true
+	}
+	return false
 }

@@ -93,6 +93,10 @@ type Config struct {
 	// refusal (10605, queueType p3/p4) at the gateway's per-minute admission
 	// window; such refusals then follow the generic shared-refusal wait.
 	QoderQueueWindowRetryDisabled bool `json:"qoder_queue_window_retry_disabled,omitempty"`
+	// NonStreamKeepAliveDisabled turns off whitespace keep-alives for
+	// non-streaming answers that take longer than a minute (see
+	// handler.nonStreamOpenAfter).
+	NonStreamKeepAliveDisabled bool `json:"non_stream_keepalive_disabled,omitempty"`
 
 	// ── Cline (api.cline.bot) OAuth channel ──
 	//

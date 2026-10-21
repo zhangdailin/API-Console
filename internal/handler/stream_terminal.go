@@ -244,11 +244,19 @@ func (h *streamHandler) reportRequestFailure(logMsg, category, message string, r
 	h.hasReturn = true
 	h.requestFailed = true
 	h.returned.Store(true)
+	opened := h.nonStreamOpened
 	h.mu.Unlock()
+	failure := apperrors.NewWithRetryAfter(category, message, apperrors.StatusForCategory(category), retryAfter)
+	if opened {
+		// A keep-alive already committed 200; the JSON error body follows the
+		// whitespace, and the status cannot change any more.
+		_, _ = h.w.Write(failure.ToJSON())
+		return
+	}
 	// retryAfter publishes the upstream's own "come back in" hint. A caller that
 	// just waited out several windows deserves to know when the answer might
 	// change instead of retrying blindly.
-	apperrors.NewWithRetryAfter(category, message, apperrors.StatusForCategory(category), retryAfter).WriteResponse(h.w)
+	failure.WriteResponse(h.w)
 }
 
 // writeStreamError reports a failure inside a stream that has already started.

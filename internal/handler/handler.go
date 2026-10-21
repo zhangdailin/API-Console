@@ -170,6 +170,22 @@ const keepAliveInterval = 15 * time.Second
 // later failure is reported in band. Retries and account switching are
 // unaffected: they depend on emitted content, not on the open stream.
 const silentCommitAfter = 45 * time.Second
+
+// nonStreamOpenAfter is how long a non-streaming answer may stay silent before
+// the gateway opens the response and keeps it alive with whitespace. A
+// fronting proxy also ends a non-streaming request whose origin sends nothing:
+// Cloudflare answered 524 at 120 seconds, and every Qoder non-streaming
+// request still waiting for the upstream's admission window was lost there,
+// while streaming requests (kept alive) were served up to 180 seconds.
+// Leading whitespace is valid JSON, so the final body still parses.
+const nonStreamOpenAfter = 60 * time.Second
+
+// nonStreamOpenPadding is the first keep-alive write of a non-streaming
+// answer. It is large enough to clear the buffering threshold of a compressing
+// reverse proxy (Caddy's encode holds back the first 512 bytes), so the bytes
+// actually reach the edge.
+var nonStreamOpenPadding = []byte(strings.Repeat(" ", 1023) + "\n")
+
 const maxRequestBytes = 50 * 1024 * 1024 // 50MB
 
 func NewWithLoadBalancer(cfg *config.Config, lb *loadbalancer.LoadBalancer) *Handler {
@@ -543,6 +559,7 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request, prepare
 	} else {
 		w.Header().Set("Content-Type", "application/json")
 	}
+	nonStreamKeepAlive := !isStream && !cfg.NonStreamKeepAliveDisabled && responseWriterSupportsFlush(w)
 
 	// State management
 	// msgID is now managed by streamHandler
@@ -617,7 +634,8 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request, prepare
 	// outlive the client.
 	keepAliveDone := r.Context().Done()
 	var keepAliveStop chan struct{}
-	if isStream {
+	sh.nonStreamKeepAlive = nonStreamKeepAlive
+	if isStream || nonStreamKeepAlive {
 		keepAliveStop = make(chan struct{})
 		defer close(keepAliveStop)
 		ticker := time.NewTicker(keepAliveInterval)
