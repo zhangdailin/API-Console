@@ -108,3 +108,22 @@ func TestProbeRoundsAlternatesOrder(t *testing.T) {
 	_, err = client.ProbeRounds(context.Background(), "Qwen3.7-Max", ProbeRoundOptions{Variants: []string{"Z"}})
 	testutil.Error(t, err)
 }
+
+// TestProbeIdentitiesCoverEveryFailoverNode: api3 was never probed because the
+// list stopped at the first failover node.
+func TestProbeIdentitiesCoverEveryFailoverNode(t *testing.T) {
+	client := NewFromAccount(signedTestAccount(), nil)
+	identities := client.probeIdentities("personal_standard")
+	hosts := map[string]string{}
+	for _, identity := range identities {
+		hosts[identity.name[:1]] = hostName(identity.host)
+	}
+	testutil.Equal(t, hosts["A"], "api2.qoder.sh")
+	testutil.Equal(t, hosts["F"], "api1.qoder.sh")
+	testutil.Equal(t, hosts["G"], "api1.qoder.sh")
+	testutil.Equal(t, hosts["J"], "api3.qoder.sh")
+	testutil.Equal(t, hosts["K"], "api3.qoder.sh")
+	selected, err := selectProbeIdentities(identities, []string{"A", "F", "J"})
+	testutil.NoError(t, err)
+	testutil.Equal(t, len(selected), 3)
+}

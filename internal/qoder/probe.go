@@ -110,12 +110,18 @@ func (c *Client) probeIdentities(userType string) []probeIdentity {
 		{name: "H current + reference info", host: primary, version: c.clientVersion, referenceInfo: true},
 		{name: "I full reference request", host: primary, version: referenceCosyVersion, reference: true},
 	}
-	for _, fallback := range c.endpoints.inferenceFallbacks {
+	// Every failover node is probed: the daily request count is kept per
+	// host, so whether a node also has its own admission capacity is the
+	// question these variants answer. api1 gets F/G and api3 J/K.
+	letters := [][2]string{{"F", "G"}, {"J", "K"}, {"L", "M"}}
+	for i, fallback := range c.endpoints.inferenceFallbacks {
+		if i >= len(letters) {
+			break
+		}
 		identities = append(identities,
-			probeIdentity{name: "F current on " + hostName(fallback), host: fallback, version: c.clientVersion},
-			probeIdentity{name: "G cli identity on " + hostName(fallback), host: fallback, version: "0.1.43", body: cli, headers: cliHeaders},
+			probeIdentity{name: letters[i][0] + " current on " + hostName(fallback), host: fallback, version: c.clientVersion},
+			probeIdentity{name: letters[i][1] + " cli identity on " + hostName(fallback), host: fallback, version: "0.1.43", body: cli, headers: cliHeaders},
 		)
-		break // one fallback node is enough to tell whether the host matters
 	}
 	return identities
 }
