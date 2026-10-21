@@ -35,7 +35,7 @@ func TestProbeIdentitiesReportsEachQueue(t *testing.T) {
 		}
 		_ = json.Unmarshal(decoded, &cosy)
 		mu.Lock()
-		seen[body["session_type"].(string)+"/"+r.Header.Get("Cosy-Clienttype")] = cosy.CosyVersion + "|" + r.Header.Get("Cosy-Version")
+		seen[body["session_type"].(string)+"/"+r.Header.Get("Cosy-Clienttype")+"/"+r.Header.Get("Cosy-Version")] = cosy.CosyVersion + "|" + r.Header.Get("Cosy-Version")
 		mu.Unlock()
 		if body["session_type"] == "qodercli" {
 			_, _ = io.WriteString(w, envelope(`{"choices":[{"delta":{"content":"OK"},"finish_reason":"stop"}]}`)+"event:finish\ndata: {}\n\n")
@@ -51,7 +51,7 @@ func TestProbeIdentitiesReportsEachQueue(t *testing.T) {
 	setTestEndpoints(client, server.URL, server.URL, server.URL)
 	results, err := client.ProbeIdentities(context.Background(), "Qwen3.7-Max")
 	testutil.NoError(t, err)
-	testutil.Equal(t, len(results), 7)
+	testutil.Equal(t, len(results), 8)
 
 	byName := map[string]ProbeResult{}
 	for _, r := range results {
@@ -65,9 +65,10 @@ func TestProbeIdentitiesReportsEachQueue(t *testing.T) {
 	testutil.Equal(t, byName["E"].Outcome, "served")
 
 	// Each identity reached the gateway as itself, signed with its own version.
-	testutil.Equal(t, seen["qoder_work/6"], DefaultClientVersion+"|"+DefaultClientVersion)
-	testutil.Equal(t, seen["qoder/5"], "1.0.10|1.0.10")
-	testutil.Equal(t, seen["qodercli/5"], "0.1.43|0.1.43")
+	testutil.Equal(t, seen["qoder_work/6/"+DefaultClientVersion], DefaultClientVersion+"|"+DefaultClientVersion)
+	testutil.Equal(t, seen["qoder/5/1.0.10"], "1.0.10|1.0.10")
+	testutil.Equal(t, seen["qodercli/5/0.1.43"], "0.1.43|0.1.43")
+	testutil.Equal(t, seen["qodercli/5/1.1.64"], "1.1.64|1.1.64")
 }
 
 func mustJSON(v any) string {

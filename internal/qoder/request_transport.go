@@ -116,7 +116,7 @@ func (c *Client) attemptChat(ctx context.Context, url string, body []byte, model
 	applyHeaders := c.applyAuthHeadersBytes
 	if c.referenceProfile() {
 		applyHeaders = func(req *http.Request, creds Credentials, fields RuntimeFields, _, modelKey, modelSource string, body []byte, signedPath string) error {
-			return c.applyReferenceHeaders(req, creds, fields, modelKey, modelSource, body, signedPath)
+			return c.applyCLIHeaders(req, creds, fields, modelKey, modelSource, body, signedPath, c.profile)
 		}
 	}
 	if err := applyHeaders(req, creds, fields, requestID, model.Key, model.Source, body, signPath(url)); err != nil {

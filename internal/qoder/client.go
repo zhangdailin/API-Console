@@ -80,6 +80,8 @@ type Client struct {
 	referenceRuntime RuntimeFields
 	referenceAccess  string
 	referenceRefresh string
+	// referenceProfileName is the CLI profile referenceRuntime was sealed for.
+	referenceProfileName string
 
 	refreshMu            sync.Mutex
 	runtimeMu            sync.Mutex
@@ -282,13 +284,13 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 		if err != nil {
 			return err
 		}
-		if raw, err = referenceBody(raw, c.aliyunUserType()); err != nil {
+		if raw, err = cliBody(raw, c.aliyunUserType(), c.profile); err != nil {
 			return err
 		}
 		body = EncodeBody(raw)
 	}
 
-	hosts := c.withoutSpentHosts(c.endpoints.orderedInferenceHosts(time.Now()), time.Now())
+	hosts := c.withoutSpentHosts(c.cliHostOrder(c.endpoints.orderedInferenceHosts(time.Now())), time.Now())
 	url := chatURL(hosts[0])
 	if logger != nil && !logger.Capturing() {
 		logger.LogUpstreamRequest(url, map[string]string{"provider": "qoder", "model": model.Key}, body)

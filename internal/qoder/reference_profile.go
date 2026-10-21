@@ -3,10 +3,15 @@ package qoder
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
+	"crypto/sha512"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/textproto"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -30,22 +35,50 @@ const (
 	RequestProfileReference = "reference"
 
 	referenceCosyVersion = "0.1.43"
-	referenceClientType  = "5"
-	referenceUserAgent   = "Go-http-client/2.0"
-	referenceSessionType = "qodercli"
+
+	// RequestProfileBuddySwitch is the request NextAgentX/qoder-trae-workbuddy-
+	// switch (buddy-switch, e664b38) sends: the same CLI shape as the
+	// reference profile with a newer client version, a fixed client-ip header,
+	// an identity serialized with sorted keys, and the CLI template's full body.
+	RequestProfileBuddySwitch = "buddyswitch"
+
+	buddySwitchCosyVersion     = "1.1.64"
+	buddySwitchClientIP        = "169.254.198.161"
+	buddySwitchDefaultUserType = "personal_professional_trial"
+	buddySwitchBusinessVersion = "0.1.43"
+	referenceClientType        = "5"
+	referenceUserAgent         = "Go-http-client/2.0"
+	referenceSessionType       = "qodercli"
 )
 
 // resolveRequestProfile maps the configured profile onto a known one. An
 // unknown value keeps the default rather than inventing a request shape.
 func resolveRequestProfile(value string) string {
-	if strings.EqualFold(strings.TrimSpace(value), RequestProfileReference) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case RequestProfileReference:
 		return RequestProfileReference
+	case RequestProfileBuddySwitch:
+		return RequestProfileBuddySwitch
 	}
 	return RequestProfileQoderWork
 }
 
+// referenceProfile reports a CLI-shaped profile (reference or buddyswitch):
+// both sign with the token-bearing identity and build the CLI request.
 func (c *Client) referenceProfile() bool {
-	return c != nil && c.profile == RequestProfileReference
+	return c != nil && isCLIProfile(c.profile)
+}
+
+func isCLIProfile(profile string) bool {
+	return profile == RequestProfileReference || profile == RequestProfileBuddySwitch
+}
+
+// cliCosyVersion is the client version a CLI profile signs and sends.
+func cliCosyVersion(profile string) string {
+	if profile == RequestProfileBuddySwitch {
+		return buddySwitchCosyVersion
+	}
+	return referenceCosyVersion
 }
 
 // referenceRuntimeFieldInput is the reference bridge's encrypted AuthIdentity.
@@ -75,21 +108,76 @@ func (c *Client) referenceRuntimeInput(creds Credentials) referenceRuntimeFieldI
 	}
 }
 
+// cliRuntimePlaintext is the identity a CLI profile seals. buddy-switch
+// serializes it with its keys sorted and defaults the account class to the
+// professional trial; the reference keeps struct order.
+func (c *Client) cliRuntimePlaintext(creds Credentials, profile string) ([]byte, error) {
+	in := c.referenceRuntimeInput(creds)
+	if profile != RequestProfileBuddySwitch {
+		return marshalNoEscape(in)
+	}
+	userType := strings.TrimSpace(c.aliyunUserType())
+	if userType == "" {
+		userType = buddySwitchDefaultUserType
+	}
+	return sortedCompactJSON(map[string]string{
+		"name": in.Name, "aid": in.Aid, "uid": in.UID, "yx_uid": in.YxUID,
+		"organization_id": in.OrganizationID, "organization_name": in.OrganizationName,
+		"user_type": userType, "security_oauth_token": in.SecurityOAuthToken, "refresh_token": in.RefreshToken,
+	})
+}
+
+// sortedCompactJSON renders a flat string object with sorted keys and no
+// insignificant whitespace, as buddy-switch's json_sorted_compact does.
+func sortedCompactJSON(values map[string]string) ([]byte, error) {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	var out bytes.Buffer
+	out.WriteByte('{')
+	for i, key := range keys {
+		if i > 0 {
+			out.WriteByte(',')
+		}
+		k, err := marshalNoEscape(key)
+		if err != nil {
+			return nil, err
+		}
+		v, err := marshalNoEscape(values[key])
+		if err != nil {
+			return nil, err
+		}
+		out.Write(k)
+		out.WriteByte(':')
+		out.Write(v)
+	}
+	out.WriteByte('}')
+	return out.Bytes(), nil
+}
+
 // referenceRuntimeFields returns the reference-layout pair for creds. It is
 // derived in memory per credential and never persisted: the stored pair keeps
 // the default layout, so switching profiles back needs no repair. The tokens
 // are part of the plaintext, so a rotation derives a new pair.
 func (c *Client) referenceRuntimeFields(creds Credentials) (RuntimeFields, error) {
+	return c.cliRuntimeFields(creds, RequestProfileReference)
+}
+
+// cliRuntimeFields returns the pair a CLI profile signs with, cached per
+// profile and token pair.
+func (c *Client) cliRuntimeFields(creds Credentials, profile string) (RuntimeFields, error) {
 	if strings.TrimSpace(creds.UID) == "" {
 		return RuntimeFields{}, fmt.Errorf("qoder account has no user id yet; sign in again")
 	}
 	c.stateMu.RLock()
-	cached, cachedAccess, cachedRefresh := c.referenceRuntime, c.referenceAccess, c.referenceRefresh
+	cached, cachedAccess, cachedRefresh, cachedProfile := c.referenceRuntime, c.referenceAccess, c.referenceRefresh, c.referenceProfileName
 	c.stateMu.RUnlock()
-	if cached.Complete() && cachedAccess == creds.AccessToken && cachedRefresh == creds.RefreshToken {
+	if cached.Complete() && cachedProfile == profile && cachedAccess == creds.AccessToken && cachedRefresh == creds.RefreshToken {
 		return cached, nil
 	}
-	plaintext, err := marshalNoEscape(c.referenceRuntimeInput(creds))
+	plaintext, err := c.cliRuntimePlaintext(creds, profile)
 	if err != nil {
 		return RuntimeFields{}, fmt.Errorf("marshal reference runtime identity: %w", err)
 	}
@@ -98,7 +186,7 @@ func (c *Client) referenceRuntimeFields(creds Credentials) (RuntimeFields, error
 		return RuntimeFields{}, err
 	}
 	c.stateMu.Lock()
-	c.referenceRuntime, c.referenceAccess, c.referenceRefresh = fields, creds.AccessToken, creds.RefreshToken
+	c.referenceRuntime, c.referenceAccess, c.referenceRefresh, c.referenceProfileName = fields, creds.AccessToken, creds.RefreshToken, profile
 	c.stateMu.Unlock()
 	return fields, nil
 }
@@ -106,7 +194,7 @@ func (c *Client) referenceRuntimeFields(creds Credentials) (RuntimeFields, error
 // chatRuntimeFields returns the pair the configured profile signs chat with.
 func (c *Client) chatRuntimeFields(ctx context.Context, creds Credentials) (RuntimeFields, error) {
 	if c.referenceProfile() {
-		return c.referenceRuntimeFields(creds)
+		return c.cliRuntimeFields(creds, c.profile)
 	}
 	return c.ensureRuntimeFields(ctx, creds)
 }
@@ -171,6 +259,92 @@ func referenceBody(raw []byte, userType string) ([]byte, error) {
 		for _, item := range messages {
 			if message, ok := item.(map[string]any); ok {
 				referenceMessage(message)
+			}
+		}
+	}
+	return marshalNoEscape(body)
+}
+
+// cliBody reshapes a default chat body for a CLI profile.
+func cliBody(raw []byte, userType, profile string) ([]byte, error) {
+	if profile == RequestProfileBuddySwitch {
+		return buddySwitchBody(raw, userType)
+	}
+	return referenceBody(raw, userType)
+}
+
+// buddySwitchBody reshapes a default chat body into buddy-switch's: its CLI
+// template (baseprompt.json) filled the way build_chat_body fills it. Unlike
+// the reference body it keeps the template's full chat_context, model_config
+// and business card, adds the template's empty image_urls / code_language /
+// chat_prompt fields, and sends history messages as plain role/content.
+//
+// Two of buddy-switch's behaviours are not reproduced. It flattens tool calls
+// into marked text for the international region and parses them back out of
+// the answer; this gateway keeps native tool calls. And it inserts the
+// official CLI system prompt when a client sends none; clients of this
+// gateway send their own.
+func buddySwitchBody(raw []byte, userType string) ([]byte, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var body map[string]any
+	if err := decoder.Decode(&body); err != nil {
+		return nil, fmt.Errorf("decode qoder body: %w", err)
+	}
+	delete(body, "system")
+	body["session_type"] = referenceSessionType
+	userType = strings.TrimSpace(userType)
+	if userType == "" {
+		userType = buddySwitchDefaultUserType
+	}
+	body["aliyun_user_type"] = userType
+	body["is_reply"] = true
+	body["is_retry"] = false
+	body["image_urls"] = nil
+	body["code_language"] = ""
+	body["chat_prompt"] = ""
+	if _, ok := body["tools"].([]any); !ok {
+		body["tools"] = []any{}
+	}
+	if chatContext, ok := body["chat_context"].(map[string]any); ok {
+		chatContext["text"] = textObject(chatContext["text"])
+		if _, ok := chatContext["chatPrompt"]; !ok {
+			chatContext["chatPrompt"] = ""
+		}
+		if _, ok := chatContext["features"]; !ok {
+			chatContext["features"] = []any{}
+		}
+		if _, ok := chatContext["imageUrls"]; !ok {
+			chatContext["imageUrls"] = nil
+		}
+		if extra, ok := chatContext["extra"].(map[string]any); ok {
+			extra["originalContent"] = textObject(extra["originalContent"])
+			if _, ok := extra["context"]; !ok {
+				extra["context"] = []any{}
+			}
+		}
+	}
+	if business, ok := body["business"].(map[string]any); ok {
+		next := map[string]any{
+			"product": "cli",
+			"version": buddySwitchBusinessVersion,
+			"type":    "agent",
+			"stage":   "start",
+		}
+		for _, key := range []string{"id", "name", "begin_at"} {
+			if value, ok := business[key]; ok {
+				next[key] = value
+			}
+		}
+		body["business"] = next
+	}
+	if messages, ok := body["messages"].([]any); ok {
+		for _, item := range messages {
+			if message, ok := item.(map[string]any); ok {
+				// buddy-switch sends history as plain role/content (and native
+				// tool calls); the QoderWork echo fields are not part of it.
+				delete(message, "response_meta")
+				delete(message, "reasoning_item")
 			}
 		}
 	}
@@ -259,12 +433,18 @@ func (c *Client) replayBody(encoded []byte, requestID string) ([]byte, error) {
 // payload carries its own request id: the reference signs a fresh one rather
 // than the body's.
 func (c *Client) applyReferenceHeaders(req *http.Request, creds Credentials, fields RuntimeFields, modelKey, modelSource string, body []byte, signedPath string) error {
+	return c.applyCLIHeaders(req, creds, fields, modelKey, modelSource, body, signedPath, RequestProfileReference)
+}
+
+// applyCLIHeaders sets a CLI profile's chat header set.
+func (c *Client) applyCLIHeaders(req *http.Request, creds Credentials, fields RuntimeFields, modelKey, modelSource string, body []byte, signedPath, profile string) error {
 	payloadID, err := newUUID(c.entropy)
 	if err != nil {
 		return err
 	}
+	version := cliCosyVersion(profile)
 	unixSeconds := strconv.FormatInt(time.Now().Unix(), 10)
-	authorization, err := buildCOSYAuthorization(payloadID, fields.EncryptUserInfo, referenceCosyVersion, fields.Key, unixSeconds, body, signedPath)
+	authorization, err := buildCOSYAuthorization(payloadID, fields.EncryptUserInfo, version, fields.Key, unixSeconds, body, signedPath)
 	if err != nil {
 		return err
 	}
@@ -280,10 +460,15 @@ func (c *Client) applyReferenceHeaders(req *http.Request, creds Credentials, fie
 	set("Cosy-Date", unixSeconds)
 	set("Cosy-Key", fields.Key)
 	set("Cosy-Machineid", c.machineID)
-	set("Cosy-Machinetoken", referenceMachineToken(c.machineID))
-	set("Cosy-Machinetype", referenceMachineType(c.machineID))
+	machineToken, machineType := referenceMachineToken(c.machineID), referenceMachineType(c.machineID)
+	if profile == RequestProfileBuddySwitch {
+		machineToken, machineType = buddySwitchMachineToken(creds.UID), buddySwitchMachineType(creds.UID)
+		set("Cosy-Clientip", buddySwitchClientIP)
+	}
+	set("Cosy-Machinetoken", machineToken)
+	set("Cosy-Machinetype", machineType)
 	set("Cosy-User", strings.TrimSpace(creds.UID))
-	set("Cosy-Version", referenceCosyVersion)
+	set("Cosy-Version", version)
 	set("Login-Version", "v2")
 	set("User-Agent", referenceUserAgent)
 	if key := strings.TrimSpace(modelKey); key != "" {
@@ -316,4 +501,34 @@ func referenceMachineType(machineID string) string {
 		return machineID[:18]
 	}
 	return machineID
+}
+
+// buddySwitchMachineToken and buddySwitchMachineType are buddy-switch's
+// per-account device fields (device.rs machine_identity): stable values
+// derived from the UID. Its machine id is derived the same way, but here the
+// login device id is kept: the credential is bound to the device that
+// performed the login.
+func buddySwitchMachineToken(uid string) string {
+	sum := sha512.Sum512([]byte("machinetoken:" + uid))
+	token := base64.RawURLEncoding.EncodeToString(sum[:])
+	return token[:43]
+}
+
+func buddySwitchMachineType(uid string) string {
+	sum := md5.Sum([]byte("machinetype:" + uid))
+	return hex.EncodeToString(sum[:])[:18]
+}
+
+// cliHostOrder puts a profile's preferred node first: buddy-switch sends to
+// api1 and fails over to api2 and api3. Custom hosts are left alone.
+func (c *Client) cliHostOrder(hosts []string) []string {
+	if c.profile != RequestProfileBuddySwitch || len(c.endpoints.inferenceFallbacks) == 0 {
+		return hosts
+	}
+	const preferred = "https://api1.qoder.sh"
+	index := slices.Index(hosts, preferred)
+	if index <= 0 {
+		return hosts
+	}
+	return append([]string{preferred}, slices.Delete(slices.Clone(hosts), index, index+1)...)
 }
