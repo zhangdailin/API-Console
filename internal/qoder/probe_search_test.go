@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"orchids-api/internal/testutil"
 )
@@ -68,4 +69,23 @@ func TestProbeSearchVariantsPassTheDeclarationThrough(t *testing.T) {
 	for _, r := range results {
 		testutil.Equal(t, r.Outcome, "served")
 	}
+}
+
+func TestUntilProbeWindow(t *testing.T) {
+	at := func(seconds float64) time.Time {
+		return time.Date(2026, 10, 21, 15, 1, 0, 0, time.UTC).Add(time.Duration(seconds * float64(time.Second)))
+	}
+	testutil.Equal(t, untilProbeWindow(at(0)), 9*time.Second)
+	testutil.Equal(t, untilProbeWindow(at(8.5)), 500*time.Millisecond)
+	testutil.Equal(t, untilProbeWindow(at(9)), time.Minute)
+	testutil.Equal(t, untilProbeWindow(at(30)), 39*time.Second)
+}
+
+func TestSearchVariantsSelectByFullName(t *testing.T) {
+	client := NewFromAccount(signedTestAccount(), nil)
+	selected, err := selectProbeIdentities(client.searchIdentities(), []string{"S1", "s3"})
+	testutil.NoError(t, err)
+	testutil.Equal(t, len(selected), 2)
+	testutil.Equal(t, selected[0].name[:2], "S1")
+	testutil.Equal(t, selected[1].name[:2], "S3")
 }

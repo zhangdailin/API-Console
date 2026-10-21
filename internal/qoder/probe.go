@@ -157,6 +157,11 @@ type ProbeRoundOptions struct {
 	// Search replaces the identity variants with the web-search variants
 	// (see searchIdentities) and asks a question only a search can answer.
 	Search bool
+	// AlignWindow sends every request just after the low-priority queues'
+	// per-minute admission window opens (see queue_window.go), one per
+	// minute, instead of every Interval: most requests sent at a fixed
+	// interval land outside the window and are refused.
+	AlignWindow bool
 }
 
 // ProbeRounds sends the selected identities Rounds times. The order flips
@@ -197,7 +202,12 @@ func (c *Client) ProbeRounds(ctx context.Context, requestedModel string, opts Pr
 			slices.Reverse(order)
 		}
 		for _, identity := range order {
-			if !first && opts.Interval > 0 {
+			switch {
+			case opts.AlignWindow:
+				if err := sleepCtx(ctx, untilProbeWindow(time.Now())); err != nil {
+					return results, err
+				}
+			case !first && opts.Interval > 0:
 				if err := sleepCtx(ctx, opts.Interval); err != nil {
 					return results, err
 				}
@@ -463,4 +473,17 @@ func (w *limitedWriter) Write(p []byte) (int, error) {
 		}
 	}
 	return len(p), nil
+}
+
+// probeWindowSend is the second of the minute an aligned probe request is
+// sent at: just after the admission window opens.
+const probeWindowSend = queueWindowOpen + time.Second
+
+// untilProbeWindow is the wait until the next minute's probeWindowSend.
+func untilProbeWindow(now time.Time) time.Duration {
+	intoMinute := time.Duration(now.Second())*time.Second + time.Duration(now.Nanosecond())
+	if intoMinute < probeWindowSend {
+		return probeWindowSend - intoMinute
+	}
+	return time.Minute - intoMinute + probeWindowSend
 }
