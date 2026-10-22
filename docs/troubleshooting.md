@@ -65,6 +65,8 @@ Grok 的 `429 free_usage_exhausted` 表示所选账号的该模型免费额度�
 
 Responses 的 `incomplete_details.reason=max_output_tokens` 表示该轮输出预算耗尽，推理也可能消耗全部预算，不能仅凭客户端的“stream disconnected”文案判断网络故障。核对同一 request ID 的实际上游预算、用量和终止事件；只有 `context canceled` 且尚未收到上游响应的记录不能证明 Token 触顶。WorkBuddy 未指定预算时自动使用所选账号上游模型目录公布的上限，缺少有效观察时不发送 `max_tokens`，采用上游默认行为；显式预算继续优先，真实截断仍返回 incomplete。
 
+若客户端按"上下文窗口 − 当前输入"自行计算 `max_tokens`，而使用的窗口小于模型真实窗口，长对话会让请求预算降到极小（实测出现过 `max_tokens: 1`、输入 27 万–43 万 token），推理模型把预算全部用于推理后客户端只能提示"已达到输出 token 上限"。网关原样转发客户端预算，不会改写；模型列表 `/{channel}/v1/models` 公布观察到的 `context_length` / `max_input_tokens` 与 `max_output_tokens` / `max_completion_tokens`（未观察到时省略），应让客户端读取这些值或手工配置正确窗口，并提前压缩对话。
+
 Grok keepalive 不算有效生成，语义空闲仍可触发；重复生成文本本身不再因次数中止。若重复输出仍结束，应查实际 stop、输出预算、质量策略、上游结束和超时。
 
 sequence_number 只表示事件顺序；不要用 Last-Event-ID 假定网关自动续传。生成请求重发可能产生第二次真实消费，尤其工具轮次须确认重放安全。

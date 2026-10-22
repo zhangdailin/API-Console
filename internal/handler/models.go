@@ -40,6 +40,10 @@ type PublicModelResponse struct {
 	// MaxOutputTokens is the declared output budget where the catalog publishes
 	// one. Zero means unobserved and is omitted.
 	MaxOutputTokens int `json:"max_output_tokens,omitempty"`
+	// MaxCompletionTokens carries the same budget under the name OpenAI-style
+	// clients read (the request field is max_completion_tokens); DeepSeek
+	// harness looks for it. Both are always set together.
+	MaxCompletionTokens int `json:"max_completion_tokens,omitempty"`
 	// Grok Build publishes these fields per account. Pointer booleans preserve
 	// the important distinction between an explicit false and unknown metadata.
 	ReasoningEfforts        []string `json:"reasoning_efforts,omitempty"`
@@ -108,6 +112,7 @@ func applyGrokBuildProfile(entry *PublicModelResponse, profile modelcatalog.Prof
 	entry.ContextLength = profile.ContextWindow
 	entry.MaxInputTokens = profile.ContextWindow
 	entry.MaxOutputTokens = profile.MaxCompletionTokens
+	entry.MaxCompletionTokens = profile.MaxCompletionTokens
 }
 
 func (h *Handler) HandleModels(w http.ResponseWriter, r *http.Request) {
@@ -186,6 +191,7 @@ func (h *Handler) HandleModels(w http.ResponseWriter, r *http.Request) {
 		entry.ContextLength = input
 		entry.MaxInputTokens = input
 		entry.MaxOutputTokens = output
+		entry.MaxCompletionTokens = output
 		if strings.EqualFold(mChannel, "grok") {
 			if profiles := modelpolicy.GrokModelProfiles(m, grokAccounts); len(profiles) > 0 {
 				applyGrokBuildProfile(&entry, profiles[0])
@@ -288,6 +294,7 @@ func (h *Handler) HandleModelByID(w http.ResponseWriter, r *http.Request) {
 	resp.ContextLength = input
 	resp.MaxInputTokens = input
 	resp.MaxOutputTokens = output
+	resp.MaxCompletionTokens = output
 	if profile != nil {
 		applyGrokBuildProfile(&resp, *profile)
 	}

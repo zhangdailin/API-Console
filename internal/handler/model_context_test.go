@@ -18,6 +18,9 @@ type publicListEntry struct {
 	ContextLength   int    `json:"context_length"`
 	MaxInputTokens  int    `json:"max_input_tokens"`
 	MaxOutputTokens int    `json:"max_output_tokens"`
+	// MaxCompletionTokens is the spelling DeepSeek harness and other
+	// OpenAI-style clients read.
+	MaxCompletionTokens int `json:"max_completion_tokens"`
 }
 
 func fetchPublicModels(t *testing.T, h *Handler, path string) map[string]publicListEntry {
@@ -100,7 +103,9 @@ func TestPublicModelsPublishWorkBuddyContextWindow(t *testing.T) {
 	entries := fetchPublicModels(t, h, "/workbuddy/v1/models")
 	testutil.Equal(t, entries["wb-model"].ContextLength, 256000)
 	testutil.Equal(t, entries["wb-model"].MaxOutputTokens, 32000)
+	testutil.Equal(t, entries["wb-model"].MaxCompletionTokens, 32000)
 	testutil.Equal(t, entries["legacy-model"].ContextLength, 0)
+	testutil.Equal(t, entries["legacy-model"].MaxCompletionTokens, 0)
 }
 
 // A Grok model name alone must not manufacture a context window.
