@@ -53,22 +53,7 @@ const (
 	agentID     = "agent_common"
 	// sessionType is the QoderWork session type from the capture.
 	sessionType = "qoder_work"
-
-	// defaultAliyunUserType is the account class used where a class is required
-	// but the account reported none. The chat body no longer falls back to it:
-	// the capture shows the QoderWork client sending aliyun_user_type empty.
-	defaultAliyunUserType = "personal_standard"
 )
-
-// aliyunUserTypeOr returns the reported account class, or the reference
-// gateway's default if the class is unknown. Whether this value affects queue
-// admission is not established by the 10605 response alone.
-func aliyunUserTypeOr(aliyunUserType string) string {
-	if trimmed := strings.TrimSpace(aliyunUserType); trimmed != "" {
-		return trimmed
-	}
-	return defaultAliyunUserType
-}
 
 // chatURL renders the chat endpoint.
 func chatURL(base string) string { return strings.TrimRight(base, "/") + inferPath + inferQuery }

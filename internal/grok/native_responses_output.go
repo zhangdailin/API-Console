@@ -16,14 +16,6 @@ import (
 	"orchids-api/internal/util"
 )
 
-func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader, contentType, model string, mappings ...responses.ToolNamespaces) (responseID string, captured []byte, result chatOutcome) {
-	var namespaces responses.ToolNamespaces
-	if len(mappings) > 0 {
-		namespaces = mappings[0]
-	}
-	return copyNativeResponseWithQuality(w, body, contentType, model, namespaces, nil)
-}
-
 func copyNativeResponseWithQuality(w http.ResponseWriter, body io.Reader, contentType, model string, namespaces responses.ToolNamespaces, quality *nativeResponseQuality) (responseID string, captured []byte, result chatOutcome) {
 	result.Quality.FirstVisibleMS = -1
 	// Keep the complete delivered response for replay and usage recovery.

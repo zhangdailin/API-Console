@@ -317,10 +317,6 @@ func SubResourceHandler(action string, opts BridgeOptions) http.HandlerFunc {
 // InputItemsJSON renders a request's input as the stored input-item list.
 func InputItemsJSON(input any) json.RawMessage { return inputItemsJSON(input) }
 
-// ParseResourcePath splits a path below /responses/ into the response id and
-// an optional sibling action.
-func ParseResourcePath(path string) (id, action string, ok bool) { return parseResourcePath(path) }
-
 // Action names the two sub-resource endpoints below a response id.
 const (
 	ActionCancel     = responsesActionCancel

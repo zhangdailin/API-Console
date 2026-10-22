@@ -69,19 +69,12 @@ type Client struct {
 
 	entropy source
 
-	// profile is the request shape chat is sent in; see reference_profile.go.
-	// referenceRuntime caches the reference-layout pair for the token pair it
-	// was derived from.
-	profile          string
+	// queueWindowRetry retries low-priority queue refusals at the admission
+	// window; see queue_window.go.
 	queueWindowRetry bool
 	// spentHosts holds, per inference host, when this account's daily request
 	// count was found spent there; see withoutSpentHosts.
-	spentHosts       map[string]time.Time
-	referenceRuntime RuntimeFields
-	referenceAccess  string
-	referenceRefresh string
-	// referenceProfileName is the CLI profile referenceRuntime was sealed for.
-	referenceProfileName string
+	spentHosts map[string]time.Time
 
 	refreshMu            sync.Mutex
 	runtimeMu            sync.Mutex
@@ -120,12 +113,7 @@ func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
 		streamIdle:     config.SharedStreamIdleTimeout,
 		entropy:        cryptoSource{},
 	}
-	client.profile = RequestProfileQoderWork
-	client.queueWindowRetry = true
-	if cfg != nil {
-		client.profile = resolveRequestProfile(cfg.QoderRequestProfile)
-		client.queueWindowRetry = !cfg.QoderQueueWindowRetryDisabled
-	}
+	client.queueWindowRetry = cfg == nil || !cfg.QoderQueueWindowRetryDisabled
 	if acc != nil {
 		copied := *acc
 		copied.QoderOrganizationTags = append([]string(nil), acc.QoderOrganizationTags...)
@@ -182,25 +170,6 @@ func (c *Client) runtimeInput(creds Credentials) runtimeFieldInput {
 	}
 }
 
-// aliyunUserType returns the account class this account reported, for example
-// "personal_standard" or "personal_professional_trial".
-//
-// It travels in the chat body as aliyun_user_type. Upstream 10605 responses
-// alone do not establish whether this field influences queue admission.
-func (c *Client) aliyunUserType() string {
-	if c == nil {
-		return ""
-	}
-	c.stateMu.RLock()
-	defer c.stateMu.RUnlock()
-	if c.account != nil {
-		if class := strings.TrimSpace(c.account.QoderQuota.UserType); class != "" {
-			return class
-		}
-	}
-	return ""
-}
-
 // applyFingerprint preserves the QoderWork login device identity.
 func (c *Client) applyFingerprint() {
 	// QoderWork binds the machine token to the login device ID.
@@ -246,7 +215,7 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	if err != nil {
 		return err
 	}
-	fields, err := c.chatRuntimeFields(ctx, creds)
+	fields, err := c.ensureRuntimeFields(ctx, creds)
 	prepTrace.Mark("runtime_ready_ms")
 	if err != nil {
 		return err
@@ -279,18 +248,8 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	if err != nil {
 		return err
 	}
-	if c.referenceProfile() {
-		raw, err := decodeBody(body)
-		if err != nil {
-			return err
-		}
-		if raw, err = cliBody(raw, c.aliyunUserType(), c.profile); err != nil {
-			return err
-		}
-		body = EncodeBody(raw)
-	}
 
-	hosts := c.withoutSpentHosts(c.cliHostOrder(c.endpoints.orderedInferenceHosts(time.Now())), time.Now())
+	hosts := c.withoutSpentHosts(c.endpoints.orderedInferenceHosts(time.Now()), time.Now())
 	url := chatURL(hosts[0])
 	if logger != nil && !logger.Capturing() {
 		logger.LogUpstreamRequest(url, map[string]string{"provider": "qoder", "model": model.Key}, body)
@@ -408,7 +367,7 @@ func (c *Client) runChat(ctx context.Context, hosts []string, body []byte, model
 					"error", refreshErr)
 				return err
 			}
-			if fields, err = c.chatRuntimeFields(ctx, c.currentCredentials()); err != nil {
+			if fields, err = c.ensureRuntimeFields(ctx, c.currentCredentials()); err != nil {
 				return err
 			}
 			// A replay with the original request id is rejected as a duplicate even
@@ -418,7 +377,7 @@ func (c *Client) runChat(ctx context.Context, hosts []string, body []byte, model
 			if err != nil {
 				return err
 			}
-			body, err = c.replayBody(body, requestID)
+			body, err = refreshedReplayBody(body, requestID)
 			if err != nil {
 				return err
 			}
@@ -446,7 +405,7 @@ func (c *Client) runChat(ctx context.Context, hosts []string, body []byte, model
 			if err != nil {
 				return err
 			}
-			body, err = c.replayBody(body, requestID)
+			body, err = refreshedReplayBody(body, requestID)
 			if err != nil {
 				return err
 			}
@@ -462,7 +421,7 @@ func (c *Client) runChat(ctx context.Context, hosts []string, body []byte, model
 			if err != nil {
 				return err
 			}
-			body, err = c.replayBody(body, requestID)
+			body, err = refreshedReplayBody(body, requestID)
 			if err != nil {
 				return err
 			}
@@ -483,7 +442,7 @@ func (c *Client) runChat(ctx context.Context, hosts []string, body []byte, model
 			if err != nil {
 				return err
 			}
-			body, err = c.replayBody(body, requestID)
+			body, err = refreshedReplayBody(body, requestID)
 			if err != nil {
 				return err
 			}
@@ -508,7 +467,7 @@ func (c *Client) runChat(ctx context.Context, hosts []string, body []byte, model
 			if err != nil {
 				return err
 			}
-			body, err = c.replayBody(body, requestID)
+			body, err = refreshedReplayBody(body, requestID)
 			if err != nil {
 				return err
 			}

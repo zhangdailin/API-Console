@@ -279,21 +279,6 @@ func chunkLooksDecoded(payload string) bool {
 	return false
 }
 
-// unwrapEnvelope reads the inner object of a {"data":{...}} chunk.
-func unwrapEnvelope(payload string) (string, bool) {
-	var envelope struct {
-		Data json.RawMessage `json:"data"`
-	}
-	if err := json.Unmarshal([]byte(payload), &envelope); err != nil {
-		return "", false
-	}
-	inner := strings.TrimSpace(string(envelope.Data))
-	if inner == "" || inner[0] != '{' {
-		return "", false
-	}
-	return inner, true
-}
-
 // Only unusual empty/null frames need the legacy presence probe. Ordinary
 // deltas, usage, errors and wrapped frames are decoded once at each level.
 func (c *streamChunk) decoded() bool {

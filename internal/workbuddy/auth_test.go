@@ -335,3 +335,16 @@ func TestRunChatCreatesFreshWireIdentityForRepeatedConversation(t *testing.T) {
 		}
 	}
 }
+
+// validWorkBuddyTraceID checks a generated trace or span id: 16 or 32 hex digits.
+func validWorkBuddyTraceID(value string) string {
+	if len(value) != 16 && len(value) != 32 {
+		return ""
+	}
+	for _, ch := range value {
+		if !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')) {
+			return ""
+		}
+	}
+	return strings.ToLower(value)
+}

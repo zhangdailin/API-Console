@@ -38,7 +38,7 @@ func TestParseResponsesResourcePath(t *testing.T) {
 		{"/something/else", "", "", false},
 	}
 	for _, tc := range cases {
-		id, action, ok := ParseResourcePath(tc.path)
+		id, action, ok := parseResourcePath(tc.path)
 		testutil.Equal(t, ok, tc.wantOK)
 		testutil.Equal(t, id, tc.wantID)
 		testutil.Equal(t, action, tc.wantAction)

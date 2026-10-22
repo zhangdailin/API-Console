@@ -6,11 +6,6 @@ import (
 	"orchids-api/internal/util"
 )
 
-// InferenceBudget applies only to generation routes, preserving parent deadlines.
-func InferenceBudget(next http.HandlerFunc) http.HandlerFunc {
-	return InferenceBudgetWithConfig(next, nil)
-}
-
 // InferenceBudgetWithConfig snapshots the deployment profile for this request.
 func InferenceBudgetWithConfig(next http.HandlerFunc, snapshot func() *config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

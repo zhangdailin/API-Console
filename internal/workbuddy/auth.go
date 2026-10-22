@@ -229,18 +229,6 @@ func newWorkBuddyMessageID() string {
 	return hex.EncodeToString(raw[:])
 }
 
-func validWorkBuddyTraceID(value string) string {
-	if len(value) != 16 && len(value) != 32 {
-		return ""
-	}
-	for _, ch := range value {
-		if !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')) {
-			return ""
-		}
-	}
-	return strings.ToLower(value)
-}
-
 // envelope mirrors the {code,msg,requestId,data} wrapper used by every /v2 and
 // /v3 endpoint.
 type envelope struct {
