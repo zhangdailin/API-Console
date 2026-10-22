@@ -422,6 +422,7 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request, prepare
 	protocolControls := upstream.UpstreamRequest{
 		ResponseFormat: req.ResponseFormat, ResponseText: req.ResponseText,
 		Include: req.Include, PromptCacheKey: req.PromptCacheKey, ResponsesTools: req.ResponsesTools,
+		Tools: req.Tools,
 	}
 	if format, ok := req.OutputConfig["format"].(map[string]any); ok && len(protocolControls.ResponseFormat) == 0 && len(protocolControls.ResponseText) == 0 {
 		protocolControls.ResponseText = map[string]any{"format": format}

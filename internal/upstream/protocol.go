@@ -12,6 +12,13 @@ func (r UpstreamRequest) ValidateProtocolControls(provider string) error {
 	if len(r.ResponsesTools) > 0 {
 		return fmt.Errorf("%s does not support Responses hosted tools", provider)
 	}
+	if kind, ok := serverWebSearchTool(r.Tools); ok {
+		channel := strings.TrimSpace(provider)
+		if channel == "" {
+			channel = "this channel"
+		}
+		return fmt.Errorf("%s does not support web search: the %s tool asks the API to run the search, and this upstream cannot; send web search requests through the /grok path", channel, kind)
+	}
 	if len(r.Include) > 0 {
 		return fmt.Errorf("%s does not support Responses include=%v", provider, r.Include)
 	}
@@ -95,4 +102,27 @@ func (r UpstreamRequest) ChatResponseFormat() map[string]any {
 		}
 	}
 	return out
+}
+
+// serverWebSearchTool reports a declared server-side web search tool, such as
+// the Anthropic web_search_20250305 tool Claude Code's WebSearch sends, by its
+// type. Such a tool asks the API itself to search. WorkBuddy, Qoder and Cline
+// cannot: probes on 2026-10-21 found Qoder answering a passed-through search
+// tool with 400 and ignoring enable_search, and lowering the tool to a plain
+// function let the model name a call nobody ran, so the client silently got no
+// results. A client function that happens to be called web_search has type
+// "function" or "custom" and is not one of these.
+func serverWebSearchTool(tools []any) (string, bool) {
+	for _, tool := range tools {
+		declaration, ok := tool.(map[string]any)
+		if !ok {
+			continue
+		}
+		kind, _ := declaration["type"].(string)
+		kind = strings.ToLower(strings.TrimSpace(kind))
+		if strings.HasPrefix(kind, "web_search") {
+			return kind, true
+		}
+	}
+	return "", false
 }

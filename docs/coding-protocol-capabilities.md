@@ -34,6 +34,7 @@
 | include:reasoning.encrypted_content | Chat 桥接消费该输出投影请求并返回兼容警告，不伪造密文 |
 | 其他 include | 无等价共享传输时拒绝 |
 | 桥接 web_search / preview | 删除托管搜索并提示不可用；强制搜索且无法满足时拒绝 |
+| Anthropic 服务端搜索工具（如 Claude Code WebSearch 的 `web_search_20250305`） | WorkBuddy / Qoder / Cline 在选号前以 400 拒绝并提示改用 `/grok` 路径：这些上游不能执行搜索（实测 Qoder 对原样透传返回 400、忽略 `enable_search`），此前降级为普通函数会让模型“调用”一个无人执行的工具而静默无结果。名为 web_search 的客户端普通函数（`function` / `custom`）不受影响；Grok 原生支持 |
 | 其他托管工具 / MCP | 共享桥接拒绝；Build 使用原生格式，能力取决于上游 |
 | 外部加密推理历史 | Chat 桥接拒绝；Build 按原生状态策略 |
 | background=true | 不提供网关任务队列语义；桥接无等价能力，原生仍取决上游 |
