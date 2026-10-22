@@ -105,11 +105,25 @@ jobs:
         with:
           node-version: '22'
 
+      # scripts/test-modal-focus.cjs drives a real headless Chrome. Installing it
+      # here instead of relying on the runner image keeps the test independent
+      # of what ubuntu-latest ships: the label began moving to Ubuntu 26 on
+      # 2026-10-19, and this step failed on a run that the previous commit, with
+      # identical web assets, had passed.
+      - name: Setup Chrome
+        id: chrome
+        uses: browser-actions/setup-chrome@v2
+        with:
+          chrome-version: stable
+          install-dependencies: true
+
       # The admin UI ships as embedded assets; these assertions guard the
       # rendering/credential-surface rules that Go tests cannot see.
       # Locally under a confined Windows sandbox add --test-isolation=none
       # (node --test spawns a child per file, which the sandbox blocks with EPERM).
       - name: Run web asset tests
+        env:
+          CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
         run: |
           node --test web/*.test.cjs
           node scripts/test-modal-focus.cjs
