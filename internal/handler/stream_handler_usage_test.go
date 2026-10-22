@@ -85,7 +85,9 @@ func TestStreamHandler_KeepAlive_NoPanic(t *testing.T) {
 	testutil.Equal(t, rec.buf.Len(), 0)
 	sh.handleMessage(upstream.SSEMessage{Type: "model.text-delta", Event: map[string]any{"delta": "hello"}})
 	sh.writeKeepAlive()
-	testutil.MustContain(t, rec.buf.String(), ": keep-alive")
+	// An Anthropic stream is kept alive with the ping event, which clients
+	// count as stream activity; a comment is invisible to their watchdogs.
+	testutil.MustContain(t, rec.buf.String(), ssePing)
 }
 
 func TestStreamHandler_ToolRejectionExplainsZeroOutput(t *testing.T) {

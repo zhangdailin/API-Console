@@ -127,7 +127,7 @@ func TestKeepAliveOpensAStreamSilentPastTheProxyWindow(t *testing.T) {
 	out := rec.buf.String()
 	testutil.False(t, !sh.hasCommitted(), "a stream silent past silentCommitAfter stayed uncommitted")
 	testutil.Equal(t, strings.Count(out, "event: message_start"), 1)
-	testutil.Falsef(t, strings.Index(out, sseKeepAlive) < strings.Index(out, "event: message_start"), "keep-alive preceded the opening frame: %q", out)
+	testutil.Falsef(t, strings.Index(out, ssePing) < strings.Index(out, "event: message_start"), "keep-alive preceded the opening frame: %q", out)
 
 	// A refusal after the stream opened is reported in band and closes it.
 	sh.reportRequestFailure("queue refused", "rate_limit", "Qoder model queue unavailable", 0)
@@ -144,7 +144,31 @@ func TestKeepAliveContinuesAfterStreamOpens(t *testing.T) {
 	sh.pendingModel = "qwen3.8-flash"
 	sh.handleMessage(upstream.SSEMessage{Type: "model.text-delta", Event: map[string]any{"delta": "hello"}})
 	sh.writeKeepAlive()
-	testutil.MustContain(t, rec.buf.String(), sseKeepAlive)
+	testutil.MustContain(t, rec.buf.String(), ssePing)
+}
+
+// TestKeepAliveFormatFollowsTheProtocol: Claude Code abandoned a Qoder stream
+// after ~119 seconds that carried only ": keep-alive" comments ("1 stream
+// event received ... none in the final 119282 ms"). An Anthropic stream gets
+// the ping event; an OpenAI stream keeps the comment its clients expect.
+func TestKeepAliveFormatFollowsTheProtocol(t *testing.T) {
+	for format, want := range map[adapter.ResponseFormat]string{
+		adapter.FormatAnthropic: ssePing,
+		adapter.FormatOpenAI:    sseKeepAlive,
+	} {
+		rec := newFlushRecorder()
+		sh := newStreamHandler(&config.Config{}, rec, debug.New(false, false), true, format)
+		sh.pendingModel = "qwen3.8-flash"
+		sh.handleMessage(upstream.SSEMessage{Type: "model.text-delta", Event: map[string]any{"delta": "hello"}})
+		before := rec.buf.Len()
+		sh.writeKeepAlive()
+		testutil.Equal(t, rec.buf.String()[before:], want)
+		sh.release()
+	}
+	// The ping is a well-formed Anthropic event.
+	var ping map[string]any
+	testutil.NoError(t, json.Unmarshal([]byte(strings.TrimSuffix(strings.TrimPrefix(ssePing, "event: ping\ndata: "), "\n\n")), &ping))
+	testutil.Equal(t, ping["type"], any("ping"))
 }
 
 // TestTerminalOnlyResponseStillOpensTheStream covers an answer that produced no

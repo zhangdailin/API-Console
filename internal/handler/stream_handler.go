@@ -26,12 +26,19 @@ const (
 	sseDataJoin    = "\ndata: "
 	sseDoneLine    = "data: [DONE]\n\n"
 	sseKeepAlive   = ": keep-alive\n\n"
+	// ssePing is the Anthropic keep-alive event. Claude Code's stream watchdog
+	// counts events, not comments: a stream kept alive only with ": keep-alive"
+	// comments was abandoned after ~119 seconds without an event while a Qoder
+	// request was still waiting for the upstream's admission window. The
+	// Anthropic API itself sends this ping event.
+	ssePing = "event: ping\ndata: {\"type\": \"ping\"}\n\n"
 )
 
 var (
 	sseTextDeltaMarker  = []byte(`"type":"text_delta"`)
 	sseDoneLineBytes    = []byte(sseDoneLine)
 	sseKeepAliveBytes   = []byte(sseKeepAlive)
+	ssePingBytes        = []byte(ssePing)
 	sseEventPrefixBytes = []byte(sseEventPrefix)
 	sseDataPrefixBytes  = []byte(sseDataPrefix)
 	sseLineBreakBytes   = []byte(sseLineBreak)
@@ -217,11 +224,15 @@ func (h *streamHandler) writeKeepAlive() {
 	}
 	// Heartbeats need the same fresh transport deadline as content frames.
 	// Otherwise a quiet upstream outlives the last content write's deadline.
-	if _, err := (httpserver.DeadlineResponseWriter{ResponseWriter: h.w}).Write(sseKeepAliveBytes); err != nil {
+	keepAlive := sseKeepAliveBytes
+	if h.responseFormat == adapter.FormatAnthropic {
+		keepAlive = ssePingBytes
+	}
+	if _, err := (httpserver.DeadlineResponseWriter{ResponseWriter: h.w}).Write(keepAlive); err != nil {
 		h.markWriteErrorLocked("keep-alive", err)
 		return
 	}
-	h.flushSSEWithLenLocked("keep-alive", len(sseKeepAlive), true, true)
+	h.flushSSEWithLenLocked("keep-alive", len(keepAlive), true, true)
 }
 
 func (h *streamHandler) resetRoundState() {
