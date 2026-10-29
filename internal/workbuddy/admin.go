@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"orchids-api/internal/config"
+	apperrors "orchids-api/internal/errors"
 	"orchids-api/internal/provider"
 	"orchids-api/internal/store"
 	"orchids-api/internal/util"
@@ -213,6 +214,9 @@ func VerifyAccount(ctx context.Context, acc *store.Account, cfg *config.Config, 
 
 	models, err := client.FetchModels(ctx)
 	if err != nil {
+		if apperrors.IsWorkBuddyRestricted(err.Error()) {
+			return "403", 403, err
+		}
 		return "", 502, err
 	}
 
@@ -226,6 +230,9 @@ func VerifyAccount(ctx context.Context, acc *store.Account, cfg *config.Config, 
 	// an otherwise usable account into an error; it only leaves the quota
 	// unavailable until the next sync.
 	if quota, quotaErr := client.FetchQuota(ctx); quotaErr != nil {
+		if apperrors.IsWorkBuddyRestricted(quotaErr.Error()) {
+			return "403", 403, quotaErr
+		}
 		slog.Warn("WorkBuddy credit meter sync failed; leaving quota unavailable",
 			"account_id", acc.ID, "error", quotaErr)
 	} else {

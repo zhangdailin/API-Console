@@ -80,7 +80,8 @@ type resourceResponse struct {
 // FetchQuota reads the account's credit allowance. A missing package is not an
 // error: it reports a zero allowance so the UI can say "no credits" instead of
 // inventing a value.
-func (c *Client) FetchQuota(ctx context.Context) (*Quota, error) {
+func (c *Client) FetchQuota(ctx context.Context) (quota *Quota, fetchErr error) {
+	defer func() { c.persistRestriction(ctx, fetchErr) }()
 	if c == nil {
 		return nil, fmt.Errorf("workbuddy client is nil")
 	}

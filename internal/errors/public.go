@@ -42,6 +42,7 @@ var publicStatusForCategory = map[string]int{
 	"upstream_unavailable": http.StatusServiceUnavailable,
 	"auth":                 http.StatusUnauthorized,
 	"auth_blocked":         http.StatusUnauthorized,
+	"account_restricted":   http.StatusForbidden,
 	"client":               http.StatusBadRequest,
 	// The caller closed the connection before an answer existed. 499 is the
 	// conventional (nginx) status for it; nobody receives the body.
@@ -75,6 +76,7 @@ var messageForCategoryTable = map[string]string{
 	"configuration":        "This provider is not configured correctly. Contact the gateway administrator.",
 	"auth":                 "The upstream account session has expired. Re-authenticate the account and retry.",
 	"auth_blocked":         "The upstream account is not allowed to use this feature. Check its plan and permissions.",
+	"account_restricted":   "The upstream account is restricted due to unusual activity. Requests are skipped during its restriction window; check the account in the official client or submit an appeal.",
 	"quota_exhausted":      "The available upstream accounts have exhausted their quota. Retry after the quota resets or add capacity.",
 	"rate_limit":           "The available upstream accounts are rate-limited. Retry after the cooldown.",
 	"upstream_queue":       "The upstream is holding this model's requests in a queue and has not admitted this one yet. Retry after the indicated delay.",

@@ -240,6 +240,7 @@ func (s *redisStore) UpdateAccount(ctx context.Context, acc *Account) error {
 		// these fields after account creation, which is why no merge step below
 		// touches them.
 		p.mergeStatusAndVerdict()
+		p.mergeWorkBuddyRestriction()
 		p.mergeGrokCredentials()
 		p.mergeModelCooldownState()
 		p.mergeWorkBuddyCredentials()

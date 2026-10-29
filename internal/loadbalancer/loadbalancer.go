@@ -173,6 +173,7 @@ func (lb *LoadBalancer) getNextAccountWithPreference(ctx context.Context, exclud
 	// answer decides whether an empty pool invites a retry or reports a model no
 	// matching account can serve.
 	filterWithheld := 0
+	restrictedUnavailable := 0
 	filterThrottled := 0
 	filterUnavailable := 0
 	for _, id := range excludeIDs {
@@ -219,6 +220,7 @@ func (lb *LoadBalancer) getNextAccountWithPreference(ctx context.Context, exclud
 		// two (and flip which reason is reported for an empty one).
 		channelCandidates, channelMatched = 0, 0
 		rateLimitedUnavailable, allowanceParked = 0, 0
+		restrictedUnavailable = 0
 		filterWithheld, filterThrottled, filterUnavailable = 0, 0, 0
 		for _, acc := range candidates {
 			if ctx.Err() != nil {
@@ -256,6 +258,9 @@ func (lb *LoadBalancer) getNextAccountWithPreference(ctx context.Context, exclud
 			}
 			channelMatched++
 			if !lb.isAccountAvailable(ctx, acc) {
+				if store.WorkBuddyRestrictionUntil(acc).After(time.Now()) {
+					restrictedUnavailable++
+				}
 				switch strings.TrimSpace(acc.StatusCode) {
 				case "429":
 					rateLimitedUnavailable++
@@ -323,6 +328,8 @@ func (lb *LoadBalancer) getNextAccountWithPreference(ctx context.Context, exclud
 			}
 			// The caller's filter (a per-model cooldown) rejected every candidate.
 			return nil, fmt.Errorf("no enabled accounts available for channel: %s (all matching accounts are cooling down for the requested model)", channel)
+		case channel == "workbuddy" && channelMatched > 0 && restrictedUnavailable == channelMatched:
+			return nil, fmt.Errorf("no enabled accounts available for channel: %s (workbuddy API error: status=403, code=11140, message=all matching accounts are restricted)", channel)
 		case channel != "" && channelMatched > 0 && rateLimitedUnavailable == channelMatched:
 			return nil, fmt.Errorf("no enabled accounts available for channel: %s (all matching accounts are rate-limited or cooling down)", channel)
 		case channel != "" && channelMatched > 0 && allowanceParked == channelMatched:
@@ -640,6 +647,9 @@ func (lb *LoadBalancer) isAccountAvailable(ctx context.Context, acc *store.Accou
 	if !store.AccountAuthActive(acc) {
 		return false
 	}
+	if until := store.WorkBuddyRestrictionUntil(acc); until.After(time.Now()) {
+		return false
+	}
 	// A paid Build billing snapshot is an authoritative routing signal: do not
 	// keep probing an account known to be exhausted before the period resets.
 	if isPaidGrokBuildAccount(acc) && acc.GrokBilling.IsExhausted() {
@@ -836,6 +846,7 @@ func (lb *LoadBalancer) PersistAppliedAccountStatus(ctx context.Context, acc *st
 		cached.RateLimitFailures = acc.RateLimitFailures
 		cached.QuotaResetAt = acc.QuotaResetAt
 		cached.VerifiedAt = acc.VerifiedAt
+		cached.WorkBuddyRestrictedUntil = acc.WorkBuddyRestrictedUntil
 	}
 	lb.mu.Unlock()
 	lb.persistAccountStatus(ctx, acc, reason)

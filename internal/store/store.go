@@ -69,6 +69,9 @@ type Account struct {
 	TokensToday float64 `json:"tokens_today,omitempty"`
 	TokensDate  string  `json:"tokens_date,omitempty"`
 	StatusCode  string  `json:"status_code"`
+	// WorkBuddyRestrictedUntil survives token rotation, verification and quota
+	// sync independently of their transient status updates.
+	WorkBuddyRestrictedUntil time.Time `json:"workbuddy_restricted_until,omitempty"`
 	// AuthStatus is the durable credential-routing state. Empty is treated as
 	// active for legacy rows; reauthRequired permanently excludes the account
 	// until a successful verification or credential replacement clears it.

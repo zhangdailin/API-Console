@@ -238,10 +238,11 @@ type envelope struct {
 }
 
 var errorHints = map[int]string{
-	CodeLoginPending:  "workbuddy login has not completed; finish the browser authorization",
-	CodeModelThrottle: "this model hit the per-model frequency limit; wait for the window reset or use another model",
-	CodePolicyBlocked: "workbuddy blocked the request by security policy (unapproved channel); the prompt may carry a client identity marker",
-	CodeSessionDead:   "workbuddy session is dead (Offline user session not found); re-login the account",
+	CodeLoginPending:      "workbuddy login has not completed; finish the browser authorization",
+	CodeModelThrottle:     "this model hit the per-model frequency limit; wait for the window reset or use another model",
+	CodePolicyBlocked:     "workbuddy blocked the request by security policy (unapproved channel); the prompt may carry a client identity marker",
+	CodeSessionDead:       "workbuddy session is dead (Offline user session not found); re-login the account",
+	CodeAccountRestricted: "workbuddy account is restricted due to unusual activity; skip requests during the restriction window",
 }
 
 // APIError is a typed WorkBuddy business failure. Scope-sensitive callers can
@@ -263,6 +264,8 @@ func (e *APIError) Error() string {
 	// it in HTTP 200. Expose the semantic status without losing the wire status.
 	parts := make([]string, 0, 4)
 	switch {
+	case e.Code == CodeAccountRestricted && status != http.StatusForbidden:
+		parts = append(parts, "status=403", fmt.Sprintf("upstream_status=%d", status))
 	case e.Code == CodeSessionDead && status != http.StatusUnauthorized:
 		parts = append(parts, "status=401", fmt.Sprintf("upstream_status=%d", status))
 	case e.Code == CodeModelThrottle && status != http.StatusTooManyRequests:
@@ -609,7 +612,8 @@ type configResponse struct {
 
 // FetchModels reads the account-scoped model catalog. The effective set is the
 // `cli` agent whitelist intersected with the model records.
-func (c *Client) FetchModels(ctx context.Context) ([]WorkBuddyModel, error) {
+func (c *Client) FetchModels(ctx context.Context) (models []WorkBuddyModel, fetchErr error) {
+	defer func() { c.persistRestriction(ctx, fetchErr) }()
 	if c == nil {
 		return nil, fmt.Errorf("workbuddy client is nil")
 	}

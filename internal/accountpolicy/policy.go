@@ -101,6 +101,11 @@ func (v Verdict) Apply(acc *store.Account) {
 	if at.IsZero() {
 		at = time.Now()
 	}
+	restrictedUntil := store.WorkBuddyRestrictionUntil(acc)
+	if strings.EqualFold(acc.AccountType, "workbuddy") && apperrors.IsWorkBuddyRestricted(v.Message) && !restrictedUntil.After(at) {
+		restrictedUntil = at.Add(store.WorkBuddyRestrictionCooldown)
+	}
+	acc.WorkBuddyRestrictedUntil = restrictedUntil
 	acc.StatusCode = strings.TrimSpace(v.Status)
 	if v.NeedsLogin {
 		acc.AuthStatus = store.AccountAuthStatusReauthRequired
@@ -127,6 +132,11 @@ func (v Verdict) Apply(acc *store.Account) {
 	// Any verdict — healthy or not — proves the credential was exercised, which
 	// is what makes "never checked" distinguishable from "checked and healthy".
 	acc.VerifiedAt = at
+	if restrictedUntil.After(at) {
+		acc.StatusCode = "403"
+		acc.StatusMessage = store.WorkBuddyRestrictionMessage
+		acc.LastAttempt = restrictedUntil.Add(-store.WorkBuddyRestrictionCooldown)
+	}
 }
 
 // ScopeForStatus maps an already-classified status code to the part of the
@@ -165,6 +175,10 @@ func Classify(acc *store.Account, err error, model string) Verdict {
 	message := strings.TrimSpace(err.Error())
 	lower := strings.ToLower(message)
 	now := time.Now()
+	if strings.EqualFold(accountType(acc), "workbuddy") && apperrors.IsWorkBuddyRestricted(message) {
+		return Verdict{Status: "403", Message: message, Scope: ScopeAccount,
+			Retryable: true, SwitchAccount: true, Cooldown: store.WorkBuddyRestrictionCooldown, At: now}
+	}
 	// An explicit inference-cap window is account-wide and may last hours;
 	// unlike a generic rate limit, its stated reset must not be capped at 30m.
 	if apperrors.IsClineInferenceCap(lower) {
@@ -508,6 +522,10 @@ func AccountHeld(acc *store.Account, now time.Time) bool {
 	}
 	if !store.AccountAuthActive(acc) {
 		return true
+	}
+	if until := store.WorkBuddyRestrictionUntil(acc); !until.IsZero() &&
+		(until.After(now) || (acc.StatusCode == "403" && apperrors.IsWorkBuddyRestricted(acc.StatusMessage))) {
+		return now.Before(until)
 	}
 	status := strings.TrimSpace(acc.StatusCode)
 	if status == "" || status == store.AccountStatusQoderQuotaExhausted || status == store.AccountStatusWorkBuddyQuotaExhausted {

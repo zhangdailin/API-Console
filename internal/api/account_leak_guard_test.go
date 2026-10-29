@@ -46,7 +46,7 @@ func TestAccountSecretFieldsAreComplete(t *testing.T) {
 		GrokProvider GrokModels GrokModelCatalog GrokModelsSyncedAt GrokBilling
 		GrokRateLimits GrokFreeQuota ModelCooldowns ModelCooldownReasons
 		WorkBuddyExpiresAt WorkBuddyUID ReplaceWorkBuddyCredentials WorkBuddyModelIDs
-		WorkBuddyModelsSyncedAt WorkBuddyQuota QoderExpiresAt ReplaceQoderCredentials
+		WorkBuddyModelsSyncedAt WorkBuddyQuota WorkBuddyRestrictedUntil QoderExpiresAt ReplaceQoderCredentials
 		QoderMachineID QoderUserID QoderUserName QoderOrganizationID
 		QoderOrganizationTags QoderDataPolicy QoderRuntimeIdentity QoderModelIDs QoderModelsSyncedAt QoderQuota
 		ClineExpiresAt ClineEmail ClinePlan ReplaceClineCredentials ClineModelIDs

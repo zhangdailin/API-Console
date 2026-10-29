@@ -29,7 +29,18 @@ var (
 	anthropicCLIIdentityPattern   = regexp.MustCompile(`(?i)^you are claude code\b`)
 	codexCLIIdentityPattern       = regexp.MustCompile(`(?i)^[ \t]*you are codex\b(?:[^.!?\r\n]|\.[0-9])*(?:[.!?][ \t]*|$)`)
 	codexCLIRuntimePattern        = regexp.MustCompile(`(?i)^[ \t]*you are a coding agent running in the codex cli\b[^.!?\r\n]*(?:[.!?][ \t]*|$)`)
+	dshPathBoilerplatePattern     = regexp.MustCompile(`(?m)^([ \t]*)Tokens prefixed with @ are paths the user explicitly referenced\.([ \t]*\r?)$`)
 )
+
+// Issue #680 reports this DSH boilerplate as a 11128 channel-verification
+// trigger. Rephrase only the complete sentence in instructional/history text;
+// user messages, tool results and structured tool arguments remain verbatim.
+func normalizeDSHPathBoilerplate(text string) string {
+	if !strings.Contains(text, "Tokens prefixed with @ are paths the user explicitly referenced.") {
+		return text
+	}
+	return dshPathBoilerplatePattern.ReplaceAllString(text, "${1}Tokens prefixed with @ are paths that the user explicitly referenced.${2}")
+}
 
 // These are literal client boilerplate, not a general replacement of product
 // names. Paths, tool names, links, skills and project instructions keep their
@@ -69,6 +80,7 @@ func filterClientSystemText(text string) string {
 		cleaned := codexCLIIdentityPattern.ReplaceAllString(line, "")
 		cleaned = codexCLIRuntimePattern.ReplaceAllString(cleaned, "")
 		cleaned = codexSystemBoilerplate.Replace(cleaned)
+		cleaned = normalizeDSHPathBoilerplate(cleaned)
 		if cleaned != line {
 			changed = true
 			// A removed marker-only line must not create an empty system block.
@@ -156,6 +168,9 @@ func buildMessages(req upstream.UpstreamRequest) []ChatMessage {
 	var system []string
 	normalized := make([]ChatMessage, 1, len(out))
 	for _, message := range out {
+		if message.Role == "assistant" {
+			message.Content = normalizeDSHPathBoilerplate(message.Content)
+		}
 		if message.Role == "system" {
 			system = append(system, message.Content)
 			continue

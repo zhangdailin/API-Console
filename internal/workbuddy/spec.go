@@ -132,7 +132,7 @@ func maintain(ctx context.Context, env provider.Env, acc *store.Account) {
 }
 
 func catalogRefreshDue(acc *store.Account, now time.Time) bool {
-	if acc == nil {
+	if acc == nil || store.WorkBuddyRestrictionUntil(acc).After(now) {
 		return false
 	}
 	if len(acc.WorkBuddyModelIDs) == 0 || acc.WorkBuddyModelsSyncedAt.IsZero() {
@@ -166,7 +166,7 @@ func refreshCatalog(ctx context.Context, env provider.Env, acc *store.Account) {
 // quotaRefreshDue reports whether the account's credit-meter reading should be
 // re-read on this tick.
 func quotaRefreshDue(acc *store.Account, now time.Time) bool {
-	if acc == nil {
+	if acc == nil || store.WorkBuddyRestrictionUntil(acc).After(now) {
 		return false
 	}
 	if acc.WorkBuddyQuota.SyncedAt.IsZero() {

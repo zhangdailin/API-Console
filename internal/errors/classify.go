@@ -243,6 +243,9 @@ func ClassifyUpstreamError(errStr string) UpstreamErrorClass {
 	case isClineModelEntitlement(lower):
 		return UpstreamErrorClass{Category: "model_unavailable", Retryable: true, SwitchAccount: true}
 	case HasExplicitHTTPStatus(lower, "403"):
+		if IsWorkBuddyRestricted(lower) {
+			return UpstreamErrorClass{Category: "account_restricted", Retryable: true, SwitchAccount: true}
+		}
 		return UpstreamErrorClass{Category: "auth_blocked", Retryable: true, SwitchAccount: true}
 	case HasExplicitHTTPStatus(lower, "404"):
 		return UpstreamErrorClass{Category: "auth_blocked"}

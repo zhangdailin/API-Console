@@ -43,6 +43,10 @@
 
 兼容警告可能使用历史名称 `X-Grok2API-Compatibility-Warnings`，不能从 Header 名判断当前存在 Grok Web 通道。
 
+WorkBuddy 将 `11128` 渠道校验拦截与 `11140` 账号受限分开处理。提示词兼容层参考 [issue #680](https://github.com/ardeyouxipianyi/workbuddy2api-hub/issues/680)，仅在 system/developer 和 assistant 正文中，将独占一行的 DSH 固定句 `Tokens prefixed with @ are paths the user explicitly referenced.` 改写为 `Tokens prefixed with @ are paths that the user explicitly referenced.`；用户正文、工具参数及工具结果不改写。这是窄范围协议兼容，不保证上游继续接受该客户端。
+
+`11140` 保存独立的 `workbuddy_restricted_until`，沿用原有 24 小时冷却。期间聊天、后台目录/额度刷新和手动验证均跳过该账号；凭据刷新、账号编辑或目录接口成功不能清除限制，重复触发也不会延长当前窗口。旧 `403/11140` 记录从原 `last_attempt` 推导截止时间，无需重新起算。客户端收到 `403 account_restricted`，区别于会话失效的 401；本地冷却结束不代表上游已解除限制。
+
 Qoder 未指定推理强度时保留账号实际目录的默认 `is_reasoning`；显式强度会同步更新 `model_config` 和 `chat_context.extra.modelConfig` 中的开关。`none` 发送 `reasoning_effort: "none"`、`max_thinking_tokens: 0` 和 `enable_thinking: false`，两处 `is_reasoning` 均为 false；其他显式档位同步开启。这是请求映射约定，是否支持该档位仍由国际版上游判定。
 
 Qoder 的 `success:false` 错误既可以是裸 SSE JSON，也可以包在成功的 envelope 中。带有错误码或说明的失败帧使用与 HTTP 错误一致的分类，不会被后续 `event:finish` 覆盖为成功；已输出正文、推理或 usage 后不重放请求。

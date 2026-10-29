@@ -36,6 +36,7 @@ import (
 
 	"orchids-api/internal/config"
 	"orchids-api/internal/debug"
+	"orchids-api/internal/refreshqueue"
 	"orchids-api/internal/store"
 	"orchids-api/internal/upstream"
 	"orchids-api/internal/util"
@@ -70,8 +71,9 @@ const (
 	// CodePolicyBlocked is the upstream's content/security gate. It answers
 	// "Illegal API invocation from an unapproved channel" and is what a request
 	// carrying a first-party Anthropic client marker gets back.
-	CodePolicyBlocked = 11128
-	CodeSessionDead   = 12153
+	CodePolicyBlocked     = 11128
+	CodeAccountRestricted = 11140
+	CodeSessionDead       = 12153
 )
 
 // Client is one WorkBuddy account's upstream client.
@@ -143,6 +145,7 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 }
 
 func (c *Client) runChat(ctx context.Context, req upstream.UpstreamRequest, timeout time.Duration, onMessage func(upstream.SSEMessage), logger *debug.Logger) (sendErr error) {
+	defer func() { c.persistRestriction(ctx, sendErr) }()
 	if c == nil {
 		return fmt.Errorf("workbuddy client is nil")
 	}
@@ -230,6 +233,26 @@ func parseRetryAfter(value string) time.Duration {
 // ensureAccessToken returns a usable bearer token, refreshing when the stored
 // access token is missing or about to expire.
 func (c *Client) ensureAccessToken(ctx context.Context) (string, error) {
+	c.mu.Lock()
+	acc, owner := c.account, c.accountStore
+	if acc != nil {
+		snapshot := *acc
+		acc = &snapshot
+	}
+	c.mu.Unlock()
+	if acc != nil {
+		latest, err := refreshqueue.LatestAccount(ctx, owner, acc.ID)
+		if err != nil {
+			return "", err
+		}
+		if latest != nil {
+			acc = latest
+		}
+		if until := store.WorkBuddyRestrictionUntil(acc); until.After(time.Now()) {
+			return "", &APIError{HTTPStatus: http.StatusForbidden, Code: CodeAccountRestricted,
+				Message: "account restricted; skipped until " + until.UTC().Format(time.RFC3339), RetryDelay: time.Until(until)}
+		}
+	}
 	return c.tokenUpdater().Token(ctx, c.creds)
 }
 

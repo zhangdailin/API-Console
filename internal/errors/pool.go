@@ -80,6 +80,8 @@ func ClassifyPoolExhaustion(selectErr error, lastErr string) PoolExhaustion {
 		lowerSelect = strings.ToLower(selectErr.Error())
 	}
 	switch {
+	case IsWorkBuddyRestricted(lowerLastErr) || IsWorkBuddyRestricted(lowerSelect):
+		return PoolExhaustion{Category: "account_restricted", Message: CategoryMessage("account_restricted")}
 	case IsCreditExhaustion(lowerLastErr) || strings.Contains(lowerSelect, "exhausted their allowance"):
 		return PoolExhaustion{Category: "quota_exhausted", Message: PoolAllowanceMessage}
 	// A plan/entitlement refusal is not a rate limit: the credential works and
