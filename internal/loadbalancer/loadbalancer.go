@@ -643,6 +643,17 @@ const (
 	retry403Grok = accountpolicy.CooldownBlockedGro
 )
 
+// qoderSpentProbeInterval is how often a spent Qoder account may be probed.
+//
+// A parked account stays admissible so it can recover on a free model, but not
+// on every request. Measured on 2026-11-01: a spent Free account was refused
+// (10605, RESOURCE_LIMIT) through two whole admission windows while a funded
+// account was admitted in one, and with 41 of 44 accounts parked the fallback
+// path re-hit the same spent accounts on every request. One probe per interval
+// keeps recovery possible without spending admission windows on accounts that
+// cannot answer.
+const qoderSpentProbeInterval = 10 * time.Minute
+
 func (lb *LoadBalancer) isAccountAvailable(ctx context.Context, acc *store.Account) bool {
 	if !store.AccountAuthActive(acc) {
 		return false
@@ -702,7 +713,11 @@ func (lb *LoadBalancer) isAccountAvailable(ctx context.Context, acc *store.Accou
 			// requests at an account the upstream just said was spent.
 			lb.clearAccountStatus(ctx, acc, "Qoder 额度窗口已重置，恢复完整能力")
 		}
-		return true
+		// A spent account stays admissible so it can recover on a free model,
+		// but a spent account that was just probed is not a fallback: probing it
+		// again on this request spends an admission window on an account the
+		// upstream has already refused.
+		return acc.LastAttempt.IsZero() || now.Sub(acc.LastAttempt) >= qoderSpentProbeInterval
 	case store.AccountStatusWorkBuddyQuotaExhausted:
 		if !strings.EqualFold(strings.TrimSpace(acc.AccountType), "workbuddy") {
 			return false
