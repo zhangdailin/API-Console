@@ -379,7 +379,8 @@ func (e *messageExecution) run() {
 				"category", errClass.Category,
 			)
 			e.sh.reportRequestFailure("Reporting a shared refusal after the wait budget",
-				errClass.Category, apperrors.PublicMessage(errStr), upstreamRetryAfter(err))
+				errClass.Category, apperrors.PublicMessage(errStr), upstreamRetryAfter(err),
+				queueRefusalDetails(errClass.Category, errStr, upstreamRetryAfter(err)))
 			return
 		}
 		if sharedRefusalWait > 0 {

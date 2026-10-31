@@ -216,7 +216,7 @@ func (h *streamHandler) terminalState() (returned, failed bool) {
 	return h.hasReturn, h.requestFailed
 }
 
-func (h *streamHandler) reportRequestFailure(logMsg, category, message string, retryAfter time.Duration) {
+func (h *streamHandler) reportRequestFailure(logMsg, category, message string, retryAfter time.Duration, details ...map[string]any) {
 	if h == nil || h.w == nil {
 		return
 	}
@@ -247,6 +247,9 @@ func (h *streamHandler) reportRequestFailure(logMsg, category, message string, r
 	opened := h.nonStreamOpened
 	h.mu.Unlock()
 	failure := apperrors.NewWithRetryAfter(category, message, apperrors.StatusForCategory(category), retryAfter)
+	for _, extra := range details {
+		failure.WithDetails(extra)
+	}
 	if opened {
 		// A keep-alive already committed 200; the JSON error body follows the
 		// whitespace, and the status cannot change any more.

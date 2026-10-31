@@ -141,3 +141,43 @@ func sharedRefusalJitter(delay time.Duration) time.Duration {
 	}
 	return time.Duration(rand.Int63n(int64(jitter)))
 }
+
+// queueRefusalDetails adds the queue class and the wait the caller is being
+// asked to accept to the error object. The status stays 429 so an
+// OpenAI-compatible client still backs off; the fields exist so a caller that
+// can route around the queue (another model, another tier) can see that from
+// the answer instead of inferring it from a timeout.
+//
+// Only the queue class is read out of the refusal text: the retry hint is the
+// one already published as Retry-After, and repeating a body field as the header
+// would give a client two values to disagree about.
+func queueRefusalDetails(category, errText string, retryAfter time.Duration) map[string]any {
+	if category != "upstream_queue" {
+		return nil
+	}
+	details := map[string]any{
+		"queue_type":               queueTypeFromRefusal(errText),
+		"retry_after_seconds":      max(int(retryAfter.Seconds()+0.5), 0),
+		"model_switch_recommended": true,
+	}
+	if details["queue_type"] == "" {
+		delete(details, "queue_type")
+	}
+	return details
+}
+
+// queueTypeFromRefusal reads "queueType":"p4" out of a refusal that may be
+// quoted several times on its way through the upstream client.
+func queueTypeFromRefusal(text string) string {
+	text = strings.ReplaceAll(text, "\\", "")
+	const marker = `"queueType":`
+	index := strings.Index(text, marker)
+	if index < 0 {
+		return ""
+	}
+	value := strings.TrimLeft(text[index+len(marker):], ` "`)
+	if end := strings.IndexAny(value, `",}`); end >= 0 {
+		value = value[:end]
+	}
+	return strings.TrimSpace(value)
+}
