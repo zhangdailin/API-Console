@@ -294,3 +294,27 @@ func TestRepairKeepsLargeIntegersExact(t *testing.T) {
 	_, ok = repairChatBody([]byte(`{"messages":[]}`), repairMaxTokens)
 	testutil.False(t, ok, "a body without max_tokens has nothing to lower")
 }
+
+// liveReasoningRefusal is the refusal observed from the live gateway for
+// reflection/beam-free (2026-10-31). The provider message sits behind ~250
+// characters of wrapper text, past the length an error string is truncated to.
+const liveReasoningRefusal = `{"error":{"code":"stream_initialization_failed","message":"Failed to create stream: inference request failed: failed to generate stream from Vercel: failed to invoke model 'reflection/beam-free' with streaming: request failed with status 400: {\"error\":{\"message\":\"Missing required parameter: 'messages[1].reasoning_content'. This model needs the reasoning of every earlier assistant message: send it back.\"}}"}}`
+
+// TestChatRepairsTheLiveRefusalShape proves the repair is classified on the
+// untruncated upstream text, both for the 200 stream whose first frame is the
+// refusal (the live shape) and for the same text as a status error.
+func TestChatRepairsTheLiveRefusalShape(t *testing.T) {
+	testutil.True(t, strings.Index(liveReasoningRefusal, "reasoning_content") > 300, "the fixture must exceed the truncation length")
+	for name, first := range map[string]func(http.ResponseWriter){
+		"stream": refuse(http.StatusOK, "data: "+liveReasoningRefusal+"\n\n"),
+		"status": refuse(http.StatusBadRequest, liveReasoningRefusal),
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := &chatRecorder{responses: []func(http.ResponseWriter){first}}
+			err := runRecordedChat(t, rec, upstream.UpstreamRequest{Messages: historyWithAssistantTurn()}, nil)
+			testutil.NoError(t, err)
+			testutil.Equal(t, len(rec.bodies), 2)
+			testutil.Equal(t, fmt.Sprint(assistantReasoning(rec.bodies[1])), "["+reasoningReplayPlaceholder+"]")
+		})
+	}
+}

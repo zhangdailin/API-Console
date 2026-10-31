@@ -201,7 +201,10 @@ func consumeStreamWithToolNames(body io.Reader, toolsEnabled bool, toolNames map
 		// carrying choices is answer data, even when the answer quotes the phrase.
 		if !result.SawMeaningfulEvent && bytes.Contains(payload, []byte("Missing required parameter")) &&
 			!bytes.Contains(payload, []byte(`"choices"`)) {
-			return result, fmt.Errorf("cline stream error: %s", util.Truncate(string(payload), 300))
+			return result, &attemptStreamError{
+				err:    fmt.Errorf("cline stream error: %s", util.Truncate(string(payload), 300)),
+				detail: string(payload),
+			}
 		}
 
 		// Some chunks arrive wrapped in {"data":{...}}; the delta has to be read
@@ -221,7 +224,7 @@ func consumeStreamWithToolNames(body io.Reader, toolsEnabled bool, toolNames map
 		}
 
 		if msg := strings.TrimSpace(chunk.Error.Message); msg != "" {
-			return result, fmt.Errorf("cline stream error: %s", msg)
+			return result, &attemptStreamError{err: fmt.Errorf("cline stream error: %s", msg), detail: msg}
 		}
 		upstream.ApplyStreamUsage(onMessage, upstream.NormalizeUsageMap(chunk.Usage), &result.SawMeaningfulEvent, &result.Usage)
 		if len(chunk.Choices) == 0 {

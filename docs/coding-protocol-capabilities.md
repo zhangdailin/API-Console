@@ -49,7 +49,9 @@ WorkBuddy 将 `11128` 渠道校验拦截与 `11140` 账号受限分开处理。�
 
 Anthropic 请求的 `thinking: {"type":"disabled"}` 视为显式关闭推理，在 WorkBuddy、Qoder、Cline 上按 `reasoning_effort: "none"` 处理，优先于 `output_config.effort`（与 Grok 原生路径一致）；OpenAI 字段 `reasoning_effort` 仍最优先。WorkBuddy 收到 `none` 时省略该字段；Cline 原样发送，上游拒绝后去掉该字段重试一次。
 
-Cline 在尚未向客户端输出前，对三类可修复的上游拒绝各本地重放一次：历史 assistant 缺 `reasoning_content`（GLM 系）时补占位符 `"."`；`reasoning_effort` 被拒时去掉该字段；网关默认 `max_tokens` 被拒时降到 32000（客户端显式值不改）。超过 64 字符的工具名按"前 55 字节 + sha256 前缀"确定性缩短，返回时还原。`/auth/refresh` 拒绝（400/401/403）时先用 WorkOS `refresh_token` 续期并经 `/auth/register` 换回 Cline 凭据，两者都拒绝才要求重新登录。以上拒绝文本与限制来自参考实现的观察，未在真实上游逐项复核。
+Cline 在尚未向客户端输出前，对三类可修复的上游拒绝各本地重放一次：历史 assistant 缺 `reasoning_content`（GLM 系）时补占位符 `"."`；`reasoning_effort` 被拒时去掉该字段；网关默认 `max_tokens` 被拒时降到 32000（客户端显式值不改）。超过 64 字符的工具名按"前 55 字节 + sha256 前缀"确定性缩短，返回时还原。`/auth/refresh` 拒绝（400/401/403）时先用 WorkOS `refresh_token` 续期并经 `/auth/register` 换回 Cline 凭据，两者都拒绝才要求重新登录。
+
+2026-10-31 用生产账号对真实上游复核：`reflection/beam-free` 对缺 `reasoning_content` 的历史返回 200 + 首帧 `stream_initialization_failed` 错误（报错原文前有约 250 字符包装，修复按未截断原文判断），补 `"."` 后正常；65 字节工具名同样以 200 + 错误帧拒绝，64 字节通过；网关客户端端到端（缺推理历史、`none`、超长工具名）成功并还原原名。当时四个免费模型都接受 `reasoning_effort: "none"` 和 `max_tokens: 128000`，这两类修复暂未被触发，仅作兜底保留；模型目录不返回 `contextWindow`。WorkOS 续期会轮换生产账号的 refresh token，未在生产账号上实测。
 
 Qoder 未指定推理强度时保留账号实际目录的默认 `is_reasoning`；显式强度会同步更新 `model_config` 和 `chat_context.extra.modelConfig` 中的开关。`none` 发送 `reasoning_effort: "none"`、`max_thinking_tokens: 0` 和 `enable_thinking: false`，两处 `is_reasoning` 均为 false；其他显式档位同步开启。这是请求映射约定，是否支持该档位仍由国际版上游判定。
 

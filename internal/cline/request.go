@@ -201,7 +201,15 @@ func repairKind(err error, payload chatPayload) (int, bool) {
 	if err == nil {
 		return 0, false
 	}
-	text := strings.ToLower(err.Error())
+	// The refusal is read from the full upstream text: the gateway wraps the
+	// provider's message in ~250 characters of context, so the truncated error
+	// string can lose the very field name the repair is keyed on.
+	text := err.Error()
+	var attempt *attemptStreamError
+	if errors.As(err, &attempt) && attempt.detail != "" {
+		text = attempt.detail
+	}
+	text = strings.ToLower(text)
 	switch {
 	case strings.Contains(text, "reasoning_content") && strings.Contains(text, "missing required parameter"):
 		return repairReasoningReplay, true
@@ -443,10 +451,12 @@ func normalizeToolChoice(choice any) any {
 	return choice
 }
 
-// attemptStreamError marks a rejected credential for the one refresh attempt.
+// attemptStreamError marks a rejected credential for the one refresh attempt,
+// and keeps the untruncated upstream text a request repair is classified on.
 type attemptStreamError struct {
 	err    error
 	unauth bool
+	detail string
 }
 
 func (e *attemptStreamError) Error() string { return e.err.Error() }
@@ -474,7 +484,7 @@ func classifyStatus(status int, raw []byte) error {
 		// not the token. Reporting it as a missing credential would take a
 		// healthy account out of rotation and demand a re-login that cannot fix
 		// it, so it is surfaced as a plain refusal for the scheduler to judge.
-		return &attemptStreamError{err: wrapped}
+		return &attemptStreamError{err: wrapped, detail: detail}
 	case http.StatusTooManyRequests:
 		// The inference cap names the account and states its own recovery
 		// window, so it is returned as-is: the scheduler cools the account for
@@ -486,5 +496,5 @@ func classifyStatus(status int, raw []byte) error {
 			return capErr
 		}
 	}
-	return &attemptStreamError{err: wrapped}
+	return &attemptStreamError{err: wrapped, detail: detail}
 }
