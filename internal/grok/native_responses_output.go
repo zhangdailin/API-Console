@@ -65,7 +65,8 @@ func copyNativeResponseWithQuality(w http.ResponseWriter, body io.Reader, conten
 		}
 		// Preserve JSON bytes unless restoring tool identities or masking errors.
 		// Partial SSE events also need strict-client supplementation below.
-		changed := namespaces.RestoreEnvelope(response)
+		changed := responses.FilterInternalSearchCalls(response)
+		changed = namespaces.RestoreEnvelope(response) || changed
 		if redactResponseError(response) || changed {
 			raw, _ = json.Marshal(response)
 		}
@@ -85,6 +86,7 @@ func copyNativeResponseWithQuality(w http.ResponseWriter, body io.Reader, conten
 	failureCode, failureMessage := "", ""
 	compat := &responsesCompatibilityState{model: model}
 	lowered := responses.NewLoweredCallFilter(namespaces)
+	internal := responses.NewInternalCallStreamFilter()
 	err := responses.ConsumeSSE(body, func(frame responses.SSEEvent) error {
 		var event map[string]any
 		kind := ""
@@ -116,7 +118,11 @@ func copyNativeResponseWithQuality(w http.ResponseWriter, body io.Reader, conten
 		if lowered.Drop(event) {
 			return nil
 		}
-		changed := namespaces.RestoreEnvelope(event)
+		drop, changed := internal.Apply(event)
+		if drop {
+			return nil
+		}
+		changed = namespaces.RestoreEnvelope(event) || changed
 		changed = supplementResponsesEvent(event, compat) || changed
 		if redactResponseError(event) || changed {
 			raw, _ := json.Marshal(event)
