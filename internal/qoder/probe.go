@@ -32,6 +32,9 @@ import (
 type ProbeResult struct {
 	Variant string
 	Host    string
+	// Identity is the label of the client identity the request presented, so a
+	// comparison of identities is readable in the result list.
+	Identity string
 	// Outcome is "served" when the stream produced model output, "queued" for a
 	// 10605 queue refusal, and "error" otherwise.
 	Outcome   string
@@ -164,7 +167,8 @@ func selectProbeVariants(all []probeVariant, letters []string) ([]probeVariant, 
 }
 
 func (c *Client) probeOnce(ctx context.Context, variant probeVariant, req upstream.UpstreamRequest, model modelEntry, creds Credentials, fields RuntimeFields) ProbeResult {
-	result := ProbeResult{Variant: variant.name, Host: hostName(variant.host)}
+	identity := c.identityOr()
+	result := ProbeResult{Variant: variant.name, Host: hostName(variant.host), Identity: identity.Label}
 	fail := func(err error) ProbeResult {
 		result.Outcome, result.Detail = "error", err.Error()
 		return result
@@ -173,12 +177,12 @@ func (c *Client) probeOnce(ctx context.Context, variant probeVariant, req upstre
 	if err != nil {
 		return fail(err)
 	}
-	encoded, err := buildChatBodyProfile(req, model, sessionID, requestID, setID, c.clientVersion, "", sceneBusinessProduct)
+	encoded, err := buildChatBodyProfileIdentity(req, model, sessionID, requestID, setID, c.clientVersion, "", identity)
 	if err != nil {
 		return fail(err)
 	}
 
-	url := chatURL(variant.host)
+	url := chatURLFor(variant.host, identity)
 	attemptCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	httpReq, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, url, bytes.NewReader(encoded))

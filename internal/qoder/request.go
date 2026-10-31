@@ -55,8 +55,105 @@ const (
 	sessionType = "qoder_work"
 )
 
+// Identity is the client identity a chat request presents: the body fields the
+// gateway reads before it admits the request, the AgentId its URL is signed
+// with, and the Cosy-* header triple that names the same client.
+//
+// It exists because admission depends on it. Operator probes recorded the
+// QoderWork identity landing in the p4 (lowest) queue and the IDE/CLI identity in
+// p3, while neither the request body nor the account class moved the class. A
+// queue class is therefore a routing decision, not a constant of the protocol,
+// and it has to be measurable without editing a constant — see
+// Client.WithIdentity and qoder.ProbeRounds.
+//
+// The zero value is not a valid identity; Client.identityOr substitutes the
+// default so a client built in a test keeps the production identity.
+type Identity struct {
+	// Label names the profile in probe output.
+	Label string
+	// Product is business.product and Cosy-Business-Product.
+	Product string
+	// BusinessType is business.type and Cosy-Business-Type.
+	BusinessType string
+	// SessionType is the top-level session_type.
+	SessionType string
+	// ChatTask is chat_task.
+	ChatTask string
+	// AgentID is agent_id.
+	AgentID string
+	// TaskID is task_id.
+	TaskID string
+	// Source is source.
+	Source int
+	// SubTask is business.sub_task.
+	SubTask string
+	// Scene is Cosy-Scene.
+	Scene string
+	// ClientType is Cosy-ClientType.
+	ClientType string
+	// UserAgent is the User-Agent header.
+	UserAgent string
+	// InferQuery is the chat URL query. It carries the AgentId the URL is signed
+	// with, so it has to agree with AgentID.
+	InferQuery string
+}
+
+// DefaultIdentity is the QoderWork identity production presents, taken from a
+// packet capture of the international client.
+func DefaultIdentity() Identity {
+	return Identity{
+		Label:        "qoderwork",
+		Product:      sceneBusinessProduct,
+		BusinessType: sceneBusinessType,
+		SessionType:  sessionType,
+		ChatTask:     chatTask,
+		AgentID:      agentID,
+		TaskID:       taskID,
+		Source:       sourceValue,
+		SubTask:      subTask,
+		Scene:        sceneName,
+		ClientType:   sceneClientID,
+		UserAgent:    clientUserAgent,
+		InferQuery:   inferQuery,
+	}
+}
+
+// IDEIdentity is the IDE emulation this channel used before the QoderWork
+// capture: product "ide", scene "assistant", session_type "qoder". Only the
+// fields that comment names are changed — the AgentId query keeps agent_common
+// because that is the only agent the inference URL has been observed with, and
+// changing it without a capture would make the URL and agent_id disagree.
+func IDEIdentity() Identity {
+	identity := DefaultIdentity()
+	identity.Label = "ide"
+	identity.Product = "ide"
+	identity.Scene = "assistant"
+	identity.SessionType = "qoder"
+	return identity
+}
+
+// identityOr returns the client's identity, substituting the production default
+// for a zero value so a client built as a literal still sends the full header
+// set.
+func (c *Client) identityOr() Identity {
+	if c == nil || strings.TrimSpace(c.identity.Product) == "" {
+		return DefaultIdentity()
+	}
+	return c.identity
+}
+
 // chatURL renders the chat endpoint.
-func chatURL(base string) string { return strings.TrimRight(base, "/") + inferPath + inferQuery }
+func chatURL(base string) string { return chatURLFor(base, DefaultIdentity()) }
+
+// chatURLFor renders the chat endpoint for one identity. A profile that leaves
+// InferQuery empty falls back to the captured query so the URL stays signable.
+func chatURLFor(base string, identity Identity) string {
+	query := identity.InferQuery
+	if strings.TrimSpace(query) == "" {
+		query = inferQuery
+	}
+	return strings.TrimRight(base, "/") + inferPath + query
+}
 
 // chatBody is the request payload. Field order matters only for readability
 // here: the body is encoded and the signature covers the encoded bytes, not the
@@ -186,7 +283,21 @@ type chatParameters struct {
 	MaxThinkingTokens *int           `json:"max_thinking_tokens,omitempty"`
 }
 
+// buildChatBodyProfile renders the body with the production identity. Tests and
+// the request path call it with the captured product; the probe path calls
+// buildChatBodyProfileIdentity directly so it can compare identities.
 func buildChatBodyProfile(req upstream.UpstreamRequest, model modelEntry, sessionID, requestID, requestSetID, clientVersion, aliyunUserType, businessProduct string) ([]byte, error) {
+	identity := DefaultIdentity()
+	if strings.TrimSpace(businessProduct) != "" {
+		identity.Product = businessProduct
+	}
+	return buildChatBodyProfileIdentity(req, model, sessionID, requestID, requestSetID, clientVersion, aliyunUserType, identity)
+}
+
+func buildChatBodyProfileIdentity(req upstream.UpstreamRequest, model modelEntry, sessionID, requestID, requestSetID, clientVersion, aliyunUserType string, identity Identity) ([]byte, error) {
+	if strings.TrimSpace(identity.Product) == "" {
+		identity = DefaultIdentity()
+	}
 	if err := req.ValidateProtocolControls("qoder"); err != nil {
 		return nil, err
 	}
@@ -234,29 +345,29 @@ func buildChatBodyProfile(req upstream.UpstreamRequest, model modelEntry, sessio
 
 	body := chatBody{
 		Business: businessInfo{
-			Product: businessProduct,
+			Product: identity.Product,
 			Version: clientVersion,
-			Type:    sceneBusinessType,
+			Type:    identity.BusinessType,
 			ID:      requestSetID,
 			Name:    businessName(req),
 			BeginAt: time.Now().UnixMilli(),
 			Stage:   "start",
-			SubTask: subTask,
+			SubTask: identity.SubTask,
 		},
 		RequestID:         requestID,
 		RequestSetID:      requestSetID,
 		ChatRecordID:      requestID,
 		SessionID:         sessionID,
 		Stream:            true,
-		ChatTask:          chatTask,
+		ChatTask:          identity.ChatTask,
 		ChatContext:       referenceChatContext(req, model),
 		IsReply:           true,
 		IsRetry:           false, // Official queued attempts keep this false; Attempt is local bookkeeping.
-		Source:            sourceValue,
+		Source:            identity.Source,
 		Version:           "3",
-		AgentID:           agentID,
-		TaskID:            taskID,
-		SessionType:       sessionType,
+		AgentID:           identity.AgentID,
+		TaskID:            identity.TaskID,
+		SessionType:       identity.SessionType,
 		AliyunUser:        strings.TrimSpace(aliyunUserType),
 		ModelConfig:       wireModelConfig(model),
 		System:            systemText,

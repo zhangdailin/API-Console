@@ -42,6 +42,9 @@ func (c *Client) applyAuthHeadersBytes(req *http.Request, creds Credentials, fie
 	if len(req.Header) == 0 {
 		req.Header = make(http.Header, 32)
 	}
+	// The identity headers have to agree with the body and the signed URL: the
+	// gateway was observed to treat this triple as the client that is asking.
+	identity := c.identityOr()
 	var values [32]string
 	index := 0
 	set := func(key, value string) {
@@ -55,9 +58,9 @@ func (c *Client) applyAuthHeadersBytes(req *http.Request, creds Credentials, fie
 	set("Cache-Control", "no-cache")
 	set("Connection", "keep-alive")
 	set("Content-Type", "application/json")
-	set("Cosy-Business-Product", sceneBusinessProduct)
-	set("Cosy-Business-Type", sceneBusinessType)
-	set("Cosy-ClientType", sceneClientID)
+	set("Cosy-Business-Product", identity.Product)
+	set("Cosy-Business-Type", identity.BusinessType)
+	set("Cosy-ClientType", identity.ClientType)
 	set("Cosy-Data-Policy", dataPolicyHeader(c.dataPolicyAgreed()))
 	set("Cosy-Date", unixSeconds)
 	set("Cosy-Key", fields.Key)
@@ -71,12 +74,12 @@ func (c *Client) applyAuthHeadersBytes(req *http.Request, creds Credentials, fie
 	if tags := filterTags(creds.OrgTags); len(tags) > 0 {
 		set("Cosy-Organization-Tags", strings.Join(tags, ","))
 	}
-	set("Cosy-Scene", sceneName)
+	set("Cosy-Scene", identity.Scene)
 	set("Cosy-User", strings.TrimSpace(creds.UID))
 	set("Cosy-Version", c.clientVersion)
 	set("Sec-Fetch-Mode", "cors")
 	set("Traceparent", util.Traceparent(requestID))
-	set("User-Agent", clientUserAgent)
+	set("User-Agent", identity.UserAgent)
 	set("Login-Version", "v2")
 	if key := strings.TrimSpace(modelKey); key != "" {
 		set("X-Model-Key", key)

@@ -21,11 +21,19 @@ import (
 // prompt per inference node through a single Qoder account and prints whether
 // each was served, queued (and in which queue) or refused. See
 // qoder.ProbeRounds.
+//
+// -model accepts a comma-separated list and -identity selects the client
+// identity to present. Operator probes recorded the identity deciding the
+// admission queue (QoderWork p4, IDE/CLI p3) while the request body did not, so
+// -identity both is the measurement that settles which queue this channel is
+// actually using: it sends the same models twice, once per identity, on one
+// account.
 func runQoderProbe(args []string, out io.Writer) error {
 	flags := flag.NewFlagSet("qoder-probe", flag.ContinueOnError)
 	configPath := flags.String("config", "", "Path to config.json/config.yaml")
 	accountID := flags.Int64("account", 0, "Qoder account id (default: the enabled account with the most credits left)")
-	model := flags.String("model", "qwen3.8-flash", "model to probe, as a client would name it")
+	modelsFlag := flags.String("model", "qwen3.8-flash", "comma-separated model keys to probe, as a client would name them")
+	identityFlag := flags.String("identity", "default", "client identity to present: default (qoderwork), ide, or both")
 	rounds := flags.Int("rounds", 0, "send the selected variants this many times, alternating their order (0: one pass)")
 	interval := flags.Duration("interval", 35*time.Second, "pause before every request in a multi-round comparison")
 	variants := flags.String("variants", "", "comma-separated variant letters to send, e.g. A,F (default: all)")
@@ -41,6 +49,14 @@ func runQoderProbe(args []string, out io.Writer) error {
 		if letter = strings.TrimSpace(letter); letter != "" {
 			letters = append(letters, letter)
 		}
+	}
+	models := splitModelKeys(*modelsFlag)
+	if len(models) == 0 {
+		return errors.New("--model needs at least one key")
+	}
+	identities, err := selectIdentities(*identityFlag)
+	if err != nil {
+		return err
 	}
 
 	cfg, resolvedConfigPath, err := config.Load(*configPath)
@@ -69,7 +85,7 @@ func runQoderProbe(args []string, out io.Writer) error {
 		if *alignWindow {
 			step = time.Minute
 		}
-		budget += time.Duration(max(*rounds, 1)*perRound) * (step + 90*time.Second)
+		budget += time.Duration(max(*rounds, 1)*perRound*len(models)*len(identities)) * (step + 90*time.Second)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
@@ -87,16 +103,76 @@ func runQoderProbe(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "account %d (%s, %s), model %s\n\n", acc.ID, acc.QoderQuota.UserType, acc.QoderQuota.PlanTier, *model)
+	fmt.Fprintf(out, "account %d (%s, %s)\n\n", acc.ID, acc.QoderQuota.UserType, acc.QoderQuota.PlanTier)
 
-	client := qoder.NewFromAccount(acc, cfg)
-	client.SetAccountStore(s) // a token rotated during the probe is persisted
-	if *rounds > 1 || *alignWindow {
-		return runProbeRounds(ctx, client, out, *model, letters, max(*rounds, 1), *interval, *alignWindow)
+	base := qoder.NewFromAccount(acc, cfg)
+	base.SetAccountStore(s) // a token rotated during the probe is persisted
+
+	summaries := make([]probeSummary, 0, len(models)*len(identities))
+	for _, identity := range identities {
+		// WithIdentity mutates the probe's own client, so it is set again for
+		// every profile instead of only for the ones that differ from default.
+		client := base.WithIdentity(identity)
+		for _, model := range models {
+			verbose := len(models)*len(identities) > 1
+			if verbose {
+				fmt.Fprintf(out, "identity %s  model %s\n", identity.Label, model)
+			} else {
+				fmt.Fprintf(out, "model %s\n\n", model)
+			}
+			results, probeErr := probeOneModel(ctx, client, out, model, letters, *rounds, *interval, *alignWindow)
+			summary := summarizeProbe(model, results)
+			summary.Identity = identity.Label
+			summaries = append(summaries, summary)
+			if probeErr != nil {
+				return probeErr
+			}
+		}
 	}
-	results, err := client.ProbeRounds(ctx, *model, qoder.ProbeRoundOptions{Rounds: 1, Variants: letters})
+
+	if len(summaries) > 1 {
+		printProbeSummary(out, summaries)
+	}
+	return nil
+}
+
+// splitModelKeys keeps the order the operator wrote and drops empty entries.
+func splitModelKeys(raw string) []string {
+	keys := make([]string, 0, 4)
+	for _, part := range strings.Split(raw, ",") {
+		if key := strings.TrimSpace(part); key != "" {
+			keys = append(keys, key)
+		}
+	}
+	return keys
+}
+
+// selectIdentities maps -identity onto the profiles the package exposes. An
+// unknown name is refused rather than silently treated as the default, because
+// a typo would otherwise produce a run that looks like it compared identities.
+func selectIdentities(raw string) ([]qoder.Identity, error) {
+	defaultIdentity := qoder.DefaultIdentity()
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "default", "qoderwork", "qoder_work":
+		return []qoder.Identity{defaultIdentity}, nil
+	case "ide":
+		return []qoder.Identity{qoder.IDEIdentity()}, nil
+	case "both":
+		return []qoder.Identity{defaultIdentity, qoder.IDEIdentity()}, nil
+	default:
+		return nil, fmt.Errorf("unknown --identity %q (want default, ide or both)", raw)
+	}
+}
+
+// probeOneModel runs one model and prints the per-node table the command has
+// always printed.
+func probeOneModel(ctx context.Context, client *qoder.Client, out io.Writer, model string, letters []string, rounds int, interval time.Duration, alignWindow bool) ([]qoder.ProbeResult, error) {
+	if rounds > 1 || alignWindow {
+		return runProbeRounds(ctx, client, out, model, letters, max(rounds, 1), interval, alignWindow)
+	}
+	results, err := client.ProbeRounds(ctx, model, qoder.ProbeRoundOptions{Rounds: 1, Variants: letters})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "VARIANT\tHOST\tOUTCOME\tHTTP\tQUEUE\tAVAILABLE\tSUBCODE\tRETRY\tTIME")
@@ -105,7 +181,7 @@ func runQoderProbe(args []string, out io.Writer) error {
 			dash(r.QueueType), dash(r.Available), dash(r.SubCode), dash(r.RetryWait), r.Elapsed.Round(time.Millisecond))
 	}
 	if err := w.Flush(); err != nil {
-		return err
+		return nil, err
 	}
 	fmt.Fprintln(out)
 	for _, r := range results {
@@ -113,7 +189,74 @@ func runQoderProbe(args []string, out io.Writer) error {
 			fmt.Fprintf(out, "%s: %s\n", r.Variant, r.Detail)
 		}
 	}
-	return nil
+	return results, nil
+}
+
+// probeSummary is one model's queue verdict across every node it was sent to.
+type probeSummary struct {
+	Identity string
+	Model    string
+	Served   int
+	Queued   int
+	Errors   int
+	Queue    string
+	Verdict  string
+}
+
+// summarizeProbe reduces a model's results to the queue class it lands in. A
+// model that answers p4 on every node can only be reached by switching tier or
+// waiting for the per-minute window; one that answers p3 is admitted on the
+// identity the gateway presents.
+func summarizeProbe(model string, results []qoder.ProbeResult) probeSummary {
+	summary := probeSummary{Model: model}
+	queueCounts := map[string]int{}
+	for _, r := range results {
+		switch r.Outcome {
+		case "served":
+			summary.Served++
+		case "queued":
+			summary.Queued++
+			if q := strings.TrimSpace(r.QueueType); q != "" {
+				queueCounts[q]++
+			}
+		default:
+			summary.Errors++
+		}
+	}
+	for queue, count := range queueCounts {
+		if summary.Queue == "" || count > queueCounts[summary.Queue] {
+			summary.Queue = queue
+		}
+	}
+	switch {
+	case summary.Served > 0 && summary.Queued == 0:
+		summary.Verdict = "admitted"
+	case summary.Served > 0 && summary.Queued > 0:
+		summary.Verdict = "partly admitted"
+	case summary.Queued > 0:
+		summary.Verdict = "queued " + dash(summary.Queue)
+	case summary.Errors > 0:
+		summary.Verdict = "refused"
+	default:
+		summary.Verdict = "no result"
+	}
+	return summary
+}
+
+func printProbeSummary(out io.Writer, summaries []probeSummary) {
+	fmt.Fprintln(out)
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "IDENTITY\tMODEL\tSERVED\tQUEUED\tERRORS\tQUEUE\tVERDICT")
+	for _, s := range summaries {
+		fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%d\t%s\t%s\n", dash(s.Identity), s.Model, s.Served, s.Queued, s.Errors, dash(s.Queue), s.Verdict)
+	}
+	if err := w.Flush(); err != nil {
+		return
+	}
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "The client identity picks the queue class (QoderWork p4, IDE/CLI p3); the model key only")
+	fmt.Fprintln(out, "decides whether a key is served at all. A key that answers p4 needs a tier switch or a")
+	fmt.Fprintln(out, "window-aligned retry, not a longer timeout.")
 }
 
 func dash(value string) string {
@@ -162,7 +305,7 @@ func qoderProbeCommand(args []string) bool {
 
 // runProbeRounds prints each attempt as it lands and then how often each
 // identity was served.
-func runProbeRounds(ctx context.Context, client *qoder.Client, out io.Writer, model string, letters []string, rounds int, interval time.Duration, alignWindow bool) error {
+func runProbeRounds(ctx context.Context, client *qoder.Client, out io.Writer, model string, letters []string, rounds int, interval time.Duration, alignWindow bool) ([]qoder.ProbeResult, error) {
 	if alignWindow {
 		fmt.Fprintf(out, "%d rounds, one request per minute at second :09, order alternating each round\n\n", rounds)
 	} else {
@@ -217,9 +360,9 @@ func runProbeRounds(ctx context.Context, client *qoder.Client, out io.Writer, mo
 		fmt.Fprintf(w, "%s\t%d\t%d\t%s\n", name, t.served, t.sent, dash(strings.Join(queues, " ")))
 	}
 	if flushErr := w.Flush(); flushErr != nil {
-		return flushErr
+		return results, flushErr
 	}
-	return err
+	return results, err
 }
 
 // probeErrorReason shortens an error detail to its reason, so identical

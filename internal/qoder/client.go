@@ -41,6 +41,10 @@ type Client struct {
 	// drifting under a live credential.
 	machineToken string
 	machineType  string
+	// identity is the client identity requests present, in the body and in the
+	// Cosy-* headers. It is fixed for the life of a serving client; the probe
+	// owns its client and replaces it through WithIdentity to compare queues.
+	identity Identity
 
 	// control answers the short control-plane calls (token, profile, catalog).
 	// stream answers the chat call, and has no client-level deadline so a long
@@ -125,9 +129,29 @@ func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
 		client.machineID = strings.TrimSpace(acc.QoderMachineID)
 	}
 	client.applyFingerprint()
+	client.identity = DefaultIdentity()
 	client.adoptStoredRuntime()
 	return client
 }
+
+// WithIdentity sets the client identity requests present and returns the same
+// client. It mutates instead of returning a copy on purpose: Client owns a lock
+// and a credential that is replaced in place on rotation, so a struct copy would
+// duplicate both. The probe is the only caller and owns its client, which is why
+// a mutation is safe there and a copy is not.
+func (c *Client) WithIdentity(identity Identity) *Client {
+	if c == nil {
+		return nil
+	}
+	if strings.TrimSpace(identity.Product) == "" {
+		identity = DefaultIdentity()
+	}
+	c.identity = identity
+	return c
+}
+
+// Identity returns the identity this client presents.
+func (c *Client) Identity() Identity { return c.identityOr() }
 
 // adoptStoredRuntime reuses the runtime pair stored beside the credential when
 // it was derived for the identity the account holds now. Without this every
@@ -250,7 +274,7 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	}
 
 	hosts := c.withoutSpentHosts(c.endpoints.orderedInferenceHosts(time.Now()), time.Now())
-	url := chatURL(hosts[0])
+	url := chatURLFor(hosts[0], c.identityOr())
 	if logger != nil && !logger.Capturing() {
 		logger.LogUpstreamRequest(url, map[string]string{"provider": "qoder", "model": model.Key}, body)
 	}
@@ -292,7 +316,7 @@ func (c *Client) runChat(ctx context.Context, hosts []string, body []byte, model
 	// a failover for one account's spent daily count must not steer every
 	// other account to the same node.
 	faultFailover := false
-	url := chatURL(host)
+	url := chatURLFor(host, c.identityOr())
 	emit := func(msg upstream.SSEMessage) {
 		emitted = true
 		if onMessage != nil {
@@ -400,7 +424,7 @@ func (c *Client) runChat(ctx context.Context, hosts []string, body []byte, model
 			slog.Warn("Qoder daily request count spent on this host; trying the next one", "host", host, "next_host", next)
 			host = next
 			faultFailover = false
-			url = chatURL(next)
+			url = chatURLFor(next, c.identityOr())
 			requestID, err = newUUID(c.entropy)
 			if err != nil {
 				return err
@@ -416,7 +440,7 @@ func (c *Client) runChat(ctx context.Context, hosts []string, body []byte, model
 			slog.Warn("Qoder inference host failed; failing over", "host", host, "next_host", next, "error", err)
 			host = next
 			faultFailover = true
-			url = chatURL(next)
+			url = chatURLFor(next, c.identityOr())
 			requestID, err = newUUID(c.entropy)
 			if err != nil {
 				return err
