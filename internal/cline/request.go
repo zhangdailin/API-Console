@@ -1,8 +1,10 @@
 package cline
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"strings"
 
@@ -38,15 +40,38 @@ type chatBody struct {
 	ToolChoice        any            `json:"tool_choice,omitempty"`
 }
 
+// chatPayload is one rendered chat request plus what the client half of the
+// stream needs to undo the request-side rewrites.
+type chatPayload struct {
+	body []byte
+	// toolNames maps an upstream tool name back to the client's original one.
+	// It is nil when no name had to be shortened.
+	toolNames map[string]string
+	// defaultMaxTokens reports that max_tokens is this package's default rather
+	// than the client's own value, so a repair may lower it.
+	defaultMaxTokens bool
+}
+
 // buildChatBody renders one chat request.
 func buildChatBody(req upstream.UpstreamRequest, model string) ([]byte, error) {
+	payload, err := buildChatPayload(req, model)
+	return payload.body, err
+}
+
+// buildChatPayload renders one chat request and records the rewrites the
+// response side has to reverse.
+func buildChatPayload(req upstream.UpstreamRequest, model string) (chatPayload, error) {
 	if err := req.ValidateProtocolControls("cline"); err != nil {
-		return nil, err
+		return chatPayload{}, err
 	}
 	sessionID := logicalTaskID(req.RequestID)
 	maxTokens := DefaultMaxTokens
-	if req.MaxTokens != nil {
+	defaultMaxTokens := true
+	if req.MaxTokens != nil && *req.MaxTokens > 0 {
+		// A non-positive budget is not a usable request; it is treated as unset
+		// rather than forwarded for the upstream to reject.
 		maxTokens = *req.MaxTokens
+		defaultMaxTokens = false
 	}
 	// The upstream needs a reasoning_effort on every request, so the default
 	// stands in when the client did not state one; a stated effort wins.
@@ -69,7 +94,160 @@ func buildChatBody(req upstream.UpstreamRequest, model string) ([]byte, error) {
 		body.Tools = normalizeToolDefinitions(req)
 		body.ToolChoice = normalizeToolChoice(req.ToolChoice)
 	}
-	return json.Marshal(body)
+	toolNames := shortenToolNames(&body)
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return chatPayload{}, err
+	}
+	return chatPayload{body: raw, toolNames: toolNames, defaultMaxTokens: defaultMaxTokens}, nil
+}
+
+// maxToolNameLength is the upstream's ceiling on a function name. A longer
+// name (common for namespaced MCP tools) is rejected for the whole request.
+const maxToolNameLength = 64
+
+// upstreamToolName shortens an over-long name deterministically: the same name
+// maps to the same short form on every turn, so a tool call replayed from
+// history keeps matching its declaration.
+func upstreamToolName(name string) string {
+	if len(name) <= maxToolNameLength {
+		return name
+	}
+	sum := sha256.Sum256([]byte(name))
+	return fmt.Sprintf("%.55s_%x", name, sum[:4])
+}
+
+// shortenToolNames rewrites over-long tool names in the declarations, the
+// replayed tool calls and tool_choice, and returns the reverse mapping. It
+// copies every map it changes: declarations are shared with the request, which
+// a retry on another account renders again.
+func shortenToolNames(body *chatBody) map[string]string {
+	var names map[string]string
+	rename := func(name string) string {
+		short := upstreamToolName(name)
+		if short != name {
+			if names == nil {
+				names = make(map[string]string)
+			}
+			names[short] = name
+		}
+		return short
+	}
+	renameFunctionHolder := func(holder map[string]any) map[string]any {
+		function, ok := holder["function"].(map[string]any)
+		if !ok {
+			return holder
+		}
+		name := util.StringValue(function["name"])
+		if short := rename(name); short != name {
+			function = maps.Clone(function)
+			function["name"] = short
+			holder = maps.Clone(holder)
+			holder["function"] = function
+		}
+		return holder
+	}
+	for i, raw := range body.Tools {
+		if tool, ok := raw.(map[string]any); ok {
+			body.Tools[i] = renameFunctionHolder(tool)
+		}
+	}
+	if choice, ok := body.ToolChoice.(map[string]any); ok {
+		body.ToolChoice = renameFunctionHolder(choice)
+	}
+	for i := range body.Messages {
+		for j := range body.Messages[i].ToolCalls {
+			call := &body.Messages[i].ToolCalls[j]
+			call.Function.Name = rename(call.Function.Name)
+		}
+	}
+	return names
+}
+
+// Request repairs. Each one answers a specific upstream refusal of a request
+// that is otherwise well formed, and is applied at most once per call.
+const (
+	// repairReasoningReplay answers GLM-family models, which refuse a history
+	// whose assistant turns carry no reasoning_content ("Missing required
+	// parameter: 'messages[N].reasoning_content'"). Most OpenAI clients never
+	// send it back, so a placeholder is filled in; an empty string is refused
+	// as well.
+	repairReasoningReplay = iota
+	// repairReasoningEffort drops a reasoning_effort the upstream refused.
+	repairReasoningEffort
+	// repairMaxTokens lowers this package's default budget when the upstream
+	// refused it as too large for the model. A client-stated budget is protocol
+	// data and is never changed.
+	repairMaxTokens
+	repairCount
+)
+
+// reasoningReplayPlaceholder is the minimal reasoning text the upstream accepts.
+const reasoningReplayPlaceholder = "."
+
+// repairMaxTokensBudget is the budget a refused default is lowered to.
+const repairMaxTokensBudget = 32000
+
+// repairKind reports which repair, if any, an upstream refusal asks for.
+func repairKind(err error, payload chatPayload) (int, bool) {
+	if err == nil {
+		return 0, false
+	}
+	text := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(text, "reasoning_content") && strings.Contains(text, "missing required parameter"):
+		return repairReasoningReplay, true
+	case strings.Contains(text, "reasoning_effort") || strings.Contains(text, "reasoning effort"):
+		return repairReasoningEffort, true
+	case payload.defaultMaxTokens && (strings.Contains(text, "max_tokens") ||
+		strings.Contains(text, "maxoutputtokens") || strings.Contains(text, "max_output_tokens") ||
+		strings.Contains(text, "context length") || strings.Contains(text, "context window")):
+		return repairMaxTokens, true
+	}
+	return 0, false
+}
+
+// repairChatBody applies one repair to a rendered body. It reports false when
+// the body has nothing the repair could change, so a refusal is not replayed
+// unchanged.
+func repairChatBody(body []byte, kind int) ([]byte, bool) {
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return nil, false
+	}
+	changed := false
+	switch kind {
+	case repairReasoningReplay:
+		messages, _ := decoded["messages"].([]any)
+		for _, raw := range messages {
+			message, ok := raw.(map[string]any)
+			if !ok || message["role"] != "assistant" {
+				continue
+			}
+			if strings.TrimSpace(util.StringValue(message["reasoning_content"])) == "" {
+				message["reasoning_content"] = reasoningReplayPlaceholder
+				changed = true
+			}
+		}
+	case repairReasoningEffort:
+		if _, ok := decoded["reasoning_effort"]; ok {
+			delete(decoded, "reasoning_effort")
+			changed = true
+		}
+	case repairMaxTokens:
+		if budget, ok := decoded["max_tokens"].(float64); ok && budget > repairMaxTokensBudget {
+			decoded["max_tokens"] = repairMaxTokensBudget
+			changed = true
+		}
+	}
+	if !changed {
+		return nil, false
+	}
+	repaired, err := json.Marshal(decoded)
+	if err != nil {
+		return nil, false
+	}
+	return repaired, true
 }
 
 // buildMessages renders the request history.

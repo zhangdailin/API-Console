@@ -3,6 +3,7 @@ package cline
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -279,6 +280,15 @@ func (c *Client) Refresh(ctx context.Context, refreshToken string) (Credentials,
 	}
 	if resp.StatusCode != http.StatusOK {
 		err := apiError(http.MethodPost, endpoint, resp.StatusCode, raw)
+		if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			// The Cline refresh token is the WorkOS refresh token that
+			// /auth/register wrapped, so WorkOS can still renew it when the
+			// Cline endpoint refuses. That saves a browser login; only when
+			// WorkOS refuses too is the grant really gone.
+			if renewed, ok := c.refreshViaWorkOS(ctx, refreshToken); ok {
+				return renewed, nil
+			}
+		}
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 			// The refresh grant itself was refused: no local retry can recover
 			// it, and the operator has to authorize again.
@@ -305,6 +315,66 @@ func (c *Client) Refresh(ctx context.Context, refreshToken string) (Credentials,
 		RefreshToken: util.FirstNonEmptyUntrimmed(payload.Data.RefreshToken, refreshToken),
 		ExpiresAt:    ParseExpiry(payload.Data.ExpiresAt),
 	}, nil
+}
+
+// refreshViaWorkOS renews the credential with the WorkOS refresh_token grant.
+// It reports false on any failure: the caller keeps the Cline endpoint's own
+// verdict, which is the one the operator is shown.
+func (c *Client) refreshViaWorkOS(ctx context.Context, refreshToken string) (Credentials, bool) {
+	form := url.Values{}
+	form.Set("grant_type", "refresh_token")
+	form.Set("client_id", c.workOSClientID)
+	form.Set("refresh_token", refreshToken)
+
+	reqCtx, cancel := context.WithTimeout(ctx, authRequestTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, c.workOSTokenURL,
+		strings.NewReader(form.Encode()))
+	if err != nil {
+		return Credentials{}, false
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+
+	resp, raw, err := httpclient.DoReadBody(c.control, req, 64<<10)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return Credentials{}, false
+	}
+	var granted struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.Unmarshal(raw, &granted); err != nil || strings.TrimSpace(granted.AccessToken) == "" {
+		return Credentials{}, false
+	}
+	access := strings.TrimSpace(granted.AccessToken)
+	return Credentials{
+		AccessToken:  access,
+		RefreshToken: util.FirstNonEmptyUntrimmed(strings.TrimSpace(granted.RefreshToken), refreshToken),
+		ExpiresAt:    jwtExpiry(access),
+	}, true
+}
+
+// jwtExpiry reads the exp claim of a WorkOS access token. The signature is not
+// checked: the value only schedules the next renewal, and the upstream stays
+// the authority on validity. An unreadable token yields zero, which is tried
+// as-is until the upstream refuses it.
+func jwtExpiry(token string) time.Time {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return time.Time{}
+	}
+	claims, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(parts[1], "="))
+	if err != nil {
+		return time.Time{}
+	}
+	var payload struct {
+		Exp int64 `json:"exp"`
+	}
+	if err := json.Unmarshal(claims, &payload); err != nil || payload.Exp <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(payload.Exp, 0).UTC()
 }
 
 // apiError renders an upstream failure without echoing the credential.

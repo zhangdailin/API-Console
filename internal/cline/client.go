@@ -301,22 +301,24 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	if err != nil {
 		return err
 	}
-	body, err := buildChatBody(req, model)
+	payload, err := buildChatPayload(req, model)
 	if err != nil {
 		return err
 	}
 	url := c.apiBase + "/chat/completions"
 	if logger != nil && !logger.Capturing() {
-		logger.LogUpstreamRequest(url, map[string]string{"provider": "cline", "model": model}, body)
+		logger.LogUpstreamRequest(url, map[string]string{"provider": "cline", "model": model}, payload.body)
 	}
-	return c.runChat(upstream.WithToolDeltas(ctx, req.StreamToolDeltas), url, body, logicalTaskID(req.RequestID), creds, onMessage)
+	return c.runChat(upstream.WithToolDeltas(ctx, req.StreamToolDeltas), url, payload, logicalTaskID(req.RequestID), creds, onMessage)
 }
 
-// runChat performs one upstream call, except that an initial 401 gets one token
-// refresh and one replay. All non-auth retry budgeting belongs to the shared
-// handler so an account switch and a provider-local replay cannot both consume
-// capacity for the same logical attempt.
-func (c *Client) runChat(ctx context.Context, url string, body []byte, taskID string, creds Credentials, onMessage func(upstream.SSEMessage)) error {
+// runChat performs one upstream call. Two failures get exactly one local replay
+// each, before anything reached the client: an initial 401 gets a token refresh,
+// and a refusal that names a repairable request field gets that field repaired
+// (see repairKind). All other retry budgeting belongs to the shared handler so an
+// account switch and a provider-local replay cannot both consume capacity for
+// the same logical attempt.
+func (c *Client) runChat(ctx context.Context, url string, payload chatPayload, taskID string, creds Credentials, onMessage func(upstream.SSEMessage)) error {
 	emitted := false
 	emit := func(msg upstream.SSEMessage) {
 		emitted = true
@@ -324,13 +326,14 @@ func (c *Client) runChat(ctx context.Context, url string, body []byte, taskID st
 			onMessage(msg)
 		}
 	}
-
 	attemptCredentials := creds
-	for attempt := range 2 {
+	refreshed := false
+	var repaired [repairCount]bool
+	for {
 		if current := c.currentCredentials(); current.HasCredential() {
 			attemptCredentials = current
 		}
-		result, err := c.attemptChat(ctx, url, body, taskID, attemptCredentials, emit)
+		result, err := c.attemptChat(ctx, url, payload, taskID, attemptCredentials, emit)
 		if err == nil {
 			if !result.SawMeaningfulEvent {
 				return fmt.Errorf("cline stream produced no usable events")
@@ -344,22 +347,35 @@ func (c *Client) runChat(ctx context.Context, url string, body []byte, taskID st
 			}
 			return nil
 		}
-		if emitted {
+		if emitted || upstream.RemainingAttempts(ctx) == 0 {
 			return err
 		}
-		if attempt == 0 && isUnauthorized(err) && upstream.RemainingAttempts(ctx) != 0 {
+		if isUnauthorized(err) {
+			if refreshed {
+				return err
+			}
+			refreshed = true
 			if refreshErr := c.forceRefresh(ctx, attemptCredentials); refreshErr != nil {
 				return refreshErr
 			}
 			continue
 		}
-		return err
+		kind, ok := repairKind(err, payload)
+		if !ok || repaired[kind] {
+			return err
+		}
+		repaired[kind] = true
+		body, ok := repairChatBody(payload.body, kind)
+		if !ok {
+			return err
+		}
+		payload.body = body
 	}
-	return ErrCredentialMissing
 }
 
 // attemptChat performs one upstream attempt and consumes its stream.
-func (c *Client) attemptChat(ctx context.Context, url string, body []byte, taskID string, creds Credentials, emit func(upstream.SSEMessage)) (result streamResult, attemptErr error) {
+func (c *Client) attemptChat(ctx context.Context, url string, payload chatPayload, taskID string, creds Credentials, emit func(upstream.SSEMessage)) (result streamResult, attemptErr error) {
+	body := payload.body
 	reqCtx, cancel := util.WithAttemptTimeout(ctx, c.requestTimeout)
 	defer cancel()
 
@@ -402,7 +418,7 @@ func (c *Client) attemptChat(ctx context.Context, url string, body []byte, taskI
 
 	monitored, progress := httpclient.MonitorProgressIdle(resp.Body, c.streamIdle, cancel, "cline")
 	resp.Body = monitored
-	return consumeStream(resp.Body, requestCarriesTools(body), func(m upstream.SSEMessage) {
+	return consumeStreamWithToolNames(resp.Body, requestCarriesTools(body), payload.toolNames, func(m upstream.SSEMessage) {
 		progress()
 		if emit != nil {
 			emit(m)

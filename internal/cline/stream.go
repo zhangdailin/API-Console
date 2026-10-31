@@ -124,6 +124,12 @@ func (s *clineThinkingSplitter) feed(content string, final bool, emitReasoning, 
 
 // consumeStream parses the SSE body and forwards deltas to the caller.
 func consumeStream(body io.Reader, toolsEnabled bool, onMessage func(upstream.SSEMessage), streamToolDeltas ...bool) (streamResult, error) {
+	return consumeStreamWithToolNames(body, toolsEnabled, nil, onMessage, streamToolDeltas...)
+}
+
+// consumeStreamWithToolNames is consumeStream with the request's shortened tool
+// names (upstream name -> client name) restored on every tool call.
+func consumeStreamWithToolNames(body io.Reader, toolsEnabled bool, toolNames map[string]string, onMessage func(upstream.SSEMessage), streamToolDeltas ...bool) (streamResult, error) {
 	scanner := bufio.NewScanner(body)
 	buffer := util.AcquireStreamBuffer()
 	defer util.ReleaseStreamBuffer(buffer)
@@ -188,6 +194,13 @@ func consumeStream(body io.Reader, toolsEnabled bool, onMessage func(upstream.SS
 		if len(payload) == 0 {
 			continue
 		}
+		// The gateway reports a request it refused while initializing the stream
+		// as a 200 whose first frame is an error, in shapes that do not always
+		// decode as a chunk. The text is kept so the caller can repair the
+		// request (see repairKind) instead of seeing a protocol error.
+		if !result.SawMeaningfulEvent && bytes.Contains(payload, []byte("Missing required parameter")) {
+			return result, fmt.Errorf("cline stream error: %s", util.Truncate(string(payload), 300))
+		}
 
 		// Some chunks arrive wrapped in {"data":{...}}; the delta has to be read
 		// out of the envelope before it can be decoded as a chunk.
@@ -228,7 +241,11 @@ func consumeStream(body io.Reader, toolsEnabled bool, onMessage func(upstream.SS
 		}
 		for _, call := range delta.ToolCalls {
 			result.SawMeaningfulEvent = true
-			state := tools.Add(call.Index, call.ID, call.Function.Name, call.Function.Arguments)
+			name := call.Function.Name
+			if original, ok := toolNames[name]; ok {
+				name = original
+			}
+			state := tools.Add(call.Index, call.ID, name, call.Function.Arguments)
 			if toolsEnabled {
 				controlRecovery.observe(state)
 			}
