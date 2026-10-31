@@ -38,6 +38,7 @@ func runQoderProbe(args []string, out io.Writer) error {
 	interval := flags.Duration("interval", 35*time.Second, "pause before every request in a multi-round comparison")
 	variants := flags.String("variants", "", "comma-separated variant letters to send, e.g. A,F (default: all)")
 	alignWindow := flags.Bool("align-window", false, "send each request at second :09 of a minute, one per minute, instead of every --interval")
+	sweep := flags.Int("sweep", 0, "replay the queue-window retry this many times in one process and report how many were admitted")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -108,6 +109,10 @@ func runQoderProbe(args []string, out io.Writer) error {
 	base := qoder.NewFromAccount(acc, cfg)
 	base.SetAccountStore(s) // a token rotated during the probe is persisted
 
+	if *sweep > 0 {
+		return runProbeSweep(ctx, base, out, models[0], letters, *sweep)
+	}
+
 	summaries := make([]probeSummary, 0, len(models)*len(identities))
 	for _, identity := range identities {
 		// WithIdentity mutates the probe's own client, so it is set again for
@@ -162,6 +167,66 @@ func selectIdentities(raw string) ([]qoder.Identity, error) {
 	default:
 		return nil, fmt.Errorf("unknown --identity %q (want default, ide or both)", raw)
 	}
+}
+
+// runProbeSweep replays the deployed queue-window retry in one process: wait
+// for the window, send one request a second through it, and fall back to the
+// next window when a window is spent. One process per attempt is not a fair
+// simulation — the CLI spends seconds loading the account and deriving runtime
+// fields between attempts, which pushes every attempt out of the window and
+// measures the CLI instead of the policy.
+func runProbeSweep(ctx context.Context, client *qoder.Client, out io.Writer, model string, letters []string, trials int) error {
+	if len(letters) == 0 {
+		letters = []string{"A"}
+	}
+	maxWait, maxRetries := qoder.QueueWindowLimits()
+	fmt.Fprintf(out, "model %s, %d trials, at most %d attempts each, %s wait bound\n\n",
+		model, trials, maxRetries, maxWait)
+	admitted := 0
+	for trial := 1; trial <= trials; trial++ {
+		if ctx.Err() != nil {
+			break
+		}
+		started := time.Now()
+		attempts := 0
+		served := false
+		queue := ""
+		for attempts < maxRetries {
+			delay := qoder.NextQueueWindowDelay(time.Now())
+			if time.Since(started)+delay > maxWait {
+				break
+			}
+			if delay > 0 {
+				select {
+				case <-ctx.Done():
+				case <-time.After(delay):
+				}
+			}
+			attempts++
+			results, err := client.ProbeRounds(ctx, model, qoder.ProbeRoundOptions{Rounds: 1, Variants: letters})
+			if err != nil {
+				return err
+			}
+			for _, r := range results {
+				if r.Outcome == "served" {
+					served = true
+					break
+				}
+				queue = r.QueueType
+			}
+			if served {
+				break
+			}
+		}
+		if served {
+			admitted++
+		}
+		fmt.Fprintf(out, "sweep %2d: served=%-5v attempts=%2d elapsed=%-9s queue=%s done_at=%s\n",
+			trial, served, attempts, time.Since(started).Round(100*time.Millisecond),
+			dash(queue), time.Now().Format("15:04:05"))
+	}
+	fmt.Fprintf(out, "\nsummary: %d/%d admitted\n", admitted, trials)
+	return nil
 }
 
 // probeOneModel runs one model and prints the per-node table the command has

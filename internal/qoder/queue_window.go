@@ -60,6 +60,17 @@ func nextQueueWindowDelay(now time.Time) time.Duration {
 	}
 }
 
+// NextQueueWindowDelay exposes the retry schedule so the operator probe can
+// replay it in-process. A process per attempt pays several seconds of startup
+// between attempts and never lands on the window, which measures the CLI
+// instead of the policy.
+func NextQueueWindowDelay(now time.Time) time.Duration { return nextQueueWindowDelay(now) }
+
+// QueueWindowLimits reports the retry bounds the probe replays.
+func QueueWindowLimits() (maxWait time.Duration, maxRetries int) {
+	return queueWindowMaxWait, queueWindowMaxRetries
+}
+
 // isWindowedQueueRefusal reports a 10605 from one of the low-priority queues
 // whose admission follows the per-minute window.
 func isWindowedQueueRefusal(err error) bool {
