@@ -8,27 +8,39 @@ import (
 
 // The gateway's low-priority queues (queueType p3 and p4) answer 10605 with
 // a fixed retryAfterSeconds of 30, but that hint does not describe when they
-// admit work. Probing on 2026-10-21 from two accounts at 10s intervals, and
-// from one account at 35s intervals, placed every one of about thirty admitted
-// requests between second :08 and :19 of a wall-clock minute, with requests
-// from different accounts admitted inside the same window and every request
-// outside it refused within ~100ms. The capacity behaves like a per-minute
-// allowance shared with every other caller, reset shortly after the minute
-// turns and spent within seconds.
+// admit work.
 //
-// Waiting the hinted 30 seconds therefore lands outside the window about half
-// the time. A refused request instead waits for the next window and retries
-// a few times inside it. The bound below keeps that to two windows.
+// Two measurements define the window. Probing on 2026-10-21 from two accounts
+// at 10s intervals, and from one account at 35s intervals, placed every one of
+// about thirty admitted requests between second :08 and :19 of a wall-clock
+// minute, with requests from different accounts admitted inside the same window
+// and every request outside it refused within ~100ms. A denser probe on
+// 2026-11-01 (one request per second for two minutes, then 130 samples across
+// three inference nodes) put every admission at :10 through :20 and every
+// refusal elsewhere, and showed how small the allowance is: about five
+// admissions per minute for one account, shared by api1, api2 and api3 rather
+// than granted per node, and unaffected by the client identity the request
+// presents.
+//
+// Two consequences follow. Waiting the hinted 30 seconds lands outside the
+// window about half the time, so a refused request waits for the next window
+// instead. And because the allowance is spent within seconds, one attempt
+// inside the window succeeds only about half the time — the window has to be
+// swept, not sampled. A one-second step gives about twelve attempts per window;
+// at the per-attempt rate measured above, a single request needs at most two
+// windows to be admitted, which is what the bounds below allow.
 const (
 	queueWindowOpen  = 8 * time.Second
 	queueWindowClose = 20 * time.Second
-	// queueWindowStep spaces retries inside an open window.
-	queueWindowStep = 3 * time.Second
+	// queueWindowStep spaces retries inside an open window. It is one second,
+	// not three: at three seconds a window offers four attempts, which the
+	// measured ~50% per-attempt rate leaves at roughly a 6% failure chance.
+	queueWindowStep = 1 * time.Second
 	// queueWindowMaxWait bounds the waiting one request spends on windows,
-	// and queueWindowMaxRetries the requests it sends doing so: two windows
-	// of four steps each, with room to spare.
-	queueWindowMaxWait    = 130 * time.Second
-	queueWindowMaxRetries = 12
+	// and queueWindowMaxRetries the requests it sends doing so: about two
+	// windows of twelve attempts each, with room to spare.
+	queueWindowMaxWait    = 200 * time.Second
+	queueWindowMaxRetries = 24
 )
 
 // queueWindowNow is the clock the window is read from; tests replace it.
