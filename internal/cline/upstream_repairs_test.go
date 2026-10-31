@@ -198,16 +198,24 @@ func testJWT(exp int64) string {
 }
 
 // TestRefreshFallsBackToWorkOS proves a refusal at the Cline refresh endpoint
-// is retried against WorkOS, which issued the underlying grant, and that only a
-// refusal from both still demands a browser login.
+// is retried against WorkOS, which issued the underlying grant. The renewed
+// grant is exchanged at /auth/register when that works and used bare when it
+// does not; only a refusal from both endpoints still demands a browser login.
 func TestRefreshFallsBackToWorkOS(t *testing.T) {
 	exp := time.Now().Add(time.Hour).Unix()
-	var workOSForm string
-	workOSStatus := http.StatusOK
+	var workOSForm, registered string
+	workOSStatus, registerStatus := http.StatusOK, http.StatusServiceUnavailable
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/auth/refresh":
 			w.WriteHeader(http.StatusUnauthorized)
+		case "/auth/register":
+			raw, _ := io.ReadAll(r.Body)
+			registered = string(raw)
+			w.WriteHeader(registerStatus)
+			if registerStatus == http.StatusOK {
+				_, _ = io.WriteString(w, `{"data":{"accessToken":"cline-access","refreshToken":"cline-refresh","expiresAt":"2099-01-01T00:00:00Z"}}`)
+			}
 		case "/workos":
 			raw, _ := io.ReadAll(r.Body)
 			workOSForm = string(raw)
@@ -230,6 +238,15 @@ func TestRefreshFallsBackToWorkOS(t *testing.T) {
 	for _, want := range []string{"grant_type=refresh_token", "client_id=client_x", "refresh_token=durable"} {
 		testutil.CheckContain(t, workOSForm, want)
 	}
+
+	// A renewed grant is exchanged for a Cline pair, as at login.
+	registerStatus = http.StatusOK
+	creds, err = client.Refresh(context.Background(), "durable")
+	testutil.NoError(t, err)
+	testutil.Equal(t, creds.AccessToken, "cline-access")
+	testutil.Equal(t, creds.RefreshToken, "cline-refresh")
+	testutil.Equal(t, creds.ExpiresAt.Year(), 2099)
+	testutil.CheckContain(t, registered, `"refreshToken":"rotated"`)
 
 	workOSStatus = http.StatusBadRequest
 	_, err = client.Refresh(context.Background(), "durable")

@@ -348,9 +348,17 @@ func (c *Client) refreshViaWorkOS(ctx context.Context, refreshToken string) (Cre
 		return Credentials{}, false
 	}
 	access := strings.TrimSpace(granted.AccessToken)
+	rotated := util.FirstNonEmptyUntrimmed(strings.TrimSpace(granted.RefreshToken), refreshToken)
+	// The renewed WorkOS grant is exchanged for a Cline pair exactly as at
+	// login, so the account keeps the credential the Cline endpoints issue.
+	// The bare WorkOS token is the fallback when that exchange fails.
+	if registered, err := c.Register(ctx, access, rotated); err == nil {
+		registered.RefreshToken = util.FirstNonEmptyUntrimmed(registered.RefreshToken, rotated)
+		return registered, true
+	}
 	return Credentials{
 		AccessToken:  access,
-		RefreshToken: util.FirstNonEmptyUntrimmed(strings.TrimSpace(granted.RefreshToken), refreshToken),
+		RefreshToken: rotated,
 		ExpiresAt:    jwtExpiry(access),
 	}, true
 }
