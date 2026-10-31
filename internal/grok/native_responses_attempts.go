@@ -28,7 +28,7 @@ func nativeQualityRequest(model string, payload map[string]any) *chatwire.Reques
 // reasoning recovery and quality retries. Every account starts from immutable
 // input and rejected output never establishes response ownership or replay.
 func (h *Handler) serveNativeResponses(w http.ResponseWriter, r *http.Request, sess *chatAccountSession, pinned bool, spec ModelSpec, payload map[string]any, path string, namespaces responses.ToolNamespaces) (responseID string, captured []byte, result chatOutcome) {
-	ctx := r.Context()
+	ctx := withClientTurnIndex(r.Context(), r)
 	ctx, _ = upstream.WithAttemptBudget(ctx, h.configSnapshot().InferencePolicy().MaxAttempts)
 	immutable, err := cloneBuildPayload(payload)
 	if err != nil {

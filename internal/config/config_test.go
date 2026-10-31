@@ -14,9 +14,9 @@ func TestConfigDefaults(t *testing.T) {
 
 	testutil.Equal(t, cfg.ResponseStoreTTL, 720)
 	testutil.Equal(t, cfg.MediaDir, "data"+string(filepath.Separator)+"tmp")
-	testutil.Equal(t, cfg.GrokCLIClientVersionOrDefault(), "1.0.40")
+	testutil.Equal(t, cfg.GrokCLIClientVersionOrDefault(), "1.0.60")
 	got := cfg.GrokCLIUserAgentOrDefault()
-	testutil.Falsef(t, got != "grok-shell/1.0.40 (linux; x86_64)", "GrokCLIUserAgentOrDefault()=%q", got)
+	testutil.Falsef(t, got != "grok-shell/1.0.60 (linux; x86_64)", "GrokCLIUserAgentOrDefault()=%q", got)
 }
 
 func TestCloneDeepCopiesReferenceFields(t *testing.T) {

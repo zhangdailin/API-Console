@@ -7,6 +7,9 @@ import (
 )
 
 type namespaceToolIdentity struct {
+	// Kind is set for a lowered Codex extension tool (see codex_tools.go) and
+	// empty for a namespace function.
+	Kind        string         `json:"kind,omitempty"`
 	Namespace   string         `json:"namespace"`
 	Name        string         `json:"name"`
 	Function    map[string]any `json:"function,omitempty"`
@@ -152,6 +155,10 @@ func (aliases ToolNamespaces) RestoreItem(item map[string]any) bool {
 	}
 	name, _ := item["name"].(string)
 	if identity, ok := aliases[name]; ok {
+		if identity.Kind != "" {
+			raiseCodexItem(item, identity)
+			return true
+		}
 		item["name"], item["namespace"] = identity.Name, identity.Namespace
 		return true
 	}

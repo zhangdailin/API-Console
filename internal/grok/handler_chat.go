@@ -89,7 +89,7 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer sess.Close()
-	h.serveNativeChat(r.Context(), w, &req, spec, sess, logger)
+	h.serveNativeChat(withClientTurnIndex(r.Context(), r), w, &req, spec, sess, logger)
 }
 
 // debugHeaderMap renders a header set for the debug journal, redacting the

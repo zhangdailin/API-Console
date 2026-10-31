@@ -329,7 +329,7 @@ func (c *Config) GrokCLIUserAgentOrDefault() string {
 	if c != nil && strings.TrimSpace(c.GrokCLIUserAgent) != "" {
 		return strings.TrimSpace(c.GrokCLIUserAgent)
 	}
-	return "grok-shell/1.0.40 (linux; x86_64)"
+	return "grok-shell/1.0.60 (linux; x86_64)"
 }
 
 // GrokCLIClientVersionOrDefault returns the x-grok-client-version header value.
@@ -337,7 +337,7 @@ func (c *Config) GrokCLIClientVersionOrDefault() string {
 	if c != nil && strings.TrimSpace(c.GrokCLIClientVersion) != "" {
 		return strings.TrimSpace(c.GrokCLIClientVersion)
 	}
-	return "1.0.40"
+	return "1.0.60"
 }
 
 // GrokCLIClientIdentifierOrDefault returns the x-grok-client-identifier header.

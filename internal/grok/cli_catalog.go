@@ -148,5 +148,6 @@ func (c *CLIClient) FetchModelCatalog(ctx context.Context, acc *store.Account) (
 	if len(profiles) == 0 {
 		return nil, fmt.Errorf("grok cli models response contains no model ids")
 	}
+	buildModelsETags.recordCatalogRead(acc.ID, resp.Header)
 	return profiles, nil
 }

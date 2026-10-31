@@ -115,14 +115,14 @@ func (c *CLIClient) userAgent() string {
 	if c != nil && c.cfg != nil {
 		return c.cfg.GrokCLIUserAgentOrDefault()
 	}
-	return "grok-shell/1.0.40 (linux; x86_64)"
+	return "grok-shell/1.0.60 (linux; x86_64)"
 }
 
 func (c *CLIClient) clientVersion() string {
 	if c != nil && c.cfg != nil {
 		return c.cfg.GrokCLIClientVersionOrDefault()
 	}
-	return "1.0.40"
+	return "1.0.60"
 }
 
 func (c *CLIClient) clientIdentifier() string {
@@ -156,6 +156,7 @@ func (c *CLIClient) doResponsesUncheckedAt(ctx context.Context, acc *store.Accou
 			return nil, err
 		}
 		if resp.StatusCode == http.StatusOK {
+			buildModelsETags.observe(acc.ID, resp.Header)
 			return resp, nil
 		}
 		raw, headerCopy := readBoundedResponse(resp)
@@ -275,6 +276,14 @@ func (c *CLIClient) doResponsesOnceAt(ctx context.Context, acc *store.Account, p
 		normalized := buildSessionUUID(strings.TrimSpace(session))
 		headers.Set("x-grok-session-id", normalized)
 		headers.Set("x-grok-conv-id", normalized)
+		// The official client groups a root conversation with its subagents
+		// under this id; each stable gateway session is its own root.
+		headers.Set("x-grok-conv-group-id", conversationGroupID(normalized))
+		// A turn index is forwarded only with a stable session and only when the
+		// client sent one.
+		if turn := clientTurnIndex(ctx); turn != "" {
+			headers.Set("x-grok-turn-idx", turn)
+		}
 	}
 	// The official Build client identifies itself and traces each request.
 	// Without these the upstream sees an anonymous caller, which is both a

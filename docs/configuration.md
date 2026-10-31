@@ -111,7 +111,7 @@ Cline 套餐只读取官方 `/users/me/plan` 的 `success=true`、`data.plan` �
 | Grok | `grok_cli_base_url`、`grok_cli_user_agent`、`grok_cli_client_version`、`grok_cli_client_identifier` | 默认 Build CLI 网关和 CLI 身份 |
 | Grok | `grok_cli_oauth_client_id`、`grok_cli_oauth_device_url`、`grok_cli_oauth_token_url` | 默认 auth.x.ai 的设备授权与交换端点 |
 
-Grok 默认 base 为 `https://cli-chat-proxy.grok.com/v1`，CLI 版本当前默认 1.0.40。替换主机前确认协议、账号区域与授权匹配，不能只把字符串域名换掉就宣称区域兼容。
+Grok 默认 base 为 `https://cli-chat-proxy.grok.com/v1`，CLI 版本当前默认 1.0.60。替换主机前确认协议、账号区域与授权匹配，不能只把字符串域名换掉就宣称区域兼容。
 
 ## 8. Grok 请求与出口
 

@@ -42,9 +42,9 @@ func TestCLIHeadersUseOfficialBuildIdentity(t *testing.T) {
 	testutil.Equal(t, headers.Get("Authorization"), "Bearer test-access-token")
 	testutil.Equal(t, headers.Get("X-XAI-Token-Auth"), "xai-grok-cli")
 	testutil.Equal(t, headers.Get("x-grok-client-identifier"), "grok-shell")
-	testutil.Equal(t, headers.Get("x-grok-client-version"), "1.0.40")
+	testutil.Equal(t, headers.Get("x-grok-client-version"), "1.0.60")
 	got := headers.Get("User-Agent")
-	testutil.Falsef(t, got != "grok-shell/1.0.40 (linux; x86_64)", "User-Agent=%q", got)
+	testutil.Falsef(t, got != "grok-shell/1.0.60 (linux; x86_64)", "User-Agent=%q", got)
 }
 
 func TestApplyCLIOAuthIdentity(t *testing.T) {

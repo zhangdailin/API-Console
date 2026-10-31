@@ -20,10 +20,20 @@ func NormalizeNamespacePayload(payload map[string]any) (ToolNamespaces, error) {
 			return nil, fmt.Errorf("tools must be an array of objects")
 		}
 	}
+	// Codex extension tools are lowered first: the namespace adaptation below
+	// validates the result and would refuse them.
+	lowered, err := LowerCodexExtensionTools(payload)
+	if err != nil {
+		return nil, err
+	}
+	tools = InterfaceMaps(payload["tools"])
 	req := CreateRequest{Tools: tools, Input: payload["input"], ToolChoice: payload["tool_choice"]}
 	aliases, err := NormalizeBridgedNamespaces(&req)
 	if err != nil {
 		return nil, err
+	}
+	for name, identity := range lowered {
+		aliases[name] = identity
 	}
 	for key, value := range map[string]any{"tools": req.Tools, "input": req.Input, "tool_choice": req.ToolChoice} {
 		if _, exists := payload[key]; exists {
@@ -57,11 +67,20 @@ func (aliases ToolNamespaces) MergeStored(raw json.RawMessage) error {
 		return err
 	}
 	for name, identity := range previous {
-		if identity.Namespace == "" || identity.Name == "" || name != namespaceToolName(identity.Namespace, identity.Name) {
-			return fmt.Errorf("invalid stored namespace identity")
+		switch identity.Kind {
+		case "":
+			if identity.Namespace == "" || identity.Name == "" || name != namespaceToolName(identity.Namespace, identity.Name) {
+				return fmt.Errorf("invalid stored namespace identity")
+			}
+		case toolKindCustom, toolKindApplyPatch:
+			if identity.Namespace != "" || identity.Name == "" || name != codexWireName(identity) {
+				return fmt.Errorf("invalid stored tool identity")
+			}
+		default:
+			return fmt.Errorf("invalid stored tool identity")
 		}
 		if current, exists := aliases[name]; exists {
-			if current.Namespace != identity.Namespace || current.Name != identity.Name {
+			if current.Kind != identity.Kind || current.Namespace != identity.Namespace || current.Name != identity.Name {
 				return fmt.Errorf("conflicting namespace identity")
 			}
 			if current.Function != nil {
@@ -85,7 +104,14 @@ func (aliases ToolNamespaces) RestoreEnvelope(envelope map[string]any) bool {
 	}
 	if choice, ok := envelope["tool_choice"].(map[string]any); ok && choice["type"] == "function" {
 		if identity, found := aliases[ParseLooseStringAny(choice["name"])]; found {
-			choice["name"], choice["namespace"] = identity.Name, identity.Namespace
+			switch identity.Kind {
+			case toolKindCustom:
+				envelope["tool_choice"] = map[string]any{"type": toolKindCustom, "name": identity.Name}
+			case toolKindApplyPatch:
+				envelope["tool_choice"] = map[string]any{"type": toolKindApplyPatch}
+			default:
+				choice["name"], choice["namespace"] = identity.Name, identity.Namespace
+			}
 			changed = true
 		}
 	}
@@ -100,6 +126,18 @@ func (aliases ToolNamespaces) RestoreEnvelope(envelope map[string]any) bool {
 			continue
 		}
 		toolsChanged = true
+		if identity.Kind != "" {
+			// A lowered tool is echoed as the client declared it.
+			original := CloneStringInterfaceMap(identity.Function)
+			if original == nil {
+				original = map[string]any{"type": identity.Kind}
+				if identity.Kind == toolKindCustom {
+					original["name"] = identity.Name
+				}
+			}
+			restored = append(restored, original)
+			continue
+		}
 		group := groups[identity.Namespace]
 		if group == nil {
 			group = map[string]any{"type": "namespace", "name": identity.Namespace, "tools": []map[string]any{}}

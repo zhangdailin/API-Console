@@ -43,6 +43,9 @@ func CLIModelsNeedSync(acc *store.Account, now time.Time) bool {
 	if !accountpolicy.IsGrokAccount(acc) || len(acc.GrokModels) == 0 || acc.GrokModelsSyncedAt.IsZero() {
 		return true
 	}
+	if buildModelsETags.isStale(acc.ID) {
+		return true
+	}
 	return !now.Before(acc.GrokModelsSyncedAt.Add(modelSnapshotTTL))
 }
 
