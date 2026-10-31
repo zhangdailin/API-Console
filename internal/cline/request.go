@@ -1,12 +1,14 @@
 package cline
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"errors"
 	"fmt"
 	"maps"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"encoding/json"
 
@@ -114,7 +116,13 @@ func upstreamToolName(name string) string {
 		return name
 	}
 	sum := sha256.Sum256([]byte(name))
-	return fmt.Sprintf("%.55s_%x", name, sum[:4])
+	// The ceiling counts bytes; the prefix is cut on a rune boundary so a
+	// non-ASCII name neither overflows it nor splits a character.
+	prefix := name[:55]
+	for !utf8.ValidString(prefix) {
+		prefix = prefix[:len(prefix)-1]
+	}
+	return fmt.Sprintf("%s_%x", prefix, sum[:4])
 }
 
 // shortenToolNames rewrites over-long tool names in the declarations, the
@@ -211,8 +219,12 @@ func repairKind(err error, payload chatPayload) (int, bool) {
 // the body has nothing the repair could change, so a refusal is not replayed
 // unchanged.
 func repairChatBody(body []byte, kind int) ([]byte, bool) {
+	// UseNumber keeps every number in the body (tool schemas included) exactly
+	// as rendered; float64 would round large integers on the way back out.
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
 	var decoded map[string]any
-	if err := json.Unmarshal(body, &decoded); err != nil {
+	if err := decoder.Decode(&decoded); err != nil {
 		return nil, false
 	}
 	changed := false
@@ -235,7 +247,8 @@ func repairChatBody(body []byte, kind int) ([]byte, bool) {
 			changed = true
 		}
 	case repairMaxTokens:
-		if budget, ok := decoded["max_tokens"].(float64); ok && budget > repairMaxTokensBudget {
+		number, _ := decoded["max_tokens"].(json.Number)
+		if budget, err := number.Int64(); err == nil && budget > repairMaxTokensBudget {
 			decoded["max_tokens"] = repairMaxTokensBudget
 			changed = true
 		}

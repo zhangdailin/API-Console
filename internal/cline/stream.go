@@ -197,8 +197,10 @@ func consumeStreamWithToolNames(body io.Reader, toolsEnabled bool, toolNames map
 		// The gateway reports a request it refused while initializing the stream
 		// as a 200 whose first frame is an error, in shapes that do not always
 		// decode as a chunk. The text is kept so the caller can repair the
-		// request (see repairKind) instead of seeing a protocol error.
-		if !result.SawMeaningfulEvent && bytes.Contains(payload, []byte("Missing required parameter")) {
+		// request (see repairKind) instead of seeing a protocol error. A frame
+		// carrying choices is answer data, even when the answer quotes the phrase.
+		if !result.SawMeaningfulEvent && bytes.Contains(payload, []byte("Missing required parameter")) &&
+			!bytes.Contains(payload, []byte(`"choices"`)) {
 			return result, fmt.Errorf("cline stream error: %s", util.Truncate(string(payload), 300))
 		}
 

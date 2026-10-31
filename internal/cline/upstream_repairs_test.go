@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"encoding/json"
 
@@ -257,4 +258,39 @@ func TestJWTExpiryIgnoresOpaqueTokens(t *testing.T) {
 	testutil.True(t, jwtExpiry("opaque").IsZero(), "an opaque token has no stated expiry")
 	testutil.True(t, jwtExpiry("a.!!!.c").IsZero(), "an undecodable claim set has no stated expiry")
 	testutil.Equal(t, jwtExpiry(testJWT(4102444800)).Unix(), int64(4102444800))
+}
+
+// TestConsumeStreamKeepsAnAnswerQuotingTheRefusal proves the refusal probe only
+// reads error frames: an answer whose first delta quotes the phrase is content.
+func TestConsumeStreamKeepsAnAnswerQuotingTheRefusal(t *testing.T) {
+	body := `data: {"choices":[{"delta":{"content":"Missing required parameter means a field is absent"},"finish_reason":"stop"}]}` + "\n\n"
+	var text strings.Builder
+	_, err := consumeStream(strings.NewReader(body), false, func(msg upstream.SSEMessage) {
+		if msg.Type == "model.text-delta" {
+			text.WriteString(fmt.Sprint(msg.Event["delta"]))
+		}
+	})
+	testutil.NoError(t, err)
+	testutil.MustContain(t, text.String(), "Missing required parameter")
+}
+
+// TestUpstreamToolNameCutsOnARuneBoundary pins the byte ceiling for a name
+// whose 55-byte prefix would end inside a multi-byte character.
+func TestUpstreamToolNameCutsOnARuneBoundary(t *testing.T) {
+	name := strings.Repeat("a", 54) + "工具" + strings.Repeat("b", 20)
+	short := upstreamToolName(name)
+	testutil.True(t, len(short) <= maxToolNameLength, "the short name must fit the byte ceiling")
+	testutil.True(t, utf8.ValidString(short), "the short name must stay valid UTF-8")
+}
+
+// TestRepairKeepsLargeIntegersExact proves the repair round trip does not
+// round numbers it does not touch, such as a tool schema bound.
+func TestRepairKeepsLargeIntegersExact(t *testing.T) {
+	body := []byte(`{"max_tokens":128000,"tools":[{"type":"function","function":{"name":"f","parameters":{"maximum":9007199254740993}}}]}`)
+	repaired, ok := repairChatBody(body, repairMaxTokens)
+	testutil.True(t, ok, "the default budget must be lowered")
+	testutil.MustContain(t, string(repaired), `9007199254740993`)
+	testutil.MustContain(t, string(repaired), `"max_tokens":32000`)
+	_, ok = repairChatBody([]byte(`{"messages":[]}`), repairMaxTokens)
+	testutil.False(t, ok, "a body without max_tokens has nothing to lower")
 }
