@@ -75,6 +75,8 @@ strict:false 和 json_object 不执行相同强制校验。答案围栏与外围
 
 四通道的 Responses 支持 Codex namespace 中的 function：将分组身份编码为稳定的上游函数名，并在 JSON、SSE 和响应资源中还原 namespace 与原始名称；tool_choice 和续轮历史使用同一映射，参数 JSON 不改写。Grok Build 保持原生 Responses 传输，映射随 Key 所有权和 TTL 保存，并保留推理回放中的分组身份。Build 函数声明的 object/null 根类型规范为 object；对象根的 anyOf/oneOf 移入 allOf，保留分支、其他约束、引用及嵌套 nullable 字段。工具声明在实际调用前就会被上游校验。custom、apply_patch、local_shell、tool_search 等扩展仍明确拒绝。文本中的工具标记仅作为文本输出，不转换为可执行调用；工具结果不读取客户端本地文件。
 
+Grok Build 的 Chat、Messages 和 Responses 请求声明 function 参数 schema 时，网关暂存上游响应并检查完整参数，包括必填字段、已支持的类型和属性约束。合法输出保留原始参数字节；不补造缺失的 `prompt` 等值。参数不符合 schema 时，安全可重放的请求在原账号上携带校验反馈重新生成一次，仍受请求的物理调用总预算约束。再次失败返回 502，不下发无效调用；Chat/Responses 的错误代码为 `invalid_tool_arguments`，Messages 保留 Anthropic 的 `overloaded_error` 类型及 `upstream_unavailable` 代码。声明托管工具、MCP 服务、`store:true`、后台任务或 `previous_response_id` 的请求不做这次重新生成。函数请求的流式内容会在校验后发送，因此首段输出延后；真实生成时序仍用于质量判断。暂存超过 1 MiB 时转入临时文件，响应上限为 64 MiB，完成、失败和取消均清理临时文件。
+
 公共模型目录只发布模型管理中实际启用且通过可见性检查的记录，不再凭推理档位生成额外模型 ID；档位通过能力元数据提供。CC Switch 使用选定 Key 的渠道公共目录，因此仍会受 Key 模型权限和停用状态限制。Build 首轮与 previous_response_id 续轮均按实际账号目录应用推理能力，不支持的档位返回 reasoning.effort 参数错误。
 
 桥接不能无损接受任意未知 item、外部密文或原生托管工具。工具参数增量应聚合后再执行；缺 finish / DONE、参数错误和截断不能伪装完整成功。

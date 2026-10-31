@@ -12,6 +12,7 @@ import (
 // Native Responses use the same classifier as Chat, but never fail open with a
 // response already classified as degraded. Releasing frames is irreversible.
 type nativeResponseQuality struct {
+	buffered  bool
 	hold      *buildQualityHold
 	result    *chatOutcome
 	reasoning map[string]int64
@@ -39,7 +40,9 @@ func (q *nativeResponseQuality) observe(event map[string]any, kind string, resul
 	switch kind {
 	case "response.output_text.delta", "response.refusal.delta":
 		if text, _ := event["delta"].(string); text != "" {
-			result.Quality.observeVisible(time.Since(q.hold.started).Milliseconds())
+			if !q.buffered {
+				result.Quality.observeVisible(time.Since(q.hold.started).Milliseconds())
+			}
 			result.Quality.VisibleChars += int64(utf8.RuneCountInString(text))
 		}
 	case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":

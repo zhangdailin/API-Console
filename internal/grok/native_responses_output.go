@@ -18,6 +18,9 @@ import (
 
 func copyNativeResponseWithQuality(w http.ResponseWriter, body io.Reader, contentType, model string, namespaces responses.ToolNamespaces, quality *nativeResponseQuality) (responseID string, captured []byte, result chatOutcome) {
 	result.Quality.FirstVisibleMS = -1
+	if quality != nil {
+		quality.buffered = applyToolResponseTiming(body, &result.Quality)
+	}
 	// Keep the complete delivered response for replay and usage recovery.
 	fullCapture := new(bytes.Buffer)
 	defer func() {

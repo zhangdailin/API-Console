@@ -226,6 +226,10 @@ func markAllGrokAccountStatuses(err error) bool {
 }
 
 func shouldSwitchGrokAccount(err error) bool {
+	var invalid *toolArgumentsError
+	if errors.As(err, &invalid) {
+		return false // schema failures are bounded by the tool guard, not account switching
+	}
 	if err == nil {
 		return false
 	}

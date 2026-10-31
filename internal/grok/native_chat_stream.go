@@ -111,6 +111,7 @@ type responseReasoningState struct {
 // on another account (withhold). A nil hold keeps the plain streaming path.
 func (h *Handler) streamBuildChatHolding(w http.ResponseWriter, req *chatwire.Request, body io.Reader, hold *buildQualityHold) (outcome chatOutcome) {
 	outcomeStarted := time.Now()
+	bufferedTiming := applyToolResponseTiming(body, &outcome.Quality)
 	if hold != nil {
 		// The hold reads this stream's own accounting, so point it at the outcome
 		// being built. It never writes to it.
@@ -220,7 +221,9 @@ func (h *Handler) streamBuildChatHolding(w http.ResponseWriter, req *chatwire.Re
 		text.WriteString(value)
 		outcome.Quality.VisibleChars += int64(len(value))
 		outcome.SawText = true
-		outcome.Quality.observeVisible(time.Since(outcomeStarted).Milliseconds())
+		if !bufferedTiming {
+			outcome.Quality.observeVisible(time.Since(outcomeStarted).Milliseconds())
+		}
 		return emit(map[string]any{"content": value}, "", nil)
 	}
 	emitArgs := func(tc *responseToolState, value string, snapshot bool) error {

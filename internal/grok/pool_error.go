@@ -107,6 +107,11 @@ func grokUpstreamFailureMessage(err error) string {
 // plane. That plane keeps its own envelope and the status the caller already
 // computed (a client acts on the status), while the prose goes to the log.
 func writeGrokUpstreamFailure(w http.ResponseWriter, status int, err error) {
+	var invalid *toolArgumentsError
+	if errors.As(err, &invalid) {
+		writeResponsesAPIError(w, http.StatusBadGateway, "invalid_tool_arguments", "The upstream model returned tool arguments that do not match the declared schema.")
+		return
+	}
 	if profileErr, ok := errors.AsType[*buildReasoningProfileError](err); ok {
 		writeResponsesAPIErrorWithParam(w, http.StatusBadRequest, "invalid_request_error", profileErr.Error(), "reasoning.effort")
 		return

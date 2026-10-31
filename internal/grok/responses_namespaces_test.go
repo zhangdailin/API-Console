@@ -24,11 +24,14 @@ func TestNativeResponsesNamespacesAndContinuation(t *testing.T) {
 				var upstreamResponse map[string]any
 				posts, gets := 0, 0
 				tools := []any{}
+				parameters := map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{
+					"count": map[string]any{"type": "integer"}, "text": map[string]any{"type": "string"},
+				}}
 				for i := range 7 {
 					tools = append(tools, map[string]any{"type": "function", "name": fmt.Sprintf("plain%d", i), "parameters": map[string]any{"type": "object"}})
 				}
 				for _, ns := range []string{"alpha", "beta"} {
-					tools = append(tools, map[string]any{"type": "namespace", "name": ns, "description": "group " + ns, "tools": []any{map[string]any{"type": "function", "name": "read", "description": "read data", "strict": true, "parameters": map[string]any{"type": "object", "additionalProperties": false}}}})
+					tools = append(tools, map[string]any{"type": "namespace", "name": ns, "description": "group " + ns, "tools": []any{map[string]any{"type": "function", "name": "read", "description": "read data", "strict": true, "parameters": parameters}}})
 				}
 				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if r.Method == http.MethodGet {
@@ -59,7 +62,7 @@ func TestNativeResponsesNamespacesAndContinuation(t *testing.T) {
 						}
 						for _, tool := range flat[7:] {
 							wireNames = append(wireNames, tool["name"].(string))
-							if tool["strict"] != true || !reflect.DeepEqual(tool["parameters"], map[string]any{"type": "object", "additionalProperties": false}) {
+							if tool["strict"] != true || !reflect.DeepEqual(tool["parameters"], parameters) {
 								t.Error("schema changed")
 							}
 						}
@@ -226,8 +229,10 @@ func TestNativeNamespaceStreamFailureDoesNotSaveOwnership(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	wrapped(rec, req)
-	if !strings.Contains(rec.Body.String(), "response.failed") {
-		t.Fatal(rec.Body.String())
+	// Tool-schema turns are held until validated. A truncated upstream stream
+	// now fails before committing SSE or publishing its partial response ID.
+	if rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), "upstream_error") || strings.Contains(rec.Body.String(), "resp_partial") {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	var lookupStatus int
 	check := middleware.APIKeyAuth(func(context.Context, string) (*middleware.APIKeyPrincipal, error) {
