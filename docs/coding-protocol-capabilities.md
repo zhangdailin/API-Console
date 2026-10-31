@@ -55,6 +55,8 @@ Cline 在尚未向客户端输出前，对三类可修复的上游拒绝各本�
 
 Qoder 未指定推理强度时保留账号实际目录的默认 `is_reasoning`；显式强度会同步更新 `model_config` 和 `chat_context.extra.modelConfig` 中的开关。`none` 发送 `reasoning_effort: "none"`、`max_thinking_tokens: 0` 和 `enable_thinking: false`，两处 `is_reasoning` 均为 false；其他显式档位同步开启。这是请求映射约定，是否支持该档位仍由国际版上游判定。
 
+Qoder 选号先在仍有可用额度的账号中进行；额度已耗尽（`qoder_quota_exhausted`、402 或额度快照为耗尽）的账号只在没有其他合格账号时作为后备，免费模型也不例外。2026-11-01 用生产账号实测：额度为 0 的 Free 账号对 `qfmodel` 连续两个准入窗口都返回 10605（`queueType: p4`、`subCode: RESOURCE_LIMIT`），而有额度的 Pro Trial 账号在同类窗口内 14 个模型中 13 个成功（`ultimate` 仍被拒）；此前大部分请求落到这类耗尽账号上并在等待后返回 429。每日签到接口（`/sash/api/v1/me/campaigns`）可用设备 access token 访问，但当天只有 `VIEW_DETAILS` 活动，没有可领取的额度活动。
+
 Qoder 的 `success:false` 错误既可以是裸 SSE JSON，也可以包在成功的 envelope 中。带有错误码或说明的失败帧使用与 HTTP 错误一致的分类，不会被后续 `event:finish` 覆盖为成功；已输出正文、推理或 usage 后不重放请求。
 
 Qoder 的工具选择写入 `parameters.tool_choice`，与国际 CLI 1.0.45 一致；工具定义仍位于顶层 `tools`。选择账号会先检查其已观察的目录是否包含目标模型，尚无有效目录的账号不能参与推理；优先账号或会话亲和不能绕过这一检查。

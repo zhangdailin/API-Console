@@ -62,3 +62,34 @@ func TestQoderBillingLookupIsSharedAcrossCandidatesButNotSelections(t *testing.T
 	// Repeated fallback scans must also reuse the negative billing result.
 	testutil.Equal(t, mini.CommandCount()-before, 2)
 }
+
+// TestSelectAccountRecord_QoderPrefersAccountsWithCredits pins the 2026-11-01
+// production finding: spent Free accounts were refused on the free model
+// (10605, RESOURCE_LIMIT) while accounts holding credits were admitted. A
+// request goes to an account with credits whenever one qualifies, and to a
+// spent account only when none does.
+func TestSelectAccountRecord_QoderPrefersAccountsWithCredits(t *testing.T) {
+	h, s, _ := setupModelValidationHandler(t)
+	ctx := context.Background()
+	catalog := []string{`{"key":"qfmodel","name":"Qwen3.8-Flash","price_factor":0}`}
+	testutil.NoError(t, s.CreateModel(ctx, &store.Model{Channel: "Qoder", ModelID: "qwen3.8-flash", Name: "qwen3.8-flash", Status: store.ModelStatusAvailable, BillingTier: "free", BillingSource: "qoder_price_factor"}))
+	var spent []int64
+	for range 6 {
+		acc := &store.Account{AccountType: "qoder", QoderRefreshToken: "token", Enabled: true, Weight: 1, StatusCode: store.AccountStatusQoderQuotaExhausted, QoderModelIDs: catalog}
+		testutil.NoError(t, s.CreateAccount(ctx, acc))
+		spent = append(spent, acc.ID)
+	}
+	funded := &store.Account{AccountType: "qoder", QoderRefreshToken: "token", Enabled: true, Weight: 1, QoderModelIDs: catalog,
+		QoderQuota: store.QoderQuotaSnapshot{Remaining: 228, Limit: 300}}
+	testutil.NoError(t, s.CreateAccount(ctx, funded))
+
+	for range 20 {
+		got, err := h.selectAccountRecordWithOptions(ctx, "qoder", nil, accountSelectionOptions{ModelID: "qwen3.8-flash"})
+		testutil.NoError(t, err)
+		testutil.Equal(t, got.ID, funded.ID)
+	}
+	got, err := h.selectAccountRecordWithOptions(ctx, "qoder", []int64{funded.ID}, accountSelectionOptions{ModelID: "qwen3.8-flash"})
+	testutil.NoError(t, err)
+	testutil.True(t, got.ID != funded.ID, "with the funded account excluded a spent one must still serve")
+	testutil.True(t, qoderAccountSpent(got), "the fallback must come from the spent accounts")
+}

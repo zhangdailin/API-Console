@@ -184,7 +184,35 @@ func (h *Handler) selectAccountRecordWithOptions(ctx context.Context, targetChan
 			return loadbalancer.ErrAccountNotEligible
 		}
 	}
+	if channel == "qoder" && filter != nil {
+		// A spent Qoder account still qualifies for a free model, but the
+		// upstream gives it the lowest admission: on 2026-11-01 a spent Free
+		// account was refused (10605, RESOURCE_LIMIT) through two whole
+		// admission windows while accounts holding credits were admitted on the
+		// same model within one. Accounts with credits are tried first; the
+		// spent ones remain the fallback, so nothing that selected before stops
+		// selecting.
+		withCredits := func(acc *store.Account) error {
+			if qoderAccountSpent(acc) {
+				return loadbalancer.ErrAccountNotEligible
+			}
+			return filter(acc)
+		}
+		if acc, err := h.loadBalancer.GetNextAccountWithPreference(ctx, failedAccountIDs, targetChannel, h.connTracker, withCredits, opts.PreferredAccountID); err == nil {
+			return acc, nil
+		}
+	}
 	return h.loadBalancer.GetNextAccountWithPreference(ctx, failedAccountIDs, targetChannel, h.connTracker, filter, opts.PreferredAccountID)
+}
+
+// qoderAccountSpent reports a Qoder account with no spendable credits: parked
+// as exhausted or as a payment refusal, or holding an exhausted quota reading.
+func qoderAccountSpent(acc *store.Account) bool {
+	switch strings.TrimSpace(acc.StatusCode) {
+	case store.AccountStatusQoderQuotaExhausted, "402":
+		return true
+	}
+	return acc.QoderQuota.Exhausted
 }
 
 func effectiveAccountConcurrencyLimit(acc *store.Account) int64 {
