@@ -254,6 +254,40 @@ func TestHandleMessages_ResolvesBareModelToEffortVariant(t *testing.T) {
 	testutil.Equal(t, client.calls[0].ReasoningEffort, "low")
 }
 
+// TestHandleMessages_ForwardsDisabledThinkingAsNone proves an Anthropic client
+// that turned thinking off reaches the provider with "none" rather than an
+// empty effort, which every passthrough channel would fill with its default.
+func TestHandleMessages_ForwardsDisabledThinkingAsNone(t *testing.T) {
+	s := newTestRedisStore(t, "test:")
+	ctx := context.Background()
+	if err := s.CreateAccount(ctx, &store.Account{
+		Name:         "workbuddy-1",
+		AccountType:  "workbuddy",
+		RefreshToken: "rt",
+		Enabled:      true,
+		Weight:       1,
+	}); err != nil {
+		t.Fatalf("CreateAccount() error = %v", err)
+	}
+	mustCreateModel(t, s, "403", "WorkBuddy", "claude-opus-5", store.ModelStatusAvailable)
+
+	lb := loadbalancer.NewWithCacheTTL(s, 0)
+	h := NewWithLoadBalancer(&config.Config{DebugEnabled: false, RequestTimeout: 10, MaxRetries: 0}, lb)
+	client := &fakePayloadClient{}
+	h.SetClientFactory(func(acc *store.Account, cfg *config.Config) UpstreamClient { return client })
+
+	body := `{"model":"claude-opus-5","max_tokens":64,"messages":[{"role":"user","content":"hi"}],"thinking":{"type":"disabled"}}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "http://x/workbuddy/v1/messages", strings.NewReader(body))
+	h.HandleMessages(rec, req)
+
+	testutil.Equal(t, rec.Code, http.StatusOK)
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	testutil.Equal(t, len(client.calls), 1)
+	testutil.Equal(t, client.calls[0].ReasoningEffort, "none")
+}
+
 func TestRequestReasoningEffort(t *testing.T) {
 	cases := []struct {
 		name string
@@ -267,7 +301,9 @@ func TestRequestReasoningEffort(t *testing.T) {
 		{"small thinking budget", ClaudeRequest{Thinking: map[string]any{"budget_tokens": float64(2048)}}, "low"},
 		{"mid thinking budget", ClaudeRequest{Thinking: map[string]any{"budget_tokens": float64(8192)}}, "medium"},
 		{"large thinking budget", ClaudeRequest{Thinking: map[string]any{"budget_tokens": float64(32000)}}, "high"},
-		{"thinking disabled", ClaudeRequest{Thinking: map[string]any{"type": "disabled"}}, ""},
+		{"thinking disabled", ClaudeRequest{Thinking: map[string]any{"type": "disabled"}}, "none"},
+		{"thinking disabled wins over output_config", ClaudeRequest{Thinking: map[string]any{"type": "Disabled"}, OutputConfig: map[string]any{"effort": "high"}}, "none"},
+		{"openai field wins over thinking disabled", ClaudeRequest{ReasoningEffort: "low", Thinking: map[string]any{"type": "disabled"}}, "low"},
 		{"no hint", ClaudeRequest{}, ""},
 	}
 	for _, tc := range cases {

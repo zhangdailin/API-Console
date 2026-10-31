@@ -47,6 +47,10 @@ WorkBuddy 将 `11128` 渠道校验拦截与 `11140` 账号受限分开处理。�
 
 `11140` 保存独立的 `workbuddy_restricted_until`，沿用原有 24 小时冷却。期间聊天、后台目录/额度刷新和手动验证均跳过该账号；凭据刷新、账号编辑或目录接口成功不能清除限制，重复触发也不会延长当前窗口。旧 `403/11140` 记录从原 `last_attempt` 推导截止时间，无需重新起算。客户端收到 `403 account_restricted`，区别于会话失效的 401；本地冷却结束不代表上游已解除限制。
 
+Anthropic 请求的 `thinking: {"type":"disabled"}` 视为显式关闭推理，在 WorkBuddy、Qoder、Cline 上按 `reasoning_effort: "none"` 处理，优先于 `output_config.effort`（与 Grok 原生路径一致）；OpenAI 字段 `reasoning_effort` 仍最优先。WorkBuddy 收到 `none` 时省略该字段；Cline 原样发送，上游拒绝后去掉该字段重试一次。
+
+Cline 在尚未向客户端输出前，对三类可修复的上游拒绝各本地重放一次：历史 assistant 缺 `reasoning_content`（GLM 系）时补占位符 `"."`；`reasoning_effort` 被拒时去掉该字段；网关默认 `max_tokens` 被拒时降到 32000（客户端显式值不改）。超过 64 字符的工具名按"前 55 字节 + sha256 前缀"确定性缩短，返回时还原。`/auth/refresh` 拒绝（400/401/403）时先用 WorkOS `refresh_token` 续期并经 `/auth/register` 换回 Cline 凭据，两者都拒绝才要求重新登录。以上拒绝文本与限制来自参考实现的观察，未在真实上游逐项复核。
+
 Qoder 未指定推理强度时保留账号实际目录的默认 `is_reasoning`；显式强度会同步更新 `model_config` 和 `chat_context.extra.modelConfig` 中的开关。`none` 发送 `reasoning_effort: "none"`、`max_thinking_tokens: 0` 和 `enable_thinking: false`，两处 `is_reasoning` 均为 false；其他显式档位同步开启。这是请求映射约定，是否支持该档位仍由国际版上游判定。
 
 Qoder 的 `success:false` 错误既可以是裸 SSE JSON，也可以包在成功的 envelope 中。带有错误码或说明的失败帧使用与 HTTP 错误一致的分类，不会被后续 `event:finish` 覆盖为成功；已输出正文、推理或 usage 后不重放请求。

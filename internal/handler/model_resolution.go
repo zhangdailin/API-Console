@@ -41,9 +41,17 @@ func (h *Handler) lookupModelRow(ctx context.Context, channel, modelID string) *
 // output_config.effort / thinking. A thinking budget without an explicit effort
 // maps onto the same coarse levels so an effort-suffixed catalog can still be
 // resolved.
+//
+// An explicit `thinking: {"type":"disabled"}` is a stated choice, not an
+// absence: it yields "none", which every channel reads as "no reasoning",
+// instead of letting the channel default (high) stand in. It wins over
+// output_config.effort, as on the native Grok path.
 func requestReasoningEffort(req ClaudeRequest) string {
 	if effort := strings.ToLower(strings.TrimSpace(req.ReasoningEffort)); effort != "" {
 		return effort
+	}
+	if typeName, _ := req.Thinking["type"].(string); strings.EqualFold(strings.TrimSpace(typeName), "disabled") {
+		return "none"
 	}
 	for _, config := range []map[string]any{req.OutputConfig, req.Thinking} {
 		value, ok := config["effort"].(string)
