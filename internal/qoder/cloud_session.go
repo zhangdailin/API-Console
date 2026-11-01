@@ -159,10 +159,36 @@ func (c *Client) storeJobToken(ctx context.Context, token string, ttl time.Durat
 }
 
 func (c *Client) exchangeJobToken(ctx context.Context, personalToken string) (string, time.Duration, error) {
-	// The endpoint answered 401 "missing authorization header" when the personal
-	// token was only in the body, so it is sent both ways.
-	body := map[string]any{"personal_token": personalToken}
-	return c.requestJobToken(ctx, "/api/v1/jobToken/exchange", body, personalToken)
+	// The exchange has answered three different ways while being probed: 401
+	// "missing authorization header" with the token only in the body (api.qoder.com),
+	// 400 BadRequest with both (openapi.qoder.sh). The shapes are cheap, so all of
+	// them are tried and every refusal is reported instead of asserting one.
+	variants := []struct {
+		name   string
+		bearer bool
+		body   bool
+	}{
+		{"bearer+body", true, true},
+		{"body", false, true},
+		{"bearer", true, false},
+	}
+	refusals := make([]string, 0, len(variants))
+	for _, variant := range variants {
+		body := map[string]any{}
+		if variant.body {
+			body["personal_token"] = personalToken
+		}
+		bearer := ""
+		if variant.bearer {
+			bearer = personalToken
+		}
+		token, ttl, err := c.requestJobToken(ctx, "/api/v1/jobToken/exchange", body, bearer)
+		if err == nil {
+			return token, ttl, nil
+		}
+		refusals = append(refusals, variant.name+": "+err.Error())
+	}
+	return "", 0, fmt.Errorf("%s", strings.Join(refusals, "; "))
 }
 
 func (c *Client) meJobToken(ctx context.Context, accessToken string) (string, time.Duration, error) {
