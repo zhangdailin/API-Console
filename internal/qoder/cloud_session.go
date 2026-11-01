@@ -74,13 +74,155 @@ func (c *Client) cloudAccessToken() string {
 	return strings.TrimSpace(c.currentCredentials().AccessToken)
 }
 
+// cloudJobTokenSetting caches the exchanged job token, which is what the
+// session API actually accepts.
+const cloudJobTokenSetting = "qoder_cloud_job_token"
+
+// cloudOrigin is the API origin the session endpoints live under.
+func cloudOrigin() string {
+	parsed, err := url.Parse(cloudBaseURL)
+	if err != nil || parsed.Host == "" {
+		return "https://api.qoder.com"
+	}
+	return parsed.Scheme + "://" + parsed.Host
+}
+
+// cloudJobTokenResponse is the shape /jobToken/* answers with.
+type cloudJobTokenResponse struct {
+	Token        string `json:"token"`
+	RefreshToken string `json:"refresh_token"`
+	ExpiresIn    int64  `json:"expires_in"`
+	ExpiresAt    string `json:"expires_at"`
+	ExpireTime   int64  `json:"expire_time"`
+}
+
+// cloudAuthToken returns the token the session API accepts: the job token
+// exchanged from this account's credential, cached until it is close to expiry.
+//
+// The bundle shows two ways to obtain one — /api/v1/jobToken/exchange with a
+// personal token, and /api/v1/me/jobToken with a Bearer access token — and the
+// session API rejects the raw credential ("invalid pt-token"), so both are
+// tried before giving up.
+func (c *Client) cloudAuthToken(ctx context.Context) (string, error) {
+	raw := c.cloudAccessToken()
+	if raw == "" {
+		return "", fmt.Errorf("qoder cloud session needs an access token")
+	}
+	if token, ok := c.cachedJobToken(ctx); ok {
+		return token, nil
+	}
+	token, ttl, err := c.exchangeJobToken(ctx, raw)
+	if err != nil {
+		alternate, alternateTTL, alternateErr := c.meJobToken(ctx, raw)
+		if alternateErr != nil {
+			return "", fmt.Errorf("qoder cloud job token: %w (fallback: %v)", err, alternateErr)
+		}
+		token, ttl = alternate, alternateTTL
+	}
+	c.storeJobToken(ctx, token, ttl)
+	return token, nil
+}
+
+func (c *Client) cachedJobToken(ctx context.Context) (string, bool) {
+	if c.settings == nil {
+		return "", false
+	}
+	raw, err := c.settings.GetSetting(ctx, cloudJobTokenSetting)
+	if err != nil || strings.TrimSpace(raw) == "" {
+		return "", false
+	}
+	var cached struct {
+		Token     string `json:"token"`
+		ExpiresAt int64  `json:"expires_at"`
+	}
+	if json.Unmarshal([]byte(raw), &cached) != nil || cached.Token == "" {
+		return "", false
+	}
+	// A token with a minute left is treated as expired; the exchange is cheap.
+	if cached.ExpiresAt > 0 && time.Now().Unix() >= cached.ExpiresAt-60 {
+		return "", false
+	}
+	return cached.Token, true
+}
+
+func (c *Client) storeJobToken(ctx context.Context, token string, ttl time.Duration) {
+	if c.settings == nil || token == "" {
+		return
+	}
+	payload := map[string]any{"token": token}
+	if ttl > 0 {
+		payload["expires_at"] = time.Now().Add(ttl).Unix()
+	}
+	if raw, err := json.Marshal(payload); err == nil {
+		_ = c.settings.SetSetting(ctx, cloudJobTokenSetting, string(raw))
+	}
+}
+
+func (c *Client) exchangeJobToken(ctx context.Context, personalToken string) (string, time.Duration, error) {
+	body := map[string]any{"personal_token": personalToken}
+	return c.requestJobToken(ctx, "/api/v1/jobToken/exchange", body, "")
+}
+
+func (c *Client) meJobToken(ctx context.Context, accessToken string) (string, time.Duration, error) {
+	body := map[string]any{"clientId": c.currentCredentials().UID}
+	return c.requestJobToken(ctx, "/api/v1/me/jobToken", body, accessToken)
+}
+
+// requestJobToken posts to one of the job-token endpoints. An empty bearer means
+// the endpoint authenticates by the body alone.
+func (c *Client) requestJobToken(ctx context.Context, path string, body any, bearer string) (string, time.Duration, error) {
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return "", 0, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cloudOrigin()+path, bytes.NewReader(raw))
+	if err != nil {
+		return "", 0, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	client := c.control
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", 0, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	payload, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if resp.StatusCode >= 400 {
+		return "", 0, fmt.Errorf("%s: HTTP %d: %s", path, resp.StatusCode, strings.TrimSpace(string(payload)))
+	}
+	var parsed cloudJobTokenResponse
+	if err := json.Unmarshal(payload, &parsed); err != nil {
+		return "", 0, fmt.Errorf("decode %s: %w", path, err)
+	}
+	if strings.TrimSpace(parsed.Token) == "" {
+		return "", 0, fmt.Errorf("%s did not return a token", path)
+	}
+	ttl := time.Duration(parsed.ExpiresIn) * time.Second
+	if ttl <= 0 && parsed.ExpireTime > 0 {
+		ttl = time.Until(time.Unix(parsed.ExpireTime, 0))
+	}
+	if ttl <= 0 && parsed.ExpiresAt != "" {
+		if when, err := time.Parse(time.RFC3339, parsed.ExpiresAt); err == nil {
+			ttl = time.Until(when)
+		}
+	}
+	return parsed.Token, ttl, nil
+}
+
 // cloudRequest performs one session-API call. The session API authenticates with
 // the account's OAuth bearer token; the COSY signature and the private body
 // encoding belong to the inference endpoint and are not used here.
 func (c *Client) cloudRequest(ctx context.Context, method, path string, body any, accept string, stream bool) (*http.Response, error) {
-	token := c.cloudAccessToken()
-	if token == "" {
-		return nil, fmt.Errorf("qoder cloud session needs an access token")
+	token, err := c.cloudAuthToken(ctx)
+	if err != nil {
+		return nil, err
 	}
 	var reader io.Reader
 	if body != nil {

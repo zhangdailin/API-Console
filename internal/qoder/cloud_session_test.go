@@ -61,14 +61,31 @@ func TestRunCloudTurnDrivesTheSessionLoop(t *testing.T) {
 		calls = append(calls, r.Method+" "+r.URL.Path)
 		mu.Unlock()
 
-		if got := r.Header.Get("Authorization"); got != "Bearer access-1" {
-			t.Errorf("Authorization = %q, want the account bearer token", got)
+		// The session API authenticates with the exchanged job token, not the
+		// account credential; the exchange itself carries no authorization.
+		wantAuth := "Bearer job-1"
+		if r.URL.Path == "/api/v1/jobToken/exchange" {
+			wantAuth = ""
 		}
-		if got := r.Header.Get("X-Qoder-Remote-Api-Version"); got != "2" {
-			t.Errorf("X-Qoder-Remote-Api-Version = %q, want 2", got)
+		if got := r.Header.Get("Authorization"); got != wantAuth {
+			t.Errorf("%s Authorization = %q, want %q", r.URL.Path, got, wantAuth)
+		}
+		// The version header belongs to the session endpoints; the job-token
+		// exchange is a plain JSON POST.
+		if r.URL.Path != "/api/v1/jobToken/exchange" {
+			if got := r.Header.Get("X-Qoder-Remote-Api-Version"); got != "2" {
+				t.Errorf("X-Qoder-Remote-Api-Version = %q, want 2", got)
+			}
 		}
 
 		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/jobToken/exchange":
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body["personal_token"] != "access-1" {
+				t.Errorf("exchange body = %v, want the account credential", body)
+			}
+			_, _ = w.Write([]byte(`{"token":"job-1","expires_in":3600}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/environments":
 			_, _ = w.Write([]byte(`{"id":"env-1"}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/agents":
