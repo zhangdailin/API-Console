@@ -57,11 +57,8 @@ type Client struct {
 	// replay a consumed refresh token.
 	account      *store.Account
 	accountStore AccountUpdater
-	// settings persists deployment-scoped state (the cloud environment and
-	// agent the session transport created once). It is optional.
-	settings   SettingsStore
-	catalog    *Catalog
-	catalogIDs []string
+	catalog      *Catalog
+	catalogIDs   []string
 
 	// creds is the resolved credential. runtime holds the derived auth pair.
 	creds   Credentials
@@ -207,16 +204,6 @@ func (c *Client) applyFingerprint() {
 // SetAccountStore lets the client persist a rotated refresh token and a newly
 // derived runtime pair. Without it a rotation would be lost at the next
 // restart, which would break the account.
-// SetSettingsStore lets the channel persist deployment-scoped settings, which
-// the cloud session transport uses to keep one environment and agent instead
-// of creating a pair per run.
-func (c *Client) SetSettingsStore(s SettingsStore) {
-	if c == nil {
-		return
-	}
-	c.settings = s
-}
-
 func (c *Client) SetAccountStore(s AccountUpdater) {
 	if c == nil {
 		return
