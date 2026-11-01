@@ -15,6 +15,7 @@ import (
 	"orchids-api/internal/config"
 	"orchids-api/internal/qoder"
 	"orchids-api/internal/store"
+	"orchids-api/internal/upstream"
 )
 
 // runQoderProbe implements `orchids-server qoder-probe`: it sends one minimal
@@ -39,6 +40,9 @@ func runQoderProbe(args []string, out io.Writer) error {
 	variants := flags.String("variants", "", "comma-separated variant letters to send, e.g. A,F (default: all)")
 	alignWindow := flags.Bool("align-window", false, "send each request at second :09 of a minute, one per minute, instead of every --interval")
 	sweep := flags.Int("sweep", 0, "replay the queue-window retry this many times in one process and report how many were admitted")
+	cloud := flags.Bool("cloud", false, "run one turn through the cloud session API instead of the inference endpoint")
+	cloudBase := flags.String("cloud-base", "", "override the cloud session API base URL")
+	cloudPrompt := flags.String("prompt", "Reply with the single word OK.", "prompt sent by -cloud")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -109,6 +113,9 @@ func runQoderProbe(args []string, out io.Writer) error {
 	base := qoder.NewFromAccount(acc, cfg)
 	base.SetAccountStore(s) // a token rotated during the probe is persisted
 
+	if *cloud {
+		return runCloudProbe(ctx, base, s, out, *cloudBase, *cloudPrompt)
+	}
 	if *sweep > 0 {
 		return runProbeSweep(ctx, base, out, models[0], letters, *sweep)
 	}
@@ -167,6 +174,33 @@ func selectIdentities(raw string) ([]qoder.Identity, error) {
 	default:
 		return nil, fmt.Errorf("unknown --identity %q (want default, ide or both)", raw)
 	}
+}
+
+// runCloudProbe runs one turn through the cloud session transport and prints
+// what came back. It is the end-to-end check for the channel the desktop client
+// actually uses, which is not the inference endpoint qoder-probe measures by
+// default.
+func runCloudProbe(ctx context.Context, client *qoder.Client, settings qoder.SettingsStore, out io.Writer, baseURL, prompt string) error {
+	if strings.TrimSpace(baseURL) != "" {
+		qoder.SetCloudBaseURL(baseURL)
+	}
+	client.SetSettingsStore(settings)
+	var text strings.Builder
+	result, err := client.RunCloudTurn(ctx, prompt, func(message upstream.SSEMessage) {
+		if message.Type != "model.text-delta" {
+			return
+		}
+		if delta, ok := message.Event["delta"].(string); ok {
+			text.WriteString(delta)
+		}
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "session %s: events=%d text=%d bytes last=%s\n",
+		result.SessionID, result.Events, result.TextBytes, dash(result.LastType))
+	fmt.Fprintf(out, "answer: %s\n", strings.TrimSpace(text.String()))
+	return nil
 }
 
 // runProbeSweep replays the deployed queue-window retry in one process: wait
