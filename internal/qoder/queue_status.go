@@ -27,7 +27,10 @@ import (
 	"orchids-api/internal/httpclient"
 )
 
-const queueStatusPath = "/api/v2/service/ask/queue/status"
+// The client names this path without the /algo prefix because its inference
+// endpoint base already carries it, the same way the chat path is published as
+// /algo/api/v2/service/pro/sse/agent_chat_generation.
+const queueStatusPath = "/algo/api/v2/service/ask/queue/status"
 
 // QueueStatus is the server's view of one model's admission queue.
 type QueueStatus struct {
