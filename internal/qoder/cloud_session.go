@@ -116,7 +116,17 @@ func (c *Client) cloudRequest(ctx context.Context, method, path string, body any
 	if resp.StatusCode >= 400 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 		_ = resp.Body.Close()
-		return nil, fmt.Errorf("qoder cloud %s %s: HTTP %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(raw)))
+		detail := strings.TrimSpace(string(raw))
+		if resp.StatusCode == http.StatusUnauthorized {
+			// The session API authenticated the request and rejected the
+			// credential's class, not its freshness: an account whose token came
+			// from the personal-token login is answered "invalid pt-token" even
+			// while that token is valid for the inference endpoint.
+			return nil, fmt.Errorf(
+				"qoder cloud %s %s: HTTP 401: %s (the session API needs the desktop client's OAuth access token, not the personal token this account holds)",
+				method, path, detail)
+		}
+		return nil, fmt.Errorf("qoder cloud %s %s: HTTP %d: %s", method, path, resp.StatusCode, detail)
 	}
 	return resp, nil
 }
