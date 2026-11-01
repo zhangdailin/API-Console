@@ -56,6 +56,13 @@ func TestClassifyUpstreamError(t *testing.T) {
 			wantSwitch:   true,
 		},
 		{
+			name:         "qoder call count limit switches accounts",
+			errStr:       `qoder upstream error: status=200, {"code":"10605","subCode":"CALL_COUNT_LIMIT","serviceAvailable":true,"retryAfterSeconds":30}`,
+			wantCategory: "rate_limit",
+			wantRetry:    true,
+			wantSwitch:   true,
+		},
+		{
 			name:         "qoder entitlement switches to another eligible account",
 			errStr:       `qoder account has no usable plan or allowance; the model requires a subscription (upstream code=112: {"pricingUrl":"https://qoder.com/pricing?client=qoder"})`,
 			wantCategory: "model_unavailable",

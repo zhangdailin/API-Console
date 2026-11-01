@@ -206,6 +206,14 @@ func ClassifyUpstreamError(errStr string) UpstreamErrorClass {
 		strings.Contains(lower, "max_token_limit") ||
 		strings.Contains(lower, "duplicate request"):
 		return UpstreamErrorClass{Category: "client"}
+	// A Qoder account can also be refused for its own call allowance, reported as
+	// a subcode while the service still says it is available: observed once on
+	// 2026-11-01 as {"subCode":"CALL_COUNT_LIMIT","retryAfterSeconds":30,
+	// "serviceAvailable":true}. That is this account's limit rather than a queue
+	// every account shares, so it is decided before the queue gate, and another
+	// account may still be inside its allowance.
+	case strings.Contains(lower, "call_count_limit"):
+		return UpstreamErrorClass{Category: "rate_limit", Retryable: true, SwitchAccount: true}
 	// A refusal about a resource shared by every account has to be decided before
 	// the HTTP-status branches below. Qoder reports business code 10605 inside a
 	// 401/403 envelope, so the credential branch used to win: a working account's
