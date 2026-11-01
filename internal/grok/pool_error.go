@@ -91,6 +91,9 @@ func writeGrokNoAccountError(w http.ResponseWriter, err error) {
 // the caller's own problem and keeps its precise message, because flattening it
 // into "the upstream request failed" would hide the one thing the caller can fix.
 func grokUpstreamFailureMessage(err error) string {
+	if answer, ok := grokRequestFailure(err); ok {
+		return answer.message
+	}
 	if err == nil {
 		return apperrors.PublicMessage("")
 	}
@@ -107,6 +110,10 @@ func grokUpstreamFailureMessage(err error) string {
 // plane. That plane keeps its own envelope and the status the caller already
 // computed (a client acts on the status), while the prose goes to the log.
 func writeGrokUpstreamFailure(w http.ResponseWriter, status int, err error) {
+	if answer, ok := grokRequestFailure(err); ok {
+		writeResponsesAPIError(w, answer.status, answer.code, answer.message)
+		return
+	}
 	var invalid *toolArgumentsError
 	if errors.As(err, &invalid) {
 		writeResponsesAPIError(w, http.StatusBadGateway, "invalid_tool_arguments", "The upstream model returned tool arguments that do not match the declared schema.")

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/httpserver"
 	"orchids-api/internal/middleware"
 	"orchids-api/internal/responses"
 	"orchids-api/internal/upstream"
@@ -104,10 +105,16 @@ func (h *Handler) serveNativeResponses(w http.ResponseWriter, r *http.Request, s
 			return
 		}
 		h.syncGrokQuota(sess.acc, resp.Header)
+		var keepalive *httpserver.SSEKeepalive
+		var delivery http.ResponseWriter = w
+		if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+			keepalive = httpserver.NewSSEKeepalive(w, httpserver.SSEKeepaliveInterval, func() { _ = resp.Body.Close() })
+			delivery = keepalive
+		}
 		var quality *nativeResponseQuality
-		var target http.ResponseWriter = w
+		var target http.ResponseWriter = delivery
 		if path == "/responses" && responses.ClassifyCompactionPayload(immutable) == responses.CompactionNone && h.shouldHoldQualityTurn(req, ProviderBuild) {
-			quality = newNativeResponseQuality(w, policy)
+			quality = newNativeResponseQuality(delivery, policy)
 			target = quality.hold.writer
 			h.auditQualityCheck(ctx, sess.acc, req, "checking", "native", attempt, req.StartedAt, chatOutcome{})
 		}
@@ -124,6 +131,13 @@ func (h *Handler) serveNativeResponses(w http.ResponseWriter, r *http.Request, s
 			resp.Body = io.NopCloser(bytes.NewReader(raw))
 		}
 		func() {
+			if keepalive != nil {
+				defer func() {
+					if err := keepalive.Close(); err != nil && result.Err == nil {
+						result.Err, result.Finish = err, "error"
+					}
+				}()
+			}
 			defer resp.Body.Close()
 			target.WriteHeader(resp.StatusCode)
 			responseID, captured, result = copyNativeResponseWithQuality(target, resp.Body, resp.Header.Get("Content-Type"), spec.ID, namespaces, quality)

@@ -61,12 +61,12 @@ func TestBuildQuotaOfficialWindowIsConfirmed(t *testing.T) {
 }
 
 // TestBuildQuotaInfersFreeAndEstimatesTheWindow pins the reported gap: an OAuth
-// account whose upstream publishes neither a plan name nor a numeric window used to
-// fall back to "未知", which is indistinguishable from "never synced".
+// account with a complete observed zero monetary profile can use a Free estimate.
+// An absent or incomplete profile remains unknown.
 func TestBuildQuotaInfersFreeAndEstimatesTheWindow(t *testing.T) {
 	t.Parallel()
 
-	acc := buildAccount("", store.GrokBillingSnapshot{SyncedAt: time.Now(), Source: "cli_billing"})
+	acc := buildAccount("", store.GrokBillingSnapshot{SyncedAt: time.Now(), Source: "cli_billing", ProfileKnown: true})
 
 	fields := buildQuotaResponseFieldsWithUsage(acc, 12000, true)
 	testutil.Equal(t, fieldString(t, fields, "quota_type"), "free")
@@ -137,7 +137,8 @@ func TestFreeProfileInferenceRequiresASignal(t *testing.T) {
 		want   bool
 		source string
 	}{
-		{"synced zero billing", buildAccount("", store.GrokBillingSnapshot{SyncedAt: time.Now()}), true, grok.FreeProfileSourceBilling},
+		{"synced zero billing", buildAccount("", store.GrokBillingSnapshot{SyncedAt: time.Now(), ProfileKnown: true}), true, grok.FreeProfileSourceBilling},
+		{"incomplete billing", buildAccount("", store.GrokBillingSnapshot{SyncedAt: time.Now()}), false, ""},
 		{"official free plan", buildAccount("free", store.GrokBillingSnapshot{}), true, grok.FreeProfileSourcePlan},
 		{"never synced", buildAccount("", store.GrokBillingSnapshot{}), false, ""},
 		{"unknown plan", buildAccount("unknown", store.GrokBillingSnapshot{}), false, ""},
@@ -183,7 +184,7 @@ func TestObservedTokensByAccountUsesOnlyTheFreeWindow(t *testing.T) {
 	testutil.Equal(t, usage[143], 2000)
 	testutil.Equal(t, usage[144], 5000)
 
-	acc := buildAccount("", store.GrokBillingSnapshot{SyncedAt: time.Now()})
+	acc := buildAccount("", store.GrokBillingSnapshot{SyncedAt: time.Now(), ProfileKnown: true})
 	fields := buildQuotaResponseFieldsWithUsage(acc, usage[acc.ID], true)
 	testutil.Equal(t, fieldFloat(t, fields, "quota_used"), 2000)
 	testutil.False(t, !fieldBool(t, fields, "quota_observed"), "quota_observed=false although the measurement succeeded")

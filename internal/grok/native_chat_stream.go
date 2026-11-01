@@ -136,6 +136,7 @@ func (h *Handler) streamBuildChatHolding(w http.ResponseWriter, req *chatwire.Re
 		output, respWriter = hold.writer, hold.writer
 	} else {
 		streamResponseHeaders(w)
+		w.WriteHeader(http.StatusOK)
 	}
 	stream := &httpserver.CheckedStreamWriter{Target: output}
 	output = stream

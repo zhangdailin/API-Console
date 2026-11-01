@@ -23,6 +23,7 @@ func TestPlanDisplayName(t *testing.T) {
 		"super":             "Super",
 		"pro":               "Super",
 		"lite":              "Lite",
+		"supergrok_lite":    "Lite",
 		"free":              "Free",
 		"basic":             "Basic",
 		" enterprise-team ": "enterprise-team",

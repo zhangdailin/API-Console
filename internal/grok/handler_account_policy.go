@@ -43,6 +43,10 @@ func (h *Handler) reserveAccount(acc *store.Account) (func(), bool) {
 }
 
 func (h *Handler) markAccountStatus(ctx context.Context, acc *store.Account, err error) {
+	switch ClassifyUpstreamError(err) {
+	case UpstreamErrorContentRefusal, UpstreamErrorUpgradeRequired:
+		return
+	}
 	// Invalid parameters and missing resources are request errors, not evidence
 	// that the credential is unusable. Do not poison account routing with them.
 	if status := upstreamStatus(err); status >= 400 && status < 500 && status != 401 && status != 402 && status != 403 && status != 429 {
@@ -213,6 +217,10 @@ func markAllGrokAccountStatuses(err error) bool {
 	if err == nil {
 		return false
 	}
+	switch ClassifyUpstreamError(err) {
+	case UpstreamErrorContentRefusal, UpstreamErrorUpgradeRequired:
+		return false
+	}
 	// Shared team rate limits and preflight cooldowns are not account failures.
 	if isSharedGrokRateLimitError(err) {
 		return false
@@ -243,7 +251,7 @@ func shouldSwitchGrokAccount(err error) bool {
 	switch ClassifyUpstreamError(err) {
 	case UpstreamErrorAccountBlock:
 		return true
-	case UpstreamErrorGenericForbidden:
+	case UpstreamErrorGenericForbidden, UpstreamErrorContentRefusal, UpstreamErrorUpgradeRequired:
 		return false
 	}
 	status := apperrors.ClassifyAccountStatus(err.Error())

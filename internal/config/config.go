@@ -242,6 +242,7 @@ func ApplyDefaults(cfg *Config) {
 // Only the profile name is persisted; individual generation limits cannot be
 // overridden through file, Redis or management JSON.
 func ApplyHardcoded(cfg *Config) {
+	NormalizeGrokCLIIdentity(cfg)
 	if ValidateInferenceProfile(cfg) == nil {
 		cfg.InferenceProfile = cfg.InferencePolicy().Name
 	}
@@ -296,17 +297,23 @@ func (c *Config) GrokCLIOAuthTokenURLOrDefault() string {
 // requests. A fixed CLI identity (not the browser UA) is required upstream.
 func (c *Config) GrokCLIUserAgentOrDefault() string {
 	if c != nil && strings.TrimSpace(c.GrokCLIUserAgent) != "" {
-		return strings.TrimSpace(c.GrokCLIUserAgent)
+		return grokCLIProductVersion.ReplaceAllStringFunc(strings.TrimSpace(c.GrokCLIUserAgent), func(product string) string {
+			name, version, _ := strings.Cut(product, "/")
+			if legacyGrokVersion(version) {
+				return name + "/" + c.GrokCLIClientVersionOrDefault()
+			}
+			return product
+		})
 	}
-	return "grok-shell/1.0.60 (linux; x86_64)"
+	return "grok-shell/" + c.GrokCLIClientVersionOrDefault() + " (linux; x86_64)"
 }
 
 // GrokCLIClientVersionOrDefault returns the x-grok-client-version header value.
 func (c *Config) GrokCLIClientVersionOrDefault() string {
 	if c != nil && strings.TrimSpace(c.GrokCLIClientVersion) != "" {
-		return strings.TrimSpace(c.GrokCLIClientVersion)
+		return normalizedGrokVersion(c.GrokCLIClientVersion)
 	}
-	return "1.0.60"
+	return grokCLIClientVersion
 }
 
 // GrokCLIClientIdentifierOrDefault returns the x-grok-client-identifier header.

@@ -185,6 +185,13 @@ func (h *Handler) serveAnthropicMessageStream(w http.ResponseWriter, req *http.R
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
+		keepalive := httpserver.NewAnthropicSSEKeepalive(w, httpserver.SSEKeepaliveInterval, func() {
+			if closer, ok := reader.(io.Closer); ok {
+				_ = closer.Close()
+			}
+		})
+		defer keepalive.Close()
+		w = keepalive
 		w.WriteHeader(http.StatusOK)
 		_ = translateOpenAIChatStreamToAnthropicWithInput(w, reader, model, inputTokens)
 	})
@@ -529,6 +536,19 @@ func writeAnthropicError(w http.ResponseWriter, status int, message string) {
 }
 
 func writeAnthropicUpstreamError(w http.ResponseWriter, status int, body string) {
+	var envelope struct {
+		Error struct{ Code string } `json:"error"`
+	}
+	if json.Unmarshal([]byte(body), &envelope) == nil {
+		if answer, ok := grokRequestFailureByCode(envelope.Error.Code); ok {
+			util.WriteJSONStatus(w, answer.status, map[string]any{
+				"type": "error", "error": map[string]any{
+					"type": anthropicErrorType(answer.status), "code": answer.code, "message": answer.message,
+				},
+			})
+			return
+		}
+	}
 	if status < 400 {
 		status = http.StatusBadGateway
 	}

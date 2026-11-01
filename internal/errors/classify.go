@@ -168,12 +168,12 @@ func ClassifyUpstreamError(errStr string) UpstreamErrorClass {
 		strings.Contains(lower, "configuration error") ||
 		strings.Contains(lower, "client is nil"):
 		return UpstreamErrorClass{Category: "configuration"}
+	case HasExplicitHTTPStatus(lower, "426"):
+		return UpstreamErrorClass{Category: "upstream_upgrade_required"}
 	// A safety refusal is the client's content, not a capacity or credential
 	// problem: it maps to 400 and must never retry. Labelling it anything
 	// retryable lets one rejected prompt walk the whole account pool.
-	case strings.Contains(lower, "content policy rejected") ||
-		strings.Contains(lower, "datainspectionfailed") ||
-		strings.Contains(lower, "input text data may contain"):
+	case IsContentPolicyRefusal(lower):
 		return UpstreamErrorClass{Category: "client"}
 	// A 200 stream that delivered nothing is the upstream refusing quietly. It
 	// is a protocol-level emptiness, not a rate limit, and replaying it adds

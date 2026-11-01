@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+
+	apperrors "orchids-api/internal/errors"
 )
 
 // 403/429 classification helpers for Build account handling.
@@ -21,6 +23,8 @@ const (
 	UpstreamErrorAccountBlock
 	UpstreamErrorGenericForbidden
 	UpstreamErrorRateLimited
+	UpstreamErrorContentRefusal
+	UpstreamErrorUpgradeRequired
 )
 
 func (k UpstreamErrorKind) String() string {
@@ -31,6 +35,10 @@ func (k UpstreamErrorKind) String() string {
 		return "generic_forbidden"
 	case UpstreamErrorRateLimited:
 		return "rate_limited"
+	case UpstreamErrorContentRefusal:
+		return "content_refusal"
+	case UpstreamErrorUpgradeRequired:
+		return "upgrade_required"
 	default:
 		return "unknown"
 	}
@@ -42,9 +50,19 @@ func ClassifyUpstreamResponse(status int, header http.Header, body []byte) Upstr
 		return UpstreamErrorRateLimited
 	}
 	switch status {
+	case http.StatusUpgradeRequired:
+		return UpstreamErrorUpgradeRequired
 	case http.StatusForbidden:
 		if IsDefinitiveAccountBlockBody(body) {
 			return UpstreamErrorAccountBlock
+		}
+		var payload any
+		text := string(body)
+		if json.Unmarshal(body, &payload) == nil {
+			text = strings.Join(collectJSONStrings(payload), " ")
+		}
+		if apperrors.IsContentPolicyRefusal(text) {
+			return UpstreamErrorContentRefusal
 		}
 		return UpstreamErrorGenericForbidden
 	case http.StatusUnauthorized:

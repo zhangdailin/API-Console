@@ -46,14 +46,15 @@ var publicStatusForCategory = map[string]int{
 	"client":               http.StatusBadRequest,
 	// The caller closed the connection before an answer existed. 499 is the
 	// conventional (nginx) status for it; nobody receives the body.
-	"client_closed":     499,
-	"model_unavailable": http.StatusNotFound,
-	"configuration":     http.StatusServiceUnavailable,
-	"timeout":           http.StatusGatewayTimeout,
-	"network":           http.StatusBadGateway,
-	"server":            http.StatusBadGateway,
-	"protocol":          http.StatusBadGateway,
-	"local_overload":    http.StatusBadGateway,
+	"client_closed":             499,
+	"model_unavailable":         http.StatusNotFound,
+	"configuration":             http.StatusServiceUnavailable,
+	"upstream_upgrade_required": http.StatusServiceUnavailable,
+	"timeout":                   http.StatusGatewayTimeout,
+	"network":                   http.StatusBadGateway,
+	"server":                    http.StatusBadGateway,
+	"protocol":                  http.StatusBadGateway,
+	"local_overload":            http.StatusBadGateway,
 	// A strict structured-output request the gateway could not satisfy is a fault
 	// of the model's answer, not of the caller's request: the caller sent a valid
 	// schema and a valid prompt. It is answered as an upstream fault so a client
@@ -73,24 +74,25 @@ func StatusForCategory(category string) int {
 // of each category. An empty category is the caller that had no error text to
 // classify, and keeps its shorter wording.
 var messageForCategoryTable = map[string]string{
-	"configuration":        "This provider is not configured correctly. Contact the gateway administrator.",
-	"auth":                 "The upstream account session has expired. Re-authenticate the account and retry.",
-	"auth_blocked":         "The upstream account is not allowed to use this feature. Check its plan and permissions.",
-	"account_restricted":   "The upstream account is restricted due to unusual activity. Requests are skipped during its restriction window; check the account in the official client or submit an appeal.",
-	"quota_exhausted":      "The available upstream accounts have exhausted their quota. Retry after the quota resets or add capacity.",
-	"rate_limit":           "The available upstream accounts are rate-limited. Retry after the cooldown.",
-	"upstream_queue":       "The upstream is holding this model's requests in a queue and has not admitted this one yet. Retry after the indicated delay.",
-	"upstream_unavailable": "The upstream service for this model is temporarily unavailable. Retry after the indicated delay.",
-	"model_unavailable":    "The requested model is unavailable for the selected upstream accounts.",
-	"client":               "The upstream rejected the request parameters or model. Check the request and model selection.",
-	"client_closed":        "The client closed the request before the upstream answered.",
-	"timeout":              "The upstream stream timed out while waiting for generated output.",
-	"network":              "The gateway lost its connection to the upstream service. Retry later.",
-	"server":               "The upstream service is temporarily unavailable. Retry later.",
-	"protocol":             "The upstream returned an unsupported stream format. Use the request ID to inspect diagnostics.",
-	"local_overload":       "The gateway is temporarily overloaded. Retry later.",
-	"schema_mismatch":      "The model's answer did not match the schema this strict request declared. Relax the schema or retry.",
-	"canceled":             "The request was canceled.",
+	"configuration":             "This provider is not configured correctly. Contact the gateway administrator.",
+	"upstream_upgrade_required": "The upstream requires a newer Build client version. Contact the gateway administrator to update the Build client identity.",
+	"auth":                      "The upstream account session has expired. Re-authenticate the account and retry.",
+	"auth_blocked":              "The upstream account is not allowed to use this feature. Check its plan and permissions.",
+	"account_restricted":        "The upstream account is restricted due to unusual activity. Requests are skipped during its restriction window; check the account in the official client or submit an appeal.",
+	"quota_exhausted":           "The available upstream accounts have exhausted their quota. Retry after the quota resets or add capacity.",
+	"rate_limit":                "The available upstream accounts are rate-limited. Retry after the cooldown.",
+	"upstream_queue":            "The upstream is holding this model's requests in a queue and has not admitted this one yet. Retry after the indicated delay.",
+	"upstream_unavailable":      "The upstream service for this model is temporarily unavailable. Retry after the indicated delay.",
+	"model_unavailable":         "The requested model is unavailable for the selected upstream accounts.",
+	"client":                    "The upstream rejected the request parameters or model. Check the request and model selection.",
+	"client_closed":             "The client closed the request before the upstream answered.",
+	"timeout":                   "The upstream stream timed out while waiting for generated output.",
+	"network":                   "The gateway lost its connection to the upstream service. Retry later.",
+	"server":                    "The upstream service is temporarily unavailable. Retry later.",
+	"protocol":                  "The upstream returned an unsupported stream format. Use the request ID to inspect diagnostics.",
+	"local_overload":            "The gateway is temporarily overloaded. Retry later.",
+	"schema_mismatch":           "The model's answer did not match the schema this strict request declared. Relax the schema or retry.",
+	"canceled":                  "The request was canceled.",
 }
 
 // The upstream_queue text exists so the caller is told what actually happened. It

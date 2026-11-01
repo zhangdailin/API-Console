@@ -228,12 +228,12 @@ func PlanDisplayName(subscription string) string {
 		return "X Premium"
 	case strings.Contains(plan, "xbasic"), strings.Contains(plan, "x_basic"):
 		return "X Basic"
+	case strings.Contains(plan, "lite"):
+		return "Lite"
 	case strings.Contains(plan, "supergrok"):
 		return "SuperGrok"
 	case strings.Contains(plan, "super"), strings.Contains(plan, "pro"):
 		return "Super"
-	case strings.Contains(plan, "lite"):
-		return "Lite"
 	case strings.Contains(plan, "free"):
 		return "Free"
 	case strings.Contains(plan, "basic"):
@@ -244,16 +244,12 @@ func PlanDisplayName(subscription string) string {
 }
 
 // projectPlan publishes the account's tier in the shared plan_* shape. A paid
-// plan name or a billing window proves paid; a Free verdict is confirmed when
+// plan name or a positive monetary entitlement proves paid; a Free verdict is confirmed when
 // the upstream stated it (plan endpoint or an exhaustion refusal) and inferred
 // when it rests on an empty billing profile.
 func projectPlan(fields map[string]any, acc *store.Account) {
 	subscription := strings.TrimSpace(acc.Subscription)
-	if BuildPlanIsPaid(subscription) {
-		provider.PlanProjection(fields, PlanDisplayName(subscription), provider.PlanTierPaid, "")
-		return
-	}
-	if acc.GrokBilling.Weekly.HasUsage || acc.GrokBilling.Monthly.HasLimit {
+	if accountpolicy.GrokBuildAccountIsPaid(acc) {
 		provider.PlanProjection(fields, PlanDisplayName(subscription), provider.PlanTierPaid, "")
 		return
 	}
@@ -262,12 +258,20 @@ func projectPlan(fields map[string]any, acc *store.Account) {
 		if verdict.Source == FreeProfileSourceBilling {
 			confidence = provider.PlanConfidenceInferred
 		}
-		provider.PlanProjection(fields, "", provider.PlanTierFree, confidence)
+		name := ""
+		if accountpolicy.GrokBuildPlanIsFree(subscription) {
+			name = PlanDisplayName(subscription)
+		}
+		provider.PlanProjection(fields, name, provider.PlanTierFree, confidence)
 		return
 	}
 	switch {
 	case subscription == "":
-		provider.PlanProjection(fields, "", provider.PlanTierUnsynced, "")
+		tier := provider.PlanTierUnsynced
+		if !acc.GrokBilling.SyncedAt.IsZero() || acc.GrokBilling.Weekly.HasUsage {
+			tier = provider.PlanTierUnknown
+		}
+		provider.PlanProjection(fields, "", tier, "")
 	case strings.EqualFold(subscription, "unknown"):
 		provider.PlanProjection(fields, "", provider.PlanTierUnknown, "")
 	default:
@@ -282,19 +286,19 @@ func projectPlan(fields map[string]any, acc *store.Account) {
 // fact. Free is inferred only from a successful zero-value billing profile or from
 // the upstream's own plan name.
 func InferFreeProfile(acc *store.Account) FreeProfileVerdict {
-	if acc == nil || !accountpolicy.IsGrokAccount(acc) || BuildPlanIsPaid(acc.Subscription) {
+	if acc == nil || !accountpolicy.IsGrokAccount(acc) || accountpolicy.GrokBuildAccountIsPaid(acc) {
 		return FreeProfileVerdict{}
+	}
+	if accountpolicy.GrokBuildPlanIsFree(acc.Subscription) {
+		return FreeProfileVerdict{Inferred: true, Source: FreeProfileSourcePlan}
 	}
 	if !acc.GrokFreeQuota.ConfirmedAt.IsZero() {
 		return FreeProfileVerdict{Inferred: true, Source: FreeProfileSourceExhaustion}
 	}
 	billing := acc.GrokBilling
-	if !billing.SyncedAt.IsZero() && !billing.Weekly.HasUsage && !billing.Monthly.HasLimit {
+	plan := strings.TrimSpace(acc.Subscription)
+	if (plan == "" || strings.EqualFold(plan, "unknown")) && billing.HasZeroProfile() {
 		return FreeProfileVerdict{Inferred: true, Source: FreeProfileSourceBilling}
-	}
-	switch strings.ToLower(strings.TrimSpace(acc.Subscription)) {
-	case "free", "basic":
-		return FreeProfileVerdict{Inferred: true, Source: FreeProfileSourcePlan}
 	}
 	return FreeProfileVerdict{}
 }

@@ -79,6 +79,10 @@ func writeSSEStreamError(w http.ResponseWriter, flusher http.Flusher, logger *de
 // as 503 rather than 401/403, and a retryable failure
 // carries the upstream Retry-After back to the client.
 func writeGrokUpstreamError(w http.ResponseWriter, err error) {
+	if answer, ok := grokRequestFailure(err); ok {
+		writeGrokErrorCode(w, answer.status, answer.code, answer.message)
+		return
+	}
 	var invalid *toolArgumentsError
 	if errors.As(err, &invalid) {
 		writeGrokErrorCode(w, http.StatusBadGateway, "invalid_tool_arguments", "The upstream model returned tool arguments that do not match the declared schema.")

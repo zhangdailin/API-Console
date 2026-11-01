@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"orchids-api/internal/accountpolicy"
 	"orchids-api/internal/config"
 	"orchids-api/internal/modelcatalog"
 	"orchids-api/internal/provider"
@@ -107,7 +108,7 @@ func projectOutput(out *store.Account) {
 	// the same Free inference that produces its quota window already proves it
 	// is Free — and only Free. Reporting "unknown" there told an operator nothing
 	// about an account the gateway had already characterised.
-	if verdict := InferFreeProfile(out); verdict.Inferred {
+	if verdict := InferFreeProfile(out); verdict.Inferred && verdict.Source != FreeProfileSourceBilling {
 		switch strings.ToLower(strings.TrimSpace(out.Subscription)) {
 		case "", "unknown", "free":
 			out.Subscription = "free"
@@ -245,6 +246,10 @@ func projectQuota(fields map[string]any, acc *store.Account, _, _ float64, obser
 	weekly := acc.GrokBilling.Weekly
 	monthly := acc.GrokBilling.Monthly
 	projectPlan(fields, acc)
+	quotaTier, _ := fields["plan_tier"].(string)
+	if quotaTier != provider.PlanTierPaid && quotaTier != provider.PlanTierFree {
+		quotaTier = provider.PlanTierUnknown
+	}
 	fields["quota_mode"] = "unknown"
 	fields["quota_unit"] = "build_credits"
 	fields["quota_supported"] = false
@@ -257,7 +262,7 @@ func projectQuota(fields map[string]any, acc *store.Account, _, _ float64, obser
 		fields["quota_mode"] = "monthly"
 		fields["quota_unit"] = "build_credits"
 		fields["quota_supported"] = true
-		provider.QuotaProvenance(fields, "paid", "upstreamBilling", "confirmed",
+		provider.QuotaProvenance(fields, quotaTier, "upstreamBilling", "confirmed",
 			"上游 Build 账单返回的月度额度", true, false)
 	}
 	if weekly.HasUsage {
@@ -271,7 +276,7 @@ func projectQuota(fields map[string]any, acc *store.Account, _, _ float64, obser
 			fields["quota_unit"] = "percent"
 			fields["quota_supported"] = true
 			fields["quota_reset_at"] = weekly.ResetAt
-			provider.QuotaProvenance(fields, "paid", "upstreamBilling", "confirmed",
+			provider.QuotaProvenance(fields, quotaTier, "upstreamBilling", "confirmed",
 				"上游 Build 账单返回的周度窗口", true, false)
 		}
 	}
@@ -335,9 +340,13 @@ func projectQuota(fields map[string]any, acc *store.Account, _, _ float64, obser
 		fields["quota_window_hours"] = int(FreeBuildUsageWindow / time.Hour)
 		provider.QuotaProvenance(fields, "free", verdict.Source, "estimated",
 			"上游未下发数值额度；按免费画像估算，用量为本网关在窗口内观测到的 token", false, usageObserved)
-	case BuildPlanIsPaid(acc.Subscription):
-		provider.QuotaProvenance(fields, "paid", "planMetadata", "confirmed",
-			"官方身份接口报告为付费套餐，但未下发数值额度窗口", false, false)
+	case accountpolicy.GrokBuildAccountIsPaid(acc):
+		source := "planMetadata"
+		if !BuildPlanIsPaid(acc.Subscription) {
+			source = "upstreamBilling"
+		}
+		provider.QuotaProvenance(fields, "paid", source, "confirmed",
+			"上游套餐或账单金额证明付费权益，但未下发数值额度窗口", false, false)
 	default:
 		// Never synced, or the upstream has not said anything yet. Saying anything
 		// more here would be an invention.

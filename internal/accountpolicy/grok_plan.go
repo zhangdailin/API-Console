@@ -1,20 +1,40 @@
 package accountpolicy
 
 import (
-	"slices"
 	"strings"
+
+	"orchids-api/internal/store"
 )
 
-// grokPaidPlanMarkers are the substrings xAI uses in paid Build plan names. The
-// Grok channel and the load balancer both decide "paid" from this one list.
-var grokPaidPlanMarkers = []string{"super", "pro", "heavy", "lite", "x_basic", "xbasic", "x_premium", "xpremium", "paid", "team", "enterprise"}
+func normalizeGrokPlan(subscription string) string {
+	return strings.NewReplacer(" ", "", "_", "", "-", "", "+", "plus").Replace(strings.ToLower(strings.TrimSpace(subscription)))
+}
+
+// GrokBuildPlanIsFree names Build entitlements, independently of an X subscription.
+func GrokBuildPlanIsFree(subscription string) bool {
+	switch normalizeGrokPlan(subscription) {
+	case "free", "grokfree", "freetier", "basic", "grokbasic", "xbasic":
+		return true
+	}
+	return false
+}
 
 // GrokBuildPlanIsPaid reports whether a Grok subscription string names a paid
 // Build plan. An empty or "unknown" plan is not evidence of either tier.
 func GrokBuildPlanIsPaid(subscription string) bool {
-	plan := strings.ToLower(strings.TrimSpace(subscription))
-	if plan == "" || plan == "unknown" {
+	plan := normalizeGrokPlan(subscription)
+	switch plan {
+	case "super", "pro", "grokpro", "heavy", "lite", "xpremium", "xpremiumplus", "paid", "team", "enterprise", "apikey":
+		return true
+	}
+	return strings.HasPrefix(plan, "supergrok") || strings.HasPrefix(plan, "enterprise") || strings.HasPrefix(plan, "team")
+}
+
+// GrokBuildAccountIsPaid shares plan and monetary evidence with account routing.
+// Positive purchased credit is an entitlement even on an otherwise free plan.
+func GrokBuildAccountIsPaid(acc *store.Account) bool {
+	if !IsGrokAccount(acc) {
 		return false
 	}
-	return slices.ContainsFunc(grokPaidPlanMarkers, func(paid string) bool { return strings.Contains(plan, paid) })
+	return GrokBuildPlanIsPaid(acc.Subscription) || acc.GrokBilling.HasPaidEntitlement()
 }

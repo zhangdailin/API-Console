@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/httpserver"
 	"orchids-api/internal/responses"
 	"strings"
 	"time"
@@ -422,11 +423,17 @@ func (h *Handler) finishUpstreamChat(ctx context.Context, w http.ResponseWriter,
 	}
 
 	if req.Stream {
+		keepalive := httpserver.NewSSEKeepalive(w, httpserver.SSEKeepaliveInterval, func() { _ = resp.Body.Close() })
+		defer keepalive.Close()
+		w = keepalive
 		var hold *buildQualityHold
 		if holdEnabled {
 			hold = newBuildQualityHold(w, h.qualityHoldPolicy(), nil)
 		}
 		result := h.streamBuildChatHolding(w, req, resp.Body, hold)
+		if err := keepalive.Close(); err != nil && result.Err == nil {
+			result.Err, result.Finish = err, "error"
+		}
 		if hold != nil {
 			result.QualityChecked, result.QualityAttempt = true, qualityAttempt
 			if !result.Withheld {

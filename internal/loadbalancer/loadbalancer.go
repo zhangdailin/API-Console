@@ -739,7 +739,7 @@ func cooldownElapsed(lastAttempt time.Time, cooldown time.Duration, now time.Tim
 }
 
 func isPaidGrokBuildAccount(acc *store.Account) bool {
-	return accountpolicy.IsGrokAccount(acc) && accountpolicy.GrokBuildPlanIsPaid(acc.Subscription)
+	return accountpolicy.GrokBuildAccountIsPaid(acc)
 }
 
 // resetAccountRuntimeState drops the transient routing verdict so the account is

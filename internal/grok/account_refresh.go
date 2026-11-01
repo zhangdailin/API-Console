@@ -46,7 +46,7 @@ func RefreshBuildAccount(ctx context.Context, client *CLIClient, acc *store.Acco
 		billing, err := client.FetchBilling(billingCtx, acc)
 		cancel()
 		result.BillingErr = err
-		if err == nil {
+		if billing != nil {
 			ApplyCLIBillingInfo(acc, billing)
 		}
 	}

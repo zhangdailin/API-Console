@@ -51,6 +51,12 @@ type GrokBillingSnapshot struct {
 	Monthly  GrokQuotaWindow `json:"monthly"`
 	SyncedAt time.Time       `json:"synced_at"`
 	Source   string          `json:"source,omitempty"`
+	// ProfileKnown distinguishes parsed monetary fields from missing quota data.
+	ProfileKnown   bool    `json:"profile_known,omitempty"`
+	MonthlyUsed    float64 `json:"monthly_used,omitempty"`
+	OnDemandCap    float64 `json:"on_demand_cap,omitempty"`
+	OnDemandUsed   float64 `json:"on_demand_used,omitempty"`
+	PrepaidBalance float64 `json:"prepaid_balance,omitempty"`
 	// NextProbeAt serializes probes after an exhausted paid period ends. Before
 	// the first claim PeriodEnd is the due time; each claim advances this by the
 	// bounded retry interval so concurrent selectors cannot hammer billing.
@@ -59,6 +65,17 @@ type GrokBillingSnapshot struct {
 }
 
 const GrokPaidQuotaProbeInterval = 15 * time.Minute
+
+// HasPaidEntitlement excludes usage percentages: free accounts expose them too.
+func (b GrokBillingSnapshot) HasPaidEntitlement() bool {
+	return b.Monthly.Limit > 0 || b.OnDemandCap > 0 || b.OnDemandUsed > 0 || b.PrepaidBalance > 0
+}
+
+// HasZeroProfile requires observed monetary fields, not a failed or empty read.
+func (b GrokBillingSnapshot) HasZeroProfile() bool {
+	return b.ProfileKnown && !b.SyncedAt.IsZero() && !b.HasPaidEntitlement() &&
+		b.MonthlyUsed == 0 && b.Weekly.UsagePercent == 0
+}
 
 // IsExhausted reports an authoritative paid-billing exhaustion signal. Monthly
 // numeric allowance wins when present; otherwise a 100% weekly usage snapshot
