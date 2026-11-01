@@ -88,7 +88,7 @@ flowchart TD
 | Cline | `/ai/cline/recommended-models` 与 `/users/me/plan` | 免费账号发布 `free`，确认付费订阅后同时发布 `clinePass`；不授予按量计费目录权益 |
 | Grok Build | `/v1/models` | 目录刷新不是生成探针；过滤不支持的媒体标识 |
 
-Grok Build 等级按 `/user?include=subscription`、Billing 套餐元数据、OAuth JWT `tier` 的顺序读取。JWT 仅为兜底元数据，不替代身份验证，也不覆盖已有明确套餐；数字 0–6 对应 Free、SuperGrok、X Basic、X Premium、X Premium+、Heavy、Lite。等级与额度独立保存：等级查询成功而 Billing 失败或未提供额度时，更新等级并保留旧额度。
+Grok Build 等级优先读取 `/settings` 的 `subscription_tier_display`，再依次使用 `/user?include=subscription`、Billing 套餐元数据、OAuth JWT `tier`。实际免费账号的 `/user` 可返回 `subscriptionTier: null`，JWT 也可省略 `tier`，此时 Settings 仍会明确返回 `Free`；不能把空值或请求失败直接当成免费。JWT 仅为兜底元数据，不替代身份验证，也不覆盖已有明确套餐；数字 0–6 对应 Free、SuperGrok、X Basic、X Premium、X Premium+、Heavy、Lite。等级与额度独立保存：等级查询成功而 Billing 失败或未提供额度时，更新等级并保留旧额度。上游提供周使用率时保留真实百分比；未提供数值的已知免费账号显示明确标注的免费估算。
 
 Build 付费权益须有明确付费套餐，或正数月度额度、按量上限/已消费金额、预付余额；周使用率（包括 0%）本身不能证明付费。`x_basic` 属于 Build 免费权益。未知套餐保持未知；仅在完整观测到的账单金额及使用率均为零时，才从账单推断免费。面板和账号调度共用此判定，不使用网站 `/rest/rate-limits` 的请求次数映射，也不据此增加模型目录。
 

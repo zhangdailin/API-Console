@@ -8,8 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"encoding/json"
-
 	"orchids-api/internal/store"
 )
 
@@ -46,16 +44,21 @@ func (c *CLIClient) FetchBilling(ctx context.Context, acc *store.Account) (*CLIB
 		tierTimeout = min(tierTimeout, time.Until(deadline)/2)
 	}
 	tierCtx, cancel := context.WithTimeout(ctx, tierTimeout)
-	tier, _ := c.fetchSubscriptionTier(tierCtx, acc)
+	tier, _ := c.fetchSettingsSubscriptionTier(tierCtx, acc)
+	tierSource := "settings"
+	if !cliPlanNameAvailable(tier) {
+		tier, _ = c.fetchSubscriptionTier(tierCtx, acc)
+		tierSource = "user"
+	}
 	cancel()
 	info, billingErr := c.fetchBillingSnapshot(ctx, acc)
 	if info == nil {
 		info = &CLIBillingInfo{}
 	}
 	switch {
-	case tier != "":
-		info.Subscription, info.SubscriptionSource = tier, "user"
-	case info.Subscription != "":
+	case cliPlanNameAvailable(tier):
+		info.Subscription, info.SubscriptionSource = tier, tierSource
+	case cliPlanNameAvailable(info.Subscription):
 		info.SubscriptionSource = "billing"
 	default:
 		info.Subscription = cliSubscriptionTierFromJWT(acc.OAuthAccessToken)
@@ -140,29 +143,4 @@ func ApplyCLIBillingInfo(acc *store.Account, info *CLIBillingInfo) bool {
 		changed = true
 	}
 	return changed
-}
-
-func (c *CLIClient) fetchSubscriptionTier(ctx context.Context, acc *store.Account) (string, error) {
-	resp, err := c.request(ctx, acc, http.MethodGet, c.baseURL()+"/user?include=subscription", nil, nil)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, cliOAuthMaxBodyBytes))
-	if err != nil {
-		return "", err
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return "", newCLIUpstreamError(resp.StatusCode, resp.Header, body)
-	}
-	var payload map[string]json.RawMessage
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return "", fmt.Errorf("decode grok cli subscription response: %w", err)
-	}
-	if tier := cliBillingString(payload, "subscriptionTier", "subscription_tier"); tier != "" {
-		return tier, nil
-	}
-	var user map[string]json.RawMessage
-	_ = json.Unmarshal(payload["user"], &user)
-	return cliBillingString(user, "subscriptionTier", "subscription_tier"), nil
 }

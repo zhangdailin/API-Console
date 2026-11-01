@@ -216,7 +216,7 @@ func BuildPlanIsPaid(subscription string) bool {
 // operator recognises. An unrecognised string is returned trimmed as-is.
 func PlanDisplayName(subscription string) string {
 	raw := strings.TrimSpace(subscription)
-	plan := strings.ToLower(raw)
+	plan := strings.NewReplacer(" ", "", "+", "plus").Replace(strings.ToLower(raw))
 	switch {
 	case plan == "":
 		return ""
