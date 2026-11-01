@@ -209,10 +209,17 @@ func (h *Handler) selectAccountRecordWithOptions(ctx context.Context, targetChan
 // as exhausted or as a payment refusal, or holding an exhausted quota reading.
 func qoderAccountSpent(acc *store.Account) bool {
 	switch strings.TrimSpace(acc.StatusCode) {
-	case store.AccountStatusQoderQuotaExhausted, "402":
+	case "402":
 		return true
+	case store.AccountStatusQoderQuotaExhausted:
+		// The desktop client keeps no persisted exhausted state: availability is
+		// derived from the reading (available defaults to cap > 0) and an
+		// allowance refusal fails that request only. A status with no numbers
+		// behind it is therefore not evidence of a spent account — parking one
+		// kept working accounts out of rotation entirely.
+		return acc.QoderQuota.Limit > 0 && acc.QoderQuota.Remaining == 0
 	}
-	return acc.QoderQuota.Exhausted
+	return acc.QoderQuota.Limit > 0 && acc.QoderQuota.Remaining == 0
 }
 
 func effectiveAccountConcurrencyLimit(acc *store.Account) int64 {

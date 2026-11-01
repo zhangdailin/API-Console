@@ -28,7 +28,9 @@ func TestSelectAccountRecord_ExhaustedQoderRequiresExplicitAccountFreeFactor(t *
 	h, s, _ := setupModelValidationHandler(t)
 	ctx := context.Background()
 	catalog := []string{`{"key":"qfmodel","name":"Qwen3.8-Flash","price_factor":0}`}
-	acc := &store.Account{AccountType: "qoder", QoderRefreshToken: "token", Enabled: true, Weight: 1, StatusCode: store.AccountStatusQoderQuotaExhausted, QoderModelIDs: catalog}
+	acc := &store.Account{AccountType: "qoder", QoderRefreshToken: "token", Enabled: true, Weight: 1, StatusCode: store.AccountStatusQoderQuotaExhausted, QoderModelIDs: catalog,
+		// A spent account is one the reading proves spent.
+		QoderQuota: store.QoderQuotaSnapshot{Limit: 300, Remaining: 0, Exhausted: true}}
 	testutil.NoError(t, s.CreateAccount(ctx, acc))
 	testutil.NoError(t, s.CreateModel(ctx, &store.Model{Channel: "Qoder", ModelID: "qwen3.8-flash", Name: "qwen3.8-flash", Status: store.ModelStatusAvailable, BillingTier: "free", BillingSource: "qoder_price_factor"}))
 	got, err := h.selectAccountRecordWithOptions(ctx, "qoder", nil, accountSelectionOptions{ModelID: "qwen3.8-flash"})
@@ -75,7 +77,9 @@ func TestSelectAccountRecord_QoderPrefersAccountsWithCredits(t *testing.T) {
 	testutil.NoError(t, s.CreateModel(ctx, &store.Model{Channel: "Qoder", ModelID: "qwen3.8-flash", Name: "qwen3.8-flash", Status: store.ModelStatusAvailable, BillingTier: "free", BillingSource: "qoder_price_factor"}))
 	var spent []int64
 	for range 6 {
-		acc := &store.Account{AccountType: "qoder", QoderRefreshToken: "token", Enabled: true, Weight: 1, StatusCode: store.AccountStatusQoderQuotaExhausted, QoderModelIDs: catalog}
+		acc := &store.Account{AccountType: "qoder", QoderRefreshToken: "token", Enabled: true, Weight: 1, StatusCode: store.AccountStatusQoderQuotaExhausted, QoderModelIDs: catalog,
+			// A spent account is one the reading proves spent.
+			QoderQuota: store.QoderQuotaSnapshot{Limit: 300, Remaining: 0, Exhausted: true}}
 		testutil.NoError(t, s.CreateAccount(ctx, acc))
 		spent = append(spent, acc.ID)
 	}
