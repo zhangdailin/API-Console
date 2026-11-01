@@ -2,6 +2,7 @@ package qoder
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -81,7 +82,45 @@ func isWindowedQueueRefusal(err error) bool {
 	case "p3", "p4":
 		return true
 	}
-	return false
+	// A refusal that says the request was queued is a queue refusal even when
+	// the upstream omits the class: a CALL_COUNT_LIMIT refusal carries
+	// isQueued/serviceAvailable/waitTime and no queueType, and treating it as a
+	// plain throttle handed it to the shared retry loop instead of this one.
+	return queueRefusalIsCallCountLimit(err.Error())
+}
+
+// queueRefusalIsCallCountLimit recognises the refusal the upstream sends when
+// an account has spent its call allowance: it carries isQueued, serviceAvailable
+// and waitTime but no queueType, which used to hand it to the shared retry loop.
+func queueRefusalIsCallCountLimit(text string) bool {
+	text = strings.ToLower(strings.ReplaceAll(text, `\`, ""))
+	text = strings.ReplaceAll(text, " ", "")
+	return strings.Contains(text, "call_count_limit")
+}
+
+// queueRefusalWait reads the wait the refusal itself names, for a refusal that
+// carries no queue class to align to a window.
+func queueRefusalWait(text string) time.Duration {
+	text = strings.ToLower(strings.ReplaceAll(text, `\`, ""))
+	text = strings.ReplaceAll(text, " ", "")
+	const marker = `"retryafterseconds":`
+	index := strings.Index(text, marker)
+	if index < 0 {
+		return 0
+	}
+	digits := text[index+len(marker):]
+	end := 0
+	for end < len(digits) && digits[end] >= '0' && digits[end] <= '9' {
+		end++
+	}
+	if end == 0 {
+		return 0
+	}
+	seconds, err := strconv.Atoi(digits[:end])
+	if err != nil || seconds <= 0 {
+		return 0
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 // modelKeyOf reads the model the queue refusal names, so the status read asks

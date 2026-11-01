@@ -477,6 +477,14 @@ func (c *Client) runChat(ctx context.Context, hosts []string, body []byte, model
 		case c.queueWindowRetry && isWindowedQueueRefusal(err) && windowRetries < queueWindowMaxRetries && upstream.RemainingAttempts(ctx) != 0:
 			delay := nextQueueWindowDelay(queueWindowNow())
 			windowSource := "qoder_queue_window"
+			// A refusal without a queue class has no window to align to, so the
+			// wait it names is the one to honour.
+			if queueTypeOf(err.Error()) == "" {
+				if wait := queueRefusalWait(err.Error()); wait > 0 {
+					delay = wait
+					windowSource = "qoder_queue_hint"
+				}
+			}
 			// The refusal names the queue this request landed in, and the server
 			// publishes that queue's wait. Ask it before falling back to the
 			// window this gateway inferred from measurements: a published number
