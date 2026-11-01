@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -39,6 +40,7 @@ func runQoderProbe(args []string, out io.Writer) error {
 	variants := flags.String("variants", "", "comma-separated variant letters to send, e.g. A,F (default: all)")
 	alignWindow := flags.Bool("align-window", false, "send each request at second :09 of a minute, one per minute, instead of every --interval")
 	sweep := flags.Int("sweep", 0, "replay the queue-window retry this many times in one process and report how many were admitted")
+	queueModel := flags.String("queue", "", "read the admission queue for this model key instead of sending a chat")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -109,6 +111,21 @@ func runQoderProbe(args []string, out io.Writer) error {
 	base := qoder.NewFromAccount(acc, cfg)
 	base.SetAccountStore(s) // a token rotated during the probe is persisted
 
+	if strings.TrimSpace(*queueModel) != "" {
+		requestSetID, idErr := newProbeRequestID()
+		if idErr != nil {
+			return idErr
+		}
+		status, statusErr := base.QueueStatus(ctx, requestSetID, "", *queueModel, "")
+		if statusErr != nil {
+			return statusErr
+		}
+		fmt.Fprintf(out, "queue model=%s observed=%v queued=%v available=%v type=%s count=%d retry_after=%s wait=%s\n",
+			*queueModel, status.Observed, status.IsQueued, status.ServiceAvailable,
+			dash(status.QueueType), status.QueueCount, status.RetryAfter, status.WaitTime)
+		return nil
+	}
+
 	if *sweep > 0 {
 		return runProbeSweep(ctx, base, out, models[0], letters, *sweep)
 	}
@@ -167,6 +184,15 @@ func selectIdentities(raw string) ([]qoder.Identity, error) {
 	default:
 		return nil, fmt.Errorf("unknown --identity %q (want default, ide or both)", raw)
 	}
+}
+
+// newProbeRequestID makes the identifier the queue status read asks about.
+func newProbeRequestID() (string, error) {
+	raw := make([]byte, 16)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", raw), nil
 }
 
 // runProbeSweep replays the deployed queue-window retry in one process: wait
