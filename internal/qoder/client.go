@@ -476,12 +476,28 @@ func (c *Client) runChat(ctx context.Context, hosts []string, body []byte, model
 		// fixed 30s hint is what gets the request in.
 		case c.queueWindowRetry && isWindowedQueueRefusal(err) && windowRetries < queueWindowMaxRetries && upstream.RemainingAttempts(ctx) != 0:
 			delay := nextQueueWindowDelay(queueWindowNow())
+			windowSource := "qoder_queue_window"
+			// The refusal names the queue this request landed in, and the server
+			// publishes that queue's wait. Ask it before falling back to the
+			// window this gateway inferred from measurements: a published number
+			// is not a guess, and it is the difference between waiting 8 seconds
+			// and waiting out a window that is already spent.
+			// A status read needs the model the refusal is about; a refusal that
+			// does not name one cannot be asked about, and the window stays.
+			if refusalModel := modelKeyOf(err.Error()); refusalModel != "" {
+				if status, statusErr := c.QueueStatus(ctx, requestID, "", refusalModel, queueTypeOf(err.Error())); statusErr == nil {
+					if hint := status.RetryHint(); hint > 0 {
+						delay = hint
+						windowSource = "qoder_queue_status"
+					}
+				}
+			}
 			if windowWaited+delay > queueWindowMaxWait || !util.RetryWaitFits(ctx, delay) {
 				return c.alignQueueHint(err)
 			}
 			waitStarted := time.Now()
 			waitErr := sleepCtx(ctx, delay)
-			debug.RecordWait(ctx, "qoder_queue_window", delay, time.Since(waitStarted), waitErr != nil)
+			debug.RecordWait(ctx, windowSource, delay, time.Since(waitStarted), waitErr != nil)
 			if waitErr != nil {
 				return waitErr
 			}

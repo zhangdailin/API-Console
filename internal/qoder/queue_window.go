@@ -84,6 +84,22 @@ func isWindowedQueueRefusal(err error) bool {
 	return false
 }
 
+// modelKeyOf reads the model the queue refusal names, so the status read asks
+// about the same model the refusal is about.
+func modelKeyOf(text string) string {
+	text = strings.ReplaceAll(text, `\`, "")
+	const marker = `"modelKey":`
+	index := strings.Index(text, marker)
+	if index < 0 {
+		return ""
+	}
+	value := strings.TrimLeft(text[index+len(marker):], ` "`)
+	if end := strings.IndexAny(value, `",}`); end >= 0 {
+		value = value[:end]
+	}
+	return strings.TrimSpace(value)
+}
+
 // queueTypeOf reads queueType out of a refusal however deeply it was quoted.
 func queueTypeOf(text string) string {
 	text = strings.ReplaceAll(text, `\`, "")

@@ -53,7 +53,13 @@ func TestQueueTypeOfProductionRefusal(t *testing.T) {
 
 // windowServer refuses with the given queue type until refusals are spent.
 func windowServer(t *testing.T, queueType string, refusals int32, calls *atomic.Int32) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The queue-status read is not a chat attempt: it must not consume the
+		// refusal budget these tests count, and this server has no such route.
+		if r.URL.Path == queueStatusPath {
+			http.NotFound(w, r)
+			return
+		}
 		if calls.Add(1) <= refusals {
 			_, _ = io.WriteString(w, queueRefusal(queueType))
 			return

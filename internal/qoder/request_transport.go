@@ -81,6 +81,15 @@ func (c *Client) applyAuthHeadersBytes(req *http.Request, creds Credentials, fie
 	set("Traceparent", util.Traceparent(requestID))
 	set("User-Agent", identity.UserAgent)
 	set("Login-Version", "v2")
+	// The inference request class is the one that carries the machine host name
+	// and, when the address was resolved ahead of the request, the address it
+	// used. Both are part of what the client presents on this endpoint.
+	if name := machineHostname(); name != "" {
+		set("Cosy-MachineHostname", name)
+	}
+	if ip := resolvedInferIP(req); ip != "" {
+		set("X-Qoder-HTTPDNS-IP", ip)
+	}
 	if key := strings.TrimSpace(modelKey); key != "" {
 		set("X-Model-Key", key)
 		// The source header is gated on the key, not on its own value: the CLI
