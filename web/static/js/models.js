@@ -17,9 +17,6 @@ const modelOperations = ConsoleUI.keyedSubmission();
 
 // ── small helpers ────────────────────────────────────────────────────────────
 
-
-
-
 // activeChannel is the channel the page is scoped to. A channel is always
 // required by the refresh and batch actions, so the first known one stands in
 // when the strip has not been clicked yet.
@@ -158,7 +155,6 @@ function modelRefreshSourceLabel(source) {
     // Upstream catalogs.
     grok_build_models: "Grok Build OAuth 目录",
     workbuddy_cli_models: "WorkBuddy /v3/config 白名单",
-    qoder_upstream_models: "Qoder 有符号上游目录",
     cline_recommended_models: "Cline 推荐模型目录",
     // Not an observation: nothing was read from an upstream account.
     no_active_account: "无 active 账号（未拉取，未发布）",
@@ -166,7 +162,6 @@ function modelRefreshSourceLabel(source) {
   if (labels[value]) return labels[value];
   if (value.startsWith("grok_build_models")) return "Grok Build OAuth 目录";
   if (value.startsWith("workbuddy_cli_models")) return "WorkBuddy /v3/config 白名单";
-  if (value.startsWith("qoder_upstream_models")) return "Qoder 有符号上游目录";
   if (value.startsWith("cline_recommended_models")) return "Cline 推荐模型目录";
   // Anything reaching here is a cached or compiled-in list. It must not be
   // mistaken for a fresh upstream observation.
@@ -180,7 +175,6 @@ function isUpstreamModelRefreshSource(source) {
   const value = String(source || "").trim();
   return value.startsWith("grok_build_models") ||
     value.startsWith("workbuddy_cli_models") ||
-    value.startsWith("qoder_upstream_models") ||
     value.startsWith("cline_recommended_models");
 }
 
@@ -332,7 +326,6 @@ function renderModels() {
     emptyModels(container);
     return;
   }
-
 
   const rows = pageItems.map((m) => `
       <tr data-id="${encodeData(m.id)}">
@@ -495,11 +488,8 @@ async function runModelBatch(action) {
   }
 }
 
-
-
 // bindModelCardActions is the mobile list's delegated handler: the card has no
 // select column and no batch bar, so only the two row actions apply.
-
 
 const modelLoads = ConsoleUI.requestGate();
 async function loadModels() {
@@ -751,8 +741,6 @@ async function deleteOfflineModelsForCurrentChannel() {
     updateRefreshButton();
   }
 }
-
-
 
 document.addEventListener("DOMContentLoaded", async () => {
   await window.OrchidsProviderRegistry?.ready;

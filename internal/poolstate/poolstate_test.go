@@ -79,13 +79,13 @@ func TestCountsMatchesBothOriginalImplementations(t *testing.T) {
 		{AccountType: "grok", Enabled: true, StatusCode: "429"},
 		{AccountType: "GROK", Enabled: true, StatusCode: "401"},
 		{AccountType: " grok ", Enabled: true},
-		{AccountType: "qoder", Enabled: true, StatusCode: "401"},
+		{AccountType: "workbuddy", Enabled: true, StatusCode: "401"},
 		{AccountType: "grok", Enabled: true, ModelCooldowns: map[string]time.Time{"m1": future}},
 		{AccountType: "grok", Enabled: true, ModelCooldowns: map[string]time.Time{"m1": past}},
 		{AccountType: "grok", Enabled: true, ModelCooldowns: map[string]time.Time{"": future}},
 	}
 
-	for _, channel := range []string{"grok", "qoder"} {
+	for _, channel := range []string{"grok", "workbuddy"} {
 		for _, accounts := range [][]*store.Account{nil, shapes} {
 			wantEnabled, wantAvailable, wantNeeding, wantCooldowns := legacyAlertPoolCounts(accounts, channel, now)
 			wantConsoleEnabled, wantConsoleAvailable, wantConsoleNeeding, wantConsoleCooldowns := legacyConsolePoolCounts(accounts, channel, now)

@@ -138,7 +138,7 @@ func TestEvaluate_SeverityOrdering(t *testing.T) {
 // health, and a visitor must not be able to page an operator.
 func TestEvaluate_IgnoresInfrastructureAggregates(t *testing.T) {
 	testutil.False(t, IsAlertableChannel("http") || IsAlertableChannel("probe"), "the http and probe aggregates must not be alertable")
-	for _, channel := range []string{"grok", "qoder", "cline", "workbuddy", "GROK"} {
+	for _, channel := range []string{"grok", "cline", "workbuddy", "GROK"} {
 		testutil.True(t, IsAlertableChannel(channel), "%s must remain alertable")
 	}
 

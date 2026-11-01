@@ -1,4 +1,4 @@
-param([switch]$OpenLoop,[switch]$Warmup,[switch]$RequireTarget,[ValidateSet('cline','workbuddy','qoder','grok')][string[]]$Providers=@('cline','workbuddy','qoder','grok'),[ValidateRange(1,60)][int]$Seconds=5,[ValidateRange(1,1000)][int]$GCPercent=100,[string]$MemoryLimit='512MiB')
+param([switch]$OpenLoop,[switch]$Warmup,[switch]$RequireTarget,[ValidateSet('cline','workbuddy','grok')][string[]]$Providers=@('cline','workbuddy','grok'),[ValidateRange(1,60)][int]$Seconds=5,[ValidateRange(1,1000)][int]$GCPercent=100,[string]$MemoryLimit='512MiB')
 # Measures current source. Archived overlays target the earlier source/test shape.
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot

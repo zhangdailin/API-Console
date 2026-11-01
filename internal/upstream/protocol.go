@@ -43,8 +43,8 @@ func (r UpstreamRequest) ValidateProtocolControls(provider string) error {
 			return fmt.Errorf("unsupported response format type %q", format["type"])
 		}
 	}
-	// Qoder has no wire field for this optional cache hint. Its request
-	// builder omits it; a cache selection hint must not reject generation.
+	// A channel with no wire field for this optional cache hint omits it; a
+	// cache selection hint must not reject generation.
 	return nil
 }
 
@@ -106,11 +106,9 @@ func (r UpstreamRequest) ChatResponseFormat() map[string]any {
 
 // serverWebSearchTool reports a declared server-side web search tool, such as
 // the Anthropic web_search_20250305 tool Claude Code's WebSearch sends, by its
-// type. Such a tool asks the API itself to search. WorkBuddy, Qoder and Cline
-// cannot: probes on 2026-10-21 found Qoder answering a passed-through search
-// tool with 400 and ignoring enable_search, and lowering the tool to a plain
-// function let the model name a call nobody ran, so the client silently got no
-// results. A client function that happens to be called web_search has type
+// type. Such a tool asks the API itself to search. WorkBuddy and Cline cannot:
+// lowering the tool to a plain function let the model name a call nobody ran,
+// so the client silently got no results. A client function that happens to be called web_search has type
 // "function" or "custom" and is not one of these.
 func serverWebSearchTool(tools []any) (string, bool) {
 	for _, tool := range tools {

@@ -22,7 +22,7 @@ import urllib.request
 
 STAGE = Path(os.environ.get('PROTOCOL_VERIFY_DIR', '/tmp/api-console-protocol-verify-20261002'))
 BASE = 'http://127.0.0.1:13002'
-CHANNELS = ('workbuddy', 'qoder', 'cline', 'grok')
+CHANNELS = ('workbuddy', 'cline', 'grok')
 
 
 class Redis:
@@ -145,9 +145,9 @@ def setup():
             if suffix.startswith('accounts:id:'):
                 account = json.loads(redis.command('GET', key))
                 channel = account.get('account_type', '').lower()
-                for field in ('refresh_token', 'client_cookie', 'token', 'oauth_refresh_token', 'workbuddy_refresh_token', 'qoder_refresh_token', 'cline_refresh_token'):
+                for field in ('refresh_token', 'client_cookie', 'token', 'oauth_refresh_token', 'workbuddy_refresh_token', 'cline_refresh_token'):
                     account[field] = ''
-                expiry_name = {'workbuddy':'workbuddy_expires_at','qoder':'qoder_expires_at','cline':'cline_expires_at','grok':'oauth_expires_at'}.get(channel)
+                expiry_name = {'workbuddy':'workbuddy_expires_at','cline':'cline_expires_at','grok':'oauth_expires_at'}.get(channel)
                 expiry = account.get(expiry_name, '') if expiry_name else ''
                 if expiry and not expiry.startswith('0001-'):
                     expires = datetime.datetime.fromisoformat(expiry.replace('Z', '+00:00'))
@@ -260,7 +260,7 @@ def extra_probe(channel, model, cache=False):
 def probe(channel, model_override=None, schema_only=False):
     status, catalog, _ = http('/' + channel + '/v1/models')
     models = [m['id'] for m in catalog.get('data', [])]
-    preference = {'workbuddy':['glm-5.3-flash','minimax-m2.5','claude-haiku'], 'qoder':['qwen3.8-flash','qwen','flash'], 'cline':['gpt-5.6-luna','glm','gpt-5.4-mini'], 'grok':['grok-4.6','grok-4.5','grok-composer-2.5-fast']}[channel]
+    preference = {'workbuddy':['glm-5.3-flash','minimax-m2.5','claude-haiku'], 'cline':['gpt-5.6-luna','glm','gpt-5.4-mini'], 'grok':['grok-4.6','grok-4.5','grok-composer-2.5-fast']}[channel]
     model = next((m for wanted in preference for m in models if m == wanted), None)
     if not model:
         model = next((m for wanted in preference for m in models if wanted in m), models[0] if models else None)

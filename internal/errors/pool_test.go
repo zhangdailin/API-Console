@@ -86,14 +86,6 @@ func TestClassifyPoolExhaustion_SelectorReasonsPickTheAnswer(t *testing.T) {
 			wantMessage:  "has exhausted its allowance",
 		},
 		{
-			name:         "Qoder's model rate limit keeps naming the channel",
-			selectErr:    errors.New("no enabled accounts available for channel: qoder"),
-			lastErr:      "qoder model rate limited",
-			wantCategory: "rate_limit",
-			wantStatus:   http.StatusTooManyRequests,
-			wantMessage:  "the requested Qoder model is temporarily rate-limited",
-		},
-		{
 			name:       "a failure that names no capacity cause stays for the caller",
 			selectErr:  errors.New("grok cli account token is empty"),
 			wantStatus: 0,
@@ -120,7 +112,6 @@ func TestClassifyPoolExhaustion_SelectorReasonsPickTheAnswer(t *testing.T) {
 func TestPoolExhaustionMessagesNeverNamePoolInternals(t *testing.T) {
 	for _, message := range []string{
 		PoolAllowanceMessage,
-		PoolQoderModelMessage,
 		PoolModelCooldownMessage,
 		PoolRateLimitedMessage,
 		PoolBusyMessage,

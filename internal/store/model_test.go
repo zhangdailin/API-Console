@@ -67,24 +67,24 @@ func TestGetModelByChannelAndModelID_AllowsDuplicateModelIDsAcrossChannels(t *te
 		t.Fatalf("CreateModel(workbuddy) error = %v", err)
 	}
 	if err := s.CreateModel(ctx, &Model{
-		Channel: "Qoder", ModelID: sharedModelID, Name: "Qoder Shared",
+		Channel: "Cline", ModelID: sharedModelID, Name: "Cline Shared",
 		Status: ModelStatusAvailable, Verified: true,
 	}); err != nil {
-		t.Fatalf("CreateModel(qoder) error = %v", err)
+		t.Fatalf("CreateModel(cline) error = %v", err)
 	}
 
 	workBuddyModel, err := s.GetModelByChannelAndModelID(ctx, "workbuddy", sharedModelID)
 	testutil.NoError(t, err, "GetModelByChannelAndModelID(workbuddy) error = %v")
 	testutil.Equal(t, workBuddyModel.Channel, "WorkBuddy")
 
-	qoderModel, err := s.GetModelByChannelAndModelID(ctx, "qoder", sharedModelID)
-	testutil.NoError(t, err, "GetModelByChannelAndModelID(qoder) error = %v")
-	testutil.Equal(t, qoderModel.Channel, "Qoder")
-	if workBuddyModel.ModelID != sharedModelID || qoderModel.ModelID != sharedModelID ||
-		workBuddyModel.Name != "WorkBuddy Shared" || qoderModel.Name != "Qoder Shared" {
-		t.Fatalf("channel index mixed records: workbuddy=%+v qoder=%+v", workBuddyModel, qoderModel)
+	clineModel, err := s.GetModelByChannelAndModelID(ctx, "cline", sharedModelID)
+	testutil.NoError(t, err, "GetModelByChannelAndModelID(cline) error = %v")
+	testutil.Equal(t, clineModel.Channel, "Cline")
+	if workBuddyModel.ModelID != sharedModelID || clineModel.ModelID != sharedModelID ||
+		workBuddyModel.Name != "WorkBuddy Shared" || clineModel.Name != "Cline Shared" {
+		t.Fatalf("channel index mixed records: workbuddy=%+v cline=%+v", workBuddyModel, clineModel)
 	}
-	testutil.NotEqual(t, qoderModel.ID, workBuddyModel.ID)
+	testutil.NotEqual(t, clineModel.ID, workBuddyModel.ID)
 }
 
 // TestStoreNew_PublishesNoBuiltInModels pins the startup contract: a new store
@@ -106,10 +106,10 @@ func TestStoreNew_PublishesNoBuiltInModels(t *testing.T) {
 	for _, probe := range []struct{ channel, modelID string }{
 		{"Grok", "grok-4.5"},
 		{"Grok", "grok-imagine-image"},
-		{"Qoder", "auto-open"},
+		{"Cline", "auto-open"},
 		{"WorkBuddy", "claude-opus-5"},
 		{"WorkBuddy", "default-model"},
-		{"Qoder", "Qwen3.7-Max"},
+		{"Cline", "Qwen3.7-Max"},
 	} {
 		_, err := s.GetModelByChannelAndModelID(ctx, probe.channel, probe.modelID)
 		testutil.CheckError(t, err)

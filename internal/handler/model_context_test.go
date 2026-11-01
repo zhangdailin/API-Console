@@ -39,30 +39,6 @@ func fetchPublicModels(t *testing.T, h *Handler, path string) map[string]publicL
 	return out
 }
 
-// The Qoder catalog declares max_input_tokens per model and the request path
-// already forwards it. The model list has to publish the same number, otherwise
-// a 1M-token model reads as the client's 262144 default.
-func TestPublicModelsPublishQoderContextWindow(t *testing.T) {
-	h, s, _ := setupModelValidationHandler(t)
-
-	acc := createEnabledTestAccount(t, s, "qoder-1", "qoder")
-	acc.QoderModelIDs = []string{
-		`{"key":"ultimate","name":"Ultimate","display_name":"Ultimate","max_input_tokens":1000000}`,
-		`{"key":"qfmodel","name":"Qwen3.8-Flash","display_name":"Qwen3.8-Flash","max_input_tokens":180000}`,
-	}
-	testutil.NoError(t, s.UpdateAccount(context.Background(), acc), "UpdateAccount() error = %v")
-
-	publishModel(t, s,
-		&store.Model{Channel: "qoder", ModelID: "ultimate"},
-		&store.Model{Channel: "qoder", ModelID: "qwen3.8-flash"},
-	)
-
-	entries := fetchPublicModels(t, h, "/qoder/v1/models")
-	testutil.Equal(t, entries["ultimate"].ContextLength, 1000000)
-	testutil.Equal(t, entries["ultimate"].MaxInputTokens, 1000000)
-	testutil.Equal(t, entries["qwen3.8-flash"].ContextLength, 180000)
-}
-
 // A window that was never observed must be absent, not zero: a client that reads
 // zero would treat the model as unable to hold anything.
 func TestPublicModelsOmitUnobservedContextWindow(t *testing.T) {

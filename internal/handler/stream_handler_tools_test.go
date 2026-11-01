@@ -28,26 +28,3 @@ func TestStreamHandler_NoToolsGateSuppressesValidToolCall(t *testing.T) {
 	testutil.MustNotContain(t, out, `"type":"tool_use"`)
 	testutil.MustContain(t, out, `"stop_reason":"end_turn"`)
 }
-
-func TestStreamHandler_RejectedWriteDoesNotLeakContent(t *testing.T) {
-	sh, rec := newStreamTestHandler(t, true, adapter.FormatAnthropic)
-
-	sh.setAllowedToolNames(nil)
-	sh.setSurfaceToolRejects(true)
-	sh.setDisallowToolCalls(true)
-	sh.handleMessage(upstream.SSEMessage{
-		Type: "model.tool-call",
-		Event: map[string]any{
-			"toolCallId": "tool_write_1",
-			"toolName":   "Write",
-			"input":      `{"file_path":"index.html","content":"<!doctype html><h1>Ready</h1>"}`,
-		},
-	})
-	sh.finishResponse("tool_use")
-
-	out := rec.buf.String()
-	testutil.MustNotContain(t, out, `"type":"tool_use"`)
-	testutil.MustNotContainAny(t, out, "Ready", "index.html", "<!doctype")
-	testutil.MustContain(t, out, "compatible tool")
-	testutil.MustContain(t, out, `"stop_reason":"end_turn"`)
-}

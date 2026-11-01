@@ -192,15 +192,6 @@ func TestSyncAccountCatalogAggregatesAllAccountsAndProtectsPartialPrune(t *testi
 			},
 		},
 		{
-			name: "Qoder", accountType: "qoder", path: "/algo/api/v2/model/list",
-			bodyA:  `{"chat":[{"key":"qa","display_name":"Qoder-A","enable":true}]}`,
-			bodyB:  `{"chat":[{"key":"qb","display_name":"Qoder-B","enable":true}]}`,
-			models: []string{"qoder-a", "qoder-b"},
-			account: func(baseURL string) (*store.Account, *config.Config) {
-				return qoderTestAccount("11111111-2222-4333-8444-555555555555"), &config.Config{QoderInferenceURL: baseURL}
-			},
-		},
-		{
 			name: "Cline", accountType: "cline", path: "/ai/cline/recommended-models",
 			bodyA:  `{"free":[{"id":"cline/a","name":"Cline A"}]}`,
 			bodyB:  `{"free":[{"id":"cline/b","name":"Cline B"}]}`,
@@ -235,8 +226,6 @@ func TestSyncAccountCatalogAggregatesAllAccountsAndProtectsPartialPrune(t *testi
 					switch tc.accountType {
 					case "workbuddy", "cline":
 						failedAccount = strings.Contains(r.Header.Get("Authorization"), "access-2")
-					case "qoder":
-						failedAccount = r.Header.Get("Cosy-MachineId") == "22222222-3333-4444-8555-666666666666"
 					}
 					if failedAccount {
 						http.Error(w, "temporary account failure", http.StatusBadGateway)
@@ -264,8 +253,6 @@ func TestSyncAccountCatalogAggregatesAllAccountsAndProtectsPartialPrune(t *testi
 				second.WorkBuddyAccessToken = "access-2"
 			case "cline":
 				second.ClineAccessToken = "access-2"
-			case "qoder":
-				second.QoderMachineID = "22222222-3333-4444-8555-666666666666"
 			}
 			for _, acc := range []*store.Account{first, second} {
 				testutil.NoError(t, s.CreateAccount(ctx, acc))
@@ -296,7 +283,6 @@ func TestSyncAccountCatalogAggregatesAllAccountsAndProtectsPartialPrune(t *testi
 				stored, err := s.GetAccount(ctx, id)
 				testutil.NoError(t, err)
 				if (tc.accountType == "workbuddy" && len(stored.WorkBuddyModelIDs) == 0) ||
-					(tc.accountType == "qoder" && len(stored.QoderModelIDs) == 0) ||
 					(tc.accountType == "cline" && len(stored.ClineModelIDs) == 0) {
 					t.Fatalf("account %d snapshot was not persisted", id)
 				}

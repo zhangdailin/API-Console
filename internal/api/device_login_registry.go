@@ -20,9 +20,7 @@ type deviceLoginRegistry[T any] struct {
 	logins map[string]*T
 	// shared returns the embedded state the common bookkeeping operates on.
 	shared func(*T) *deviceLogin
-	// ready reports whether a transaction can still be polled. Most channels also
-	// require a device code; Qoder does not, because its transaction exists before
-	// the code is issued.
+	// ready reports whether a transaction can still be polled.
 	ready func(*deviceLogin) bool
 	// expiredMessage is the operator-facing reason a transaction timed out.
 	expiredMessage string
@@ -44,13 +42,6 @@ func newDeviceLoginRegistry[T any](shared func(*T) *deviceLogin, ready func(*dev
 // outstanding and a device code has been issued.
 func deviceLoginReady(login *deviceLogin) bool {
 	return login != nil && login.status == "pending" && strings.TrimSpace(login.deviceCode) != ""
-}
-
-// deviceLoginReadyWithoutCode is Qoder's test. Its upstream issues the code during
-// the first poll rather than at start, so requiring one here would refuse to poll
-// the transaction that was just created.
-func deviceLoginReadyWithoutCode(login *deviceLogin) bool {
-	return login != nil && login.status == "pending"
 }
 
 // admit stores a new transaction unless the admission limit is reached. A refused

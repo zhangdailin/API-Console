@@ -132,14 +132,14 @@ func TestAdminWorkBuddyModelsFollowEnabledAccountEntitlements(t *testing.T) {
 func TestAdminModelEntitlementsRespectAuthCatalogAndBinding(t *testing.T) {
 	models := []*store.Model{
 		{Channel: "workbuddy", ModelID: "alias", UpstreamModel: "hy3", BoundAccountIDs: []int64{1}},
-		{Channel: "qoder", ModelID: "qwen"},
+		{Channel: "cline", ModelID: "cline-model"},
 	}
 	for _, tc := range []struct {
 		name    string
 		account store.Account
 		want    int
 	}{
-		{"other channel", store.Account{ID: 1, AccountType: "qoder", Enabled: true}, 1},
+		{"other channel", store.Account{ID: 1, AccountType: "cline", Enabled: true}, 1},
 		{"inactive auth", store.Account{ID: 1, AccountType: "workbuddy", Enabled: true, AuthStatus: "reauth_required", UsageCurrent: 10}, 1},
 		{"refused credential", store.Account{ID: 1, AccountType: "workbuddy", Enabled: true, StatusCode: "401", UsageCurrent: 10}, 1},
 		{"different binding", store.Account{ID: 2, AccountType: "workbuddy", Enabled: true, UsageCurrent: 10}, 1},

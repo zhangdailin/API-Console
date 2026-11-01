@@ -40,7 +40,6 @@ const (
 	CooldownRateLimitMax  = 30 * time.Minute
 	// CooldownRateLimit is retained as the first-failure/default alias.
 	CooldownRateLimit  = CooldownRateLimitBase
-	CooldownQoderDaily = 24 * time.Hour
 	CooldownPayment    = 24 * time.Hour
 	CooldownBlocked    = 24 * time.Hour
 	CooldownBlockedGro = 10 * time.Minute
@@ -123,7 +122,7 @@ func (v Verdict) Apply(acc *store.Account) {
 			acc.RateLimitFailures++
 			if v.Cooldown > 0 {
 				reset := at.Add(v.Cooldown)
-				if isQoderDailyCount(acc) || reset.After(acc.QuotaResetAt) {
+				if reset.After(acc.QuotaResetAt) {
 					acc.QuotaResetAt = reset
 				}
 			}
@@ -146,7 +145,7 @@ func ScopeForStatus(status string) Scope {
 	switch strings.TrimSpace(status) {
 	case "401":
 		return ScopeCredential
-	case "402", "403", "404", "429", store.AccountStatusQoderQuotaExhausted, store.AccountStatusWorkBuddyQuotaExhausted:
+	case "402", "403", "404", "429", store.AccountStatusWorkBuddyQuotaExhausted:
 		return ScopeAccount
 	case "":
 		return ScopeNone
@@ -191,33 +190,10 @@ func Classify(acc *store.Account, err error, model string) Verdict {
 			Retryable: true, SwitchAccount: true, Cooldown: cooldown, At: now}
 	}
 
-	// The quota snapshot's reset is the subscription/credit period boundary,
-	// not a daily request-count reset. Without a daily reset from the upstream,
-	// retry after a bounded day from the refusal, regardless of credit balance.
-	if strings.EqualFold(accountType(acc), "qoder") && strings.Contains(lower, "billing daily count exceeded") {
-		return Verdict{Status: "429", Message: message, Scope: ScopeAccount,
-			Retryable: true, SwitchAccount: true, Cooldown: CooldownQoderDaily, At: now}
-	}
-
-	// A plan/allowance refusal is about this account and this model, not the
-	// caller's input or the credential itself. Cool down only this pairing and
-	// allow the request to try another account with the required entitlement.
-	// The cooldown is labelled as an entitlement so the pool can answer an
-	// emptied one with "not available here" instead of "retry later".
-	if strings.EqualFold(accountType(acc), "qoder") && strings.Contains(lower, "no usable plan or allowance") {
-		return Verdict{Scope: ScopeModel, Message: message, Model: model,
-			Retryable: true, SwitchAccount: true, Cooldown: CooldownPayment,
-			ModelCooldownKind: store.ModelCooldownUnavailable, At: now}
-	}
-
-	// A queue/service refusal that names the whole upstream rather than this
-	// account has to be decided before the retryAfter hint below. Qoder reports
-	// 10605 as {"isQueued":true,"serviceAvailable":false,"retryAfterSeconds":30},
-	// and the error carrying it implements RetryAfter() -- so the generic branch
-	// used to win, park the account as "429" for 30s and rotate to the next one.
-	// Every account then ate the same shared refusal in turn: the pool drained to
-	// zero within seconds, with pool-empty alerts and a ~20% success rate, while
-	// the upstream had only said that this model's queue was unavailable.
+	// A refusal that names the whole upstream rather than this account has to
+	// be decided before the retryAfter hint below: the error carrying it can
+	// implement RetryAfter(), and the generic branch would then park the account
+	// as "429" and rotate, so every account ate the same shared refusal in turn.
 	//
 	// The verdict is retryable but deliberately not switchable, and it records
 	// nothing: the request waits out the upstream's own window and tries again on
@@ -390,11 +366,6 @@ func creditExhaustionVerdict(acc *store.Account, message string, err error, at t
 			Status: store.AccountStatusWorkBuddyQuotaExhausted, Message: message,
 			Scope: ScopeAccount, Retryable: Retryable(err), SwitchAccount: true, At: at,
 		}, true
-	case strings.EqualFold(strings.TrimSpace(accountType(acc)), "qoder"):
-		return Verdict{
-			Status: store.AccountStatusQoderQuotaExhausted, Message: message,
-			Scope: ScopeAccount, Retryable: Retryable(err), SwitchAccount: true, At: at,
-		}, true
 	default:
 		return Verdict{}, false
 	}
@@ -418,31 +389,12 @@ func isClientRefusal(lower string) bool {
 // resource is unavailable, so the refusal is identical for every account and
 // rotation cannot help.
 //
-// The markers are deliberately about the *shape* of the refusal rather than one
-// phrasing, because the same condition reaches here under different text:
-//
-//   - "qoder gateway is busy"    -- the classified form
-//   - code 10605 / isQueued      -- Qoder's queue/busy business code, which also
-//     arrives wrapped in a 401 envelope that a parser can misread as a
-//     credential rejection ("qoder upstream rejected the credential: {...}")
-//   - serviceAvailable:false     -- the upstream stating the service itself is
-//     down for the model
-//   - "available upstream accounts are rate-limited" -- the upstream saying its
-//     own account pool is throttled, not ours
-//
-// The quoted markers are matched against the text with JSON escaping removed.
-// Qoder's payload reaches us as a JSON string nested inside another one, so the
-// haystack holds `\"isqueued\":true`; searching it for `"isqueued":true` never
-// matched, and the classification survived only because the bare "10605" digits
-// happened to be in the same string.
+// The marker is the upstream saying its own account pool is throttled, not
+// ours, matched with JSON escaping removed.
 func isGlobalUpstreamRefusal(text string) bool {
 	text = strings.ReplaceAll(strings.ToLower(text), `\`, "")
-	return apperrors.IsQoderGatewayBusy(text) ||
-		strings.Contains(text, "available upstream accounts are rate-limited") ||
-		strings.Contains(text, "available upstream accounts are rate limited") ||
-		strings.Contains(text, "10605") ||
-		strings.Contains(text, `"serviceavailable":false`) ||
-		strings.Contains(text, `"isqueued":true`)
+	return strings.Contains(text, "available upstream accounts are rate-limited") ||
+		strings.Contains(text, "available upstream accounts are rate limited")
 }
 
 // isEntitlementRefusal reports a model-scoped refusal that no amount of waiting
@@ -450,8 +402,7 @@ func isGlobalUpstreamRefusal(text string) bool {
 // this beside the cooldown so an emptied pool can be answered as "not available
 // here" rather than as "temporarily rate-limited".
 func isEntitlementRefusal(lower string) bool {
-	return strings.Contains(lower, "no usable plan or allowance") ||
-		strings.Contains(lower, "not subscribed to required model plan") ||
+	return strings.Contains(lower, "not subscribed to required model plan") ||
 		apperrors.IsClineProductSurface(lower) ||
 		(strings.Contains(lower, "http 403") && strings.Contains(lower, "entitlement"))
 }
@@ -470,11 +421,7 @@ func modelCooldownKindFor(lower string) store.ModelCooldownReason {
 // the credential or the account's quota.
 func isModelScopedFailure(lower string) bool {
 	return strings.Contains(lower, "code=6004") ||
-		apperrors.IsQoderGatewayBusy(lower) ||
-		apperrors.IsQoderAgentLimit(lower) ||
-		apperrors.IsQoderModelRateLimited(lower) ||
 		strings.Contains(lower, "available upstream accounts are rate-limited") ||
-		strings.Contains(lower, "agentlimitresettime") ||
 		strings.Contains(lower, "model is not found") ||
 		strings.Contains(lower, "model not found") ||
 		strings.Contains(lower, "no_implementation_available") ||
@@ -528,16 +475,11 @@ func AccountHeld(acc *store.Account, now time.Time) bool {
 		return now.Before(until)
 	}
 	status := strings.TrimSpace(acc.StatusCode)
-	if status == "" || status == store.AccountStatusQoderQuotaExhausted || status == store.AccountStatusWorkBuddyQuotaExhausted {
+	if status == "" || status == store.AccountStatusWorkBuddyQuotaExhausted {
 		return false
 	}
 	if acc.LastAttempt.IsZero() {
 		return true
-	}
-	// Also repair routing of legacy records whose QuotaResetAt contains the
-	// subscription expiry. Quota refreshes may still write that billing date.
-	if isQoderDailyCount(acc) {
-		return now.Before(acc.LastAttempt.Add(CooldownQoderDaily))
 	}
 	until := acc.LastAttempt.Add(CooldownFor(acc))
 	// QuotaResetAt is an explicit deadline somebody recorded: the rate-limit
@@ -587,16 +529,10 @@ func AccountHeld(acc *store.Account, now time.Time) bool {
 // billing-cycle end into QuotaResetAt, the field a throttle also uses.
 func billingResetInQuotaField(acc *store.Account) bool {
 	switch strings.ToLower(strings.TrimSpace(accountType(acc))) {
-	case "workbuddy", "qoder":
+	case "workbuddy":
 		return true
 	}
 	return false
-}
-
-func isQoderDailyCount(acc *store.Account) bool {
-	return acc != nil && strings.EqualFold(acc.AccountType, "qoder") &&
-		strings.TrimSpace(acc.StatusCode) == "429" &&
-		strings.Contains(strings.ToLower(acc.StatusMessage), "billing daily count exceeded")
 }
 
 // CooldownFor returns the cooldown the account's current status implies.
@@ -608,9 +544,6 @@ func CooldownFor(acc *store.Account) time.Duration {
 	case "401":
 		return CredentialReverify
 	case "429":
-		if isQoderDailyCount(acc) {
-			return CooldownQoderDaily
-		}
 		return RateLimitCooldown(acc.RateLimitFailures)
 	case "402":
 		// WorkBuddy reaches this with a status only when its allowance is gone: a

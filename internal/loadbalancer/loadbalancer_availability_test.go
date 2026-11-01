@@ -51,19 +51,6 @@ func TestIsAccountAvailable_429UsesQuotaResetAt(t *testing.T) {
 	testutil.Falsef(t, !acc.QuotaResetAt.IsZero(), "expected quota reset timestamp to be cleared, got %v", acc.QuotaResetAt)
 }
 
-func TestIsAccountAvailable_LegacyQoder402ReachesModelFilter(t *testing.T) {
-	lb := &LoadBalancer{connTracker: NewMemoryConnTracker()}
-	acc := &store.Account{
-		ID:          1,
-		AccountType: "qoder",
-		StatusCode:  "402",
-		LastAttempt: time.Now().Add(-5 * time.Minute),
-	}
-
-	testutil.False(t, !lb.isAccountAvailable(context.Background(), acc), "expected legacy Qoder 402 account to reach the free-model filter")
-	testutil.Equal(t, acc.StatusCode, "402")
-}
-
 // TestIsAccountAvailable_WorkBuddyCreditExhaustionReachesModelFilter pins that
 // the dedicated spent-package state remains a candidate; the handler's
 // model-aware filter then admits only confirmed advertised free models.
@@ -98,17 +85,5 @@ func TestIsAccountAvailable_402KeepsLongCooldownForOtherChannels(t *testing.T) {
 		LastAttempt: time.Now().Add(-time.Hour),
 	}
 
-	testutil.False(t, lb.isAccountAvailable(context.Background(), acc), "expected non-Qoder 402 account to keep the long cooldown")
-}
-
-func TestQoderDailyCountLegacyBillingDateDoesNotBlockRecovery(t *testing.T) {
-	lb := &LoadBalancer{connTracker: NewMemoryConnTracker()}
-	acc := &store.Account{ID: 85, AccountType: "qoder", StatusCode: "429",
-		StatusMessage: "qoder daily request count is exceeded: Billing daily count exceeded",
-		LastAttempt:   time.Now().Add(-23 * time.Hour), QuotaResetAt: time.Now().Add(14 * 24 * time.Hour)}
-	testutil.False(t, lb.isAccountAvailable(context.Background(), acc))
-	acc.LastAttempt = time.Now().Add(-25 * time.Hour)
-	testutil.True(t, lb.isAccountAvailable(context.Background(), acc))
-	testutil.Equal(t, acc.StatusCode, "")
-	testutil.True(t, acc.QuotaResetAt.IsZero())
+	testutil.False(t, lb.isAccountAvailable(context.Background(), acc), "expected a 402 account to keep the long cooldown")
 }

@@ -12,7 +12,7 @@ const payload = {
   defaultProviderKey: 'workbuddy',
   providers: [
     { key: 'workbuddy', label: 'WorkBuddy' },
-    { key: 'qoder', label: 'Qoder' }, { key: 'cline', label: 'Cline' },
+    { key: 'cline', label: 'Cline' },
     { key: 'grok', label: 'Grok' },
   ],
 };
@@ -47,8 +47,8 @@ test('accounts and models consume the backend-fed provider registry', () => {
   assert.match(accounts, /OrchidsProviderRegistry\?\.keys/);
   assert.match(accounts, /OrchidsProviderRegistry\?\.providers/);
   assert.match(models, /OrchidsProviderRegistry\?\.channels/);
-  assert.doesNotMatch(accounts, /\["workbuddy", "qoder", "cline", "grok"\]/);
-  assert.doesNotMatch(models, /\["WorkBuddy", "Qoder", "Cline", "Grok"\]/);
+  assert.doesNotMatch(accounts, /\["workbuddy", "cline", "grok"\]/);
+  assert.doesNotMatch(models, /\["WorkBuddy", "Cline", "Grok"\]/);
 });
 
 test('all provider pages load the registry before page code', () => {

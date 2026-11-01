@@ -20,7 +20,7 @@ import (
 	"orchids-api/internal/testutil"
 )
 
-// planCooldownHandler builds the smallest live pool that can answer a Qoder
+// planCooldownHandler builds the smallest live pool that can answer a WorkBuddy
 // request: one enabled account carrying a cooldown for the requested model, and a
 // store that publishes that model.
 func planCooldownHandler(t *testing.T, model string, cool func(acc *store.Account)) (*Handler, func() int) {
@@ -31,12 +31,12 @@ func planCooldownHandler(t *testing.T, model string, cool func(acc *store.Accoun
 	t.Cleanup(func() { _ = s.Close() })
 
 	ctx := context.Background()
-	acc := &store.Account{Name: "qoder-1", AccountType: "qoder", QoderModelIDs: []string{model}, QoderRefreshToken: "rt", Enabled: true, Weight: 1}
+	acc := &store.Account{Name: "workbuddy-1", AccountType: "workbuddy", WorkBuddyModelIDs: []string{model}, WorkBuddyRefreshToken: "rt", Enabled: true, Weight: 1}
 	testutil.NoError(t, s.CreateAccount(ctx, acc), "CreateAccount() error = %v")
 	cool(acc)
 	testutil.NoError(t, s.UpdateAccount(ctx, acc), "UpdateAccount() error = %v")
 
-	publishModel(t, s, &store.Model{Channel: "Qoder", ModelID: model, BillingTier: "free", BillingSource: "qoder_price_factor"})
+	publishModel(t, s, &store.Model{Channel: "WorkBuddy", ModelID: model, BillingTier: "free", BillingSource: "upstream"})
 
 	h := NewWithLoadBalancer(&config.Config{DebugEnabled: false, RequestTimeout: 10, MaxRetries: 1}, loadbalancer.NewWithCacheTTL(s, 0))
 	// The count has to be read through a closure: returning the value once
@@ -60,7 +60,7 @@ func requestModel(t *testing.T, h *Handler, model string) *httptest.ResponseReco
 	}
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "http://x/qoder/v1/chat/completions", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "http://x/workbuddy/v1/chat/completions", bytes.NewReader(body))
 	h.HandleMessages(rec, req)
 	return rec
 }
@@ -69,8 +69,8 @@ func requestModel(t *testing.T, h *Handler, model string) *httptest.ResponseReco
 // that answered a plan verdict with "the requested model is temporarily
 // rate-limited".
 //
-// The cooldown was recorded by an entitlement refusal (Qoder business code 112:
-// the account's plan does not cover this model) and held for a day. The selection
+// The cooldown records an entitlement refusal: the account plan does not cover
+// this model, so availability is held for a day. The selection
 // layer could see the deadline but not the verdict behind it, so every request
 // for that model was answered with an invitation to retry a condition that no
 // amount of waiting changes.

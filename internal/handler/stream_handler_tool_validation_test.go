@@ -117,14 +117,12 @@ func assertToolCallSurvived(t *testing.T, h *streamHandler, wantName string) {
 	testutil.Falsef(t, got != "tool_use", "expected tool_use block, got %q", got)
 	got, _ = h.contentBlocks[0]["name"].(string)
 	testutil.Falsef(t, got != wantName, "expected tool name %s, got %q", wantName, got)
-	testutil.Equal(t, h.suppressedToolCalls, 0)
 }
 
 // assertToolCallSuppressed checks the call was dropped and the turn still ended.
 func assertToolCallSuppressed(t *testing.T, h *streamHandler, name string) {
 	t.Helper()
 	testutil.Equal(t, len(h.contentBlocks), 0)
-	testutil.Equal(t, h.suppressedToolCalls, 1)
 	testutil.Equal(t, h.finalStopReason, "end_turn")
 }
 
@@ -157,7 +155,7 @@ func TestTaskToolCall_IsRejectedWhenDelegatedToolsExceedAllowedSet(t *testing.T)
 	sendToolFinish(h)
 
 	testutil.Equal(t, len(h.contentBlocks), 0)
-	testutil.NotEqual(t, h.suppressedToolCalls, 0)
+	testutil.Equal(t, h.finalStopReason, "end_turn")
 }
 
 func TestSkillToolCall_IsAcceptedWhenClientDeclaredSkill(t *testing.T) {
@@ -205,6 +203,7 @@ func TestToolCallMissingID_IsSuppressed(t *testing.T) {
 	sendToolFinish(h)
 
 	testutil.Equal(t, len(h.contentBlocks), 0)
+	testutil.Equal(t, h.finalStopReason, "end_turn")
 }
 
 // newToolValidationHandler builds the non-stream handler these tool-call

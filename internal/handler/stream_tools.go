@@ -29,12 +29,6 @@ func (h *streamHandler) setAllowedToolNames(names []string) {
 	h.mu.Unlock()
 }
 
-func (h *streamHandler) setSurfaceToolRejects(surface bool) {
-	h.mu.Lock()
-	h.surfaceToolRejects = surface
-	h.mu.Unlock()
-}
-
 func (h *streamHandler) emitToolCallNonStream(call toolCall) {
 	h.addOutputTokens(call.name)
 	h.addOutputTokens(call.input)
@@ -127,18 +121,6 @@ func (h *streamHandler) shouldAcceptToolCall(call toolCall) bool {
 		name := strings.TrimSpace(call.name)
 		_, allowedTool = h.allowedToolNames[name]
 	}
-	if !allowedTool && h.surfaceToolRejects && h.emptyOutputFallback == "" {
-		h.emptyOutputFallback = "The upstream model attempted to use a tool that is not available in this request."
-	}
-	if disallowToolCalls && h.surfaceToolRejects && h.emptyOutputFallback == "" {
-		h.emptyOutputFallback = "This request did not provide a compatible tool for the attempted operation."
-	}
-	if disallowToolCalls {
-		h.suppressedToolCalls++
-	}
-	if !allowedTool {
-		h.suppressedToolCalls++
-	}
 	h.mu.Unlock()
 	if disallowToolCalls {
 		if h.config != nil && h.config.DebugEnabled {
@@ -154,12 +136,6 @@ func (h *streamHandler) shouldAcceptToolCall(call toolCall) bool {
 	}
 
 	if !validToolCallInput(call.name, call.input) {
-		h.mu.Lock()
-		h.suppressedToolCalls++
-		if h.surfaceToolRejects && h.emptyOutputFallback == "" {
-			h.emptyOutputFallback = "The upstream model returned an invalid tool request."
-		}
-		h.mu.Unlock()
 		if h.config != nil && h.config.DebugEnabled {
 			slog.Debug("invalid tool call suppressed", "input_bytes", len(call.input))
 		}

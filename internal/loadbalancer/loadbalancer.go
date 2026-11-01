@@ -26,7 +26,7 @@ const defaultCacheTTL = config.LoadBalancerCacheTTL
 // its client's side calls: with one slot the second concurrent request waits out
 // the whole reservation window and then fails as an overload, even though the
 // upstream account is healthy. Providers used to differ here (WorkBuddy 3, the
-// others 1, Qoder unlimited); they now share one explicit value so the pool's
+// others 1); they now share one explicit value so the pool's
 // capacity is a deliberate setting rather than a per-channel accident.
 const DefaultAccountConcurrency int64 = 10
 
@@ -124,13 +124,7 @@ func (lb *LoadBalancer) GetNextAccountExcludingByChannelWithTracker(ctx context.
 }
 
 func (lb *LoadBalancer) GetNextAccountExcludingByChannelWithTrackerFilter(ctx context.Context, excludeIDs []int64, channel string, tracker ConnTracker, filter AccountFilter) (*store.Account, error) {
-	return lb.GetNextAccountWithPreference(ctx, excludeIDs, channel, tracker, filter, 0)
-}
-
-// GetNextAccountWithPreference applies the normal eligibility and capacity
-// checks before honoring a conversation's preferred account.
-func (lb *LoadBalancer) GetNextAccountWithPreference(ctx context.Context, excludeIDs []int64, channel string, tracker ConnTracker, filter AccountFilter, preferredID int64) (*store.Account, error) {
-	return lb.getNextAccountWithPreference(ctx, excludeIDs, channel, tracker, filter, preferredID, nil)
+	return lb.getNextAccountWithFilter(ctx, excludeIDs, channel, tracker, filter, nil)
 }
 
 // PreparedAccountFilter batches request-scoped observations before filtering a
@@ -141,10 +135,10 @@ type PreparedAccountFilter struct {
 }
 
 func (lb *LoadBalancer) GetNextAccountWithPreparedFilter(ctx context.Context, excludeIDs []int64, channel string, tracker ConnTracker, filter PreparedAccountFilter) (*store.Account, error) {
-	return lb.getNextAccountWithPreference(ctx, excludeIDs, channel, tracker, filter.Match, 0, filter.Prepare)
+	return lb.getNextAccountWithFilter(ctx, excludeIDs, channel, tracker, filter.Match, filter.Prepare)
 }
 
-func (lb *LoadBalancer) getNextAccountWithPreference(ctx context.Context, excludeIDs []int64, channel string, tracker ConnTracker, filter AccountFilter, preferredID int64, prepare func([]*store.Account) error) (*store.Account, error) {
+func (lb *LoadBalancer) getNextAccountWithFilter(ctx context.Context, excludeIDs []int64, channel string, tracker ConnTracker, filter AccountFilter, prepare func([]*store.Account) error) (*store.Account, error) {
 	if ctx.Err() != nil {
 		return nil, context.Cause(ctx)
 	}
@@ -272,22 +266,6 @@ func (lb *LoadBalancer) getNextAccountWithPreference(ctx context.Context, exclud
 			filtered = append(filtered, acc)
 		}
 		return len(filtered) > 0
-	}
-	if preferredID != 0 {
-		for _, candidate := range accounts {
-			if candidate.ID == preferredID {
-				if scan([]*store.Account{candidate}) {
-					if selected := lb.selectAccountWithTracker(filtered, tracker); selected != nil {
-						return selected, nil
-					}
-				}
-				filtered = nil
-				if scanErr != nil {
-					return nil, scanErr
-				}
-				break
-			}
-		}
 	}
 	if !scan(scanned) && scanErr == nil && len(scanned) != len(accounts) {
 		// Nothing usable in this window: fall back to the whole pool once.
@@ -643,17 +621,6 @@ const (
 	retry403Grok = accountpolicy.CooldownBlockedGro
 )
 
-// qoderSpentProbeInterval is how often a spent Qoder account may be probed.
-//
-// A parked account stays admissible so it can recover on a free model, but not
-// on every request. Measured on 2026-11-01: a spent Free account was refused
-// (10605, RESOURCE_LIMIT) through two whole admission windows while a funded
-// account was admitted in one, and with 41 of 44 accounts parked the fallback
-// path re-hit the same spent accounts on every request. One probe per interval
-// keeps recovery possible without spending admission windows on accounts that
-// cannot answer.
-const qoderSpentProbeInterval = 10 * time.Minute
-
 func (lb *LoadBalancer) isAccountAvailable(ctx context.Context, acc *store.Account) bool {
 	if !store.AccountAuthActive(acc) {
 		return false
@@ -687,37 +654,6 @@ func (lb *LoadBalancer) isAccountAvailable(ctx context.Context, acc *store.Accou
 
 	now := time.Now()
 	switch status {
-	case store.AccountStatusQoderQuotaExhausted:
-		if !strings.EqualFold(strings.TrimSpace(acc.AccountType), "qoder") {
-			return false
-		}
-		// The exhausted verdict is a snapshot, not a fact about right now: it is
-		// written by a sync round (and now also by an in-band quota notice) and
-		// stays on the row until something refreshes it. Production held six
-		// accounts flagged 300/300 while the same accounts answered complete
-		// generations, so the flag must never be the only thing that decides.
-		//
-		// Two signals retire it. A newer snapshot that says the allowance is back
-		// is the obvious one. The second is the reset boundary: once the window
-		// the snapshot named has passed, the reading describes a window that no
-		// longer exists, and holding the account out on it meant it stayed parked
-		// until the next sync happened to notice the clock, not until the
-		// upstream said so.
-		if !acc.QoderQuota.Exhausted && acc.QoderQuota.Remaining > 0 {
-			lb.clearAccountStatus(ctx, acc, "Qoder 额度已刷新，恢复完整能力")
-		} else if reset := acc.QoderQuota.ResetAt; !reset.IsZero() &&
-			!now.Before(reset) && acc.QoderQuota.SyncedAt.Before(reset) {
-			// Only a snapshot taken *before* the boundary it names is stale. A
-			// reading taken after the reset and still reporting exhaustion is
-			// describing the current window, and clearing on it would route
-			// requests at an account the upstream just said was spent.
-			lb.clearAccountStatus(ctx, acc, "Qoder 额度窗口已重置，恢复完整能力")
-		}
-		// A spent account stays admissible so it can recover on a free model,
-		// but a spent account that was just probed is not a fallback: probing it
-		// again on this request spends an admission window on an account the
-		// upstream has already refused.
-		return acc.LastAttempt.IsZero() || now.Sub(acc.LastAttempt) >= qoderSpentProbeInterval
 	case store.AccountStatusWorkBuddyQuotaExhausted:
 		if !strings.EqualFold(strings.TrimSpace(acc.AccountType), "workbuddy") {
 			return false
@@ -741,13 +677,6 @@ func (lb *LoadBalancer) isAccountAvailable(ctx context.Context, acc *store.Accou
 		}
 		return false
 	case "402":
-		// Older Qoder rows used the generic 402 marker before free-only
-		// capability states existed. Admit them to the model-aware selector; that
-		// selector accepts only an explicitly free current catalog row. This also
-		// makes upgrades effective without rewriting Redis by hand.
-		if strings.EqualFold(strings.TrimSpace(acc.AccountType), "qoder") {
-			return true
-		}
 		// Paid Build exhaustion recovers at the billing period boundary rather
 		// than after an arbitrary 24-hour probe window.
 		if isPaidGrokBuildAccount(acc) {

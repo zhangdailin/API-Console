@@ -236,7 +236,7 @@ func TestResponsesBridgeForwardsTextFormatAndInclude(t *testing.T) {
 	body := `{"model":"gpt-5.6-luna","input":"hi","stream":true,` +
 		`"include":["reasoning.encrypted_content"],` +
 		`"text":{"format":{"type":"json_schema","name":"answer","schema":{"type":"object"}}}}`
-	req := httptest.NewRequest(http.MethodPost, "/qoder/v1/responses", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/workbuddy/v1/responses", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	bridge(rec, req)
 	testutil.Equal(t, rec.Code, http.StatusOK)

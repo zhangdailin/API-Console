@@ -86,10 +86,6 @@ func accountCredentialFields(acc *Account) []*string {
 		&acc.OAuthRefreshToken,
 		&acc.WorkBuddyAccessToken,
 		&acc.WorkBuddyRefreshToken,
-		&acc.QoderAccessToken,
-		&acc.QoderRefreshToken,
-		&acc.QoderRuntimeInfo,
-		&acc.QoderRuntimeKey,
 		&acc.ClineAccessToken,
 		&acc.ClineRefreshToken,
 	}

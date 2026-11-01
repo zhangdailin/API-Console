@@ -35,7 +35,7 @@ func TestResponsesBridgeStillRejectsUnservableToolTypes(t *testing.T) {
 }
 
 func TestResponsesBridgeRejectsClientToolFormatsBeforeUpstream(t *testing.T) {
-	for _, channel := range []string{"workbuddy", "qoder", "cline"} {
+	for _, channel := range []string{"workbuddy", "cline"} {
 		bridge := responses.ResponsesBridgeHandler(func(w http.ResponseWriter, r *http.Request) { t.Fatal("unsupported tool reached upstream") }, responses.BridgeOptions{})
 		for _, kind := range []string{"namespace", "custom", "apply_patch", "local_shell", "tool_search"} {
 			rec := httptest.NewRecorder()

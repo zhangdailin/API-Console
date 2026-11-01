@@ -58,37 +58,6 @@ type Config struct {
 	// stubbed upstream. Empty means the production international host.
 	WorkBuddyBaseURL string `json:"workbuddy_base_url,omitempty"`
 
-	// ── Qoder (qoder.com CLI device authorization) ──
-	// The Qoder CLI talks to three hosts. They are configurable so a deployment
-	// can point at a regional endpoint (for example the CN gateway) and so tests
-	// can stub the upstream.
-	//
-	//   QoderOAuthBaseURL   browser authorization page   (default https://qoder.com)
-	//   QoderOpenAPIBaseURL device token + profile API   (default https://openapi.qoder.sh)
-	//   QoderInferenceURL   chat completion endpoint     (default https://api2.qoder.sh)
-	QoderOAuthBaseURL   string `json:"qoder_oauth_base_url,omitempty"`
-	QoderOpenAPIBaseURL string `json:"qoder_openapi_base_url,omitempty"`
-	QoderInferenceURL   string `json:"qoder_inference_base_url,omitempty"`
-	// QoderClientID is the public OAuth client id of the Qoder CLI. It is not a
-	// secret, and it is configurable so a future CLI build can be followed
-	// without a code change.
-	QoderClientID string `json:"qoder_client_id,omitempty"`
-	// QoderClientVersion is sent as the user agent / Cosy-Version family value
-	// and appended to the login URL.
-	QoderClientVersion string `json:"qoder_client_version,omitempty"`
-	// QoderHTTP2Enabled makes the Qoder chat transport use HTTP/2, matching the
-	// official client's offer on the wire. It is off by default because HTTP/2
-	// multiplexes every chat request to the host over one connection, so a
-	// single reset there fails every in-flight request at once, and Go queues at
-	// the peer's stream limit instead of opening another connection. It was also
-	// measured *not* to be the cause of the queue refusals: HTTP/1.1, an
-	// explicit HTTP/2 transport and the default client all answered in the same
-	// 1.5-2.0s window, and the refusals appeared on all three.
-	QoderHTTP2Enabled bool `json:"qoder_http2_enabled,omitempty"`
-	// QoderQueueWindowRetryDisabled turns off retrying a low-priority queue
-	// refusal (10605, queueType p3/p4) at the gateway's per-minute admission
-	// window; such refusals then follow the generic shared-refusal wait.
-	QoderQueueWindowRetryDisabled bool `json:"qoder_queue_window_retry_disabled,omitempty"`
 	// NonStreamKeepAliveDisabled turns off whitespace keep-alives for
 	// non-streaming answers that take longer than a minute (see
 	// handler.nonStreamOpenAfter).

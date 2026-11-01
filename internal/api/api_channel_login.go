@@ -36,13 +36,9 @@ type browserLogin struct {
 // keeps its own, so codes and credentials can never cross authentication flows
 // and one channel's abandoned logins cannot use up another's admission limit.
 func newBrowserLoginRegistry(id channel.ID) *deviceLoginRegistry[browserLogin] {
-	ready := deviceLoginReady
-	if flow := loginFlow(id); flow != nil && !flow.NeedsDeviceCode {
-		ready = deviceLoginReadyWithoutCode
-	}
 	return newDeviceLoginRegistry(
 		func(login *browserLogin) *deviceLogin { return &login.deviceLogin },
-		ready, channelLabel(id)+" authorization expired")
+		deviceLoginReady, channelLabel(id)+" authorization expired")
 }
 
 // HandleWorkBuddyLogin starts and observes the official WorkBuddy browser
@@ -50,12 +46,6 @@ func newBrowserLoginRegistry(id channel.ID) *deviceLoginRegistry[browserLogin] {
 // middleware.
 func (a *API) HandleWorkBuddyLogin(w http.ResponseWriter, r *http.Request) {
 	a.handleBrowserLogin(w, r, channel.WorkBuddy, a.workbuddyLogins)
-}
-
-// HandleQoderLogin starts and observes the official Qoder device authorization
-// flow. It is registered behind the administrator session middleware.
-func (a *API) HandleQoderLogin(w http.ResponseWriter, r *http.Request) {
-	a.handleBrowserLogin(w, r, channel.Qoder, a.qoderLogins)
 }
 
 // HandleClineLogin starts and observes the official Cline device authorization

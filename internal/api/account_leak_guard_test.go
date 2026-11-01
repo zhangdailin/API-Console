@@ -24,10 +24,6 @@ var accountSecretFields = map[string]func(*store.Account) string{
 	"oauth_refresh_token":     func(a *store.Account) string { return a.OAuthRefreshToken },
 	"workbuddy_access_token":  func(a *store.Account) string { return a.WorkBuddyAccessToken },
 	"workbuddy_refresh_token": func(a *store.Account) string { return a.WorkBuddyRefreshToken },
-	"qoder_access_token":      func(a *store.Account) string { return a.QoderAccessToken },
-	"qoder_refresh_token":     func(a *store.Account) string { return a.QoderRefreshToken },
-	"qoder_runtime_info":      func(a *store.Account) string { return a.QoderRuntimeInfo },
-	"qoder_runtime_key":       func(a *store.Account) string { return a.QoderRuntimeKey },
 	"cline_access_token":      func(a *store.Account) string { return a.ClineAccessToken },
 	"cline_refresh_token":     func(a *store.Account) string { return a.ClineRefreshToken },
 }
@@ -46,9 +42,7 @@ func TestAccountSecretFieldsAreComplete(t *testing.T) {
 		GrokProvider GrokModels GrokModelCatalog GrokModelsSyncedAt GrokBilling
 		GrokRateLimits GrokFreeQuota ModelCooldowns ModelCooldownReasons
 		WorkBuddyExpiresAt WorkBuddyUID ReplaceWorkBuddyCredentials WorkBuddyModelIDs
-		WorkBuddyModelsSyncedAt WorkBuddyQuota WorkBuddyRestrictedUntil QoderExpiresAt ReplaceQoderCredentials
-		QoderMachineID QoderUserID QoderUserName QoderOrganizationID
-		QoderOrganizationTags QoderDataPolicy QoderRuntimeIdentity QoderModelIDs QoderModelsSyncedAt QoderQuota
+		WorkBuddyModelsSyncedAt WorkBuddyQuota WorkBuddyRestrictedUntil
 		ClineExpiresAt ClineEmail ClinePlan ReplaceClineCredentials ClineModelIDs
 		ClineModelsSyncedAt
 	`) {
@@ -97,7 +91,7 @@ func TestAccountSecretFieldsAreComplete(t *testing.T) {
 
 // accountChannels are the channels the account API serves. Every one of them goes
 // through the same projection, so the guard has to cover each.
-var accountChannels = []string{"grok", "workbuddy", "qoder", "cline"}
+var accountChannels = []string{"grok", "workbuddy", "cline"}
 
 // marker prefixes every planted secret so one substring search can find all of
 // them in the rendered JSON, whatever the field name became on the wire.
@@ -149,10 +143,6 @@ var accountSecretSetter = map[string]func(*store.Account, string){
 	"workbuddy_refresh_token": func(a *store.Account, v string) {
 		a.WorkBuddyRefreshToken = v
 	},
-	"qoder_access_token":  func(a *store.Account, v string) { a.QoderAccessToken = v },
-	"qoder_refresh_token": func(a *store.Account, v string) { a.QoderRefreshToken = v },
-	"qoder_runtime_info":  func(a *store.Account, v string) { a.QoderRuntimeInfo = v },
-	"qoder_runtime_key":   func(a *store.Account, v string) { a.QoderRuntimeKey = v },
 	"cline_access_token":  func(a *store.Account, v string) { a.ClineAccessToken = v },
 	"cline_refresh_token": func(a *store.Account, v string) { a.ClineRefreshToken = v },
 }
@@ -186,7 +176,7 @@ func TestAccountResponsesNeverCarryCredentials(t *testing.T) {
 // rather than merely empty, so a client cannot distinguish "no credential" from
 // "credential withheld" by key presence.
 func TestAccountResponsesHideCredentialKeys(t *testing.T) {
-	acc := accountWithSecrets("qoder")
+	acc := accountWithSecrets("cline")
 	raw, err := json.Marshal(normalizeAccountOutput(acc))
 	testutil.NoError(t, err, "marshal account output: %v")
 	var row map[string]any

@@ -177,58 +177,6 @@ type Account struct {
 	// the consumption delta the account table shows).
 	WorkBuddyQuota WorkBuddyQuotaSnapshot `json:"workbuddy_quota"`
 
-	// ── Qoder (qoder.com / openapi.qoder.sh) OAuth channel ──
-	//
-	// A Qoder account is created only through the official CLI device
-	// authorization flow: there is no pasted personal access token. The device
-	// access token is short lived, the device refresh token is the durable
-	// credential and is rotated by the upstream on every refresh, so the rotated
-	// value must be written back. They live in their own fields rather than the
-	// generic Token/RefreshToken slots so account responses can redact them
-	// without touching another channel's credential.
-	QoderAccessToken        string    `json:"qoder_access_token,omitempty"`
-	QoderRefreshToken       string    `json:"qoder_refresh_token,omitempty"`
-	QoderExpiresAt          time.Time `json:"qoder_expires_at"`
-	ReplaceQoderCredentials bool      `json:"-"`
-	// QoderMachineID is the 36-character device identity the CLI sends as
-	// Cosy-MachineId / Cosy-MachineToken. It is bound to the credential: the
-	// upstream rejects a request whose machine id does not match the one that
-	// performed the login.
-	QoderMachineID string `json:"qoder_machine_id,omitempty"`
-	QoderUserID    string `json:"qoder_user_id,omitempty"`
-	QoderUserName  string `json:"qoder_user_name,omitempty"`
-	// QoderOrganizationID and QoderOrganizationTags come from the post-login
-	// userinfo enrichment. They are optional headers: an empty value omits the
-	// corresponding Cosy-Organization-* header entirely.
-	QoderOrganizationID   string   `json:"qoder_organization_id,omitempty"`
-	QoderOrganizationTags []string `json:"qoder_organization_tags,omitempty"`
-	// QoderDataPolicy is the data-policy agreement the CLI recorded. Empty means
-	// "not observed"; the client then reports `disagree`.
-	QoderDataPolicy bool `json:"qoder_data_policy,omitempty"`
-	// QoderRuntimeInfo and QoderRuntimeKey are the derived authentication pair
-	// the gateway requires (the COSY payload's `info` and the Cosy-Key header).
-	// They are derived from the credential and the identity, not supplied by the
-	// operator, and they are reused across requests exactly as the CLI reuses
-	// the pair it derived at login.
-	QoderRuntimeInfo string `json:"qoder_runtime_info,omitempty"`
-	QoderRuntimeKey  string `json:"qoder_runtime_key,omitempty"`
-	// QoderRuntimeIdentity is a digest of the identity the stored pair encrypts.
-	// The pair itself cannot be decrypted locally, so this is how a rebuilt
-	// client tells whether the stored pair still describes the account before
-	// reusing it instead of deriving new device material.
-	QoderRuntimeIdentity string `json:"qoder_runtime_identity,omitempty"`
-	// QoderModelIDs is the last successful account-scoped model catalog
-	// snapshot. An empty snapshot means "not synced yet", not that the account
-	// supports every model.
-	QoderModelIDs       []string  `json:"qoder_model_ids,omitempty"`
-	QoderModelsSyncedAt time.Time `json:"qoder_models_synced_at"`
-	// QoderQuota is the last successful credit/plan snapshot. The generic
-	// UsageLimit/UsageCurrent fields stay authoritative for scheduling; this keeps
-	// the extra detail the gateway reports (plan tier, the exhausted verdict and
-	// the upgrade link) so the console can explain an account instead of showing
-	// it as broken.
-	QoderQuota QoderQuotaSnapshot `json:"qoder_quota"`
-
 	// ── Cline (api.cline.bot) OAuth channel ──
 	//
 	// A Cline account is created only through the official WorkOS device
@@ -263,14 +211,11 @@ type Account struct {
 	ClineModelsSyncedAt time.Time `json:"cline_models_synced_at"`
 }
 
-// Qoder quota exhaustion is a capability downgrade when, and only when, the
+// WorkBuddy quota exhaustion is a capability downgrade when, and only when, the
 // requested route is explicitly marked free by the current upstream catalog.
 // The selector keeps these accounts in the pool but its model filter rejects
 // every metered or unknown route.
-const (
-	AccountStatusQoderQuotaExhausted     = "qoder_quota_exhausted"
-	AccountStatusWorkBuddyQuotaExhausted = "workbuddy_quota_exhausted"
-)
+const AccountStatusWorkBuddyQuotaExhausted = "workbuddy_quota_exhausted"
 
 const (
 	AccountAuthStatusActive         = "active"
@@ -327,27 +272,6 @@ type GrokCredentialPatch struct {
 	UserID, Email, Name, TeamID string
 }
 
-// QoderAccountPatch contains the independently refreshed Qoder client state.
-// Nil slices mean "not changed"; the remaining zero values keep the stored
-// value, matching the provider's rotated-credential semantics.
-type QoderAccountPatch struct {
-	ExpectedRefreshToken string
-	AccessToken          string
-	RefreshToken         string
-	ExpiresAt            time.Time
-	UserID               string
-	RuntimeInfo          string
-	RuntimeKey           string
-	RuntimeIdentity      string
-	ModelIDs             []string
-	// Quota carries a reading the upstream stated in band — a quota_exceeded
-	// notice multiplexed into a stream — rather than one a sync round fetched.
-	// It goes through the same freshness guard as a synced snapshot so a notice
-	// racing a login or a manual sync cannot rewind the account's view of its
-	// own allowance.
-	Quota *QoderQuotaSnapshot
-}
-
 // ClineCredentialPatch contains the independently refreshed Cline client state.
 // Nil slices mean "not changed"; the remaining zero values keep the stored
 // value, matching the provider's rotated-credential semantics.
@@ -366,7 +290,6 @@ type accountStore interface {
 	UpdateAccountQuality(ctx context.Context, id int64, failures int, cooldownUntil time.Time, reason string) error
 	ApplyAccountQuality(ctx context.Context, id int64, update AccountQualityUpdate) (AccountQualityResult, error)
 	UpdateWorkBuddyCredentials(ctx context.Context, id int64, patch WorkBuddyCredentialPatch) error
-	UpdateQoderAccount(ctx context.Context, id int64, patch QoderAccountPatch) error
 	UpdateClineCredentials(ctx context.Context, id int64, patch ClineCredentialPatch) error
 	UpdateGrokCredentials(ctx context.Context, id int64, patch GrokCredentialPatch) error
 	DeleteAccount(ctx context.Context, id int64) error
@@ -529,13 +452,6 @@ func (s *Store) UpdateWorkBuddyCredentials(ctx context.Context, id int64, patch 
 	return fmt.Errorf("store not configured")
 }
 
-func (s *Store) UpdateQoderAccount(ctx context.Context, id int64, patch QoderAccountPatch) error {
-	if s.accounts != nil {
-		return s.accounts.UpdateQoderAccount(ctx, id, patch)
-	}
-	return fmt.Errorf("store not configured")
-}
-
 // UpdateClineCredentials persists a rotated Cline credential atomically.
 func (s *Store) UpdateClineCredentials(ctx context.Context, id int64, patch ClineCredentialPatch) error {
 	if s.accounts != nil {
@@ -649,10 +565,6 @@ func (a *Account) Secrets() []string {
 		a.OAuthRefreshToken,
 		a.WorkBuddyAccessToken,
 		a.WorkBuddyRefreshToken,
-		a.QoderAccessToken,
-		a.QoderRefreshToken,
-		a.QoderRuntimeInfo,
-		a.QoderRuntimeKey,
 		a.ClineAccessToken,
 		a.ClineRefreshToken,
 	}

@@ -254,8 +254,6 @@ test('sidebar and account rows use the same quota even when older counters disag
     { account: { account_type: 'cline', enabled: true, has_credential: true,
       quota_supported: true, quota_limit: 1000, quota_remaining: 0,
       status_code: 'cline_quota_exhausted' }, remaining: 0, exhausted: true },
-    { account: { account_type: 'qoder', enabled: true, has_credential: true,
-      quota_supported: true, quota_limit: 0, quota_remaining: 0 }, remaining: 0, exhausted: true },
   ];
   for (const { account, remaining, exhausted } of cases) {
     assert.deepEqual(JSON.parse(JSON.stringify(sidebar.getQuotaStats(account))),

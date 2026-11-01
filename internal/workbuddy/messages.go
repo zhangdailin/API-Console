@@ -290,7 +290,7 @@ func normalizeToolChoice(choice any) string {
 
 // normalizeToolDefinitions renders the OpenAI function envelope for the tool
 // declarations the gateway forwards. It is the shared implementation in
-// internal/util: WorkBuddy, Qoder and Cline all need the same envelope.
+// internal/util: WorkBuddy and Cline both need the same envelope.
 func normalizeToolDefinitions(tools []any) []any {
 	return util.NormalizeToolDefinitions(tools)
 }

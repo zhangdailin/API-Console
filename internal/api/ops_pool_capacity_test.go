@@ -16,7 +16,7 @@ func TestOpsPoolCapacityUsesAvailableAccountsAndEffectiveLimits(t *testing.T) {
 		{ID: 2, AccountType: "cline", Enabled: true, MaxConcurrent: 3},
 		{ID: 3, AccountType: "cline", Enabled: true, StatusCode: "401", LastAttempt: time.Now()},
 		{ID: 4, AccountType: "cline", Enabled: false},
-		{ID: 5, AccountType: "qoder", Enabled: true},
+		{ID: 5, AccountType: "workbuddy", Enabled: true},
 	}
 	capacity := opsPoolCapacity(accounts, map[int64]int64{1: 2, 2: 1, 3: 4, 4: 5, 5: 6}, "cline")
 	if capacity["capacity_slots"] != int64(13) || capacity["occupied_slots"] != int64(3) || capacity["capacity_available"] != true {

@@ -23,7 +23,7 @@ func TestInferenceBudgetUsesSelectedProfile(t *testing.T) {
 					<-r.Context().Done()
 					testutil.Equal(t, context.Cause(r.Context()), error(context.DeadlineExceeded))
 				}, func() *config.Config { return cfg })
-				h(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/qoder/v1/chat/completions", nil))
+				h(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/workbuddy/v1/chat/completions", nil))
 				testutil.Equal(t, time.Since(started), cfg.InferencePolicy().FirstGeneration)
 			})
 		})

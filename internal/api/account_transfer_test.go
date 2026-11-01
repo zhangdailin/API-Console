@@ -41,7 +41,7 @@ func TestAccountBackupRejectsGenericCredentialSlots(t *testing.T) {
 	a, s := transferAPI(t, 3)
 	backup := ExportData{Version: 1, Accounts: []store.Account{
 		{AccountType: "workbuddy", Token: "access", RefreshToken: "refresh"},
-		{AccountType: "qoder", ClientCookie: `{"accessToken":"access","refreshToken":"refresh","machineId":"device"}`},
+		{AccountType: "cline", ClientCookie: `{"accessToken":"access","refreshToken":"refresh"}`},
 	}}
 	body, err := json.Marshal(backup)
 	if err != nil {
@@ -56,13 +56,12 @@ func TestAccountBackupRejectsGenericCredentialSlots(t *testing.T) {
 		t.Fatalf("rows=%d err=%v", len(rows), err)
 	}
 }
-func TestAccountBackupRestoresFourChannelsAcrossEncryptionKeys(t *testing.T) {
+func TestAccountBackupRestoresEveryChannelAcrossEncryptionKeys(t *testing.T) {
 	source, s := transferAPI(t, 1)
 	target, destination := transferAPI(t, 2)
 	expires := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
 	rows := []store.Account{
 		{AccountType: "workbuddy", WorkBuddyAccessToken: "wb-access", WorkBuddyRefreshToken: "wb-refresh", WorkBuddyUID: "wb-uid", WorkBuddyExpiresAt: expires},
-		{AccountType: "qoder", QoderAccessToken: "q-access", QoderRefreshToken: "q-refresh", QoderUserID: "q-user", QoderMachineID: "q-device", QoderRuntimeInfo: "q-runtime", QoderRuntimeKey: "q-key", QoderExpiresAt: expires, QoderModelIDs: []string{"model-a"}},
 		{AccountType: "cline", ClineAccessToken: "c-access", ClineRefreshToken: "c-refresh", ClineEmail: "test@example.com", ClineExpiresAt: expires},
 		{AccountType: "grok", CredentialType: "oauth", GrokProvider: "build", OAuthAccessToken: "g-access", OAuthRefreshToken: "g-refresh", UserID: "g-user", OAuthExpiresAt: expires},
 	}
@@ -91,7 +90,7 @@ func TestAccountBackupRestoresFourChannelsAcrossEncryptionKeys(t *testing.T) {
 		}
 	}
 	result := importBackup(t, target, w.Body.Bytes())
-	if result.Imported != 4 || result.Skipped != 0 {
+	if result.Imported != 3 || result.Skipped != 0 {
 		t.Fatalf("result: %+v", result)
 	}
 	restored, err := destination.ListAccounts(t.Context())
@@ -111,12 +110,8 @@ func TestAccountBackupRestoresFourChannelsAcrossEncryptionKeys(t *testing.T) {
 			t.Fatalf("credential or identity lost: %s", original.AccountType)
 		}
 	}
-	q := byChannel["qoder"]
-	if q.QoderMachineID != "q-device" || q.QoderRuntimeInfo != "q-runtime" || q.QoderRuntimeKey != "q-key" || !q.QoderExpiresAt.Equal(expires) || len(q.QoderModelIDs) != 1 {
-		t.Fatal("Qoder recovery material lost")
-	}
 	again := importBackup(t, target, w.Body.Bytes())
-	if again.Imported != 0 || again.Duplicates != 4 {
+	if again.Imported != 0 || again.Duplicates != 3 {
 		t.Fatalf("repeat import duplicated rows: %+v", again)
 	}
 	backup.Accounts[0].Name = "do not overwrite"
@@ -127,11 +122,11 @@ func TestAccountBackupRestoresFourChannelsAcrossEncryptionKeys(t *testing.T) {
 	}
 	encoded, _ := json.Marshal(backup)
 	again = importBackup(t, target, encoded)
-	if again.Duplicates != 4 {
+	if again.Duplicates != 3 {
 		t.Fatal("stable identity not detected")
 	}
 	restored, _ = destination.ListAccounts(t.Context())
-	if len(restored) != 4 {
+	if len(restored) != 3 {
 		t.Fatal("duplicate rows inserted")
 	}
 }
@@ -144,7 +139,7 @@ func TestAccountImportRejectsInvalidFilesAndReportsInvalidRows(t *testing.T) {
 			t.Fatalf("invalid file accepted: %d", w.Code)
 		}
 	}
-	body := []byte(`{"version":1,"accounts":[{"account_type":"workbuddy"},{"account_type":"qoder","qoder_refresh_token":"refresh"},{"account_type":"cline"},{"account_type":"grok","token":"retired-cookie"},{"account_type":"warp"}]}`)
+	body := []byte(`{"version":1,"accounts":[{"account_type":"workbuddy"},{"account_type":"retired","refresh_token":"refresh"},{"account_type":"cline"},{"account_type":"grok","token":"retired-cookie"},{"account_type":"warp"}]}`)
 	result := importBackup(t, a, body)
 	if result.Invalid != 5 || result.Imported != 0 || len(result.Issues) != 5 {
 		t.Fatalf("invalid credentials accepted: %+v", result)

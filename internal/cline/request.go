@@ -54,12 +54,6 @@ type chatPayload struct {
 	defaultMaxTokens bool
 }
 
-// buildChatBody renders one chat request.
-func buildChatBody(req upstream.UpstreamRequest, model string) ([]byte, error) {
-	payload, err := buildChatPayload(req, model)
-	return payload.body, err
-}
-
 // buildChatPayload renders one chat request and records the rewrites the
 // response side has to reverse.
 func buildChatPayload(req upstream.UpstreamRequest, model string) (chatPayload, error) {

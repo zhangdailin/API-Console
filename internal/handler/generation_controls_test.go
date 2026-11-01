@@ -5,7 +5,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"encoding/json"
 	"orchids-api/internal/config"
@@ -18,9 +17,9 @@ func TestGenerationControlsReachUpstream(t *testing.T) {
 		limit            int
 		stop             string
 	}{
-		{"anthropic", "/qoder/v1/messages", `{"model":"m","messages":[{"role":"user","content":"hi"}],"max_tokens":12,"temperature":0,"top_p":0.5,"stop_sequences":["END"]}`, 12, "END"},
-		{"chat-string", "/qoder/v1/chat/completions", `{"model":"m","messages":[{"role":"user","content":"hi"}],"max_tokens":12,"max_completion_tokens":7,"temperature":0,"top_p":0.5,"stop":"STOP"}`, 7, "STOP"},
-		{"chat-array", "/qoder/v1/chat/completions", `{"model":"m","messages":[{"role":"user","content":"hi"}],"max_tokens":0,"temperature":0,"top_p":0.5,"stop":["END"]}`, 0, "END"},
+		{"anthropic", "/workbuddy/v1/messages", `{"model":"m","messages":[{"role":"user","content":"hi"}],"max_tokens":12,"temperature":0,"top_p":0.5,"stop_sequences":["END"]}`, 12, "END"},
+		{"chat-string", "/workbuddy/v1/chat/completions", `{"model":"m","messages":[{"role":"user","content":"hi"}],"max_tokens":12,"max_completion_tokens":7,"temperature":0,"top_p":0.5,"stop":"STOP"}`, 7, "STOP"},
+		{"chat-array", "/workbuddy/v1/chat/completions", `{"model":"m","messages":[{"role":"user","content":"hi"}],"max_tokens":0,"temperature":0,"top_p":0.5,"stop":["END"]}`, 0, "END"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := NewWithLoadBalancer(&config.Config{RequestTimeout: 10}, nil)
@@ -51,19 +50,12 @@ func TestGenerationControlsOmittedAndInvalid(t *testing.T) {
 	testutil.Error(t, err)
 }
 
-func TestQoderSharedRefusalPreservesFullHintOnlyForQoder(t *testing.T) {
-	for _, retry := range []int{1, 2, 3, 4} {
-		testutil.Equal(t, sharedRefusalWaitForChannel(30*time.Second, retry, "Qoder", "rate_limit"), 30*time.Second)
-		testutil.Equal(t, sharedRefusalWaitForChannel(30*time.Second, retry, "workbuddy", "rate_limit"), sharedRefusalWait(30*time.Second, retry))
-	}
-}
-
 func TestCountTokensIncludesEntireRequest(t *testing.T) {
 	h := NewWithLoadBalancer(&config.Config{}, nil)
 	count := func(body string) int {
 		t.Helper()
 		rec := httptest.NewRecorder()
-		h.HandleCountTokens(rec, httptest.NewRequest(http.MethodPost, "/qoder/v1/messages/count_tokens", strings.NewReader(body)))
+		h.HandleCountTokens(rec, httptest.NewRequest(http.MethodPost, "/workbuddy/v1/messages/count_tokens", strings.NewReader(body)))
 		var got struct {
 			InputTokens int `json:"input_tokens"`
 		}

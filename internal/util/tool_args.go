@@ -11,8 +11,8 @@ import (
 // Anthropic `{"name", "input_schema", "description"}` shape. Anything that is
 // not a JSON object is dropped, as is a declaration with no name.
 //
-// It lives here because the Qoder, WorkBuddy and Cline request builders all
-// need the same envelope and each used to carry their own copy. It always
+// It lives here because the WorkBuddy and Cline request builders both need the
+// same envelope and each used to carry its own copy. It always
 // returns a non-nil slice: callers differ only in what an empty result means,
 // and each keeps that decision to itself.
 func NormalizeToolDefinitions(tools []any) []any {

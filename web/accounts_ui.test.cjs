@@ -124,8 +124,7 @@ function loadUI({ deferTimers = false, accountsPayload = [] } = {}) {
   context.fetch = async (url, options = {}) => {
     requests.push({ url: String(url), method: options.method || 'GET' });
     if (url === '/api/providers') return { ok: true, json: async () => ({ defaultProviderKey:'workbuddy', providers:[
-      {key:'workbuddy',label:'WorkBuddy'},
-      {key:'qoder',label:'Qoder'},{key:'cline',label:'Cline'},{key:'grok',label:'Grok'},
+      {key:'workbuddy',label:'WorkBuddy'},{key:'cline',label:'Cline'},{key:'grok',label:'Grok'},
     ]}) };
     return { ok: true, status: 200, headers: { get: () => 'application/json' },
       json: async () => url === '/api/accounts' ? accountsPayload : [] };
@@ -166,7 +165,6 @@ const LOGIN_PLATFORMS = [
   { key: 'grok', label: 'Grok', group: 'grokDeviceLoginGroup' },
   { key: 'cline', label: 'Cline', group: 'clineLoginGroup' },
   { key: 'workbuddy', label: 'WorkBuddy', group: 'workbuddyLoginGroup' },
-  { key: 'qoder', label: 'Qoder', group: 'qoderLoginGroup' },
 ];
 
 for (const { key, label } of LOGIN_PLATFORMS) {
@@ -268,8 +266,8 @@ test('loading accounts stays read-only after scheduled callbacks run', async () 
   const { context, node, requests, runTimers } = loadUI({ deferTimers: true, accountsPayload });
   await context.loadAccounts();
   assert.deepEqual(requests, [{ url: '/api/accounts', method: 'GET' }]);
-  assert.equal(vm.runInContext('accounts.length', context), 4);
-  assert.equal(node('totalAccounts').textContent, 4, 'the real stats/render path must run');
+  assert.equal(vm.runInContext('accounts.length', context), 3);
+  assert.equal(node('totalAccounts').textContent, 3, 'the real stats/render path must run');
   await runTimers();
   assert.deepEqual(requests, [{ url: '/api/accounts', method: 'GET' }], 'timer execution must not issue any upstream work');
   assert.equal(requests.some(({ url }) => /\/(?:check|refresh)(?:[/?]|$)/.test(url)), false);
@@ -397,22 +395,6 @@ test('WorkBuddy rows show the metered credits, plan label and signed-in email', 
   assert.doesNotMatch(tokenCell, /workbuddy_refresh_token/);
 });
 
-test('WorkBuddy and Qoder share snapshot parsing without mixing spent-credit semantics', () => {
-  const { context } = loadUI();
-  const fields = { quota_supported: true, quota_limit: 350, quota_remaining: 120.5,
-    quota_used: 19.25, quota_unit: 'credit', quota_reset_at: '2027-01-01T00:00:00Z' };
-  const workbuddy = context.getQuotaStats(workBuddyAccount(fields));
-  const qoder = context.getQuotaStats(qoderTrialAccount({ ...fields, quota_exhausted: true,
-    quota_upgrade_url: ' https://qoder.com/upgrade ' }));
-  assert.equal(workbuddy.used, 229.5, 'WorkBuddy spent amount derives from the remaining meter');
-  assert.equal(qoder.used, 19.25, 'Qoder spent amount comes from quota_used');
-  assert.equal(workbuddy.workbuddy, true);
-  assert.equal(qoder.qoder, true);
-  assert.equal(qoder.exhausted, true);
-  assert.equal(qoder.upgradeUrl, 'https://qoder.com/upgrade');
-  assert.equal(workbuddy.resetAt, qoder.resetAt);
-});
-
 test('estimated and upstream-confirmed Grok Free windows retain distinct provenance', () => {
   const { context } = loadUI();
   const base = { account_type: 'grok', credential_type: 'oauth', grok_provider: 'build',
@@ -439,7 +421,6 @@ test('official-login cleanup stops each provider and hides its own status and li
   const calls = [];
   for (const [provider, stop, status, link] of [
     ['WorkBuddyLogin', 'stopWorkBuddyLogin', 'workbuddyLoginStatus', ''],
-    ['QoderLogin', 'stopQoderLogin', 'qoderLoginStatus', 'qoderLoginLink'],
     ['ClineLogin', 'stopClineLogin', 'clineLoginStatus', 'clineLoginLink'],
   ]) {
     context[provider] = { stop: () => calls.push(provider) };
@@ -451,20 +432,19 @@ test('official-login cleanup stops each provider and hides its own status and li
     assert.equal(node(status).textContent, '');
     if (link) assert.equal(node(link).hidden, true);
   }
-  assert.deepEqual(calls, ['WorkBuddyLogin', 'QoderLogin', 'ClineLogin']);
+  assert.deepEqual(calls, ['WorkBuddyLogin', 'ClineLogin']);
 });
 
 test('shared login action only starts the provider shown in the account modal', () => {
   const { context, node } = loadUI();
   const starts = [];
   context.WorkBuddyLogin = { start: () => starts.push('workbuddy') };
-  context.QoderLogin = { start: () => starts.push('qoder') };
   context.ClineLogin = { start: () => starts.push('cline') };
-  node('accountType').value = 'qoder';
+  node('accountType').value = 'cline';
   context.startOfficialLogin('workbuddy');
-  context.startOfficialLogin('qoder');
+  context.startOfficialLogin('cline');
   context.startOfficialLogin('unknown');
-  assert.deepEqual(starts, ['qoder']);
+  assert.deepEqual(starts, ['cline']);
 });
 
 test('batch deletion reports partial failure and suppresses a second submission', async () => {
@@ -551,35 +531,6 @@ test('WorkBuddy keeps operator-facing server errors and original terminal messag
   assert.match(source, /failed: 'WorkBuddy 授权失败，请重新发起登录。'/);
   assert.match(source, /expired: 'WorkBuddy 授权已超时，请重新发起登录。'/);
   assert.match(fs.readFileSync(path.join(__dirname, 'static/js/device-auth.js'), 'utf8'), /readErrorPayload\(response\)/);
-});
-
-test('Qoder is OAuth-only in the modal: no manual credential field and no PAT entry', () => {
-  const { context, node } = loadUI();
-  vm.runInContext('globalThis.QoderLogin = { start() {}, stop() {} };', context);
-  node('accountModal').classList = { add() {}, remove() {}, toggle() {}, contains() { return true; } };
-  node('accountId').value = '';
-  node('enabled').checked = true;
-  context.filterByPlatform('qoder');
-  context.openModal();
-
-  assert.equal(node('accountType').value, 'qoder', 'modal type');
-  assert.equal(node('accountTypeDisplay').value, 'Qoder', 'modal type label');
-  assert.equal(node('qoderLoginGroup').hidden, false, 'the qoder login must be visible');
-  assert.equal(node('workbuddyLoginGroup').hidden, true, 'the workbuddy login must stay hidden');
-  // The channel is OAuth-only: there must be no credential field to type a PAT
-  // into, and no submit button for a new account.
-  assert.equal(node('#accountForm button[type="submit"]').hidden, true, 'new Qoder account uses official login');
-});
-
-test('the qoder-auth module drives the server flow without carrying credentials', () => {
-  const source = fs.readFileSync(path.join(__dirname, 'static/js/qoder-auth.js'), 'utf8');
-  assert.match(source, /api\/qoder\/login/);
-  assert.match(source, /DeviceAuthLogin/);
-  assert.match(source, /qoder_login_v1/);
-  // The channel is OAuth-only: no PAT field, no token persistence, no cookies.
-  assert.doesNotMatch(source, /personal_token/i);
-  assert.doesNotMatch(source, /localStorage\.setItem\([^)]*token/i);
-  assert.doesNotMatch(source, /document\.cookie/);
 });
 
 test('the shared device-auth driver reserves the popup before its first await', () => {
@@ -681,109 +632,12 @@ test('the session fingerprint never exposes the credential', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Qoder account row: 等级 / 配额 / 状态 must all render.
 //
-// A Qoder "Pro Trial" fixture has a daily credit window, and the
 // allowance is reported by the channel's quota read. Before these cases the row
 // was blank because the channel was not in any of the renderer's branches: 等级
 // fell through to a generic badge, 配额 read the generic usage columns (which are
 // 0 for this channel) and 状态 had no label mapping.
 // ---------------------------------------------------------------------------
-
-function qoderTrialAccount(overrides = {}) {
-  return {
-    account_type: 'qoder',
-    enabled: true,
-    name: 'trial-user@example.com',
-    email: 'trial-user@example.com',
-    qoder_user_id: '00000000-0000-4000-8000-000000000001',
-    qoder_access_token: 'eyJhbGciOi.access.token',
-    has_credential: true,
-    quota_supported: true,
-    quota_plan: 'Pro Trial',
-    plan_name: 'Pro Trial',
-    plan_tier: 'paid',
-    quota_unit: 'credits',
-    quota_limit: 300,
-    quota_remaining: 300,
-    quota_used: 0,
-    quota_exhausted: false,
-    quota_upgrade_url: 'https://qoder.com/pricing?client=qoder',
-    quota_reset_at: '2026-09-14T19:47:13Z',
-    ...overrides,
-  };
-}
-
-test('a Qoder trial account renders 等级, 配额 and 状态 instead of blank cells', () => {
-  const { context } = loadUI();
-  const account = qoderTrialAccount();
-
-  // 等级 comes from the plan tier the channel reports.
-  const tier = context.buildSubscriptionMarkup(account);
-  assert.match(tier, /Pro Trial/, `tier markup was ${tier}`);
-
-  // 配额 shows the remaining share of the window, not the generic usage columns.
-  const quota = context.getQuotaStats(account);
-  assert.equal(quota.remaining, 300, 'the remaining allowance must be read from the quota fields');
-  assert.equal(quota.limit, 300);
-  const quotaMarkup = context.buildQuotaMarkup(account);
-  assert.equal(quota.used, 0);
-  assert.equal(quota.pctRemaining, 100);
-  assert.equal(strip(quotaMarkup), '300 / 300 (剩余)');
-
-  // 状态 must be a real label, not the fallback.
-  const badge = context.statusBadge(account);
-  assert.equal(badge.text, '正常');
-});
-
-test('a Qoder account with no quota snapshot says so instead of showing zero', () => {
-  const { context } = loadUI();
-  const account = qoderTrialAccount({
-    quota_supported: false,
-    quota_plan: '',
-    plan_name: '',
-    plan_tier: 'unsynced',
-    quota_limit: 0,
-    quota_remaining: 0,
-  });
-
-  const quota = context.getQuotaStats(account);
-  assert.equal(quota.unknown, true, 'a missing snapshot must be reported as unknown, not as 0');
-  assert.match(context.buildQuotaMarkup(account), /未知/);
-  assert.match(context.buildSubscriptionMarkup(account), /未同步|未知/);
-});
-
-test('an exhausted Qoder account shows the reset and the upgrade link, not an error', () => {
-  const { context } = loadUI();
-  const account = qoderTrialAccount({
-    status_code: '402',
-    quota_remaining: 0,
-    quota_used: 300,
-    quota_exhausted: true,
-  });
-
-  // 402 is a quota state: the row must stay readable and say what to do.
-  const badge = context.statusBadge(account);
-  assert.equal(badge.text, '额度不足');
-  const quotaMarkup = context.buildQuotaMarkup(account);
-  assert.equal(strip(quotaMarkup), '0 / 300 (剩余)');
-  const quota = context.getQuotaStats(account);
-  assert.equal(quota.remaining, 0);
-  assert.equal(quota.limit, 300);
-  assert.equal(quota.used, 300);
-  assert.equal(quota.pctRemaining, 0);
-  assert.equal(quota.resetAt, account.quota_reset_at);
-  assert.equal(quota.upgradeUrl, account.quota_upgrade_url);
-});
-
-test('the Qoder identity column leads with the signed-in address', () => {
-  const { context } = loadUI();
-  const account = qoderTrialAccount();
-  assert.equal(context.accountIdentityPrimary(account), 'trial-user@example.com');
-  // The device credential is never shown, not even truncated.
-  const token = context.formatTokenDisplay(account);
-  assert.doesNotMatch(token, /eyJhbGciOi/);
-});
 
 test('Grok identity shows the email together with the login method', () => {
   const { context } = loadUI();
@@ -796,106 +650,8 @@ test('Grok identity shows the email together with the login method', () => {
   }), 'oauth@example.com · Build OAuth');
 });
 
-test('the Qoder quota tooltip carries the plan, the reset and the upgrade link', () => {
-  const { context, node } = loadUI();
-  const account = qoderTrialAccount({ id: 901, status_code: '402', quota_remaining: 0, quota_used: 300, quota_exhausted: true });
-  vm.runInContext(`accounts = [${JSON.stringify(account)}]; currentPlatform = 'qoder'; renderAccounts();`, context);
-  const row = node('accountsList').querySelectorAll('tbody tr')[0];
-  const cell = row.children.find((candidate) => candidate.className === 'col-quota');
-  assert.equal(strip(cell.innerHTML), '0 / 300 (剩余)');
-  assert.equal(cell.title, [
-    '计划: Pro Trial', '单位: credits', '口径: 可用额度池合计剩余 / 合计额度',
-    '上游已判定额度耗尽或可用余额为零，刷新额度后确认恢复',
-    `重置: ${new Date(account.quota_reset_at).toLocaleString()}`,
-    `升级: ${account.quota_upgrade_url}`,
-  ].join(' · '));
-});
-
-test('an exhausted Qoder quota is reported as a quota state, not as a fault', () => {
-  const { context } = loadUI();
-  const exhausted = qoderTrialAccount({
-    status_code: '402',
-    quota_remaining: 0,
-    quota_exhausted: true,
-  });
-  assert.equal(context.getQuotaStats(exhausted).exhausted, true);
-  assert.equal(context.getQuotaStats(qoderTrialAccount()).exhausted, false);
-  // 402 must not turn the account into an error row: the credential is fine.
-  assert.equal(context.isSidebarAccountAbnormal({ ...exhausted, has_credential: true, status_code: '' }), false);
-});
-
 // Anonymized regression fixtures retain the server payload shape and quota
 // values without committing an operator's account address or identifier.
-test('anonymized Qoder payloads render exact 等级 / 配额 / 状态', () => {
-  const fixtures = [
-    {
-      id: 901,
-      account_type: 'qoder',
-      enabled: true,
-      email: 'trial-user@example.com',
-      qoder_user_id: '00000000-0000-4000-8000-000000000001',
-      qoder_access_token: 'access-token-placeholder',
-      has_credential: true,
-      usage_limit: 300,
-      usage_current: 300,
-      quota_supported: true,
-      quota_plan: 'Pro Trial',
-      plan_name: 'Pro Trial',
-      plan_tier: 'paid',
-      quota_unit: 'credits',
-      quota_limit: 300,
-      quota_remaining: 300,
-      quota_used: 0,
-      quota_exhausted: false,
-      quota_upgrade_url: 'https://qoder.com/pricing?client=qoder',
-      quota_reset_at: '2026-09-14T19:47:13Z',
-      expect: { tier: 'Pro Trial', quota: '300 / 300 (剩余)', remaining: 300, limit: 300, used: 0, pctRemaining: 100, status: '正常' },
-    },
-    {
-      id: 902,
-      account_type: 'qoder',
-      enabled: true,
-      email: 'free-user@example.net',
-      qoder_user_id: '00000000-0000-4000-8000-000000000002',
-      qoder_access_token: 'access-token-placeholder',
-      has_credential: true,
-      status_code: '402',
-      usage_limit: 0,
-      usage_current: 0,
-      quota_supported: true,
-      quota_plan: 'Free',
-      plan_name: 'Free',
-      plan_tier: 'free',
-      plan_confidence: 'confirmed',
-      quota_unit: 'credits',
-      quota_limit: 0,
-      quota_remaining: 0,
-      quota_used: 0,
-      quota_exhausted: true,
-      quota_upgrade_url: 'https://qoder.com/pricing?client=qoder',
-      quota_reset_at: '2026-09-14T02:39:48Z',
-      expect: { tier: '免费', quota: '0 / 0 (剩余)', remaining: 0, limit: 0, used: 0, pctRemaining: 0, status: '额度不足' },
-    },
-  ];
-
-  const { context } = loadUI();
-  for (const fixture of fixtures) {
-    const { expect, ...account } = fixture;
-    const tier = context.buildSubscriptionMarkup(account);
-    const quota = context.buildQuotaMarkup(account);
-    const status = context.statusBadge(account);
-
-    assert.equal(strip(tier), expect.tier, `id ${account.id}: 等级`);
-    assert.doesNotMatch(tier, />-</, `id ${account.id}: 等级 fell through to the empty placeholder`);
-    assert.equal(strip(quota), expect.quota, `id ${account.id}: 配额`);
-    const stats = context.getQuotaStats(account);
-    for (const field of ['remaining', 'limit', 'used', 'pctRemaining']) {
-      assert.equal(stats[field], expect[field], `id ${account.id}: ${field}`);
-    }
-    assert.doesNotMatch(quota, /未知/, `id ${account.id}: 配额 claimed to be unknown while a snapshot existed`);
-    assert.equal(status.text, expect.status, `id ${account.id}: 状态 was ${status.text}`);
-  }
-});
 
 // ---------------------------------------------------------------------------
 // Channel enumeration drift.
@@ -906,7 +662,7 @@ const CHANNEL_SELECT_TEMPLATES = [
   'templates/components/modals/model-modal.html',
 ];
 
-const CHANNEL_KEYS = ['workbuddy', 'qoder', 'cline', 'grok'];
+const CHANNEL_KEYS = ['workbuddy',  'cline', 'grok'];
 
 test('channel forms are populated from the backend provider registry', () => {
   const template = fs.readFileSync(path.join(__dirname, CHANNEL_SELECT_TEMPLATES[0]), 'utf8');
@@ -982,7 +738,7 @@ test('账号管理 and 运维总览 count the same 异常 accounts from one pred
     { id: 4, account_type: 'grok', enabled: true, has_credential: true, status_code: '', quota_supported: true, quota_limit: 500000, quota_remaining: 0, quota_confidence: 'estimated' },
     // Genuine faults must still be counted.
     { id: 6, account_type: 'grok', enabled: false, has_credential: true, status_code: '' },
-    { id: 7, account_type: 'qoder', enabled: true, has_credential: true, status_code: '401' },
+    { id: 7, account_type: 'cline', enabled: true, has_credential: true, status_code: '401' },
     { id: 8, account_type: 'cline', enabled: true, has_credential: false, status_code: '' },
     // A healthy account with an untouched window stays normal.
     { id: 9, account_type: 'grok', enabled: true, has_credential: true, status_code: '', quota_supported: true, quota_limit: 500000, quota_remaining: 471863, quota_confidence: 'estimated' },
@@ -1028,15 +784,13 @@ test('credential verdict drives sidebar counters and channel-specific row badges
   for (const [type, missingText, missingTip] of [
     ['grok', '待登录', /Build OAuth/],
     ['workbuddy', '待补全', /WorkBuddy/],
-    ['qoder', '待补全', /Qoder/],
     ['cline', '待补全', /Cline/],
   ]) {
     const account = { id: 101, account_type: type, enabled: true, status_code: '', has_credential: true };
     assert.equal(context.isSidebarAccountAbnormal(account), false, `${type}: credentialed sidebar`);
     assert.equal(context.evaluateAccountStatus(account).text, '正常', `${type}: credentialed badge`);
     const missing = { ...account, has_credential: false,
-      token: 'obsolete-token', credential_type: 'oauth', workbuddy_access_token: 'visible-token',
-      qoder_access_token: 'visible-token', cline_access_token: 'visible-token' };
+      token: 'obsolete-token', credential_type: 'oauth', workbuddy_access_token: 'visible-token', cline_access_token: 'visible-token' };
     assert.equal(context.isSidebarAccountAbnormal(missing), true, `${type}: missing credential sidebar`);
     const badge = context.evaluateAccountStatus(missing);
     assert.equal(badge.text, missingText, `${type}: missing credential badge`);
@@ -1104,7 +858,6 @@ test('quality details ignore unrelated providers and do not render arbitrary rea
   assert.equal(context.buildQualityMarkup(other), '');
 });
 
-
 test('Grok model cooldown is visible without an HTTP error or exhausted weekly allowance', () => {
   const { context, node } = loadUI();
   const until = new Date(Date.now() + 3600000).toISOString();
@@ -1152,27 +905,9 @@ test('expired or invalid model holds do not hide recovered account availability'
   assert.equal(context.evaluateAccountStatus({ ...mixed, enabled: false }).text, '禁用');
 });
 
-test('Qoder quota pool tooltip keeps unavailable organization credits separate', () => {
-  const { context } = loadUI();
-  const lines = Array.from(context.qoderQuotaPoolLines({ quota_pools: {
-    plan: { known: true, available: true, limit: 100, remaining: 0 },
-    add_on: { known: true, available: true, limit: 200, remaining: 190 },
-    organization: { known: true, available: false, limit: 500, remaining: 470 },
-  } }));
-  assert.equal(lines.length, 3);
-  assert.match(lines[0], /套餐额度: 0 \/ 100/);
-  assert.match(lines[1], /加购额度: 190 \/ 200/);
-  assert.match(lines[2], /组织资源包: 470 \/ 500（不可用，不计入合计）/);
-  assert.equal(context.qoderQuotaPoolLines({}).length, 0);
-  assert.equal(context.qoderQuotaPoolLines({ quota_pools: {
-    plan: { known: true, available: true, limit: 0, remaining: 0 },
-    add_on: { known: false, limit: 100, remaining: 80 },
-  } }).length, 0);
-});
-
 test('account and configuration management omit retired check-in controls and requests', () => {
   for (const name of ['templates/components/modals/account-modal.html', 'templates/pages/config.html', 'static/js/accounts.js', 'static/js/config.js']) {
     const source = fs.readFileSync(path.join(__dirname, name), 'utf8');
-    assert.doesNotMatch(source, /签到|autoCheckin|qoderCheckin|qoder_checkin|checkin_supported|checkinAccount|\/checkin/);
+    assert.doesNotMatch(source, /签到|autoCheckin|checkin_supported|checkinAccount|\/checkin/);
   }
 });

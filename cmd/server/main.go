@@ -84,9 +84,6 @@ func run() error {
 		}
 		return nil
 	}
-	if qoderProbeCommand(os.Args[1:]) {
-		return runQoderProbe(os.Args[2:], os.Stdout)
-	}
 	if len(os.Args) == 2 && os.Args[1] == "--version" {
 		_ = json.NewEncoder(os.Stdout).Encode(buildinfo.Current())
 		return nil

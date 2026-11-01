@@ -10,7 +10,6 @@ import (
 	"orchids-api/internal/httpserver"
 	"orchids-api/internal/logutil"
 	"orchids-api/internal/middleware"
-	"orchids-api/internal/upstream"
 )
 
 func (h *streamHandler) finishResponse(stopReason string) {
@@ -36,23 +35,6 @@ func (h *streamHandler) finishResponse(stopReason string) {
 		h.reportRequestFailure("Reporting that the answer did not match the requested schema",
 			"schema_mismatch", err.Error(), 0)
 		return
-	}
-
-	if !h.hasVisibleOutput() {
-		h.mu.Lock()
-		fallback := h.emptyOutputFallback
-		h.mu.Unlock()
-		if fallback != "" {
-			h.mu.Lock()
-			h.useUpstreamUsage = false
-			h.outputTokens = 0
-			h.outputEstimator.Reset()
-			h.mu.Unlock()
-			h.handleMessage(upstream.SSEMessage{
-				Type:  "model.text-delta",
-				Event: map[string]any{"delta": fallback},
-			})
-		}
 	}
 
 	// The opening frame is deferred until there is something to send, so a

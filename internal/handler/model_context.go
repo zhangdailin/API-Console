@@ -87,8 +87,8 @@ func (h *Handler) observedModelContextWindows(ctx context.Context) *modelContext
 				}
 			}
 		}
-		// The channel declares its own windows: Qoder's catalog carries
-		// max_input_tokens per model, WorkBuddy carries input and output. Cline
+		// The channel declares its own windows: WorkBuddy's catalog carries
+		// input and output per model. Cline
 		// names models but not windows, so it registers none and contributes
 		// nothing here.
 		channel := strings.ToLower(strings.TrimSpace(acc.AccountType))

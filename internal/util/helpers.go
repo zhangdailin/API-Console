@@ -44,7 +44,7 @@ func SecureCompare(a, b string) bool { return subtle.ConstantTimeCompare([]byte(
 
 // FirstNonEmpty returns the first non-empty (after trimming) value, or "".
 // It is the single shared implementation of the firstNonEmpty helper that was
-// previously duplicated across packages (grok, api, cmd/server, cline, qoder).
+// previously duplicated across packages (grok, api, cmd/server, cline).
 func FirstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if trimmed := strings.TrimSpace(value); trimmed != "" {

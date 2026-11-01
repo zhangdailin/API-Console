@@ -4,7 +4,7 @@
 
 API-Console 是 Go 服务与内嵌管理网页组成的多通道网关。Redis 是账号、模型、配置、Key、响应状态及运维数据的主要存储；凭据主密钥在文件或环境变量中，不保存在 Redis。
 
-当前支持 WorkBuddy、Qoder、Cline 和 Grok Build OAuth。Grok 的 Messages / Chat 是面向客户端的兼容转换，生成上游仍为 Build Responses；不能描述为独立的原生 Anthropic 上游。
+当前支持 WorkBuddy、Cline 和 Grok Build OAuth。Grok 的 Messages / Chat 是面向客户端的兼容转换，生成上游仍为 Build Responses；不能描述为独立的原生 Anthropic 上游。
 
 ## 2. 模块职责
 
@@ -12,12 +12,12 @@ API-Console 是 Go 服务与内嵌管理网页组成的多通道网关。Redis �
 |---|---|
 | `cmd/server/main.go` | 配置、密钥、Redis、日志、处理器、后台任务与 HTTP 服务装配 |
 | `cmd/server/routes.go` | 推理、模型、管理、静态、健康和调试路由注册 |
-| `internal/channel` | 四通道定义、前缀、默认通道和浏览器注册表来源 |
+| `internal/channel` | 三通道定义、前缀、默认通道和浏览器注册表来源 |
 | `internal/middleware` | 鉴权、并发、预算、可信代理、请求跟踪、审计与流刷新 |
-| `internal/handler` | WorkBuddy / Qoder / Cline 共用推理编排 |
+| `internal/handler` | WorkBuddy / Cline 共用推理编排 |
 | `internal/provider` | 通道端口：`Spec` 契约（客户端、能力、探活、目录、账号维护）与注册表；不导入任何通道实现 |
-| `internal/provider/all` | 唯一的通道链接清单；二进制与测试通过空白导入它来注册四个通道 |
-| `internal/workbuddy`、`qoder`、`cline` | 各自授权、目录、请求构造和流解析；`spec.go` 向端口注册本通道 |
+| `internal/provider/all` | 唯一的通道链接清单；二进制与测试通过空白导入它来注册三个通道 |
+| `internal/workbuddy`、`cline` | 各自授权、目录、请求构造和流解析；`spec.go` 向端口注册本通道 |
 | `internal/grok` | Build OAuth、原生 Responses、Chat / Messages 转换及会话状态；`spec.go` 注册目录与账号维护 |
 | `internal/archtest` | 分层规则测试：端口不依赖实现、通道互不依赖、调用方只经端口访问通道 |
 | `internal/chatwire` | Chat 请求、内容块、工具声明与宽松标量解析 |
@@ -85,7 +85,6 @@ flowchart TD
 | 通道 | 目录来源 | 重要边界 |
 |---|---|---|
 | WorkBuddy | `/v3/config` | 免费权益需结合账号已观察目录 |
-| Qoder | `/algo/api/v2/model/list` | 公共模型名称与私有 key 映射来自账号快照 |
 | Cline | `/ai/cline/recommended-models` 与 `/users/me/plan` | 免费账号发布 `free`，确认付费订阅后同时发布 `clinePass`；不授予按量计费目录权益 |
 | Grok Build | `/v1/models` | 目录刷新不是生成探针；过滤不支持的媒体标识 |
 
@@ -113,7 +112,7 @@ flowchart TD
     M[cmd/server 装配] --> E[入口：handler · grok · api · refresh · modelrefresh]
     M --> L[internal/provider/all 链接清单]
     E --> P[internal/provider 端口与注册表]
-    L --> I[实现：workbuddy · qoder · cline · grok]
+    L --> I[实现：workbuddy · cline · grok]
     I --> P
     P --> D[store · config · upstream · channel]
 ```

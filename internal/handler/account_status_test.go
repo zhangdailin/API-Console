@@ -64,11 +64,6 @@ func TestClassifyAccountStatus(t *testing.T) {
 			expected: "402",
 		},
 		{
-			name:     "Qoder agent limit reset is rate limit not global quota",
-			errStr:   `qoder upstream rejected the credential: {"agentLimitResetTime":1790538433100}`,
-			expected: "429",
-		},
-		{
 			name:     "Quota exceeded message",
 			errStr:   "No remaining quota: No AI requests remaining",
 			expected: "429",

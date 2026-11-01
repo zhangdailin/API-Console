@@ -20,7 +20,6 @@ func TestPersistAccountCatalogSnapshotChannels(t *testing.T) {
 		ids     func(*store.Account) []string
 		synced  func(*store.Account) time.Time
 	}{
-		{"qoder", func(a *store.Account) []string { return a.QoderModelIDs }, func(a *store.Account) time.Time { return a.QoderModelsSyncedAt }},
 		{"workbuddy", func(a *store.Account) []string { return a.WorkBuddyModelIDs }, func(a *store.Account) time.Time { return a.WorkBuddyModelsSyncedAt }},
 		{"cline", func(a *store.Account) []string { return a.ClineModelIDs }, func(a *store.Account) time.Time { return a.ClineModelsSyncedAt }},
 	}
@@ -60,11 +59,11 @@ func TestPersistAccountCatalogSnapshotZeroIDPreservesAutoBehavior(t *testing.T) 
 	testutil.Falsef(t, !reflect.DeepEqual(acc.ClineModelIDs, []string{"m"}) || acc.ClineModelsSyncedAt.IsZero(), "zero-ID automatic snapshot was not mutated: %+v", acc)
 	// Manual discovery keeps its pre-existing zero-ID guard.
 	manual := &store.Account{}
-	for _, channel := range []string{"qoder", "workbuddy", "cline"} {
+	for _, channel := range []string{"workbuddy", "cline"} {
 		spec, ok := provider.Lookup(channel)
 		testutil.True(t, ok, "channel %q is not registered")
 		observation := provider.Observation{Record: provider.RecordSnapshot([]string{"m"}, spec.Catalog.SetSnapshot)}
 		testutil.NoError(t, persistObservation(context.Background(), nil, manual, observation, time.Now()))
 	}
-	testutil.Falsef(t, !manual.QoderModelsSyncedAt.IsZero() || !manual.WorkBuddyModelsSyncedAt.IsZero() || !manual.ClineModelsSyncedAt.IsZero(), "zero-ID manual discovery mutated the account: %+v", manual)
+	testutil.Falsef(t, !manual.WorkBuddyModelsSyncedAt.IsZero() || !manual.ClineModelsSyncedAt.IsZero(), "zero-ID manual discovery mutated the account: %+v", manual)
 }

@@ -2,7 +2,7 @@
 function installFlowSimulation({theme='light'}={}) {
  localStorage.setItem('api-console-theme',theme);
  let mode='normal',paused=false,instance='preview-instance-1',tick=0;
- const streams=[],counters=new Map(),channels=['workbuddy','cline','qoder','grok'],protocols=['chat','responses','messages'];
+ const streams=[],counters=new Map(),channels=['workbuddy','cline','grok'],protocols=['chat','responses','messages'];
  const sum=(rows,key)=>rows.reduce((n,row)=>n+(row[key]||0),0);
  function snapshot(scope='') {
   const all=channels.flatMap((channel,c)=>protocols.map((protocol,p)=>{

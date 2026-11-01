@@ -7,19 +7,19 @@ const controllerSource=fs.readFileSync(__dirname+'/static/js/ops-flow.js','utf8'
 function model(){const context=vm.createContext({});vm.runInContext(modelSource,context);return context.FlowScreenModel;}
 const start=Date.parse('2026-10-17T06:00:00Z');
 function snapshot(at=start, overrides={}) {
- const routes=['workbuddy','cline','qoder','grok'].flatMap(channel=>['chat','responses','messages'].map(protocol=>({channel,protocol,active:0,started:0,completed:0,qps:0,input_tps:0,output_tps:0,usage_available:true})));
+ const routes=['workbuddy','cline','grok'].flatMap(channel=>['chat','responses','messages'].map(protocol=>({channel,protocol,active:0,started:0,completed:0,qps:0,input_tps:0,output_tps:0,usage_available:true})));
  routes[4]={...routes[4],active:2,started:12,completed:10,qps:.4,input_tps:40,output_tps:10};
  const empty={samples:0,p50_ms:null,p95_ms:null};
  const stats={completed:10,failed:2,failure_rate:.2,waiting:1,responding:1,observed:10,usage_reported:8,retried:2,attempts:12,account_switches:1,retry_wait_ms:2000,queue_wait_ms:1000,longest_active_ms:3000,rate_limited:1,timeouts:0,stream_errors:1,canceled:0,
   first_generation:{samples:8,p50_ms:100,p95_ms:1200},first_visible:empty,body_ttfb:empty,duration:{samples:10,p50_ms:2000,p95_ms:4000},http_phases:{dns_ms:{samples:2,avg_ms:0}}};
- return {available:true,instance_started:'one',sampled_at:new Date(at).toISOString(),routes,nodes:Object.fromEntries(['gateway','workbuddy','cline','qoder','grok','chat','responses','messages'].map(key=>[key,{...stats}])),...overrides};
+ return {available:true,instance_started:'one',sampled_at:new Date(at).toISOString(),routes,nodes:Object.fromEntries(['gateway','workbuddy','cline','grok','chat','responses','messages'].map(key=>[key,{...stats}])),...overrides};
 }
-function pools(at=start,scope='') { return {available:true,sampled_at:new Date(at).toISOString(),rows:['workbuddy','cline','qoder','grok'].filter(key=>!scope||scope===key).map(channel=>({channel,accounts_available:2,accounts_enabled:3,capacity_available:true,capacity_slots:20,occupied_slots:5,model_cooldowns:1}))}; }
+function pools(at=start,scope='') { return {available:true,sampled_at:new Date(at).toISOString(),rows:['workbuddy','cline','grok'].filter(key=>!scope||scope===key).map(channel=>({channel,accounts_available:2,accounts_enabled:3,capacity_available:true,capacity_slots:20,occupied_slots:5,model_cooldowns:1}))}; }
 
 test('flow scope and totals count admitted routes once, and separate output from input tokens',()=>{
  const M=model(),data=snapshot();
  const all=M.normalize(data,''),cline=M.normalize(data,'cline');
- assert.equal(all.routes.length,12);assert.equal(cline.routes.length,3);
+ assert.equal(all.routes.length,9);assert.equal(cline.routes.length,3);
  assert.equal(M.rate(M.rowsFor(all,'gateway')).active,2);
  assert.equal(M.rate(M.rowsFor(all,'gateway')).qps,.4);
  assert.equal(M.rate(M.rowsFor(all,'gateway')).output,10);
@@ -50,7 +50,7 @@ test('incoming and completion pulses use positive counter deltas and reset acros
 test('pool observations expire, stay scoped and never invent capacity',()=>{
  const M=model(),data=pools();
  const cline=M.pool(data,'cline','',start+1000,start);assert.equal(cline.available,2);assert.equal(cline.occupied,5);
- assert.equal(M.pool(data,'gateway','',start+1000,start).capacity,80);
+ assert.equal(M.pool(data,'gateway','',start+1000,start).capacity,60);
  assert.equal(M.pool(pools(start,'cline'),'gateway','cline',start+1000,start).capacity,20);
  assert.equal(M.pool(data,'cline','',start+30000,start).fresh,false);
  assert.equal(M.pool({...data,rows:[]},'gateway','',start,start).fresh,false);
@@ -84,7 +84,7 @@ function harness({fetchPools,search=''}={}) {
   };
   if(id)nodes.set(id,node);return node;
  }
- const keys=['workbuddy','cline','qoder','grok','gateway','chat','responses','messages'];
+ const keys=['workbuddy','cline','grok','gateway','chat','responses','messages'];
  const get=id=>nodes.get(id)||element(id);
  for(const key of keys)get('opsNode-'+key).dataset.flowNode=key;
  get('flowTabOverview').dataset.flowTab='overview';get('flowTabDetails').dataset.flowTab='details';

@@ -67,7 +67,7 @@ var (
 		if acc.account_type ~= nil then
 			acc_type = string.lower(tostring(acc.account_type))
 		end
-		if acc_type ~= "grok" and acc_type ~= "qoder" and acc_type ~= "workbuddy" then
+		if acc_type ~= "grok" and acc_type ~= "workbuddy" then
 			acc.usage_current = (acc.usage_current or 0) + usage
 		end
 		acc.usage_total = (acc.usage_total or 0) + usage

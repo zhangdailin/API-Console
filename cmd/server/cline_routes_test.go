@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"orchids-api/internal/modelrefresh"
+	"strings"
 	"testing"
 	"time"
 
@@ -141,4 +142,17 @@ func TestClineChannelEndToEnd(t *testing.T) {
 	testutil.MustNotContain(t, fmtHeaders(stub.chatHeaders), "workos-access")
 	testutil.MustContain(t, string(stub.chatBody), `"session_id"`)
 	testutil.MustContain(t, string(stub.chatBody), `"reasoning_effort":"high"`)
+}
+
+// fmtHeaders renders headers as text so a test can assert a value never
+// appears in any of them.
+func fmtHeaders(headers http.Header) string {
+	var builder strings.Builder
+	for name, values := range headers {
+		builder.WriteString(name)
+		builder.WriteString(":")
+		builder.WriteString(strings.Join(values, " "))
+		builder.WriteString("\n")
+	}
+	return builder.String()
 }

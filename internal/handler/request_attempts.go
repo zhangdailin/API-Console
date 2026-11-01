@@ -45,16 +45,9 @@ type messageExecution struct {
 	trackedAccountID   int64
 	failedAccountIDs   []int64
 	failedAccountSet   map[int64]struct{}
-	affinity           requestAffinity
 }
 
 func (e *messageExecution) run() {
-	// A per-request chat session id, reused across account switches so the
-	// upstream keeps one conversation for this downstream request.
-	chatSessionID := "chat_" + randomSessionID()
-	if e.affinity.SessionID != "" {
-		chatSessionID = e.affinity.SessionID
-	}
 	policy := e.cfg.InferencePolicy()
 	maxRetries := min(max(e.cfg.MaxRetries, 0), policy.MaxAttempts-1)
 	retryDelay := time.Duration(e.cfg.RetryDelay) * time.Millisecond
@@ -99,10 +92,6 @@ func (e *messageExecution) run() {
 		RequestID:         workBuddyConversationRequestID(e.r),
 		ConversationID:    explicitConversationID(e.r, e.req),
 		TraceID:           middleware.GetTraceID(e.r.Context()),
-		ChatSessionID:     chatSessionID,
-	}
-	if e.affinity.SessionID != "" {
-		upstreamReq.ConversationID = e.affinity.SessionID
 	}
 	primaryHandler := func(msg upstream.SSEMessage) {
 		if msg.Type == "model.text-delta" || msg.Type == "model.reasoning-delta" || msg.Type == "model.tool-call" || msg.Type == "model.tool-call-delta" {
@@ -134,7 +123,6 @@ func (e *messageExecution) run() {
 				"channel", e.targetChannel,
 				"model", e.mappedModel,
 				"conversation_id", e.conversationKey,
-				"chat_session_id", chatSessionID,
 				"account_id", accountID,
 				"account_type", accountType,
 				"account_name", accountName,
@@ -308,9 +296,7 @@ func (e *messageExecution) run() {
 				e.trackedAccountID = 0
 			}
 
-			nextClient, nextAccount, releaseNext, nextTrackedAccountID, retryErr := e.h.acquireReservedAccountSelection(e.r.Context(), e.targetChannel, true, e.failedAccountIDs, accountSelectionOptions{
-				ModelID: upstreamReq.Model,
-			})
+			nextClient, nextAccount, releaseNext, nextTrackedAccountID, retryErr := e.h.acquireReservedAccountSelection(e.r.Context(), e.targetChannel, true, e.failedAccountIDs, upstreamReq.Model)
 			if retryErr == nil {
 				previousRelease := e.releaseClient
 				e.apiClient = nextClient
@@ -359,9 +345,9 @@ func (e *messageExecution) run() {
 		}
 		sharedRefusal := isSharedUpstreamRefusalClass(errClass)
 		// The probe interval must fit; jitter is capped by the remaining budget.
-		sharedRefusalWait := time.Duration(0)
+		refusalWait := time.Duration(0)
 		if retryDelayForAttempt > 0 && sharedRefusal {
-			sharedRefusalWait = sharedRefusalWaitForChannel(retryDelayForAttempt, attempt+1, e.targetChannel, errClass.Category)
+			refusalWait = sharedRefusalWait(retryDelayForAttempt, attempt+1)
 		}
 		waitBudget := e.cfg.RefusalWaitBudget()
 		// A shared refusal is a gate on the upstream's side, not this account's
@@ -370,21 +356,20 @@ func (e *messageExecution) run() {
 		// which is the edge proxy's origin timeout, not the caller's patience:
 		// answering past the edge's limit does not give the caller the work,
 		// it gives it a 520 from the edge.
-		if sharedRefusal && (waitBudget == 0 || (sharedRefusalWait > 0 && !sharedRefusalWaitAllowedWithin(sharedRefusalWaited, sharedRefusalWait, waitBudget))) {
+		if sharedRefusal && (waitBudget == 0 || (refusalWait > 0 && !sharedRefusalWaitAllowedWithin(sharedRefusalWaited, refusalWait, waitBudget))) {
 			slog.Warn("Shared upstream refusal exceeded the wait budget; answering now",
 				"trace_id", e.traceID,
 				"waited", sharedRefusalWaited,
-				"next", sharedRefusalWait,
+				"next", refusalWait,
 				"budget", waitBudget,
 				"category", errClass.Category,
 			)
 			e.sh.reportRequestFailure("Reporting a shared refusal after the wait budget",
-				errClass.Category, apperrors.PublicMessage(errStr), upstreamRetryAfter(err),
-				queueRefusalDetails(errClass.Category, errStr, upstreamRetryAfter(err)))
+				errClass.Category, apperrors.PublicMessage(errStr), upstreamRetryAfter(err))
 			return
 		}
-		if sharedRefusalWait > 0 {
-			retryDelayForAttempt = min(sharedRefusalSleepForChannel(sharedRefusalWait, e.targetChannel, errClass.Category), waitBudget-sharedRefusalWaited)
+		if refusalWait > 0 {
+			retryDelayForAttempt = min(refusalWait+sharedRefusalJitter(refusalWait), waitBudget-sharedRefusalWaited)
 		}
 		if !util.RetryWaitFits(e.r.Context(), retryDelayForAttempt) {
 			e.sh.reportRequestFailure("Retry wait cannot fit within the remaining request budget",
@@ -439,9 +424,8 @@ func (e *messageExecution) run() {
 // cancellationCategory names why a request's context ended: a deadline the
 // gateway applies is a timeout (504), anything else is the caller going away
 // (499). The caller's disconnect used to be filed as "client" and logged as a
-// 400, which read as a malformed request: a Qoder caller with a 125-second
-// timeout produced a run of 400s while its requests were still waiting for the
-// upstream's admission window.
+// 400, which read as a malformed request: a caller with a short timeout
+// produced a run of 400s while its requests were still waiting upstream.
 func cancellationCategory(ctx context.Context) string {
 	if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
 		return "timeout"

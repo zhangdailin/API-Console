@@ -8,26 +8,8 @@ import (
 	"orchids-api/internal/testutil"
 )
 
-// The exact status_message stored for production Qoder account 22.
-const sharedRefusalMessage = `qoder upstream rejected the credential: {"code":"10605","message":"{\"isQueued\":true,\"modelKey\":\"qfmodel\",\"queueCount\":0,\"queueType\":\"p3\",\"retryAfterSeconds\":30,\"serviceAvailable\":false,\"waitTime\":30}"}`
-
-func TestQoderQueueHonorsUpstreamRetryWindow(t *testing.T) {
-	wait := sharedRefusalWaitForChannel(30*time.Second, 1, "qoder", "upstream_queue")
-	testutil.Equal(t, wait, 30*time.Second)
-	testutil.True(t, sharedRefusalWaitAllowedWithin(30*time.Second, wait, sharedRefusalTotalWaitBudget))
-	testutil.False(t, sharedRefusalWaitAllowedWithin(55*time.Second, wait, sharedRefusalTotalWaitBudget))
-	testutil.False(t, sharedRefusalWaitAllowedWithin(time.Minute, wait, sharedRefusalTotalWaitBudget))
-	testutil.False(t, sharedRefusalWaitAllowedWithin(time.Second, time.Duration(1<<63-1), sharedRefusalTotalWaitBudget))
-	testutil.Equal(t, sharedRefusalSleepForChannel(wait, "qoder", "upstream_queue"), wait)
-	testutil.Equal(t, sharedRefusalWaitForChannel(30*time.Second, 1, "qoder", "rate_limit"), 30*time.Second)
-	testutil.Equal(t, sharedRefusalWaitForChannel(30*time.Second, 1, "workbuddy", "upstream_queue"), sharedRefusalWait(30*time.Second, 1))
-	testutil.Equal(t, sharedRefusalWaitForChannel(0, 1, "qoder", "upstream_queue"), time.Duration(0))
-	for _, hint := range []time.Duration{time.Second, 7 * time.Second, time.Minute} {
-		for retry := 1; retry <= 4; retry++ {
-			testutil.Equal(t, sharedRefusalWaitForChannel(hint, retry, "qoder", "upstream_queue"), hint)
-		}
-	}
-}
+// Shared refusal phrase returned by the upstream account pool.
+const sharedRefusalMessage = "available upstream accounts are rate-limited"
 
 // TestSharedRefusalClassIsRecognised pins the signal the retry loop uses. A
 // shared refusal is retried on the account already held; anything the classifier
@@ -38,8 +20,8 @@ func TestSharedRefusalClassIsRecognised(t *testing.T) {
 
 	for name, message := range map[string]string{
 		"production message":   sharedRefusalMessage,
-		"classified busy form": "qoder gateway is busy: serviceAvailable=false retryAfterSeconds=29",
-		"upstream pool":        "qoder API error: the available upstream accounts are rate-limited",
+		"classified busy form": "available upstream accounts are rate limited",
+		"upstream pool":        "workbuddy API error: the available upstream accounts are rate-limited",
 	} {
 		t.Run(name, func(t *testing.T) {
 			testutil.CheckFalsef(t, !isSharedUpstreamRefusalClass(apperrors.ClassifyUpstreamError(message)), "%q was not recognised as a shared refusal", message)

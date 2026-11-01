@@ -13,7 +13,7 @@ func TestIsProviderChannel_KeepsInfrastructureOutOfTheMatrix(t *testing.T) {
 	for _, aggregate := range []string{"http", "probe", "HTTP", " probe ", "Probe"} {
 		testutil.Falsef(t, IsProviderChannel(aggregate), "%q must not be presented as a provider channel", aggregate)
 	}
-	for _, channel := range []string{"grok", "qoder", "cline", "workbuddy", "GROK"} {
+	for _, channel := range []string{"grok", "cline", "workbuddy", "GROK"} {
 		testutil.True(t, IsProviderChannel(channel), "%q must remain a provider channel")
 	}
 	testutil.False(t, IsProviderChannel(""), "an empty channel is not a provider channel")

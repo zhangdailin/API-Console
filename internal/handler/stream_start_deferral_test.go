@@ -32,13 +32,13 @@ func (m *sharedRefusalUpstream) SendRequestWithPayload(_ context.Context, req up
 	if m.wait > 0 {
 		return sharedRefusalHint{wait: m.wait}
 	}
-	return errors.New(`qoder upstream rejected the credential: {"code":"10605","message":"{\"isQueued\":true,\"serviceAvailable\":false,\"retryAfterSeconds\":30}"}`)
+	return errors.New("available upstream accounts are rate-limited")
 }
 
 type sharedRefusalHint struct{ wait time.Duration }
 
 func (e sharedRefusalHint) Error() string {
-	return `qoder gateway is busy: {"code":"10605","isQueued":true,"serviceAvailable":false}`
+	return "available upstream accounts are rate-limited"
 }
 
 func (e sharedRefusalHint) RetryAfter() time.Duration { return e.wait }
@@ -52,7 +52,7 @@ type recoveringRefusalUpstream struct {
 func (m *recoveringRefusalUpstream) SendRequestWithPayload(_ context.Context, _ upstream.UpstreamRequest, onMessage func(upstream.SSEMessage), _ *debug.Logger) error {
 	m.calls++
 	if m.calls <= 2 {
-		return errors.New(`qoder upstream rejected the credential: {"code":"10605","message":"{\"isQueued\":true,\"serviceAvailable\":false,\"retryAfterSeconds\":30}"}`)
+		return errors.New("available upstream accounts are rate-limited")
 	}
 	onMessage(upstream.SSEMessage{Type: "model.text-delta", Event: map[string]any{"delta": "ready"}})
 	onMessage(upstream.SSEMessage{Type: "model.finish", Event: map[string]any{"finishReason": "end_turn"}})
@@ -67,7 +67,7 @@ func TestSharedRefusalRecoversInsideSingleRequest(t *testing.T) {
 	payload := map[string]any{"model": "qwen3.8-flash", "messages": []map[string]any{{"role": "user", "content": "hi"}}, "stream": true}
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "http://x/qoder/v1/chat/completions", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "http://x/workbuddy/v1/chat/completions", bytes.NewReader(body))
 	h.HandleMessages(rec, req)
 	testutil.Falsef(t, stub.calls != 3 || rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "ready"), "calls=%d status=%d body=%s", stub.calls, rec.Code, rec.Body.String())
 }
@@ -108,8 +108,8 @@ func TestKeepAliveDoesNotCommitSilentStream(t *testing.T) {
 
 	sh.writeKeepAlive()
 	testutil.Falsef(t, rec.buf.Len() != 0 || sh.hasCommitted(), "keep-alive prematurely opened response: %q", rec.buf.String())
-	sh.reportRequestFailure("queue refused", "rate_limit", "Qoder model queue unavailable", 0)
-	testutil.Falsef(t, !strings.Contains(rec.buf.String(), "Qoder model queue unavailable") || strings.Contains(rec.buf.String(), "event: message_start"), "queue failure was not returned as HTTP error: %q", rec.buf.String())
+	sh.reportRequestFailure("queue refused", "rate_limit", "WorkBuddy model queue unavailable", 0)
+	testutil.Falsef(t, !strings.Contains(rec.buf.String(), "WorkBuddy model queue unavailable") || strings.Contains(rec.buf.String(), "event: message_start"), "queue failure was not returned as HTTP error: %q", rec.buf.String())
 }
 
 // TestKeepAliveOpensAStreamSilentPastTheProxyWindow covers a first event that
@@ -130,9 +130,9 @@ func TestKeepAliveOpensAStreamSilentPastTheProxyWindow(t *testing.T) {
 	testutil.Falsef(t, strings.Index(out, ssePing) < strings.Index(out, "event: message_start"), "keep-alive preceded the opening frame: %q", out)
 
 	// A refusal after the stream opened is reported in band and closes it.
-	sh.reportRequestFailure("queue refused", "rate_limit", "Qoder model queue unavailable", 0)
+	sh.reportRequestFailure("queue refused", "rate_limit", "WorkBuddy model queue unavailable", 0)
 	testutil.MustContain(t, rec.buf.String(), "event: error")
-	testutil.MustContain(t, rec.buf.String(), "Qoder model queue unavailable")
+	testutil.MustContain(t, rec.buf.String(), "WorkBuddy model queue unavailable")
 }
 
 // TestKeepAliveContinuesAfterStreamOpens covers the usual keep-alive behavior
@@ -147,7 +147,7 @@ func TestKeepAliveContinuesAfterStreamOpens(t *testing.T) {
 	testutil.MustContain(t, rec.buf.String(), ssePing)
 }
 
-// TestKeepAliveFormatFollowsTheProtocol: Claude Code abandoned a Qoder stream
+// TestKeepAliveFormatFollowsTheProtocol: Claude Code abandoned a WorkBuddy stream
 // after ~119 seconds that carried only ": keep-alive" comments ("1 stream
 // event received ... none in the final 119282 ms"). An Anthropic stream gets
 // the ping event; an OpenAI stream keeps the comment its clients expect.
@@ -209,14 +209,14 @@ func TestSharedRefusalBeforeOutputUsesRetryWindow(t *testing.T) {
 	}
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "http://x/qoder/v1/chat/completions", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "http://x/workbuddy/v1/chat/completions", bytes.NewReader(body))
 
 	h.HandleMessages(rec, req)
 
 	testutil.Equal(t, rec.Code, http.StatusTooManyRequests)
 	out := rec.Body.String()
 	testutil.MustNotContainAny(t, out, "event: error", "data:")
-	testutil.MustContain(t, out, "upstream_queue")
+	testutil.MustContain(t, out, "rate_limit")
 	// Initial request plus the three configured retry probes.
 	testutil.Equal(t, stub.calls, 4)
 }
@@ -229,7 +229,7 @@ func TestSharedRefusalBeforeOutputUsesRetryWindow(t *testing.T) {
 // The first version of this bound reasoned from the caller instead, at 90s, and
 // production answered 520 — "the origin web server sent a response Cloudflare
 // could not parse" — for requests the gateway would have completed at ~106s.
-// Caddy's access log showed the shape exactly: every qoder failure before that
+// Caddy's access log showed the shape exactly: every workbuddy failure before that
 // build ended at 33-38s, and every one after it ended at 97-108s, with one
 // connection closed by the edge before any response was written (status 0).
 //
@@ -287,7 +287,7 @@ func TestSharedRefusalConfiguredBudgetStopsBeforeRetry(t *testing.T) {
 			h.client = stub
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
-			req := httptest.NewRequest(http.MethodPost, "http://x/qoder/v1/chat/completions", strings.NewReader(`{"model":"qwen3.8-flash","messages":[{"role":"user","content":"hi"}],"stream":true}`)).WithContext(ctx)
+			req := httptest.NewRequest(http.MethodPost, "http://x/workbuddy/v1/chat/completions", strings.NewReader(`{"model":"qwen3.8-flash","messages":[{"role":"user","content":"hi"}],"stream":true}`)).WithContext(ctx)
 			rec := httptest.NewRecorder()
 			h.HandleMessages(rec, req)
 			if ctx.Err() != nil || stub.calls != 1 || rec.Code != http.StatusTooManyRequests {

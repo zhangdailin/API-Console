@@ -89,14 +89,6 @@ func redactForeignCredentials(acc *store.Account) {
 		acc.WorkBuddyRefreshToken = ""
 		acc.WorkBuddyExpiresAt = time.Time{}
 	}
-	if channel != "qoder" {
-		acc.QoderAccessToken = ""
-		acc.QoderRefreshToken = ""
-		acc.QoderExpiresAt = time.Time{}
-		acc.QoderRuntimeInfo = ""
-		acc.QoderRuntimeKey = ""
-		acc.QoderRuntimeIdentity = ""
-	}
 	if channel != "cline" {
 		acc.ClineAccessToken = ""
 		acc.ClineRefreshToken = ""

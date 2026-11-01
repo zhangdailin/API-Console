@@ -12,9 +12,9 @@ import (
 // silently.
 func TestServerWebSearchToolIsRefused(t *testing.T) {
 	req := UpstreamRequest{Tools: []any{map[string]any{"type": "web_search_20250305", "name": "web_search", "max_uses": 8}}}
-	err := req.ValidateProtocolControls("qoder")
+	err := req.ValidateProtocolControls("workbuddy")
 	testutil.Error(t, err)
-	testutil.MustContain(t, err.Error(), "qoder does not support web search")
+	testutil.MustContain(t, err.Error(), "workbuddy does not support web search")
 	testutil.MustContain(t, err.Error(), "web_search_20250305")
 	testutil.MustContain(t, err.Error(), "/grok")
 }
@@ -28,7 +28,7 @@ func TestClientFunctionNamedWebSearchIsAllowed(t *testing.T) {
 		"openai function":       {"type": "function", "function": map[string]any{"name": "web_search"}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			testutil.NoError(t, UpstreamRequest{Tools: []any{tool}}.ValidateProtocolControls("qoder"))
+			testutil.NoError(t, UpstreamRequest{Tools: []any{tool}}.ValidateProtocolControls("workbuddy"))
 		})
 	}
 }

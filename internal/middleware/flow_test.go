@@ -143,17 +143,17 @@ func TestFlowCountsErrorsCancellationAndFinalCoalescedFlush(t *testing.T) {
 	tracker := NewFlowTracker()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	tracker.Track(func(http.ResponseWriter, *http.Request) {})(httptest.NewRecorder(), httptest.NewRequest("POST", "/qoder/messages", nil).WithContext(ctx))
+	tracker.Track(func(http.ResponseWriter, *http.Request) {})(httptest.NewRecorder(), httptest.NewRequest("POST", "/workbuddy/messages", nil).WithContext(ctx))
 	deadlineCtx, expire := context.WithCancelCause(context.Background())
 	expire(context.DeadlineExceeded)
-	tracker.Track(func(http.ResponseWriter, *http.Request) {})(httptest.NewRecorder(), httptest.NewRequest("POST", "/qoder/messages", nil).WithContext(deadlineCtx))
-	tracker.Track(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(429); w.Write([]byte(`{"error":"busy"}`)) })(httptest.NewRecorder(), httptest.NewRequest("POST", "/qoder/messages", nil))
+	tracker.Track(func(http.ResponseWriter, *http.Request) {})(httptest.NewRecorder(), httptest.NewRequest("POST", "/workbuddy/messages", nil).WithContext(deadlineCtx))
+	tracker.Track(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(429); w.Write([]byte(`{"error":"busy"}`)) })(httptest.NewRecorder(), httptest.NewRequest("POST", "/workbuddy/messages", nil))
 	tracker.Track(CoalesceStreamFlush(func() time.Duration { return time.Second })(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n"))
 		w.(http.Flusher).Flush()
-	}))(flowFlushFailureWriter{httptest.NewRecorder()}, httptest.NewRequest("POST", "/qoder/messages", nil))
-	stats := tracker.Snapshot("qoder").Nodes["qoder"]
+	}))(flowFlushFailureWriter{httptest.NewRecorder()}, httptest.NewRequest("POST", "/workbuddy/messages", nil))
+	stats := tracker.Snapshot("workbuddy").Nodes["workbuddy"]
 	if stats.Completed != 4 || stats.Failed != 4 || stats.Canceled != 1 || stats.Timeouts != 1 || stats.RateLimited != 1 || stats.StreamErrors != 1 || stats.Waiting != 0 || stats.Responding != 0 || *stats.FailureRate != 1 {
 		t.Fatalf("failure was reported as success: %+v", stats)
 	}

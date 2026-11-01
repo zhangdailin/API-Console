@@ -95,32 +95,6 @@ func testAccount(id int64, session string) *store.Account {
 	return &store.Account{ID: id, AccountType: "workbuddy", RefreshToken: session, Enabled: true, Weight: 1}
 }
 
-// TestQoderDerivedRuntimeDoesNotEvictClient verifies that a runtime pair
-// persisted by the client cannot evict that very client after its first call.
-// Token rotation and catalog changes still invalidate it.
-func TestQoderDerivedRuntimeDoesNotEvictClient(t *testing.T) {
-	fixture := newCacheTestHandler(t)
-	account := &store.Account{ID: 21, AccountType: "qoder", Enabled: true, QoderAccessToken: "access-a", QoderRefreshToken: "refresh-a", QoderUserID: "uid-a"}
-	fixture.setCurrent(account)
-	first, release := fixture.handler.acquireAccountClient(account)
-	release()
-	updated := *account
-	updated.QoderRuntimeInfo = "derived-info"
-	updated.QoderRuntimeKey = "derived-key"
-	updated.QoderModelsSyncedAt = time.Now()
-	fixture.setCurrent(&updated)
-	fixture.handler.AccountChanges([]int64{account.ID})
-	second, releaseSecond := fixture.handler.acquireAccountClient(&updated)
-	releaseSecond()
-	testutil.False(t, first != second || len(fixture.builtClients()) != 1, "derived runtime write rebuilt the cached Qoder client")
-	updated.QoderAccessToken = "access-b"
-	fixture.setCurrent(&updated)
-	fixture.handler.AccountChanges([]int64{account.ID})
-	third, releaseThird := fixture.handler.acquireAccountClient(&updated)
-	releaseThird()
-	testutil.False(t, third == first || len(fixture.builtClients()) != 2, "Qoder token rotation did not rebuild the cached client")
-}
-
 // TestAccountChanges_RotationBuildsANewClient is the acceptance rule for
 // credential rotation: the next request must not reuse a client built from the
 // replaced credential.

@@ -90,35 +90,6 @@ func TestStreamHandler_KeepAlive_NoPanic(t *testing.T) {
 	testutil.MustContain(t, rec.buf.String(), ssePing)
 }
 
-func TestStreamHandler_ToolRejectionExplainsZeroOutput(t *testing.T) {
-	sh, rec := newStreamTestHandler(t, true, adapter.FormatAnthropic)
-
-	sh.setSurfaceToolRejects(true)
-	sh.setDisallowToolCalls(true)
-	sh.shouldAcceptToolCall(toolCall{name: "Write", input: `{ "content": "private body" }`})
-	sh.handleMessage(upstream.SSEMessage{
-		Type: "model.finish",
-		Event: map[string]any{
-			"finishReason": "end_turn",
-			"usage":        map[string]any{"inputTokens": 20, "outputTokens": 0},
-		},
-	})
-
-	out := rec.buf.String()
-	testutil.MustContain(t, out, "compatible tool")
-	testutil.MustNotContainAny(t, out, "private body", "File operation completed successfully.")
-	// The opening frame reports the usage known when it is opened, which is zero
-	// output tokens -- the same figure the eager opening call carried before it was
-	// deferred, so a whole-body search for a zero would now always find it. The
-	// report that decides the fallback is the terminal one, and that is where the
-	// synthesised text has to be counted.
-	terminalAt := strings.Index(out, "event: message_delta")
-	testutil.Falsef(t, terminalAt < 0, "expected a terminal usage report, got: %s", out)
-	terminal := out[terminalAt:]
-	testutil.MustNotContain(t, terminal, `"output_tokens":0`)
-	testutil.MustContain(t, terminal, `"usage":{"output_tokens":`)
-}
-
 func TestResponseMessageID_OpenAIUsesChatCompletionPrefix(t *testing.T) {
 	id := responseMessageID(adapter.FormatOpenAI)
 	testutil.Falsef(t, !strings.HasPrefix(id, "chatcmpl-"), "id=%q want chatcmpl- prefix", id)

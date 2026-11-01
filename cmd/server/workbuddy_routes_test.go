@@ -104,7 +104,6 @@ func TestRegisterRoutes_WorkBuddyEndpoints(t *testing.T) {
 		"/workbuddy/v1/responses/",
 		"/workbuddy/v1/responses/compact",
 		"/cline/v1/responses",
-		"/qoder/v1/responses",
 		// The unversioned provider bases share the registered API capabilities.
 		"/workbuddy/chat/completions",
 		"/workbuddy/messages",

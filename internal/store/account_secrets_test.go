@@ -11,7 +11,7 @@ import (
 // again.
 //
 // The redactors drifted once already: attempt diagnostics covered seven of the
-// fourteen credential values, so a Qoder runtime key or a WorkBuddy refresh token
+// credential values, so a WorkBuddy refresh token
 // echoed by an upstream could be persisted. A field added to the account with a
 // conventional name is now a test failure rather than a silent exposure.
 func TestSecretsCoversEveryCredentialShapedField(t *testing.T) {

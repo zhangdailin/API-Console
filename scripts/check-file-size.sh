@@ -13,10 +13,8 @@ CEILING=700
 # Files over the ceiling before this check existed. These exemptions skip the
 # whole-file limit; splitting a file removes its entry.
 EXEMPT="
-internal/qoder/client.go
 internal/grok/native_chat.go
 internal/workbuddy/auth.go
-internal/qoder/stream.go
 internal/loadbalancer/loadbalancer.go
 internal/api/api_ops.go
 internal/opsagg/opsagg.go

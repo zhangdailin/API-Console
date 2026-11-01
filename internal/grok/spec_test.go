@@ -18,7 +18,7 @@ func TestCLIBillingNeedsSyncUsesSlowCadence(t *testing.T) {
 // counting an account that has nothing to present as an active one.
 func TestCatalogEligibleRequiresAUsableBuildCredential(t *testing.T) {
 	testutil.False(t, catalogEligible(nil), "a nil account is not eligible")
-	testutil.False(t, catalogEligible(&store.Account{AccountType: "qoder", CredentialType: "oauth", OAuthAccessToken: "t"}), "another channel's account is not eligible")
+	testutil.False(t, catalogEligible(&store.Account{AccountType: "workbuddy", CredentialType: "oauth", OAuthAccessToken: "t"}), "another channel's account is not eligible")
 	testutil.False(t, catalogEligible(&store.Account{AccountType: "grok", OAuthAccessToken: "t"}), "a non-OAuth credential is not eligible")
 	testutil.False(t, catalogEligible(&store.Account{AccountType: "grok", CredentialType: "oauth"}), "an account without a token is not eligible")
 	testutil.True(t, catalogEligible(&store.Account{AccountType: "grok", CredentialType: "oauth", OAuthRefreshToken: "r"}), "a refresh token alone is enough to read the catalog")

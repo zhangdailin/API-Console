@@ -86,10 +86,6 @@ type Login struct {
 	ErrPending     error
 	ErrUnavailable error
 	ErrRejected    error
-	// NeedsDeviceCode reports whether a transaction can be polled only once it
-	// holds a device code. It is false for a flow whose upstream issues the
-	// code during the first poll.
-	NeedsDeviceCode bool
 	// BuildVerifies says that building the account already proves the
 	// credential, so a failed build is reported as a failed verification
 	// rather than a failed save.

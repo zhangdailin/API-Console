@@ -47,7 +47,7 @@ func (c *responsesProtocolRecorder) SendRequestWithPayload(_ context.Context, re
 }
 
 func TestResponsesProtocolThroughAuthenticatedRoutes(t *testing.T) {
-	for _, channel := range []string{"workbuddy", "qoder", "cline"} {
+	for _, channel := range []string{"workbuddy", "cline"} {
 		t.Run(channel, func(t *testing.T) {
 			cfg := &config.Config{AdminUser: "admin", AdminPass: "secret", AdminToken: "admintoken", AdminPath: "/admin", RequestTimeout: 10}
 			mux, s, h := newRouteMux(t, "responses-protocol:"+channel+":", cfg)
@@ -59,7 +59,7 @@ func TestResponsesProtocolThroughAuthenticatedRoutes(t *testing.T) {
 			if err := s.CreateModel(context.Background(), &store.Model{Channel: channel, ModelID: "m", Name: "m", Status: store.ModelStatusAvailable, Verified: true, Origin: "discovery"}); err != nil {
 				t.Fatal(err)
 			}
-			if err := s.CreateAccount(context.Background(), &store.Account{Name: "test", AccountType: channel, Enabled: true, Weight: 1, QoderModelIDs: []string{"m"}, ClineModelIDs: []string{`{"id":"m"}`}}); err != nil {
+			if err := s.CreateAccount(context.Background(), &store.Account{Name: "test", AccountType: channel, Enabled: true, Weight: 1, ClineModelIDs: []string{`{"id":"m"}`}}); err != nil {
 				t.Fatal(err)
 			}
 			client := &responsesProtocolRecorder{}

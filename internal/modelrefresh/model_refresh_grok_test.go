@@ -97,7 +97,6 @@ func TestShouldDeleteMissingModelsOnRefresh_NeverChannelPrunesOnBuildCatalog(t *
 	// Only complete authoritative account catalogs prune automatically.
 	// WorkBuddy's degraded whitelist fallback cannot prove absence.
 	for _, tc := range []struct{ channel, source string }{
-		{"Qoder", "qoder_upstream_models"},
 		{"Cline", "cline_recommended_models"},
 	} {
 		testutil.True(t, shouldDeleteMissingModelsOnRefresh(tc.source), "%s/%s must be allowed to prune")
@@ -213,16 +212,15 @@ func TestGrokCatalogPanicIsAccountFailureWithoutPruning(t *testing.T) {
 }
 
 func TestCatalogSnapshotsRequireJSONRows(t *testing.T) {
-	for _, ch := range []string{"workbuddy", "cline", "qoder"} {
+	for _, ch := range []string{"workbuddy", "cline"} {
 		t.Run(ch, func(t *testing.T) {
-			account := &store.Account{WorkBuddyModelIDs: []string{"old"}, ClineModelIDs: []string{"old"}, QoderModelIDs: []string{"old"}}
+			account := &store.Account{WorkBuddyModelIDs: []string{"old"}, ClineModelIDs: []string{"old"}}
 			if got := accountCatalogSnapshotToDiscovered(ch, account); len(got) != 0 {
 				t.Fatalf("legacy accepted: %+v", got)
 			}
 			rows := []string{`{"id":"fresh"}`}
 			account.WorkBuddyModelIDs = rows
 			account.ClineModelIDs = rows
-			account.QoderModelIDs = rows
 			if got := accountCatalogSnapshotToDiscovered(ch, account); len(got) != 1 || got[0].ID != "fresh" {
 				t.Fatalf("current unavailable: %+v", got)
 			}

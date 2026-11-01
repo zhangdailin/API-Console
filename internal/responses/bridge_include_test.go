@@ -10,7 +10,7 @@ import (
 )
 
 func TestBridgeConsumesEncryptedReasoningProjection(t *testing.T) {
-	for _, channel := range []string{"qoder", "workbuddy", "cline"} {
+	for _, channel := range []string{"workbuddy", "cline"} {
 		for _, stream := range []string{"true", "false"} {
 			var mu sync.Mutex
 			var calls []recordedChatCall
@@ -36,14 +36,14 @@ func TestBridgeStillRejectsEncryptedInput(t *testing.T) {
 	called := false
 	bridge := ResponsesBridgeHandler(func(http.ResponseWriter, *http.Request) { called = true }, BridgeOptions{})
 	rec := httptest.NewRecorder()
-	bridge(rec, httptest.NewRequest("POST", "/qoder/v1/responses", strings.NewReader(`{"model":"test","input":[{"type":"reasoning","encrypted_content":"opaque"}],"include":["reasoning.encrypted_content"]}`)))
+	bridge(rec, httptest.NewRequest("POST", "/workbuddy/v1/responses", strings.NewReader(`{"model":"test","input":[{"type":"reasoning","encrypted_content":"opaque"}],"include":["reasoning.encrypted_content"]}`)))
 	if called || rec.Code == 200 {
 		t.Fatalf("encrypted input accepted: %d", rec.Code)
 	}
 }
 
 func TestBridgeRejectsUnrecognizedEncryptedMessageBeforeCallingChat(t *testing.T) {
-	for _, channel := range []string{"workbuddy", "qoder", "cline"} {
+	for _, channel := range []string{"workbuddy", "cline"} {
 		for _, endpoint := range []string{"/responses", "/responses/compact"} {
 			called := false
 			chat := func(http.ResponseWriter, *http.Request) { called = true }
@@ -64,7 +64,7 @@ func TestBridgeRejectsUnrecognizedEncryptedMessageBeforeCallingChat(t *testing.T
 }
 
 func TestBridgeDisablesHostedSearchWithoutInventingFunction(t *testing.T) {
-	for _, channel := range []string{"qoder", "workbuddy", "cline"} {
+	for _, channel := range []string{"workbuddy", "cline"} {
 		var mu sync.Mutex
 		var calls []recordedChatCall
 		bridge := ResponsesBridgeHandler(recordingChat(t, &calls, &mu), BridgeOptions{})

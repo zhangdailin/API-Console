@@ -95,7 +95,7 @@ const chrome=process.env.CHROME_BIN||['/usr/bin/google-chrome','/usr/bin/chromiu
  await page.evaluate(()=>window.__flowSim.resume());await waitLive();
  await page.evaluate(()=>window.__flowSim.restart());await page.waitForTimeout(300);assert.ok((await page.locator('#flowTrendNote').innerText()).includes('1/60'));
  check('connection recovery and instance restart reset history');
- poolState.fail=true;await page.selectOption('#flowChannel','qoder');await page.waitForFunction(()=>document.querySelector('#flowPool-qoder').textContent.includes('读取失败'));await waitLive();
+ poolState.fail=true;await page.selectOption('#flowChannel','cline');await page.waitForFunction(()=>document.querySelector('#flowPool-cline').textContent.includes('读取失败'));await waitLive();
  assert.equal(await page.evaluate(()=>window.__flowSim.streams.filter(s=>!s.closed).length),1);check('pool read failure is independent of live flow');
  poolState.fail=false;poolState.stale=true;await page.selectOption('#flowChannel','grok');await page.waitForFunction(()=>document.querySelector('#flowPool-grok').textContent.includes('过期'));
  assert.equal(await page.locator('#flowCapacity-grok').innerText(),'槽位 —');check('stale pool observations cannot look like idle capacity');
@@ -104,7 +104,7 @@ const chrome=process.env.CHROME_BIN||['/usr/bin/google-chrome','/usr/bin/chromiu
  poolState.empty=false;await page.selectOption('#flowChannel','');await page.evaluate(()=>window.__flowSim.mode('normal'));await waitLive();
  await page.evaluate(()=>document.documentElement.dataset.theme='light');await page.waitForTimeout(300);
  assert.ok(await page.evaluate(()=>{
-  const colors=['workbuddy','cline','qoder','grok'].map(key=>getComputedStyle(document.querySelector('#opsWire-'+key)).getPropertyValue('--node-color').trim());return new Set(colors).size===4;
+  const colors=['workbuddy','cline','grok'].map(key=>getComputedStyle(document.querySelector('#opsWire-'+key)).getPropertyValue('--node-color').trim());return new Set(colors).size===3;
  }));await screenshot('desktop-light-1920');
  await page.setViewportSize({width:1440,height:1000});await page.waitForTimeout(250);await screenshot('desktop-light-1440');
  await page.evaluate(()=>{

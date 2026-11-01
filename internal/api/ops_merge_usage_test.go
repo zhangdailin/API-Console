@@ -17,7 +17,7 @@ func TestMergedMetricsKeepUsageAndPricing(t *testing.T) {
 	defer client.Close()
 	agg := opsagg.New(client, "merge:")
 	now := time.Now()
-	for _, channel := range []string{"grok", "qoder"} {
+	for _, channel := range []string{"grok", "cline"} {
 		agg.Observe(context.Background(), opsagg.Outcome{Channel: channel, OK: true, At: now, UsageReported: true, Priced: true, InputTokens: 10, CachedTokens: 4, OutputTokens: 5, ReasoningTokens: 3, TotalTokens: 15, CostInUSDTicks: 100})
 	}
 	a := &API{opsAggregator: agg}

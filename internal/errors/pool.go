@@ -12,10 +12,6 @@ const (
 	// PoolAllowanceMessage answers an exhausted allowance: waiting is not enough,
 	// somebody has to add credits or capacity.
 	PoolAllowanceMessage = "Request failed: every account for this channel has exhausted its allowance. Add credits or accounts, or wait for the quota reset."
-	// PoolQoderModelMessage answers Qoder's business rate limit, which names the
-	// channel on purpose: unlike a generic capacity problem, the fix is to pick
-	// another model or wait for that model's window.
-	PoolQoderModelMessage = "Request failed: the requested Qoder model is temporarily rate-limited. Please retry after its cooldown or choose another model."
 	// PoolModelCooldownMessage is the channel-neutral form of the same answer.
 	PoolModelCooldownMessage = "Request failed: the requested model is cooling down on this channel. Please retry after its cooldown or choose another model."
 	// PoolClineInferenceCapMessage answers Cline's inference cap, which holds
@@ -88,20 +84,14 @@ func ClassifyPoolExhaustion(selectErr error, lastErr string) PoolExhaustion {
 	// the account simply does not cover the model. Answering it with "retry
 	// after the cooldown" told clients to retry a condition that only a plan
 	// change on the upstream side can fix.
-	case strings.Contains(lowerLastErr, "no usable plan or allowance") ||
-		strings.Contains(lowerLastErr, "not subscribed to required model plan"):
+	case strings.Contains(lowerLastErr, "not subscribed to required model plan"):
 		return PoolExhaustion{Category: "model_unavailable", Message: PoolModelUnavailableMessage}
 	case IsClineInferenceCap(lowerLastErr):
 		// The inference cap holds the whole account for the duration the
 		// upstream stated, not one model, so it gets its own answer.
 		return PoolExhaustion{Category: "rate_limit", Message: PoolClineInferenceCapMessage}
-	// Qoder's per-agent ceiling and per-model throttle share one answer: the
-	// fix is to pick another model or wait for that model's window.
-	case IsQoderAgentLimit(lowerLastErr) ||
-		IsQoderModelRateLimited(lowerLastErr) ||
-		strings.Contains(lowerLastErr, "model cooldown"):
-		return PoolExhaustion{Category: "rate_limit", Message: PoolQoderModelMessage}
-	case strings.Contains(lowerSelect, "cooling down for the requested model"):
+	case strings.Contains(lowerLastErr, "model cooldown") ||
+		strings.Contains(lowerSelect, "cooling down for the requested model"):
 		return PoolExhaustion{Category: "rate_limit", Message: PoolModelCooldownMessage}
 	case strings.Contains(lowerSelect, "not covered by any matching account's plan"):
 		// Every account of this channel carries a model cooldown, and every one of

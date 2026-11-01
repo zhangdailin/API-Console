@@ -23,11 +23,6 @@ func TestFindDuplicateAccountUsesStableProviderIdentityAfterTokenRotation(t *tes
 			login:    &store.Account{AccountType: "workbuddy", WorkBuddyUID: "wb-user", WorkBuddyRefreshToken: "new-refresh", Enabled: true},
 		},
 		{
-			name:     "qoder user id",
-			existing: &store.Account{AccountType: "qoder", QoderUserID: "q-user", QoderRefreshToken: "old-refresh", Enabled: true},
-			login:    &store.Account{AccountType: "qoder", QoderUserID: "q-user", QoderRefreshToken: "new-refresh", Enabled: true},
-		},
-		{
 			name:     "grok oauth user id",
 			existing: &store.Account{AccountType: "grok", CredentialType: "oauth", UserID: "grok-user", OAuthRefreshToken: "old-refresh", Enabled: true},
 			login:    &store.Account{AccountType: "grok", CredentialType: "oauth", UserID: "grok-user", OAuthRefreshToken: "new-refresh", Enabled: true},
@@ -52,9 +47,10 @@ func TestStableProviderIdentityNeverCrossesProviders(t *testing.T) {
 	testutil.NoError(t, s.CreateAccount(context.Background(), existing))
 	a := New(s, "", "", &config.Config{})
 	got, err := a.findDuplicateAccountByCredential(context.Background(), &store.Account{
-		AccountType:       "qoder",
-		QoderUserID:       "same-user",
-		QoderRefreshToken: "q-token",
+		AccountType:       "grok",
+		CredentialType:    "oauth",
+		UserID:            "same-user",
+		OAuthRefreshToken: "g-token",
 	}, 0)
 	testutil.NoError(t, err)
 	testutil.Falsef(t, got != nil, "cross-provider account was treated as duplicate: %+v", got)

@@ -12,7 +12,7 @@ import (
 //
 // The gateway compiles the caller's schema once and checks the model's answer
 // against it. The check exists because forwarding a schema upstream is not the
-// same as honoring it: WorkBuddy, Qoder and Cline accept `response_format` and
+// same as honoring it: WorkBuddy and Cline accept `response_format` and
 // then answer in free-form prose, so a client that asked for strict structured
 // output silently receives something it cannot parse. Rejecting an answer that
 // does not match is the only honest outcome — a wrong one delivered with a 200

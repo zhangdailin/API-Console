@@ -122,7 +122,6 @@ func isNoActiveAccounts(err error) bool {
 var upstreamCatalogSources = map[string]struct{}{
 	"grok_build_models":        {},
 	"workbuddy_cli_models":     {},
-	"qoder_upstream_models":    {},
 	"cline_recommended_models": {},
 }
 

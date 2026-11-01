@@ -173,8 +173,6 @@ func registerRoutes(
 	mux.HandleFunc("/api/accounts/", sessionAuth(apiHandler.HandleAccountByID))
 	mux.HandleFunc("/api/workbuddy/login", sessionAuth(apiHandler.HandleWorkBuddyLogin))
 	mux.HandleFunc("/api/workbuddy/login/", sessionAuth(apiHandler.HandleWorkBuddyLogin))
-	mux.HandleFunc("/api/qoder/login", sessionAuth(apiHandler.HandleQoderLogin))
-	mux.HandleFunc("/api/qoder/login/", sessionAuth(apiHandler.HandleQoderLogin))
 	mux.HandleFunc("/api/cline/login", sessionAuth(apiHandler.HandleClineLogin))
 	mux.HandleFunc("/api/cline/login/", sessionAuth(apiHandler.HandleClineLogin))
 	mux.HandleFunc("/api/grok/device-auth", sessionAuth(apiHandler.HandleGrokDeviceAuthorization))

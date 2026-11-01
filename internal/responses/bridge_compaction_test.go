@@ -18,7 +18,7 @@ import (
 )
 
 func TestBridgeCompactionRoundTripAndIsolation(t *testing.T) {
-	for _, channel := range []string{"workbuddy", "qoder", "cline"} {
+	for _, channel := range []string{"workbuddy", "cline"} {
 		t.Run(channel, func(t *testing.T) {
 			st := store.NewMemoryResponseStore(0)
 			var got chatwire.Request
@@ -96,13 +96,13 @@ func TestCompactionStorageOutageIsNotAClientError(t *testing.T) {
 	}
 	for _, h := range []http.HandlerFunc{ResponsesBridgeHandler(chat, opts), ResponsesBridgeCompactHandler(chat, opts)} {
 		w := httptest.NewRecorder()
-		h(w, httptest.NewRequest(http.MethodPost, "/qoder/v1/responses", strings.NewReader(`{"model":"m","input":[{"type":"compaction","encrypted_content":"bridge_compact_v1.missing"}]}`)))
+		h(w, httptest.NewRequest(http.MethodPost, "/workbuddy/v1/responses", strings.NewReader(`{"model":"m","input":[{"type":"compaction","encrypted_content":"bridge_compact_v1.missing"}]}`)))
 		if w.Code != 503 || calls != 0 || !strings.Contains(w.Body.String(), "response_store_unavailable") {
 			t.Fatalf("storage error=%d calls=%d %s", w.Code, calls, w.Body.String())
 		}
 	}
 	write := httptest.NewRecorder()
-	ResponsesBridgeCompactHandler(chat, opts)(write, httptest.NewRequest(http.MethodPost, "/qoder/v1/responses/compact", strings.NewReader(`{"model":"m","input":"hi"}`)))
+	ResponsesBridgeCompactHandler(chat, opts)(write, httptest.NewRequest(http.MethodPost, "/workbuddy/v1/responses/compact", strings.NewReader(`{"model":"m","input":"hi"}`)))
 	if write.Code != 503 || strings.Contains(write.Body.String(), bridgeCompactionPrefix) {
 		t.Fatalf("stored failed compact: %d %s", write.Code, write.Body.String())
 	}
@@ -119,7 +119,7 @@ func TestBridgeCompactionOwnerIsolationAndFailures(t *testing.T) {
 		wrapped := middleware.APIKeyAuth(func(context.Context, string) (*middleware.APIKeyPrincipal, error) {
 			return &middleware.APIKeyPrincipal{}, nil
 		}, h)
-		r := httptest.NewRequest(http.MethodPost, "/qoder/v1/responses", strings.NewReader(body))
+		r := httptest.NewRequest(http.MethodPost, "/workbuddy/v1/responses", strings.NewReader(body))
 		r.Header.Set("Authorization", "Bearer "+token)
 		w := httptest.NewRecorder()
 		wrapped(w, r)

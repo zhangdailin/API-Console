@@ -33,8 +33,7 @@ type deviceGrant struct {
 // codes remain server-side only.
 func loginPort() *provider.Login {
 	return &provider.Login{
-		ErrPending:      ErrDeviceAuthorizationPending,
-		NeedsDeviceCode: true,
+		ErrPending: ErrDeviceAuthorizationPending,
 		Start: func(ctx context.Context, cfg *config.Config) (provider.LoginChallenge, error) {
 			authenticator := NewDeviceAuthenticator(cfg)
 			details, err := authenticator.Start(ctx)

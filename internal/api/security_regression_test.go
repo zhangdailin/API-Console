@@ -14,21 +14,21 @@ import (
 // account leak guard does not cover: normalizeAccountOutput projects credentials
 // away for the wire, but the stored row must keep them.
 //
-// That every credential field is absent from the rendered account — for all four
+// That every credential field is absent from the rendered account — for all three
 // channels, including values echoed into StatusMessage — is asserted, more
 // strongly, by TestAccountResponsesNeverCarryCredentials and
 // TestAccountResponsesHideCredentialKeys in account_leak_guard_test.go.
 func TestAccountRedactionDoesNotMutateStoredAccount(t *testing.T) {
 	acc := &store.Account{
-		ID: 9, AccountType: "qoder", Token: "private-token",
+		ID: 9, AccountType: "cline", Token: "private-token",
 		RefreshToken: "private-refresh", OAuthAccessToken: "private-oauth",
-		QoderAccessToken: "private-qoder", ClineAccessToken: "private-cline",
-		StatusMessage: "upstream rejected private-refresh",
+		ClineAccessToken: "private-cline",
+		StatusMessage:    "upstream rejected private-refresh",
 	}
 	_, err := json.Marshal(normalizeAccountOutput(acc))
 	testutil.NoError(t, err)
 	if acc.Token != "private-token" || acc.RefreshToken != "private-refresh" ||
-		acc.OAuthAccessToken != "private-oauth" || acc.QoderAccessToken != "private-qoder" ||
+		acc.OAuthAccessToken != "private-oauth" ||
 		acc.ClineAccessToken != "private-cline" ||
 		acc.StatusMessage != "upstream rejected private-refresh" {
 		t.Fatal("redaction mutated the stored account")

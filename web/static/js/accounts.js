@@ -49,7 +49,6 @@ function sortAccounts() { accounts.sort((a, b) => b.id - a.id); }
 // Normalize account type
 function normalizeAccountType(acc) { return normalizeSidebarAccountType(acc); }
 
-
 // QUOTA_SOURCE_LABELS names each provenance signal for the operator tooltip: the raw
 // id is an implementation detail.
 const QUOTA_SOURCE_LABELS = {
@@ -85,7 +84,6 @@ function quotaTooltip(acc, quota) {
   if (provenance.note) parts.push(provenance.note);
   return parts.join(" · ");
 }
-
 
 // PLAN_BADGE_STYLES colours the subscription badge by tier. The server
 // publishes plan_tier for every channel, so one table serves all of them.
@@ -144,7 +142,6 @@ function applyTokenLabels(type) {
 // URL allowlists remain explicit, so changing one provider cannot silently
 // widen another.
 
-
 const grokDeviceLogin = globalThis.DeviceAuthLogin.create({
   storageKey: 'grok_login_v1', basePath: '/api/grok/device-auth', popupName: 'grok-login',
   label: 'Grok', statusId: 'grokDeviceLoginStatus', buttonId: 'grokDeviceLoginButton',
@@ -153,7 +150,6 @@ const grokDeviceLogin = globalThis.DeviceAuthLogin.create({
 });
 const ACCOUNT_LOGIN_DRIVERS = {
   workbuddy: () => globalThis.WorkBuddyLogin,
-  qoder: () => globalThis.QoderLogin,
   cline: () => globalThis.ClineLogin,
   grok: () => grokDeviceLogin,
 };
@@ -333,7 +329,7 @@ function evaluateAccountStatus(acc) {
 
   if (!hasSidebarAccountCredential(acc)) {
     const type = normalizeAccountType(acc);
-    const tips = { grok: '缺少 Build OAuth 授权', workbuddy: '缺少 WorkBuddy 凭证（refreshToken / accessToken）', qoder: '缺少 Qoder 设备凭据，请重新使用官方网页登录', cline: '缺少 Cline WorkOS 凭据，请重新使用官方网页登录' };
+    const tips = { grok: '缺少 Build OAuth 授权', workbuddy: '缺少 WorkBuddy 凭证（refreshToken / accessToken）', cline: '缺少 Cline WorkOS 凭据，请重新使用官方网页登录' };
     return { normal: false, text: type === 'grok' ? '待登录' : '待补全', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.16)', tip: tips[type] || '缺少账号凭据' };
   }
 
@@ -437,7 +433,6 @@ function renderAccounts() {
     renderPagination(1, 1);
     return;
   }
-
 
   container.innerHTML = "";
   const wrap = document.createElement("div");
@@ -558,18 +553,6 @@ function renderAccounts() {
             quota.resetAt ? `重置: ${new Date(quota.resetAt).toLocaleString()}` : "",
           ].filter(Boolean).join(" · ");
         } else { tdQuota.title = "尚未读取到 WorkBuddy 计量额度；点刷新立即同步"; }
-      } else if (normalizeAccountType(acc) === "qoder") {
-        if (quota && quota.supported) {
-          tdQuota.title = [
-            quota.plan ? `计划: ${quota.plan}` : "",
-            `单位: ${quota.unit || "credits"}`,
-            "口径: 可用额度池合计剩余 / 合计额度",
-            ...qoderQuotaPoolLines(acc),
-            quota.exhausted ? "上游已判定额度耗尽或可用余额为零，刷新额度后确认恢复" : "",
-            quota.resetAt ? `重置: ${new Date(quota.resetAt).toLocaleString()}` : "",
-            quota.upgradeUrl ? `升级: ${quota.upgradeUrl}` : "",
-          ].filter(Boolean).join(" · ");
-        } else { tdQuota.title = "尚未读取到 Qoder 计划与额度；点「检查」立即同步"; }
       } else if (quota && (quota.estimated || quota.quotaUnavailable)) {
         // Every number in this cell carries its provenance, so an estimate is never
         // mistaken for a reported balance.
@@ -675,17 +658,6 @@ function renderAccounts() {
   updateSelectedCount();
 
   bindAccountActions(container);
-}
-
-// qoderQuotaPoolLines keeps individual pool balances separate from the aggregate.
-function qoderQuotaPoolLines(account) {
-  const names = { plan: "套餐额度", add_on: "加购额度", organization: "组织资源包" };
-  return Object.entries(names).flatMap(([key, label]) => {
-    const pool = account?.quota_pools?.[key];
-    if (!pool?.known || !(pool.limit > 0)) return [];
-    const state = pool.available ? "" : "（不可用，不计入合计）";
-    return [`${label}: ${formatCredit(pool.remaining)} / ${formatCredit(pool.limit)}${state}`];
-  });
 }
 
 // formatCredit renders meter values that the upstream reports with fractions.
@@ -861,7 +833,6 @@ function accountUsageCounter(acc) {
 // buildMobileEmailMarkup surfaces the signed-in address, which is how operators
 // actually recognise a WorkBuddy account (the nickname is the email).
 
-
 // accountIdentityPrimary is the row's subject: the address for channels that
 // report one (WorkBuddy's nickname is the email), otherwise the credential
 // summary.
@@ -1027,7 +998,6 @@ function toggleSelectAll(checked) {
 function openModal(account = null) {
   if (accountSave.busy) return;
   stopWorkBuddyLogin();
-  stopQoderLogin();
   stopClineLogin();
   const title = document.getElementById("modalTitle");
   const form = document.getElementById("accountForm");
@@ -1063,7 +1033,6 @@ function stopOfficialLogin(provider, statusId, linkId = "") {
 }
 
 function stopWorkBuddyLogin() { stopOfficialLogin("WorkBuddyLogin", "workbuddyLoginStatus"); }
-function stopQoderLogin() { stopOfficialLogin("QoderLogin", "qoderLoginStatus", "qoderLoginLink"); }
 function stopClineLogin() { stopOfficialLogin("ClineLogin", "clineLoginStatus", "clineLoginLink"); }
 
 // Close modal
@@ -1071,7 +1040,6 @@ function closeModal() {
   stopGrokDeviceLogin(true);
   resetGrokDeviceLoginStatus();
   stopWorkBuddyLogin();
-  stopQoderLogin();
   stopClineLogin();
   ConsoleUI.modal("accountModal", false);
 }
@@ -1143,7 +1111,6 @@ function workBuddyIdentityLabel(acc) {
   if (uid) return uid.length > 20 ? `uid ${uid.substring(0, 8)}...${uid.substring(uid.length - 4)}` : `uid ${uid}`;
   return "-";
 }
-
 
 // Export accounts
 function exportAccounts() { window.location.href = "/api/export"; }

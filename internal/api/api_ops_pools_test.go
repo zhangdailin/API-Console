@@ -22,7 +22,7 @@ func TestOpsPoolsReadOnlyScopeAndCapacity(t *testing.T) {
 		{AccountType: "cline", Name: "active", Enabled: true, MaxConcurrent: 4, ClineAccessToken: "must-not-leak", ClineRefreshToken: "never-refresh"},
 		{AccountType: "cline", Name: "held", Enabled: true, StatusCode: "401", LastAttempt: time.Now()},
 		{AccountType: "cline", Name: "disabled", Enabled: false},
-		{AccountType: "qoder", Name: "other", Enabled: true},
+		{AccountType: "workbuddy", Name: "other", Enabled: true},
 	}
 	for _, acc := range accounts {
 		if err := s.CreateAccount(ctx, acc); err != nil {
@@ -48,7 +48,7 @@ func TestOpsPoolsReadOnlyScopeAndCapacity(t *testing.T) {
 		return result
 	}
 	all := read("/api/ops/pools")
-	if len(all["rows"].([]any)) != 4 {
+	if len(all["rows"].([]any)) != 3 {
 		t.Fatal("all providers must retain stable rows")
 	}
 	scoped := read("/api/ops/pools?channel=cline")
@@ -118,7 +118,7 @@ func TestOpsPoolsFailuresAreNotIdleCapacity(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if rec.Code != 200 || len(result.Rows) != 4 {
+	if rec.Code != 200 || len(result.Rows) != 3 {
 		t.Fatal("missing tracker must retain account counts")
 	}
 	for _, row := range result.Rows {

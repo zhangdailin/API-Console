@@ -52,7 +52,7 @@ func strictUpstream(answer string) *mockUpstream {
 func TestHandleMessages_StrictSchemaRejectsNonConformingAnswer(t *testing.T) {
 	h := NewWithLoadBalancer(&config.Config{RequestTimeout: 10}, nil)
 	// The upstream ignores response_format and answers in prose, which is exactly
-	// what WorkBuddy, Qoder and Cline do today.
+	// what WorkBuddy, WorkBuddy and Cline do today.
 	h.client = strictUpstream("Sure! Here is what you asked for.")
 
 	rec := httptest.NewRecorder()

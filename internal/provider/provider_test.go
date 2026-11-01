@@ -38,10 +38,10 @@ func TestEveryDefinedChannelIsRegistered(t *testing.T) {
 }
 
 func TestLookupNormalizesTheAccountType(t *testing.T) {
-	for _, value := range []string{"qoder", "Qoder", " QODER "} {
+	for _, value := range []string{"cline", "Cline", " CLINE "} {
 		spec, ok := provider.Lookup(value)
 		testutil.True(t, ok, "Lookup(%q) found nothing")
-		testutil.Equal(t, spec.ID, channel.Qoder)
+		testutil.Equal(t, spec.ID, channel.Cline)
 	}
 	_, ok := provider.Lookup("unknown")
 	testutil.False(t, ok, "an unknown account type must not resolve to a channel")
@@ -59,10 +59,10 @@ func TestRegisterRefusesWiringMistakes(t *testing.T) {
 		register()
 	}
 	mustPanic("registering an undefined channel", func() { provider.Register(provider.Spec{ID: "undefined"}) })
-	mustPanic("registering a channel twice", func() { provider.Register(provider.Spec{ID: channel.Qoder}) })
+	mustPanic("registering a channel twice", func() { provider.Register(provider.Spec{ID: channel.Cline}) })
 
 	// The refused registrations must not have replaced the real one.
-	spec, ok := provider.Lookup("qoder")
+	spec, ok := provider.Lookup("cline")
 	testutil.True(t, ok && spec.NewClient != nil, "a refused registration replaced the registered channel")
 }
 
@@ -120,11 +120,8 @@ func TestEveryChannelServesTheManagementAPI(t *testing.T) {
 func TestProjectNeverLeavesADurableCredential(t *testing.T) {
 	durable := map[channel.ID]func(*store.Account) []string{
 		channel.WorkBuddy: func(acc *store.Account) []string { return []string{acc.WorkBuddyRefreshToken} },
-		channel.Qoder: func(acc *store.Account) []string {
-			return []string{acc.QoderRefreshToken, acc.QoderRuntimeInfo, acc.QoderRuntimeKey}
-		},
-		channel.Cline: func(acc *store.Account) []string { return []string{acc.ClineRefreshToken} },
-		channel.Grok:  func(acc *store.Account) []string { return []string{acc.OAuthRefreshToken} },
+		channel.Cline:     func(acc *store.Account) []string { return []string{acc.ClineRefreshToken} },
+		channel.Grok:      func(acc *store.Account) []string { return []string{acc.OAuthRefreshToken} },
 	}
 	for _, spec := range provider.All() {
 		read, listed := durable[spec.ID]
@@ -135,8 +132,7 @@ func TestProjectNeverLeavesADurableCredential(t *testing.T) {
 			RefreshToken:          "generic-refresh",
 			OAuthRefreshToken:     "oauth-refresh",
 			WorkBuddyRefreshToken: "workbuddy-refresh",
-			QoderRefreshToken:     "qoder-refresh", QoderRuntimeInfo: "qoder-info", QoderRuntimeKey: "qoder-key",
-			ClineRefreshToken: "cline-refresh",
+			ClineRefreshToken:     "cline-refresh",
 		}
 		out := *stored
 		spec.Admin.Project(&out)

@@ -401,7 +401,7 @@ func TestNewToolCallIDIsUnique(t *testing.T) {
 	testutil.CheckEqual(t, len(seen), 200)
 }
 
-// TestConsumeStreamSignsReasoningDeltas pins the WorkBuddy/Qoder/Cline parity:
+// TestConsumeStreamSignsReasoningDeltas pins the WorkBuddy/WorkBuddy/Cline parity:
 // every reasoning delta of one stream carries the same signature so the
 // Anthropic surface keeps them inside a single signed thinking block.
 func TestConsumeStreamSignsReasoningDeltas(t *testing.T) {

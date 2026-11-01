@@ -22,7 +22,6 @@ import (
 //	mergeGrokCredentials        Grok OAuth identity and provider snapshots
 //	mergeModelCooldownState     per-model cooldowns and their labels
 //	mergeWorkBuddyCredentials   WorkBuddy credentials and catalog
-//	mergeQoderCredentials       Qoder credentials, organization and quota
 //	mergeClineCredentials       Cline credentials, tier and catalog
 //
 // UsageTotal and the daily token fields are absent from every step on purpose:
@@ -194,42 +193,6 @@ func (p accountPatch) mergeWorkBuddyCredentials() {
 	}
 	if workBuddyMeterReadingIsNewer(acc, existing) {
 		u.WorkBuddyQuota = acc.WorkBuddyQuota
-	}
-}
-
-func (p accountPatch) mergeQoderCredentials() {
-	u, acc, existing := p.updated, p.acc, p.existing
-	// Qoder credentials are rotated by the upstream and account updates are
-	// frequently partial (a request counter, a quota refresh), so an empty value
-	// means "keep what is stored", never "erase". The derived runtime pair is
-	// written once at login and then reused, which is why it follows the same
-	// keep-on-empty rule instead of being regenerated per request.
-	if acc.ReplaceQoderCredentials {
-		u.QoderAccessToken = strings.TrimSpace(acc.QoderAccessToken)
-		u.QoderRefreshToken = strings.TrimSpace(acc.QoderRefreshToken)
-		u.QoderExpiresAt = acc.QoderExpiresAt
-		u.QoderMachineID = strings.TrimSpace(acc.QoderMachineID)
-		u.QoderRuntimeInfo = strings.TrimSpace(acc.QoderRuntimeInfo)
-		u.QoderRuntimeKey = strings.TrimSpace(acc.QoderRuntimeKey)
-		u.QoderRuntimeIdentity = strings.TrimSpace(acc.QoderRuntimeIdentity)
-	}
-	patchString(&u.QoderUserID, acc.QoderUserID)
-	patchString(&u.QoderUserName, acc.QoderUserName)
-	patchString(&u.QoderOrganizationID, acc.QoderOrganizationID)
-	if len(acc.QoderOrganizationTags) > 0 {
-		u.QoderOrganizationTags = append([]string(nil), acc.QoderOrganizationTags...)
-	}
-	if acc.QoderDataPolicy {
-		u.QoderDataPolicy = true
-	}
-	if len(acc.QoderModelIDs) > 0 {
-		u.QoderModelIDs = append([]string(nil), acc.QoderModelIDs...)
-	}
-	if !acc.QoderModelsSyncedAt.IsZero() && (existing.QoderModelsSyncedAt.IsZero() || !acc.QoderModelsSyncedAt.Before(existing.QoderModelsSyncedAt)) {
-		u.QoderModelsSyncedAt = acc.QoderModelsSyncedAt
-	}
-	if !acc.QoderQuota.SyncedAt.IsZero() && (existing.QoderQuota.SyncedAt.IsZero() || !acc.QoderQuota.SyncedAt.Before(existing.QoderQuota.SyncedAt)) {
-		u.QoderQuota = acc.QoderQuota
 	}
 }
 

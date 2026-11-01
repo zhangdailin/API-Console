@@ -7,7 +7,6 @@
 | 前缀 | 路由规则 |
 |---|---|
 | `/workbuddy`、`/workbuddy/v1` | WorkBuddy 账号池 |
-| `/qoder`、`/qoder/v1` | Qoder 账号池 |
 | `/cline`、`/cline/v1` | Cline 账号池 |
 | `/grok`、`/grok/v1` | Grok Build OAuth 账号池 |
 
@@ -17,7 +16,7 @@
 
 ### 1.1 编程客户端与 CC Switch
 
-四个固定渠道都提供 OpenAI Chat Completions、Responses（Codex）及 Anthropic Messages（Claude Code）。OpenAI / Codex Base URL 使用上表含 `/v1` 的地址；Claude Code 和 Anthropic SDK 使用 `/{channel}`，由客户端追加 `/v1/messages`。其他客户端是否需要 `/v1` 取决于其追加路径方式。
+三个固定渠道都提供 OpenAI Chat Completions、Responses（Codex）及 Anthropic Messages（Claude Code）。OpenAI / Codex Base URL 使用上表含 `/v1` 的地址；Claude Code 和 Anthropic SDK 使用 `/{channel}`，由客户端追加 `/v1/messages`。其他客户端是否需要 `/v1` 取决于其追加路径方式。
 
 管理后台「配置管理 → API Key 管理」每条密钥提供复制与 CC Switch 导入：点击该密钥的导入按钮，选择 Codex 或 Claude Code、渠道和目录模型，再点击导入。弹窗按需读取完整密钥并自动读取默认 WorkBuddy 目录；切换渠道重新读取。目录使用该 Key 请求渠道公开 `/models`，因此遵守公开可见性与 Key 模型权限，不使用管理列表代替。Key 或渠道改变后必须重新读取；没有目录结果时不能导入。
 
@@ -38,8 +37,8 @@
 | POST | `/messages` | Anthropic Messages 兼容输入输出 |
 | POST | `/chat/completions` | Chat Completions 兼容输入输出 |
 | POST | `/responses` | Responses，Grok 原生 Build，其他通道 Chat 桥接 |
-| POST | `/messages/count_tokens` | 四通道均支持本地 Token 估算 |
-| POST | `/responses/compact` | 网关摘要 / Build 压缩路径；四通道两种前缀均支持 |
+| POST | `/messages/count_tokens` | 三通道均支持本地 Token 估算 |
+| POST | `/responses/compact` | 网关摘要 / Build 压缩路径；三通道两种前缀均支持 |
 
 模型应从当前目录选择，不要把示例字符串当可用白名单。目录正常不证明账号拥有生成额度；目录失败保留旧观察。
 
@@ -149,7 +148,7 @@ API Key 创建和轮换时返回完整秘密，并使用主密钥派生的独立
 
 ### 实时账号池汇总
 
-`GET /api/ops/pools` 使用与运维概览相同的管理会话认证，响应禁止缓存。可选 `channel=workbuddy|cline|qoder|grok`；不传时固定返回四个渠道（包括无账号渠道）。非法渠道返回 400，非 GET 返回 405，账号或共享占用读取失败返回 503，不返回伪造的空闲容量。
+`GET /api/ops/pools` 使用与运维概览相同的管理会话认证，响应禁止缓存。可选 `channel=workbuddy|cline|grok`；不传时固定返回三个渠道（包括无账号渠道）。非法渠道返回 400，非 GET 返回 405，账号或共享占用读取失败返回 503，不返回伪造的空闲容量。
 
 响应顶层为 `available:true`、`sampled_at`（UTC RFC3339）、`capacity_scope:"account_pool"` 和 `rows`。每行含 `channel`、`accounts_enabled`、`accounts_available`、`accounts_needing_login`、`model_cooldowns`、`concurrency_available` 和 `capacity_available`。占用可读取时另有 `active_requests`；容量可计算时另有 `capacity_slots`、`occupied_slots` 和 `capacity_sampled_at`。未知容量不补零，也不返回账号 ID、名称或凭据。
 
@@ -163,7 +162,6 @@ curl -c admin.cookies http://127.0.0.1:3002/api/login \
   -d '{"username":"admin","password":"<ADMIN_PASSWORD>"}'
 
 curl -b admin.cookies http://127.0.0.1:3002/api/models/refresh \
-  -H 'Content-Type: application/json' -d '{"channel":"qoder"}'
 ```
 
 cookie 文件按管理秘密保管。授权启动要求同源 HTTPS 或 loopback；建议直接用后台页面完成流程，避免遗漏 Origin 与事务状态。
@@ -173,7 +171,6 @@ cookie 文件按管理秘密保管。授权启动要求同源 HTTPS 或 loopback
 | 通道 | 启动路径 |
 |---|---|
 | WorkBuddy | POST `/api/workbuddy/login` |
-| Qoder | POST `/api/qoder/login` |
 | Cline | POST `/api/cline/login` |
 | Grok Build | POST `/api/grok/device-auth` |
 
@@ -187,7 +184,7 @@ cookie 文件按管理秘密保管。授权启动要求同源 HTTPS 或 loopback
 
 备份可导入另一个使用不同凭据加密主密钥的实例：导出前存储层已解密，导入由目标存储层重新加密。正常账号列表仍脱敏，不可用列表响应代替备份。API Key、独立模型管理记录、请求日志、Redis 命名空间及完整账本不在账号 JSON 中；账号 ID 和请求/当日 Token 计数不会恢复为原实例数据。恢复整个实例仍应备份 Redis 和加密主密钥。
 
-页面选择不超过 8 MiB 的 JSON，先在浏览器本地预览各渠道数量，再明确确认 POST `/api/import`。文件内容仅暂存在页面内存；导入或关闭后释放。后端只接受一个 `version:1` JSON 文档及 accounts 数组。四渠道均要求持久刷新令牌；Qoder 还要求设备 Machine ID，保留 UID、组织、runtime 与目录材料。缺少必要恢复材料和退役渠道逐条跳过，不创建空凭据账号。
+页面选择不超过 8 MiB 的 JSON，先在浏览器本地预览各渠道数量，再明确确认 POST `/api/import`。文件内容仅暂存在页面内存；导入或关闭后释放。后端只接受一个 `version:1` JSON 文档及 accounts 数组。三渠道均要求持久刷新令牌。缺少必要恢复材料和退役渠道逐条跳过，不创建空凭据账号。
 
 导入采用追加方式，不覆盖已有账号。渠道稳定身份或持久凭据相同视为重复；同一文件内重复及再次导入也跳过。响应包含 total、imported、skipped、duplicates、invalid、failed 以及 issues（1-based index、稳定 reason）；可能部分成功，不是整个文件的原子事务。存储读取失败则不开始写入，逐条写入失败会报告。单进程导入串行化，不承诺跨实例导入与同时登录之间的全局原子去重。
 

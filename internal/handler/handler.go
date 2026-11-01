@@ -174,9 +174,9 @@ const silentCommitAfter = 45 * time.Second
 // nonStreamOpenAfter is how long a non-streaming answer may stay silent before
 // the gateway opens the response and keeps it alive with whitespace. A
 // fronting proxy also ends a non-streaming request whose origin sends nothing:
-// Cloudflare answered 524 at 120 seconds, and every Qoder non-streaming
-// request still waiting for the upstream's admission window was lost there,
-// while streaming requests (kept alive) were served up to 180 seconds.
+// Cloudflare answered 524 at 120 seconds, and every non-streaming request still
+// waiting on the upstream was lost there, while streaming requests (kept alive)
+// were served up to 180 seconds.
 // Leading whitespace is valid JSON, so the final body still parses.
 const nonStreamOpenAfter = 60 * time.Second
 
@@ -415,7 +415,7 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request, prepare
 		return
 	}
 
-	// WorkBuddy, Qoder and Cline forward raw OpenAI-style messages: their
+	// WorkBuddy and Cline forward raw OpenAI-style messages: their
 	// endpoint is OpenAI-shaped and the caller's request is passed upstream
 	// verbatim. The path determines the channel before account selection.
 	preSelectChannel := passthroughChannelName(targetChannel)
@@ -442,7 +442,6 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request, prepare
 	// the model and check its answer; a non-strict request yields nil and every
 	// path below is unchanged.
 	structured := upstream.NewStructuredOutput(protocolControls)
-	preSelectQoderRequest := preSelectChannel == "qoder"
 	// Suggestion mode answered and returned above, so the gates below can only be
 	// triggered by tool_choice or by a tool_result-only follow-up; thinking stays
 	// suppressed only by configuration.
@@ -474,11 +473,7 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request, prepare
 	failedAccountSet := make(map[int64]struct{})
 
 	var e *messageExecution
-	affinity := prepareRequestAffinity(r, req, targetChannel)
-	apiClient, currentAccount, releaseClient, trackedAccountID, err := h.acquireReservedAccountSelection(r.Context(), targetChannel, true, failedAccountIDs, accountSelectionOptions{
-		ModelID:            strings.TrimSpace(req.Model),
-		PreferredAccountID: h.preferredAccount(r.Context(), affinity),
-	})
+	apiClient, currentAccount, releaseClient, trackedAccountID, err := h.acquireReservedAccountSelection(r.Context(), targetChannel, true, failedAccountIDs, strings.TrimSpace(req.Model))
 	// The client is held for the whole request: a credential change during it
 	// retires the client and closes it here, after the request finished.
 	defer func() {
@@ -606,9 +601,6 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request, prepare
 	sh := newStreamHandler(cfg, w, logger, isStream, responseFormat)
 	sh.cancelUpstream = cancelUpstream
 	sh.setAllowedToolNames(declaredToolNames(effectiveTools))
-	if preSelectQoderRequest {
-		sh.setSurfaceToolRejects(true)
-	}
 	sh.setDisallowToolCalls(gateNoTools)
 	// The compiled schema gates the finished answer; a request that declared no
 	// schema installs a nil check and behaves exactly as before.
@@ -662,12 +654,8 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request, prepare
 	}
 
 	e = &messageExecution{h: h, r: r, cfg: cfg, sh: sh, req: req, mappedModel: mappedModel, targetChannel: targetChannel, forcedChannel: forcedChannel, traceID: traceID, conversationKey: conversationKey, builtPrompt: builtPrompt, effort: effort, verboseDiagnostics: verboseDiagnostics, gateNoTools: gateNoTools, upstreamMessages: upstreamMessages, effectiveTools: effectiveTools, structured: structured, logger: logger, apiClient: apiClient, currentAccount: currentAccount, releaseClient: releaseClient, trackedAccountID: trackedAccountID, failedAccountIDs: failedAccountIDs, failedAccountSet: failedAccountSet}
-	e.affinity = affinity
 	e.run()
 	r, currentAccount, releaseClient, trackedAccountID = e.r, e.currentAccount, e.releaseClient, e.trackedAccountID
 
 	h.finishMessages(w, r, sh, req, currentAccount, forcedChannel, isStream, responseFormat, startTime)
-	if returned, failed := sh.terminalState(); returned && !failed {
-		h.rememberAccount(r.Context(), affinity, currentAccount)
-	}
 }

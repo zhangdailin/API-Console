@@ -43,7 +43,7 @@ const plain=v=>Array.from(v);
 
 test('configuration payload hydrates security and proxy controls without simulated cache fields',()=>{
  const {api,node}=loadConfig();
- api.applyConfigurationPayload({admin_password:'secret',anonymous_allow_ips:['203.0.113.1'],proxy_url:'http://proxy.example:8080',proxy_bypass:['example.com'],shared_stream_idle_timeout_seconds:300,workbuddy_default_max_tokens:8192,first_token_timeout_seconds:60,request_timeout:7200,concurrency_timeout:7200,qoder_queue_wait_budget_ms:0,qoder_queue_retry_interval_ms:0});
+ api.applyConfigurationPayload({admin_password:'secret',anonymous_allow_ips:['203.0.113.1'],proxy_url:'http://proxy.example:8080',proxy_bypass:['example.com'],shared_stream_idle_timeout_seconds:300,workbuddy_default_max_tokens:8192,first_token_timeout_seconds:60,request_timeout:7200,concurrency_timeout:7200,});
  assert.equal(node('cfg_admin_pass').value,'secret');
  assert.equal(node('cfg_proxy_url').value,'http://proxy.example:8080');
  assert.equal(node('cfg_proxy_bypass').value,'example.com');
@@ -121,12 +121,11 @@ for (const scenario of [
  });
 }
 
-
 test('configuration page removes anonymous and generation customization',()=>{
  const html=fs.readFileSync(path.join(__dirname,'templates/pages/config.html'),'utf8');
  const js=fs.readFileSync(path.join(__dirname,'static/js/config.js'),'utf8');
  assert.doesNotMatch(html,/cfg_anonymous_allow_ips|groupPerformance|生成预算与延迟|cfg_first_token_timeout_seconds/);
- assert.doesNotMatch(js,/PERFORMANCE_FIELDS|parseAnonymousAllowIPs|anonymous_allow_ips|qoder_queue|first_token_timeout_seconds/);
+ assert.doesNotMatch(js,/PERFORMANCE_FIELDS|parseAnonymousAllowIPs|anonymous_allow_ips|first_token_timeout_seconds/);
 });
 
 test('request policy controls hydrate, save, track changes and reset',async()=>{
@@ -196,7 +195,6 @@ test('failed config saves retain the old baseline and allow retry without duplic
  assert.equal(api.countConfigChanges(),0);
  assert.equal(node('cfgSaveBtn').disabled,false);
 });
-
 
 test('blank admin password is omitted when saving unrelated settings',async()=>{
  let saved;

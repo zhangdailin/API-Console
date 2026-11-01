@@ -2,7 +2,6 @@ package loadbalancer
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -118,66 +117,11 @@ func TestSelectAccountWithTracker_UsesProvidedTracker(t *testing.T) {
 	}
 }
 
-// Qoder accounts are interchangeable credentials behind a per-account daily
-// allowance, so selection spreads requests across the whole pool instead of
-// pinning them to the lowest account ID. The pinned primary is what drained one
-// free account's quota while the rest of the pool sat idle.
-func TestQoderAccountsAreLoadBalanced(t *testing.T) {
-	now := time.Now()
-	first := &store.Account{ID: 2, AccountType: "qoder", Enabled: true}
-	second := &store.Account{ID: 7, AccountType: "qoder", Enabled: true}
-	lb := &LoadBalancer{
-		cachedAccounts: []*store.Account{second, first},
-		cacheExpires:   now.Add(time.Minute),
-		connTracker:    NewMemoryConnTracker(),
-	}
-	tracker := &fixedConnTracker{counts: map[int64]int64{}}
-	selectAccount := func(exclude []int64) (*store.Account, error) {
-		return lb.GetNextAccountExcludingByChannelWithTracker(context.Background(), exclude, "qoder", tracker)
-	}
-
-	// Idle pool: repeated selections must reach both accounts, not just the
-	// lowest ID.
-	counts := map[int64]int{}
-	for i := range 20 {
-		selected, err := selectAccount(nil)
-		testutil.Falsef(t, err != nil, "selection %d: err=%v", i, err)
-		counts[selected.ID]++
-	}
-	testutil.Falsef(t, counts[first.ID] == 0 || counts[second.ID] == 0, "qoder selection did not spread across the pool: %v", counts)
-
-	// A saturated account is skipped so the rest of the pool absorbs the
-	// request rather than the channel failing while capacity remains.
-	tracker.counts[first.ID] = EffectiveAccountConcurrencyLimit(first)
-	for range 5 {
-		selected, err := selectAccount(nil)
-		testutil.Equal(t, err, nil)
-		testutil.Equal(t, selected.ID, second.ID)
-	}
-
-	// Only a fully saturated pool reports a capacity error.
-	tracker.counts[second.ID] = EffectiveAccountConcurrencyLimit(second)
-	selected, err := selectAccount(nil)
-	testutil.Falsef(t, selected != nil || err == nil || !strings.Contains(err.Error(), "concurrency limit"), "saturated pool: account=%v err=%v, want capacity error", selected, err)
-
-	// An explicitly excluded account stays out of the pool.
-	tracker.counts[first.ID] = 0
-	tracker.counts[second.ID] = 0
-	selected, err = selectAccount([]int64{first.ID})
-	testutil.Falsef(t, err != nil || selected.ID != second.ID, "excluded first: account=%v err=%v, want second", selected, err)
-
-	// A cooling account falls out of the pool for the next selection.
-	first.StatusCode = "429"
-	first.LastAttempt = now
-	selected, err = selectAccount(nil)
-	testutil.Falsef(t, err != nil || selected.ID != second.ID, "cooling first: account=%v err=%v, want second", selected, err)
-}
-
 // TestFilterReasonsDecideTheEmptyPoolAnswer pins what the filter's reason is
 // for: the same empty pool has to be answered "retry later" or "this model is
 // not available here" depending on why every candidate was withheld.
 //
-// Production asked for a Qoder model whose cooldown on every account was a
+// Production asked for a model whose cooldown on every account was a
 // day-long plan verdict, and was answered "the requested model is temporarily
 // rate-limited" — an invitation to retry a condition that could never change.
 func TestFilterReasonsDecideTheEmptyPoolAnswer(t *testing.T) {
@@ -362,58 +306,4 @@ func TestLargePoolIsScannedInRotatingWindows(t *testing.T) {
 		}
 	}
 	testutil.Equal(t, len(seen), size)
-}
-
-// TestQoderExhaustedSnapshotRetiresAtItsResetBoundary pins the scheduling rule
-// that kept a spent-looking account parked after its window had reopened.
-//
-// The exhausted flag is a snapshot: it is written by a sync round (and by an
-// in-band quota notice) and stays on the row until something refreshes it.
-// Production held six accounts flagged 300/300 while the same accounts answered
-// complete generations, so the flag cannot be the only thing that decides. A
-// snapshot taken before the boundary it names is describing a window that no
-// longer exists.
-func TestQoderExhaustedSnapshotRetiresAtItsResetBoundary(t *testing.T) {
-	build := func(syncedAt, resetAt time.Time) *store.Account {
-		acc := &store.Account{
-			ID:          1,
-			AccountType: "qoder",
-			StatusCode:  store.AccountStatusQoderQuotaExhausted,
-			LastAttempt: time.Now().Add(-time.Hour),
-		}
-		acc.QoderQuota = store.QoderQuotaSnapshot{
-			Limit: 300, Used: 300, Remaining: 0, Exhausted: true,
-			SyncedAt: syncedAt, ResetAt: resetAt,
-		}
-		return acc
-	}
-
-	now := time.Now()
-
-	// Snapshot predates the reset it named: the window it describes is over, so
-	// the account is admitted with its full capability restored.
-	lb := &LoadBalancer{connTracker: NewMemoryConnTracker()}
-	stale := build(now.Add(-2*time.Hour), now.Add(-time.Hour))
-	testutil.False(t, !lb.isAccountAvailable(context.Background(), stale), "an exhausted snapshot taken before its own reset boundary must be admitted")
-	testutil.Equal(t, stale.StatusCode, "")
-
-	// Snapshot taken after the reset and still reporting exhaustion describes
-	// the current window: clearing on it would route requests at an account the
-	// upstream just said was spent.
-	lb = &LoadBalancer{connTracker: NewMemoryConnTracker()}
-	current := build(now.Add(-time.Minute), now.Add(-time.Hour))
-	testutil.False(t, !lb.isAccountAvailable(context.Background(), current), "a spent account is still admitted to the model-aware selector")
-	testutil.Equal(t, current.StatusCode, store.AccountStatusQoderQuotaExhausted)
-
-	// No boundary recorded at all: nothing proves the window reopened.
-	lb = &LoadBalancer{connTracker: NewMemoryConnTracker()}
-	unknown := build(now.Add(-2*time.Hour), time.Time{})
-	testutil.False(t, !lb.isAccountAvailable(context.Background(), unknown), "a spent account with no reset time is still admitted")
-	testutil.Equal(t, unknown.StatusCode, store.AccountStatusQoderQuotaExhausted)
-
-	// A non-Qoder row must not borrow the Qoder rule.
-	lb = &LoadBalancer{connTracker: NewMemoryConnTracker()}
-	wrongChannel := build(now.Add(-2*time.Hour), now.Add(-time.Hour))
-	wrongChannel.AccountType = "workbuddy"
-	testutil.False(t, lb.isAccountAvailable(context.Background(), wrongChannel), "a non-Qoder row holding the Qoder status must stay excluded")
 }

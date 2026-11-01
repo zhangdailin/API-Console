@@ -300,7 +300,7 @@ func (h *Handler) buildAccountClient(acc *store.Account) UpstreamClient {
 		return nil
 	}
 	// A rotating credential has to be written back: WorkBuddy rotates its token
-	// on every renewal, Qoder on its refresh, and Cline the same. Without the
+	// on every renewal, and Cline on its refresh. Without the
 	// store the client would keep using a credential the pool already replaced.
 	var accountStore *store.Store
 	if h != nil && h.loadBalancer != nil {
@@ -361,14 +361,6 @@ func accountClientFingerprint(acc *store.Account, cfg *config.Config) string {
 		_, _ = io.WriteString(hasher, value)
 		_, _ = hasher.Write([]byte{0})
 	}
-	writeBool := func(value bool) {
-		if value {
-			_, _ = hasher.Write([]byte{1})
-		} else {
-			_, _ = hasher.Write([]byte{0})
-		}
-		_, _ = hasher.Write([]byte{0})
-	}
 	writeInt64 := func(value int64) {
 		_, _ = io.WriteString(hasher, strconv.FormatInt(value, 10))
 		_, _ = hasher.Write([]byte{0})
@@ -395,20 +387,6 @@ func accountClientFingerprint(acc *store.Account, cfg *config.Config) string {
 	writeString(acc.WorkBuddyUID)
 	writeInt64(acc.WorkBuddyExpiresAt.UnixNano())
 	writeStrings(acc.WorkBuddyModelIDs)
-	writeString(acc.QoderAccessToken)
-	writeString(acc.QoderRefreshToken)
-	writeInt64(acc.QoderExpiresAt.UnixNano())
-	writeString(acc.QoderMachineID)
-	writeString(acc.QoderUserID)
-	writeString(acc.QoderUserName)
-	writeString(acc.QoderOrganizationID)
-	writeStrings(acc.QoderOrganizationTags)
-	writeBool(acc.QoderDataPolicy)
-	// RuntimeInfo/RuntimeKey are random derived output written by the Qoder
-	// client itself. Including them invalidates that client on its first write,
-	// causing the next request to derive and persist another pair indefinitely.
-	// Token, UID and device inputs above still force a rebuild when they change.
-	writeStrings(acc.QoderModelIDs)
 	// The catalog observation timestamp does not change model resolution.
 	writeString(acc.ClineAccessToken)
 	writeString(acc.ClineRefreshToken)
@@ -422,11 +400,6 @@ func accountClientFingerprint(acc *store.Account, cfg *config.Config) string {
 
 	if cfg != nil {
 		writeString(cfg.WorkBuddyBaseURL)
-		writeString(cfg.QoderOAuthBaseURL)
-		writeString(cfg.QoderOpenAPIBaseURL)
-		writeString(cfg.QoderInferenceURL)
-		writeString(cfg.QoderClientID)
-		writeString(cfg.QoderClientVersion)
 		writeString(cfg.ClineAPIBaseURL)
 		writeString(cfg.ClineWorkOSClientID)
 		writeString(cfg.ClineWorkOSAuthorizeURL)
@@ -441,8 +414,6 @@ func accountClientFingerprint(acc *store.Account, cfg *config.Config) string {
 		writeInt(cfg.RequestTimeout)
 		writeInt(cfg.UpstreamMaxConnsPerHost)
 		writeInt(cfg.UpstreamMaxIdleConnsPerHost)
-		writeString(strconv.FormatBool(cfg.QoderHTTP2Enabled))
-		writeString(strconv.FormatBool(cfg.QoderQueueWindowRetryDisabled))
 		writeString(strconv.FormatBool(cfg.ClineHTTP2Enabled))
 		writeString(strconv.FormatBool(cfg.WorkBuddyHTTP2Enabled))
 		for _, value := range cfg.ProxyBypass {

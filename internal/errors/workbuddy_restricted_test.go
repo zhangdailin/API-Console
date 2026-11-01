@@ -20,7 +20,7 @@ func TestWorkBuddyRestrictionClassificationIsExact(t *testing.T) {
 		"workbuddy API error: status=403, code=111400",
 		"workbuddy API error: status=403, code=11128",
 		"workbuddy API error: status=500, code=11140",
-		"qoder API error: status=403, code=11140",
+		"upstream API error: status=403, code=11140",
 		"workbuddy stream request failed: HTTP 403",
 	} {
 		testutil.False(t, IsWorkBuddyRestricted(message))

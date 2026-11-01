@@ -1038,7 +1038,6 @@ table tbody tr:last-child td { border-bottom: 0; }
 
 .badge-grok,
 .badge-workbuddy,
-.badge-qoder,
 .badge-cline {
   font-family: var(--font-mono);
   font-size: 0.7rem;
@@ -1049,7 +1048,6 @@ table tbody tr:last-child td { border-bottom: 0; }
 
 .badge-workbuddy { color: var(--ok); border-color: rgba(74, 222, 155, 0.35); background: var(--ok-soft); }
 
-.badge-qoder { color: var(--warn); border-color: rgba(251, 191, 36, 0.35); background: rgba(251, 191, 36, 0.14); }
 
 .badge-cline { color: var(--accent-purple); border-color: rgba(167, 139, 250, 0.35); background: rgba(167, 139, 250, 0.14); }
 

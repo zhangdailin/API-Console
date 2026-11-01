@@ -18,8 +18,6 @@ func (acc *Account) Clone() *Account {
 	copy.ModelCooldowns = maps.Clone(acc.ModelCooldowns)
 	copy.ModelCooldownReasons = maps.Clone(acc.ModelCooldownReasons)
 	copy.WorkBuddyModelIDs = slices.Clone(acc.WorkBuddyModelIDs)
-	copy.QoderModelIDs = slices.Clone(acc.QoderModelIDs)
-	copy.QoderOrganizationTags = slices.Clone(acc.QoderOrganizationTags)
 	copy.ClineModelIDs = slices.Clone(acc.ClineModelIDs)
 	return &copy
 }

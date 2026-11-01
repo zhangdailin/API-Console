@@ -15,7 +15,7 @@ import (
 )
 
 // TestWebSearchRequestIsRefusedBeforeTheUpstream: Claude Code's WebSearch
-// request to Qoder used to be lowered to a plain function; the model named a
+// request to WorkBuddy used to be lowered to a plain function; the model named a
 // call nobody ran and the search silently returned nothing. It is now refused
 // with a 400 that names the reason, before an account or upstream is spent.
 func TestWebSearchRequestIsRefusedBeforeTheUpstream(t *testing.T) {
@@ -26,19 +26,18 @@ func TestWebSearchRequestIsRefusedBeforeTheUpstream(t *testing.T) {
 	}))
 	defer upstream.Close()
 	s := newTestRedisStore(t, "web-search-refusal:")
-	acc := &store.Account{AccountType: "qoder", Enabled: true, Weight: 1,
-		QoderUserID: "test-user", QoderMachineID: "test-machine",
-		QoderAccessToken: "test-access", QoderRefreshToken: "test-refresh",
-		QoderModelIDs: []string{`{"key":"qfmodel","name":"Qwen3.8-Flash"}`}}
+	acc := &store.Account{AccountType: "workbuddy", Enabled: true, Weight: 1,
+		WorkBuddyAccessToken: "test-access", WorkBuddyRefreshToken: "test-refresh",
+		WorkBuddyModelIDs: []string{`{"id":"qwen3.8-flash"}`}}
 	testutil.NoError(t, s.CreateAccount(t.Context(), acc))
-	publishModel(t, s, &store.Model{Channel: "Qoder", ModelID: "qwen3.8-flash"})
-	h := NewWithLoadBalancer(&config.Config{QoderInferenceURL: upstream.URL}, loadbalancer.NewWithCacheTTL(s, 0))
+	publishModel(t, s, &store.Model{Channel: "WorkBuddy", ModelID: "qwen3.8-flash"})
+	h := NewWithLoadBalancer(&config.Config{WorkBuddyBaseURL: upstream.URL}, loadbalancer.NewWithCacheTTL(s, 0))
 	defer h.Close()
 
 	body := `{"model":"qwen3.8-flash","max_tokens":1024,"stream":true,
 		"messages":[{"role":"user","content":"Perform a web search for the query: go release"}],
 		"tools":[{"type":"web_search_20250305","name":"web_search","max_uses":8}]}`
-	req := httptest.NewRequest(http.MethodPost, "http://x/qoder/v1/messages", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "http://x/workbuddy/v1/messages", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	h.HandleMessages(rec, req)
 

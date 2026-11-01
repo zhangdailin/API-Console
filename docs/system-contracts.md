@@ -6,7 +6,7 @@
 
 API-Console 是 Go 网关与内嵌 Go 模板、原生 JavaScript 管理后台。Redis 保存主要业务状态，凭据主密钥来自文件或环境变量。Node 用于前端测试，不是服务运行依赖。
 
-WorkBuddy、Qoder、Cline 走共享 Handler、提供者工厂和能力适配；Grok Build 走独立处理器，上游生成使用 Responses，面向客户端提供 Chat / Messages 转换。所有推理入口通过路径绑定通道，通道根前缀与带 /v1 前缀能力一致；统一推理入口已删除。响应子资源依赖已存所有权，取消和输入历史显式注册共享接口。
+WorkBuddy、Cline 走共享 Handler、提供者工厂和能力适配；Grok Build 走独立处理器，上游生成使用 Responses，面向客户端提供 Chat / Messages 转换。所有推理入口通过路径绑定通道，通道根前缀与带 /v1 前缀能力一致；统一推理入口已删除。响应子资源依赖已存所有权，取消和输入历史显式注册共享接口。
 
 共享 Chat 线格式放在 `internal/chatwire`，Responses 协议放在 `internal/responses`，通用 HTTP 逻辑放在 `internal/httpclient` / `httpserver`。调用方直接使用所属包的实现。
 
@@ -56,7 +56,6 @@ WorkBuddy、Qoder、Cline 走共享 Handler、提供者工厂和能力适配；G
 | [账号持久通知](../internal/store/account_events_test.go) | 持久后通知、异步分发与合并 |
 | [Key 权威鉴权](../internal/store/api_key_auth_test.go) | 存储策略与限流判定的权威来源 |
 | [客户端缓存事件](../internal/handler/client_cache_events_test.go) | 轮换退役旧客户端，最后租约释放后关闭 |
-| [Qoder 原生工具](../internal/qoder/tool_protocol_test.go) | 原生函数参数保留、工具文本不执行、终止与用量处理 |
 | [Grok 质量暂存](../internal/grok/quality_hold_test.go) | 暂存、重试、预算与安全重放 |
 | [共享 SSE 接入](../internal/grok/responses_sse_adoption_test.go) | SSE 原始帧与共享实现边界 |
 | [会话状态存储](../internal/store/grok_session_store_test.go) | 亲和及推理回放的隔离、TTL 与身份 |

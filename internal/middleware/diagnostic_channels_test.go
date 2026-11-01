@@ -18,7 +18,7 @@ func TestDiagnosticsCapturesAllChannelResponses(t *testing.T) {
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	defer client.Close()
 	store := debug.NewDiagnosticStore(client, "channels:")
-	for _, provider := range []string{"qoder", "workbuddy", "cline", "grok"} {
+	for _, provider := range []string{"workbuddy", "cline", "grok"} {
 		for _, endpoint := range []string{"responses", "responses/compact", "messages", "chat/completions"} {
 			for _, status := range []int{http.StatusOK, http.StatusBadRequest} {
 				path := "/" + provider + "/v1/" + endpoint

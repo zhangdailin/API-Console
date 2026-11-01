@@ -33,7 +33,6 @@ func loginPort() *provider.Login {
 		ErrPending:        ErrAuthPending,
 		ErrUnavailable:    ErrAuthUnavailable,
 		ErrRejected:       ErrAuthRejected,
-		NeedsDeviceCode:   true,
 		Start: func(ctx context.Context, cfg *config.Config) (provider.LoginChallenge, error) {
 			client := NewFromAccount(nil, cfg)
 			defer client.Close()

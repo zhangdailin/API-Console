@@ -19,8 +19,8 @@ func channelFromPath(path string) string {
 }
 
 // passthroughChannelName reports the canonical name of a passthrough channel —
-// WorkBuddy, Qoder or Cline — and "" for every other name. Those three forward
-// the caller's OpenAI-shaped request upstream verbatim.
+// WorkBuddy or Cline — and "" for every other name. Those two forward the
+// caller's OpenAI-shaped request upstream verbatim.
 // passthroughChannelName resolves a name to the channel that forwards the
 // caller's OpenAI-shaped request upstream verbatim.
 //

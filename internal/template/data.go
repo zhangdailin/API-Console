@@ -33,12 +33,6 @@ var accountLoginProviders = []LoginProvider{
 		HelpText: "在 www.workbuddy.ai 完成登录并授权本管理站点；服务端只保存 access/refresh token，读取不到密码。授权完成后自动保存账号并同步模型目录与额度，refreshToken 由服务端自动轮换。登录只在点击按钮后开始；编辑已有账号时也可用它重新授权。该渠道只支持官方登录，不提供手填凭证。",
 	},
 	{
-		Key: "qoder", GroupID: "qoderLoginGroup", Label: "官方 Qoder 登录（设备授权流）",
-		ButtonID: "qoderLoginButton", ButtonText: "使用 Qoder 官方网页登录",
-		StatusID: "qoderLoginStatus", LinkID: "qoderLoginLink", LinkTextID: "qoderLoginLinkText",
-		HelpText: "在 qoder.com 完成官方设备授权；服务端只保存 device access/refresh token，读取不到密码。授权完成后自动保存账号并同步模型目录，refreshToken 由服务端自动轮换。该渠道只支持官方登录，不提供 PAT（个人访问令牌）入口。",
-	},
-	{
 		Key: "cline", GroupID: "clineLoginGroup", Label: "官方 Cline 登录（WorkOS 设备授权）",
 		ButtonID: "clineLoginButton", ButtonText: "使用 Cline 官方网页登录",
 		StatusID: "clineLoginStatus", LinkID: "clineLoginLink", LinkTextID: "clineLoginLinkText",

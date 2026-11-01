@@ -21,7 +21,7 @@ func httpStatusFromAccountStatus(status string) int {
 	switch strings.TrimSpace(status) {
 	case "401":
 		return http.StatusUnauthorized
-	case "402", store.AccountStatusQoderQuotaExhausted, store.AccountStatusWorkBuddyQuotaExhausted:
+	case "402", store.AccountStatusWorkBuddyQuotaExhausted:
 		return http.StatusPaymentRequired
 	case "403":
 		return http.StatusForbidden

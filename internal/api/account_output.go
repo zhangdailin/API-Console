@@ -49,7 +49,7 @@ func (o accountOutput) MarshalJSON() ([]byte, error) {
 	// Credentials are write-only. The account API exposes only their presence,
 	// including for create, update and refresh responses.
 	merged["has_credential"] = o.SessionFingerprint != ""
-	for _, field := range []string{"token", "client_cookie", "refresh_token", "oauth_access_token", "oauth_refresh_token", "workbuddy_access_token", "workbuddy_refresh_token", "qoder_access_token", "qoder_refresh_token", "qoder_runtime_info", "qoder_runtime_key", "cline_access_token", "cline_refresh_token", "session_fingerprint"} {
+	for _, field := range []string{"token", "client_cookie", "refresh_token", "oauth_access_token", "oauth_refresh_token", "workbuddy_access_token", "workbuddy_refresh_token", "cline_access_token", "cline_refresh_token", "session_fingerprint"} {
 		delete(merged, field)
 	}
 	if o.Account != nil {
@@ -90,10 +90,9 @@ func normalizeAccountOutputWithUsage(acc *store.Account, usage map[int64]int64) 
 	// The projection renders a copy: the channel redaction below clears slots on
 	// the way out, and the stored record must keep the credential it was given.
 	out := *acc
-	// The message is redacted with the same list the final render uses. The two
-	// used to differ: this one omitted Qoder's access token and runtime pair, and
-	// it ran before the channel projection cleared them, so an upstream error that
-	// echoed a Qoder token published it in status_message.
+	// The message is redacted with the same list the final render uses, before
+	// the channel projection clears any slot, so an upstream error that echoed a
+	// credential cannot publish it in status_message.
 	out.StatusMessage = redactAccountSecrets(acc.StatusMessage, acc)
 	out.QualityReason = redactAccountSecrets(acc.QualityReason, acc)
 	// The channel clears every credential it must never return. The final

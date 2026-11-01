@@ -155,32 +155,15 @@ func TestAccountClientFingerprintCoversProviderConstructionInputs(t *testing.T) 
 
 	base := &store.Account{
 		ID:                    9,
-		AccountType:           "qoder",
+		AccountType:           "workbuddy",
 		WorkBuddyAccessToken:  "wb-access",
 		WorkBuddyRefreshToken: "wb-refresh",
 		WorkBuddyUID:          "wb-user",
 		WorkBuddyExpiresAt:    time.Unix(10, 0),
 		WorkBuddyModelIDs:     []string{`{"id":"wb-model"}`},
-		QoderAccessToken:      "q-access",
-		QoderRefreshToken:     "q-refresh",
-		QoderExpiresAt:        time.Unix(20, 0),
-		QoderMachineID:        "machine-a",
-		QoderUserID:           "user-a",
-		QoderUserName:         "name-a",
-		QoderOrganizationID:   "org-a",
-		QoderOrganizationTags: []string{"tag-a"},
-		QoderDataPolicy:       true,
-		QoderRuntimeInfo:      "runtime-a",
-		QoderRuntimeKey:       "key-a",
-		QoderModelIDs:         []string{"q-model-a"},
 	}
 	cfg := &config.Config{
-		WorkBuddyBaseURL:    "https://wb-a.example",
-		QoderOAuthBaseURL:   "https://oauth-a.example",
-		QoderOpenAPIBaseURL: "https://open-a.example",
-		QoderInferenceURL:   "https://infer-a.example",
-		QoderClientID:       "client-a",
-		QoderClientVersion:  "version-a",
+		WorkBuddyBaseURL: "https://wb-a.example",
 	}
 	want := accountClientFingerprint(base, cfg)
 
@@ -191,12 +174,6 @@ func TestAccountClientFingerprintCoversProviderConstructionInputs(t *testing.T) 
 		{"workbuddy endpoint credential", func(a *store.Account) { a.WorkBuddyRefreshToken = "wb-refresh-b" }},
 		{"workbuddy expiry", func(a *store.Account) { a.WorkBuddyExpiresAt = time.Unix(11, 0) }},
 		{"workbuddy models", func(a *store.Account) { a.WorkBuddyModelIDs = []string{"wb-model-b"} }},
-		{"qoder access", func(a *store.Account) { a.QoderAccessToken = "q-access-b" }},
-		{"qoder machine", func(a *store.Account) { a.QoderMachineID = "machine-b" }},
-		{"qoder identity", func(a *store.Account) { a.QoderUserID = "user-b" }},
-		{"qoder organization", func(a *store.Account) { a.QoderOrganizationTags = []string{"tag-b"} }},
-		{"qoder policy", func(a *store.Account) { a.QoderDataPolicy = false }},
-		{"qoder models", func(a *store.Account) { a.QoderModelIDs = []string{"q-model-b"} }},
 		{"cline plan", func(a *store.Account) { a.ClinePlan = "free" }},
 	}
 	for _, tc := range accountCases {
@@ -207,31 +184,11 @@ func TestAccountClientFingerprintCoversProviderConstructionInputs(t *testing.T) 
 		})
 	}
 
-	for _, tc := range []struct {
-		name   string
-		mutate func(*store.Account)
-	}{
-		{"derived runtime ciphertext", func(a *store.Account) { a.QoderRuntimeInfo = "runtime-b" }},
-		{"derived runtime key", func(a *store.Account) { a.QoderRuntimeKey = "key-b" }},
-		{"catalog observation time", func(a *store.Account) { a.QoderModelsSyncedAt = time.Now() }},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			changed := *base
-			tc.mutate(&changed)
-			testutil.Equal(t, accountClientFingerprint(&changed, cfg), want)
-		})
-	}
-
 	configCases := []struct {
 		name   string
 		mutate func(*config.Config)
 	}{
 		{"workbuddy base URL", func(c *config.Config) { c.WorkBuddyBaseURL = "https://wb-b.example" }},
-		{"qoder OAuth URL", func(c *config.Config) { c.QoderOAuthBaseURL = "https://oauth-b.example" }},
-		{"qoder OpenAPI URL", func(c *config.Config) { c.QoderOpenAPIBaseURL = "https://open-b.example" }},
-		{"qoder inference URL", func(c *config.Config) { c.QoderInferenceURL = "https://infer-b.example" }},
-		{"qoder client id", func(c *config.Config) { c.QoderClientID = "client-b" }},
-		{"qoder client version", func(c *config.Config) { c.QoderClientVersion = "version-b" }},
 		{"request timeout", func(c *config.Config) { c.RequestTimeout = 90 }},
 		{"proxy", func(c *config.Config) { c.ProxyHTTPS = "https://proxy.example" }},
 	}

@@ -1,5 +1,5 @@
 // Shared driver for the browser device-authorization flows exposed by the admin
-// console (WorkBuddy, Qoder, Cline, Grok).
+// console (WorkBuddy, Cline, Grok).
 //
 // The server owns the whole transaction: it starts the authorization, keeps the
 // private verifier, polls the upstream and persists the resulting credential.

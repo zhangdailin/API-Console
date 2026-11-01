@@ -31,17 +31,15 @@ func TestAccountCredentialsEncryptedAndPlaintextRejected(t *testing.T) {
 		OAuthRefreshToken:     "refresh-secret",
 		WorkBuddyAccessToken:  "wb-access-secret",
 		WorkBuddyRefreshToken: "wb-refresh-secret",
-		QoderAccessToken:      "qoder-access-secret",
-		QoderRefreshToken:     "qoder-refresh-secret",
-		QoderRuntimeInfo:      "qoder-runtime-secret",
-		QoderRuntimeKey:       "qoder-key-secret",
+		ClineAccessToken:      "cline-access-secret",
+		ClineRefreshToken:     "cline-refresh-secret",
 	}
 	testutil.NoError(t, s.CreateAccount(ctx, acc), "CreateAccount() error = %v")
 	raw, err := mini.Get("cipher-test:accounts:id:1")
 	testutil.NoError(t, err, "read raw account: %v")
 	for _, secret := range []string{
 		"sso-secret", "access-secret", "refresh-secret", "wb-access-secret", "wb-refresh-secret",
-		"qoder-access-secret", "qoder-refresh-secret", "qoder-runtime-secret", "qoder-key-secret", "qoder-job-secret",
+		"cline-access-secret", "cline-refresh-secret",
 	} {
 		testutil.MustNotContain(t, raw, secret)
 	}
@@ -51,8 +49,8 @@ func TestAccountCredentialsEncryptedAndPlaintextRejected(t *testing.T) {
 	testutil.Equal(t, got.ClientCookie, acc.ClientCookie)
 	testutil.Equal(t, got.OAuthAccessToken, acc.OAuthAccessToken)
 	testutil.Equal(t, got.OAuthRefreshToken, acc.OAuthRefreshToken)
-	if got.WorkBuddyRefreshToken != acc.WorkBuddyRefreshToken || got.QoderRefreshToken != acc.QoderRefreshToken ||
-		got.QoderRuntimeKey != acc.QoderRuntimeKey {
+	if got.WorkBuddyRefreshToken != acc.WorkBuddyRefreshToken || got.ClineRefreshToken != acc.ClineRefreshToken ||
+		got.ClineAccessToken != acc.ClineAccessToken {
 		t.Fatalf("decrypted provider credentials mismatch: %#v", got)
 	}
 

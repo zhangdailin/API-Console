@@ -114,7 +114,7 @@ func TestUpdateAccount_PreservesModelCooldownsAcrossPartialWrites(t *testing.T) 
 // matching account can serve.
 func TestModelCooldownKind_SeparatesPlanFromThrottle(t *testing.T) {
 	now := time.Now()
-	acc := &Account{AccountType: "qoder"}
+	acc := &Account{AccountType: "cline"}
 	RecordModelCooldownWithReason(acc, "glm-5.3", now.Add(24*time.Hour), ModelCooldownUnavailable)
 	RecordModelCooldownWithReason(acc, "efficient", now.Add(30*time.Second), ModelCooldownThrottled)
 
@@ -145,7 +145,7 @@ func TestModelCooldownKind_SeparatesPlanFromThrottle(t *testing.T) {
 // verdict must not turn it back into "retry later".
 func TestRecordModelCooldownWithReason_KeepsTheStoredVerdict(t *testing.T) {
 	now := time.Now()
-	acc := &Account{AccountType: "qoder"}
+	acc := &Account{AccountType: "cline"}
 
 	RecordModelCooldownWithReason(acc, "glm-5.3", now.Add(24*time.Hour), ModelCooldownUnavailable)
 	RecordModelCooldown(acc, "glm-5.3", now.Add(30*time.Second))
@@ -206,7 +206,7 @@ func TestModelCooldownReasonsSurviveRedis(t *testing.T) {
 	s, _ := newTestRedisStore(t, "modelcoolreason:")
 	ctx := t.Context()
 
-	acc := &Account{AccountType: "qoder", Enabled: true}
+	acc := &Account{AccountType: "cline", Enabled: true}
 	RecordModelCooldownWithReason(acc, "glm-5.3", time.Now().Add(24*time.Hour), ModelCooldownUnavailable)
 	testutil.NoError(t, s.CreateAccount(ctx, acc), "CreateAccount() error = %v")
 
@@ -224,7 +224,7 @@ func TestModelCooldownReasonsSurviveRedis(t *testing.T) {
 
 	// The deadline map still decodes exactly as an earlier binary wrote it.
 	var legacy Account
-	testutil.NoError(t, json.Unmarshal([]byte(`{"id":9,"account_type":"qoder","model_cooldowns":{"m":"2030-01-01T00:00:00Z"}}`), &legacy), "legacy account document no longer decodes: %v")
+	testutil.NoError(t, json.Unmarshal([]byte(`{"id":9,"account_type":"cline","model_cooldowns":{"m":"2030-01-01T00:00:00Z"}}`), &legacy), "legacy account document no longer decodes: %v")
 	testutil.Equal(t, len(legacy.ModelCooldowns), 1)
 
 	// And the other direction: an earlier binary reading a document this build

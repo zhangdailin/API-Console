@@ -8,7 +8,6 @@ import "orchids-api/internal/store"
 type Capabilities interface {
 	// SupportsModel reports whether an account's catalog advertises the model.
 	// Each channel decides whether an unobserved catalog can serve requests.
-	// Qoder requires a snapshot; channels with upstream resolution may allow it.
 	SupportsModel(acc *store.Account, model string) bool
 	// IsFreeModel reports whether the model is currently free for the account.
 	IsFreeModel(acc *store.Account, model string) bool

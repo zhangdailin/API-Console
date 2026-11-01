@@ -8,7 +8,7 @@
 // of switching on a channel name.
 //
 // This package imports no channel implementation. That is the rule that keeps
-// the seam usable by all four channels: the table used to live here together
+// the seam usable by all three channels: the table used to live here together
 // with imports of three of them, so a fourth could only be added by repeating
 // the dispatch in each consumer.
 package provider
@@ -67,9 +67,6 @@ type Spec struct {
 
 	// Capabilities answers catalog questions for the shared pipeline.
 	Capabilities Capabilities
-
-	// ConversationAffinity keeps successive turns on an eligible account.
-	ConversationAffinity bool
 
 	Probe *Probe
 

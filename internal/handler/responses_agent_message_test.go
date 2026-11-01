@@ -17,7 +17,7 @@ import (
 
 func TestResponsesAgentTaskReachesSharedUpstream(t *testing.T) {
 	const task = "Check login permissions.\nPreserve the existing authentication checks."
-	for _, channel := range []string{"workbuddy", "qoder", "cline"} {
+	for _, channel := range []string{"workbuddy", "cline"} {
 		for _, stream := range []bool{false, true} {
 			for _, kind := range []string{"message", "agent_message"} {
 				t.Run(channel+"/"+kind+"/"+map[bool]string{false: "json", true: "stream"}[stream], func(t *testing.T) {
@@ -26,7 +26,7 @@ func TestResponsesAgentTaskReachesSharedUpstream(t *testing.T) {
 					t.Cleanup(h.Close)
 					ctx := context.Background()
 					testutil.NoError(t, s.CreateAccount(ctx, &store.Account{AccountType: channel, Enabled: true, Weight: 1,
-						QoderModelIDs: []string{"deepseek-test"}, WorkBuddyAccessToken: "test-access", QoderAccessToken: "test-access", ClineAccessToken: "test-access"}))
+						WorkBuddyAccessToken: "test-access", ClineAccessToken: "test-access"}))
 					testutil.NoError(t, s.CreateModel(ctx, &store.Model{Channel: channel, ModelID: "deepseek-test", Name: "deepseek-test", Status: store.ModelStatusAvailable, Verified: true}))
 					client := &fakePayloadClient{eventsByOp: [][]upstream.SSEMessage{{
 						{Type: "model.text-delta", Event: map[string]any{"delta": "ok"}},

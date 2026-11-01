@@ -12,20 +12,15 @@ import (
 	"time"
 )
 
-type accountSelectionOptions struct {
-	ModelID            string
-	PreferredAccountID int64
-}
-
 // acquireAccountSelection is the form the request path uses: it returns the
 // release handle for the account client, so a client evicted mid-request is
 // closed only after that request finishes.
-func (h *Handler) acquireAccountSelection(ctx context.Context, targetChannel string, channelRequired bool, failedAccountIDs []int64, opts accountSelectionOptions) (UpstreamClient, *store.Account, func(), error) {
+func (h *Handler) acquireAccountSelection(ctx context.Context, targetChannel string, channelRequired bool, failedAccountIDs []int64, modelID string) (UpstreamClient, *store.Account, func(), error) {
 	if h.loadBalancer != nil {
 		if targetChannel != "" {
 			slog.Debug("Account channel selection", "channel", targetChannel, "channel_required", channelRequired)
 		}
-		account, err := h.selectAccountRecordWithOptions(ctx, targetChannel, failedAccountIDs, opts)
+		account, err := h.selectAccountRecord(ctx, targetChannel, failedAccountIDs, modelID)
 		if err != nil {
 			if channelRequired {
 				return nil, nil, func() {}, err
@@ -51,13 +46,13 @@ func (h *Handler) acquireAccountSelection(ctx context.Context, targetChannel str
 // account selection and connection tracking. A candidate is not returned until
 // its per-account slot has been atomically reserved; if another request wins the
 // last slot, selection continues with the remaining accounts.
-func (h *Handler) acquireReservedAccountSelection(ctx context.Context, targetChannel string, channelRequired bool, failedAccountIDs []int64, opts accountSelectionOptions) (UpstreamClient, *store.Account, func(), int64, error) {
+func (h *Handler) acquireReservedAccountSelection(ctx context.Context, targetChannel string, channelRequired bool, failedAccountIDs []int64, modelID string) (UpstreamClient, *store.Account, func(), int64, error) {
 	excluded := append([]int64(nil), failedAccountIDs...)
 	full := make(map[int64]struct{})
 	waitBudget := h.configSnapshot().ReservationWaitBudget()
 	var waited time.Duration
 	for {
-		client, account, release, err := h.acquireAccountSelection(ctx, targetChannel, channelRequired, excluded, opts)
+		client, account, release, err := h.acquireAccountSelection(ctx, targetChannel, channelRequired, excluded, modelID)
 		if err != nil {
 			if waited < waitBudget && strings.Contains(err.Error(), "all matching accounts are at their concurrency limit") {
 				// Rebuild the exclusion set from caller-supplied failures. Entries in
@@ -103,43 +98,25 @@ func (h *Handler) acquireReservedAccountSelection(ctx context.Context, targetCha
 }
 
 // honorsModelCooldown reports whether a channel's selection consults the
-// per-model cooldown its own verdicts write. Qoder scopes agent/model windows;
-// WorkBuddy may scope a plan refusal while accounts with a truly exhausted
+// per-model cooldown its own verdicts write. WorkBuddy may scope a plan refusal
+// while accounts with a truly exhausted
 // package remain account-wide parked. The answer now comes from the channel's
 // registered capabilities instead of a hardcoded list here.
 func honorsModelCooldown(channel string) bool {
 	return provider.HonorsModelCooldown(channel)
 }
 
-func (h *Handler) isCurrentFreeModel(ctx context.Context, channel, modelID string) bool {
-	if h == nil || h.loadBalancer == nil || h.loadBalancer.Store == nil {
-		return false
-	}
-	model, err := h.loadBalancer.Store.GetModelByChannelAndModelID(ctx, channel, strings.ToLower(strings.TrimSpace(modelID)))
-	return err == nil && model != nil && strings.EqualFold(strings.TrimSpace(model.BillingTier), "free")
-}
-
-func (h *Handler) selectAccountRecordWithOptions(ctx context.Context, targetChannel string, failedAccountIDs []int64, opts accountSelectionOptions) (*store.Account, error) {
+func (h *Handler) selectAccountRecord(ctx context.Context, targetChannel string, failedAccountIDs []int64, modelID string) (*store.Account, error) {
 	if h == nil || h.loadBalancer == nil {
 		return nil, errors.New("load balancer not configured")
 	}
-	model := strings.TrimSpace(opts.ModelID)
+	model := strings.TrimSpace(modelID)
 	channel := strings.ToLower(strings.TrimSpace(targetChannel))
-	// honorsModelCooldown already covers the qoder and workbuddy channels; cline
-	// is the one extra channel whose catalog the filter below understands.
+	// honorsModelCooldown already covers the workbuddy channel; cline is the one
+	// extra channel whose catalog the filter below understands.
 	needsFilter := model != "" && (honorsModelCooldown(channel) || channel == "cline")
 	var filter loadbalancer.AccountFilter
 	if needsFilter {
-		// Model billing is request-wide, not account-specific. Resolve lazily so
-		// healthy accounts need no Redis read, and scan/fallback passes share it.
-		var billingRead, currentFree bool
-		isCurrentFree := func() bool {
-			if !billingRead {
-				billingRead = true
-				currentFree = h.isCurrentFreeModel(ctx, channel, model)
-			}
-			return currentFree
-		}
 		filter = func(acc *store.Account) error {
 			if !provider.SupportsModel(channel, acc, model) {
 				return loadbalancer.ErrModelUnavailable
@@ -155,25 +132,7 @@ func (h *Handler) selectAccountRecordWithOptions(ctx context.Context, targetChan
 				}
 			}
 			switch strings.TrimSpace(acc.StatusCode) {
-			case "402":
-				if channel == "qoder" {
-					if provider.IsFreeModel("qoder", acc, model) && isCurrentFree() {
-						return nil
-					}
-					return loadbalancer.ErrAccountNotEligible
-				}
-				if channel == "workbuddy" {
-					if provider.IsFreeModel("workbuddy", acc, model) {
-						return nil
-					}
-					return loadbalancer.ErrAccountNotEligible
-				}
-			case store.AccountStatusQoderQuotaExhausted:
-				if channel == "qoder" && provider.IsFreeModel("qoder", acc, model) && isCurrentFree() {
-					return nil
-				}
-				return loadbalancer.ErrAccountNotEligible
-			case store.AccountStatusWorkBuddyQuotaExhausted:
+			case "402", store.AccountStatusWorkBuddyQuotaExhausted:
 				if channel == "workbuddy" && provider.IsFreeModel("workbuddy", acc, model) {
 					return nil
 				}
@@ -181,45 +140,9 @@ func (h *Handler) selectAccountRecordWithOptions(ctx context.Context, targetChan
 			default:
 				return nil
 			}
-			return loadbalancer.ErrAccountNotEligible
 		}
 	}
-	if channel == "qoder" && filter != nil {
-		// A spent Qoder account still qualifies for a free model, but the
-		// upstream gives it the lowest admission: on 2026-11-01 a spent Free
-		// account was refused (10605, RESOURCE_LIMIT) through two whole
-		// admission windows while accounts holding credits were admitted on the
-		// same model within one. Accounts with credits are tried first; the
-		// spent ones remain the fallback, so nothing that selected before stops
-		// selecting.
-		withCredits := func(acc *store.Account) error {
-			if qoderAccountSpent(acc) {
-				return loadbalancer.ErrAccountNotEligible
-			}
-			return filter(acc)
-		}
-		if acc, err := h.loadBalancer.GetNextAccountWithPreference(ctx, failedAccountIDs, targetChannel, h.connTracker, withCredits, opts.PreferredAccountID); err == nil {
-			return acc, nil
-		}
-	}
-	return h.loadBalancer.GetNextAccountWithPreference(ctx, failedAccountIDs, targetChannel, h.connTracker, filter, opts.PreferredAccountID)
-}
-
-// qoderAccountSpent reports a Qoder account with no spendable credits: parked
-// as exhausted or as a payment refusal, or holding an exhausted quota reading.
-func qoderAccountSpent(acc *store.Account) bool {
-	switch strings.TrimSpace(acc.StatusCode) {
-	case "402":
-		return true
-	case store.AccountStatusQoderQuotaExhausted:
-		// The desktop client keeps no persisted exhausted state: availability is
-		// derived from the reading (available defaults to cap > 0) and an
-		// allowance refusal fails that request only. A status with no numbers
-		// behind it is therefore not evidence of a spent account — parking one
-		// kept working accounts out of rotation entirely.
-		return acc.QoderQuota.Limit > 0 && acc.QoderQuota.Remaining == 0
-	}
-	return acc.QoderQuota.Limit > 0 && acc.QoderQuota.Remaining == 0
+	return h.loadBalancer.GetNextAccountExcludingByChannelWithTrackerFilter(ctx, failedAccountIDs, targetChannel, h.connTracker, filter)
 }
 
 func effectiveAccountConcurrencyLimit(acc *store.Account) int64 {

@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"orchids-api/internal/testutil"
-	"strings"
 	"testing"
 	"time"
 )
@@ -40,23 +39,6 @@ func TestProviderCredentialPatchesPreserveConcurrentAccountFields(t *testing.T) 
 	testutil.Equal(t, storedWB.Token, "")
 	testutil.Equal(t, storedWB.RefreshToken, "")
 
-	qoder := &Account{
-		AccountType: "qoder", Enabled: true, Name: "qoder", UsageLimit: 100,
-		QoderAccessToken: "q-access-old", QoderRefreshToken: "q-refresh-old", QoderMachineID: "machine",
-	}
-	testutil.NoError(t, s.CreateAccount(ctx, qoder))
-	if err := s.UpdateQoderAccount(ctx, qoder.ID, QoderAccountPatch{
-		ExpectedRefreshToken: "q-refresh-old",
-		AccessToken:          "q-access-new",
-		RefreshToken:         "q-refresh-new",
-		RuntimeInfo:          "runtime",
-		RuntimeKey:           "key",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	storedQoder, err := s.GetAccount(ctx, qoder.ID)
-	testutil.NoError(t, err)
-	testutil.Falsef(t, storedQoder.UsageLimit != 100 || storedQoder.QoderRefreshToken != "q-refresh-new" || storedQoder.QoderRuntimeKey != "key", "qoder patch produced the wrong state: %+v", storedQoder)
 }
 
 func TestGrokCredentialPatchPreservesEditsAndRejectsStaleRotation(t *testing.T) {
@@ -81,22 +63,6 @@ func TestGrokCredentialPatchPreservesEditsAndRejectsStaleRotation(t *testing.T) 
 	if err := s.UpdateGrokCredentials(ctx, acc.ID, patch); err == nil {
 		t.Fatal("stale rotation accepted")
 	}
-}
-
-func TestProviderCredentialPatchRejectsStaleRotation(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s, _ := newTestRedisStore(t, "provider-patch:")
-	acc := &Account{AccountType: "qoder", Enabled: true, QoderRefreshToken: "refresh-current"}
-	testutil.NoError(t, s.CreateAccount(ctx, acc))
-	err := s.UpdateQoderAccount(ctx, acc.ID, QoderAccountPatch{
-		ExpectedRefreshToken: "refresh-stale",
-		RefreshToken:         "refresh-would-overwrite",
-	})
-	testutil.Falsef(t, err == nil || !strings.Contains(err.Error(), "changed concurrently"), "error = %v, want a concurrent credential rejection", err)
-	stored, getErr := s.GetAccount(ctx, acc.ID)
-	testutil.NoError(t, getErr)
-	testutil.Equal(t, stored.QoderRefreshToken, "refresh-current")
 }
 
 func TestClineCredentialPatchPreservesEditsAndRejectsStaleRotation(t *testing.T) {

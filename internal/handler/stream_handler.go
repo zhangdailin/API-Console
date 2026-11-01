@@ -28,8 +28,8 @@ const (
 	sseKeepAlive   = ": keep-alive\n\n"
 	// ssePing is the Anthropic keep-alive event. Claude Code's stream watchdog
 	// counts events, not comments: a stream kept alive only with ": keep-alive"
-	// comments was abandoned after ~119 seconds without an event while a Qoder
-	// request was still waiting for the upstream's admission window. The
+	// comments was abandoned after ~119 seconds without an event while a request
+	// was still waiting for the upstream. The
 	// Anthropic API itself sends this ping event.
 	ssePing = "event: ping\ndata: {\"type\": \"ping\"}\n\n"
 )
@@ -59,14 +59,12 @@ var (
 type streamHandler struct {
 	cancelUpstream context.CancelFunc
 	// Configuration
-	config              *config.Config
-	isStream            bool
-	useUpstreamUsage    bool
-	responseFormat      adapter.ResponseFormat
-	disallowToolCalls   bool
-	surfaceToolRejects  bool
-	allowedToolNames    map[string]struct{}
-	emptyOutputFallback string
+	config            *config.Config
+	isStream          bool
+	useUpstreamUsage  bool
+	responseFormat    adapter.ResponseFormat
+	disallowToolCalls bool
+	allowedToolNames  map[string]struct{}
 	// structured validates the finished answer of a strict structured-output
 	// request. It is nil unless the caller sent `strict: true` with a schema
 	// this gateway could read, so an ordinary request pays nothing here.
@@ -132,12 +130,11 @@ type streamHandler struct {
 	ssePayloadScratch        []byte
 
 	// Tool Handling (proxy mode only)
-	pendingToolCalls    []toolCall
-	toolCallHandled     map[string]bool
-	toolCallEmitted     map[string]struct{}
-	streamingTools      map[string]int
-	toolCallCount       int
-	suppressedToolCalls int
+	pendingToolCalls []toolCall
+	toolCallHandled  map[string]bool
+	toolCallEmitted  map[string]struct{}
+	streamingTools   map[string]int
+	toolCallCount    int
 
 	// Logger
 	logger *debug.Logger

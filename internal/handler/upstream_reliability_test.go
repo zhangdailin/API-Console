@@ -3,16 +3,12 @@ package handler
 import (
 	"context"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"orchids-api/internal/config"
 	"orchids-api/internal/debug"
-	"orchids-api/internal/qoder"
-	"orchids-api/internal/store"
 	"orchids-api/internal/upstream"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -43,53 +39,4 @@ func TestUpstreamReliabilityDownstreamWriteFailureCancelsUpstream(t *testing.T) 
 	if !c.wasCanceled {
 		t.Errorf("upstream ctx was not canceled after failed downstream write; continued=%v", c.continued)
 	}
-}
-
-func TestUpstreamReliabilityHandlerQoderRetryBudget(t *testing.T) {
-	old := qoder.TransientBackoff
-	qoder.TransientBackoff = func(int) time.Duration { return 0 }
-	defer func() { qoder.TransientBackoff = old }()
-	var n atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n.Add(1)
-		w.WriteHeader(503)
-		io.WriteString(w, "{\"message\":\"provider_error\"}")
-	}))
-	defer server.Close()
-	cfg := &config.Config{AdminPass: "test-only-password", RequestTimeout: 10, MaxRetries: 3, RetryDelay: 1, QoderInferenceURL: server.URL, QoderOpenAPIBaseURL: server.URL, QoderOAuthBaseURL: server.URL}
-	acc := &store.Account{ID: 1, AccountType: "qoder", QoderAccessToken: "access", QoderRefreshToken: "refresh", QoderExpiresAt: time.Now().Add(48 * time.Hour), QoderUserID: "uid", QoderMachineID: "11111111-2222-4333-8444-555555555555", QoderModelIDs: []string{"Qwen3.7-Max"}}
-	h := NewWithLoadBalancer(cfg, nil)
-	h.client = qoder.NewFromAccount(acc, cfg)
-	req := httptest.NewRequest(http.MethodPost, "http://x/qoder/v1/chat/completions", strings.NewReader("{\"model\":\"Qwen3.7-Max\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"stream\":false}"))
-	rec := httptest.NewRecorder()
-	h.HandleMessages(rec, req)
-	t.Logf("one HTTP ingress request; upstream attempts=%d response status=%d", n.Load(), rec.Code)
-	if n.Load() > 4 {
-		t.Errorf("one ingress request exceeded configured 4-attempt budget: got %d", n.Load())
-	}
-}
-
-func TestQoderQueueWaitStopsAtRequestDeadline(t *testing.T) {
-	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		w.WriteHeader(401)
-		io.WriteString(w, `{"code":"10605","message":"gateway busy retryAfterSeconds=30"}`)
-	}))
-	defer server.Close()
-	cfg := &config.Config{RequestTimeout: 10, MaxRetries: 3, RetryDelay: 1, QoderInferenceURL: server.URL, QoderOpenAPIBaseURL: server.URL, QoderOAuthBaseURL: server.URL}
-	acc := &store.Account{ID: 1, AccountType: "qoder", QoderAccessToken: "access", QoderRefreshToken: "refresh", QoderExpiresAt: time.Now().Add(48 * time.Hour), QoderUserID: "uid", QoderMachineID: "11111111-2222-4333-8444-555555555555", QoderModelIDs: []string{"Qwen3.7-Max"}}
-	h := NewWithLoadBalancer(cfg, nil)
-	h.client = qoder.NewFromAccount(acc, cfg)
-	defer h.Close()
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "http://x/qoder/v1/chat/completions", strings.NewReader(`{"model":"Qwen3.7-Max","messages":[{"role":"user","content":"hi"}],"stream":true}`))
-	ctx, cancel := context.WithTimeout(req.Context(), 500*time.Millisecond)
-	defer cancel()
-	started := time.Now()
-	h.HandleMessages(rec, req.WithContext(ctx))
-	if calls.Load() != 1 || rec.Code < 400 || time.Since(started) > 2*time.Second {
-		t.Fatalf("queue ignored request deadline: calls=%d status=%d elapsed=%v", calls.Load(), rec.Code, time.Since(started))
-	}
-
 }

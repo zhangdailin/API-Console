@@ -22,7 +22,7 @@ func TestLatencyCapturesReusedConnectionsAndSecrets(t *testing.T) {
 		req.Header.Set("Cosy-Key", "secret-key")
 		req.Header.Set("Cosy-User", "private-user")
 		a := BeginUpstream(ctx, req.Method, server.URL, req.Header, nil)
-		traced, l := a.Trace(ctx, map[string]any{"model_key": "qfmodel"})
+		traced, l := a.Trace(ctx, map[string]any{"model_key": "test-model"})
 		resp, err := client.Do(req.WithContext(traced))
 		testutil.NoError(t, err)
 		l.Response(resp)

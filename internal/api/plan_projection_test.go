@@ -23,11 +23,6 @@ func TestPlanProjectionSharesOneShapeAcrossChannels(t *testing.T) {
 		{"cline free", &store.Account{AccountType: "cline", ClinePlan: "free"}, "free", "free", "confirmed"},
 		{"cline pass", &store.Account{AccountType: "cline", ClinePlan: "Cline Pass"}, "Cline Pass", "paid", ""},
 
-		{"qoder unsynced", &store.Account{AccountType: "qoder"}, "", "unsynced", ""},
-		{"qoder no plan name", &store.Account{AccountType: "qoder", QoderQuota: store.QoderQuotaSnapshot{SyncedAt: synced}}, "", "unknown", ""},
-		{"qoder free", &store.Account{AccountType: "qoder", QoderQuota: store.QoderQuotaSnapshot{PlanTier: "Free", SyncedAt: synced}}, "Free", "free", "confirmed"},
-		{"qoder pro", &store.Account{AccountType: "qoder", QoderQuota: store.QoderQuotaSnapshot{PlanTier: "Pro", SyncedAt: synced}}, "Pro", "paid", ""},
-
 		{"workbuddy unsynced", &store.Account{AccountType: "workbuddy"}, "", "unsynced", ""},
 		{"workbuddy free package", &store.Account{AccountType: "workbuddy", WorkBuddyQuota: store.WorkBuddyQuotaSnapshot{PackageName: "Free Plan Subscription", SyncedAt: synced}}, "Free Plan Subscription", "free", "confirmed"},
 		{"workbuddy paid package", &store.Account{AccountType: "workbuddy", WorkBuddyQuota: store.WorkBuddyQuotaSnapshot{PackageName: "Pro Monthly", SyncedAt: synced}}, "Pro Monthly", "paid", ""},

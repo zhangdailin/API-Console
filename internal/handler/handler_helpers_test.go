@@ -108,13 +108,13 @@ func TestSelectAccountRecord_WorkBuddyParksModelNotAccount(t *testing.T) {
 	store.RecordModelCooldown(refused, "paid-model", time.Now().Add(time.Minute))
 	testutil.NoError(t, s.UpdateAccount(ctx, refused), "UpdateAccount() error = %v")
 
-	account, err := h.selectAccountRecordWithOptions(ctx, "workbuddy", nil, accountSelectionOptions{ModelID: "paid-model"})
-	testutil.NoError(t, err, "selectAccountRecordWithOptions() error = %v")
+	account, err := h.selectAccountRecord(ctx, "workbuddy", nil, "paid-model")
+	testutil.NoError(t, err, "selectAccountRecord() error = %v")
 	testutil.Equal(t, account.ID, spare.ID)
 
 	// Only the named model is parked: the refused account still serves free models.
-	account, err = h.selectAccountRecordWithOptions(ctx, "workbuddy", []int64{spare.ID}, accountSelectionOptions{ModelID: "free-model"})
-	testutil.NoError(t, err, "selectAccountRecordWithOptions(free-model) error = %v")
+	account, err = h.selectAccountRecord(ctx, "workbuddy", []int64{spare.ID}, "free-model")
+	testutil.NoError(t, err, "selectAccountRecord(free-model) error = %v")
 	testutil.Equal(t, account.ID, refused.ID)
 }
 
@@ -126,7 +126,7 @@ func TestSelectAccountRecord_ClineEnforcesPerAccountCatalog(t *testing.T) {
 	for _, acc := range []*store.Account{first, second} {
 		testutil.NoError(t, s.CreateAccount(ctx, acc))
 	}
-	selected, err := h.selectAccountRecordWithOptions(ctx, "cline", nil, accountSelectionOptions{ModelID: "model-b"})
+	selected, err := h.selectAccountRecord(ctx, "cline", nil, "model-b")
 	testutil.NoError(t, err)
 	testutil.Equal(t, selected.ID, second.ID)
 }
@@ -249,7 +249,7 @@ func TestHandleMessages_ResolvesBareModelToEffortVariant(t *testing.T) {
 	testutil.Equal(t, len(client.calls), 1)
 	testutil.Equal(t, client.calls[0].Model, "claude-opus-5-low")
 	// The client-stated effort must reach the provider request so channels
-	// whose wire contract carries it (qoder/workbuddy/cline) can forward
+	// whose wire contract carries it (workbuddy/workbuddy/cline) can forward
 	// the thinking hint instead of silently dropping it.
 	testutil.Equal(t, client.calls[0].ReasoningEffort, "low")
 }

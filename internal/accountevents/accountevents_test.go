@@ -204,8 +204,8 @@ func TestClassify_CredentialSignalCoversEveryChannel(t *testing.T) {
 	refreshed.OAuthAccessToken = "t2"
 	testutil.Equal(t, Classify(grokOAuth, &refreshed), KindCredential)
 
-	qoder := &store.Account{ID: 4, AccountType: "qoder", QoderAccessToken: "q1"}
-	reTokenized := *qoder
-	reTokenized.QoderAccessToken = "q2"
-	testutil.Equal(t, Classify(qoder, &reTokenized), KindCredential)
+	cline := &store.Account{ID: 4, AccountType: "cline", ClineAccessToken: "c1"}
+	reTokenized := *cline
+	reTokenized.ClineAccessToken = "c2"
+	testutil.Equal(t, Classify(cline, &reTokenized), KindCredential)
 }

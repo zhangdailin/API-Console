@@ -36,9 +36,6 @@ func TestClassify_ModelScopedFailureKeepsAccount(t *testing.T) {
 	acc := grokBuildAccount()
 	for _, message := range []string{
 		"workbuddy API error: status=200, code=6004, message=usage exceeds frequency limit",
-		"qoder agent limit reached; resets at 2026-09-27T19:47:13Z",
-		`qoder upstream rejected the credential: {"agentLimitResetTime":1790538433100}`,
-		"qoder gateway is busy: serviceAvailable=false retryAfterSeconds=29",
 		"404: model is not found",
 		"model not found: grok-4.6",
 		"no_implementation_available for grok-4.6",
@@ -118,7 +115,6 @@ func TestCooldownFor_MatchesPoolValues(t *testing.T) {
 		{&store.Account{StatusCode: "401"}, 30 * time.Minute},
 		{&store.Account{StatusCode: "429"}, 30 * time.Second},
 		{&store.Account{StatusCode: "402"}, 24 * time.Hour},
-		{&store.Account{StatusCode: "402", AccountType: "qoder"}, 24 * time.Hour},
 		// A WorkBuddy account reaches status 402 only when its allowance is gone
 		// (a model-scoped refusal writes no status), so it is held like any other
 		// payment verdict — and released early by isAccountAvailable once
@@ -230,21 +226,6 @@ func TestClassifyInferenceCapPreservesStatedCooldown(t *testing.T) {
 	testutil.False(t, !AccountHeld(acc, time.Now().Add(time.Hour)), "inference cap account was released by the generic 30m throttle ceiling")
 	remaining := time.Until(acc.QuotaResetAt)
 	testutil.Falsef(t, remaining < wait-time.Second || remaining > wait+time.Second, "quota reset remaining=%v want %v", remaining, wait)
-}
-
-func TestClassifyQoderDailyCountHoldsUntilReset(t *testing.T) {
-	acc := &store.Account{ID: 16, AccountType: "qoder", Enabled: true,
-		QoderQuota: store.QoderQuotaSnapshot{ResetAt: time.Now().Add(8 * time.Hour)}}
-	v := Classify(acc, errors.New("qoder upstream rejected the credential: Billing daily count exceeded"), "efficient")
-	testutil.Falsef(t, v.Scope != ScopeAccount || v.Status != "429" || !v.Retryable || !v.SwitchAccount || v.Cooldown < time.Hour, "daily count verdict = %+v", v)
-	v.Apply(acc)
-	testutil.False(t, !AccountHeld(acc, time.Now().Add(time.Hour)), "daily limit must not be released after an ordinary 30s throttle")
-}
-
-func TestClassifyQoderEntitlementOnlyBlocksCurrentModel(t *testing.T) {
-	acc := &store.Account{ID: 18, AccountType: "qoder", Enabled: true}
-	v := Classify(acc, errors.New("qoder account has no usable plan or allowance; the model requires a subscription (upstream code=112)"), "efficient")
-	testutil.Falsef(t, v.Scope != ScopeModel || v.Model != "efficient" || v.Status != "" || !v.Retryable || !v.SwitchAccount || v.Cooldown <= 0, "entitlement verdict = %+v", v)
 }
 
 type retryAfterTestError struct{ wait time.Duration }
@@ -366,41 +347,6 @@ func TestClassify_PlainThrottleKeepsItsRetryHint(t *testing.T) {
 	testutil.Equal(t, verdict.Cooldown, 2*time.Minute)
 }
 
-// A spent balance is also not a payment refusal: it must not be answered as a
-// per-request 402 hold, which parks the whole account for a day without leaving
-// its free tier reachable.
-func TestClassify_SpentBalanceOnQoderKeepsTheFreeTierState(t *testing.T) {
-	acc := &store.Account{ID: 16, AccountType: "qoder", Enabled: true}
-	verdict := Classify(acc, hintedError{
-		message: "qoder API error: status=429, message=no AI credits remaining",
-		wait:    30 * time.Second,
-	}, "qwen3.8-flash")
-
-	testutil.Equal(t, verdict.Status, store.AccountStatusQoderQuotaExhausted)
-}
-
-// Billing timestamps must neither shorten daily holds nor strand credentials
-// until subscription expiry, including records written before this fix.
-func TestQoderDailyCountIgnoresBillingReset(t *testing.T) {
-	for _, billing := range []time.Duration{-time.Hour, 8 * time.Hour, 14 * 24 * time.Hour} {
-		t.Run(billing.String(), func(t *testing.T) {
-			acc := &store.Account{AccountType: "qoder", Enabled: true,
-				QuotaResetAt: time.Now().Add(billing),
-				QoderQuota:   store.QoderQuotaSnapshot{ResetAt: time.Now().Add(billing)}}
-			v := Classify(acc, errors.New("Billing daily count exceeded"), "efficient")
-			testutil.Equal(t, v.Cooldown, 24*time.Hour)
-			v.Apply(acc)
-			testutil.Equal(t, acc.QuotaResetAt, v.At.Add(24*time.Hour))
-			testutil.Equal(t, CooldownFor(acc), 24*time.Hour)
-			// Simulate a legacy record or a later subscription quota refresh.
-			acc.QuotaResetAt = v.At.Add(billing)
-			testutil.True(t, AccountHeld(acc, v.At.Add(23*time.Hour)))
-			testutil.False(t, AccountHeld(acc, v.At.Add(24*time.Hour)))
-			testutil.False(t, AccountHeld(acc, v.At.Add(25*time.Hour)))
-		})
-	}
-}
-
 // TestAccountHeld_429BillingResetChannels pins the scope of the rule above: only
 // channels whose quota sync stores a billing-cycle end in QuotaResetAt ignore a
 // far reset. Elsewhere a far reset is still honoured up to the ceiling.
@@ -409,7 +355,7 @@ func TestAccountHeld_429BillingResetChannels(t *testing.T) {
 	for _, tc := range []struct {
 		channel  string
 		heldAt10 bool
-	}{{"workbuddy", false}, {"qoder", false}, {"grok", true}, {"cline", true}} {
+	}{{"workbuddy", false}, {"grok", true}, {"cline", true}} {
 		acc := &store.Account{AccountType: tc.channel, StatusCode: "429", LastAttempt: now,
 			RateLimitFailures: 1, QuotaResetAt: now.Add(9 * 24 * time.Hour)}
 		testutil.Equal(t, AccountHeld(acc, now.Add(10*time.Minute)), tc.heldAt10)

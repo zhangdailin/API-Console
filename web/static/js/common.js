@@ -51,20 +51,17 @@ function getQuotaStats(acc) {
     return { ...empty, unmetered: true, note: String(acc.quota_note || "").trim(),
       modelCount: Array.isArray(acc.cline_model_ids) ? acc.cline_model_ids.length : 0 };
   }
-  if (type === "workbuddy" || type === "qoder") {
+  if (type === "workbuddy") {
     // Credit snapshots are authoritative; gateway token counts are not balances.
-    const qoder = type === "qoder";
     const limit = Math.max(0, Number(acc.quota_limit || 0));
     const remaining = Math.max(0, Number(acc.quota_remaining || 0));
-    if (acc.quota_supported !== true || (!qoder && limit <= 0)) return { ...empty, unknown: true };
+    if (acc.quota_supported !== true || limit <= 0) return { ...empty, unknown: true };
     return {
       supported: true, limit, remaining,
-      used: qoder ? Math.max(0, Number(acc.quota_used || 0)) : Math.max(0, limit - remaining),
+      used: Math.max(0, limit - remaining),
       pctRemaining: limit > 0 ? Math.min(100, Math.round((remaining / limit) * 100)) : 0,
       unit: acc.quota_unit || "credits", plan: acc.quota_plan || "", resetAt: acc.quota_reset_at || "",
-      ...(qoder
-        ? { qoder: true, exhausted: acc.quota_exhausted === true, upgradeUrl: String(acc.quota_upgrade_url || "").trim() }
-        : { workbuddy: true, packageRemaining: Math.max(0, Number(acc.quota_package_remaining || 0)) }),
+      workbuddy: true, packageRemaining: Math.max(0, Number(acc.quota_package_remaining || 0)),
     };
   }
   if (isSidebarGrokOAuthAccount(acc)) {
@@ -107,7 +104,6 @@ function getQuotaStats(acc) {
 
 function isQuotaOnlyStatus(acc, quota = getQuotaStats(acc)) {
   if (!acc) return false;
-  const type = normalizeSidebarAccountType(acc);
   const statusCode = normalizeSidebarStatusCode(acc.status_code);
   // An exhausted allowance is a business limit on every channel, not a fault:
   // the credential is intact and the scheduler resumes the account when the
@@ -115,12 +111,6 @@ function isQuotaOnlyStatus(acc, quota = getQuotaStats(acc)) {
   // out was reported as 异常 on one page and as 额度不足 on another.
   if (isQuotaExhaustedQuota(acc, quota)) return true;
   if (statusCode === "402") return true;
-  if (type === "qoder") {
-    // Qoder reports the window share directly and the gateway's exhausted verdict
-    // is authoritative. The limit may legitimately be 0 while credits remain, so
-    // the verdict must not be gated on limit > 0.
-    return Boolean(acc.quota_exhausted === true || (quota && quota.remaining <= 0 && acc.quota_supported === true));
-  }
   return false;
 }
 

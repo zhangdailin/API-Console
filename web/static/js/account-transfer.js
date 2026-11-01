@@ -59,7 +59,7 @@ async function confirmAccountImport() {
     if (!result || !['total', 'imported', 'skipped', 'duplicates', 'invalid', 'failed'].every(name => Number.isInteger(result[name]) && result[name] >= 0) || result.imported + result.skipped !== result.total) throw new Error('结果格式无效');
     accountImportData = null;
     ConsoleUI.setText('accountImportSummary', `已处理 ${result.total} 个：导入 ${result.imported}，重复 ${result.duplicates}，无效 ${result.invalid}，写入失败 ${result.failed}。`);
-    const reasons = { duplicate_account: '已有相同账号，保留现有记录', unsupported_channel: '不支持的渠道', missing_refresh_token: '缺少可续期的刷新令牌', missing_device_identity: '缺少 Qoder 设备身份', storage_error: '存储写入失败' };
+    const reasons = { duplicate_account: '已有相同账号，保留现有记录', unsupported_channel: '不支持的渠道', missing_refresh_token: '缺少可续期的刷新令牌', storage_error: '存储写入失败' };
     const container = document.getElementById('accountImportResult');
     container.replaceChildren();
     (Array.isArray(result.issues) ? result.issues : []).slice(0, 50).forEach(issue => {

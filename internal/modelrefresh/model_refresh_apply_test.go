@@ -16,7 +16,7 @@ import (
 func TestApplyModelRefresh_RefusesNonUpstreamSources(t *testing.T) {
 	for _, source := range []string{
 		"test",
-		"qoder_builtin_catalog",
+		"workbuddy_builtin_catalog",
 		"cline_cached_models",
 		"grok_build_models_unavailable_cached",
 		"",
@@ -49,7 +49,6 @@ func TestApplyModelRefresh_IsUpstreamCatalogSource(t *testing.T) {
 	allowed := []string{
 		"grok_build_models",
 		"workbuddy_cli_models",
-		"qoder_upstream_models",
 		"cline_recommended_models",
 	}
 	for _, source := range allowed {
@@ -58,7 +57,7 @@ func TestApplyModelRefresh_IsUpstreamCatalogSource(t *testing.T) {
 	refused := []string{
 		"",
 		"test",
-		"qoder_builtin_catalog",
+		"workbuddy_builtin_catalog",
 		"grok_cached_models",
 		"cline_cached_models",
 		"grok_build_models_unavailable_cached",

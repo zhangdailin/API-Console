@@ -122,13 +122,8 @@ func (s *clineThinkingSplitter) feed(content string, final bool, emitReasoning, 
 	}
 }
 
-// consumeStream parses the SSE body and forwards deltas to the caller.
-func consumeStream(body io.Reader, toolsEnabled bool, onMessage func(upstream.SSEMessage), streamToolDeltas ...bool) (streamResult, error) {
-	return consumeStreamWithToolNames(body, toolsEnabled, nil, onMessage, streamToolDeltas...)
-}
-
-// consumeStreamWithToolNames is consumeStream with the request's shortened tool
-// names (upstream name -> client name) restored on every tool call.
+// consumeStreamWithToolNames parses SSE and restores the request's shortened
+// tool names (upstream name -> client name) on every tool call.
 func consumeStreamWithToolNames(body io.Reader, toolsEnabled bool, toolNames map[string]string, onMessage func(upstream.SSEMessage), streamToolDeltas ...bool) (streamResult, error) {
 	scanner := bufio.NewScanner(body)
 	buffer := util.AcquireStreamBuffer()

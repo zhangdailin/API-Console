@@ -73,10 +73,10 @@ func TestNonStreamKeepAliveWaitsBeforeOpening(t *testing.T) {
 func TestNonStreamFailureAfterOpeningWritesOnlyTheBody(t *testing.T) {
 	sh, rec := newNonStreamHandler(t, nonStreamOpenAfter+time.Second)
 	sh.writeKeepAlive()
-	sh.reportRequestFailure("queue refused", "upstream_queue", "Qoder model queue unavailable", 30*time.Second)
+	sh.reportRequestFailure("queue refused", "upstream_queue", "WorkBuddy model queue unavailable", 30*time.Second)
 	testutil.Equal(t, rec.headerCalls, 0)
 	body := rec.buf.String()
-	testutil.MustContain(t, body, "Qoder model queue unavailable")
+	testutil.MustContain(t, body, "WorkBuddy model queue unavailable")
 	var parsed map[string]any
 	testutil.NoError(t, json.Unmarshal([]byte(body), &parsed))
 	testutil.False(t, !strings.HasPrefix(body, " "), "the error was not written after the keep-alive")

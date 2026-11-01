@@ -2,7 +2,7 @@
 
 # API Console
 
-**One gateway for WorkBuddy, Qoder, Cline, and Grok Build.**
+**One gateway for WorkBuddy, Cline, and Grok Build.**
 
 [![Go](https://img.shields.io/badge/Go-1.26.10%2B-00ADD8?logo=go&logoColor=white)](go.mod)
 [![Redis](https://img.shields.io/badge/Redis-required-DC382D?logo=redis&logoColor=white)](config.example.json)
@@ -25,7 +25,7 @@ Applications can use Claude Messages, OpenAI Chat Completions, or Responses endp
 
 ## Features
 
-- **Four Upstream Channels** — WorkBuddy, Qoder, Cline, and Grok Build OAuth, with official authorization flows in the console.
+- **Three Upstream Channels** — WorkBuddy, Cline, and Grok Build OAuth, with official authorization flows in the console.
 - **Compatible API Interfaces** — Messages, Chat Completions, and Responses, including streaming, reasoning, and tool calls where supported by the upstream model.
 - **Account Pool Scheduling** — Weighted selection, concurrency limits, credential refresh, cooldowns, and retry policies.
 - **Model Discovery** — Refresh catalogs from authorized accounts and manage model visibility and routing.
@@ -40,7 +40,6 @@ Applications can use Claude Messages, OpenAI Chat Completions, or Responses endp
 | Channel | Authorization | API prefix |
 |---------|---------------|------------|
 | WorkBuddy | Official browser authorization | `/workbuddy/v1` |
-| Qoder | Official device authorization | `/qoder/v1` |
 | Cline | WorkOS device authorization | `/cline/v1` |
 | Grok | Build OAuth device authorization | `/grok/v1` |
 
@@ -116,7 +115,7 @@ chmod +x orchids-server-linux-amd64
 ./orchids-server-linux-amd64 -config ./config.json
 ```
 
-Existing build and deployment scripts retain the binary name `orchids-server`. The project is API Console, with the four channels listed above.
+Existing build and deployment scripts retain the binary name `orchids-server`. The project is API Console, with the three channels listed above.
 
 For a persistent Linux service, reverse proxy, and backend port protection, follow the [host deployment guide](deploy/README.md). Review the deployment script's options with:
 
@@ -143,7 +142,7 @@ See [Online Upgrade](docs/online-upgrade.md) for eligibility, configuration, and
 
 ## API Usage
 
-Use `http://127.0.0.1:3002/workbuddy/v1`, or choose `/qoder/v1`, `/cline/v1`, or `/grok/v1`. The corresponding unversioned provider bases expose the same endpoints.
+Use `http://127.0.0.1:3002/workbuddy/v1`, or choose `/cline/v1`, or `/grok/v1`. The corresponding unversioned provider bases expose the same endpoints.
 
 | Method | Path relative to the API prefix | Purpose |
 |--------|---------------------------------|---------|

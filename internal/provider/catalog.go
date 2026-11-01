@@ -52,7 +52,7 @@ const (
 // catalog for a currently active account. Nothing here returns a compiled-in or
 // defaulted list.
 type Catalog struct {
-	// Source labels the discovery report ("qoder_upstream_models").
+	// Source labels the discovery report ("cline_recommended_models").
 	Source string
 	Kind   CatalogKind
 	// RequestTimeoutSeconds caps the request timeout of a manual discovery
@@ -107,12 +107,9 @@ func PersistSnapshot(ctx context.Context, s *store.Store, acc *store.Account, ca
 // SnapshotRow is the part of a stored catalog row every row-snapshot channel
 // writes. A channel reads the fields its own feed carries and ignores the rest.
 type SnapshotRow struct {
-	ID          string   `json:"id"`
-	Key         string   `json:"key"`
-	Name        string   `json:"name"`
-	DisplayName string   `json:"display_name"`
-	Provider    string   `json:"provider"`
-	PriceFactor *float64 `json:"price_factor"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name"`
 }
 
 // ParseSnapshotRows decodes the JSON rows of a stored snapshot. A row that is

@@ -33,7 +33,6 @@ func loginPort() *provider.Login {
 		ErrPending:        ErrAuthPending,
 		ErrUnavailable:    ErrAuthUnavailable,
 		ErrRejected:       ErrAuthRejected,
-		NeedsDeviceCode:   true,
 		// The catalog read while building the account doubles as the credential
 		// check, so a failed build is a failed verification.
 		BuildVerifies: true,

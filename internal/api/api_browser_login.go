@@ -94,8 +94,7 @@ func beginBrowserLogin[T any](w http.ResponseWriter, r *http.Request, a *API, ch
 // loginSeed is what a channel learned from its upstream about the transaction it
 // just opened, together with the operator's intent for the resulting account.
 type loginSeed struct {
-	// deviceCode is the value the poll call exchanges. Qoder has none at this
-	// point: its upstream issues one during the first poll.
+	// deviceCode is the value the poll call exchanges.
 	deviceCode string
 	// verifyURI is the human-facing page and verifyFull the single-use challenge
 	// embedded in it. A channel with no separate page leaves verifyURI empty.

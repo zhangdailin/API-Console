@@ -21,7 +21,7 @@ func TestAccountLoginTemplateRendersEveryProviderOnce(t *testing.T) {
 	err = renderer.RenderIndex(recorder, httptest.NewRequest(http.MethodGet, "/?tab=accounts", nil), &config.Config{AdminPath: "/admin"}, nil)
 	testutil.NoError(t, err)
 	page := recorder.Body.String()
-	for _, provider := range []string{"workbuddy", "qoder", "cline", "grok"} {
+	for _, provider := range []string{"workbuddy", "cline", "grok"} {
 		if got := strings.Count(page, `data-login-provider="`+provider+`"`); got != 1 {
 			t.Fatalf("%s login buttons: got %d, want 1", provider, got)
 		}
@@ -29,7 +29,7 @@ func TestAccountLoginTemplateRendersEveryProviderOnce(t *testing.T) {
 			t.Fatalf("%s login groups: got %d, want 1", provider, got)
 		}
 	}
-	for _, id := range []string{"workbuddyLoginStatus", "qoderLoginStatus", "clineLoginStatus", "grokDeviceLoginStatus", "workbuddyLoginLink", "qoderLoginLink", "clineLoginLink", "grokDeviceLoginLink"} {
+	for _, id := range []string{"workbuddyLoginStatus", "clineLoginStatus", "grokDeviceLoginStatus", "workbuddyLoginLink", "clineLoginLink", "grokDeviceLoginLink"} {
 		if got := strings.Count(page, `id="`+id+`"`); got != 1 {
 			t.Fatalf("%s: got %d, want 1", id, got)
 		}

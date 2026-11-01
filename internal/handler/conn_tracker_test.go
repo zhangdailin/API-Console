@@ -141,7 +141,7 @@ func TestSelectAccount_UsesHandlerConnTracker(t *testing.T) {
 		return &trackerTestUpstream{}
 	})
 
-	_, selected, release, err := h.acquireAccountSelection(context.Background(), "workbuddy", true, nil, accountSelectionOptions{})
+	_, selected, release, err := h.acquireAccountSelection(context.Background(), "workbuddy", true, nil, "")
 	defer release()
 	testutil.NoError(t, err, "selectAccount() error = %v")
 	testutil.False(t, selected == nil, "selectAccount() returned nil account")
@@ -190,7 +190,7 @@ func TestAcquireReservedAccountSelection_WaitsForShortLease(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	_, chosen, release, trackedID, err := h.acquireReservedAccountSelection(ctx, "workbuddy", true, nil, accountSelectionOptions{ModelID: "deepseek-v4-flash"})
+	_, chosen, release, trackedID, err := h.acquireReservedAccountSelection(ctx, "workbuddy", true, nil, "deepseek-v4-flash")
 	defer release()
 	select {
 	case <-tracker.fullObserved:
@@ -249,9 +249,7 @@ func TestAcquireReservedAccountSelection_WaitsForBusyAccountLease(t *testing.T) 
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	_, chosen, release, trackedID, err := h.acquireReservedAccountSelection(ctx, "workbuddy", true, nil, accountSelectionOptions{
-		ModelID: "claude-opus-5",
-	})
+	_, chosen, release, trackedID, err := h.acquireReservedAccountSelection(ctx, "workbuddy", true, nil, "claude-opus-5")
 	defer release()
 	select {
 	case <-tracker.fullObserved:
@@ -336,13 +334,13 @@ func TestDefaultAccountConcurrencyLimitIsTen(t *testing.T) {
 	t.Parallel()
 
 	// Every provider shares one default. The per-channel values this replaced
-	// (WorkBuddy 3, Grok 1, Qoder unlimited) made a channel's capacity depend on
+	// (WorkBuddy 3, Grok 1) made a channel's capacity depend on
 	// which switch arm it happened to fall into.
-	for _, accountType := range []string{"grok", "workbuddy", "qoder", "cline"} {
+	for _, accountType := range []string{"grok", "workbuddy", "cline"} {
 		testutil.Equal(t, effectiveAccountConcurrencyLimit(&store.Account{AccountType: accountType}), 10)
 	}
 	testutil.Equal(t, effectiveAccountConcurrencyLimit(&store.Account{AccountType: "workbuddy", MaxConcurrent: 7}), 7)
-	testutil.Equal(t, effectiveAccountConcurrencyLimit(&store.Account{AccountType: "qoder", MaxConcurrent: 4}), 4)
+	testutil.Equal(t, effectiveAccountConcurrencyLimit(&store.Account{AccountType: "cline", MaxConcurrent: 4}), 4)
 }
 
 func TestTryAcquireTrackedAccount_DoesNotAdmitRequestPastLimit(t *testing.T) {

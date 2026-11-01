@@ -59,8 +59,8 @@ func addReasoningDiagnostics(ctx context.Context, metadata map[string]any) {
 func diagnosticText(text string, acc *store.Account) string {
 	if acc != nil {
 		// One list, owned by the type that grows credential fields. This scrubber
-		// used to carry its own copy covering seven of the fourteen values, so a
-		// Qoder runtime key or a WorkBuddy refresh token could be written into the
+		// used to carry its own copy covering only some of the values, so a
+		// WorkBuddy refresh token could be written into the
 		// diagnostics it produces — which are persisted in the audit journal.
 		for _, secret := range acc.Secrets() {
 			if secret == "" {

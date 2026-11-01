@@ -28,8 +28,8 @@ function setup(fetcher) {
     el('ImportModel').value = 'model/中文 +&?'; el('ImportModel').events.change();
   } };
 }
-test('all four channels import Codex and Claude with encoded credentials and exact endpoints', async () => {
-  for (const channel of ['workbuddy', 'qoder', 'cline', 'grok']) {
+test('all three channels import Codex and Claude with encoded credentials and exact endpoints', async () => {
+  for (const channel of ['workbuddy',  'cline', 'grok']) {
     const t = setup(); await t.load(channel);
     assert.equal(t.calls.at(-1)[0], 'https://gateway.example/' + channel + '/v1/models');
     assert.equal(t.calls.at(-1)[1].credentials, 'omit');

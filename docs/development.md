@@ -88,7 +88,7 @@ provider-performance.ps1 驱动本地 BenchmarkProviderLocal，可选择通道�
 部分 live 测试有 build tag 与显式环境开关，默认 CI 不运行；路径可能随分层重构变化，运行前以 rg 查找当前测试函数及构建标签，不照搬历史命令。
 
 ```bash
-rg -n 'go:build live|func TestLive|QODER_PROBE|WB_LIVE|TLS_PROBE' internal
+rg -n 'go:build live|func TestLive|WB_LIVE|TLS_PROBE' internal
 ```
 
 历史 verify-coding-protocols.py 绑定配置目录、服务名、13002 端口及 Linux /proc，会读取生产进程密钥并复制账号快照。它不是即插即用的公开测试入口；运行可能消耗真实额度，需隔离命名空间、明确账号和精确清理对象。
@@ -98,7 +98,6 @@ rg -n 'go:build live|func TestLive|QODER_PROBE|WB_LIVE|TLS_PROBE' internal
 修改后更新对应运行指南，给历史报告标明范围。交付时分开报告本地检查、Git 提交、push、部署和在线验证。源码更新不自动意味着发布或生产更新。
 
 受管理文件稳定后维护 AOCI；不能用扫描路径或符号列表自动拼出索引语义。仅文档更新也需同步相关索引，但不需要为了文档运行真实生成探针。
-
 
 ## 真实流式 API 性能测试
 

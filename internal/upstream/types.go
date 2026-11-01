@@ -40,8 +40,7 @@ type UpstreamRequest struct {
 	ConversationID string
 	// TraceID preserves a client-provided trace independently from RequestID.
 	// WorkBuddy uses RequestID to aggregate one turn and TraceID for diagnostics.
-	TraceID       string
-	ChatSessionID string
+	TraceID string
 }
 
 // SSEMessage is the shared streaming event representation for upstream providers.

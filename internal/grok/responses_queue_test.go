@@ -21,7 +21,7 @@ func TestResponsesBridgeStreamCompletesAndCloses(t *testing.T) {
 	server := httptest.NewServer(bridge)
 	defer server.Close()
 	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Post(server.URL+"/qoder/v1/responses", "application/json", strings.NewReader(`{"model":"qwen3.8-flash","input":"hi","stream":true}`))
+	resp, err := client.Post(server.URL+"/cline/v1/responses", "application/json", strings.NewReader(`{"model":"qwen3.8-flash","input":"hi","stream":true}`))
 	testutil.NoError(t, err)
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
@@ -40,7 +40,7 @@ func TestResponsesBridgePreservesQueueRefusal(t *testing.T) {
 				w.WriteHeader(http.StatusTooManyRequests)
 				_, _ = w.Write([]byte(`{"error":{"type":"rate_limit_error","message":"upstream queue busy"}}`))
 			}, responses.BridgeOptions{})
-			req := httptest.NewRequest(http.MethodPost, "/qoder/v1/responses", strings.NewReader(fmt.Sprintf(`{"model":"qwen3.8-flash","input":"hi","stream":%v}`, stream)))
+			req := httptest.NewRequest(http.MethodPost, "/cline/v1/responses", strings.NewReader(fmt.Sprintf(`{"model":"qwen3.8-flash","input":"hi","stream":%v}`, stream)))
 			rec := httptest.NewRecorder()
 			bridge(rec, req)
 			testutil.Falsef(t, rec.Code != 429 || rec.Header().Get("Retry-After") != "30" || !strings.Contains(rec.Body.String(), "rate_limit_error"), "queue response lost: status=%d header=%v body=%s", rec.Code, rec.Header(), rec.Body.String())
@@ -61,7 +61,7 @@ func TestResponsesBridgePropagatesQueueCancellation(t *testing.T) {
 				w.WriteHeader(http.StatusServiceUnavailable)
 				_, _ = w.Write([]byte(`{"error":{"message":"request canceled"}}`))
 			}, responses.BridgeOptions{})
-			req := httptest.NewRequest(http.MethodPost, "/qoder/v1/responses", strings.NewReader(fmt.Sprintf(`{"model":"qwen3.8-flash","input":"hi","stream":%v}`, stream))).WithContext(ctx)
+			req := httptest.NewRequest(http.MethodPost, "/cline/v1/responses", strings.NewReader(fmt.Sprintf(`{"model":"qwen3.8-flash","input":"hi","stream":%v}`, stream))).WithContext(ctx)
 			go func() { defer close(finished); bridge(httptest.NewRecorder(), req) }()
 			select {
 			case <-started:

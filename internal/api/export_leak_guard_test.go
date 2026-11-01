@@ -63,8 +63,6 @@ func TestExportNeverCarriesAnotherChannelsCredential(t *testing.T) {
 		"grok":      setOf("client_cookie", "refresh_token", "token", "oauth_access_token", "oauth_refresh_token"),
 		"workbuddy": setOf("client_cookie", "refresh_token", "token", "workbuddy_access_token", "workbuddy_refresh_token"),
 		"cline":     setOf("client_cookie", "refresh_token", "token", "cline_access_token", "cline_refresh_token"),
-		"qoder": setOf("client_cookie", "refresh_token", "token", "qoder_access_token", "qoder_refresh_token",
-			"qoder_runtime_info", "qoder_runtime_key"),
 	}
 	for _, channel := range accountChannels {
 		t.Run(channel, func(t *testing.T) {
@@ -122,7 +120,7 @@ func containsString(haystack []string, needle string) bool {
 // contract: the export is a portability artifact, so a channel whose only way to
 // renew is a rotated refresh token must export it.
 //
-// Without the refresh token a restored WorkBuddy or Qoder account works until its
+// Without the refresh token a restored WorkBuddy or Cline account works until its
 // access token expires and then cannot recover — there is no other renewal path —
 // which made the export unusable for exactly the channels the file exists to move.
 func TestExportCarriesTheDurableCredentialForReimport(t *testing.T) {
@@ -139,12 +137,6 @@ func TestExportCarriesTheDurableCredentialForReimport(t *testing.T) {
 			acc: &store.Account{ID: 1, AccountType: "cline", Enabled: true, Weight: 1,
 				ClineAccessToken: marker + "access", ClineRefreshToken: marker + "refresh"},
 			want: []string{"cline_access_token", "cline_refresh_token"},
-		},
-		"qoder": {
-			acc: &store.Account{ID: 1, AccountType: "qoder", Enabled: true, Weight: 1,
-				QoderAccessToken: marker + "access", QoderRefreshToken: marker + "refresh",
-				QoderRuntimeInfo: marker + "info", QoderRuntimeKey: marker + "key"},
-			want: []string{"qoder_access_token", "qoder_refresh_token", "qoder_runtime_info", "qoder_runtime_key"},
 		},
 	}
 	for channel, tc := range cases {
@@ -222,7 +214,7 @@ func TestAccountCheckKeepsTheReasonForAnUnchangedVerdict(t *testing.T) {
 	testutil.MustNotContain(t, different.StatusMessage, "session expired")
 
 	// A verifier with something to say keeps its own wording.
-	explicit := &store.Account{AccountType: "qoder", StatusCode: "402", StatusMessage: "old"}
+	explicit := &store.Account{AccountType: "cline", StatusCode: "402", StatusMessage: "old"}
 	applySuccessfulAccountRefreshStatus(explicit, "402")
 	testutil.Equal(t, explicit.StatusMessage, "old")
 }

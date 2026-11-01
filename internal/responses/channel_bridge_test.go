@@ -84,7 +84,7 @@ func TestResponsesChatPathMapsTheChannelPrefix(t *testing.T) {
 		"/workbuddy/v1/responses/compact": "/workbuddy/v1/chat/completions",
 		"/cline/v1/responses/":            "/cline/v1/chat/completions",
 		"/workbuddy/responses":            "/workbuddy/chat/completions",
-		"  /qoder/v1/responses  ":         "/qoder/v1/chat/completions",
+		"  /workbuddy/v1/responses  ":     "/workbuddy/v1/chat/completions",
 		"/something/else":                 "/something/else",
 	}
 	for path, want := range cases {
@@ -138,7 +138,7 @@ func TestResponsesBridgeStreamNumbersEveryEvent(t *testing.T) {
 	calls := []recordedChatCall{}
 	bridge := ResponsesBridgeHandler(recordingChat(t, &calls, &mu), BridgeOptions{})
 
-	req := httptest.NewRequest(http.MethodPost, "/qoder/v1/responses",
+	req := httptest.NewRequest(http.MethodPost, "/workbuddy/v1/responses",
 		strings.NewReader(`{"model":"gpt-5.6-luna","input":"say hi","stream":true}`))
 	rec := httptest.NewRecorder()
 	bridge(rec, req)
@@ -289,8 +289,8 @@ func TestResponsesChannelSubpathServesCompactAndTrailingSlash(t *testing.T) {
 	handler := ResponsesChannelSubpath(recordingChat(t, &calls, &mu), BridgeOptions{})
 
 	for name, target := range map[string]string{
-		"trailing_slash": "/qoder/v1/responses/",
-		"compact":        "/workbuddy/v1/responses/compact",
+		"trailing_slash": "/workbuddy/v1/responses/",
+		"compact":        "/cline/v1/responses/compact",
 	} {
 		t.Run(name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(`{"model":"gpt-5.6-luna","input":"summarise the thread","stream":true}`))
@@ -309,7 +309,7 @@ func TestResponsesChannelSubpathServesCompactAndTrailingSlash(t *testing.T) {
 	for _, call := range calls {
 		paths[call.path] = true
 	}
-	testutil.Falsef(t, !paths["/qoder/v1/chat/completions"] || !paths["/workbuddy/v1/chat/completions"], "inner chat paths = %v, want the same channel prefix as the request", paths)
+	testutil.Falsef(t, !paths["/workbuddy/v1/chat/completions"] || !paths["/cline/v1/chat/completions"], "inner chat paths = %v, want the same channel prefix as the request", paths)
 }
 
 // The chat-only channels keep no response store, so /responses/{id} must answer

@@ -60,7 +60,7 @@ func TestUpdateAccount_DoesNotOverwriteAtomicUsageCounters(t *testing.T) {
 	s, _ := newTestRedisStore(t, "test:")
 
 	ctx := context.Background()
-	acc := &Account{AccountType: "qoder", Enabled: true}
+	acc := &Account{AccountType: "cline", Enabled: true}
 	testutil.NoError(t, s.CreateAccount(ctx, acc), "CreateAccount() error = %v")
 	stale, err := s.GetAccount(ctx, acc.ID)
 	testutil.NoError(t, err, "GetAccount() error = %v")
@@ -91,7 +91,7 @@ func TestIncrementAccountStats_WorkBuddyKeepsRemoteRemainingCredits(t *testing.T
 func TestIncrementAccountStatsOperationIsDurablyIdempotent(t *testing.T) {
 	s, _ := newTestRedisStore(t, "stats-idempotent:")
 	ctx := context.Background()
-	acc := &Account{AccountType: "qoder", Enabled: true}
+	acc := &Account{AccountType: "cline", Enabled: true}
 	testutil.NoError(t, s.CreateAccount(ctx, acc))
 	completed := time.Date(2026, 3, 5, 23, 59, 59, 0, time.UTC)
 	for range 2 {
@@ -109,7 +109,7 @@ func TestIncrementAccountStatsOperationIsDurablyIdempotent(t *testing.T) {
 func TestIncrementAccountStatsOperationUsesCompletionUTCDateAcrossMidnight(t *testing.T) {
 	s, _ := newTestRedisStore(t, "stats-midnight:")
 	ctx := context.Background()
-	acc := &Account{AccountType: "qoder", Enabled: true}
+	acc := &Account{AccountType: "cline", Enabled: true}
 	testutil.NoError(t, s.CreateAccount(ctx, acc))
 	beforeMidnight := time.Date(2026, 3, 5, 23, 59, 59, 0, time.UTC)
 	afterMidnight := beforeMidnight.Add(2 * time.Second)

@@ -117,7 +117,6 @@ func TestHandleConfigSaveAcceptsCodeFreeMaxStylePayload(t *testing.T) {
 	saved, err := s.GetSetting(context.Background(), "config")
 	testutil.NoError(t, err, "GetSetting(config) error = %v")
 	testutil.MustContain(t, saved, `"admin_pass":"changed-secret"`)
-	testutil.MustNotContain(t, saved, "qoder_queue_retry_interval_ms")
 }
 
 func TestHandleConfigSavePublishesImmutableSnapshot(t *testing.T) {
@@ -211,7 +210,7 @@ func TestPersistConfigConcurrentReadersSeeCompleteSnapshots(t *testing.T) {
 // A signing endpoint is validated where it is typed: the value decides whether
 // account page metadata leaves the host, so an invalid one must not be stored.
 func TestHandleConfigSaveRejectsRemovedSettingsWithoutChangingState(t *testing.T) {
-	for _, field := range []string{"anonymous_allow_ips", "request_timeout", "concurrency_timeout", "first_token_timeout_seconds", "shared_stream_idle_timeout_seconds", "workbuddy_default_max_tokens", "shared_refusal_wait_budget_ms", "qoder_queue_wait_budget_ms", "qoder_queue_retry_interval_ms", "grok_build_timeout_seconds", "grok_stream_idle_seconds", "grok_build_stream_idle_seconds", "max_retries", "retry_delay", "account_switch_count", "retry_429_interval", "quality_hold_enabled", "quality_hold_max_attempts", "quality_hold_timeout_ms", "quality_hold_on_exhausted"} {
+	for _, field := range []string{"anonymous_allow_ips", "request_timeout", "concurrency_timeout", "first_token_timeout_seconds", "shared_stream_idle_timeout_seconds", "workbuddy_default_max_tokens", "shared_refusal_wait_budget_ms", "grok_build_timeout_seconds", "grok_stream_idle_seconds", "grok_build_stream_idle_seconds", "max_retries", "retry_delay", "account_switch_count", "retry_429_interval", "quality_hold_enabled", "quality_hold_max_attempts", "quality_hold_timeout_ms", "quality_hold_on_exhausted"} {
 		t.Run(field, func(t *testing.T) {
 			api, s, _ := setupConfigAPI(t)
 			before := api.ConfigSnapshot()

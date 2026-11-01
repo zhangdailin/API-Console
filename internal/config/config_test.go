@@ -126,12 +126,12 @@ func TestProxyValidationRejectsInvalidAddressesWithoutLeakingCredentials(t *test
 
 func TestRemovedGenerationSettingsCannotOverrideFixedPolicy(t *testing.T) {
 	var cfg Config
-	testutil.NoError(t, json.Unmarshal([]byte(`{"anonymous_allow_ips":["0.0.0.0/0"],"first_token_timeout_seconds":-1,"workbuddy_default_max_tokens":1,"shared_stream_idle_timeout_seconds":1,"qoder_queue_wait_budget_ms":-1,"request_timeout":1,"max_retries":999,"quality_hold_enabled":false}`), &cfg))
+	testutil.NoError(t, json.Unmarshal([]byte(`{"anonymous_allow_ips":["0.0.0.0/0"],"first_token_timeout_seconds":-1,"workbuddy_default_max_tokens":1,"shared_stream_idle_timeout_seconds":1,"request_timeout":1,"max_retries":999,"quality_hold_enabled":false}`), &cfg))
 	ApplyHardcoded(&cfg)
 	testutil.Equal(t, cfg.RequestTimeout, int(InferenceRequestTimeout.Seconds()))
 	testutil.Equal(t, cfg.MaxRetries, GenerationMaxRetries)
 	testutil.Equal(t, FirstGenerationTimeout.Seconds(), float64(180))
 	raw, err := json.Marshal(cfg)
 	testutil.NoError(t, err)
-	testutil.MustNotContainAny(t, string(raw), "anonymous_allow_ips", "first_token_timeout_seconds", "workbuddy_default_max_tokens", "shared_stream_idle_timeout_seconds", "qoder_queue_wait_budget_ms", "request_timeout", "max_retries", "quality_hold_enabled")
+	testutil.MustNotContainAny(t, string(raw), "anonymous_allow_ips", "first_token_timeout_seconds", "workbuddy_default_max_tokens", "shared_stream_idle_timeout_seconds", "request_timeout", "max_retries", "quality_hold_enabled")
 }

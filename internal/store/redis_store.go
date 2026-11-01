@@ -244,7 +244,6 @@ func (s *redisStore) UpdateAccount(ctx context.Context, acc *Account) error {
 		p.mergeGrokCredentials()
 		p.mergeModelCooldownState()
 		p.mergeWorkBuddyCredentials()
-		p.mergeQoderCredentials()
 		p.mergeClineCredentials()
 		*existing = updated
 		return nil
@@ -361,32 +360,6 @@ func (s *redisStore) UpdateWorkBuddyCredentials(ctx context.Context, id int64, p
 		patchString(&acc.WorkBuddyUID, patch.UID)
 		if email := strings.TrimSpace(patch.Email); email != "" && strings.TrimSpace(acc.Email) == "" {
 			acc.Email = email
-		}
-		return nil
-	})
-}
-
-func (s *redisStore) UpdateQoderAccount(ctx context.Context, id int64, patch QoderAccountPatch) error {
-	return s.updateAccountAtomic(ctx, id, func(acc *Account) error {
-		if err := applyCredentialPatch("qoder", patch.ExpectedRefreshToken, patch.AccessToken, patch.RefreshToken, patch.ExpiresAt,
-			&acc.QoderAccessToken, &acc.QoderRefreshToken, &acc.QoderExpiresAt); err != nil {
-			return err
-		}
-		patchString(&acc.QoderUserID, patch.UserID)
-		patchString(&acc.QoderRuntimeInfo, patch.RuntimeInfo)
-		patchString(&acc.QoderRuntimeKey, patch.RuntimeKey)
-		patchString(&acc.QoderRuntimeIdentity, patch.RuntimeIdentity)
-		if patch.ModelIDs != nil {
-			acc.QoderModelIDs = append([]string(nil), patch.ModelIDs...)
-		}
-		if patch.Quota != nil {
-			// Same rule as a synced snapshot: a reading at least as new as the
-			// stored one wins; an older one is discarded rather than rewinding a
-			// view an in-flight sync just established.
-			incoming := *patch.Quota
-			if acc.QoderQuota.SyncedAt.IsZero() || !incoming.SyncedAt.Before(acc.QoderQuota.SyncedAt) {
-				acc.QoderQuota = incoming
-			}
 		}
 		return nil
 	})

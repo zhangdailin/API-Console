@@ -74,7 +74,7 @@ func TestProviderRoutesShareOneGlobalAdmission(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("first request did not reach upstream")
 	}
-	for _, path := range []string{"/workbuddy/v1/messages/count_tokens", "/qoder/messages/count_tokens", "/grok/v1/messages/count_tokens"} {
+	for _, path := range []string{"/workbuddy/v1/messages/count_tokens", "/cline/messages/count_tokens", "/grok/v1/messages/count_tokens"} {
 		w := call(path, `{"model":"m"}`)
 		if w.Code != http.StatusServiceUnavailable || w.Header().Get("Retry-After") != "1" || !strings.Contains(w.Body.String(), "server_overloaded") {
 			t.Fatalf("overload %s = %d %s", path, w.Code, w.Body.String())

@@ -68,7 +68,7 @@ Windows 用 `Copy-Item config.example.json config.json`。JSON 是推荐格式�
 | 字段 | 默认 / 行为 |
 |---|---|
 | `concurrency_limit` | 100，最大 1000000；进程满时立即拒绝 |
-| `provider_concurrency_limits` | 四通道各自的本进程入口容量，非正关闭该限制 |
+| `provider_concurrency_limits` | 三通道各自的本进程入口容量，非正关闭该限制 |
 | `stream_flush_interval_ms` | 默认 2 毫秒、最大 20；负值关闭合并刷新 |
 | `upstream_max_conns_per_host` | HTTP 连接配额；浏览器 HTTP/2 同时限制在途请求 |
 | `upstream_max_idle_conns_per_host` | 空闲连接复用容量 |
@@ -84,17 +84,10 @@ Key 和账号并发限制与入口容量叠加。上游 HTTP、流空闲、首�
 | 通道 | 刷新侧重点 |
 |---|---|
 | WorkBuddy | 令牌、目录、信用额度 |
-| Qoder | 设备凭据、runtime、目录和权威额度 |
 | Cline | OAuth、套餐与免费 / ClinePass 推荐目录，不提供统一数值余额 |
 | Grok | OAuth、Build 身份、账单与目录观察 |
 
 观察读取失败保留旧快照，不能补造余额或把认证成功等同于额度恢复。WorkBuddy 无时区额度时间按 UTC 解释，仅作参考。
-
-Qoder 同步保留套餐、加购额度和组织资源包明细，账号管理接口通过 `quota_pools` 返回。汇总余额仅计入正额度且可消费的池；组织池必须明确 `available=true`，不可用的组织池仍保留明细。套餐为零不代表其他额度也耗尽，上游明确的耗尽标记仍优先于数值余额。账号额度提示展示各池剩余和参与汇总情况。
-
-Qoder 重置时间只使用状态接口明确返回的 `nextResetAt`，不再由套餐开始时间推算每日重置，也不将到期时间或 year-9999 永久有效值当作重置时间。状态读取失败或缺少边界时显示未知，成功的额度读取仍保留余额；一次成功刷新会清除旧快照中的推算边界。该刷新与聊天请求独立，不增加推理热路径的网络调用。
-
-Qoder access token 在到期前 5 分钟内由后台维护任务提前续期，续期后的凭据按原子补丁写回；请求路径仍保留到期前 1 分钟的同步续期作为兜底。运行时认证对（`qoder_runtime_info` / `qoder_runtime_key`）与其身份摘要一起保存，重启或账号重建后在身份未变化时直接复用，token 轮换或身份变化后才重新派生。
 
 Cline 套餐只读取官方 `/users/me/plan` 的 `success=true`、`data.plan` 结构，使用 `displayName` 或 `name`；旧的扁平套餐返回格式不再支持。账号维护与模型目录观察都会先同步套餐，再更新账号的可用目录。确认有付费套餐后自动加入上游 `clinePass` 分类并保留免费模型；未确认付费时仅发布 `free` 分类。订阅到期或明确无套餐后撤销 Pass 路由资格，旧快照中的付费条目也不能继续选中。套餐读取失败保留已确认的状态；ClinePass 订阅不作为 `clineCloud` 按量计费模型的授权依据。
 
@@ -103,10 +96,7 @@ Cline 套餐只读取官方 `/users/me/plan` 的 `success=true`、`data.plan` �
 | 通道 | 字段组 | 说明 |
 |---|---|---|
 | WorkBuddy | `workbuddy_base_url`、`workbuddy_http2_enabled` | 默认国际服务；HTTP/2 是传输设置 |
-| Qoder | `qoder_oauth_base_url`、`qoder_openapi_base_url`、`qoder_inference_base_url` | 浏览器、控制面和生成主机各自配置；生成主机为默认 `api2.qoder.sh` 时，无响应的连接级故障和主机自身的服务故障（5xx、418、`provider_error`）依次切换到 `api1`、`api3`；切换成功的节点在 5 分钟内优先使用，之后重新从 `api2` 开始。业务拒绝（如 10605 排队、400）不切换；自定义主机不切换。每日请求次数按节点分别计算：某账号在一个节点上返回 `Billing daily count exceeded` 时，本次请求改走下一个节点，该账号 1 小时内跳过这个节点；只有所有节点都用完才按每日次数用完停用账号。这类切换只针对该账号，不影响其他账号的节点优先级 |
 | 非流式响应保活 | `non_stream_keepalive_disabled` | 默认开启。非流式请求静默超过 60 秒时先发出 200 响应头和空白字符，之后每 15 秒补一个换行，最终 JSON 跟在空白之后（JSON 允许前导空白），避免前置代理（Cloudflare 120 秒）以 524 断开。保活后的失败只能以 JSON 错误体返回、状态码保持 200。设为 `true` 关闭 |
-| Qoder 排队窗口重试 | `qoder_queue_window_retry_disabled` | 默认开启。低优先级队列（10605，`queueType` 为 `p3`/`p4`）只在每分钟约第 8–20 秒放行，固定的 `retryAfterSeconds: 30` 常常落在窗口外；开启时被拒请求等到下一个窗口，并在窗口内每 3 秒重试，单个请求累计最多等 130 秒、重试 12 次，且不超过请求期限和尝试次数。窗口重试用尽后交回上层时，等待提示改为距下一个窗口的时间（上层的下一次重试和最终 429 的 `Retry-After` 都使用它），不再是固定 30 秒。设为 `true` 关闭，改回按通用的共享拒绝等待处理 |
-| Qoder | `qoder_client_id`、`qoder_client_version`、`qoder_http2_enabled` | runtime 身份遵循国际 CLI 1.0.45 的 UID、组织及数据策略结构；旧 qoder_protocol_profile 字段被忽略 |
 | Cline | `cline_api_base_url`、`cline_workos_client_id`、`cline_workos_authorize_url`、`cline_workos_token_url`、`cline_http2_enabled` | API 与 WorkOS 授权分别配置 |
 | Grok | `grok_cli_base_url`、`grok_cli_user_agent`、`grok_cli_client_version`、`grok_cli_client_identifier` | 默认 Build CLI 网关和 CLI 身份 |
 | Grok | `grok_cli_oauth_client_id`、`grok_cli_oauth_device_url`、`grok_cli_oauth_token_url` | 默认 auth.x.ai 的设备授权与交换端点 |
@@ -130,7 +120,7 @@ Grok 语义空闲按有效生成事件衡量，keepalive 不延长时钟；下�
 
 `proxy_url` 为通用代理，`proxy_http` / `proxy_https` 为分离配置，另有 proxy_user / proxy_pass / proxy_bypass。实际优先级与环境代理回退由 [proxy 实现](../internal/httpclient/proxy.go) 决定；不要以 UI 的“直连”文字替代真实请求路径证据。代理字段在文件加载、Redis 配置恢复和管理端保存时校验，无效值会被拒绝，不会静默直连；HTTP、HTTPS、SOCKS5 与 SOCKS5H 均可作为通用上游代理，Grok browser transport 也支持 HTTPS CONNECT 代理。
 
-`cache_strategy` 默认 mix，用于请求中的真实上游缓存提示。它不提供本地答案缓存，不保证上游命中，不删除重复用户输入。Qoder 没有等价缓存 key 字段时省略该提示。
+`cache_strategy` 默认 mix，用于请求中的真实上游缓存提示。它不提供本地答案缓存，不保证上游命中，不删除重复用户输入。
 
 已废弃字段：inference_auth_enabled、grok_cli_model_ids，以及 enable_token_cache、token_cache_ttl、token_cache_strategy、cache_token_count、cache_ttl。旧鉴权开关不能关闭 Key；管理保存显式提交本地模拟缓存字段返回 400，旧 token-cache 管理端点不存在。
 
@@ -139,7 +129,6 @@ Grok 语义空闲按有效生成事件衡量，keepalive 不延长时钟；下�
 `diagnostics_sample_every`、`diagnostics_max_concurrent` 控制诊断采样与并发。采样意味着不是每个请求都有正文；无采集时 API 明确 unavailable，而非返回空正文证明上游没有输出。
 
 改配置后按顺序核对：保存 HTTP 和管理 code 信封 → 当前有效值 → 是否需重启 → 重启后进程值 → 账号观察及真实请求。更多见 [故障排查](troubleshooting.md)。
-
 
 ## 固定生成策略
 
@@ -151,15 +140,12 @@ Grok 语义空闲按有效生成事件衡量，keepalive 不延长时钟；下�
 |---|---:|
 | 跨重试首生成期限 | 180 秒 |
 | 入口及上游完整请求期限 | 7200 秒 |
-| WorkBuddy / Qoder / Cline 语义流空闲 | 300 秒 |
+| WorkBuddy / Cline 语义流空闲 | 300 秒 |
 | Grok 语义流空闲 | 120 秒 |
 | 共享拒绝排队睡眠预算 | 默认 60 秒，可通过 `shared_refusal_wait_budget_ms` 缩短或关闭 |
-| Qoder 已分类队列闸门重试间隔 | 遵守上游 Retry-After 提示，不提前探测 |
 | 共享生成重试上限 | 20 次重试，认证重放占同一尝试预算 |
 
 首生成包括文本、推理和工具进展，不等同可见首字；生成进展后停止该计时。成功非流 JSON 的响应头释放流式看门狗，完整正文仍受总期限约束。心跳、角色和纯用量不刷新语义空闲，父取消始终有效。内部目录读取保留更短的操作期限，不开放为用户配置。
-
-Qoder 队列闸门仍在同一个账号上有界等待，不因共享队列拒绝切号。预算只计排队睡眠（含抖动），网络往返和其他上游处理时间仍消耗首生成及完整期限。普通账号限流保留上游 Retry-After 与账号冷却逻辑。
 
 Grok 标准档的传输切号尝试上限为 20；默认开启输出前质量暂存，质量尝试最多 6 次，30 秒是随内容事件检查的策略阈值，并非独立计时器保证的释放期限。不设固定缓冲字节上限。`grok_low_latency: true` 跳过质量暂存和质量重试，保留异常处理、用量及质量审计。Chat/Messages 沿用质量尝试耗尽后交付最后结果的策略；原生 Responses 对已判异常的输出返回 `502 quality_degraded`。Chat/Messages 和原生 Responses 的传输、认证重放、推理解码恢复和质量重试都受同一个实际 HTTP 调用预算约束，标准档最多 21 次、交互档最多 4 次；OAuth 控制面刷新不计生成次数。仅尚未交付且无上游副作用的请求可重放；`previous_response_id` 续接固定原账号，托管工具请求禁止跨账号重放。质量阈值和安全限制不能被任意配置覆盖。
 
@@ -196,7 +182,7 @@ Grok 请求审计记录 `quality_delivery_mode`（`quality` / `low_latency`）�
 | `shared_refusal_wait_budget_ms` | 60000 | 0 使用默认，负数禁用共享拒绝等待，正数最多 60000ms；累计睡眠包含抖动 |
 | `account_reservation_wait_budget_ms` | 2000 | 0 使用默认，负数禁用满载等待，正数最多 2000ms |
 
-两个等待预算用于 WorkBuddy、Qoder、Cline 的共享 handler，不控制 Grok 的独立重试逻辑。预算仅限制对应的等待，不包含上游执行、Redis 查询或其他错误重试耗时，正值不能超过所选档位的上限。`shared_refusal_wait_budget_ms` 仅通过配置文件或 Redis 配置设置，管理 API 仍拒绝该旧生成参数；`account_reservation_wait_budget_ms` 可通过管理 API 设置。Redis 中已保存的配置优先于文件。
+两个等待预算用于 WorkBuddy、Cline 的共享 handler，不控制 Grok 的独立重试逻辑。预算仅限制对应的等待，不包含上游执行、Redis 查询或其他错误重试耗时，正值不能超过所选档位的上限。`shared_refusal_wait_budget_ms` 仅通过配置文件或 Redis 配置设置，管理 API 仍拒绝该旧生成参数；`account_reservation_wait_budget_ms` 可通过管理 API 设置。Redis 中已保存的配置优先于文件。
 
 后台账号维护最多并发 4 个账号，每个账号继承服务取消信号并有 60 秒期限；同一轮去重账号 ID，各渠道继续自行检查模型、额度和凭据是否到期并保留原有刷新互斥。慢请求或单账号 panic 不再阻塞整轮其余账号，整轮结束后才处理下一轮。
 

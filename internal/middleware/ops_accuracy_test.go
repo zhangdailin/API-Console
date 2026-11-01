@@ -17,7 +17,7 @@ func TestInferenceOutcomeExcludesNonGeneration(t *testing.T) {
 		{"POST", "/cline/v1/messages/count_tokens", "http"}, {"GET", "/v1/videos/job", "http"},
 		{"GET", "/v1/videos", "http"}, {"OPTIONS", "/v1/responses", "http"},
 		{"POST", "/cline/v1/nonexistent", "http"}, {"POST", "/v1/files", "http"},
-		{"POST", "/cline/v1/messages", "cline"}, {"POST", "/qoder/v1/chat/completions", "qoder"},
+		{"POST", "/cline/v1/messages", "cline"}, {"POST", "/workbuddy/v1/chat/completions", "workbuddy"},
 		{"POST", "/workbuddy/v1/messages", "workbuddy"}, {"POST", "/grok/v1/messages", "grok"},
 		{"POST", "/v1/responses", "http"}, {"POST", "/v1/images/generations", "http"},
 		{"POST", "/v1/videos", "http"}, {"POST", "/v1/audio/transcriptions", "http"},

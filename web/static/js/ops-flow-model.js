@@ -1,9 +1,9 @@
 // Protocol observations and chart arithmetic are independent of DOM and timers.
 globalThis.FlowScreenModel = (() => {
-  const channels = Object.freeze(['workbuddy', 'cline', 'qoder', 'grok']);
+  const channels = Object.freeze(['workbuddy', 'cline', 'grok']);
   const protocols = Object.freeze(['chat', 'responses', 'messages']);
   const keys = Object.freeze([...channels, 'gateway', ...protocols]);
-  const names = Object.freeze({ workbuddy:'WorkBuddy', cline:'Cline', qoder:'Qoder', grok:'Grok', gateway:'API Console', chat:'Chat Completions', responses:'Responses', messages:'Messages' });
+  const names = Object.freeze({ workbuddy:'WorkBuddy', cline:'Cline', grok:'Grok', gateway:'API Console', chat:'Chat Completions', responses:'Responses', messages:'Messages' });
   function numeric(value) { return value != null && value !== '' && Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : null; }
   function number(value, digits = 0) { const n=numeric(value); return n == null ? '—' : n.toLocaleString('en-US',{minimumFractionDigits:digits,maximumFractionDigits:digits}); }
   function milliseconds(value) { const n=numeric(value); return n == null ? '暂无样本' : n < 1000 ? Math.round(n)+' ms' : (n/1000).toFixed(1)+' s'; }

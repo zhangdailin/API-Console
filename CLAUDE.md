@@ -6,7 +6,7 @@ Guidance for Claude Code and other coding agents working in this repository.
 
 `orchids-api` is a Go multi-channel LLM gateway. It serves Anthropic Messages,
 OpenAI Chat Completions and OpenAI Responses clients and forwards each request to
-one of four upstream channels: **WorkBuddy**, **Qoder**, **Cline** and
+one of three upstream channels: **WorkBuddy**, **Cline** and
 **Grok Build**. The deployed binary is named `orchids-server`; that is a build
 artifact name, not a project rename.
 
@@ -59,11 +59,11 @@ internal/responses     OpenAI Responses protocol: wire types, conversions, SSE,
 internal/chatwire     OpenAI Chat Completions wire types
 internal/httpserver   shared HTTP/SSE reading and writing, error envelopes
 internal/httpclient   HTTP transport: proxies, client pool, browser fingerprint
-internal/handler  shared pipeline for WorkBuddy / Qoder / Cline
+internal/handler  shared pipeline for WorkBuddy / Cline
 internal/grok     Grok Build native Messages / Chat Completions / Responses
 internal/channel  provider identity, prefixes, metadata (single source of truth)
 internal/provider     channel port: the Spec contract and registry (imports no channel)
-internal/provider/all the one list of channel imports; link it to register all four
+internal/provider/all the one list of channel imports; link it to register all three
 internal/archtest     tests that enforce the package layering
 internal/modelrefresh model directory discovery and reconciliation
 internal/refresh      scheduled credential and quota refresh
@@ -77,7 +77,7 @@ internal/middleware  auth, rate limiting, tracing, diagnostics
 
 Inference routes require a provider path: **`/{channel}/*`** and
 **`/{channel}/v1/*`** bind the same channel and expose the same endpoints.
-Prefixes come from `internal/channel` (WorkBuddy, Qoder, Cline and Grok).
+Prefixes come from `internal/channel` (WorkBuddy, Cline and Grok).
 Root and unified `/v1` inference endpoints are unregistered and return 404.
 The root admin redirect, management APIs and health/metrics routes remain.
 

@@ -72,7 +72,6 @@ type API struct {
 	// and bookkeeping behind them is shared (see deviceLoginRegistry).
 	grokLogins      *deviceLoginRegistry[deviceLogin]
 	workbuddyLogins *deviceLoginRegistry[browserLogin]
-	qoderLogins     *deviceLoginRegistry[browserLogin]
 	clineLogins     *deviceLoginRegistry[browserLogin]
 
 	// opsAggregator and alerts back the operations overview. They are optional:
@@ -162,7 +161,6 @@ func New(s *store.Store, adminUser, adminPass string, cfg *config.Config) *API {
 		checkSem:         make(chan struct{}, 2),
 		grokLogins:       newDeviceLoginRegistry(identityDeviceLogin, nil, "Grok authorization expired"),
 		workbuddyLogins:  newBrowserLoginRegistry(channel.WorkBuddy),
-		qoderLogins:      newBrowserLoginRegistry(channel.Qoder),
 		clineLogins:      newBrowserLoginRegistry(channel.Cline),
 	}
 	if cfg != nil {

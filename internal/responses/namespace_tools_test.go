@@ -16,7 +16,7 @@ import (
 // Reproduce the real tools[7] rejection, then exercise both response formats
 // and a second turn with the exact client-visible function identities.
 func TestCodexNamespaceBridgeRoundTrip(t *testing.T) {
-	for _, provider := range []string{"workbuddy", "qoder", "cline"} {
+	for _, provider := range []string{"workbuddy", "cline"} {
 		for _, prefix := range []string{"", "/v1"} {
 			for _, stream := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s%s/stream=%v", provider, prefix, stream), func(t *testing.T) {
