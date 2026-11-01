@@ -159,8 +159,10 @@ func (c *Client) storeJobToken(ctx context.Context, token string, ttl time.Durat
 }
 
 func (c *Client) exchangeJobToken(ctx context.Context, personalToken string) (string, time.Duration, error) {
+	// The endpoint answered 401 "missing authorization header" when the personal
+	// token was only in the body, so it is sent both ways.
 	body := map[string]any{"personal_token": personalToken}
-	return c.requestJobToken(ctx, "/api/v1/jobToken/exchange", body, "")
+	return c.requestJobToken(ctx, "/api/v1/jobToken/exchange", body, personalToken)
 }
 
 func (c *Client) meJobToken(ctx context.Context, accessToken string) (string, time.Duration, error) {

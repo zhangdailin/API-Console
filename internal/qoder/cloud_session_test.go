@@ -65,7 +65,8 @@ func TestRunCloudTurnDrivesTheSessionLoop(t *testing.T) {
 		// account credential; the exchange itself carries no authorization.
 		wantAuth := "Bearer job-1"
 		if r.URL.Path == "/api/v1/jobToken/exchange" {
-			wantAuth = ""
+			// The exchange carries the account credential itself.
+			wantAuth = "Bearer access-1"
 		}
 		if got := r.Header.Get("Authorization"); got != wantAuth {
 			t.Errorf("%s Authorization = %q, want %q", r.URL.Path, got, wantAuth)
