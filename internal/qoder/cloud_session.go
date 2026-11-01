@@ -24,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -37,6 +38,15 @@ const DefaultCloudBaseURL = "https://api.qoder.com/api/v1/cloud"
 // cloudTargetsSetting caches the environment and agent created for this
 // deployment, so a restart does not orphan a new pair on every run.
 const cloudTargetsSetting = "qoder_cloud_targets"
+
+// Cloud Agents credentials, as documented by the service: a personal access
+// token ("pt-...") is used as the bearer directly, while a service account key is
+// exchanged for a short-lived SAT at the openapi host.
+const (
+	envCloudPAT   = "QODER_PAT"
+	envCloudSAKey = "QODER_SA_KEY"
+	envCloudOpen  = "QODER_OPENAPI_BASE_URL"
+)
 
 // cloudBaseURL is the session API base. It is a variable so the operator probe
 // and tests can point it elsewhere; production leaves the default.
@@ -104,9 +114,26 @@ type cloudJobTokenResponse struct {
 // session API rejects the raw credential ("invalid pt-token"), so both are
 // tried before giving up.
 func (c *Client) cloudAuthToken(ctx context.Context) (string, error) {
+	// The documented credentials come first: a PAT is the bearer itself, and an
+	// SA key is exchanged for an SAT. Only when neither is configured does the
+	// desktop client's own job-token flow apply.
+	if pat := strings.TrimSpace(os.Getenv(envCloudPAT)); pat != "" {
+		return pat, nil
+	}
+	if saKey := strings.TrimSpace(os.Getenv(envCloudSAKey)); saKey != "" {
+		if token, ok := c.cachedJobToken(ctx); ok {
+			return token, nil
+		}
+		token, ttl, err := c.exchangeServiceToken(ctx, saKey)
+		if err != nil {
+			return "", err
+		}
+		c.storeJobToken(ctx, token, ttl)
+		return token, nil
+	}
 	raw := c.cloudAccessToken()
 	if raw == "" {
-		return "", fmt.Errorf("qoder cloud session needs an access token")
+		return "", fmt.Errorf("qoder cloud session needs a credential: create a personal access token at qoder.com (Settings -> Personal access tokens) and set %s, or set %s", envCloudPAT, envCloudSAKey)
 	}
 	if token, ok := c.cachedJobToken(ctx); ok {
 		return token, nil
@@ -156,6 +183,57 @@ func (c *Client) storeJobToken(ctx context.Context, token string, ttl time.Durat
 	if raw, err := json.Marshal(payload); err == nil {
 		_ = c.settings.SetSetting(ctx, cloudJobTokenSetting, string(raw))
 	}
+}
+
+// exchangeServiceToken trades a Service Account Key for a short-lived SAT, as
+// documented: POST {openapi}/api/v1/serviceToken/exchange with
+// grant_type=client_credentials, audience=qoder, scope=qca.access.
+func (c *Client) exchangeServiceToken(ctx context.Context, saKey string) (string, time.Duration, error) {
+	openapi := strings.TrimRight(strings.TrimSpace(os.Getenv(envCloudOpen)), "/")
+	if openapi == "" {
+		openapi = "https://openapi.qoder.sh"
+	}
+	body := map[string]any{
+		"grant_type":  "client_credentials",
+		"audience":    "qoder",
+		"scope":       "qca.access",
+		"ttl_seconds": 43200,
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return "", 0, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, openapi+"/api/v1/serviceToken/exchange", bytes.NewReader(raw))
+	if err != nil {
+		return "", 0, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+saKey)
+	client := c.control
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", 0, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	payload, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if resp.StatusCode >= 400 {
+		return "", 0, fmt.Errorf("serviceToken/exchange: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(payload)))
+	}
+	var parsed struct {
+		AccessToken string `json:"access_token"`
+		ExpiresIn   int64  `json:"expires_in"`
+	}
+	if err := json.Unmarshal(payload, &parsed); err != nil {
+		return "", 0, fmt.Errorf("decode serviceToken/exchange: %w", err)
+	}
+	if strings.TrimSpace(parsed.AccessToken) == "" {
+		return "", 0, fmt.Errorf("serviceToken/exchange did not return an access token")
+	}
+	return parsed.AccessToken, time.Duration(parsed.ExpiresIn) * time.Second, nil
 }
 
 func (c *Client) exchangeJobToken(ctx context.Context, personalToken string) (string, time.Duration, error) {
