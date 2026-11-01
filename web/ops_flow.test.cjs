@@ -10,7 +10,7 @@ function snapshot(at=start, overrides={}) {
  const routes=['workbuddy','cline','grok'].flatMap(channel=>['chat','responses','messages'].map(protocol=>({channel,protocol,active:0,started:0,completed:0,qps:0,input_tps:0,output_tps:0,usage_available:true})));
  routes[4]={...routes[4],active:2,started:12,completed:10,qps:.4,input_tps:40,output_tps:10};
  const empty={samples:0,p50_ms:null,p95_ms:null};
- const stats={completed:10,failed:2,failure_rate:.2,waiting:1,responding:1,observed:10,usage_reported:8,retried:2,attempts:12,account_switches:1,retry_wait_ms:2000,queue_wait_ms:1000,longest_active_ms:3000,rate_limited:1,timeouts:0,stream_errors:1,canceled:0,
+ const stats={completed:10,failed:2,failure_rate:.2,waiting:1,responding:1,observed:10,usage_reported:8,retried:2,attempts:12,account_switches:1,retry_wait_ms:2000,longest_active_ms:3000,rate_limited:1,timeouts:0,stream_errors:1,canceled:0,
   first_generation:{samples:8,p50_ms:100,p95_ms:1200},first_visible:empty,body_ttfb:empty,duration:{samples:10,p50_ms:2000,p95_ms:4000},http_phases:{dns_ms:{samples:2,avg_ms:0}}};
  return {available:true,instance_started:'one',sampled_at:new Date(at).toISOString(),routes,nodes:Object.fromEntries(['gateway','workbuddy','cline','grok','chat','responses','messages'].map(key=>[key,{...stats}])),...overrides};
 }

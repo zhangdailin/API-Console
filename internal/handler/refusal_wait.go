@@ -59,19 +59,8 @@ func shouldRetryCurrentAccountWhenNoAlternative(category string) bool {
 // category/switch pair the classifier produces for that shape, and it is also
 // what tells the retry loop to keep the account it already holds: rotating
 // would meet the identical refusal, so the wait is spent on the same one.
-//
-// upstream_unavailable (the upstream saying its own service is down for the
-// model) belongs here beside the shared queue refusal: both are answerable only
-// by waiting, neither is about the account, and both were previously reported to
-// the client as this gateway's rate limit. upstream_queue is the same condition
-// with the upstream naming a window, and is answered to the client as 429.
 func isSharedUpstreamRefusalClass(class apperrors.UpstreamErrorClass) bool {
-	if class.SwitchAccount {
-		return false
-	}
-	return class.Category == "rate_limit" ||
-		class.Category == "upstream_unavailable" ||
-		class.Category == "upstream_queue"
+	return !class.SwitchAccount && class.Category == "rate_limit"
 }
 
 // Default budget used when no per-deployment override is configured.

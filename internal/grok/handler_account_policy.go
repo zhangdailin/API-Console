@@ -43,8 +43,8 @@ func (h *Handler) reserveAccount(acc *store.Account) (func(), bool) {
 }
 
 func (h *Handler) markAccountStatus(ctx context.Context, acc *store.Account, err error) {
-	switch ClassifyUpstreamError(err) {
-	case UpstreamErrorContentRefusal, UpstreamErrorUpgradeRequired:
+	// A content refusal or a client-version demand says nothing about the credential.
+	if _, requestFailure := grokRequestFailure(err); requestFailure {
 		return
 	}
 	// Invalid parameters and missing resources are request errors, not evidence
@@ -217,8 +217,7 @@ func markAllGrokAccountStatuses(err error) bool {
 	if err == nil {
 		return false
 	}
-	switch ClassifyUpstreamError(err) {
-	case UpstreamErrorContentRefusal, UpstreamErrorUpgradeRequired:
+	if _, requestFailure := grokRequestFailure(err); requestFailure {
 		return false
 	}
 	// Shared team rate limits and preflight cooldowns are not account failures.

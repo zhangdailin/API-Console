@@ -32,8 +32,7 @@ func (h *streamHandler) finalizeOutputTokens() {
 }
 
 // applyUpstreamUsageTokens folds one provider usage payload into the reported
-// totals under one lock. Omitted fields keep their local estimates; metadata
-// alone still counts as provider usage evidence.
+// totals under one lock. Omitted fields keep their local estimates.
 func (h *streamHandler) applyUpstreamUsageTokens(usage map[string]any) {
 	if len(usage) == 0 {
 		return
@@ -51,23 +50,12 @@ func (h *streamHandler) applyUpstreamUsageTokens(usage map[string]any) {
 	cached, hasCached := read("cacheReadTokens", "cache_read_tokens")
 	cacheWrite, hasCacheWrite := read("cacheWriteTokens", "cache_creation_input_tokens")
 	reasoning, hasReasoning := read("reasoningTokens", "reasoning_tokens")
-	_, hasCredits := usage["credits"]
-	_, hasOriginalCredits := usage["original_credits"]
-	metadataKeys := []string{"billable", "cacheable_tokens", "firstTokenDuration", "totalDuration", "serverDuration"}
-	hasMetadata := false
-	for _, key := range metadataKeys {
-		if _, ok := usage[key]; ok {
-			hasMetadata = true
-		}
-	}
-	if !hasInput && !hasOutput && !hasCached && !hasCacheWrite && !hasReasoning && !hasCredits && !hasOriginalCredits && !hasMetadata {
+	if !hasInput && !hasOutput && !hasCached && !hasCacheWrite && !hasReasoning {
 		return
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if hasInput || hasOutput || hasCached || hasCacheWrite || hasReasoning || hasCredits || hasOriginalCredits {
-		h.useUpstreamUsage = true
-	}
+	h.useUpstreamUsage = true
 	if hasInput {
 		h.inputTokens = input
 	}
@@ -82,22 +70,6 @@ func (h *streamHandler) applyUpstreamUsageTokens(usage map[string]any) {
 	}
 	if hasReasoning {
 		h.reasoningTokens = reasoning
-	}
-	if hasCredits || hasOriginalCredits || hasMetadata {
-		if h.usageMetadata == nil {
-			h.usageMetadata = make(map[string]any, 7)
-		}
-		for _, key := range metadataKeys {
-			if value, ok := usage[key]; ok {
-				h.usageMetadata[key] = value
-			}
-		}
-		if hasCredits {
-			h.usageMetadata["credits"] = usage["credits"]
-		}
-		if hasOriginalCredits {
-			h.usageMetadata["original_credits"] = usage["original_credits"]
-		}
 	}
 }
 

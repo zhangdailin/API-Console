@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -121,7 +120,6 @@ func (h *Handler) finishMessages(w http.ResponseWriter, r *http.Request, sh *str
 		}
 		metadata["visible_output"] = visibleOutput
 		metadata["reasoning_only"] = reasoningOutput && !visibleOutput && !toolOutput
-		maps.Copy(metadata, sh.usageMetadata)
 		event := audit.Event{
 			// One journal schema for every channel: the log centre must be able to
 			// compare two channels' requests on the same fields.

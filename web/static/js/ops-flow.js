@@ -152,7 +152,7 @@
     field(overviewFacts,'routes',known?other.map(key=>`${M.names[key]} ${M.number(M.sum(data.filter(row=>row.channel===key||row.protocol===key),'active'))} 进行中`).join(' / '):'—');
     for(const [key,metricKey]of [['generation','first_generation'],['visible','first_visible'],['body','body_ttfb'],['duration','duration']])field(detailedFacts,key,distribution(metric?.[metricKey]));
     field(detailedFacts,'retry',metric?.observed>0?`${M.number(metric.retried)} 个请求重试 · ${M.number(metric.attempts)} 次尝试 · ${M.number(metric.account_switches)} 次切号`:'未采集');
-    field(detailedFacts,'wait',metric?.observed>0?`重试 ${M.milliseconds(metric.retry_wait_ms/metric.observed)} · 其中排队 ${M.milliseconds(metric.queue_wait_ms/metric.observed)} · ${M.number(metric.observed)} 请求`:'未采集');
+    field(detailedFacts,'wait',metric?.observed>0?`重试 ${M.milliseconds(metric.retry_wait_ms/metric.observed)} · ${M.number(metric.observed)} 请求`:'未采集');
     field(detailedFacts,'longest',known&&rate.active>0?M.milliseconds(metric?.longest_active_ms):'无进行中请求');
     field(detailedFacts,'coverage',metric?`${M.number(metric.usage_reported)}/${M.number(metric.completed)} 个已结束请求`:'未采集');
     const labels={dns_ms:'DNS',tcp_ms:'TCP',tls_ms:'TLS',connection_wait_ms:'取连接',response_headers_ms:'响应头'};

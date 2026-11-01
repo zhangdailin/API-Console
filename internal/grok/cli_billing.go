@@ -3,8 +3,6 @@ package grok
 import (
 	"context"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
 	"time"
 
@@ -68,17 +66,9 @@ func (c *CLIClient) FetchBilling(ctx context.Context, acc *store.Account) (*CLIB
 }
 
 func (c *CLIClient) fetchBillingSnapshot(ctx context.Context, acc *store.Account) (*CLIBillingInfo, error) {
-	resp, err := c.request(ctx, acc, http.MethodGet, c.baseURL()+"/billing?format=credits", nil, nil)
+	body, _, err := c.getCLI(ctx, acc, "/billing?format=credits")
 	if err != nil {
 		return nil, err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, cliOAuthMaxBodyBytes))
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, newCLIUpstreamError(resp.StatusCode, resp.Header, body)
 	}
 	info, err := parseCLIBilling(body)
 	if err != nil {
@@ -102,8 +92,7 @@ func ApplyCLIBillingInfo(acc *store.Account, info *CLIBillingInfo) bool {
 	// not an inferred allowance: some paid accounts intentionally do not expose
 	// a numeric Build-credit window.
 	subscription := strings.TrimSpace(info.Subscription)
-	existing := strings.TrimSpace(acc.Subscription)
-	if subscription != "" && (info.SubscriptionSource != "jwt" || existing == "" || strings.EqualFold(existing, "unknown")) && acc.Subscription != subscription {
+	if subscription != "" && (info.SubscriptionSource != "jwt" || !cliPlanNameAvailable(acc.Subscription)) && acc.Subscription != subscription {
 		acc.Subscription = subscription
 		changed = true
 	}

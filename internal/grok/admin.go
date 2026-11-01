@@ -342,7 +342,7 @@ func projectQuota(fields map[string]any, acc *store.Account, _, _ float64, obser
 			"上游未下发数值额度；按免费画像估算，用量为本网关在窗口内观测到的 token", false, usageObserved)
 	case accountpolicy.GrokBuildAccountIsPaid(acc):
 		source := "planMetadata"
-		if !BuildPlanIsPaid(acc.Subscription) {
+		if !accountpolicy.GrokBuildPlanIsPaid(acc.Subscription) {
 			source = "upstreamBilling"
 		}
 		provider.QuotaProvenance(fields, "paid", source, "confirmed",

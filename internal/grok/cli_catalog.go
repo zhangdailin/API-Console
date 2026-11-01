@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"math"
-	"net/http"
 	"strings"
 
 	"orchids-api/internal/modelcatalog"
@@ -109,17 +107,9 @@ func (c *CLIClient) FetchModelCatalog(ctx context.Context, acc *store.Account) (
 		return nil, fmt.Errorf("grok cli models is not configured")
 	}
 	ApplyCLIOAuthIdentity(acc)
-	resp, err := c.request(ctx, acc, http.MethodGet, c.baseURL()+"/models", nil, nil)
+	body, header, err := c.getCLI(ctx, acc, "/models")
 	if err != nil {
 		return nil, err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, cliOAuthMaxBodyBytes))
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, newCLIUpstreamError(resp.StatusCode, resp.Header, body)
 	}
 	var payload struct {
 		Data []json.RawMessage `json:"data"`
@@ -148,6 +138,6 @@ func (c *CLIClient) FetchModelCatalog(ctx context.Context, acc *store.Account) (
 	if len(profiles) == 0 {
 		return nil, fmt.Errorf("grok cli models response contains no model ids")
 	}
-	buildModelsETags.recordCatalogRead(acc.ID, resp.Header)
+	buildModelsETags.recordCatalogRead(acc.ID, header)
 	return profiles, nil
 }

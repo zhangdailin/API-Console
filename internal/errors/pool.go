@@ -20,16 +20,6 @@ const (
 	PoolClineInferenceCapMessage = "Request failed: this Cline account reached its inference cap and is cooling down. Please wait for the cap window to pass or add another Cline account."
 	// PoolRateLimitedMessage answers a pool every account of which is cooling down.
 	PoolRateLimitedMessage = "Request failed: all available accounts for this channel are currently rate-limited. Please wait for cooldown or add another valid account."
-	// PoolUpstreamQueueMessage answers a model the upstream is queuing for
-	// everyone. It names the queue and the wait because the caller's own traffic
-	// is not the problem and the account table has nothing to fix: the same
-	// model answers normally once the window passes.
-	PoolUpstreamQueueMessage = "Request failed: the upstream is holding this model's requests in a queue and did not admit this one. Retry after the delay indicated by the upstream."
-	// PoolUpstreamUnavailableMessage answers a model whose upstream service is
-	// down for everyone. It must not be answered as a rate limit: the caller's
-	// own traffic is not the problem, and "our accounts are rate-limited" sent
-	// operators looking at the account table while the upstream was the fault.
-	PoolUpstreamUnavailableMessage = "Request failed: the upstream service for this model is temporarily unavailable. Retry after the delay indicated by the upstream."
 	// PoolBusyMessage answers a pool whose accounts are all serving other requests.
 	PoolBusyMessage = "Request failed: every account for this channel is busy with other requests. Please retry shortly."
 	// PoolModelUnavailableMessage answers a request for a model the channel's
@@ -109,14 +99,6 @@ func ClassifyPoolExhaustion(selectErr error, lastErr string) PoolExhaustion {
 		return PoolExhaustion{Category: "rate_limit", Message: PoolBusyMessage}
 	case strings.Contains(lowerSelect, "is not available in the current") && strings.Contains(lowerSelect, "account pool"):
 		return PoolExhaustion{Category: "model_unavailable", Message: PoolModelUnavailableMessage}
-	case ClassifyUpstreamError(lastErr).Category == "upstream_queue":
-		// The pool is empty because the upstream queued every account's request
-		// rather than served it. That is a throttle with a window, so the pool
-		// answer is a retryable rate limit and not "the service is down" — the
-		// service answers most requests fine between windows.
-		return PoolExhaustion{Category: "upstream_queue", Message: PoolUpstreamQueueMessage}
-	case ClassifyUpstreamError(lastErr).Category == "upstream_unavailable":
-		return PoolExhaustion{Category: "upstream_unavailable", Message: PoolUpstreamUnavailableMessage}
 	case ClassifyUpstreamError(lastErr).Category == "rate_limit":
 		return PoolExhaustion{Category: "rate_limit", Message: PoolRateLimitedMessage}
 	}

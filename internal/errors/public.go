@@ -23,27 +23,13 @@ func CategoryMessage(category string) string { return messageForCategory(categor
 // 429 is where it looks for a retryable capacity problem (and for a quota, where
 // it stops), 401 for a credential it must replace, 400 for a request the upstream
 // rejected on its merits, and 5xx for the gateway's or the upstream's own fault.
-//
-// Two categories carry the same numeric status for different reasons, which is
-// why the table entries are not collapsed:
-//
-//   - upstream_queue is a throttle the caller can wait out: the upstream put the
-//     request in a queue and named a window. It is answered as 429 + Retry-After
-//     so an OpenAI-compatible client backs off and comes back, instead of reading
-//     503 as a broken gateway.
-//   - upstream_unavailable is the upstream's own service being down for this
-//     model with no window offered. It is not the caller's rate limit and not
-//     this gateway's fault, so it is answered as a temporarily unavailable
-//     upstream rather than as a 429 that tells the caller to stop sending.
 var publicStatusForCategory = map[string]int{
-	"quota_exhausted":      http.StatusTooManyRequests,
-	"rate_limit":           http.StatusTooManyRequests,
-	"upstream_queue":       http.StatusTooManyRequests,
-	"upstream_unavailable": http.StatusServiceUnavailable,
-	"auth":                 http.StatusUnauthorized,
-	"auth_blocked":         http.StatusUnauthorized,
-	"account_restricted":   http.StatusForbidden,
-	"client":               http.StatusBadRequest,
+	"quota_exhausted":    http.StatusTooManyRequests,
+	"rate_limit":         http.StatusTooManyRequests,
+	"auth":               http.StatusUnauthorized,
+	"auth_blocked":       http.StatusUnauthorized,
+	"account_restricted": http.StatusForbidden,
+	"client":             http.StatusBadRequest,
 	// The caller closed the connection before an answer existed. 499 is the
 	// conventional (nginx) status for it; nobody receives the body.
 	"client_closed":             499,
@@ -81,8 +67,6 @@ var messageForCategoryTable = map[string]string{
 	"account_restricted":        "The upstream account is restricted due to unusual activity. Requests are skipped during its restriction window; check the account in the official client or submit an appeal.",
 	"quota_exhausted":           "The available upstream accounts have exhausted their quota. Retry after the quota resets or add capacity.",
 	"rate_limit":                "The available upstream accounts are rate-limited. Retry after the cooldown.",
-	"upstream_queue":            "The upstream is holding this model's requests in a queue and has not admitted this one yet. Retry after the indicated delay.",
-	"upstream_unavailable":      "The upstream service for this model is temporarily unavailable. Retry after the indicated delay.",
 	"model_unavailable":         "The requested model is unavailable for the selected upstream accounts.",
 	"client":                    "The upstream rejected the request parameters or model. Check the request and model selection.",
 	"client_closed":             "The client closed the request before the upstream answered.",
@@ -95,9 +79,6 @@ var messageForCategoryTable = map[string]string{
 	"canceled":                  "The request was canceled.",
 }
 
-// The upstream_queue text exists so the caller is told what actually happened. It
-// replaces a 503 "the upstream service is temporarily unavailable" that was
-// published for a gate the same upstream served fine seconds later.
 func messageForCategory(category string) string {
 	if message, ok := messageForCategoryTable[strings.TrimSpace(category)]; ok {
 		return message

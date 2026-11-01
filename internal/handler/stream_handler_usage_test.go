@@ -27,12 +27,12 @@ func TestStreamHandler_UsageMissingFieldsKeepLocalEstimate(t *testing.T) {
 	sh := newStreamHandler(&config.Config{}, newFlushRecorder(), debug.New(false, false), false, adapter.FormatAnthropic)
 	defer sh.release()
 	sh.inputTokens, sh.outputTokens = 31, 17
-	sh.applyUpstreamUsageTokens(map[string]any{"output_tokens": 9, "credits": 0.5})
-	testutil.Falsef(t, !sh.useUpstreamUsage || sh.inputTokens != 31 || sh.outputTokens != 9 || sh.usageMetadata["credits"] != 0.5, "partial usage overwrote estimate or lost metadata: input=%d output=%d metadata=%v", sh.inputTokens, sh.outputTokens, sh.usageMetadata)
+	sh.applyUpstreamUsageTokens(map[string]any{"output_tokens": 9})
+	testutil.Falsef(t, !sh.useUpstreamUsage || sh.inputTokens != 31 || sh.outputTokens != 9, "partial usage overwrote estimate: input=%d output=%d", sh.inputTokens, sh.outputTokens)
 	sh.resetRoundState()
 	sh.inputTokens, sh.outputTokens = 31, 17
-	sh.applyUpstreamUsageTokens(map[string]any{"original_credits": 0.25})
-	testutil.Falsef(t, !sh.useUpstreamUsage || sh.inputTokens != 31 || sh.outputTokens != 17 || sh.usageMetadata["original_credits"] != 0.25, "credits-only usage lost evidence or estimate: input=%d output=%d metadata=%v", sh.inputTokens, sh.outputTokens, sh.usageMetadata)
+	sh.applyUpstreamUsageTokens(map[string]any{"unrelated": 0.25})
+	testutil.Falsef(t, sh.useUpstreamUsage || sh.inputTokens != 31 || sh.outputTokens != 17, "usage without token fields replaced the estimate: input=%d output=%d", sh.inputTokens, sh.outputTokens)
 }
 
 func TestStreamHandler_DetailedUsageIsAssignedIdempotently(t *testing.T) {
@@ -41,15 +41,12 @@ func TestStreamHandler_DetailedUsageIsAssignedIdempotently(t *testing.T) {
 	usage := map[string]any{
 		"inputTokens": 1000, "outputTokens": 20, "cacheReadTokens": 900,
 		"cacheWriteTokens": 50, "reasoningTokens": 7,
-		"credits": 0.25, "original_credits": 0.5,
 	}
 	sh.handleMessage(upstream.SSEMessage{Type: "model.tokens-used", Event: usage})
 	sh.handleMessage(upstream.SSEMessage{Type: "model.finish", Event: map[string]any{"usage": usage}})
 	testutil.Falsef(t, sh.inputTokens != 1000 || sh.outputTokens != 20 || sh.cachedInputTokens != 900 || sh.cacheWriteTokens != 50 || sh.reasoningTokens != 7, "detailed usage lost or doubled: in=%d out=%d cached=%d write=%d reasoning=%d", sh.inputTokens, sh.outputTokens, sh.cachedInputTokens, sh.cacheWriteTokens, sh.reasoningTokens)
-	testutil.Equal(t, sh.usageMetadata["credits"], 0.25)
-	testutil.Equal(t, sh.usageMetadata["original_credits"], 0.5)
 	sh.resetRoundState()
-	testutil.Falsef(t, sh.cachedInputTokens != 0 || sh.cacheWriteTokens != 0 || sh.reasoningTokens != 0 || sh.usageMetadata != nil, "detailed usage survived round reset: %+v", sh)
+	testutil.Falsef(t, sh.cachedInputTokens != 0 || sh.cacheWriteTokens != 0 || sh.reasoningTokens != 0, "detailed usage survived round reset: %+v", sh)
 }
 
 func TestStreamHandler_FinalOutputTokens_MatchChunkedText(t *testing.T) {

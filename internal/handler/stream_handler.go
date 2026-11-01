@@ -104,7 +104,6 @@ type streamHandler struct {
 	cachedInputTokens        int
 	cacheWriteTokens         int
 	reasoningTokens          int
-	usageMetadata            map[string]any
 	activeThinkingBlockIndex int
 	activeThinkingSSEIndex   int
 	activeTextBlockIndex     int
@@ -275,7 +274,6 @@ func (h *streamHandler) resetRoundState() {
 	h.cachedInputTokens = 0
 	h.cacheWriteTokens = 0
 	h.reasoningTokens = 0
-	h.usageMetadata = nil
 	h.completionLogged = false
 	h.outputEstimator.Reset()
 	h.useUpstreamUsage = false

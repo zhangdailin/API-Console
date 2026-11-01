@@ -1,7 +1,6 @@
 package grok
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -10,12 +9,8 @@ import (
 // cliSubscriptionTierFromJWT reads a metadata hint, not authentication proof.
 // Live subscription metadata always takes precedence over these unsigned claims.
 func cliSubscriptionTierFromJWT(token string) string {
-	parts := strings.Split(strings.TrimSpace(token), ".")
-	if len(parts) != 3 {
-		return ""
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
+	payload := cliJWTPayload(token)
+	if payload == nil {
 		return ""
 	}
 	var claims struct {

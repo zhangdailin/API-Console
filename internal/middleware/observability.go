@@ -31,7 +31,7 @@ type requestObservation struct {
 	attempts, failures, switches int64
 	account                      int64
 	providerReached              bool
-	retryWaitMS, queueWaitMS     int64
+	retryWaitMS                  int64
 	httpPhaseSamples             int64
 	httpPhases                   map[string]int64
 	httpPhaseCounts              map[string]int64
@@ -322,7 +322,6 @@ func finishRequestJournal(r *http.Request, w *TracedResponseWriter, duration tim
 		maps.Copy(phaseSnapshot, box.httpPhases)
 		metadata["upstream_http_phases_sum"] = phaseSnapshot
 		metadata["retry_wait_ms"] = box.retryWaitMS
-		metadata["queue_wait_ms"] = box.queueWaitMS
 		metadata["upstream_attempts"] = box.attempts
 		metadata["account_switches"] = box.switches
 		maps.Copy(metadata, box.annotations)
@@ -343,13 +342,10 @@ func finishRequestJournal(r *http.Request, w *TracedResponseWriter, duration tim
 }
 
 // RecordRetryWait records lightweight wait evidence even with diagnostic capture off.
-func RecordRetryWait(ctx context.Context, category string, elapsed time.Duration) {
+func RecordRetryWait(ctx context.Context, elapsed time.Duration) {
 	if box, ok := ctx.Value(requestObservationKey{}).(*requestObservation); ok {
 		box.mu.Lock()
 		defer box.mu.Unlock()
 		box.retryWaitMS += elapsed.Milliseconds()
-		if category == "upstream_queue" {
-			box.queueWaitMS += elapsed.Milliseconds()
-		}
 	}
 }

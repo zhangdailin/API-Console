@@ -63,7 +63,7 @@ func flowObservation(r *http.Request, w *TracedResponseWriter, now time.Time, pa
 		if box.attempts > 1 {
 			counts.Retried = 1
 		}
-		counts.RetryWaitMS, counts.QueueWaitMS = box.retryWaitMS, box.queueWaitMS
+		counts.RetryWaitMS = box.retryWaitMS
 		for i, name := range flowPhaseNames {
 			phases[i] = flowPhase{sum: box.httpPhases[name], samples: box.httpPhaseCounts[name]}
 		}

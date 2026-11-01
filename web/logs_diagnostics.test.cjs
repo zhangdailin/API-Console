@@ -47,11 +47,11 @@ test('bundle renders both attempts without hiding truncation or interpreting res
  assert.equal(details[2].children[1].textContent,''); details[2].open=true; details[2].listeners.toggle(); assert.equal(details[2].children[1].textContent,'<script>example</script>'); assert.match(allText(container),/下载完整诊断/);
 });
 
-test('latency diagnostics show zero, reused connections and upstream clock separately',()=>{
+test('latency diagnostics show zero timings, reused connections and missing values',()=>{
  const api=load(),container=element();
- api.renderBundle(container,{sections:[{name:'upstream_002_latency.json',payload:JSON.stringify({connection_reused:true,first_sse_ms:0,first_text_ms:838,upstream_firstTokenDuration:700,model_key:'test-model',httpdns_ip:''}),bytes:100}]},'');
+ api.renderBundle(container,{sections:[{name:'upstream_002_latency.json',payload:JSON.stringify({connection_reused:true,first_body_ms:0,total_ms:838,host:'test-host',alpn:''}),bytes:100}]},'');
  const text=allText(container);
- assert.match(text,/复用连接：是/);assert.match(text,/首条 SSE：0 ms/);assert.match(text,/首个正文：838 ms/);assert.match(text,/上游报告首 Token：700 ms/);assert.match(text,/实际模型路由：test-model/);assert.match(text,/HTTPDNS 请求头：未记录/);
+ assert.match(text,/复用连接：是/);assert.match(text,/首个响应体字节：0 ms/);assert.match(text,/本次耗时：838 ms/);assert.match(text,/上游主机：test-host/);assert.match(text,/TLS ALPN：未记录/);
 });
 
 const findButton=(node,label)=>node.children.find(n=>n.tag==='button'&&n.textContent===label);

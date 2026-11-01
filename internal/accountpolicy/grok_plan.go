@@ -6,13 +6,15 @@ import (
 	"orchids-api/internal/store"
 )
 
-func normalizeGrokPlan(subscription string) string {
+// NormalizeGrokPlan folds case, separators and "+" so every spelling of one
+// Build plan name compares equal ("X Premium+" == "x_premium_plus").
+func NormalizeGrokPlan(subscription string) string {
 	return strings.NewReplacer(" ", "", "_", "", "-", "", "+", "plus").Replace(strings.ToLower(strings.TrimSpace(subscription)))
 }
 
 // GrokBuildPlanIsFree names Build entitlements, independently of an X subscription.
 func GrokBuildPlanIsFree(subscription string) bool {
-	switch normalizeGrokPlan(subscription) {
+	switch NormalizeGrokPlan(subscription) {
 	case "free", "grokfree", "freetier", "basic", "grokbasic", "xbasic":
 		return true
 	}
@@ -22,7 +24,7 @@ func GrokBuildPlanIsFree(subscription string) bool {
 // GrokBuildPlanIsPaid reports whether a Grok subscription string names a paid
 // Build plan. An empty or "unknown" plan is not evidence of either tier.
 func GrokBuildPlanIsPaid(subscription string) bool {
-	plan := normalizeGrokPlan(subscription)
+	plan := NormalizeGrokPlan(subscription)
 	switch plan {
 	case "super", "pro", "grokpro", "heavy", "lite", "xpremium", "xpremiumplus", "paid", "team", "enterprise", "apikey":
 		return true

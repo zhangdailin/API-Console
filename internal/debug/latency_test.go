@@ -19,10 +19,10 @@ func TestLatencyCapturesReusedConnectionsAndSecrets(t *testing.T) {
 	client := server.Client()
 	for range 2 {
 		req, _ := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
-		req.Header.Set("Cosy-Key", "secret-key")
-		req.Header.Set("Cosy-User", "private-user")
+		req.Header.Set("Authorization", "Bearer secret-key")
+		req.Header.Set("Cookie", "session=private-user")
 		a := BeginUpstream(ctx, req.Method, server.URL, req.Header, nil)
-		traced, l := a.Trace(ctx, map[string]any{"model_key": "test-model"})
+		traced, l := a.Trace(ctx, map[string]any{"host": "test-host"})
 		resp, err := client.Do(req.WithContext(traced))
 		testutil.NoError(t, err)
 		l.Response(resp)
@@ -60,7 +60,7 @@ func TestLatencyDisabledAndWaitCancellation(t *testing.T) {
 	l.Mark("x")
 	l.Finish(nil)
 	ctx, c := WithCapture(ctx, "cancelled")
-	RecordWait(ctx, "upstream_queue", time.Second, 10*time.Millisecond, true)
+	RecordWait(ctx, "rate_limit", time.Second, 10*time.Millisecond, true)
 
 	found := false
 	for _, s := range c.Bundle().Sections {

@@ -42,7 +42,7 @@ func beginUpstream(c *Capture, method, url string, headers http.Header, body any
 	safeHeaders := map[string]string{}
 	for k, v := range headers {
 		switch strings.ToLower(k) {
-		case "authorization", "proxy-authorization", "cookie", "cosy-key", "cosy-user", "cosy-machineid", "cosy-machinetoken":
+		case "authorization", "proxy-authorization", "cookie":
 			safeHeaders[k] = "[REDACTED]"
 		default:
 			safeHeaders[k] = strings.Join(v, ", ")

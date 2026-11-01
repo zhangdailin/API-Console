@@ -100,7 +100,7 @@ func TestFlowRatesUseObservedUsageWithoutDoubleCounting(t *testing.T) {
 
 func TestFlowMetricsSeparateGenerationVisibleAndNonStream(t *testing.T) {
 	tracker := NewFlowTracker()
-	box := &requestObservation{attempts: 3, switches: 1, retryWaitMS: 120, queueWaitMS: 80,
+	box := &requestObservation{attempts: 3, switches: 1, retryWaitMS: 120,
 		httpPhases:      map[string]int64{"dns_ms": 10, "response_headers_ms": 90},
 		httpPhaseCounts: map[string]int64{"dns_ms": 1, "response_headers_ms": 3}}
 	ctx := context.WithValue(context.Background(), requestObservationKey{}, box)
@@ -126,7 +126,7 @@ func TestFlowMetricsSeparateGenerationVisibleAndNonStream(t *testing.T) {
 	if stats.FirstGeneration.Samples != 1 || *stats.FirstGeneration.P95MS != 100 || *stats.FirstVisible.P95MS != 400 || stats.BodyTTFB.Samples != 0 {
 		t.Fatalf("mixed latency semantics: %+v", stats)
 	}
-	if stats.Observed != 1 || stats.Retried != 1 || stats.Attempts != 3 || stats.AccountSwitches != 1 || stats.QueueWaitMS != 80 || stats.RetryWaitMS != 120 || stats.HTTPPhases["response_headers_ms"].AvgMS != 30 {
+	if stats.Observed != 1 || stats.Retried != 1 || stats.Attempts != 3 || stats.AccountSwitches != 1 || stats.RetryWaitMS != 120 || stats.HTTPPhases["response_headers_ms"].AvgMS != 30 {
 		t.Fatalf("lost observations: %+v", stats)
 	}
 	if _, ok := stats.HTTPPhases["tls_ms"]; ok {

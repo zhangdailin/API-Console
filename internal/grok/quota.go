@@ -205,28 +205,21 @@ type FreeProfileVerdict struct {
 	Source   string
 }
 
-// BuildPlanIsPaid reports whether a subscription string names a paid Build plan.
-// The check exists so a paid account that deliberately exposes no numeric window is
-// never reclassified as Free by the estimate below.
-func BuildPlanIsPaid(subscription string) bool {
-	return accountpolicy.GrokBuildPlanIsPaid(subscription)
-}
-
 // PlanDisplayName renders a Build subscription string as the plan name an
 // operator recognises. An unrecognised string is returned trimmed as-is.
 func PlanDisplayName(subscription string) string {
 	raw := strings.TrimSpace(subscription)
-	plan := strings.NewReplacer(" ", "", "+", "plus").Replace(strings.ToLower(raw))
+	plan := accountpolicy.NormalizeGrokPlan(raw)
 	switch {
 	case plan == "":
 		return ""
 	case strings.Contains(plan, "heavy"):
 		return "Heavy"
-	case strings.Contains(plan, "xpremiumplus"), strings.Contains(plan, "x_premium_plus"):
+	case strings.Contains(plan, "xpremiumplus"):
 		return "X Premium+"
-	case strings.Contains(plan, "xpremium"), strings.Contains(plan, "x_premium"):
+	case strings.Contains(plan, "xpremium"):
 		return "X Premium"
-	case strings.Contains(plan, "xbasic"), strings.Contains(plan, "x_basic"):
+	case strings.Contains(plan, "xbasic"):
 		return "X Basic"
 	case strings.Contains(plan, "lite"):
 		return "Lite"
@@ -296,8 +289,7 @@ func InferFreeProfile(acc *store.Account) FreeProfileVerdict {
 		return FreeProfileVerdict{Inferred: true, Source: FreeProfileSourceExhaustion}
 	}
 	billing := acc.GrokBilling
-	plan := strings.TrimSpace(acc.Subscription)
-	if (plan == "" || strings.EqualFold(plan, "unknown")) && billing.HasZeroProfile() {
+	if !cliPlanNameAvailable(acc.Subscription) && billing.HasZeroProfile() {
 		return FreeProfileVerdict{Inferred: true, Source: FreeProfileSourceBilling}
 	}
 	return FreeProfileVerdict{}

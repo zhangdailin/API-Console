@@ -2,12 +2,25 @@ package grok
 
 import (
 	"encoding/base64"
-	"strings"
-
 	"encoding/json"
+	"strings"
 
 	"orchids-api/internal/store"
 )
+
+// cliJWTPayload returns the decoded, unverified claims segment of a JWT, or nil
+// when the token is not a three-part JWT. Callers read metadata only.
+func cliJWTPayload(token string) []byte {
+	parts := strings.Split(strings.TrimSpace(token), ".")
+	if len(parts) != 3 || strings.TrimSpace(parts[1]) == "" {
+		return nil
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil
+	}
+	return payload
+}
 
 // ApplyCLIOAuthIdentity copies only non-secret identity claims from an OAuth
 // access-token JWT into the account. Claims are used as request metadata, not
@@ -27,12 +40,8 @@ func ApplyCLIOAuthIdentityToken(acc *store.Account, token string) bool {
 	if acc == nil {
 		return false
 	}
-	parts := strings.Split(strings.TrimSpace(token), ".")
-	if len(parts) != 3 || strings.TrimSpace(parts[1]) == "" {
-		return false
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
+	payload := cliJWTPayload(token)
+	if payload == nil {
 		return false
 	}
 	var claims struct {

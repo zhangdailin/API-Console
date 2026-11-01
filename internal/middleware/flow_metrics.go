@@ -26,7 +26,6 @@ type FlowCounts struct {
 	Attempts        int64 `json:"attempts"`
 	AccountSwitches int64 `json:"account_switches"`
 	RetryWaitMS     int64 `json:"retry_wait_ms"`
-	QueueWaitMS     int64 `json:"queue_wait_ms"`
 }
 
 func (c *FlowCounts) add(other FlowCounts) {
@@ -42,7 +41,6 @@ func (c *FlowCounts) add(other FlowCounts) {
 	c.Attempts += other.Attempts
 	c.AccountSwitches += other.AccountSwitches
 	c.RetryWaitMS += other.RetryWaitMS
-	c.QueueWaitMS += other.QueueWaitMS
 }
 
 type FlowDistribution struct {

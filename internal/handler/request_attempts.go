@@ -392,7 +392,7 @@ func (e *messageExecution) run() {
 		if retryDelayForAttempt > 0 {
 			waitCompleted = util.SleepWithContext(e.r.Context(), retryDelayForAttempt)
 			debug.RecordWait(e.r.Context(), errClass.Category, retryDelayForAttempt, time.Since(waitStarted), !waitCompleted)
-			middleware.RecordRetryWait(e.r.Context(), errClass.Category, time.Since(waitStarted))
+			middleware.RecordRetryWait(e.r.Context(), time.Since(waitStarted))
 		}
 		if !waitCompleted {
 			category := cancellationCategory(e.r.Context())

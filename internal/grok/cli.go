@@ -111,25 +111,21 @@ func (c *CLIClient) cliHeaders(acc *store.Account, accessToken string) http.Head
 	return h
 }
 
-func (c *CLIClient) userAgent() string {
-	if c != nil && c.cfg != nil {
-		return c.cfg.GrokCLIUserAgentOrDefault()
+// cliConfig returns the client's config, or nil; the Config accessors are
+// nil-safe and own the identity defaults.
+func (c *CLIClient) cliConfig() *config.Config {
+	if c == nil {
+		return nil
 	}
-	return "grok-shell/1.0.60 (linux; x86_64)"
+	return c.cfg
 }
 
-func (c *CLIClient) clientVersion() string {
-	if c != nil && c.cfg != nil {
-		return c.cfg.GrokCLIClientVersionOrDefault()
-	}
-	return "1.0.60"
-}
+func (c *CLIClient) userAgent() string { return c.cliConfig().GrokCLIUserAgentOrDefault() }
+
+func (c *CLIClient) clientVersion() string { return c.cliConfig().GrokCLIClientVersionOrDefault() }
 
 func (c *CLIClient) clientIdentifier() string {
-	if c != nil && c.cfg != nil {
-		return c.cfg.GrokCLIClientIdentifierOrDefault()
-	}
-	return "grok-shell"
+	return c.cliConfig().GrokCLIClientIdentifierOrDefault()
 }
 
 // doResponses issues a standard Responses request to the CLI proxy. It ensures a

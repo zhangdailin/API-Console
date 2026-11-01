@@ -104,7 +104,7 @@ Redis 桶可汇总多个写入者，但 runtime、采集健康、进程准入及
 
 HTTP 成功、协议完成、可见输出与预算截断是不同口径。正常 `length` / `max_tokens` 终止保持 HTTP 成功及原结束原因，日志新增 `output_truncated`；只产生推理而没有文本或工具时标记 `reasoning_only`。运维概览提供 `output_evidence_samples`、`visible_answers`、`reasoning_only`、`output_truncated`，旧记录没有输出证据，不补造为完整答案。
 
-请求日志的 `first_token_ms` 为首生成（包括推理和工具；非流式采用正文首写的 TTFB 近似），`first_visible_token_ms` 是流式文本首字。另有 `retry_wait_ms`、`queue_wait_ms`、`upstream_attempts`、`account_switches`。普通日志也采集 `upstream_http_phase_samples` 及 `upstream_http_phases_sum` 的 DNS、TCP、TLS、取连接、响应头耗时。各阶段可能重叠，累计值不能相加当作请求总耗时；复用连接及自定义传输可能缺阶段，缺失不能解释为零。不会保存请求正文、凭据、代理地址或模型输出。
+请求日志的 `first_token_ms` 为首生成（包括推理和工具；非流式采用正文首写的 TTFB 近似），`first_visible_token_ms` 是流式文本首字。另有 `retry_wait_ms`、`upstream_attempts`、`account_switches`。普通日志也采集 `upstream_http_phase_samples` 及 `upstream_http_phases_sum` 的 DNS、TCP、TLS、取连接、响应头耗时。各阶段可能重叠，累计值不能相加当作请求总耗时；复用连接及自定义传输可能缺阶段，缺失不能解释为零。不会保存请求正文、凭据、代理地址或模型输出。
 
 这些数值测量源站内的链路。公网客户端的 DNS、TLS、CDN 等时间须另测，并按 `X-Orchids-Request-ID` 关联 Caddy 与请求日志。源站之外的额外等待不能仅凭一个样本归因模型或网关。
 
