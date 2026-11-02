@@ -124,7 +124,7 @@ Grok 质量检查分两半：暂存（`quality_hold.go` 编排、`quality_hold_p
 
 被拒尝试自身的 `grok_request` 行以 `status=quality_degraded` 记录，并带 `metadata.quality_withheld` 与 `metadata.quality_reason`；`metadata.finish_reason` 保留上游原始结束原因。
 
-`reason` 取值：`burst_dump`、`cipher_drool`、`fake_encrypted_dump`、`fast_reasoning_ratio_dump`、`no_reasoning`。`stopped` 取值：`attempts_exhausted`、`account_budget_exhausted`、`replay_unsafe`、`client_gone`、`no_other_account`。
+`reason` 取值：`burst_dump`、`cipher_drool`、`fake_encrypted_dump`、`fast_reasoning_ratio_dump`、`no_reasoning`。三种倾倒检测器（`burst_dump`、`fake_encrypted_dump`、`fast_reasoning_ratio_dump`）只判断可见回答不少于 32 个 token 的轮次：推理后一次性给出的短回答（会话标题、问候、`{"action":"proceed"}` 之类的路由判定）无法凭时序与劣化区分，不作为停用或冷却账号的依据，口径与 grok2api 的最小判定输出一致。`stopped` 取值：`attempts_exhausted`、`account_budget_exhausted`、`replay_unsafe`、`client_gone`、`no_other_account`。
 
 判断客户端是否收到了降级回答，只看 `grok_quality_resolution`：`delivered_degraded` 表示按 fail-open 交付了最后一轮被拒内容，其余三种状态客户端都没有收到降级内容。`grok_quality_degraded` 描述的是客户端从未见到的尝试。
 

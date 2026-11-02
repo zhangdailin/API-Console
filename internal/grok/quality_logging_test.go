@@ -399,14 +399,14 @@ func TestClassifyQualityHoldReasonNamesTheDetector(t *testing.T) {
 		sig    qualityStreamSignals
 		reason string
 	}{
-		{"late short answer after a long reasoning bill",
-			qualityStreamSignals{HoldExpired: true, VisibleTokens: 10, ReasoningTokens: 200, FirstVisible: true, VisibleFlushMS: 9000},
+		{"an answer dumped at once after a large reasoning bill",
+			qualityStreamSignals{VisibleTokens: 40, ReasoningTokens: 200, FirstVisible: true, VisibleFlushMS: 100, Terminal: true},
 			qualityReasonBurstDump},
 		{"cipher-only thinking with no bill while the answer ends",
 			qualityStreamSignals{EncryptedBytes: 100, EncryptedFloor: 256, VisibleTokens: 50, Terminal: true, FirstVisible: true, VisibleFlushMS: 5000},
 			qualityReasonCipherDrool},
 		{"plaintext reasoning that is nearly the whole output, dumped at once",
-			qualityStreamSignals{HasThinking: true, HasReasoningDelta: true, FirstVisible: true, Terminal: true, VisibleFlushMS: 100, ReasoningTokens: 90, OutputTokens: 100, VisibleTokens: 10},
+			qualityStreamSignals{HasThinking: true, HasReasoningDelta: true, FirstVisible: true, Terminal: true, VisibleFlushMS: 100, ReasoningTokens: 400, OutputTokens: 440, VisibleTokens: 40},
 			qualityReasonFastReasoningRatio},
 		{"an answer with no thinking of any kind",
 			qualityStreamSignals{VisibleTokens: 50, Terminal: true, FirstVisible: true, VisibleFlushMS: 5000},
@@ -439,4 +439,22 @@ func TestQualityGuardPersistsVerdictAfterClientCancel(t *testing.T) {
 	saved, err := s.GetAccount(context.Background(), acc.ID)
 	testutil.NoError(t, err)
 	testutil.Equal(t, saved.QualityFailures, 1)
+}
+
+// The production false positives of 2026-11-02: a conversation title, a
+// greeting and a routing verdict, each a correct short answer after encrypted
+// reasoning, parked five accounts and disabled account 54. Signals are the ones
+// recorded for account 54.
+func TestQualityGuardDoesNotJudgeShortAnswersAfterReasoning(t *testing.T) {
+	short := qualitySignals{
+		ExpectReasoning: true, Terminal: true, VisibleChars: 20, EncryptedChars: 10372, ReasoningTokens: 1725,
+		FirstVisibleMS: 15468, LastVisibleMS: 15484, VisibleTimingObserved: true,
+	}
+	testutil.False(t, qualityDegraded(short), "a short answer after billed encrypted reasoning is not degraded")
+	h, s, _ := setupValidationHandler(t)
+	acc := &store.Account{AccountType: "grok", Enabled: true, CredentialType: "oauth", GrokProvider: ProviderBuild, OAuthAccessToken: "jwt-user-short-answer"}
+	testutil.NoError(t, s.CreateAccount(context.Background(), acc))
+	testutil.Equal(t, h.applyBuildQualityGuard(context.Background(), acc, &chatwire.Request{Model: "grok-4.7"}, chatOutcome{Quality: short}), qualityGuardNone)
+	// A requested-reasoning answer with no reasoning of any kind is still judged.
+	testutil.True(t, qualityDegraded(qualitySignals{ExpectReasoning: true, Terminal: true, VisibleChars: 400}), "missing reasoning stays degraded")
 }

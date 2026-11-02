@@ -44,11 +44,15 @@ func TestClassifyQualityHold(t *testing.T) {
 			want: qualityWait,
 		},
 		{
-			// The upstream deliberately does not gate this on visible size: the
-			// 18190/18183 dumps answered in under two seconds and leaked through
-			// the minimum-output check.
-			name: "cipher blob then a fast answer is withheld even when short",
+			// Below qualityMinJudgedVisibleTokens timing is not evidence: titles,
+			// greetings and routing verdicts arrive in one delta after reasoning.
+			name: "cipher blob then a fast short answer delivers",
 			sig:  qualityStreamSignals{HasThinking: true, EncryptedBytes: 400, EncryptedFloor: 256, VisibleTokens: 5, FirstVisible: true, VisibleFlushMS: 150, Terminal: true},
+			want: qualityDeliver,
+		},
+		{
+			name: "cipher blob then a fast answer of judged size is withheld",
+			sig:  qualityStreamSignals{HasThinking: true, EncryptedBytes: 400, EncryptedFloor: 256, VisibleTokens: qualityMinJudgedVisibleTokens, FirstVisible: true, VisibleFlushMS: 150, Terminal: true},
 			want: qualityWithhold,
 		},
 		{
@@ -76,9 +80,9 @@ func TestClassifyQualityHold(t *testing.T) {
 			want: qualityWithhold,
 		},
 		{
-			name: "reasoning stub then a short dump is withheld (burst)",
+			name: "reasoning stub then a dump is withheld (burst)",
 			sig: qualityStreamSignals{
-				ReasoningStarted: true, ReasoningTokens: 954, VisibleTokens: 1,
+				ReasoningStarted: true, ReasoningTokens: 954, VisibleTokens: 40,
 				FirstVisible: true, VisibleFlushMS: 30, Terminal: true,
 			},
 			want: qualityWithhold,
@@ -86,7 +90,7 @@ func TestClassifyQualityHold(t *testing.T) {
 		{
 			name: "large encrypted blob then a fast answer is withheld (fake encrypted dump)",
 			sig: qualityStreamSignals{
-				HasThinking: true, EncryptedBytes: int64(len(dumpEncrypted)), VisibleTokens: 1,
+				HasThinking: true, EncryptedBytes: int64(len(dumpEncrypted)), VisibleTokens: 40,
 				FirstVisible: true, VisibleFlushMS: 1800, Terminal: true,
 			},
 			want: qualityWithhold,
@@ -95,9 +99,19 @@ func TestClassifyQualityHold(t *testing.T) {
 			name: "plaintext reasoning dumped in 1ms with an 80% bill is withheld",
 			sig: qualityStreamSignals{
 				HasThinking: true, HasReasoningDelta: true, ReasoningTokens: 900,
-				OutputTokens: 1000, VisibleTokens: 25, FirstVisible: true, VisibleFlushMS: 1, Terminal: true,
+				OutputTokens: 1000, VisibleTokens: 40, FirstVisible: true, VisibleFlushMS: 1, Terminal: true,
 			},
 			want: qualityWithhold,
+		},
+		{
+			// The live false positives: a conversation title or {"action":"proceed"}
+			// after real reasoning, delivered in one delta.
+			name: "short answer after a large reasoning bill delivers",
+			sig: qualityStreamSignals{
+				ReasoningStarted: true, ReasoningTokens: 1725, EncryptedBytes: 10372, VisibleTokens: 6,
+				FirstVisible: true, FirstVisibleMS: 15468, VisibleTimingObserved: true, VisibleFlushMS: 16, Terminal: true,
+			},
+			want: qualityDeliver,
 		},
 		{
 			name: "cipher drool (status loop) is withheld once visible text is large",

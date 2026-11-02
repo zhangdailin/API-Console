@@ -91,13 +91,9 @@ func qualityDegraded(sig qualitySignals) bool {
 	}) {
 		return false
 	}
-	// A large reasoning bill with almost no visible output that arrived in one
-	// late burst is the flagship dump shape.
-	if sig.ReasoningTokens >= qualityBurstReasoning &&
-		sig.VisibleChars > 0 && sig.VisibleChars < qualityBurstVisible &&
-		sig.visibleDurationMS() >= 0 && sig.visibleDurationMS() < qualityBurstFlushMS {
-		return true
-	}
+	// A short answer after a large reasoning bill is not judged as a dump: a
+	// conversation title or a greeting arrives in one delta by nature (see
+	// qualityMinJudgedVisibleTokens).
 	if qualityHasBilledEncryptedReasoning(qualityStreamSignals{EncryptedBytes: sig.EncryptedChars, ReasoningTokens: sig.ReasoningTokens}) {
 		return false
 	}

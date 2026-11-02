@@ -201,24 +201,32 @@ func qualityHasPromptBilledReasoning(sig qualityStreamSignals) bool {
 		qualityHasBilledEncryptedReasoning(sig)
 }
 
-// qualityIsBurstDump is the late greeting: a short visible answer dumped after a
-// long hold with a large reasoning bill.
+// qualityMinJudgedVisibleTokens is the smallest visible answer the dump
+// detectors judge, as in grok2api (DefaultDegradeMinOutput). A short answer
+// after real reasoning arrives in one delta by nature: conversation titles,
+// greetings and routing verdicts such as {"action":"proceed"} were parking and
+// disabling healthy accounts. Below this size timing cannot separate a dump
+// from a correct answer, so it is not evidence against the account.
+const qualityMinJudgedVisibleTokens = int64(32)
+
+func qualityTooShortToJudge(sig qualityStreamSignals) bool {
+	return sig.VisibleTokens < qualityMinJudgedVisibleTokens
+}
+
+// qualityIsBurstDump is a visible answer dumped in one burst after a large
+// reasoning bill.
 func qualityIsBurstDump(sig qualityStreamSignals) bool {
-	if sig.HasReasoningDelta || qualityHasPromptBilledReasoning(sig) {
+	if sig.HasReasoningDelta || qualityHasPromptBilledReasoning(sig) || qualityTooShortToJudge(sig) {
 		return false
-	}
-	shortVisible := sig.VisibleTokens > 0 && sig.VisibleTokens < qualityBurstVisible
-	if sig.HoldExpired && shortVisible && sig.ReasoningTokens >= qualityBurstReasoning {
-		return true
 	}
 	return qualityFastFlush(sig, qualityBurstFlushMS) && qualityHasDumpBill(sig)
 }
 
 // qualityIsFakeEncryptedDump is the dump where ciphertext or a large reasoning
-// bill is followed by the whole visible answer within two seconds. The visible
-// size is not a gate: dumps shorter than the minimum output leaked through it.
+// bill is followed by the whole visible answer within two seconds. Answers
+// shorter than qualityMinJudgedVisibleTokens are not judged.
 func qualityIsFakeEncryptedDump(sig qualityStreamSignals) bool {
-	if sig.HasReasoningDelta || qualityHasPromptBilledReasoning(sig) {
+	if sig.HasReasoningDelta || qualityHasPromptBilledReasoning(sig) || qualityTooShortToJudge(sig) {
 		return false
 	}
 	return qualityFastFlush(sig, qualityFakeEncFlushMS) && qualityHasDumpBill(sig)
@@ -228,7 +236,7 @@ func qualityIsFakeEncryptedDump(sig qualityStreamSignals) bool {
 // one-shot dump: billed reasoning is at least 80% of the output and the visible
 // text arrived within two seconds.
 func qualityIsFastReasoningRatioDump(sig qualityStreamSignals) bool {
-	if !sig.HasReasoningDelta || !qualityFastFlush(sig, qualityFakeEncFlushMS) {
+	if !sig.HasReasoningDelta || !qualityFastFlush(sig, qualityFakeEncFlushMS) || qualityTooShortToJudge(sig) {
 		return false
 	}
 	output := sig.OutputTokens
