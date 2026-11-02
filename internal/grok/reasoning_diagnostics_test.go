@@ -105,6 +105,25 @@ func TestAuditChatOutcomePersistsAccountTokens(t *testing.T) {
 	testutil.Equal(t, got.RequestCount, 0)
 }
 
+// A client commonly hangs up the moment its stream ends. The usage it consumed
+// must still be booked; a write bound to the request context used to be lost.
+func TestAuditChatOutcomePersistsTokensAfterClientCancel(t *testing.T) {
+	s := newTestGrokStore(t, "grok_usage_cancel_test:")
+	acc := &store.Account{AccountType: "grok", GrokProvider: ProviderBuild, Enabled: true}
+	testutil.NoError(t, s.CreateAccount(context.Background(), acc))
+	h := &Handler{lb: loadbalancer.NewWithCacheTTL(s, time.Minute), auditLogger: audit.NewNopLogger()}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	h.auditChatOutcome(ctx, acc, &chatwire.Request{Model: "grok-4.7"}, chatOutcome{
+		Finish:      "stop",
+		Usage:       map[string]any{"prompt_tokens": 90, "completion_tokens": 10, "total_tokens": 100},
+		UsageSource: audit.UsageSourceUpstream,
+	})
+	got, err := s.GetAccount(context.Background(), acc.ID)
+	testutil.NoError(t, err)
+	testutil.Equal(t, got.TokensToday, 100)
+}
+
 func TestReasoningDiagnosticsReachAttemptAndOutcome(t *testing.T) {
 	for _, effort := range []string{"", "low", "xhigh", "private-secret"} {
 		r := map[string]any{"summary": "concise"}

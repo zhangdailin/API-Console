@@ -12,6 +12,17 @@ import (
 	"time"
 )
 
+// grokFinalizeWriteTimeout bounds the account writes that finish a request:
+// they run after the client may already have hung up.
+const grokFinalizeWriteTimeout = 5 * time.Second
+
+// detachedGrokWrite keeps request values (request ID, tracing) but not its
+// cancellation, so a client that disconnects as its stream ends cannot drop
+// the account state that request produced.
+func detachedGrokWrite(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), grokFinalizeWriteTimeout)
+}
+
 func (h *Handler) auditAttempt(ctx context.Context, acc *store.Account, provider string, attempt int, started time.Time, err error, stages ...string) {
 	stage := "request"
 	if len(stages) > 0 {
@@ -113,7 +124,11 @@ func (h *Handler) auditChatOutcome(ctx context.Context, acc *store.Account, req 
 	// tokens_today and usage_total remain permanently zero.
 	if acc != nil && acc.ID != 0 && event.TotalTokens > 0 && h != nil && h.lb != nil && h.lb.Store != nil {
 		accountID := acc.ID
-		if err := h.lb.Store.IncrementAccountStats(ctx, accountID, float64(event.TotalTokens), 0); err != nil {
+		// The client may hang up the moment its stream ends; the usage it
+		// consumed must still be booked, so the write outlives the request.
+		persistCtx, cancel := detachedGrokWrite(ctx)
+		defer cancel()
+		if err := h.lb.Store.IncrementAccountStats(persistCtx, accountID, float64(event.TotalTokens), 0); err != nil {
 			slog.Warn("grok token usage persistence failed", "account_id", accountID, "runtime_account_id", acc.ID, "tokens", event.TotalTokens, "error", err)
 		}
 	}

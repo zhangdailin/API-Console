@@ -158,7 +158,9 @@ func (h *Handler) applyQualityGuard(ctx context.Context, acc *store.Account, sig
 	if reason == "" {
 		reason = qualityReasonNoReasoning
 	}
-	result, err := h.lb.Store.ApplyAccountQuality(ctx, acc.ID, store.AccountQualityUpdate{
+	writeCtx, cancel := detachedGrokWrite(ctx)
+	defer cancel()
+	result, err := h.lb.Store.ApplyAccountQuality(writeCtx, acc.ID, store.AccountQualityUpdate{
 		ExpectedRevision: acc.QualityRevision, Reason: reason,
 		CooldownUntil: time.Now().UTC().Add(qualityCooldown), DisableThreshold: qualityDisableThreshold,
 	})
@@ -191,7 +193,9 @@ func (h *Handler) clearQualityGuard(ctx context.Context, acc *store.Account) qua
 	if h == nil || acc == nil || h.lb == nil || h.lb.Store == nil || acc.QualityFailures == 0 {
 		return qualityGuardNone
 	}
-	result, err := h.lb.Store.ApplyAccountQuality(ctx, acc.ID, store.AccountQualityUpdate{ExpectedRevision: acc.QualityRevision})
+	writeCtx, cancel := detachedGrokWrite(ctx)
+	defer cancel()
+	result, err := h.lb.Store.ApplyAccountQuality(writeCtx, acc.ID, store.AccountQualityUpdate{ExpectedRevision: acc.QualityRevision})
 	if err != nil {
 		slog.Warn("grok quality guard: failed to clear the account verdict", "account_id", acc.ID, "error", err)
 		return qualityGuardNone

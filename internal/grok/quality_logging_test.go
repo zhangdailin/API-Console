@@ -425,3 +425,18 @@ func TestClassifyQualityHoldReasonNamesTheDetector(t *testing.T) {
 	testutil.Equal(t, verdict, qualityDeliver)
 	testutil.Equal(t, reason, "")
 }
+
+// A degraded turn is judged after its client may already have disconnected;
+// the verdict must still be stored.
+func TestQualityGuardPersistsVerdictAfterClientCancel(t *testing.T) {
+	h, s, _ := setupValidationHandler(t)
+	acc := &store.Account{AccountType: "grok", Enabled: true, CredentialType: "oauth", GrokProvider: ProviderBuild, OAuthAccessToken: "jwt-user-guard-cancel"}
+	testutil.NoError(t, s.CreateAccount(context.Background(), acc))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	degraded := chatOutcome{Quality: qualitySignals{ExpectReasoning: true, Terminal: true, VisibleChars: 400}}
+	testutil.Equal(t, h.applyBuildQualityGuard(ctx, acc, &chatwire.Request{Model: "grok-4.5"}, degraded), qualityGuardParked)
+	saved, err := s.GetAccount(context.Background(), acc.ID)
+	testutil.NoError(t, err)
+	testutil.Equal(t, saved.QualityFailures, 1)
+}
