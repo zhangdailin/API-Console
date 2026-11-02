@@ -203,9 +203,15 @@ globalThis.DeviceAuthLogin = (() => {
           fail(result.message || terminalMessages.expired);
           return;
         }
-        if (login.popup && login.popup.closed && !login.resumed) {
-          login.closedAt ||= Date.now();
-          if (Date.now() - login.closedAt >= 3000) { fail(`${label} 登录窗口已关闭，尚未完成授权。`); }
+        // A closed popup is not a cancellation. Authorization pages that send
+        // Cross-Origin-Opener-Policy sever the opener, so popup.closed turns
+        // true while the page is still open, and some pages close themselves
+        // right after approval, before the server's next upstream poll. The
+        // server-side transaction keeps running until it completes, fails or
+        // expires; only the operator's cancel or the expiry ends it here.
+        if (login.popup && login.popup.closed && !login.resumed && !login.closedNoticeShown) {
+          login.closedNoticeShown = true;
+          status(`${label} 授权窗口已关闭或已脱离本页。若已在官方页面完成授权，本页会自动完成；否则请点击上方链接继续授权。`);
         }
       } catch (err) {
         if (err && err.name === 'AbortError') return;
@@ -263,7 +269,7 @@ globalThis.DeviceAuthLogin = (() => {
       setLink('');
       status(statusPrefix);
 
-      const login = { loginId: '', expiresAt: 0, popup: null, timer: null, controller: new AbortController(), closedAt: 0 };
+      const login = { loginId: '', expiresAt: 0, popup: null, timer: null, controller: new AbortController(), closedNoticeShown: false };
       active = login;
 
       // Reserve the popup window during the click gesture; it is navigated once

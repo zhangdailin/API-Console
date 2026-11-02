@@ -13,6 +13,7 @@ function browser({ storedSession = null, popupBlocked = false, beginError = null
   const toasts = [];
   let pollResult = { status: 'pending' };
   let popupClosed = false;
+  let intervalFn = null;
   const element = (id) => {
     if (!elements.has(id)) elements.set(id, {
       id, hidden: true, checked: true, disabled: false, textContent: '',
@@ -52,7 +53,7 @@ function browser({ storedSession = null, popupBlocked = false, beginError = null
       if (options.method === 'DELETE') return { ok: true };
       return { ok: true, json: async () => pollResult };
     },
-    setInterval() { return 1; },
+    setInterval(fn) { intervalFn = fn; return 1; },
     clearInterval() {},
     AbortController,
     showToast: (...args) => toasts.push(args),
@@ -60,7 +61,7 @@ function browser({ storedSession = null, popupBlocked = false, beginError = null
     loadAccounts() {},
   });
   for (const script of scripts) vm.runInContext(fs.readFileSync(path.join(__dirname, 'static/js', script), 'utf8'), context);
-  return { context, element, storage, requests, toasts, popup, setPollResult(value) { pollResult = value; } };
+  return { context, element, storage, requests, toasts, popup, setPollResult(value) { pollResult = value; }, closePopup() { popupClosed = true; }, runInterval() { if (intervalFn) intervalFn(); } };
 }
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -100,4 +101,25 @@ test('shared login errors retain provider names and specialized upstream message
     assert.match(ui.toasts[0][0], message);
     assert.equal(ui.toasts[0][1], 'error');
   }
+});
+
+// Authorization pages that send Cross-Origin-Opener-Policy make popup.closed
+// read true while the page is still open, and a page may close itself right
+// after approval. Neither may cancel the server transaction: that used to drop
+// every Grok login six seconds after it started.
+test('a closed popup keeps the server login alive and still completes', async () => {
+  const ui = browser();
+  ui.context.WorkBuddyLogin.start();
+  await tick();
+  ui.closePopup();
+  for (let i = 0; i < 5; i++) {
+    ui.runInterval();
+    await tick();
+  }
+  assert.equal(ui.requests.some(({ options }) => options.method === 'DELETE'), false);
+  assert.match(ui.element('workbuddyLoginStatus').textContent, /授权窗口已关闭或已脱离本页/);
+  ui.setPollResult({ status: 'complete' });
+  ui.runInterval();
+  await tick();
+  assert.equal(ui.toasts.at(-1)[1], 'success');
 });
