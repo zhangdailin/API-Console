@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/config"
 	"orchids-api/internal/httpserver"
 	"orchids-api/internal/responses"
 	"strings"
@@ -511,7 +512,7 @@ func (h *Handler) serveNativeChat(ctx context.Context, w http.ResponseWriter, re
 		req.StartedAt = time.Now()
 	}
 	// Authentication replays and reasoning recovery spend this same HTTP budget.
-	ctx, _ = upstream.WithAttemptBudget(ctx, h.configSnapshot().InferencePolicy().MaxAttempts)
+	ctx, _ = upstream.WithAttemptBudget(ctx, config.GenerationMaxAttempts)
 	payload, err := h.responsesPayloadFromChat(spec, req, true)
 	if err != nil {
 		writeGrokUpstreamError(w, err)
@@ -753,7 +754,7 @@ func (h *Handler) retryWithAccountSwitchWhen(ctx context.Context, sess *chatAcco
 
 func (h *Handler) accountSwitchBudget() int {
 	if cfg := h.configSnapshot(); cfg != nil {
-		limit := min(cfg.InferencePolicy().MaxAccounts, maxAccountSwitchBudget)
+		limit := min(config.MaxAccountSwitches, maxAccountSwitchBudget)
 		if cfg.AccountSwitchCount > 0 {
 			limit = min(limit, cfg.AccountSwitchCount)
 		}

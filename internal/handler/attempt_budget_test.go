@@ -32,14 +32,14 @@ func (c *budgetFailureClient) SendRequestWithPayload(ctx context.Context, _ upst
 	return c.failure
 }
 
-func TestInteractiveProfileStopsAfterThreeDifferentAccounts(t *testing.T) {
+func TestAccountSwitchBudgetStopsAtFixedAccountCount(t *testing.T) {
 	h, s, _ := setupModelValidationHandler(t)
-	cfg := &config.Config{InferenceProfile: "interactive"}
+	cfg := &config.Config{}
 	config.ApplyHardcoded(cfg)
 	cfg.RetryDelay = 0
 	h.SetConfig(cfg)
 	ctx := context.Background()
-	for range 5 {
+	for range config.MaxAccountSwitches + 2 {
 		testutil.NoError(t, s.CreateAccount(ctx, &store.Account{AccountType: "workbuddy", WorkBuddyAccessToken: "test-token", Enabled: true, Weight: 1}))
 	}
 	testutil.NoError(t, s.CreateModel(ctx, &store.Model{Channel: "WorkBuddy", ModelID: "test-model", Name: "test-model", Status: store.ModelStatusAvailable}))
@@ -49,13 +49,13 @@ func TestInteractiveProfileStopsAfterThreeDifferentAccounts(t *testing.T) {
 	})
 	rec := httptest.NewRecorder()
 	h.HandleMessages(rec, httptest.NewRequest(http.MethodPost, "/workbuddy/v1/messages", strings.NewReader(`{"model":"test-model","messages":[{"role":"user","content":"hello"}],"stream":false}`)))
-	testutil.Equal(t, len(attempts), 3)
+	testutil.Equal(t, len(attempts), config.MaxAccountSwitches)
 	testutil.Equal(t, rec.Code, http.StatusTooManyRequests)
 	seen := map[int64]bool{}
 	for _, id := range attempts {
 		seen[id] = true
 	}
-	testutil.Equal(t, len(seen), 3)
+	testutil.Equal(t, len(seen), config.MaxAccountSwitches)
 }
 
 type budgetRetryHint struct{ wait time.Duration }

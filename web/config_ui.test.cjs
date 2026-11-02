@@ -61,7 +61,7 @@ test('save sends security and proxy settings but no local cache settings',async(
  node('cfg_anonymous_allow_ips').value='203.0.113.1';
  node('cfg_proxy_bypass').value='example.com';
  await api.saveConfiguration();
- same(saved,{admin_password:'changed',proxy_url:'http://proxy.example:8080',proxy_bypass:['example.com'],inference_profile:'standard',grok_low_latency:false});
+ same(saved,{admin_password:'changed',proxy_url:'http://proxy.example:8080',proxy_bypass:['example.com'],grok_low_latency:false});
 });
 
 test('configuration page omits simulated cache section, stats and clear actions',()=>{
@@ -128,25 +128,22 @@ test('configuration page removes anonymous and generation customization',()=>{
  assert.doesNotMatch(js,/PERFORMANCE_FIELDS|parseAnonymousAllowIPs|anonymous_allow_ips|first_token_timeout_seconds/);
 });
 
-test('request policy controls hydrate, save, track changes and reset',async()=>{
+test('grok delivery control hydrates, saves, tracks changes and resets',async()=>{
  let saved;
  const {api,node}=loadConfig(async(_url,options)=>{
   saved=JSON.parse(options.body);
   return {ok:true,json:async()=>({code:0})};
  });
  node('cfg_grok_low_latency').type='checkbox';
- api.applyConfigurationPayload({inference_profile:'interactive',grok_low_latency:true});
+ api.applyConfigurationPayload({grok_low_latency:true});
  api.captureConfigBaseline();
- assert.equal(node('cfg_inference_profile').value,'interactive');
  assert.equal(node('cfg_grok_low_latency').checked,true);
  node('cfg_grok_low_latency').checked=false;
- node('cfg_inference_profile').value='standard';
- assert.equal(api.countConfigChanges(),2);
+ assert.equal(api.countConfigChanges(),1);
  api.resetConfigChanges();
  assert.equal(node('cfg_grok_low_latency').checked,true);
- assert.equal(node('cfg_inference_profile').value,'interactive');
  await api.saveConfiguration();
- assert.equal(saved.inference_profile,'interactive');
+ assert.equal(saved.inference_profile,undefined);
  assert.equal(saved.grok_low_latency,true);
 });
 

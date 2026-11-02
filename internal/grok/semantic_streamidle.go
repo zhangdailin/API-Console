@@ -4,11 +4,9 @@ package grok
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
-	"orchids-api/internal/util"
 	"strings"
 	"sync"
 	"time"
@@ -58,10 +56,9 @@ var buildGeneratedOutputItemTypes = map[string]struct{}{
 // io.Pipe write) must not look like an upstream stall; the client write
 // deadline covers that case.
 type semanticIdleReadCloser struct {
-	generationContext context.Context
-	inner             io.ReadCloser
-	idle              time.Duration
-	timer             *time.Timer
+	inner io.ReadCloser
+	idle  time.Duration
+	timer *time.Timer
 
 	mu         sync.Mutex
 	detector   buildSSEActivityDetector
@@ -164,9 +161,6 @@ func (r *semanticIdleReadCloser) Read(buffer []byte) (int, error) {
 
 	r.mu.Lock()
 	if n > 0 && !r.finished && r.detector.Observe(buffer[:n]) {
-		if r.generationContext != nil && r.detector.generated {
-			util.MarkGenerationProgress(r.generationContext)
-		}
 		r.remaining = r.idle
 		if r.readers > 0 && !r.finished {
 			r.clockStart = time.Now()
@@ -218,7 +212,6 @@ func (r *semanticIdleReadCloser) TimedOut() bool {
 // buildSSEActivityDetector incrementally parses SSE framing without modifying
 // the bytes returned to downstream response wrappers.
 type buildSSEActivityDetector struct {
-	generated  bool
 	pending    []byte
 	scanOffset int
 	eventName  string
@@ -300,10 +293,8 @@ func (d *buildSSEActivityDetector) finishEvent() bool {
 			}
 			if _, generatedDelta := buildGeneratedDeltaEvents[kind]; generatedDelta {
 				active = payload.Delta != ""
-				d.generated = d.generated || active
 			} else if kind == "response.output_item.added" || kind == "response.output_item.done" {
 				itemType := strings.TrimSpace(payload.Item.Type)
-				d.generated = d.generated || (strings.TrimSpace(payload.Item.Name) != "" && itemType != "message" && itemType != "reasoning")
 				_, generatedItem := buildGeneratedOutputItemTypes[itemType]
 				active = generatedItem && (strings.TrimSpace(payload.Item.ID) != "" ||
 					strings.TrimSpace(payload.Item.CallID) != "" || strings.TrimSpace(payload.Item.Name) != "")

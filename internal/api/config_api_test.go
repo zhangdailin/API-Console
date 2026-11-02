@@ -229,27 +229,25 @@ func TestHandleConfigSaveRejectsRemovedSettingsWithoutChangingState(t *testing.T
 	}
 }
 
-func TestConfigInferenceProfileAndGrokModeRoundTrip(t *testing.T) {
+func TestConfigGrokModeRoundTripAndRetiredInferenceProfile(t *testing.T) {
 	a, s, _ := setupConfigAPI(t)
 	rec := httptest.NewRecorder()
-	a.HandleConfigSave(rec, httptest.NewRequest(http.MethodPost, "/api/config/save", strings.NewReader(`{"inference_profile":"interactive","grok_low_latency":true}`)))
+	a.HandleConfigSave(rec, httptest.NewRequest(http.MethodPost, "/api/config/save", strings.NewReader(`{"grok_low_latency":true}`)))
 	testutil.Equal(t, rec.Code, http.StatusOK)
 	testutil.MustContain(t, rec.Body.String(), `"code":0`)
 	cfg := a.ConfigSnapshot()
-	testutil.Equal(t, cfg.MaxRetries, 3)
-	testutil.Equal(t, cfg.AccountSwitchCount, 3)
+	testutil.Equal(t, cfg.MaxRetries, config.GenerationMaxRetries)
+	testutil.Equal(t, cfg.AccountSwitchCount, config.MaxAccountSwitches)
 	testutil.True(t, cfg.GrokLowLatency)
 	raw, err := s.GetSetting(context.Background(), "config")
 	testutil.NoError(t, err)
 	var saved config.Config
 	testutil.NoError(t, json.Unmarshal([]byte(raw), &saved))
-	testutil.Equal(t, saved.InferenceProfile, "interactive")
 	testutil.True(t, saved.GrokLowLatency)
-	config.ApplyDefaults(&saved)
-	testutil.Equal(t, saved.MaxRetries, 3)
+	testutil.MustNotContain(t, raw, "inference_profile")
 	before := a.ConfigSnapshot()
 	rec = httptest.NewRecorder()
-	a.HandleConfigSave(rec, httptest.NewRequest(http.MethodPost, "/api/config/save", strings.NewReader(`{"inference_profile":"invalid","grok_low_latency":false}`)))
+	a.HandleConfigSave(rec, httptest.NewRequest(http.MethodPost, "/api/config/save", strings.NewReader(`{"inference_profile":"interactive","grok_low_latency":false}`)))
 	testutil.Equal(t, rec.Code, http.StatusBadRequest)
 	testutil.Equal(t, a.ConfigSnapshot(), before)
 	afterRaw, err := s.GetSetting(context.Background(), "config")

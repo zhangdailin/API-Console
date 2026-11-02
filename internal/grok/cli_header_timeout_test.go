@@ -29,9 +29,9 @@ func headerTimeoutTestClient(t *testing.T, server *httptest.Server, timeout time
 	return client, account
 }
 
-func TestCLIResponseWaitUsesFixedGenerationBudget(t *testing.T) {
+func TestCLIResponseWaitUsesBuildHeaderTimeout(t *testing.T) {
 	client := NewCLIClient(&config.Config{})
-	testutil.Equal(t, client.responseHeaderTimeout, config.FirstGenerationTimeout)
+	testutil.Equal(t, client.responseHeaderTimeout, config.GrokBuildResponseHeaderTimeout)
 }
 
 func TestCLIHeaderWaitHonorsSharedDeadlineAndRecordsPartialPhases(t *testing.T) {
@@ -44,7 +44,7 @@ func TestCLIHeaderWaitHonorsSharedDeadlineAndRecordsPartialPhases(t *testing.T) 
 	}))
 	defer server.Close()
 	client, account := headerTimeoutTestClient(t, server, time.Second)
-	ctx, cancel := util.WithFirstGenerationTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	var samples []map[string]int64
 	ctx = util.WithHTTPPhaseObserver(ctx, func(v map[string]int64) { samples = append(samples, v) })

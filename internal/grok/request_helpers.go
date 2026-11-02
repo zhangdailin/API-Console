@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"orchids-api/internal/util"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -42,17 +40,9 @@ func doUpstreamHTTP(req *http.Request, do func(*http.Request) (*http.Response, e
 		}
 		if mode == upstreamIdleBuildSemantic {
 			resp.Body = wrapBuildSemanticIdle(resp.Body, idle)
-			if monitored, ok := resp.Body.(*semanticIdleReadCloser); ok {
-				monitored.generationContext = req.Context()
-			}
 		} else {
 			resp.Body = wrapByteIdle(resp.Body, idle)
 		}
-	}
-	// JSON upstreams reveal no incremental generation progress. Do not apply
-	// a streaming first-token deadline to their active response body.
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 && !strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
-		util.MarkGenerationProgress(req.Context())
 	}
 	if resp.Body != nil {
 		resp.Body = &deadlineCauseBody{ReadCloser: resp.Body, ctx: req.Context()}

@@ -48,8 +48,7 @@ type messageExecution struct {
 }
 
 func (e *messageExecution) run() {
-	policy := e.cfg.InferencePolicy()
-	maxRetries := min(max(e.cfg.MaxRetries, 0), policy.MaxAttempts-1)
+	maxRetries := min(max(e.cfg.MaxRetries, 0), config.GenerationMaxRetries)
 	retryDelay := time.Duration(e.cfg.RetryDelay) * time.Millisecond
 	retriesRemaining := maxRetries
 	budgetCtx, attemptBudget := upstream.WithAttemptBudget(e.r.Context(), maxRetries+1)
@@ -94,9 +93,6 @@ func (e *messageExecution) run() {
 		TraceID:           middleware.GetTraceID(e.r.Context()),
 	}
 	primaryHandler := func(msg upstream.SSEMessage) {
-		if msg.Type == "model.text-delta" || msg.Type == "model.reasoning-delta" || msg.Type == "model.tool-call" || msg.Type == "model.tool-call-delta" {
-			util.MarkGenerationProgress(e.r.Context())
-		}
 		e.sh.handleMessage(msg)
 	}
 	var attempt int
@@ -267,7 +263,7 @@ func (e *messageExecution) run() {
 				errClass.Category, apperrors.PublicMessage(errStr), upstreamRetryAfter(err))
 			return
 		}
-		if verdict.SwitchAccount && len(attemptedAccounts) >= policy.MaxAccounts {
+		if verdict.SwitchAccount && len(attemptedAccounts) >= config.MaxAccountSwitches {
 			e.sh.reportRequestFailure("Reporting that the account attempt budget is exhausted",
 				errClass.Category, apperrors.PublicMessage(errStr), upstreamRetryAfter(err))
 			return

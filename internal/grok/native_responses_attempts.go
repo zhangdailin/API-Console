@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/config"
 	"orchids-api/internal/httpserver"
 	"orchids-api/internal/middleware"
 	"orchids-api/internal/responses"
@@ -30,7 +31,7 @@ func nativeQualityRequest(model string, payload map[string]any) *chatwire.Reques
 // input and rejected output never establishes response ownership or replay.
 func (h *Handler) serveNativeResponses(w http.ResponseWriter, r *http.Request, sess *chatAccountSession, pinned bool, spec ModelSpec, payload map[string]any, path string, namespaces responses.ToolNamespaces) (responseID string, captured []byte, result chatOutcome) {
 	ctx := withClientTurnIndex(r.Context(), r)
-	ctx, _ = upstream.WithAttemptBudget(ctx, h.configSnapshot().InferencePolicy().MaxAttempts)
+	ctx, _ = upstream.WithAttemptBudget(ctx, config.GenerationMaxAttempts)
 	immutable, err := cloneBuildPayload(payload)
 	if err != nil {
 		writeGrokUpstreamError(w, err)

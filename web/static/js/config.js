@@ -45,7 +45,6 @@ const CONFIG_TRACKED_FIELDS = [
   "cfg_admin_pass",
   "cfg_proxy_url",
   "cfg_proxy_bypass",
-  "cfg_inference_profile",
   "cfg_grok_low_latency",
 ];
 let configBaseline = null;
@@ -222,7 +221,6 @@ function applyConfigurationPayload(cfg) {
   setConfigControlValue("cfg_admin_pass", cfg.admin_password || cfg.admin_pass || "");
   setConfigControlValue("cfg_proxy_url", cfg.proxy_url || "");
   setConfigControlValue("cfg_proxy_bypass", normalizeProxyBypass(cfg.proxy_bypass).join("\n"));
-  setConfigControlValue("cfg_inference_profile", cfg.inference_profile || "standard");
   const lowLatency = document.getElementById("cfg_grok_low_latency");
   if (lowLatency) lowLatency.checked = cfg.grok_low_latency === true;
   syncAllToggleStates();
@@ -254,7 +252,6 @@ async function saveConfiguration() {
   const data = {
     proxy_url: document.getElementById("cfg_proxy_url").value.trim(),
     proxy_bypass: parseProxyBypass(proxyBypassRaw),
-    inference_profile: document.getElementById("cfg_inference_profile")?.value || "standard",
     grok_low_latency: !!document.getElementById("cfg_grok_low_latency")?.checked,
   };
 	const password = document.getElementById("cfg_admin_pass").value;

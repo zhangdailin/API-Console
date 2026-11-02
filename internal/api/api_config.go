@@ -151,7 +151,7 @@ func (a *API) HandleConfigSave(w http.ResponseWriter, r *http.Request) {
 	current := a.config.Load()
 	newCfg, err := buildConfigFromPatch(r, current)
 	if err != nil {
-		if errors.Is(err, errRetiredCacheSetting) || errors.Is(err, errFixedRuntimeSetting) || errors.Is(err, config.ErrInvalidInferenceProfile) {
+		if errors.Is(err, errRetiredCacheSetting) || errors.Is(err, errFixedRuntimeSetting) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -227,7 +227,7 @@ func buildConfigFromPatch(r *http.Request, current *config.Config) (*config.Conf
 			return nil, fmt.Errorf("%w: %s", errRetiredCacheSetting, retired)
 		}
 	}
-	for _, fixed := range []string{"anonymous_allow_ips", "request_timeout", "concurrency_timeout", "first_token_timeout_seconds", "shared_stream_idle_timeout_seconds", "workbuddy_default_max_tokens", "shared_refusal_wait_budget_ms", "grok_build_timeout_seconds", "grok_stream_idle_seconds", "grok_build_stream_idle_seconds", "max_retries", "retry_delay", "account_switch_count", "retry_429_interval", "quality_hold_enabled", "quality_hold_max_attempts", "quality_hold_timeout_ms", "quality_hold_on_exhausted"} {
+	for _, fixed := range []string{"inference_profile", "anonymous_allow_ips", "request_timeout", "concurrency_timeout", "first_token_timeout_seconds", "shared_stream_idle_timeout_seconds", "workbuddy_default_max_tokens", "shared_refusal_wait_budget_ms", "grok_build_timeout_seconds", "grok_stream_idle_seconds", "grok_build_stream_idle_seconds", "max_retries", "retry_delay", "account_switch_count", "retry_429_interval", "quality_hold_enabled", "quality_hold_max_attempts", "quality_hold_timeout_ms", "quality_hold_on_exhausted"} {
 		if _, present := patch[fixed]; present {
 			return nil, fmt.Errorf("%w: %s is no longer configurable", errFixedRuntimeSetting, fixed)
 		}
@@ -260,9 +260,6 @@ func buildConfigFromPatch(r *http.Request, current *config.Config) (*config.Conf
 	}
 	var newCfg config.Config
 	if err := json.Unmarshal(raw, &newCfg); err != nil {
-		return nil, err
-	}
-	if err := config.ValidateInferenceProfile(&newCfg); err != nil {
 		return nil, err
 	}
 	return &newCfg, nil
@@ -367,9 +364,6 @@ func (a *API) persistConfig(ctx context.Context, current, newCfg *config.Config)
 		return fmt.Errorf("admin password must not be empty")
 	}
 	config.ApplyHardcoded(storedCfg)
-	if err := config.ValidateInferenceProfile(storedCfg); err != nil {
-		return err
-	}
 	if err := config.ValidateProxyConfig(storedCfg); err != nil {
 		return fmt.Errorf("proxy config: %w", err)
 	}

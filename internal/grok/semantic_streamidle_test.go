@@ -261,14 +261,12 @@ func (r *semanticIdleCountingReader) Close() error {
 	return nil
 }
 
-func TestFirstGenerationIgnoresEmptyOutputItemIdentity(t *testing.T) {
+func TestSemanticDetectorCountsReasoningItemAsActivity(t *testing.T) {
 	var d buildSSEActivityDetector
-	d.Observe([]byte("event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"message\",\"id\":\"msg-1\"}}\n\n"))
-	if d.generated {
-		t.Fatal("control item ID must not release first-generation deadline")
+	if !d.Observe([]byte("data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"reasoning\",\"id\":\"rs-1\"}}\n\n")) {
+		t.Fatal("a reasoning item must count as stream activity")
 	}
-	d.Observe([]byte("event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"x\"}\n\n"))
-	if !d.generated {
-		t.Fatal("text must release first-generation deadline")
+	if d.Observe([]byte("data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"message\"}}\n\n")) {
+		t.Fatal("an output item without identity must not count as activity")
 	}
 }
