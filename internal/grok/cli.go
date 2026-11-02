@@ -132,7 +132,7 @@ func (c *CLIClient) clientIdentifier() string {
 // valid access token (refreshing if needed) then POSTs the payload, returning
 // the raw upstream response (SSE or JSON) for the caller to stream or collect.
 func (c *CLIClient) doResponsesAt(ctx context.Context, acc *store.Account, path string, payload map[string]any) (*http.Response, error) {
-	return c.doResponsesWithToolValidation(ctx, acc, path, payload)
+	return c.doResponsesWithToolRepair(ctx, acc, path, payload)
 }
 
 func (c *CLIClient) doResponsesUncheckedAt(ctx context.Context, acc *store.Account, path string, payload map[string]any) (*http.Response, error) {

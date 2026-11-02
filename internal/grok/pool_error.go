@@ -114,11 +114,6 @@ func writeGrokUpstreamFailure(w http.ResponseWriter, status int, err error) {
 		writeResponsesAPIError(w, answer.status, answer.code, answer.message)
 		return
 	}
-	var invalid *toolArgumentsError
-	if errors.As(err, &invalid) {
-		writeResponsesAPIError(w, http.StatusBadGateway, "invalid_tool_arguments", "The upstream model returned tool arguments that do not match the declared schema.")
-		return
-	}
 	if profileErr, ok := errors.AsType[*buildReasoningProfileError](err); ok {
 		writeResponsesAPIErrorWithParam(w, http.StatusBadRequest, "invalid_request_error", profileErr.Error(), "reasoning.effort")
 		return

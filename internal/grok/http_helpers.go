@@ -83,11 +83,6 @@ func writeGrokUpstreamError(w http.ResponseWriter, err error) {
 		writeGrokErrorCode(w, answer.status, answer.code, answer.message)
 		return
 	}
-	var invalid *toolArgumentsError
-	if errors.As(err, &invalid) {
-		writeGrokErrorCode(w, http.StatusBadGateway, "invalid_tool_arguments", "The upstream model returned tool arguments that do not match the declared schema.")
-		return
-	}
 	if err == nil {
 		err = errors.New("upstream request failed")
 	}

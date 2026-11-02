@@ -19,7 +19,10 @@ func TestNativeResponsesNamespacesAndContinuation(t *testing.T) {
 	for _, prefix := range []string{"/grok", "/grok/v1"} {
 		for _, stream := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/stream=%t", prefix, stream), func(t *testing.T) {
-				const arguments = `{"count":1000.0,"text":"unchanged"}`
+				// A continuation carries no tool schemas, so arguments must already be
+				// in their final spelling to survive both turns unchanged.
+				const arguments = `{"count":1000,"text":"unchanged"}`
+				const upstreamArguments = arguments
 				var wireNames []string
 				var upstreamResponse map[string]any
 				posts, gets := 0, 0
@@ -90,7 +93,7 @@ func TestNativeResponsesNamespacesAndContinuation(t *testing.T) {
 					}
 					calls := []any{}
 					for i, name := range wireNames {
-						calls = append(calls, map[string]any{"type": "function_call", "id": fmt.Sprintf("fc%d", i), "call_id": fmt.Sprintf("call%d", i), "name": name, "arguments": arguments, "status": "completed"})
+						calls = append(calls, map[string]any{"type": "function_call", "id": fmt.Sprintf("fc%d", i), "call_id": fmt.Sprintf("call%d", i), "name": name, "arguments": upstreamArguments, "status": "completed"})
 					}
 					upstreamResponse = map[string]any{"id": fmt.Sprintf("resp_ns_%d", posts), "object": "response", "model": "grok-4.6", "status": "completed", "output": calls, "vendor_field": "preserved"}
 					if posts == 1 {
@@ -110,7 +113,7 @@ func TestNativeResponsesNamespacesAndContinuation(t *testing.T) {
 						item := responses.CloneStringInterfaceMap(raw.(map[string]any))
 						item["arguments"] = ""
 						emit(map[string]any{"type": "response.output_item.added", "output_index": i, "item": item})
-						for _, part := range []string{arguments[:10], arguments[10:]} {
+						for _, part := range []string{upstreamArguments[:10], upstreamArguments[10:]} {
 							emit(map[string]any{"type": "response.function_call_arguments.delta", "output_index": i, "item_id": fmt.Sprintf("fc%d", i), "delta": part})
 						}
 						emit(map[string]any{"type": "response.output_item.done", "output_index": i, "item": raw})
@@ -229,9 +232,9 @@ func TestNativeNamespaceStreamFailureDoesNotSaveOwnership(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	wrapped(rec, req)
-	// Tool-schema turns are held until validated. A truncated upstream stream
-	// now fails before committing SSE or publishing its partial response ID.
-	if rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), "upstream_error") || strings.Contains(rec.Body.String(), "resp_partial") {
+	// Tool-schema turns stream as they arrive, so a truncated upstream stream
+	// ends with response.failed; its partial response must still not be owned.
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "upstream_stream_incomplete") {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	var lookupStatus int

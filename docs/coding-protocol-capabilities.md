@@ -79,7 +79,7 @@ strict:false 和 json_object 不执行相同强制校验。答案围栏与外围
 
 Build 执行原生 x_search 时会在输出中插入已完成的内部子调用（`custom_tool_call`，名称如 `x_keyword_search`、`x_user_search`、`x_semantic_search`，call_id 以 `xs_call` 开头），原生 Responses 在 JSON 与 SSE 中移除这些条目及其输入流事件，并重排后续 `output_index`；客户端 custom 工具在发往上游前已降级为函数，因此上游的 `custom_tool_call` 不会是客户端自己的工具。Chat Completions / Messages 路径本就只转换 `function_call`，不受影响。同日实测：无工具对话本身即可命中 prompt 缓存（第二轮 6912/6959），无需注入搜索工具改走缓存路由；整数参数按整数输出（`60000`），无需修正。文本中的工具标记仅作为文本输出，不转换为可执行调用；工具结果不读取客户端本地文件。
 
-Grok Build 的 Chat、Messages 和 Responses 请求声明 function 参数 schema 时，网关暂存上游响应并检查完整参数，包括必填字段、已支持的类型和属性约束。合法输出保留原始参数字节；不补造缺失的 `prompt` 等值。参数不符合 schema 时，安全可重放的请求在原账号上携带校验反馈重新生成一次，仍受请求的物理调用总预算约束。再次失败返回 502，不下发无效调用；Chat/Responses 的错误代码为 `invalid_tool_arguments`，Messages 保留 Anthropic 的 `overloaded_error` 类型及 `upstream_unavailable` 代码。声明托管工具、MCP 服务、`store:true`、后台任务或 `previous_response_id` 的请求不做这次重新生成。函数请求的流式内容会在校验后发送，因此首段输出延后；真实生成时序仍用于质量判断。暂存超过 1 MiB 时转入临时文件，响应上限为 64 MiB，完成、失败和取消均清理临时文件。
+Grok Build 的 Chat、Messages 和 Responses 请求声明 function 参数 schema 时，正文、推理等事件到达即下发，网关只暂存各函数调用的参数增量，待该调用完成（`function_call_arguments.done`、`output_item.done`、终止事件或流结束）后一次性下发修复后的完整参数。修复仅两项：删除 schema 以 `additionalProperties: false` 明确禁止的属性（例如 Claude Code `WebSearch` 不接受的 `num_results`），以及把 schema 要求整数的 `1000.0`、`1e3` 写成 `1000`；含 `allOf`/`anyOf`/`oneOf`/`patternProperties` 的对象不删属性，超出精确整数范围的数字不改写。已合法的参数保留原始字节，不补造缺失的值。修复后仍不符合 schema 的参数按上游原样下发并记录警告，由执行工具的客户端把错误反馈给模型，网关不再为此重新生成或返回 502。单个调用参数超过 1 MiB 或同一响应累计超过 4 MiB 时，该调用改为原样透传。续接请求（`previous_response_id`）不携带工具 schema，参数原样透传。非流式 JSON 响应对 `output` 中的函数调用做同样修复。
 
 公共模型目录只发布模型管理中实际启用且通过可见性检查的记录，不再凭推理档位生成额外模型 ID；档位通过能力元数据提供。CC Switch 使用选定 Key 的渠道公共目录，因此仍会受 Key 模型权限和停用状态限制。Build 首轮与 previous_response_id 续轮均按实际账号目录应用推理能力，不支持的档位返回 reasoning.effort 参数错误。
 
