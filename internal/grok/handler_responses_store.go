@@ -58,6 +58,9 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", namespaceErr.Error())
 		return
 	}
+	if upstreamPath == "/responses" {
+		applyDefaultBuildSearch(payload)
+	}
 	if err := normalizeBuildResponsesPayload(payload); err != nil {
 		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return

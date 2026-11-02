@@ -161,3 +161,46 @@ func TestChatRequestFromResponses_DeduplicatesHostedTools(t *testing.T) {
 	}
 	testutil.Equal(t, searches, 1)
 }
+
+// Hosted web and X search are on by default for generation turns: chat
+// clients rarely send web_search_options, and without a search tool Grok
+// invented "real-time search results" for questions about today.
+func TestDefaultBuildSearchTools(t *testing.T) {
+	kinds := func(payload map[string]any) []string {
+		var out []string
+		for _, tool := range responses.InterfaceMaps(payload["tools"]) {
+			out = append(out, chatwire.ParseLooseStringAny(tool["type"]))
+		}
+		return out
+	}
+	fn := map[string]any{"type": "function", "name": "read", "parameters": map[string]any{"type": "object"}}
+	for _, tc := range []struct {
+		name    string
+		payload map[string]any
+		want    []string
+	}{
+		{"plain chat gets both", map[string]any{}, []string{"web_search", "x_search"}},
+		{"client functions with auto", map[string]any{"tools": []any{fn}, "tool_choice": "auto"}, []string{"function", "web_search", "x_search"}},
+		{"client functions without choice", map[string]any{"tools": []any{fn}}, []string{"function", "web_search", "x_search"}},
+		{"tool_choice none is respected", map[string]any{"tools": []any{fn}, "tool_choice": "none"}, []string{"function"}},
+		{"tool_choice required is respected", map[string]any{"tools": []any{fn}, "tool_choice": "required"}, []string{"function"}},
+		{"named tool choice is respected", map[string]any{"tools": []any{fn}, "tool_choice": map[string]any{"type": "function", "name": "read"}}, []string{"function"}},
+		{"explicit x_search keeps its scope", map[string]any{"tools": []any{map[string]any{"type": "x_search"}}}, []string{"x_search"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			applyDefaultBuildSearch(tc.payload)
+			testutil.Equal(t, strings.Join(kinds(tc.payload), ","), strings.Join(tc.want, ","))
+		})
+	}
+}
+
+func TestChatPayloadEnablesDefaultSearch(t *testing.T) {
+	h := &Handler{}
+	payload, err := h.responsesPayloadFromChat(ModelSpec{ID: "grok-4.7"}, &chatwire.Request{Model: "grok-4.7", Messages: []chatwire.Message{{Role: "user", Content: "今天特朗普有什么言论"}}}, true)
+	testutil.NoError(t, err)
+	declared := map[string]bool{}
+	for _, tool := range responses.InterfaceMaps(payload["tools"]) {
+		declared[chatwire.ParseLooseStringAny(tool["type"])] = true
+	}
+	testutil.True(t, declared["web_search"] && declared["x_search"], "plain chat must carry hosted web and X search")
+}

@@ -111,6 +111,38 @@ func normalizeBuildResponsesPayload(payload map[string]any) error {
 	return responses.ValidateToolsAndHistory(payload)
 }
 
+// withDefaultBuildSearchTools keeps Grok's hosted web and X search on by
+// default. Most chat clients never send web_search_options, and without a
+// hosted search tool Grok answers "today" questions by inventing "real-time
+// search results". The model still decides per turn whether to search.
+//
+// A caller that already declared a hosted search tool chose its own search
+// scope (only x_search must not grow into web search), and an explicit
+// tool_choice other than "auto" ("none", "required", a named tool, an
+// allowed_tools list) would change meaning if tools were added. Both are left
+// as the caller sent them.
+//
+// It applies to generation turns only; compaction is relayed untouched.
+func applyDefaultBuildSearch(payload map[string]any) {
+	tools := responses.InterfaceMaps(payload["tools"])
+	if next := withDefaultBuildSearchTools(tools, payload["tool_choice"]); len(next) != len(tools) {
+		payload["tools"] = next
+	}
+}
+
+func withDefaultBuildSearchTools(tools []map[string]any, choice any) []map[string]any {
+	if hasNativeSearchTool(tools) {
+		return tools
+	}
+	if choice != nil {
+		value, ok := choice.(string)
+		if !ok || !strings.EqualFold(strings.TrimSpace(value), "auto") {
+			return tools
+		}
+	}
+	return append(tools, map[string]any{"type": "web_search"}, map[string]any{"type": "x_search"})
+}
+
 // Chat Completions has no native reasoning object. Accept the relay's
 // reasoning_effort / reasoning_summary extensions and rebuild the Responses
 // shape from them. A control the caller omitted stays omitted rather than being
