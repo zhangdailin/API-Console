@@ -73,7 +73,7 @@ func TestRegisterRoutes_GrokConversationSurfacesAreRetired(t *testing.T) {
 	// or callers in the bundled console. The modern list/save, journal and alert
 	// rules endpoints remain registered and are tested elsewhere.
 	for _, path := range []string{
-		"/api/grok/availability", "/api/models/groups", "/api/config/cache/clear",
+		"/api/models/groups", "/api/config/cache/clear",
 		"/api/audit", "/api/ops/channels", "/api/ops/alerts",
 		"/api/journal/operations", "/api/journal/system",
 		"/admin/config", "/admin/cache", "/admin/token",
@@ -91,6 +91,18 @@ func TestRegisterRoutes_GrokConversationSurfacesAreRetired(t *testing.T) {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 		testutil.CheckEqual(t, rec.Code, http.StatusNotFound)
+	}
+
+	// The restored Grok Web management surface sits behind the admin session.
+	for _, path := range []string{"/api/grok/availability", "/api/grok/tools/v1/models", "/api/grok/admin/imagine/config"} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		testutil.CheckEqual(t, rec.Code, http.StatusUnauthorized)
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("X-Admin-Token", cfg.AdminToken)
+		rec = httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		testutil.CheckEqual(t, rec.Code, http.StatusOK)
 	}
 
 	rec = httptest.NewRecorder()

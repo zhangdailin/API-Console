@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"orchids-api/internal/accountpolicy"
+	"orchids-api/internal/grok/web"
 	"orchids-api/internal/modelcatalog"
 	"orchids-api/internal/store"
 )
@@ -17,7 +18,7 @@ const ProviderBuild = "build"
 const modelSnapshotTTL = 6 * time.Hour
 
 func NormalizeProvider(acc *store.Account) bool {
-	if !accountpolicy.IsGrokAccount(acc) {
+	if !accountpolicy.IsGrokAccount(acc) || web.IsWebAccount(acc) {
 		return false
 	}
 	if strings.EqualFold(strings.TrimSpace(acc.GrokProvider), ProviderBuild) {

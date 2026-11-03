@@ -9,6 +9,7 @@ import (
 	"orchids-api/internal/accountpolicy"
 	"orchids-api/internal/channel"
 	"orchids-api/internal/config"
+	"orchids-api/internal/grok/web"
 	"orchids-api/internal/modelcatalog"
 	"orchids-api/internal/provider"
 	"orchids-api/internal/store"
@@ -116,6 +117,10 @@ func lastKnownCatalog(acc *store.Account) []provider.Model {
 // refresh cycles and writing the same warning every interval until an operator
 // logs in again (which restores the active state).
 func maintain(ctx context.Context, env provider.Env, acc *store.Account) {
+	if web.IsWebAccount(acc) {
+		web.Maintain(ctx, env.Config, env.Store, acc)
+		return
+	}
 	if acc == nil || !strings.EqualFold(strings.TrimSpace(acc.CredentialType), "oauth") {
 		return
 	}

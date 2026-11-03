@@ -11,6 +11,7 @@ import (
 
 	"orchids-api/internal/accountpolicy"
 	"orchids-api/internal/config"
+	"orchids-api/internal/grok/web"
 	"orchids-api/internal/modelcatalog"
 	"orchids-api/internal/provider"
 	"orchids-api/internal/store"
@@ -28,6 +29,9 @@ func adminPort() *provider.Admin {
 			if acc == nil {
 				return ""
 			}
+			if web.IsWebAccount(acc) {
+				return web.CredentialKey(acc)
+			}
 			token := strings.TrimSpace(util.FirstNonEmpty(acc.OAuthRefreshToken, acc.OAuthAccessToken))
 			if token == "" {
 				return ""
@@ -35,6 +39,9 @@ func adminPort() *provider.Admin {
 			return "grok:" + token
 		},
 		IdentityKey: func(acc *store.Account) string {
+			if web.IsWebAccount(acc) {
+				return web.IdentityKey(acc)
+			}
 			if !accountIsOAuth(acc) {
 				return ""
 			}
@@ -50,15 +57,21 @@ func adminPort() *provider.Admin {
 			if acc == nil {
 				return ""
 			}
+			if web.IsWebAccount(acc) {
+				return web.Fingerprint(acc)
+			}
 			if accountIsOAuth(acc) {
 				return util.Fingerprint(util.FirstNonEmpty(acc.OAuthAccessToken, acc.OAuthRefreshToken))
 			}
 			return util.Fingerprint(util.FirstNonEmpty(acc.ClientCookie, acc.RefreshToken, acc.Token))
 		},
 		PrepareCreate: func(acc *store.Account) error {
+			if web.LooksLikeWebAccount(acc) {
+				return web.PrepareAccount(acc)
+			}
 			normalizeTokenInput(acc)
 			if !accountIsOAuth(acc) {
-				return errors.New("Grok accounts must be added through the Build OAuth device login (/api/grok/device-auth)")
+				return errors.New("Grok Build accounts must be added through the Build OAuth device login (/api/grok/device-auth); Grok Web accounts need an SSO cookie")
 			}
 			if !accountHasOAuthCredentials(acc) {
 				return ErrMissingOAuthToken
@@ -66,6 +79,10 @@ func adminPort() *provider.Admin {
 			return nil
 		},
 		PrepareUpdate: func(acc, existing *store.Account) error {
+			if web.IsWebAccount(existing) {
+				acc.AccountType = existing.AccountType
+				return web.PrepareUpdate(acc, existing)
+			}
 			normalizeTokenInput(acc)
 			// Admin UI redacts OAuth secrets on read; empty inbound fields mean
 			// "keep existing", not "clear credentials".
@@ -77,16 +94,51 @@ func adminPort() *provider.Admin {
 			return nil
 		},
 		PrepareImport: func(acc *store.Account) string {
+			if web.LooksLikeWebAccount(acc) {
+				if err := web.PrepareAccount(acc); err != nil {
+					return "missing_sso_token"
+				}
+				return ""
+			}
 			normalizeTokenInput(acc)
 			if strings.TrimSpace(acc.OAuthRefreshToken) == "" {
 				return "missing_refresh_token"
 			}
 			return ""
 		},
-		Project:             projectOutput,
-		ProjectQuota:        projectQuota,
+		Project: func(out *store.Account) {
+			if web.IsWebAccount(out) {
+				web.ProjectOutput(out)
+				return
+			}
+			projectOutput(out)
+		},
+		ProjectQuota: func(fields map[string]any, acc *store.Account, limit, current float64, observedTokens int64, usageObserved bool) {
+			if web.IsWebAccount(acc) {
+				web.ProjectQuota(fields, acc)
+				return
+			}
+			projectQuota(fields, acc, limit, current, observedTokens, usageObserved)
+		},
 		ObservedUsageWindow: FreeBuildUsageWindow,
 		Verify: func(ctx context.Context, env provider.Env, acc *store.Account) (string, int, error) {
+			if web.IsWebAccount(acc) {
+				status, err := web.VerifyAccount(ctx, env.Config, acc)
+				if err == nil {
+					if env.Store != nil {
+						defer func() {
+							if publishErr := web.PublishRoutes(context.WithoutCancel(ctx), env.Store); publishErr != nil {
+								slog.Warn("grok web route publication failed", "error", publishErr)
+							}
+						}()
+					}
+					return "", 0, nil
+				}
+				if status != "" {
+					return status, 0, err
+				}
+				return "", http.StatusBadGateway, err
+			}
 			err := verifyAccount(ctx, acc, env.Config, env.Store)
 			if err == nil {
 				return "", 0, nil

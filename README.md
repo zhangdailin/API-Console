@@ -41,9 +41,9 @@ Applications can use Claude Messages, OpenAI Chat Completions, or Responses endp
 |---------|---------------|------------|
 | WorkBuddy | Official browser authorization | `/workbuddy/v1` |
 | Cline | WorkOS device authorization | `/cline/v1` |
-| Grok | Build OAuth device authorization | `/grok/v1` |
+| Grok | Build OAuth device authorization, or Web SSO cookie import | `/grok/v1` |
 
-Grok uses the **Build OAuth CLI upstream**. Available models and capabilities depend on the authorized accounts and their upstream entitlements. Catalog refresh failures preserve previously observed models rather than substituting a built-in model list.
+Grok serves two planes on one prefix: the **Build OAuth CLI upstream**, and **Grok Web** (grok.com SSO cookies) for `grok-chat-*`, Imagine images and videos, with a Grok tools page in the console. Available models and capabilities depend on the authorized accounts and their upstream entitlements. Catalog refresh failures preserve previously observed models rather than substituting a built-in model list.
 
 ## Tech Stack
 

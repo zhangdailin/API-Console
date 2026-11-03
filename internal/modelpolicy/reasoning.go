@@ -28,6 +28,9 @@ func GrokModelProfiles(model *store.Model, accounts []*store.Account) []modelcat
 	if model == nil {
 		return nil
 	}
+	if strings.EqualFold(strings.TrimSpace(model.Provider), store.GrokProviderWeb) {
+		return grokWebModelProfiles(model, accounts)
+	}
 	id := strings.TrimSpace(model.UpstreamModel)
 	if id == "" {
 		id = ExternalPublicID(model.ModelID)
@@ -45,4 +48,17 @@ func GrokModelProfiles(model *store.Model, accounts []*store.Account) []modelcat
 		}
 	}
 	return modelcatalog.Aggregate(catalogs...)
+}
+
+// grokWebModelProfiles answers entitlement for a Grok Web route. grok.com has
+// no per-account model catalog: the row was published from an active Web
+// account's quota read, and it stays servable while such an account exists.
+func grokWebModelProfiles(model *store.Model, accounts []*store.Account) []modelcatalog.Profile {
+	for _, acc := range accounts {
+		if acc == nil || !acc.Enabled || !acc.IsGrokWeb() || !store.AccountAuthActive(acc) || strings.TrimSpace(acc.StatusCode) == "401" || !model.AllowsAccount(acc.ID) {
+			continue
+		}
+		return []modelcatalog.Profile{{ModelID: model.ModelID, Name: model.Name}}
+	}
+	return nil
 }

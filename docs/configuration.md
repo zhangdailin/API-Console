@@ -85,7 +85,7 @@ Key 和账号并发限制与入口容量叠加。上游 HTTP、响应头、流�
 |---|---|
 | WorkBuddy | 令牌、目录、信用额度 |
 | Cline | OAuth、套餐与免费 / ClinePass 推荐目录，不提供统一数值余额 |
-| Grok | OAuth、Build 身份、账单与目录观察 |
+| Grok | Build：OAuth、Build 身份、账单与目录观察；Web SSO：grok.com 身份与 auto / fast 额度窗口（每 30 分钟，失败后至少间隔 10 分钟重试） |
 
 观察读取失败保留旧快照，不能补造余额或把认证成功等同于额度恢复。WorkBuddy 无时区额度时间按 UTC 解释，仅作参考。
 
@@ -112,7 +112,24 @@ Grok 默认 base 为 `https://cli-chat-proxy.grok.com/v1`，CLI 版本当前默�
 | `grok_low_latency` | 默认 `false`；设为 `true` 跳过 Build 输出质量缓存和质量重试，直接交付上游内容；保留错误处理、用量统计和质量审计，代价是不再拦截疑似降质输出 |
 | `grok_build_rps` | 非正 / 非有限关闭节奏；正值夹取 0.01–1000，按账号 / 团队范围执行 |
 | `grok_egress_enabled` | 默认未启用，开启后没有健康节点则失败，不静默直连 |
-| `grok_egress_nodes` | name、url、weight、scope、proxied；URL 支持 http / socks5 / socks5h，scope 用 cli / all |
+| `grok_egress_nodes` | name、url、weight、scope、proxied；URL 支持 http / socks5 / socks5h，scope 用 cli（仅 Build）/ all（Build 与 Web） |
+
+### 8.1 Grok Web（grok.com SSO）
+
+Grok 渠道同时承载 Build（OAuth CLI）与 Web（grok.com 网页 SSO Cookie）两个平面，二者共享 `/grok/v1` 前缀，按模型 ID 分派。Web 账号在后台「账号管理 → 添加 Grok SSO」批量导入（粘贴、TXT、JSON / JSONL，含 grok2api 导出的 `ssoBasic` / `ssoSuper` 分组），Cookie 只写不读。
+
+| 字段 | 生效方式 |
+|---|---|
+| `grok_web_base_url` | 默认 `https://grok.com`，仅用于测试桩或自建反代 |
+| `grok_web_user_agent` | 浏览器 UA，TLS 指纹随 UA 的 Chrome 主版本选择 |
+| `grok_cf_clearance`、`grok_cf_bm` | 手动维护的 Cloudflare Cookie；出现 “Just a moment” 验证时需要 |
+| `grok_clearance_mode`、`grok_flaresolverr_url`、`grok_clearance_refresh_interval` | `manual`（默认）或 `flaresolverr`；后者通过 FlareSolverr 定期刷新 clearance（秒，默认 600），需同时启用 `grok_egress_enabled` 并配置 scope 为 `all` 的出口节点 |
+| `grok_statsig_signer_url`、`grok_statsig_id` | `x-statsig-id` 签名：未设置用默认签名器，显式空串关闭，`grok_statsig_id` 为手动值 |
+| `grok_temporary`、`grok_disable_memory`、`grok_custom_instruction` | 网页会话选项：默认临时会话，记忆开关与自定义指令 |
+| `grok_web_rps`、`grok_web_timeout_seconds`、`grok_web_stream_idle_seconds` | 每账号节奏、单请求期限（默认推理期限）、流空闲（默认 90 秒，30–600） |
+| `grok_image_nsfw`、`grok_image_final_min_bytes`、`grok_image_medium_min_bytes` | Imagine 工具页的 NSFW 与图片质量阈值 |
+
+Web 模型路由表（`grok-chat-fast/auto/expert/heavy`、`grok-imagine-image(-lite/-2.0/-edit)`、`grok-imagine-video`）只在存在启用、认证有效且 24 小时内成功读取过对应模式额度窗口的 Web 账号时发布；`grok-chat-heavy` 还要求 Heavy 账号。没有这样的账号时 Web 行被清理，不发布内置列表。Web 模型支持 `/chat/completions`、`/responses`（经 Chat 桥接）、`/images/*`、`/videos`、`/media/inputs`，不支持 `/messages`。
 
 Grok 返回上游提供的思考内容：Chat 使用 `reasoning_content`，Messages 使用 `thinking` 内容块，原生 Responses 保留 reasoning 事件与输出项。思考与正文分别传输；思考项身份、`encrypted_content` 和 `reasoning_tokens` 保留，用于续接与计费。
 

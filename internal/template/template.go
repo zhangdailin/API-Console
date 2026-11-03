@@ -97,6 +97,8 @@ func (r *Renderer) RenderIndex(w http.ResponseWriter, req *http.Request, cfg *co
 		templateName = "page-config"
 	case "accounts":
 		templateName = "page-accounts"
+	case "grok-tools":
+		templateName = "page-grok-tools"
 	default:
 		templateName = "page-accounts"
 	}

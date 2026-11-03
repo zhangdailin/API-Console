@@ -139,7 +139,7 @@ func TestAccountImportRejectsInvalidFilesAndReportsInvalidRows(t *testing.T) {
 			t.Fatalf("invalid file accepted: %d", w.Code)
 		}
 	}
-	body := []byte(`{"version":1,"accounts":[{"account_type":"workbuddy"},{"account_type":"retired","refresh_token":"refresh"},{"account_type":"cline"},{"account_type":"grok","token":"retired-cookie"},{"account_type":"warp"}]}`)
+	body := []byte(`{"version":1,"accounts":[{"account_type":"workbuddy"},{"account_type":"retired","refresh_token":"refresh"},{"account_type":"cline"},{"account_type":"grok","credential_type":"oauth"},{"account_type":"warp"}]}`)
 	result := importBackup(t, a, body)
 	if result.Invalid != 5 || result.Imported != 0 || len(result.Issues) != 5 {
 		t.Fatalf("invalid credentials accepted: %+v", result)

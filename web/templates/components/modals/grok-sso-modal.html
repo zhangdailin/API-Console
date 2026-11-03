@@ -1,0 +1,72 @@
+<!-- Grok Web SSO import -->
+<div class="modal" id="grokSSOModal" role="dialog" aria-modal="true" aria-labelledby="grokSSOTitle">
+  <div class="modal-content modal-content-lg grok-sso-modal">
+    <div class="modal-header">
+      <div>
+        <h3 class="modal-title" id="grokSSOTitle">添加 Grok SSO 账号</h3>
+        <p class="grok-sso-sub">grok.com 网页登录后的 <code>sso</code> Cookie。支持批量粘贴、TXT / JSON 文件导入。</p>
+      </div>
+      <button class="modal-close" type="button" data-sso-close aria-label="关闭 SSO 导入窗口">&times;</button>
+    </div>
+    <div class="modal-body grok-sso-body">
+      <div class="grok-sso-source" role="tablist" aria-label="导入方式">
+        <button class="grok-sso-source-tab active" type="button" role="tab" aria-selected="true" data-sso-source="paste">粘贴 Token</button>
+        <button class="grok-sso-source-tab" type="button" role="tab" aria-selected="false" data-sso-source="file">文件导入</button>
+      </div>
+
+      <div class="grok-sso-pane" data-sso-pane="paste">
+        <label class="form-label" for="grokSSOText">SSO Token</label>
+        <textarea class="form-input grok-sso-textarea" id="grokSSOText" rows="9" autocomplete="off" spellcheck="false"
+          placeholder="每行一个 sso Token，也可以直接粘贴整段 Cookie：&#10;eyJhbGciOiJIUzI1NiJ9...&#10;sso=eyJhbGciOi...; sso-rw=eyJhbGciOi..."></textarea>
+      </div>
+
+      <div class="grok-sso-pane" data-sso-pane="file" hidden>
+        <label class="grok-sso-drop" id="grokSSODrop" for="grokSSOFile">
+          <span class="grok-sso-drop-mark" aria-hidden="true">TXT</span>
+          <span class="grok-sso-drop-title">选择或拖入文件</span>
+          <span class="grok-sso-drop-hint">支持 .txt（每行一个）、.json / .jsonl（字符串数组、{"token": ...} 对象，或 grok2api 导出的 ssoBasic / ssoSuper 分组）</span>
+          <span class="grok-sso-drop-file" id="grokSSOFileName"></span>
+        </label>
+        <input id="grokSSOFile" type="file" accept=".txt,.json,.jsonl,text/plain,application/json" hidden>
+      </div>
+
+      <div class="grok-sso-detected" id="grokSSODetected" role="status" aria-live="polite">尚未识别到 Token</div>
+
+      <div class="grok-sso-options">
+        <label class="grok-sso-option">
+          <span class="form-label">账号池</span>
+          <select class="form-input" id="grokSSOPool">
+            <option value="auto" selected>自动识别（按额度判定）</option>
+            <option value="basic">Basic</option>
+            <option value="super">Super</option>
+            <option value="heavy">Heavy</option>
+          </select>
+        </label>
+        <label class="grok-sso-option">
+          <span class="form-label">名称前缀</span>
+          <input class="form-input" id="grokSSOPrefix" type="text" maxlength="40" placeholder="可选，例如 team-a">
+        </label>
+        <label class="grok-sso-option">
+          <span class="form-label">调度权重</span>
+          <input class="form-input" id="grokSSOWeight" type="number" min="1" max="100" value="1">
+        </label>
+      </div>
+      <div class="grok-sso-switches">
+        <label class="grok-sso-switch">
+          <label class="toggle"><input type="checkbox" id="grokSSORefresh" checked><span class="toggle-slider"></span></label>
+          <span>导入后立即同步额度与身份</span>
+        </label>
+        <label class="grok-sso-switch">
+          <label class="toggle"><input type="checkbox" id="grokSSONSFW"><span class="toggle-slider"></span></label>
+          <span>导入后开启 NSFW（接受条款、设置生日）</span>
+        </label>
+      </div>
+
+      <div class="grok-sso-result" id="grokSSOResult" hidden></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" type="button" data-sso-close>关闭</button>
+      <button class="btn btn-primary" type="button" id="grokSSOSubmit" disabled>导入</button>
+    </div>
+  </div>
+</div>

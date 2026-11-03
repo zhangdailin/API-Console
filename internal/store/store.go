@@ -117,8 +117,15 @@ type Account struct {
 	OAuthRefreshToken string    `json:"oauth_refresh_token,omitempty"`
 	OAuthExpiresAt    time.Time `json:"oauth_expires_at"`
 	TeamID            string    `json:"team_id,omitempty"`
-	// GrokProvider identifies the supported xAI product boundary: Build OAuth.
+	// GrokProvider identifies the xAI product boundary: "build" (OAuth CLI) or
+	// "web" (grok.com SSO cookie, held in ClientCookie).
 	GrokProvider string `json:"grok_provider,omitempty"`
+	// NSFWEnabled records that the Web SSO account has had the grok.com NSFW
+	// (unhinged/spicy) preference switched on by the account tools.
+	NSFWEnabled bool `json:"nsfw_enabled,omitempty"`
+	// GrokWebQuota stores the Web SSO quota windows returned by the upstream
+	// rate-limits endpoint.
+	GrokWebQuota GrokWebQuotaSnapshot `json:"grok_web_quota,omitempty"`
 	// GrokModels is the last successful account-specific upstream /v1/models
 	// capability snapshot. An empty snapshot means not synced yet, not that the
 	// account supports every model.
@@ -239,6 +246,7 @@ type Store struct {
 	models     modelStore
 	responses  responseStore
 	reasoning  reasoningReplayStore
+	webMedia   *redisStore
 	keyTouchMu sync.Mutex
 	keyTouches map[int64]time.Time
 }
@@ -340,6 +348,7 @@ func New(opts Options) (*Store, error) {
 	store.models = redisStore
 	store.responses = redisStore
 	store.reasoning = redisStore
+	store.webMedia = redisStore
 	if err := redisStore.validateAccountCredentials(context.Background()); err != nil {
 		_ = redisStore.Close()
 		return nil, fmt.Errorf("failed to validate account credentials: %w", err)
@@ -386,12 +395,50 @@ func applyGrokRouteDefaults(model *Model) {
 	if model == nil {
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(model.Provider), GrokProviderWeb) {
+		applyGrokWebRouteDefaults(model)
+		return
+	}
 	id := strings.ToLower(strings.TrimSpace(model.ModelID))
 	model.Origin = "catalog"
 	model.Provider = "build"
 	model.UpstreamModel = strings.TrimPrefix(id, "build/")
 	model.Capabilities = []string{CapabilityChat, CapabilityMessages, CapabilityResponses}
 }
+
+// GrokProviderWeb is the Grok Web (grok.com SSO) route plane.
+const GrokProviderWeb = "web"
+
+// applyGrokWebRouteDefaults derives the capabilities of a Grok Web route from
+// its identifier: media routes expose their media capability plus chat (the
+// Web plane serves media through chat completions too), voice routes expose
+// realtime/TTS, and every other route is a conversation.
+func applyGrokWebRouteDefaults(model *Model) {
+	id := strings.ToLower(strings.TrimSpace(model.ModelID))
+	model.Provider = GrokProviderWeb
+	if strings.TrimSpace(model.Origin) == "" || strings.EqualFold(model.Origin, "manual") {
+		model.Origin = "catalog"
+	}
+	if strings.TrimSpace(model.UpstreamModel) == "" {
+		model.UpstreamModel = id
+	}
+	switch {
+	case strings.Contains(id, "voice"):
+		model.Capabilities = []string{CapabilityRealtime, CapabilityTTS}
+	case strings.Contains(id, "video"):
+		model.Capabilities = []string{CapabilityVideo, CapabilityChat}
+	case strings.Contains(id, "image-edit"):
+		model.Capabilities = []string{CapabilityImageEdit, CapabilityChat}
+	case strings.Contains(id, "image"):
+		model.Capabilities = []string{CapabilityImage, CapabilityImageEdit, CapabilityChat}
+	default:
+		model.Capabilities = []string{CapabilityChat, CapabilityMessages, CapabilityResponses}
+	}
+	model.NormalizeRoute()
+}
+
+// ApplyGrokWebRouteDefaults initializes route metadata for a Grok Web row.
+func ApplyGrokWebRouteDefaults(model *Model) { applyGrokWebRouteDefaults(model) }
 
 // ApplyGrokRouteDefaults initializes route metadata for catalog/discovery
 // records while allowing callers to override Origin afterwards.
@@ -553,6 +600,14 @@ func (s *Store) SetSetting(ctx context.Context, key, value string) error {
 //
 // Callers that redact free text should replace each returned value, quoted or not:
 // upstream errors echo credentials back in both forms.
+// IsGrokWeb reports whether the account is a Grok Web (grok.com SSO) account.
+func (a *Account) IsGrokWeb() bool {
+	if a == nil || !strings.EqualFold(strings.TrimSpace(a.AccountType), "grok") || strings.EqualFold(strings.TrimSpace(a.CredentialType), "oauth") {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(a.GrokProvider), GrokProviderWeb) || strings.EqualFold(strings.TrimSpace(a.CredentialType), "sso")
+}
+
 func (a *Account) Secrets() []string {
 	if a == nil {
 		return nil

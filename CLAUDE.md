@@ -61,6 +61,8 @@ internal/httpserver   shared HTTP/SSE reading and writing, error envelopes
 internal/httpclient   HTTP transport: proxies, client pool, browser fingerprint
 internal/handler  shared pipeline for WorkBuddy / Cline
 internal/grok     Grok Build native Messages / Chat Completions / Responses
+internal/grok/web Grok Web (grok.com SSO cookie): AppChat chat, Imagine images,
+                  videos, media inputs/cache, SSO account import and tools page APIs
 internal/channel  provider identity, prefixes, metadata (single source of truth)
 internal/provider     channel port: the Spec contract and registry (imports no channel)
 internal/provider/all the one list of channel imports; link it to register all three
@@ -80,6 +82,14 @@ Inference routes require a provider path: **`/{channel}/*`** and
 Prefixes come from `internal/channel` (WorkBuddy, Cline and Grok).
 Root and unified `/v1` inference endpoints are unregistered and return 404.
 The root admin redirect, management APIs and health/metrics routes remain.
+
+The grok channel serves two planes behind one prefix: Build (OAuth CLI) and
+Web (grok.com SSO cookies, `internal/grok/web`). Requests are dispatched on the
+model identifier (`web.IsWebModelID`); Web models answer `/chat/completions`
+and `/responses` (via the chat→Responses bridge), images, videos and media
+inputs, but not `/messages`. Web accounts carry `grok_provider=web`,
+`credential_type=sso` and the cookie in `client_cookie`; every Build path must
+keep excluding them.
 
 Only Grok speaks Responses natively. The other three channels expose only
 `/v1/chat/completions`, so their Responses support goes through
@@ -129,7 +139,17 @@ These are load-bearing. A change that "simplifies" any of them is a bug.
    an upstream catalog read for a currently active account. When a channel has no
    active account, or the read fails, **publish nothing** — never a cached,
    compiled-in or locally defaulted list (`internal/modelrefresh`, `noActiveAccountsError`).
-5. **Production deployment posture:** strong admin password, `debug_enabled`
+   One scoped exception: grok.com has no model catalog, so Grok Web rows come
+   from the `web.SupportedModels` route table, but a row is published only when
+   an enabled, auth-active Web account's quota read (`/rest/rate-limits`)
+   returned the window of that route's mode within the last 24 hours
+   (`web.PublishRoutes`, reconciled with `ProviderScope: "web"`). No such
+   account → the Web plane publishes nothing and its rows are pruned.
+5. **The Grok tools page is a session-authenticated projection.**
+   `/api/grok/tools/v1/*` and `/api/grok/admin/*` run the grok channel's
+   handlers behind the admin session (not an API key) with a fixed
+   `admin-tools` ownership scope. Do not register them without `sessionAuth`.
+6. **Production deployment posture:** strong admin password, `debug_enabled`
    off, `/metrics` and the backend port not publicly reachable, and
    `trusted_proxies` containing only real proxy addresses. `settings:config` in
    Redis (with the configured `redis_prefix`) overrides file config.

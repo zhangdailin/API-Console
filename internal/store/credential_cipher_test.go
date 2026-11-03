@@ -72,7 +72,7 @@ func TestRetiredAccountFieldsAreDroppedOnRewrite(t *testing.T) {
 	testutil.NoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })
 	ctx := context.Background()
-	mini.Set("retired-fields:accounts:id:1", `{"id":1,"name":"legacy","account_type":"workbuddy","enabled":true,"nsfw_enabled":true,"device_id":"old-device","request_id":"old-request","project_id":"old-project","upstream_mode":"old-mode","workbuddy_refresh_token":"live-refresh"}`)
+	mini.Set("retired-fields:accounts:id:1", `{"id":1,"name":"legacy","account_type":"workbuddy","enabled":true,"device_id":"old-device","request_id":"old-request","project_id":"old-project","upstream_mode":"old-mode","workbuddy_refresh_token":"live-refresh"}`)
 	mini.SAdd("retired-fields:accounts:ids", "1")
 	acc, err := s.GetAccount(ctx, 1)
 	testutil.Equal(t, err, nil)
@@ -81,7 +81,7 @@ func TestRetiredAccountFieldsAreDroppedOnRewrite(t *testing.T) {
 	testutil.NoError(t, s.UpdateAccount(ctx, acc))
 	raw, err := mini.Get("retired-fields:accounts:id:1")
 	testutil.NoError(t, err)
-	for _, field := range []string{"nsfw_enabled", "device_id", "request_id", "project_id", "upstream_mode"} {
+	for _, field := range []string{"device_id", "request_id", "project_id", "upstream_mode"} {
 		testutil.CheckNotContain(t, raw, `"`+field+`"`)
 	}
 	testutil.CheckContain(t, raw, `"workbuddy_refresh_token":"live-refresh"`)

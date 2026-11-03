@@ -41,9 +41,9 @@ API Console 是使用 Go 编写的自托管 AI API 网关，将多个上游账�
 |------|----------|----------|
 | WorkBuddy | 官方浏览器授权 | `/workbuddy/v1` |
 | Cline | WorkOS 设备授权 | `/cline/v1` |
-| Grok | Build OAuth 设备授权 | `/grok/v1` |
+| Grok | Build OAuth 设备授权，或导入 Web SSO Cookie | `/grok/v1` |
 
-Grok 使用 **Build OAuth CLI 上游**。实际模型及能力取决于账号的上游权限；目录刷新失败保留既有观察结果，不以内置列表替代。
+Grok 在同一前缀下承载两个平面：**Build OAuth CLI 上游**，以及 **Grok Web**（grok.com SSO Cookie），提供 `grok-chat-*`、Imagine 生图与视频，后台附带 Grok 工具页。实际模型及能力取决于账号的上游权限；目录刷新失败保留既有观察结果，不以内置列表替代。
 
 ## 技术栈
 

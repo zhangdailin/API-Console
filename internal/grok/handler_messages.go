@@ -54,6 +54,12 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	if !requirePost(w, r) {
 		return
 	}
+	if isWeb, handled := peekWebModel(w, r); handled {
+		return
+	} else if isWeb {
+		writeGrokErrorCode(w, http.StatusBadRequest, "unsupported_endpoint", "Grok Web models are served on /chat/completions and /responses")
+		return
+	}
 	var req anthropicMessagesRequest
 	if !decodeJSONBody(w, r, &req) {
 		return

@@ -64,6 +64,14 @@
       </a>
     </li>
     <li class="sidebar-item">
+      <a href="{{.AdminPath}}/?tab=grok-tools" class="sidebar-link {{if eq .ActiveTab "grok-tools"}}active{{end}}" {{if eq .ActiveTab "grok-tools"}}aria-current="page"{{end}}>
+        <span class="nav-glyph" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg>
+        </span>
+        <span>Grok 工具</span>
+      </a>
+    </li>
+    <li class="sidebar-item">
       <a href="{{.AdminPath}}/?tab=alerts" class="sidebar-link {{if eq .ActiveTab "alerts"}}active{{end}}" {{if eq .ActiveTab "alerts"}}aria-current="page"{{end}}>
         <span class="nav-glyph" aria-hidden="true">
           <svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>

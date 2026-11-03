@@ -155,6 +155,18 @@ func registerRoutes(
 	registerWithPrefixes(mux, grokPrefixes, "/responses", inferenceAuth(grokHandler.HandleResponses))
 	registerWithPrefixes(mux, grokPrefixes, "/responses/compact", inferenceAuth(grokHandler.HandleResponsesCompact))
 	registerWithPrefixes(mux, grokPrefixes, "/responses/", inferenceAuth(grokHandler.HandleResponseResource))
+	// Grok Web (grok.com SSO) media and resources. Only the grok channel serves
+	// them; the conversation routes above dispatch Web models by identifier.
+	webHandler := grokHandler.Web()
+	registerWithPrefixes(mux, grokPrefixes, "/images/generations", inferenceAuth(webHandler.HandleImagesGenerations))
+	registerWithPrefixes(mux, grokPrefixes, "/images/edits", inferenceAuth(webHandler.HandleImagesEdits))
+	registerWithPrefixes(mux, grokPrefixes, "/videos", inferenceAuth(webHandler.HandleVideosCreate))
+	registerWithPrefixes(mux, grokPrefixes, "/videos/", inferenceAuth(webVideoResource(webHandler)))
+	registerWithPrefixes(mux, grokPrefixes, "/files/", inferenceAuth(webHandler.HandleFiles))
+	registerWithPrefixes(mux, grokPrefixes, "/media/inputs", inferenceAuth(webHandler.HandleMediaInputs))
+	registerWithPrefixes(mux, grokPrefixes, "/media/inputs/import", inferenceAuth(webHandler.HandleMediaInputImport))
+	registerWithPrefixes(mux, grokPrefixes, "/media/inputs/", inferenceAuth(webHandler.HandleMediaInputResource))
+
 	// --- Public auth/login (no prefix duplication) ---
 	mux.HandleFunc("/api/login", apiHandler.HandleLogin)
 	mux.HandleFunc("/api/logout", apiHandler.HandleLogout)
@@ -177,6 +189,7 @@ func registerRoutes(
 	mux.HandleFunc("/api/cline/login/", sessionAuth(apiHandler.HandleClineLogin))
 	mux.HandleFunc("/api/grok/device-auth", sessionAuth(apiHandler.HandleGrokDeviceAuthorization))
 	mux.HandleFunc("/api/grok/device-auth/", sessionAuth(apiHandler.HandleGrokDeviceAuthorization))
+	registerGrokWebAdminRoutes(mux, sessionAuth, h, grokHandler)
 	mux.HandleFunc("/api/keys", sessionAuth(apiHandler.HandleKeys))
 	mux.HandleFunc("/api/keys/", sessionAuth(apiHandler.HandleKeyByID))
 	// POST /api/keys/{id}/reset-usage lands on the same handler, which dispatches

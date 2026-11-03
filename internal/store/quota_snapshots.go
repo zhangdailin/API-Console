@@ -105,6 +105,16 @@ type GrokRateLimitSnapshot struct {
 	ObservedAt time.Time       `json:"observed_at"`
 }
 
+// GrokWebQuotaSnapshot is the authoritative Web SSO quota snapshot. Either
+// mode may be unavailable for a given account, so each window carries its own
+// presence markers and the snapshot can represent a partial response.
+type GrokWebQuotaSnapshot struct {
+	Auto     GrokQuotaWindow `json:"auto,omitempty"`
+	Fast     GrokQuotaWindow `json:"fast,omitempty"`
+	SyncedAt time.Time       `json:"synced_at,omitempty"`
+	Source   string          `json:"source,omitempty"`
+}
+
 // GrokFreeQuotaSnapshot is the Free allowance window the upstream CONFIRMED by
 // refusing a request ("subscription:free-usage-exhausted ... tokens (actual/limit):
 // N/M"). It is the one place a Free limit becomes a fact rather than an estimate, so

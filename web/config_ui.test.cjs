@@ -61,7 +61,7 @@ test('save sends security and proxy settings but no local cache settings',async(
  node('cfg_anonymous_allow_ips').value='203.0.113.1';
  node('cfg_proxy_bypass').value='example.com';
  await api.saveConfiguration();
- same(saved,{admin_password:'changed',proxy_url:'http://proxy.example:8080',proxy_bypass:['example.com'],grok_low_latency:false});
+ same(saved,{admin_password:'changed',proxy_url:'http://proxy.example:8080',proxy_bypass:['example.com'],grok_low_latency:false,grok_clearance_mode:'manual',grok_cf_clearance:'',grok_flaresolverr_url:''});
 });
 
 test('configuration page omits simulated cache section, stats and clear actions',()=>{

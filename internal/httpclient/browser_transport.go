@@ -69,6 +69,12 @@ func GetSharedBrowserHTTPClientWithHeaderTimeout(proxyKey string, timeout, heade
 	return getSharedBrowserHTTPClient(proxyKey, timeout, headerTimeout, proxyFunc, "")
 }
 
+// GetSharedBrowserHTTPClientForUserAgent picks the TLS ClientHello that matches
+// the browser user agent the caller will send, so the two cannot contradict.
+func GetSharedBrowserHTTPClientForUserAgent(proxyKey string, timeout, headerTimeout time.Duration, proxyFunc func(*http.Request) (*url.URL, error), userAgent string) *http.Client {
+	return getSharedBrowserHTTPClient(proxyKey, timeout, headerTimeout, proxyFunc, userAgent)
+}
+
 func GetSharedBrowserHTTPClientWithLimits(proxyKey string, timeout, headerTimeout time.Duration, proxyFunc func(*http.Request) (*url.URL, error), cfg *config.Config) *http.Client {
 	return getSharedBrowserHTTPClient(proxyKey, timeout, headerTimeout, proxyFunc, "", cfg)
 }

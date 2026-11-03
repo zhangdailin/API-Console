@@ -91,6 +91,28 @@ type Config struct {
 	GrokLowLatency          bool    `json:"grok_low_latency,omitempty"`
 	GrokBuildRPS            float64 `json:"grok_build_rps,omitempty"`
 
+	// ── Grok Web (grok.com SSO) upstream ──
+	// Configurable via config.json / Redis. Empty values select the defaults in
+	// grok_web.go. GrokStatsigSignerURL: nil = default signer, "" = disabled.
+	GrokWebBaseURL             string  `json:"grok_web_base_url,omitempty"`
+	GrokWebUserAgent           string  `json:"grok_web_user_agent,omitempty"`
+	GrokStatsigSignerURL       *string `json:"grok_statsig_signer_url,omitempty"`
+	GrokStatsigID              string  `json:"grok_statsig_id,omitempty"`
+	GrokConfigCFClearance      string  `json:"grok_cf_clearance,omitempty"`
+	GrokConfigCFBM             string  `json:"grok_cf_bm,omitempty"`
+	GrokTemporary              *bool   `json:"grok_temporary,omitempty"`
+	GrokDisableMemory          *bool   `json:"grok_disable_memory,omitempty"`
+	GrokCustomInstruction      string  `json:"grok_custom_instruction,omitempty"`
+	GrokWebRPS                 float64 `json:"grok_web_rps,omitempty"`
+	GrokWebTimeout             int     `json:"grok_web_timeout_seconds,omitempty"`
+	GrokWebStreamIdleSeconds   int     `json:"grok_web_stream_idle_seconds,omitempty"`
+	GrokFlareSolverrURL        string  `json:"grok_flaresolverr_url,omitempty"`
+	GrokClearanceMode          string  `json:"grok_clearance_mode,omitempty"`             // "manual"|"flaresolverr"
+	GrokClearanceRefreshInterv int     `json:"grok_clearance_refresh_interval,omitempty"` // seconds
+	GrokImageNSFW              *bool   `json:"grok_image_nsfw,omitempty"`
+	GrokImageFinalMinBytes     int     `json:"grok_image_final_min_bytes,omitempty"`
+	GrokImageMediumMinBytes    int     `json:"grok_image_medium_min_bytes,omitempty"`
+
 	// ── Grok Build egress proxy pool ──
 	GrokEgressEnabled bool               `json:"grok_egress_enabled,omitempty"`
 	GrokEgressNodes   []EgressNodeConfig `json:"grok_egress_nodes,omitempty"`
@@ -132,6 +154,10 @@ func (c *Config) Clone() *Config {
 	clone.TrustedProxies = append([]string(nil), c.TrustedProxies...)
 	clone.GrokEgressNodes = append([]EgressNodeConfig(nil), c.GrokEgressNodes...)
 	clone.ProxyBypass = append([]string(nil), c.ProxyBypass...)
+	clone.GrokStatsigSignerURL = cloneOptional(c.GrokStatsigSignerURL)
+	clone.GrokTemporary = cloneOptional(c.GrokTemporary)
+	clone.GrokDisableMemory = cloneOptional(c.GrokDisableMemory)
+	clone.GrokImageNSFW = cloneOptional(c.GrokImageNSFW)
 	if c.ProviderConcurrencyLimits != nil {
 		clone.ProviderConcurrencyLimits = make(map[string]int, len(c.ProviderConcurrencyLimits))
 		maps.Copy(clone.ProviderConcurrencyLimits, c.ProviderConcurrencyLimits)

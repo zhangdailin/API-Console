@@ -23,6 +23,11 @@
         </div>
       </div>
       {{end}}
+      <div class="form-group" id="grokSSOEditGroup" hidden>
+        <label class="form-label" for="grokSSOEditCookie">替换 SSO Cookie（可选）</label>
+        <textarea class="form-input" id="grokSSOEditCookie" rows="3" autocomplete="off" spellcheck="false" placeholder="留空则保留现有 Cookie；粘贴新的 sso 值或 sso=...; sso-rw=... Cookie 串"></textarea>
+        <small class="helper-text">Cookie 只写不读，保存后不会再显示。替换后额度与状态会重新同步。</small>
+      </div>
       <div class="form-group">
         <label class="form-label">
           <label class="toggle">

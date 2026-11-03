@@ -27,6 +27,21 @@ function isSidebarGrokOAuthAccount(acc) {
     String(acc?.credential_type || "").trim().toLowerCase() === "oauth";
 }
 
+// Identify Grok Web (grok.com SSO cookie) accounts.
+function isSidebarGrokWebAccount(acc) {
+  return normalizeSidebarAccountType(acc) === "grok" &&
+    (String(acc?.grok_provider || "").trim().toLowerCase() === "web" ||
+     String(acc?.credential_type || "").trim().toLowerCase() === "sso");
+}
+
+function grokWebWindow(snapshot) {
+  if (!snapshot || (snapshot.has_limit !== true && snapshot.has_remaining !== true)) return null;
+  const limit = Math.max(0, Number(snapshot.limit || 0));
+  const remaining = Math.max(0, Number(snapshot.remaining || 0));
+  const resetAt = snapshot.reset_at && !String(snapshot.reset_at).startsWith("0001") ? snapshot.reset_at : "";
+  return { limit, remaining, resetAt };
+}
+
 function hasSidebarAccountCredential(acc) { return acc?.has_credential === true; }
 
 function quotaProvenance(acc) {
@@ -62,6 +77,19 @@ function getQuotaStats(acc) {
       pctRemaining: limit > 0 ? Math.min(100, Math.round((remaining / limit) * 100)) : 0,
       unit: acc.quota_unit || "credits", plan: acc.quota_plan || "", resetAt: acc.quota_reset_at || "",
       workbuddy: true, packageRemaining: Math.max(0, Number(acc.quota_package_remaining || 0)),
+    };
+  }
+  if (isSidebarGrokWebAccount(acc)) {
+    // grok.com reports two request windows (auto, fast); auto is the headline.
+    const auto = grokWebWindow(acc.grok_web_quota?.auto);
+    const fast = grokWebWindow(acc.grok_web_quota?.fast);
+    const head = auto || fast;
+    if (!head) return { ...empty, grokWeb: true, unsynced: true, note: String(acc.quota_note || "").trim() };
+    return {
+      supported: true, limit: head.limit, remaining: head.remaining,
+      used: Math.max(0, head.limit - head.remaining),
+      pctRemaining: head.limit > 0 ? Math.min(100, Math.round((head.remaining / head.limit) * 100)) : 100,
+      grokWeb: true, auto, fast, resetAt: head.resetAt,
     };
   }
   if (isSidebarGrokOAuthAccount(acc)) {

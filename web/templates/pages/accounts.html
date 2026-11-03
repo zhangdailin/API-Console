@@ -15,6 +15,7 @@
         <p id="pageSubtitle" class="page-sub">统一维护渠道账号、状态和可用性，快速完成备份恢复、清理和批量操作。</p>
       </div>
       <div class="page-actions">
+        <button class="btn" type="button" data-sso-open title="批量导入 grok.com SSO Cookie">添加 Grok SSO</button>
         <button class="btn-primary" onclick="openModal()">添加账号</button>
       </div>
     </section>
@@ -74,6 +75,10 @@
             <button class="btn" id="accountImportOpen" type="button" onclick="openAccountImport()">导入账号</button>
             <input id="accountImportFile" type="file" accept=".json,application/json" hidden onchange="readAccountImport(this)">
           </div>
+          <div class="accounts-action-cluster" data-sso-toolbar>
+            <button class="btn" id="grokSSORefreshBtn" type="button" title="同步勾选的（未勾选则全部）Grok SSO 账号的额度与身份">同步 SSO 额度</button>
+            <button class="btn" id="grokSSONSFWBtn" type="button" title="为勾选的（未勾选则全部）Grok SSO 账号开启 NSFW">开启 NSFW</button>
+          </div>
           <div class="accounts-action-cluster is-danger">
             <button class="btn btn-danger-outline" id="batchDeleteBtn" disabled onclick="batchDeleteAccounts()">批量删除</button>
             <button class="btn btn-danger-outline" id="clearAbnormalBtn" onclick="clearAbnormalAccounts()">清空异常</button>
@@ -111,6 +116,7 @@
   </main>
 
   {{template "account-modal.html" .}}
+  {{template "grok-sso-modal.html" .}}
   <div class="modal" id="accountImportModal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="accountImportTitle" style="display:none">
     <div class="modal-content">
       <div class="modal-header"><h2 id="accountImportTitle">恢复账号备份</h2><button class="modal-close" type="button" onclick="closeAccountImport()" aria-label="关闭">×</button></div>
@@ -132,6 +138,7 @@
   <script src="{{.AdminPath}}/js/cline-auth.js?v={{.AssetVersion}}"></script>
   <script src="{{.AdminPath}}/js/accounts.js?v={{.AssetVersion}}"></script>
   <script src="{{.AdminPath}}/js/account-transfer.js?v={{.AssetVersion}}"></script>
+  <script src="{{.AdminPath}}/js/grok-sso.js?v={{.AssetVersion}}"></script>
 </body>
 
 </html>

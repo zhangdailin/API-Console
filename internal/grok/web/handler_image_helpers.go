@@ -1,0 +1,395 @@
+package web
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha1"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
+	"log/slog"
+	"net/http"
+	"net/url"
+	"os"
+	"path"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+)
+
+func normalizeImageResponseFormat(format string) string {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "b64_json", "base64":
+		return "b64_json"
+	}
+	return "url"
+}
+
+func imageResponseField(format string) string {
+	if normalizeImageResponseFormat(format) == "b64_json" {
+		return "b64_json"
+	}
+	return "url"
+}
+
+// imageMimeTypeForValue reports the media type of an image response entry.
+// grok2api always states it; a client that trusts the declared type instead of
+// sniffing the bytes needs the field to be present.
+func imageMimeTypeForValue(field, value string) string {
+	trimmed := strings.TrimSpace(value)
+	if field == "b64_json" {
+		if strings.HasPrefix(strings.ToLower(trimmed), "data:image/") {
+			rest := trimmed[len("data:"):]
+			if idx := strings.Index(rest, ";"); idx > 0 {
+				return strings.ToLower(rest[:idx])
+			}
+		}
+		return "image/" + imageOutputFormatFromBase64(trimmed)
+	}
+	if parsed, err := url.Parse(trimmed); err == nil {
+		switch strings.ToLower(path.Ext(parsed.Path)) {
+		case ".jpg", ".jpeg":
+			return "image/jpeg"
+		case ".webp":
+			return "image/webp"
+		case ".gif":
+			return "image/gif"
+		case ".png":
+			return "image/png"
+		}
+	}
+	return "image/png"
+}
+
+func imageOutputFormatFromBase64(value string) string {
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(value))
+	if err != nil || len(raw) == 0 {
+		return "png"
+	}
+	switch http.DetectContentType(raw) {
+	case "image/jpeg":
+		return "jpeg"
+	case "image/webp":
+		return "webp"
+	default:
+		return "png"
+	}
+}
+
+func mediaExtFromMime(mediaType, mimeType, rawURL string) string {
+	m := strings.ToLower(strings.TrimSpace(strings.Split(mimeType, ";")[0]))
+	switch m {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/png":
+		return ".png"
+	case "image/webp":
+		return ".webp"
+	case "image/gif":
+		return ".gif"
+	case "video/mp4":
+		return ".mp4"
+	case "video/webm":
+		return ".webm"
+	}
+	trim := strings.TrimSpace(rawURL)
+	if idx := strings.Index(trim, "?"); idx >= 0 {
+		trim = trim[:idx]
+	}
+	ext := strings.ToLower(strings.TrimSpace(filepath.Ext(trim)))
+	if ext != "" && len(ext) <= 10 {
+		return ext
+	}
+	if strings.EqualFold(mediaType, "video") {
+		return ".mp4"
+	}
+	return ".jpg"
+}
+
+func imageDimsFromBytes(data []byte) (int, int) {
+	if len(data) == 0 {
+		return 0, 0
+	}
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return 0, 0
+	}
+	return cfg.Width, cfg.Height
+}
+
+func isLikelyRasterImageBytes(data []byte) bool {
+	if len(data) < 4 {
+		return false
+	}
+	if len(data) >= 3 && data[0] == 0xff && data[1] == 0xd8 && data[2] == 0xff {
+		return true
+	}
+	if len(data) >= 8 &&
+		data[0] == 0x89 && data[1] == 'P' && data[2] == 'N' && data[3] == 'G' &&
+		data[4] == '\r' && data[5] == '\n' && data[6] == 0x1a && data[7] == '\n' {
+		return true
+	}
+	if len(data) >= 6 && (string(data[:6]) == "GIF87a" || string(data[:6]) == "GIF89a") {
+		return true
+	}
+	if len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP" {
+		return true
+	}
+	return false
+}
+
+func (h *Handler) cacheMediaURL(ctx context.Context, token, rawURL, mediaType string) (string, error) {
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+	if mediaType != "video" {
+		mediaType = "image"
+	}
+	trimURL := strings.TrimSpace(rawURL)
+	lurl := strings.ToLower(trimURL)
+	// Never cache known low-res thumbnail hosts; they lead to blurry results.
+	if mediaType == "image" && strings.Contains(lurl, "encrypted-tbn0.gstatic.com") {
+		return "", fmt.Errorf("skip thumbnail url")
+	}
+	// If the client can't reach Grok/X assets (common in some regions), caching through this server
+	// is required for images to display at all.
+	forceCache := mediaType == "image" && mustCacheImageURL(lurl)
+
+	data, mimeType, err := h.webClient().downloadAsset(ctx, token, rawURL)
+	if err != nil {
+		return "", err
+	}
+	// Heuristic: avoid caching tiny/low-res images (often thumbnails/previews).
+	if mediaType == "image" {
+		if !isRasterImageMime(mimeType) {
+			return "", fmt.Errorf("unsupported image mime type: %s", strings.TrimSpace(mimeType))
+		}
+		w, hgt := imageDimsFromBytes(data)
+		if w <= 0 || hgt <= 0 {
+			if !forceCache || !isLikelyRasterImageBytes(data) {
+				return "", fmt.Errorf("unsupported image data")
+			}
+		}
+		// For Grok/X image assets, caching is required for display (clients may not reach the CDN).
+		if forceCache {
+			// Always cache (even previews). We already avoid emitting -part-0 when full exists.
+		} else {
+			if (w > 0 && hgt > 0 && (w < 900 || hgt < 900)) || len(data) < 60*1024 {
+				slog.Debug("skip caching low-res image", "url", trimURL, "bytes", len(data), "w", w, "h", hgt)
+				return "", fmt.Errorf("skip low-res image")
+			}
+		}
+	}
+	return h.cacheMediaBytes(rawURL, mediaType, data, mimeType)
+}
+
+func isRasterImageMime(mimeType string) bool {
+	switch strings.ToLower(strings.TrimSpace(strings.Split(mimeType, ";")[0])) {
+	case "image/jpeg", "image/png", "image/webp", "image/gif":
+		return true
+	default:
+		return false
+	}
+}
+
+func mustCacheImageURL(rawURL string) bool {
+	raw := strings.TrimSpace(rawURL)
+	if raw == "" {
+		return false
+	}
+	lower := strings.ToLower(raw)
+	if strings.HasPrefix(lower, "/grok/v1/files/image/") || strings.HasPrefix(lower, "/v1/files/image/") {
+		return false
+	}
+	if isLikelyImageAssetPath(raw) {
+		return true
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Hostname() == "" {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host == "assets.grok.com" || host == "grok.com" || strings.HasSuffix(host, ".grok.com") ||
+		host == "x.ai" || strings.HasSuffix(host, ".x.ai") {
+		return true
+	}
+	return false
+}
+
+func (h *Handler) imageOutputValue(ctx context.Context, token, url, format string) (string, error) {
+	if normalizeImageResponseFormat(format) == "url" {
+		trim := strings.TrimSpace(url)
+		var cacheErr error
+		// Stable contract: prefer full over -part-0. If we only got a preview URL,
+		// try the full variant first.
+		if strings.Contains(trim, "-part-0/") {
+			full := strings.ReplaceAll(trim, "-part-0/", "/")
+			if name, err := h.cacheMediaURL(ctx, token, full, "image"); err == nil && name != "" {
+				return "/grok/v1/files/image/" + name, nil
+			} else if err != nil {
+				cacheErr = err
+			}
+		}
+		if name, err := h.cacheMediaURL(ctx, token, trim, "image"); err == nil && name != "" {
+			return "/grok/v1/files/image/" + name, nil
+		} else if err != nil {
+			cacheErr = err
+		}
+		// grok2api always lands the asset locally and answers with its own
+		// address; handing the caller an upstream CDN URL (or a low-res
+		// thumbnail that was skipped) is what the reference never does.
+		if cacheErr != nil {
+			return "", fmt.Errorf("cache grok image locally: %w", cacheErr)
+		}
+		return "", fmt.Errorf("cache grok image locally failed")
+	}
+	raw, _, err := h.webClient().downloadAsset(ctx, token, url)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(raw), nil
+}
+
+// writeImageResults writes the non-streaming image generation/edit response.
+// With strict=true a conversion failure aborts with 502; otherwise the failing
+// entry falls back to the raw URL (url format) or an empty value (b64_json).
+func (h *Handler) writeImageResults(w http.ResponseWriter, ctx context.Context, token, prompt string, urls []string, format, publicBase string, strict bool) {
+	_ = strict // kept for callers: every conversion failure is fatal now.
+	field := imageResponseField(format)
+	data := make([]map[string]interface{}, 0, len(urls))
+	for _, u := range urls {
+		val, err := h.imageOutputValue(ctx, token, u, format)
+		if err != nil {
+			// No pass-through: either the asset is cached and served from this
+			// gateway, or the request fails. strict only decides the error shape.
+			slog.Warn("grok image convert failed", "url", u, "error", err)
+			writeGrokUpstreamError(w, err)
+			return
+		}
+		if field == "url" {
+			if publicBase == "" {
+				writeGrokErrorCode(w, http.StatusInternalServerError, "image_url_base_missing", "image URL base is not configured")
+				return
+			}
+			if strings.HasPrefix(val, "/") {
+				val = publicBase + val
+			}
+		}
+		data = append(data, map[string]interface{}{
+			field: val,
+			// Both fields are always present in grok2api's response: an empty
+			// string (not null) for the unused revised prompt, and an explicit
+			// media type.
+			"revised_prompt": "",
+			"mime_type":      imageMimeTypeForValue(field, val),
+		})
+	}
+	writeJSON(w, map[string]interface{}{
+		"created": time.Now().Unix(),
+		"data":    data,
+		"usage":   buildImageUsagePayload(prompt, len(data)),
+	})
+}
+
+// collectImageChatURLs runs the chat image edit/generation loop (n images from
+// ceil(n/2) calls) and returns the normalized URLs. On failure it writes the
+// error response and returns ok=false.
+func (h *Handler) collectImageChatURLs(ctx context.Context, w http.ResponseWriter, sess *chatAccountSession, rawPayload *map[string]interface{}, rebuildPayload func(string) (map[string]interface{}, error), n int) ([]string, bool) {
+	callsNeeded := (n + 1) / 2
+	if callsNeeded < 1 {
+		callsNeeded = 1
+	}
+	var urls []string
+	for i := 0; i < callsNeeded; i++ {
+		resp, err := h.doChatWithAutoSwitchRebuild(ctx, sess, rawPayload, rebuildPayload)
+		if err != nil {
+			writeGrokUpstreamError(w, err)
+			return nil, false
+		}
+		h.syncGrokQuota(sess.acc, resp.Header)
+		err = parseUpstreamLines(resp.Body, func(line map[string]interface{}) error {
+			urls = appendImageResultURLs(urls, line)
+			return nil
+		})
+		resp.Body.Close()
+		if err != nil {
+			writeGrokUpstreamError(w, err)
+			return nil, false
+		}
+	}
+	urls = normalizeGeneratedImageURLs(urls, n)
+	if len(urls) == 0 {
+		writeGrokError(w, http.StatusBadGateway, "no image generated")
+		return nil, false
+	}
+	return urls, true
+}
+
+func (h *Handler) cacheMediaBytes(rawURL, mediaType string, data []byte, mimeType string) (string, error) {
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+	if mediaType != "video" {
+		mediaType = "image"
+	}
+	if len(data) == 0 {
+		return "", fmt.Errorf("empty media data")
+	}
+
+	dir := filepath.Join(cacheBaseDir, mediaType)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+
+	sum := sha1.Sum([]byte(strings.TrimSpace(rawURL)))
+	name := hex.EncodeToString(sum[:]) + mediaExtFromMime(mediaType, mimeType, rawURL)
+	fullPath := filepath.Join(dir, name)
+
+	if info, statErr := os.Stat(fullPath); statErr == nil && info.Mode().IsRegular() && info.Size() > 0 {
+		return name, nil
+	}
+
+	tmp := fullPath + ".tmp-" + randomHex(4)
+	if writeErr := os.WriteFile(tmp, data, 0o644); writeErr != nil {
+		_ = os.Remove(tmp)
+		return "", writeErr
+	}
+	if renameErr := os.Rename(tmp, fullPath); renameErr != nil {
+		_ = os.Remove(tmp)
+		return "", renameErr
+	}
+	return name, nil
+}
+
+// imageSizeFromBase64 reports the pixel size of a base64 image as "WxH", or
+// "auto" when it cannot be determined. A streamed image event used to always
+// say "auto"; a client that sizes its placeholder from the event had to guess.
+func imageSizeFromBase64(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "auto"
+	}
+	if idx := strings.Index(trimmed, ","); strings.HasPrefix(strings.ToLower(trimmed), "data:") && idx > 0 {
+		trimmed = trimmed[idx+1:]
+	}
+	raw, err := base64.StdEncoding.DecodeString(trimmed)
+	if err != nil || len(raw) == 0 {
+		return "auto"
+	}
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(raw))
+	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
+		return "auto"
+	}
+	return strconv.Itoa(cfg.Width) + "x" + strconv.Itoa(cfg.Height)
+}
+
+// imageEventSize picks the reported size for an image event: the real pixel
+// size for base64 payloads, and "auto" for a URL (whose bytes are not fetched
+// here).
+func imageEventSize(field, value string) string {
+	if field != "b64_json" {
+		return "auto"
+	}
+	return imageSizeFromBase64(value)
+}

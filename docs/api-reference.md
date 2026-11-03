@@ -39,6 +39,10 @@
 | POST | `/responses` | Responses，Grok 原生 Build，其他通道 Chat 桥接 |
 | POST | `/messages/count_tokens` | 三通道均支持本地 Token 估算 |
 | POST | `/responses/compact` | 网关摘要 / Build 压缩路径；三通道两种前缀均支持 |
+| POST | `/images/generations`、`/images/edits` | 仅 Grok：Web Imagine 生图 / 改图 |
+| POST / GET | `/videos`、`/videos/{id}`、`/videos/{id}/content` | 仅 Grok：Web 视频任务创建、查询与下载 |
+| GET | `/files/{image|video}/{name}` | 仅 Grok：本地媒体缓存文件 |
+| POST / GET / DELETE | `/media/inputs`、`/media/inputs/import`、`/media/inputs/{id}` | 仅 Grok：临时媒体输入（file_id） |
 
 模型应从当前目录选择，不要把示例字符串当可用白名单。目录正常不证明账号拥有生成额度；目录失败保留旧观察。
 
@@ -141,6 +145,12 @@ Chat 桥接写递增 sequence_number，便于客户端识别顺序；当前没�
 | `/api/journal/diagnostics/settings` | 读取 / 更新诊断设置 |
 | `/api/system/version`、`check-updates`、`operation` | GET 版本、发行发现和升级状态 |
 | `/api/system/update`、`rollback` | POST 异步系统操作，见升级手册 |
+| `/api/grok/sso/import` | POST 批量导入 Grok Web SSO：`text` 或 `tokens`、`pool`（auto / basic / super / heavy）、`name_prefix`、`weight`、`refresh`、`enable_nsfw`；返回新增 / 重复 / 无效计数，Token 只以摘要显示 |
+| `/api/grok/sso/refresh` | POST `{"account_ids":[...]}`（空为全部 Web 账号）同步身份与额度，并重新发布 Web 模型 |
+| `/api/grok/sso/nsfw` | POST `{"account_ids":[...]}` 在 grok.com 开启 NSFW |
+| `/api/grok/availability` | GET 各 Grok 平面可用账号数 |
+| `/api/grok/tools/v1/*` | Grok 工具页推理投影（models、chat/completions、responses、images、videos、files、media/inputs），以管理会话鉴权，资源归属固定为 `admin-tools` |
+| `/api/grok/admin/*` | 工具页管理接口：imagine start/stop/sse/ws/config、video start/stop/sse、voice/token（LiveKit）、cache、media 库、NSFW 批任务 |
 
 API Key 创建和轮换时返回完整秘密，并使用主密钥派生的独立加密用途保存密文；认证继续使用哈希。管理员可通过 secret 接口读取，列表仅返回掩码及 secret_available。加密能力未配置、密文损坏或解密失败时明确报错，不回退明文。轮换原子替换密文、哈希及索引，使旧 Key 立即失效；列表掩码不能用于调用。前端创建默认消费不限额，编辑不提交预算字段，已有后台预算策略继续生效。支持模型白名单、请求限速、有效期、并发及预算；空模型白名单兼容解释为不限模型。费用预留和结算用整数 USD ticks，1 USD 为 100 亿 ticks。
 

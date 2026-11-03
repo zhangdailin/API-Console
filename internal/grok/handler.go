@@ -3,6 +3,7 @@ package grok
 import (
 	"orchids-api/internal/audit"
 	"orchids-api/internal/config"
+	"orchids-api/internal/grok/web"
 	"orchids-api/internal/loadbalancer"
 	"orchids-api/internal/responses"
 	"orchids-api/internal/store"
@@ -35,6 +36,10 @@ type Handler struct {
 	// and compaction requests stay a plain upstream forward.
 	compactionMu   sync.RWMutex
 	compactionCode *responses.CompactionCodec
+
+	// web serves the Grok Web (grok.com SSO) plane; see web_dispatch.go.
+	web *web.Handler
+	webDispatch
 
 	quotaOnce    sync.Once
 	quotaMu      sync.Mutex
@@ -73,6 +78,7 @@ func NewHandler(cfg *config.Config, lb *loadbalancer.LoadBalancer) *Handler {
 		replayGen:   make(map[string]uint64),
 		instanceID:  instanceID,
 		auditLogger: audit.NewNopLogger(),
+		web:         web.NewHandler(cfg, lb),
 	}
 	return h
 }
@@ -92,6 +98,7 @@ func (h *Handler) SetConfig(cfg *config.Config) {
 	h.cfg = cfg
 	h.cliClient = cliClient
 	h.runtimeMu.Unlock()
+	h.web.SetConfig(cfg)
 }
 
 func (h *Handler) configSnapshot() *config.Config {
@@ -113,6 +120,7 @@ func (h *Handler) SetAuditLogger(logger audit.Logger) {
 		h.runtimeMu.Lock()
 		h.auditLogger = logger
 		h.runtimeMu.Unlock()
+		h.web.SetAuditLogger(logger)
 	}
 }
 
@@ -130,6 +138,7 @@ func (h *Handler) SetConnTracker(tracker loadbalancer.ConnTracker) {
 		h.runtimeMu.Lock()
 		h.connTracker = tracker
 		h.runtimeMu.Unlock()
+		h.web.SetConnTracker(tracker)
 	}
 }
 

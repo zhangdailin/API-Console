@@ -502,12 +502,23 @@ func (s *redisStore) ConsumeGrokQuota(ctx context.Context, id int64, provider st
 	err := s.updateAccountAtomic(ctx, id, func(acc *Account) error {
 		consumed = false // updateAccountAtomic may retry after a WATCH conflict.
 		now := time.Now().UTC()
-		if !strings.EqualFold(strings.TrimSpace(provider), "build") {
-			return nil
-		}
-		consumed = decrementQuotaWindow(&acc.GrokRateLimits.Requests, amount)
-		if consumed {
-			acc.GrokRateLimits.ObservedAt = now
+		switch strings.ToLower(strings.TrimSpace(provider)) {
+		case "build":
+			consumed = decrementQuotaWindow(&acc.GrokRateLimits.Requests, amount)
+			if consumed {
+				acc.GrokRateLimits.ObservedAt = now
+			}
+		case GrokProviderWeb:
+			// auto is the preferred request window, with fast used only when
+			// auto is absent; decrementing both would double-charge one call.
+			if acc.GrokWebQuota.Auto.HasRemaining {
+				consumed = decrementQuotaWindow(&acc.GrokWebQuota.Auto, amount)
+			} else {
+				consumed = decrementQuotaWindow(&acc.GrokWebQuota.Fast, amount)
+			}
+			if consumed && !acc.GrokWebQuota.SyncedAt.IsZero() {
+				acc.GrokWebQuota.SyncedAt = now
+			}
 		}
 		return nil
 	})

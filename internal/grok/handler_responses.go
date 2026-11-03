@@ -13,6 +13,12 @@ func (h *Handler) HandleResponses(w http.ResponseWriter, r *http.Request) {
 	if !requirePost(w, r) {
 		return
 	}
+	if isWeb, handled := peekWebModel(w, r); handled {
+		return
+	} else if isWeb && h.web != nil {
+		h.webResponsesBridge()(w, r)
+		return
+	}
 	// Keep the original object for the Build CLI route.  The CLI upstream
 	// speaks Responses natively, so translating it through Chat Completions
 	// would drop valid fields such as previous_response_id and metadata.

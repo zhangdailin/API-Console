@@ -30,6 +30,12 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 	if !requirePost(w, r) {
 		return
 	}
+	if isWeb, handled := peekWebModel(w, r); handled {
+		return
+	} else if isWeb && h.web != nil {
+		h.web.HandleChatCompletions(w, r)
+		return
+	}
 	var req chatwire.Request
 	if !decodeJSONBody(w, r, &req) {
 		return

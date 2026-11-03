@@ -97,6 +97,46 @@
             </div>
           </section>
 
+          <section class="settings-card" id="groupGrokWeb">
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">Grok Web（SSO）</h2>
+              <span class="mini-badge">新请求生效</span>
+            </div>
+            <p class="settings-card-note">grok.com 位于 Cloudflare 之后；出现 “Just a moment” 验证时，填写浏览器中的 cf_clearance，或改用 FlareSolverr 自动刷新。</p>
+            <div class="settings-card-body">
+              <div class="form-row">
+                <div class="form-row-label">
+                  <label class="form-label" for="cfg_grok_clearance_mode">Clearance 模式</label>
+                  <span class="helper-text">手动维护使用下方 Cookie；FlareSolverr 按间隔自动获取。</span>
+                </div>
+                <div class="form-row-control">
+                  <select id="cfg_grok_clearance_mode" class="form-input">
+                    <option value="manual">手动维护</option>
+                    <option value="flaresolverr">FlareSolverr</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-row-label">
+                  <label class="form-label" for="cfg_grok_cf_clearance">cf_clearance <span class="secret-badge">密钥</span></label>
+                  <span class="helper-text">需与出网 IP 和浏览器 UA 匹配；留空则不发送。</span>
+                </div>
+                <div class="form-row-control">
+                  <input type="text" id="cfg_grok_cf_clearance" class="form-input secret-field" autocomplete="off" spellcheck="false">
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-row-label">
+                  <label class="form-label" for="cfg_grok_flaresolverr_url">FlareSolverr URL</label>
+                  <span class="helper-text">例如 http://127.0.0.1:8191/v1。FlareSolverr 模式还需启用 Grok 出口池并配置 scope 为 all 的节点（配置文件）。</span>
+                </div>
+                <div class="form-row-control">
+                  <input type="text" id="cfg_grok_flaresolverr_url" class="form-input" placeholder="http://127.0.0.1:8191/v1">
+                </div>
+              </div>
+            </div>
+          </section>
+
           <section class="settings-card" id="groupProxy">
             <div class="settings-card-head">
               <h2 class="settings-card-title">代理</h2>

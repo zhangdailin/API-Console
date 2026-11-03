@@ -187,6 +187,47 @@ func SettleAPIKeyBilling(
 	return result, true
 }
 
+// SettleAPIKeyBillingResult books an already priced result (an image or video
+// produced by the upstream, priced per asset rather than per token) against the
+// request's reservation. It follows the same first-call-wins rule as
+// SettleAPIKeyBilling and returns false only for an unpriced result or a
+// settlement still pending.
+func SettleAPIKeyBillingResult(ctx context.Context, settler APIKeyBillingStore, result pricing.Result) bool {
+	if result.CostInUSDTicks <= 0 || strings.TrimSpace(result.Model) == "" {
+		return false
+	}
+	if settler == nil {
+		settler = apiKeyBillingStore
+	}
+	reservation := BillingReservationFrom(ctx)
+	if settler == nil || reservation == nil || reservation.KeyID == 0 || reservation.EventID == "" {
+		return true
+	}
+	reservation.mu.Lock()
+	defer reservation.mu.Unlock()
+	if reservation.settled {
+		return true
+	}
+	reservation.pending, reservation.priced = true, result
+	var err error
+	for range 3 {
+		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), billingReleaseTimeout)
+		err = settler.SettleApiKeyBilling(settleCtx, reservation.KeyID, reservation.EventID, result.CostInUSDTicks)
+		cancel()
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		AnnotateRequest(ctx, "billing_status", "pending")
+		slog.Error("media API key settlement pending reconciliation", "error", err, "key_id", reservation.KeyID, "event_id", reservation.EventID, "amount_ticks", result.CostInUSDTicks, "model", result.Model)
+		return false
+	}
+	reservation.settled, reservation.pending = true, false
+	AnnotateRequest(ctx, "billing_status", "settled")
+	return true
+}
+
 // APIKeyBillingReservation reserves the worst-case text cost of one inference
 // request against the client key's limit before the handler runs.
 //

@@ -107,6 +107,13 @@ func APIKeyFingerprint(ctx context.Context) string {
 	return value
 }
 
+// WithAPIKeyFingerprint stamps an ownership scope on a request that was
+// authorized by something other than a client key (the admin tools page), so
+// stateful resources it creates are not pooled with keyless callers.
+func WithAPIKeyFingerprint(ctx context.Context, fingerprint string) context.Context {
+	return context.WithValue(ctx, apiKeyFingerprintContextKey{}, fingerprint)
+}
+
 // APIKeyID returns the non-secret database identity of the validated client
 // key for request audit and usage-ledger attribution.
 func APIKeyID(ctx context.Context) int64 {

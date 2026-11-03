@@ -24,11 +24,7 @@ async function loadAccounts() {
   try {
     const loadedAccounts = await ConsoleAPI.json('/api/accounts', { signal: ticket.signal }, { array: true });
     if (!ticket.isCurrent()) return;
-    accounts = loadedAccounts.filter((account) => {
-      if (String(account?.account_type || "").trim().toLowerCase() !== "grok") return true;
-      return String(account?.credential_type || "").trim().toLowerCase() === "oauth" ||
-        String(account?.grok_provider || "").trim().toLowerCase() === "build";
-    });
+    accounts = loadedAccounts;
     sortAccounts();
     renderPlatformTabs();
     renderAccounts();
@@ -404,6 +400,7 @@ function deleteAccountBatch(ids, prompt) {
 
 // Render accounts table
 function renderAccounts() {
+  globalThis.GrokSSO?.syncToolbar?.();
   const container = domCache.accountsList || document.getElementById("accountsList");
   const filtered = accounts.filter(matchesCurrentPlatform);
 
@@ -520,6 +517,23 @@ function renderAccounts() {
     // The models table and account table use the same display names.
     typeBadge.textContent = ACCOUNT_TYPE_NAMES[normalizeAccountType(acc)] || normalizeAccountType(acc) || "unknown";
     sub.appendChild(typeBadge);
+    if (isSidebarGrokWebAccount(acc)) {
+      const pool = String(acc.grok_pool || "").trim();
+      if (pool) {
+        const poolBadge = document.createElement("span");
+        poolBadge.className = "badge badge-grok-pool";
+        poolBadge.textContent = pool;
+        poolBadge.title = "Grok Web 账号池";
+        sub.appendChild(poolBadge);
+      }
+      if (acc.nsfw_enabled === true) {
+        const nsfw = document.createElement("span");
+        nsfw.className = "badge badge-grok-nsfw";
+        nsfw.textContent = "NSFW";
+        nsfw.title = "已在 grok.com 开启 NSFW";
+        sub.appendChild(nsfw);
+      }
+    }
     if (tokenDisplay && tokenDisplay !== identity && tokenDisplay !== "-") {
       const credential = document.createElement("span");
       credential.className = "account-identity-token";
@@ -846,12 +860,25 @@ function accountIdentityPrimary(acc) {
   const name = String(acc?.name || "").trim();
   const display = formatTokenDisplay(acc);
   const identity = email || name || (display && display !== "-" ? display : "未命名账号");
-  if (type === "grok") return `${identity} · Build OAuth`;
+  if (type === "grok") return `${identity} · ${isSidebarGrokWebAccount(acc) ? "Web SSO" : "Build OAuth"}`;
   return identity;
 }
 
 // buildQuotaMarkup renders the remaining allowance for every channel.
+function grokWebWindowMarkup(label, quotaWindow) {
+  if (!quotaWindow) return "";
+  const pct = quotaWindow.limit > 0 ? Math.round((quotaWindow.remaining / quotaWindow.limit) * 100) : 100;
+  const color = pct <= 10 ? "#fb7185" : pct <= 30 ? "#f59e0b" : "#34d399";
+  const amount = quotaWindow.limit > 0 ? `${quotaWindow.remaining} / ${quotaWindow.limit}` : String(quotaWindow.remaining);
+  const reset = quotaWindow.resetAt ? ` · ${formatQuotaReset(quotaWindow.resetAt)}` : "";
+  return `<div><span style="color:#64748b;font-size:0.75rem">${label}</span> <span style="color:${color}">${amount}</span><span style="color:#64748b;font-size:0.75rem">${reset}</span></div>`;
+}
+
 function buildQuotaMarkup(acc, quota = getQuotaStats(acc)) {
+  if (quota && quota.grokWeb) {
+    if (quota.unsynced) return `<span style="color:#94a3b8">未同步</span> <span style="color:#64748b;font-size:0.75rem">(点刷新读取 grok.com 额度)</span>`;
+    return grokWebWindowMarkup("Auto", quota.auto) + grokWebWindowMarkup("Fast", quota.fast);
+  }
   if (quota && quota.confirmedFree) {
     // A real Free window reported by the upstream is a balance, not an estimate, so it
     // is rendered without "≈" while still naming what kind of window it is.
@@ -1010,6 +1037,14 @@ function openModal(account = null) {
   document.getElementById("accountId").value = account ? account.id : "";
   document.getElementById("enabled").checked = account ? account.enabled : true;
   setAccountModalType(account ? normalizeAccountType(account) : selectedPlatformAccountType(typeEl));
+  // A Web SSO account is edited in place: its cookie can be replaced, but it is
+  // never shown (credentials are write-only), and it has no official login.
+  const ssoEdit = Boolean(account && isSidebarGrokWebAccount(account));
+  const ssoGroup = document.getElementById("grokSSOEditGroup");
+  if (ssoGroup) ssoGroup.hidden = !ssoEdit;
+  const ssoCookie = document.getElementById("grokSSOEditCookie");
+  if (ssoCookie) ssoCookie.value = "";
+  if (ssoEdit) document.querySelectorAll('#accountModal [data-login-group]').forEach((node) => { node.hidden = true; });
   if (typeof window.syncToggleStates === "function") window.syncToggleStates();
   ConsoleUI.modal("accountModal", true);
 }
@@ -1058,8 +1093,11 @@ async function saveAccount(e) {
     const existing = accounts.find((account) => String(account.id) === String(id));
     const data = { account_type: type, weight: existing ? (parseInt(existing.weight, 10) || 1) : 1, enabled: document.getElementById("enabled").checked };
     if (type === "grok") {
-      data.credential_type = "oauth";
-      data.grok_provider = "build";
+      const isWeb = existing && isSidebarGrokWebAccount(existing);
+      data.credential_type = isWeb ? "sso" : "oauth";
+      data.grok_provider = isWeb ? "web" : "build";
+      const cookie = String(document.getElementById("grokSSOEditCookie")?.value || "").trim();
+      if (isWeb && cookie) data.client_cookie = cookie;
     }
     try {
       await ConsoleAPI.checked(`/api/accounts/${id}`, ConsoleAPI.jsonOptions('PUT', data));
