@@ -131,6 +131,7 @@ function applyTokenLabels(type) {
     const loginOnlyChannel = groups.some(group => group.dataset.loginGroup === normalized);
     saveButton.hidden = loginOnlyChannel && !accountId;
   }
+  globalThis.GrokSSO?.applyMode?.();
 }
 
 // Grok exposes a server-owned device-auth protocol. The lifecycle is shared
@@ -337,7 +338,8 @@ function isAccountAbnormal(acc) { return !evaluateAccountStatus(acc).normal; }
 function matchesCurrentPlatform(acc) {
   if (!currentPlatform) return true;
   const key = String(currentPlatform || "").toLowerCase();
-  return normalizeAccountType(acc).includes(key);
+  if (!normalizeAccountType(acc).includes(key)) return false;
+  return globalThis.GrokSSO?.matchesPlane ? globalThis.GrokSSO.matchesPlane(acc) : true;
 }
 
 // Get status badge for account
@@ -1033,6 +1035,7 @@ function openModal(account = null) {
   resetGrokDeviceLoginStatus();
 
   if (!account) form.reset();
+  if (!account) globalThis.GrokSSO?.resetForNewAccount?.();
   title.textContent = account ? "编辑账号" : "添加账号";
   document.getElementById("accountId").value = account ? account.id : "";
   document.getElementById("enabled").checked = account ? account.enabled : true;

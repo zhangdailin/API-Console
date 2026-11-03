@@ -12,6 +12,13 @@
         <input type="hidden" id="accountType" value="" />
         <input class="form-input" id="accountTypeDisplay" value="加载渠道…" readonly />
       </div>
+      <div class="form-group" id="grokConnectMode" hidden>
+        <span class="form-label">接入方式</span>
+        <div class="grok-sso-source" role="tablist" aria-label="Grok 接入方式">
+          <button class="grok-sso-source-tab" type="button" role="tab" data-grok-connect="build">Grok Build · 设备登录</button>
+          <button class="grok-sso-source-tab" type="button" role="tab" data-grok-connect="web">Grok Web · 快速导入 SSO</button>
+        </div>
+      </div>
       {{range .LoginProviders}}
       <div class="form-group" id="{{.GroupID}}" data-login-group="{{.Key}}" hidden>
         <label class="form-label">{{.Label}}</label>
@@ -23,12 +30,56 @@
         </div>
       </div>
       {{end}}
+      <div class="form-group grok-sso-body" id="grokSSOImportGroup" hidden>
+        <div>
+          <div class="grok-sso-title">快速导入 Grok Web 账号</div>
+          <small class="helper-text">支持粘贴多个 SSO Token，或上传每行一个 Token 的 TXT 文件；也可直接粘贴 <code>sso=...; sso-rw=...</code> Cookie 或 grok2api 导出的 JSON。重复项会自动忽略，Cookie 只写不读。</small>
+        </div>
+        <div class="grok-sso-label-row">
+          <label class="form-label" for="grokSSOText">SSO Token（每行一个）</label>
+          <button class="btn btn-outline btn-sm" type="button" id="grokSSOUpload">上传 TXT</button>
+          <input id="grokSSOFile" type="file" accept=".txt,.json,.jsonl,text/plain,application/json" hidden>
+        </div>
+        <textarea class="form-input grok-sso-textarea" id="grokSSOText" rows="9" autocomplete="off" spellcheck="false" placeholder="sso_token_1&#10;sso_token_2&#10;sso=token_3"></textarea>
+        <div class="grok-sso-detected" id="grokSSODetected" role="status" aria-live="polite">尚未识别到 Token</div>
+        <div class="grok-sso-options">
+          <label class="grok-sso-option">
+            <span class="form-label">账号类型</span>
+            <select class="form-input" id="grokSSOPool">
+              <option value="auto" selected>自动（按额度识别）</option>
+              <option value="basic">Free / Basic</option>
+              <option value="super">Super</option>
+              <option value="heavy">Heavy</option>
+            </select>
+          </label>
+          <label class="grok-sso-option">
+            <span class="form-label">名称前缀</span>
+            <input class="form-input" id="grokSSOPrefix" type="text" maxlength="40" placeholder="可选">
+          </label>
+          <label class="grok-sso-option">
+            <span class="form-label">调度权重</span>
+            <input class="form-input" id="grokSSOWeight" type="number" min="1" max="100" value="1">
+          </label>
+        </div>
+        <div class="grok-sso-switches">
+          <label class="grok-sso-switch">
+            <label class="toggle"><input type="checkbox" id="grokSSORefresh" checked><span class="toggle-slider"></span></label>
+            <span>导入后立即同步额度与身份</span>
+          </label>
+          <label class="grok-sso-switch">
+            <label class="toggle"><input type="checkbox" id="grokSSONSFW"><span class="toggle-slider"></span></label>
+            <span>导入后开启 NSFW（接受条款、设置生日）</span>
+          </label>
+        </div>
+        <div class="grok-sso-result" id="grokSSOResult" hidden></div>
+        <button class="btn btn-primary modal-submit" type="button" id="grokSSOSubmit" disabled>开始导入</button>
+      </div>
       <div class="form-group" id="grokSSOEditGroup" hidden>
         <label class="form-label" for="grokSSOEditCookie">替换 SSO Cookie（可选）</label>
         <textarea class="form-input" id="grokSSOEditCookie" rows="3" autocomplete="off" spellcheck="false" placeholder="留空则保留现有 Cookie；粘贴新的 sso 值或 sso=...; sso-rw=... Cookie 串"></textarea>
         <small class="helper-text">Cookie 只写不读，保存后不会再显示。替换后额度与状态会重新同步。</small>
       </div>
-      <div class="form-group">
+      <div class="form-group" id="accountEnabledGroup">
         <label class="form-label">
           <label class="toggle">
             <input type="checkbox" id="enabled" checked />

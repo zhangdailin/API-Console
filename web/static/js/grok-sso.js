@@ -1,7 +1,10 @@
-// Grok Web SSO account import and batch maintenance. Cookies are write-only:
-// they leave the browser once, on import, and the server never returns them.
+// Grok account connection inside the 添加账号 dialog, following grok2api: the
+// Grok channel has two planes, Build (device OAuth) and Web (SSO cookies), and
+// the dialog asks which one before it shows a form. Web accounts are imported
+// in bulk from pasted tokens or a TXT/JSON file. Cookies are write-only: they
+// leave the browser once, on import, and the server never returns them.
 (function () {
-  const state = { source: "paste", fileText: "", busy: false };
+  const state = { mode: "build", plane: "", busy: false };
   const $ = (id) => document.getElementById(id);
 
   // parseTokens mirrors the server's accepted shapes so the operator sees the
@@ -24,7 +27,6 @@
         };
         walk(JSON.parse(trimmed));
       } catch (_) {
-        // JSONL: one JSON value per line.
         trimmed.split(/\r?\n/).forEach((line) => {
           try { const value = JSON.parse(line); raw.push(typeof value === "string" ? value : (value.token || value.sso || "")); } catch (_) { raw.push(line); }
         });
@@ -52,10 +54,8 @@
     return out;
   }
 
-  function currentText() { return state.source === "file" ? state.fileText : ($("grokSSOText")?.value || ""); }
-
   function updateDetected() {
-    const count = parseTokens(currentText()).length;
+    const count = parseTokens($("grokSSOText")?.value || "").length;
     const node = $("grokSSODetected");
     if (node) {
       node.textContent = count ? `已识别 ${count} 个 Token（已去重）` : "尚未识别到 Token";
@@ -65,15 +65,45 @@
     if (submit) submit.disabled = state.busy || count === 0;
   }
 
-  function setSource(source) {
-    state.source = source === "file" ? "file" : "paste";
-    document.querySelectorAll("[data-sso-source]").forEach((tab) => {
-      const active = tab.dataset.ssoSource === state.source;
+  // applyMode shows the form of the chosen plane. It runs after the generic
+  // modal code has shown the channel's login group, so it only ever narrows.
+  function applyMode() {
+    const type = String($("accountType")?.value || "").trim().toLowerCase();
+    const editing = Boolean(String($("accountId")?.value || ""));
+    const grokNew = type === "grok" && !editing;
+    const switcher = $("grokConnectMode");
+    if (switcher) switcher.hidden = !grokNew;
+    document.querySelectorAll("[data-grok-connect]").forEach((tab) => {
+      const active = tab.dataset.grokConnect === state.mode;
       tab.classList.toggle("active", active);
       tab.setAttribute("aria-selected", String(active));
     });
-    document.querySelectorAll("[data-sso-pane]").forEach((pane) => { pane.hidden = pane.dataset.ssoPane !== state.source; });
-    updateDetected();
+    const web = grokNew && state.mode === "web";
+    const importGroup = $("grokSSOImportGroup");
+    if (importGroup) importGroup.hidden = !web;
+    const login = $("grokDeviceLoginGroup");
+    if (login && grokNew) login.hidden = web;
+    // Imported accounts are always created enabled; the toggle belongs to the
+    // single-account forms.
+    const enabled = $("accountEnabledGroup");
+    if (enabled) enabled.hidden = web;
+    if (web) updateDetected();
+  }
+
+  function setMode(mode) {
+    state.mode = mode === "web" ? "web" : "build";
+    applyMode();
+    if (state.mode === "web") setTimeout(() => $("grokSSOText")?.focus(), 0);
+  }
+
+  // resetForNewAccount is called when the dialog opens: the plane follows the
+  // Grok sub-tab the operator is looking at, Build otherwise.
+  function resetForNewAccount() {
+    state.mode = state.plane === "web" ? "web" : "build";
+    if ($("grokSSOText")) $("grokSSOText").value = "";
+    const result = $("grokSSOResult");
+    if (result) { result.hidden = true; result.innerHTML = ""; }
+    applyMode();
   }
 
   function readFile(file) {
@@ -81,10 +111,13 @@
     if (file.size > 4 * 1024 * 1024) { showToast("文件超过 4 MB", "error"); return; }
     const reader = new FileReader();
     reader.onload = () => {
-      state.fileText = String(reader.result || "");
-      const name = $("grokSSOFileName");
-      if (name) name.textContent = file.name;
+      const text = $("grokSSOText");
+      if (text) {
+        const current = text.value.trim();
+        text.value = current ? `${current}\n${String(reader.result || "")}` : String(reader.result || "");
+      }
       updateDetected();
+      showToast(`已载入 ${file.name}`, "info");
     };
     reader.readAsText(file);
   }
@@ -140,13 +173,13 @@
     if (result.refreshing) {
       const note = document.createElement("p");
       note.className = "grok-sso-note";
-      note.textContent = "正在后台同步额度与身份，稍后刷新列表查看。";
+      note.textContent = "正在后台同步额度与身份，稍后列表会自动刷新。";
       node.appendChild(note);
     }
   }
 
   async function submit() {
-    const tokens = parseTokens(currentText());
+    const tokens = parseTokens($("grokSSOText")?.value || "");
     if (!tokens.length || state.busy) return;
     state.busy = true;
     const button = $("grokSSOSubmit");
@@ -161,31 +194,46 @@
         enable_nsfw: $("grokSSONSFW")?.checked === true,
       }));
       renderResult(result);
-      showToast(`SSO 导入完成：新增 ${result.created || 0}，重复 ${result.duplicate || 0}`, result.created ? "success" : "info");
+      showToast(`导入完成：新增 ${result.created || 0}，重复 ${result.duplicate || 0}`, result.created ? "success" : "info");
       if ($("grokSSOText")) $("grokSSOText").value = "";
-      state.fileText = "";
       if (typeof loadAccounts === "function") loadAccounts();
       if (result.refreshing && typeof loadAccounts === "function") setTimeout(loadAccounts, 8000);
     } catch (err) {
       showToast("SSO 导入失败: " + (err.message || err), "error");
     } finally {
       state.busy = false;
-      if (button) button.textContent = "导入";
+      if (button) button.textContent = "开始导入";
       updateDetected();
     }
   }
 
-  function open() {
-    state.fileText = "";
-    if ($("grokSSOText")) $("grokSSOText").value = "";
-    if ($("grokSSOFileName")) $("grokSSOFileName").textContent = "";
-    if ($("grokSSOResult")) { $("grokSSOResult").hidden = true; $("grokSSOResult").innerHTML = ""; }
-    setSource("paste");
-    ConsoleUI.modal("grokSSOModal", true);
-    setTimeout(() => $("grokSSOText")?.focus(), 0);
+  // ── Grok sub-tabs (Build / Web) and the Web batch toolbar ─────────────────
+
+  function grokPlane() { return state.plane; }
+
+  function matchesPlane(acc) {
+    if (!state.plane || String(acc?.account_type || "").toLowerCase() !== "grok") return true;
+    const web = isSidebarGrokWebAccount(acc);
+    return state.plane === "web" ? web : !web;
   }
 
-  function close() { ConsoleUI.modal("grokSSOModal", false); }
+  function syncToolbar() {
+    const platform = typeof currentPlatform === "string" ? currentPlatform : "";
+    const grok = platform === "grok";
+    const planes = $("grokPlaneFilters");
+    if (planes) planes.hidden = !grok;
+    if (!grok && state.plane) state.plane = "";
+    document.querySelectorAll("[data-grok-plane]").forEach((tab) => tab.classList.toggle("active", tab.dataset.grokPlane === state.plane));
+    const showWebActions = grok && state.plane !== "build";
+    document.querySelectorAll("[data-sso-toolbar]").forEach((node) => { node.hidden = !showWebActions; });
+  }
+
+  function setPlane(plane) {
+    state.plane = plane === "web" || plane === "build" ? plane : "";
+    if (typeof currentPage !== "undefined") currentPage = 1;
+    if (typeof renderAccounts === "function") renderAccounts();
+    else syncToolbar();
+  }
 
   // selectedWebAccountIDs returns the checked Web SSO rows, or every Web SSO
   // account when nothing is checked.
@@ -198,8 +246,8 @@
 
   async function batch(path, label) {
     const ids = selectedWebAccountIDs();
-    if (!ids.length) { showToast("没有可操作的 Grok SSO 账号", "error"); return; }
-    if (!confirm(`对 ${ids.length} 个 Grok SSO 账号执行「${label}」？`)) return;
+    if (!ids.length) { showToast("没有可操作的 Grok Web 账号", "error"); return; }
+    if (!confirm(`对 ${ids.length} 个 Grok Web 账号执行「${label}」？`)) return;
     showToast(`正在${label}…`, "info");
     try {
       const result = await ConsoleAPI.json(path, ConsoleAPI.jsonOptions("POST", { account_ids: ids }));
@@ -211,29 +259,17 @@
     }
   }
 
-  function syncToolbar() {
-    const platform = typeof currentPlatform === "string" ? currentPlatform : "";
-    const visible = !platform || platform === "grok";
-    document.querySelectorAll("[data-sso-toolbar]").forEach((node) => { node.hidden = !visible; });
-  }
-
   document.addEventListener("DOMContentLoaded", () => {
-    document.querySelectorAll("[data-sso-open]").forEach((button) => button.addEventListener("click", open));
-    document.querySelectorAll("[data-sso-close]").forEach((button) => button.addEventListener("click", close));
-    document.querySelectorAll("[data-sso-source]").forEach((tab) => tab.addEventListener("click", () => setSource(tab.dataset.ssoSource)));
+    document.querySelectorAll("[data-grok-connect]").forEach((tab) => tab.addEventListener("click", () => setMode(tab.dataset.grokConnect)));
+    document.querySelectorAll("[data-grok-plane]").forEach((tab) => tab.addEventListener("click", () => setPlane(tab.dataset.grokPlane)));
     $("grokSSOText")?.addEventListener("input", updateDetected);
-    $("grokSSOFile")?.addEventListener("change", (event) => readFile(event.target.files?.[0]));
-    const drop = $("grokSSODrop");
-    if (drop) {
-      ["dragenter", "dragover"].forEach((name) => drop.addEventListener(name, (event) => { event.preventDefault(); drop.classList.add("is-over"); }));
-      ["dragleave", "drop"].forEach((name) => drop.addEventListener(name, (event) => { event.preventDefault(); drop.classList.remove("is-over"); }));
-      drop.addEventListener("drop", (event) => readFile(event.dataTransfer?.files?.[0]));
-    }
+    $("grokSSOUpload")?.addEventListener("click", () => $("grokSSOFile")?.click());
+    $("grokSSOFile")?.addEventListener("change", (event) => { readFile(event.target.files?.[0]); event.target.value = ""; });
     $("grokSSOSubmit")?.addEventListener("click", submit);
-    $("grokSSORefreshBtn")?.addEventListener("click", () => batch("/api/grok/sso/refresh", "同步 SSO 额度"));
+    $("grokSSORefreshBtn")?.addEventListener("click", () => batch("/api/grok/sso/refresh", "同步额度"));
     $("grokSSONSFWBtn")?.addEventListener("click", () => batch("/api/grok/sso/nsfw", "开启 NSFW"));
     syncToolbar();
   });
 
-  globalThis.GrokSSO = Object.freeze({ open, close, parseTokens, syncToolbar });
+  globalThis.GrokSSO = Object.freeze({ parseTokens, applyMode, resetForNewAccount, syncToolbar, matchesPlane, grokPlane });
 })();

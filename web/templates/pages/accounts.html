@@ -15,7 +15,6 @@
         <p id="pageSubtitle" class="page-sub">统一维护渠道账号、状态和可用性，快速完成备份恢复、清理和批量操作。</p>
       </div>
       <div class="page-actions">
-        <button class="btn" type="button" data-sso-open title="批量导入 grok.com SSO Cookie">添加 Grok SSO</button>
         <button class="btn-primary" onclick="openModal()">添加账号</button>
       </div>
     </section>
@@ -67,7 +66,14 @@
 
     <div id="accountsTabContent">
       <div class="accounts-toolbar">
-        <div class="accounts-platform-switch filter-tabs" id="platformFilters"></div>
+        <div class="accounts-platform-group">
+          <div class="accounts-platform-switch filter-tabs" id="platformFilters"></div>
+          <div class="filter-tabs grok-plane-switch" id="grokPlaneFilters" role="tablist" aria-label="Grok 账号类型" hidden>
+            <button class="tab-item active" type="button" data-grok-plane="">全部</button>
+            <button class="tab-item" type="button" data-grok-plane="build">Grok Build</button>
+            <button class="tab-item" type="button" data-grok-plane="web">Grok Web</button>
+          </div>
+        </div>
 
         <div class="accounts-actions">
           <div class="accounts-action-cluster">
@@ -116,7 +122,6 @@
   </main>
 
   {{template "account-modal.html" .}}
-  {{template "grok-sso-modal.html" .}}
   <div class="modal" id="accountImportModal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="accountImportTitle" style="display:none">
     <div class="modal-content">
       <div class="modal-header"><h2 id="accountImportTitle">恢复账号备份</h2><button class="modal-close" type="button" onclick="closeAccountImport()" aria-label="关闭">×</button></div>
