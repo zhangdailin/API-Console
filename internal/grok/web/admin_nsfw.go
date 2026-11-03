@@ -352,7 +352,7 @@ func (t *nsfwBatchTask) snapshot() map[string]interface{} {
 }
 
 func parseBatchTaskPath(rawPath string) (taskID string, action string, ok bool) {
-	prefixes := []string{"/api/v1/admin/batch/", "/v1/admin/batch/"}
+	prefixes := []string{"/api/grok/admin/batch/", "/api/v1/admin/batch/", "/v1/admin/batch/"}
 	prefix := ""
 	for _, item := range prefixes {
 		if strings.HasPrefix(rawPath, item) {

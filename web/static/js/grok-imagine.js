@@ -100,10 +100,10 @@
     switch (String(value || "").trim()) {
       case "16:9":
       case "3:2":
-        return "1792x1024";
+        return "1536x1024";
       case "9:16":
       case "2:3":
-        return "1024x1792";
+        return "1024x1536";
       default:
         return "1024x1024";
     }
@@ -459,6 +459,7 @@
           model: String(model || "").trim() || "grok-imagine-image-lite",
           prompt,
           n: 1,
+          aspect_ratio: ratio,
           size: sizeForRatio(ratio),
           response_format: "url",
           nsfw,

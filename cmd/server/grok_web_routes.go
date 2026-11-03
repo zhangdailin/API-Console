@@ -58,7 +58,7 @@ func registerGrokWebAdminRoutes(mux *http.ServeMux, sessionAuth func(http.Handle
 		}
 	}
 	toolRoute := func(path string, next http.HandlerFunc) {
-		mux.HandleFunc(toolsPrefix+path, sessionAuth(withAdminToolsOwner(asGrokChannel(next))))
+		mux.HandleFunc(toolsPrefix+path, sessionAuth(withAdminToolsOwner(asGrokChannel(withToolsLinks(next)))))
 	}
 	toolRoute("/models", h.HandleModels)
 	toolRoute("/chat/completions", grokHandler.HandleChatCompletions)
@@ -109,6 +109,6 @@ func registerGrokWebAdminRoutes(mux *http.ServeMux, sessionAuth func(http.Handle
 		{"/video/sse", webHandler.HandleAdminVideoSSE},
 	}
 	for _, route := range adminRoutes {
-		mux.HandleFunc("/api/grok/admin"+route.path, sessionAuth(withAdminToolsOwner(route.handler)))
+		mux.HandleFunc("/api/grok/admin"+route.path, sessionAuth(withAdminToolsOwner(withToolsLinks(route.handler))))
 	}
 }

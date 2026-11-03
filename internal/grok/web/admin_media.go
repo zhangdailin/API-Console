@@ -118,7 +118,7 @@ func (h *Handler) HandleAdminMediaImages(w http.ResponseWriter, r *http.Request)
 	filtered := make([]cacheEntry, 0, len(entries))
 	for _, entry := range entries {
 		if containsFold(entry.Name, query) {
-			entry.ViewURL = "/api/admin/v1/media/images/content/" + entry.Name
+			entry.ViewURL = "/api/grok/admin/media/images/content/" + entry.Name
 			entry.PreviewURL = entry.ViewURL
 			entry.URL = entry.ViewURL
 			filtered = append(filtered, entry)
@@ -226,7 +226,7 @@ func storedJobForAdmin(job *store.StoredVideoJob) adminVideoJob {
 	}
 	out := adminVideoJob{ID: job.ID, AccountID: job.AccountID, Provider: job.Provider, Model: job.Model, Prompt: job.Prompt, Seconds: job.Seconds, Size: job.Size, Quality: job.Quality, Status: job.Status, Progress: job.Progress, VideoURL: job.VideoURL, UpstreamRequestID: job.UpstreamRequestID, RemixedFromID: job.RemixedFromID, Operation: job.Operation, StandardAPI: job.StandardAPI, ErrorCode: job.ErrorCode, ErrorMessage: job.ErrorMessage, CreatedAt: job.CreatedAt, CompletedAt: job.CompletedAt, ExpiresAt: job.ExpiresAt, UpdatedAt: job.UpdatedAt}
 	if job.Status == "completed" && validPersistedVideoContentPath(job.ContentPath) && strings.TrimSpace(job.ContentPath) != "" {
-		out.ContentURL = "/api/admin/v1/media/videos/content/" + job.ID
+		out.ContentURL = "/api/grok/admin/media/videos/content/" + job.ID
 		out.DownloadURL = out.ContentURL + "?download=1"
 	}
 	return out
