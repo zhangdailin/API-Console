@@ -40,7 +40,7 @@ func TestAccountSecretFieldsAreComplete(t *testing.T) {
 		StatusMessage LastAttempt VerifiedAt ClearVerifiedAt QuotaResetAt RequestCount
 		LastUsedAt CreatedAt UpdatedAt CredentialType OAuthExpiresAt TeamID
 		GrokProvider GrokModels GrokModelCatalog GrokModelsSyncedAt GrokBilling
-		GrokRateLimits GrokFreeQuota NSFWEnabled GrokWebQuota ModelCooldowns ModelCooldownReasons
+		GrokRateLimits GrokFreeQuota NSFWEnabled GrokWebQuota GrokWebSyncAt GrokWebSyncError ModelCooldowns ModelCooldownReasons
 		WorkBuddyExpiresAt WorkBuddyUID ReplaceWorkBuddyCredentials WorkBuddyModelIDs
 		WorkBuddyModelsSyncedAt WorkBuddyQuota WorkBuddyRestrictedUntil
 		ClineExpiresAt ClineEmail ClinePlan ReplaceClineCredentials ClineModelIDs

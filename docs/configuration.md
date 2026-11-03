@@ -121,6 +121,7 @@ Grok 渠道同时承载 Build（OAuth CLI）与 Web（grok.com 网页 SSO Cookie
 | 字段 | 生效方式 |
 |---|---|
 | `grok_web_base_url` | 默认 `https://grok.com`，仅用于测试桩或自建反代 |
+| `grok_web_proxy_url` | 只给 grok.com（Web SSO）请求使用的代理；留空沿用通用代理。服务器 IP 被 Cloudflare 拦截（403 `cf-mitigated: challenge`）时填写，WorkBuddy / Cline / Build 仍按通用代理设置出网。修改代理或 clearance 后会自动重试尚未同步成功的 Web 账号 |
 | `grok_web_user_agent` | 浏览器 UA，TLS 指纹随 UA 的 Chrome 主版本选择 |
 | `grok_cf_clearance`、`grok_cf_bm` | 手动维护的 Cloudflare Cookie；出现 “Just a moment” 验证时需要 |
 | `grok_clearance_mode`、`grok_flaresolverr_url`、`grok_clearance_refresh_interval` | `manual`（默认）或 `flaresolverr`；后者通过 FlareSolverr 定期刷新 clearance（秒，默认 600），需同时启用 `grok_egress_enabled` 并配置 scope 为 `all` 的出口节点 |

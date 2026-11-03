@@ -94,8 +94,12 @@ type Config struct {
 	// ── Grok Web (grok.com SSO) upstream ──
 	// Configurable via config.json / Redis. Empty values select the defaults in
 	// grok_web.go. GrokStatsigSignerURL: nil = default signer, "" = disabled.
-	GrokWebBaseURL             string  `json:"grok_web_base_url,omitempty"`
-	GrokWebUserAgent           string  `json:"grok_web_user_agent,omitempty"`
+	GrokWebBaseURL   string `json:"grok_web_base_url,omitempty"`
+	GrokWebUserAgent string `json:"grok_web_user_agent,omitempty"`
+	// GrokWebProxyURL routes only grok.com (Web SSO) traffic through a proxy,
+	// for a host whose own address Cloudflare challenges. Empty uses the
+	// general proxy settings.
+	GrokWebProxyURL            string  `json:"grok_web_proxy_url,omitempty"`
 	GrokStatsigSignerURL       *string `json:"grok_statsig_signer_url,omitempty"`
 	GrokStatsigID              string  `json:"grok_statsig_id,omitempty"`
 	GrokConfigCFClearance      string  `json:"grok_cf_clearance,omitempty"`

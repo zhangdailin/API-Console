@@ -106,6 +106,15 @@
             <div class="settings-card-body">
               <div class="form-row">
                 <div class="form-row-label">
+                  <label class="form-label" for="cfg_grok_web_proxy_url">Grok Web 代理 <span class="secret-badge">密钥</span></label>
+                  <span class="helper-text">只用于 grok.com（SSO）请求；留空则使用下方通用代理。服务器 IP 被 Cloudflare 拦截时填写能访问 grok.com 的 http:// 或 socks5:// 代理。</span>
+                </div>
+                <div class="form-row-control">
+                  <input type="text" id="cfg_grok_web_proxy_url" class="form-input secret-field" autocomplete="off" spellcheck="false" placeholder="http://user:pass@host:port/">
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-row-label">
                   <label class="form-label" for="cfg_grok_clearance_mode">Clearance 模式</label>
                   <span class="helper-text">手动维护使用下方 Cookie；FlareSolverr 按间隔自动获取。</span>
                 </div>

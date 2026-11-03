@@ -114,3 +114,17 @@ func (c *Config) GrokWebStreamIdleTimeout() time.Duration {
 	seconds := max(boundedDefault(value, 90, 600), 30)
 	return time.Duration(seconds) * time.Second
 }
+
+// GrokWebTransport returns the config the Web plane builds its HTTP clients
+// from: when grok_web_proxy_url is set it replaces the general proxy settings
+// for grok.com traffic only; otherwise the config is returned unchanged.
+func (c *Config) GrokWebTransport() *Config {
+	if c == nil || strings.TrimSpace(c.GrokWebProxyURL) == "" {
+		return c
+	}
+	clone := c.Clone()
+	clone.ProxyURL = strings.TrimSpace(c.GrokWebProxyURL)
+	clone.ProxyHTTP, clone.ProxyHTTPS, clone.ProxyUser, clone.ProxyPass = "", "", "", ""
+	clone.ProxyBypass = nil
+	return clone
+}

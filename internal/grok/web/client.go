@@ -71,6 +71,7 @@ type NSFWEnableResult struct {
 }
 
 func New(cfg *config.Config) *Client {
+	cfg = cfg.GrokWebTransport()
 	timeout := cfg.GrokWebRequestTimeout()
 	baseClient := newHTTPClient(cfg, timeout, httpclient.ProxyFuncFromConfig(cfg))
 	client := &Client{

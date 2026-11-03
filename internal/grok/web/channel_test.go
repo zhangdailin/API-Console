@@ -2,12 +2,15 @@ package web
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
 
+	"orchids-api/internal/config"
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
 )
@@ -128,4 +131,36 @@ func TestWebModelIdentifiersDoNotOverlapBuild(t *testing.T) {
 	testutil.True(t, IsWebModelID("web/grok-imagine-image"))
 	testutil.False(t, IsWebModelID("grok-4.5"))
 	testutil.False(t, IsWebModelID("grok-composer-2.5-fast"))
+}
+
+func TestVerifyAccountFailsWhenTheQuotaReadFails(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/auth/session" {
+			_, _ = w.Write([]byte(`{"user":{"id":"u-1","email":"a@example.com"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`<html><title>Just a moment...</title></html>`))
+	}))
+	defer upstream.Close()
+	cfg := &config.Config{GrokWebBaseURL: upstream.URL}
+	config.ApplyDefaults(cfg)
+	acc := &store.Account{AccountType: "grok", GrokProvider: ProviderWeb, CredentialType: "sso", ClientCookie: "sso=tok-verify"}
+	status, err := VerifyAccount(context.Background(), cfg, acc)
+	testutil.Error(t, err)
+	testutil.Equal(t, status, "")
+	testutil.MustContain(t, acc.GrokWebSyncError, "Cloudflare")
+	testutil.False(t, acc.GrokWebSyncAt.IsZero())
+	testutil.Equal(t, len(observedRouteSet([]*store.Account{acc})), 0)
+}
+
+func TestGrokWebTransportOnlyReplacesTheProxy(t *testing.T) {
+	cfg := &config.Config{ProxyURL: "http://general:1", ProxyBypass: []string{"x"}}
+	testutil.Equal(t, cfg.GrokWebTransport(), cfg)
+	cfg.GrokWebProxyURL = "socks5://web:2"
+	web := cfg.GrokWebTransport()
+	testutil.Equal(t, web.ProxyURL, "socks5://web:2")
+	testutil.Equal(t, len(web.ProxyBypass), 0)
+	testutil.Equal(t, cfg.ProxyURL, "http://general:1")
 }

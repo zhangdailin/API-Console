@@ -32,6 +32,16 @@ const webMaintenanceRetry = 10 * time.Minute
 
 var maintenanceAttempts sync.Map // account ID -> time.Time of the last probe
 
+// webTransportKey summarizes the settings that decide whether grok.com is
+// reachable, so a change to them can retry the accounts that failed.
+func webTransportKey(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	return strings.Join([]string{cfg.ProxyURL, cfg.ProxyHTTP, cfg.ProxyHTTPS, cfg.ProxyUser, cfg.ProxyPass, cfg.GrokWebProxyURL,
+		cfg.GrokConfigCFClearance, cfg.GrokConfigCFBM, cfg.GrokClearanceMode, cfg.GrokFlareSolverrURL, cfg.GrokWebBaseURL, cfg.GrokWebUserAgent}, "\x00")
+}
+
 // webObservationTTL bounds how old a successful quota read may be and still
 // count as evidence that the account can serve its routes.
 const webObservationTTL = 24 * time.Hour
@@ -180,8 +190,14 @@ func ProjectQuota(fields map[string]any, acc *store.Account) {
 	fields["quota_unit"] = "requests"
 	fields["quota_mode"] = "unknown"
 	fields["quota_supported"] = false
+	if acc.GrokWebSyncError != "" {
+		fields["grok_web_sync_error"] = acc.GrokWebSyncError
+	}
 	if quota.SyncedAt.IsZero() {
 		fields["quota_note"] = "尚未同步 grok.com 额度；点刷新立即同步"
+		if acc.GrokWebSyncError != "" {
+			fields["quota_note"] = "同步失败：" + acc.GrokWebSyncError
+		}
 		return
 	}
 	fields["quota_synced_at"] = quota.SyncedAt
@@ -238,15 +254,23 @@ func VerifyAccount(ctx context.Context, cfg *config.Config, acc *store.Account) 
 		IdentityTimeout: 20 * time.Second, QuotaTimeout: 30 * time.Second, RetryDelay: time.Second,
 	})
 	ApplyWebRefresh(acc, result)
+	acc.GrokWebSyncAt = time.Now().UTC()
+	acc.GrokWebSyncError = ""
 	switch {
 	case result.AuthRejected:
 		cause := result.QuotaErr
 		if cause == nil {
 			cause = result.IdentityErr
 		}
-		return "401", fmt.Errorf("grok.com rejected the SSO cookie: %w", cause)
-	case result.QuotaErr != nil && result.IdentityErr != nil:
-		return "", fmt.Errorf("grok.com probe failed: %w", result.QuotaErr)
+		err = fmt.Errorf("grok.com rejected the SSO cookie: %w", cause)
+		acc.GrokWebSyncError = "grok.com 不接受该 SSO Cookie，需要重新导入"
+		return "401", err
+	case result.QuotaErr != nil:
+		// The quota read is what publishes the Web routes, so an account whose
+		// identity resolved but whose quota did not is not synced.
+		err = fmt.Errorf("grok.com quota read failed: %w", result.QuotaErr)
+		acc.GrokWebSyncError = redactSSOError(err, acc)
+		return "", err
 	}
 	acc.AuthStatus = store.AccountAuthStatusActive
 	return "", nil

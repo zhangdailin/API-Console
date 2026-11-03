@@ -164,6 +164,10 @@ func (p accountPatch) mergeGrokCredentials() {
 	// Web SSO: the NSFW flag is an operator/account-tool fact and follows the
 	// snapshot; the quota window only moves forward in time.
 	u.NSFWEnabled = acc.NSFWEnabled
+	if !acc.GrokWebSyncAt.IsZero() && !acc.GrokWebSyncAt.Before(existing.GrokWebSyncAt) {
+		u.GrokWebSyncAt = acc.GrokWebSyncAt
+		u.GrokWebSyncError = acc.GrokWebSyncError
+	}
 	if !acc.GrokWebQuota.SyncedAt.IsZero() && (!p.staleSnapshot || !acc.GrokWebQuota.SyncedAt.Before(existing.GrokWebQuota.SyncedAt)) {
 		u.GrokWebQuota = acc.GrokWebQuota
 	}

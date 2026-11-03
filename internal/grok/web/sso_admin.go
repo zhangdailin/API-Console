@@ -444,6 +444,7 @@ func (h *Handler) HandleAvailability(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	counts := map[string]int{ProviderBuild: 0, ProviderWeb: 0, "console": 0}
+	webSynced, webError := 0, ""
 	if h != nil && h.lb != nil && h.lb.Store != nil {
 		accounts, err := h.lb.Store.ListAccounts(r.Context())
 		if err != nil {
@@ -457,7 +458,14 @@ func (h *Handler) HandleAvailability(w http.ResponseWriter, r *http.Request) {
 			if provider := ProviderForAccount(acc); provider != "" {
 				counts[provider]++
 			}
+			if IsWebAccount(acc) {
+				if accountObservesRoutes(acc, time.Now()) {
+					webSynced++
+				} else if webError == "" {
+					webError = acc.GrokWebSyncError
+				}
+			}
 		}
 	}
-	writeJSON(w, map[string]interface{}{"counts": counts})
+	writeJSON(w, map[string]interface{}{"counts": counts, "web_synced": webSynced, "web_sync_error": webError})
 }

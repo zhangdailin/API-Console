@@ -52,6 +52,7 @@ func ValidateProxyConfig(cfg *Config) error {
 		{"proxy_url", cfg.ProxyURL},
 		{"proxy_http", cfg.ProxyHTTP},
 		{"proxy_https", cfg.ProxyHTTPS},
+		{"grok_web_proxy_url", cfg.GrokWebProxyURL},
 	}
 	for _, field := range fields {
 		if strings.TrimSpace(field.raw) == "" {

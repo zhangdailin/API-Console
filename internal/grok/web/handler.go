@@ -111,9 +111,38 @@ func (h *Handler) SetConfig(cfg *config.Config) {
 	}
 	client := New(cfg)
 	h.runtimeMu.Lock()
+	previous := h.cfg
 	h.cfg = cfg
 	h.client = client
 	h.runtimeMu.Unlock()
+	if webTransportKey(previous) != webTransportKey(cfg) {
+		// A new proxy or clearance can make grok.com reachable: retry the Web
+		// accounts that have not synced instead of waiting out their backoff.
+		maintenanceAttempts.Clear()
+		go h.resyncUnsynced()
+	}
+}
+
+// resyncUnsynced re-reads the Web accounts without a current observation.
+func (h *Handler) resyncUnsynced() {
+	if h == nil || h.lb == nil || h.lb.Store == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	accounts, err := h.lb.Store.ListAccounts(ctx)
+	if err != nil {
+		return
+	}
+	pending := make([]*store.Account, 0, len(accounts))
+	for _, acc := range accounts {
+		if IsWebAccount(acc) && acc.Enabled && store.AccountAuthActive(acc) && !accountObservesRoutes(acc, time.Now()) {
+			pending = append(pending, acc)
+		}
+	}
+	if len(pending) > 0 {
+		h.refreshAccounts(ctx, pending)
+	}
 }
 
 func (h *Handler) configSnapshot() *config.Config {

@@ -47,6 +47,7 @@ const CONFIG_TRACKED_FIELDS = [
   "cfg_proxy_bypass",
   "cfg_grok_low_latency",
   "cfg_grok_clearance_mode",
+  "cfg_grok_web_proxy_url",
   "cfg_grok_cf_clearance",
   "cfg_grok_flaresolverr_url",
 ];
@@ -227,6 +228,7 @@ function applyConfigurationPayload(cfg) {
   const lowLatency = document.getElementById("cfg_grok_low_latency");
   if (lowLatency) lowLatency.checked = cfg.grok_low_latency === true;
   setConfigControlValue("cfg_grok_clearance_mode", cfg.grok_clearance_mode || "manual");
+  setConfigControlValue("cfg_grok_web_proxy_url", cfg.grok_web_proxy_url || "");
   setConfigControlValue("cfg_grok_cf_clearance", cfg.grok_cf_clearance || "");
   setConfigControlValue("cfg_grok_flaresolverr_url", cfg.grok_flaresolverr_url || "");
   syncAllToggleStates();
@@ -264,6 +266,7 @@ async function saveConfiguration() {
     data.grok_clearance_mode = document.getElementById("cfg_grok_clearance_mode").value || "manual";
     data.grok_cf_clearance = document.getElementById("cfg_grok_cf_clearance").value.trim();
     data.grok_flaresolverr_url = document.getElementById("cfg_grok_flaresolverr_url").value.trim();
+    data.grok_web_proxy_url = document.getElementById("cfg_grok_web_proxy_url")?.value.trim() || "";
   }
 	const password = document.getElementById("cfg_admin_pass").value;
 	if (password.trim()) data.admin_password = password;

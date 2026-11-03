@@ -251,7 +251,8 @@
     showToast(`正在${label}…`, "info");
     try {
       const result = await ConsoleAPI.json(path, ConsoleAPI.jsonOptions("POST", { account_ids: ids }));
-      showToast(`${label}完成：成功 ${result.ok || 0}，失败 ${result.failed || 0}`, result.failed ? "error" : "success");
+      const firstError = (Array.isArray(result.results) ? result.results : []).find((item) => !item.success && item.error)?.error;
+      showToast(`${label}完成：成功 ${result.ok || 0}，失败 ${result.failed || 0}${firstError ? `（${firstError}）` : ""}`, result.failed ? "error" : "success");
     } catch (err) {
       showToast(`${label}失败: ${err.message || err}`, "error");
     } finally {

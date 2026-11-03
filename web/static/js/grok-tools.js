@@ -221,8 +221,19 @@
       return;
     }
     banner.classList.add("is-warning");
+    if (grokCapabilityState.counts.web > 0 && !grokCapabilityState.webSynced) {
+      // The account exists; what is missing is a successful grok.com quota
+      // read, which is what publishes the Web models.
+      title.textContent = "Grok Web 账号尚未同步成功";
+      const reason = grokCapabilityState.webSyncError ? `原因：${grokCapabilityState.webSyncError}。` : "";
+      text.textContent = `已有 ${grokCapabilityState.counts.web} 个 Web 账号，但还没有成功读取 grok.com 额度，Web 模型暂未发布。${reason}在账号管理点「同步 SSO 额度」重试，完成后刷新本页。`;
+      action.textContent = "去同步账号";
+      action.classList.remove("hidden");
+      return;
+    }
     title.textContent = tab === "chat" ? "对话需要可用的 Grok 账号" : `${labels[tab]}需要 Grok Web 账号`;
     text.textContent = `当前状态：${summary}。添加匹配账号后即可使用此功能。`;
+    action.textContent = "添加所需账号";
     action.classList.remove("hidden");
   }
 
@@ -242,6 +253,8 @@
         counts[provider] = count;
       }
       grokCapabilityState.counts = counts;
+      grokCapabilityState.webSynced = Number(payload?.web_synced || 0);
+      grokCapabilityState.webSyncError = String(payload?.web_sync_error || "");
       grokCapabilityState.failed = false;
     } catch (err) {
       grokCapabilityState.failed = true;

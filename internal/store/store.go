@@ -126,6 +126,11 @@ type Account struct {
 	// GrokWebQuota stores the Web SSO quota windows returned by the upstream
 	// rate-limits endpoint.
 	GrokWebQuota GrokWebQuotaSnapshot `json:"grok_web_quota,omitempty"`
+	// GrokWebSyncAt is the last identity/quota sync attempt of a Web account,
+	// and GrokWebSyncError why it failed (empty after a successful sync). The
+	// error is operator text with credentials removed.
+	GrokWebSyncAt    time.Time `json:"grok_web_sync_at,omitempty"`
+	GrokWebSyncError string    `json:"grok_web_sync_error,omitempty"`
 	// GrokModels is the last successful account-specific upstream /v1/models
 	// capability snapshot. An empty snapshot means not synced yet, not that the
 	// account supports every model.

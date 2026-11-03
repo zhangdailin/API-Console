@@ -878,7 +878,11 @@ function grokWebWindowMarkup(label, quotaWindow) {
 
 function buildQuotaMarkup(acc, quota = getQuotaStats(acc)) {
   if (quota && quota.grokWeb) {
-    if (quota.unsynced) return `<span style="color:#94a3b8">未同步</span> <span style="color:#64748b;font-size:0.75rem">(点刷新读取 grok.com 额度)</span>`;
+    if (quota.unsynced) {
+      const syncError = String(acc?.grok_web_sync_error || "").trim();
+      if (syncError) return `<span style="color:#fb7185" title="${escapeHtml(syncError)}">同步失败</span> <div style="color:#64748b;font-size:0.75rem;white-space:normal">${escapeHtml(syncError)}</div>`;
+      return `<span style="color:#94a3b8">未同步</span> <span style="color:#64748b;font-size:0.75rem">(点刷新读取 grok.com 额度)</span>`;
+    }
     return grokWebWindowMarkup("Auto", quota.auto) + grokWebWindowMarkup("Fast", quota.fast);
   }
   if (quota && quota.confirmedFree) {
