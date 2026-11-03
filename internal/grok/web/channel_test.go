@@ -110,9 +110,17 @@ func TestPublishRoutesIsScopedToTheWebPlane(t *testing.T) {
 	testutil.Equal(t, row.Provider, ProviderWeb)
 	testutil.True(t, row.Verified)
 	testutil.True(t, row.SupportsCapability(store.CapabilityChat))
+	testutil.True(t, row.SupportsCapability(store.CapabilityResponses))
+	// The grok channel refuses /messages for Web models, so the row must not
+	// advertise it.
+	testutil.False(t, row.SupportsCapability(store.CapabilityMessages))
 	image, err := st.GetModelByChannelAndModelID(ctx, "grok", "grok-imagine-image")
 	testutil.NoError(t, err)
 	testutil.True(t, image.SupportsCapability(store.CapabilityImage))
+	testutil.False(t, image.SupportsCapability(store.CapabilityImageEdit))
+	edit, err := st.GetModelByChannelAndModelID(ctx, "grok", "grok-imagine-image-edit")
+	testutil.NoError(t, err)
+	testutil.True(t, edit.SupportsCapability(store.CapabilityImageEdit))
 
 	// Without an observing account the Web plane publishes nothing; the Build
 	// row is another plane's and survives.

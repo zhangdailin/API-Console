@@ -99,6 +99,17 @@ func NewHandler(cfg *config.Config, lb *loadbalancer.LoadBalancer) *Handler {
 		instanceID:  instanceID,
 		auditLogger: audit.NewNopLogger(),
 	}
+	if lb != nil && lb.Store != nil {
+		// Re-derive the published Web rows from the stored observations, so a
+		// route-metadata change reaches rows published by an earlier build.
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+			if err := PublishRoutes(ctx, lb.Store); err != nil {
+				slog.Warn("grok web route publication at startup failed", "error", err)
+			}
+		}()
+	}
 	return h
 }
 
