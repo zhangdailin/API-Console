@@ -152,6 +152,9 @@
     if (!grokCapabilityState.loaded || grokCapabilityState.failed) return true;
     const counts = grokCapabilityState.counts;
     if (tab === "cache") return true;
+    // LiveKit uses the Web account's token endpoint, independently of the
+    // inference model catalog and its realtime/TTS/STT capabilities.
+    if (tab === "voice") return counts.web > 0;
     if (chatState.modelsLoaded) return chatState.capabilities[tab] === true;
     if (tab === "chat") return counts.build + counts.web + counts.console > 0;
     return chatState.capabilities[tab] || counts.web + counts.console > 0;
@@ -182,6 +185,7 @@
       }
       control.dataset.capabilityBlocked = blocked ? "true" : "false";
       if (blocked) control.title = `${tab === "chat" ? "对话" : tab === "imagine" ? "图片生成" : tab === "video" ? "视频生成" : "语音对话"}缺少可用账号`;
+      else control.removeAttribute("title");
     });
   }
 
