@@ -120,7 +120,6 @@ func (h *Handler) responsesPayloadFromChat(spec ModelSpec, req *chatwire.Request
 		if strings.TrimSpace(req.PromptCacheKey) != "" {
 			payload["prompt_cache_key"] = strings.TrimSpace(req.PromptCacheKey)
 		}
-		applyDefaultBuildSearch(payload)
 		if err := normalizeBuildResponsesPayload(payload); err != nil {
 			return nil, err
 		}

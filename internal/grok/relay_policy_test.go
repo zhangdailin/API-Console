@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"maps"
 	"net/http"
 	"net/http/httptest"
 	"orchids-api/internal/chatwire"
@@ -97,18 +96,12 @@ func TestRelayNativeContextAndUpstreamDecisions(t *testing.T) {
 			// Session keys are tenant-scoped routing metadata; content is not.
 			testutil.NotEqual(t, chatwire.ParseLooseStringAny(received["prompt_cache_key"]), "")
 			received["prompt_cache_key"] = payload["prompt_cache_key"]
-			expected := maps.Clone(payload)
-			if tc.path == "/responses" {
-				// Hosted web and X search are on by default; compaction is not a
-				// generation turn and is relayed untouched.
-				expected["tools"] = []any{map[string]any{"type": "web_search"}, map[string]any{"type": "x_search"}}
-			}
-			if !reflect.DeepEqual(received, expected) {
-				for key, want := range expected {
+			if !reflect.DeepEqual(received, payload) {
+				for key, want := range payload {
 					testutil.CheckFalsef(t, !reflect.DeepEqual(received[key], want), "request field %q changed", key)
 				}
 				for key := range received {
-					_, ok := expected[key]
+					_, ok := payload[key]
 					testutil.CheckFalsef(t, !ok, "unexpected request field %q", key)
 				}
 			}

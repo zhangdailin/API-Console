@@ -72,6 +72,5 @@ func TestHandleResponses_ProxiesBuildOAuthNatively(t *testing.T) {
 	testutil.Equal(t, received["previous_response_id"], "resp_previous")
 	metadata, _ := received["metadata"].(map[string]any)
 	testutil.Equal(t, metadata["trace"], "keep")
-	// The caller's function plus the default hosted web and X search.
-	testutil.Equal(t, len(responses.InterfaceSlice(received["tools"])), 3)
+	testutil.Equal(t, len(responses.InterfaceSlice(received["tools"])), 1)
 }
