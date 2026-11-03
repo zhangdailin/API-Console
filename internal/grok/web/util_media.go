@@ -732,7 +732,8 @@ func isAppChatImageLimitResponse(resp map[string]interface{}) bool {
 		stringAtAnyPath(response, []string{"modelResponse", "message"}),
 	} {
 		lower := strings.ToLower(msg)
-		if strings.Contains(lower, "image generation limit") || strings.Contains(lower, "try again later") {
+		if strings.Contains(lower, "image generation limit") || strings.Contains(lower, "try again later") ||
+			strings.Contains(lower, "media generation credits") {
 			return true
 		}
 	}

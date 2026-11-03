@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"orchids-api/internal/store"
@@ -24,6 +25,10 @@ type WebRefreshResult struct {
 	IdentityErr error
 	Quota       map[string]*RateLimitInfo
 	QuotaErr    error
+	// Weekly is the paid weekly pool; WeeklyErr is not a sync failure on its
+	// own (the endpoint is optional to the rate-limit windows).
+	Weekly    WeeklyCredits
+	WeeklyErr error
 
 	// AuthRejected is true only after the same surface rejects the credential
 	// twice. A non-authentication error on the second attempt is not a credential
@@ -50,6 +55,11 @@ func ProbeWebAccount(ctx context.Context, client *Client, token string, opts Web
 	result.Quota = quota
 	result.QuotaErr = quotaErr
 	result.AuthRejected = quotaErr != nil && IsAuthenticationFailure(quotaErr)
+	if !result.AuthRejected {
+		weeklyCtx, cancel := refreshStepContext(ctx, opts.QuotaTimeout)
+		result.Weekly, result.WeeklyErr = client.GetWeeklyCredits(weeklyCtx, token)
+		cancel()
+	}
 	return result
 }
 
@@ -100,4 +110,19 @@ func ApplyWebRefresh(acc *store.Account, result WebRefreshResult) {
 	if result.QuotaErr == nil && result.Quota != nil {
 		ApplyWebQuotaInfo(acc, result.Quota)
 	}
+	if result.WeeklyErr == nil {
+		acc.GrokWebQuota.Weekly = weeklyWindow(result.Weekly)
+		// The weekly pool proves a paid plan even when the window counts are a
+		// shape the tier table does not know.
+		if result.Weekly.Paid && subscriptionRank[strings.ToLower(strings.TrimSpace(acc.Subscription))] < subscriptionRank["lite"] {
+			acc.Subscription = "lite"
+		}
+	}
+}
+
+func refreshStepContext(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, timeout)
 }

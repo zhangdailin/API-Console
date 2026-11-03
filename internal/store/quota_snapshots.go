@@ -43,6 +43,9 @@ type GrokQuotaWindow struct {
 	HasRemaining bool      `json:"has_remaining,omitempty"`
 	HasUsage     bool      `json:"has_usage,omitempty"`
 	ResetAt      time.Time `json:"reset_at"`
+	// WindowSeconds is the rolling window length the upstream reported, when
+	// it reports one (Grok Web rate-limits: 86400 for Free, 7200 for paid).
+	WindowSeconds int64 `json:"window_seconds,omitempty"`
 }
 
 // GrokBillingSnapshot stores official Build weekly/monthly windows only.
@@ -109,8 +112,11 @@ type GrokRateLimitSnapshot struct {
 // mode may be unavailable for a given account, so each window carries its own
 // presence markers and the snapshot can represent a partial response.
 type GrokWebQuotaSnapshot struct {
-	Auto     GrokQuotaWindow `json:"auto,omitempty"`
-	Fast     GrokQuotaWindow `json:"fast,omitempty"`
+	Auto GrokQuotaWindow `json:"auto,omitempty"`
+	Fast GrokQuotaWindow `json:"fast,omitempty"`
+	// Weekly is the paid shared weekly pool (GetGrokCreditsConfig). Only paid
+	// accounts report a usage rate; Free accounts leave it empty.
+	Weekly   GrokQuotaWindow `json:"weekly,omitempty"`
 	SyncedAt time.Time       `json:"synced_at,omitempty"`
 	Source   string          `json:"source,omitempty"`
 }

@@ -883,7 +883,10 @@ function buildQuotaMarkup(acc, quota = getQuotaStats(acc)) {
       if (syncError) return `<span style="color:#fb7185" title="${escapeHtml(syncError)}">同步失败</span> <div style="color:#64748b;font-size:0.75rem;white-space:normal">${escapeHtml(syncError)}</div>`;
       return `<span style="color:#94a3b8">未同步</span> <span style="color:#64748b;font-size:0.75rem">(点刷新读取 grok.com 额度)</span>`;
     }
-    return grokWebWindowMarkup("Auto", quota.auto) + grokWebWindowMarkup("Fast", quota.fast);
+    const weekly = quota.weekly
+      ? `<div><span style="color:#64748b;font-size:0.75rem">周额度</span> <span style="color:${quota.weekly.remaining <= 0 ? "#fb7185" : quota.weekly.remaining <= 30 ? "#f59e0b" : "#34d399"}">已用 ${Math.round(100 - quota.weekly.remaining)}%</span><span style="color:#64748b;font-size:0.75rem">${quota.weekly.resetAt ? " · " + formatQuotaReset(quota.weekly.resetAt) : ""}</span></div>`
+      : "";
+    return weekly + grokWebWindowMarkup("Auto", quota.auto) + grokWebWindowMarkup("Fast", quota.fast);
   }
   if (quota && quota.confirmedFree) {
     // A real Free window reported by the upstream is a balance, not an estimate, so it

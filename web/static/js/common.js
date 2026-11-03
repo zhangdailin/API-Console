@@ -83,13 +83,14 @@ function getQuotaStats(acc) {
     // grok.com reports two request windows (auto, fast); auto is the headline.
     const auto = grokWebWindow(acc.grok_web_quota?.auto);
     const fast = grokWebWindow(acc.grok_web_quota?.fast);
+    const weekly = grokWebWindow(acc.grok_web_quota?.weekly);
     const head = auto || fast;
     if (!head) return { ...empty, grokWeb: true, unsynced: true, note: String(acc.quota_note || "").trim() };
     return {
       supported: true, limit: head.limit, remaining: head.remaining,
       used: Math.max(0, head.limit - head.remaining),
       pctRemaining: head.limit > 0 ? Math.min(100, Math.round((head.remaining / head.limit) * 100)) : 100,
-      grokWeb: true, auto, fast, resetAt: head.resetAt,
+      grokWeb: true, auto, fast, weekly, resetAt: head.resetAt,
     };
   }
   if (isSidebarGrokOAuthAccount(acc)) {

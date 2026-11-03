@@ -68,11 +68,12 @@ func quotaWindowFromRateLimitInfo(info *RateLimitInfo) store.GrokQuotaWindow {
 		return store.GrokQuotaWindow{}
 	}
 	window := store.GrokQuotaWindow{
-		Limit:        float64(info.Limit),
-		Remaining:    float64(info.Remaining),
-		HasLimit:     info.HasLimit,
-		HasRemaining: info.HasRemaining,
-		ResetAt:      info.ResetAt,
+		Limit:         float64(info.Limit),
+		Remaining:     float64(info.Remaining),
+		HasLimit:      info.HasLimit,
+		HasRemaining:  info.HasRemaining,
+		ResetAt:       info.ResetAt,
+		WindowSeconds: info.WindowSeconds,
 	}
 	if info.HasLimit && info.Limit > 0 && info.HasRemaining {
 		used := info.Limit - info.Remaining
@@ -141,9 +142,17 @@ func inferSubscriptionFromRateLimitInfo(info *RateLimitInfo) string {
 // tier the upstream uses for it. The tiers repeat across modes with different
 // numbers, which is why the mode has to travel with the limit.
 var webQuotaTierShapes = map[string]map[int64]string{
-	"auto": {7: "basic", 20: "basic", 50: "super", 150: "heavy"},
-	"fast": {30: "basic", 140: "super", 400: "heavy"},
+	"auto": {7: "basic", 20: "basic", 25: "lite", 50: "super", 150: "heavy"},
+	"fast": {30: "basic", 70: "lite", 140: "super", 400: "heavy"},
 }
+
+// Web rate-limit windows also differ in length by plan: Free accounts get a
+// 24-hour window, paid plans a 2-hour one. When the counts are a shape the
+// table does not know, the length still says whether the account is paid.
+const (
+	webFreeWindowSeconds = 86400
+	webPaidWindowSeconds = 7200
+)
 
 // subscriptionRank orders the pools from least to most privileged. Lite is an
 // explicit local tier (set by the admin API), never inferred from a window.
@@ -170,6 +179,15 @@ func inferSubscriptionFromWebQuota(windows map[string]*RateLimitInfo) string {
 			candidate = "heavy"
 		} else if tier, ok := webQuotaTierShapes[mode][info.Limit]; ok {
 			candidate = tier
+		}
+		if candidate == "" && mode != "heavy" {
+			switch info.WindowSeconds {
+			case webFreeWindowSeconds:
+				candidate = "basic"
+			case webPaidWindowSeconds:
+				// Paid, plan unknown: the lowest paid pool is the safe choice.
+				candidate = "lite"
+			}
 		}
 		if candidate == "" {
 			continue

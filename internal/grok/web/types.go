@@ -617,6 +617,8 @@ type RateLimitInfo struct {
 	HasRemaining bool
 	ResetAt      time.Time
 	Unit         string
+	// WindowSeconds is the upstream windowSizeSeconds, when present.
+	WindowSeconds int64
 }
 
 const (

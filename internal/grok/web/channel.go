@@ -201,7 +201,7 @@ func ProjectQuota(fields map[string]any, acc *store.Account) {
 		return
 	}
 	fields["quota_synced_at"] = quota.SyncedAt
-	windows := map[string]store.GrokQuotaWindow{"auto": quota.Auto, "fast": quota.Fast}
+	windows := map[string]store.GrokQuotaWindow{"auto": quota.Auto, "fast": quota.Fast, "weekly": quota.Weekly}
 	web := map[string]any{}
 	for name, window := range windows {
 		if !window.HasLimit && !window.HasRemaining {
@@ -235,7 +235,7 @@ func webPlanTier(acc *store.Account) string {
 	switch strings.ToLower(strings.TrimSpace(acc.Subscription)) {
 	case "", "unknown":
 		return "unknown"
-	case "basic", "free", "lite":
+	case "basic", "free":
 		return "free"
 	default:
 		return "paid"

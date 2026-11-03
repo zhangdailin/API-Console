@@ -626,8 +626,15 @@ func (c *Client) appChatImagePayload(spec ModelSpec, prompt, _ string, _ int) ma
 	if message != "" && !strings.HasPrefix(strings.ToLower(message), "drawing:") {
 		message = "Drawing: " + message
 	}
-	payload := c.chatPayload(spec, message, false, 2)
+	// grok.com refuses image-model fields (modelName grok-imagine-image-lite,
+	// modelTier, requestModelDetails) for Free accounts with "Grok is under
+	// heavy usage"; a plain fast-mode chat with image generation enabled is
+	// what the web app sends, and it draws from the fast quota every plan has.
+	_ = spec
+	chat := ModelSpec{ID: "grok-chat-fast", UpstreamModel: "grok-chat-fast", ModelMode: "MODEL_MODE_FAST", ModeID: "fast", Tier: grokTierBasic}
+	payload := c.chatPayload(chat, message, false, 2)
 	payload["modeId"] = "fast"
+	payload["enableImageGeneration"] = true
 	payload["imageGenerationCount"] = 2
 	return payload
 }

@@ -92,6 +92,9 @@ func parseRateLimitPayload(payload map[string]interface{}) *RateLimitInfo {
 	if info == nil {
 		return nil
 	}
+	if n, ok := parseNumberAny(payload["windowSizeSeconds"]); ok && n > 0 {
+		info.WindowSeconds = n
+	}
 	return info
 }
 
