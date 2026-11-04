@@ -52,7 +52,7 @@ func (h *Handler) buildImageEditPayloadFromInputs(ctx context.Context, token str
 	refs := make([]imageEditReference, 0, len(inputs))
 	assets := make([]string, 0, len(inputs))
 	for _, input := range inputs {
-		fileID, _, err := h.uploadSingleInput(ctx, token, input)
+		fileID, err := h.uploadImageEditInput(ctx, token, input)
 		if err != nil {
 			return nil, fmt.Errorf("image upload failed: %w", err)
 		}

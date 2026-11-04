@@ -436,7 +436,12 @@ func (h *Handler) collectAppChatImageURLs(ctx context.Context, sess *chatAccount
 		urls = normalizeGeneratedImageURLs(urls, 0)
 		if len(urls) == 0 && imageLimitHit {
 			err := fmt.Errorf("grok upstream status=429 body=image generation limit reached")
-			h.markAccountStatus(ctx, sess.acc, err)
+			if sess.acc != nil && sess.acc.GrokWebQuota.Weekly.HasLimit {
+				// Paid: the weekly pool is spent; the account still chats.
+				h.noteMediaExhausted(ctx, sess.acc, mediaLite)
+			} else {
+				h.markAccountStatus(ctx, sess.acc, err)
+			}
 			if !allowSwitch || sess == nil || i == maxAttempts-1 {
 				return nil, err
 			}
@@ -445,7 +450,7 @@ func (h *Handler) collectAppChatImageURLs(ctx context.Context, sess *chatAccount
 					excludedAccountIDs = append(excludedAccountIDs, sess.acc.ID)
 				}
 				sess.Close()
-				next, switchErr := h.openChatAccountSessionExcludingWithPools(ctx, excludedAccountIDs, sess.poolCandidates)
+				next, switchErr := h.openChatAccountSessionForModelExcluding(ctx, excludedAccountIDs, spec)
 				if switchErr != nil {
 					// The switch failed, so the upgrade-limit error above is the one
 					// the client acts on — but the pool's reason must not vanish: it is

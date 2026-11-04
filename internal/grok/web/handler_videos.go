@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -601,10 +602,19 @@ func (h *Handler) runVideoCreateJob(ctx context.Context, job *videoJob, spec Mod
 	// can take minutes and the 429 cooldown may clear while we wait.
 	var sess *chatAccountSession
 	var sessErr error
+	resolution := ""
+	if cfg != nil {
+		resolution = cfg.ResolutionName
+	}
+	ctx = withMediaProduct(ctx, mediaProductFor(spec, resolution))
 	for attempt := 0; attempt < 10; attempt++ {
 		sess, sessErr = h.openChatAccountSessionForModel(ctx, spec)
 		if sessErr == nil {
 			break
+		}
+		var media *mediaUnavailableError
+		if errors.As(sessErr, &media) {
+			break // waiting does not restore a spent media allowance
 		}
 		time.Sleep(2 * time.Second)
 	}

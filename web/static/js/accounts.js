@@ -867,6 +867,21 @@ function accountIdentityPrimary(acc) {
 }
 
 // buildQuotaMarkup renders the remaining allowance for every channel.
+// grokWebMediaMarkup summarizes the per-product Imagine allowance: what the
+// account can still spend on images, edits and videos.
+function grokWebMediaMarkup(imagine) {
+  if (!imagine || !imagine.synced_at || String(imagine.synced_at).startsWith("0001")) return "";
+  const part = (label, value) => {
+    if (!value || value.known !== true) return "";
+    if (value.available !== true) return `${label} <span style="color:#94a3b8">${value.metered ? "0" : "无"}</span>`;
+    if (value.metered !== true) return `${label} <span style="color:#34d399">周池</span>`;
+    const n = Number(value.remaining || 0);
+    return `${label} <span style="color:${n > 0 ? "#34d399" : "#fb7185"}">${n}</span>`;
+  };
+  const parts = [part("出图", imagine.image_pro), part("改图", imagine.image_edit), part("视频", imagine.video), part("720p", imagine.video_720p)].filter(Boolean);
+  return parts.length ? `<div style="color:#64748b;font-size:0.75rem">${parts.join(" · ")}</div>` : "";
+}
+
 function grokWebWindowMarkup(label, quotaWindow) {
   if (!quotaWindow) return "";
   const pct = quotaWindow.limit > 0 ? Math.round((quotaWindow.remaining / quotaWindow.limit) * 100) : 100;
@@ -886,7 +901,7 @@ function buildQuotaMarkup(acc, quota = getQuotaStats(acc)) {
     const weekly = quota.weekly
       ? `<div><span style="color:#64748b;font-size:0.75rem">周额度</span> <span style="color:${quota.weekly.remaining <= 0 ? "#fb7185" : quota.weekly.remaining <= 30 ? "#f59e0b" : "#34d399"}">已用 ${Math.round(100 - quota.weekly.remaining)}%</span><span style="color:#64748b;font-size:0.75rem">${quota.weekly.resetAt ? " · " + formatQuotaReset(quota.weekly.resetAt) : ""}</span></div>`
       : "";
-    return weekly + grokWebWindowMarkup("Auto", quota.auto) + grokWebWindowMarkup("Fast", quota.fast);
+    return weekly + grokWebWindowMarkup("Auto", quota.auto) + grokWebWindowMarkup("Fast", quota.fast) + grokWebMediaMarkup(acc?.grok_web_quota?.imagine);
   }
   if (quota && quota.confirmedFree) {
     // A real Free window reported by the upstream is a balance, not an estimate, so it

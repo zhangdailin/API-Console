@@ -209,6 +209,9 @@ func ProjectQuota(fields map[string]any, acc *store.Account) {
 		}
 		web[name] = window
 	}
+	if !quota.Imagine.SyncedAt.IsZero() {
+		web["imagine"] = quota.Imagine
+	}
 	if len(web) > 0 {
 		fields["grok_web_quota"] = web
 	}

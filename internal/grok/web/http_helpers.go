@@ -109,6 +109,9 @@ func writeGrokUpstreamError(w http.ResponseWriter, err error) {
 	if err == nil {
 		err = errors.New("upstream request failed")
 	}
+	if writeMediaUnavailable(w, err) {
+		return
+	}
 	if !isUpstreamFailure(err) {
 		// A local validation error (missing field, bad multipart part, storage
 		// failure) is the caller's own bad request: it keeps its precise message

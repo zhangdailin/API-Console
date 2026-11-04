@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -69,8 +70,22 @@ func classifyGrokPoolFailure(err error, fallbackCode, fallbackMessage string) gr
 // upstream_unavailable) — but a pool that is merely cooling down or spent is a
 // retryable capacity condition, and that is what the client is told.
 func writeGrokNoAccountError(w http.ResponseWriter, err error) {
+	if writeMediaUnavailable(w, err) {
+		return
+	}
 	answer := classifyGrokPoolFailure(err, "upstream_unavailable", grokModelAccountUnavailableMessage)
 	writeGrokErrorCode(w, answer.status, answer.code, answer.message)
+}
+
+// writeMediaUnavailable answers a media request no account has allowance for
+// with 429 and the reason, instead of the generic pool sentence.
+func writeMediaUnavailable(w http.ResponseWriter, err error) bool {
+	var media *mediaUnavailableError
+	if !errors.As(err, &media) {
+		return false
+	}
+	writeGrokErrorCode(w, http.StatusTooManyRequests, "media_quota_exhausted", media.message)
+	return true
 }
 
 // carriesPoolReason reports whether a selector error names why the pool is empty,

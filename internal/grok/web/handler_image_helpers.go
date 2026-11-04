@@ -331,19 +331,19 @@ func (h *Handler) collectImageChatURLs(ctx context.Context, w http.ResponseWrite
 		if len(callURLs) == 0 && limitHit {
 			// This account's media allowance is spent: park it and try the
 			// request on another account before giving up.
-			limitErr := fmt.Errorf("grok upstream status=429 body=image generation limit reached (media generation credits used up)")
-			h.markAccountStatus(ctx, sess.acc, limitErr)
+			h.noteMediaExhausted(ctx, sess.acc, mediaImageEdit)
 			if sess.acc != nil && sess.acc.ID != 0 {
 				excluded = append(excluded, sess.acc.ID)
 			}
 			if switches >= 3 || rebuildPayload == nil {
-				writeGrokErrorCode(w, http.StatusTooManyRequests, "rate_limit", "所有可用 Grok Web 账号的图片额度已用完，请稍后再试")
+				writeGrokErrorCode(w, http.StatusTooManyRequests, "media_quota_exhausted", h.mediaUnavailableMessage(ctx, mediaImageEdit))
 				return nil, false
 			}
 			sess.Close()
-			next, switchErr := h.openChatAccountSessionExcludingWithPools(ctx, excluded, sess.poolCandidates)
+			editSpec, _ := ResolveModel("grok-imagine-image-edit")
+			next, switchErr := h.openChatAccountSessionForModelExcluding(ctx, excluded, editSpec)
 			if switchErr != nil {
-				writeGrokErrorCode(w, http.StatusTooManyRequests, "rate_limit", "所有可用 Grok Web 账号的图片额度已用完，请稍后再试")
+				writeGrokNoAccountError(w, switchErr)
 				return nil, false
 			}
 			sess.acc, sess.token, sess.poolCandidates, sess.release = next.acc, next.token, next.poolCandidates, next.release

@@ -116,9 +116,33 @@ type GrokWebQuotaSnapshot struct {
 	Fast GrokQuotaWindow `json:"fast,omitempty"`
 	// Weekly is the paid shared weekly pool (GetGrokCreditsConfig). Only paid
 	// accounts report a usage rate; Free accounts leave it empty.
-	Weekly   GrokQuotaWindow `json:"weekly,omitempty"`
-	SyncedAt time.Time       `json:"synced_at,omitempty"`
-	Source   string          `json:"source,omitempty"`
+	Weekly GrokQuotaWindow `json:"weekly,omitempty"`
+	// Imagine is the per-product media allowance (/rest/media/imagine/quota_info).
+	Imagine  GrokImagineQuota `json:"imagine,omitempty"`
+	SyncedAt time.Time        `json:"synced_at,omitempty"`
+	Source   string           `json:"source,omitempty"`
+}
+
+// GrokMediaWindow is one Imagine product's allowance. Known false means the
+// product was never observed; Available false means the plan does not offer
+// it. Metered false on an available product means it draws from the paid
+// weekly pool instead of a per-product counter.
+type GrokMediaWindow struct {
+	Known         bool      `json:"known,omitempty"`
+	Available     bool      `json:"available,omitempty"`
+	Metered       bool      `json:"metered,omitempty"`
+	Remaining     int64     `json:"remaining,omitempty"`
+	WindowSeconds int64     `json:"window_seconds,omitempty"`
+	ResetAt       time.Time `json:"reset_at"`
+}
+
+// GrokImagineQuota is the media allowance of a Grok Web account by product.
+type GrokImagineQuota struct {
+	ImagePro  GrokMediaWindow `json:"image_pro,omitempty"`
+	ImageEdit GrokMediaWindow `json:"image_edit,omitempty"`
+	Video     GrokMediaWindow `json:"video,omitempty"`
+	Video720p GrokMediaWindow `json:"video_720p,omitempty"`
+	SyncedAt  time.Time       `json:"synced_at,omitempty"`
 }
 
 // GrokFreeQuotaSnapshot is the Free allowance window the upstream CONFIRMED by

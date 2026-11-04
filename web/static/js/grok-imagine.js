@@ -4,11 +4,14 @@
   const STORAGE_KEY = "grok_tools_ui_v1";
   let imageModels = [];
 
+  // Quality tiers, as grok2api names them: 快速 is the lite model (a fast
+  // chat every plan can use), 标准 the Imagine model, 高质量 Imagine 2.0.
   function qualityModels() {
     const ids = imageModels.map((item) => String(item?.id || "")).filter(Boolean);
-    const basic = ids.find((id) => /(?:lite|fast)$/i.test(id)) || ids[0] || "";
-    const quality = ids.find((id) => /(?:2\.0|quality)$/i.test(id)) || ids.find((id) => id !== basic) || basic;
-    return { basic, lite: basic, quality };
+    const lite = ids.find((id) => /image-lite$/i.test(id)) || ids[0] || "";
+    const basic = ids.find((id) => /^grok-imagine-image$/i.test(id)) || lite;
+    const quality = ids.find((id) => /image-2\.0$/i.test(id)) || basic;
+    return { basic, lite, quality };
   }
 
   const state = {
@@ -175,7 +178,7 @@
     }
   }
 
-  async function requestImageEdit(prompt, ratio, model, quality, signal) {
+  async function requestImageEdit(prompt, ratio, model, quality, signal, count = 1) {
     const inputs = state.editFileIDs.map((file_id) => ({ file_id }));
     for (const url of editURLInputs()) inputs.push({ url });
     if (!inputs.length) throw new Error("请上传或填写至少一张编辑素材");
@@ -189,18 +192,16 @@
         model: "grok-imagine-image-edit",
         prompt,
         images: inputs,
-        n: 1,
+        n: Math.max(1, Math.min(2, count)),
         aspect_ratio: ratio,
         size: sizeForRatio(ratio),
-        resolution: $("imagineResolution")?.value || "1k",
-        quality,
         response_format: "url",
       }),
     });
     if (!res.ok) throw new Error(await res.text());
-    const image = extractImageValue(await res.json());
-    if (!image) throw new Error("no image generated");
-    return image;
+    const images = extractImageValues(await res.json());
+    if (!images.length) throw new Error("no image generated");
+    return images;
   }
 
   function authHeaders() {
@@ -386,8 +387,13 @@
   }
 
   function extractImageValue(data) {
-    const item = Array.isArray(data?.data) ? data.data[0] : null;
-    return String(item?.url || item?.b64_json || item?.base64 || item?.b64 || "");
+    return extractImageValues(data)[0] || "";
+  }
+
+  function extractImageValues(data) {
+    return (Array.isArray(data?.data) ? data.data : [])
+      .map((item) => String(item?.url || item?.b64_json || item?.base64 || item?.b64 || ""))
+      .filter(Boolean);
   }
 
   async function createTask(prompt, ratio, model, route, nsfw, signal) {
@@ -449,125 +455,92 @@
       lower.includes("no image generated");
   }
 
-  async function requestImage(prompt, ratio, model, quality, nsfw, signal) {
-    if (imageOperation() === "edit") return requestImageEdit(prompt, ratio, model, quality, signal);
-    if (normalizeQuality(quality) === "basic" || document.getElementById("imagineModel")?.value) {
-      const res = await fetch(`${inferencePrefix()}/images/generations`, {
-        method: "POST",
-        headers: inferenceHeaders({ "Content-Type": "application/json" }),
-        signal,
-        body: JSON.stringify({
-          model: String(model || "").trim() || "grok-imagine-image-lite",
-          prompt,
-          n: 1,
-          aspect_ratio: ratio,
-          size: sizeForRatio(ratio),
-          response_format: "url",
-          nsfw,
-          ...(document.getElementById("imagineModel")?.value ? { resolution: document.getElementById("imagineResolution")?.value || "1k" } : {}),
-        }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
-      const image = extractImageValue(data);
-      if (!image) throw new Error("no image generated");
-      return image;
-    }
-    const route = "ws";
-    const taskID = await createTask(prompt, ratio, model, route, nsfw, signal);
-    return await new Promise((resolve, reject) => {
-      let settled = false;
-      let lastError = "";
-      let cleanup = () => {
-        try {
-          es.close();
-        } catch (err) {
-          // ignore
-        }
-        stopTasks([taskID]);
-      };
-      const finish = (fn, value) => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        fn(value);
-      };
-      const url = `/api/grok/admin/imagine/sse?task_id=${encodeURIComponent(taskID)}&t=${Date.now()}`;
-      const es = new EventSource(url);
-      const abort = () => finish(reject, new DOMException("aborted", "AbortError"));
-      if (signal) {
-        if (signal.aborted) {
-          abort();
-          return;
-        }
-        signal.addEventListener("abort", abort, { once: true });
-      }
-      const timeout = window.setTimeout(() => {
-        finish(reject, new Error(lastError || "image generation timed out"));
-      }, 150000);
-      const originalCleanup = cleanup;
-      cleanup = () => {
-        window.clearTimeout(timeout);
-        if (signal) signal.removeEventListener("abort", abort);
-        originalCleanup();
-      };
-      es.onmessage = (event) => {
-        try {
-          const payload = JSON.parse(event.data);
-          const image = imageFromImagineEvent(payload);
-          if (image) {
-            finish(resolve, image);
-            return;
-          }
-          if (payload?.type === "error" || payload?.error) {
-            const message = String(payload.message || payload.error?.message || payload.error || "");
-            lastError = message || lastError;
-            if (!isRetryableImagineError(message)) {
-              finish(reject, new Error(message || "image generation failed"));
-            }
-          }
-        } catch (err) {
-          // ignore malformed SSE frames
-        }
-      };
-      es.onerror = () => {
-        if (settled) return;
-        lastError = lastError || "image stream disconnected";
-      };
+  // One upstream call yields two images, so a request asks for up to two and
+  // fills two slots: asking one at a time doubled the upstream calls and ran
+  // into the per-minute limit. Every tier goes through /images/generations,
+  // where the server picks an account that still has the tier's allowance.
+  async function requestImages(prompt, ratio, model, quality, nsfw, signal, count = 1) {
+    if (imageOperation() === "edit") return requestImageEdit(prompt, ratio, model, quality, signal, count);
+    const chosen = String(model || "").trim() || "grok-imagine-image-lite";
+    const res = await fetch(`${inferencePrefix()}/images/generations`, {
+      method: "POST",
+      headers: inferenceHeaders({ "Content-Type": "application/json" }),
+      signal,
+      body: JSON.stringify({
+        model: chosen,
+        prompt,
+        n: Math.max(1, Math.min(2, count)),
+        aspect_ratio: ratio,
+        size: sizeForRatio(ratio),
+        response_format: "url",
+        nsfw,
+        ...(chosen !== "grok-imagine-image-lite" ? { resolution: document.getElementById("imagineResolution")?.value || "1k" } : {}),
+      }),
     });
+    if (!res.ok) throw new Error(await res.text());
+    const images = extractImageValues(await res.json());
+    if (!images.length) throw new Error("no image generated");
+    return images;
   }
 
-  async function runSlot(batch, slot, prompt, ratio, model, quality, nsfw, signal) {
+  async function runSlots(batch, slots, prompt, ratio, model, quality, nsfw, signal) {
     let tick = 0;
     const timer = window.setInterval(() => {
       tick += 1;
-      setSlotProgress(slot, Math.min(92, 8 + tick * 7));
+      slots.forEach((slot) => setSlotProgress(slot, Math.min(92, 8 + tick * 7)));
     }, 900);
     try {
-      const image = await requestImage(prompt, ratio, model, quality, nsfw, signal);
-      finishSlot(slot, image, { prompt });
-      batch.ready += 1;
+      const images = await requestImages(prompt, ratio, model, quality, nsfw, signal, slots.length);
+      slots.forEach((slot, index) => {
+        if (images[index]) {
+          finishSlot(slot, images[index], { prompt });
+          batch.ready += 1;
+        } else {
+          failSlot(slot, "未返回");
+          batch.failed += 1;
+        }
+      });
       updateBatch(batch, false);
-      return true;
+      return slots.map((_, index) => Boolean(images[index]));
     } catch (err) {
-      failSlot(slot, signal?.aborted ? "已停止" : "失败");
-      batch.failed += 1;
+      const exhausted = String(err?.message || "").includes("media_quota_exhausted");
+      if (exhausted) batch.quotaExhausted = true;
+      const reason = signal?.aborted ? "已停止" : (exhausted ? "额度用完" : "失败");
+      slots.forEach((slot) => failSlot(slot, reason));
+      batch.failed += slots.length;
       updateBatch(batch, false);
-      return false;
+      if (!signal?.aborted && err?.message && !batch.errorShown) {
+        batch.errorShown = true;
+        toast(readableImageError(err.message), "error");
+      }
+      return slots.map(() => false);
     } finally {
       window.clearInterval(timer);
+    }
+  }
+
+  function readableImageError(message) {
+    try {
+      const parsed = JSON.parse(message);
+      return parsed?.error?.message || message;
+    } catch (_) {
+      return String(message || "").slice(0, 200);
     }
   }
 
   async function runBatch(batch, prompt, ratio, model, quality, nsfw, signal) {
     const results = new Array(batch.slots.length).fill(false);
     let cursor = 0;
-    const workers = Array.from({ length: Math.min(PARALLELISM, batch.slots.length) }, async () => {
+    const workers = Array.from({ length: Math.min(PARALLELISM, Math.ceil(batch.slots.length / 2)) }, async () => {
       while (cursor < batch.slots.length) {
         if (signal?.aborted) break;
         const index = cursor;
-        cursor += 1;
-        results[index] = await runSlot(batch, batch.slots[index], prompt, ratio, model, quality, nsfw, signal);
+        cursor += 2;
+        const slots = batch.slots.slice(index, index + 2);
+        const outcome = await runSlots(batch, slots, prompt, ratio, model, quality, nsfw, signal);
+        outcome.forEach((ok, offset) => { results[index + offset] = ok; });
+        // A spent allowance does not come back within the batch.
+        if (batch.quotaExhausted) break;
       }
     });
     await Promise.all(workers);

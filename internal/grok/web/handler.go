@@ -608,10 +608,28 @@ func (h *Handler) openChatAccountSessionForModel(ctx context.Context, spec Model
 }
 
 func (h *Handler) openChatAccountSessionForModelExcluding(ctx context.Context, excludeIDs []int64, spec ModelSpec) (*chatAccountSession, error) {
-	return h.openChatAccountSessionExcludingWithPoolsAndFilter(ctx, excludeIDs, spec.PoolCandidates(), func(acc *store.Account) bool {
-		return h.routeAllowsAccount(ctx, spec.ID, acc.ID)
+	product := mediaProductFromContext(ctx)
+	if product == mediaNone {
+		product = mediaProductFor(spec, "")
+	}
+	sess, err := h.openChatAccountSessionExcludingWithPoolsAndFilter(ctx, excludeIDs, spec.PoolCandidates(), func(acc *store.Account) bool {
+		return h.routeAllowsAccount(ctx, spec.ID, acc.ID) && mediaAllowed(acc, product, time.Now())
 	})
+	if err != nil && product != mediaNone {
+		return nil, &mediaUnavailableError{message: h.mediaUnavailableMessage(ctx, product), cause: err}
+	}
+	return sess, err
 }
+
+// mediaUnavailableError is the selection failure of a media request: no
+// account has the product's allowance left. It answers 429 with the reason.
+type mediaUnavailableError struct {
+	message string
+	cause   error
+}
+
+func (e *mediaUnavailableError) Error() string { return e.message }
+func (e *mediaUnavailableError) Unwrap() error { return e.cause }
 
 func (h *Handler) openChatAccountSessionForImagineLite(ctx context.Context, excludeIDs []int64, spec ModelSpec) (*chatAccountSession, error) {
 	spec.Tier = grokTierLite

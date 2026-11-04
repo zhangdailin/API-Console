@@ -29,6 +29,9 @@ type WebRefreshResult struct {
 	// own (the endpoint is optional to the rate-limit windows).
 	Weekly    WeeklyCredits
 	WeeklyErr error
+	// Imagine is the per-product media allowance.
+	Imagine    store.GrokImagineQuota
+	ImagineErr error
 
 	// AuthRejected is true only after the same surface rejects the credential
 	// twice. A non-authentication error on the second attempt is not a credential
@@ -58,6 +61,9 @@ func ProbeWebAccount(ctx context.Context, client *Client, token string, opts Web
 	if !result.AuthRejected {
 		weeklyCtx, cancel := refreshStepContext(ctx, opts.QuotaTimeout)
 		result.Weekly, result.WeeklyErr = client.GetWeeklyCredits(weeklyCtx, token)
+		cancel()
+		imagineCtx, cancel := refreshStepContext(ctx, opts.QuotaTimeout)
+		result.Imagine, result.ImagineErr = client.GetImagineQuota(imagineCtx, token)
 		cancel()
 	}
 	return result
@@ -109,6 +115,9 @@ func ApplyWebRefresh(acc *store.Account, result WebRefreshResult) {
 	}
 	if result.QuotaErr == nil && result.Quota != nil {
 		ApplyWebQuotaInfo(acc, result.Quota)
+	}
+	if result.ImagineErr == nil {
+		acc.GrokWebQuota.Imagine = result.Imagine
 	}
 	if result.WeeklyErr == nil {
 		acc.GrokWebQuota.Weekly = weeklyWindow(result.Weekly)
