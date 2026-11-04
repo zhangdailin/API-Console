@@ -185,7 +185,8 @@
       headers: inferenceHeaders({ "Content-Type": "application/json" }),
       signal,
       body: JSON.stringify({
-        model: String(model || "").trim() || "grok-imagine-image",
+        // Edits are served by the dedicated edit route whatever tier is picked.
+        model: "grok-imagine-image-edit",
         prompt,
         images: inputs,
         n: 1,

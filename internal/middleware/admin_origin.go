@@ -1,11 +1,23 @@
 package middleware
 
 import (
+	"context"
 	"mime"
 	"net/http"
 	"net/url"
 	"strings"
 )
+
+type multipartAdminWriteKey struct{}
+
+// AllowMultipartAdminWrite marks an admin route that accepts file uploads, so
+// a cookie-authenticated write may carry multipart/form-data besides JSON. The
+// same-origin proof is still required: it is what stops a cross-site form.
+func AllowMultipartAdminWrite(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		next(w, r.WithContext(context.WithValue(r.Context(), multipartAdminWriteKey{}, true)))
+	}
+}
 
 // CheckAdminCookieWrite requires an explicit same-origin proof for browser
 // mutations. Header-authenticated clients do not rely on ambient credentials.
@@ -26,7 +38,8 @@ func CheckAdminCookieWrite(w http.ResponseWriter, r *http.Request) bool {
 	}
 	if r.Body != nil && (r.ContentLength != 0 || r.Header.Get("Content-Type") != "") {
 		media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-		if err != nil || !strings.EqualFold(media, "application/json") {
+		multipartAllowed, _ := r.Context().Value(multipartAdminWriteKey{}).(bool)
+		if err != nil || !(strings.EqualFold(media, "application/json") || multipartAllowed && strings.EqualFold(media, "multipart/form-data")) {
 			http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
 			return false
 		}

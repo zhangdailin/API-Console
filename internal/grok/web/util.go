@@ -19,6 +19,7 @@ import (
 
 	"encoding/json"
 
+	"orchids-api/internal/config"
 	"orchids-api/internal/util"
 )
 
@@ -432,6 +433,9 @@ func fetchRemoteAsDataURI(rawURL string, timeout time.Duration, proxyFunc func(*
 	if err != nil {
 		return "", err
 	}
+	// Many image hosts and CDNs refuse Go's default client identity.
+	req.Header.Set("User-Agent", config.DefaultGrokWebUserAgent)
+	req.Header.Set("Accept", "image/*, video/*;q=0.9, */*;q=0.8")
 	req = req.WithContext(ctx)
 	resp, err := client.Do(req)
 	if err != nil {

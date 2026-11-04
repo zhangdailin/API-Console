@@ -370,7 +370,8 @@
                     <label class="field-label" for="videoAction">操作</label>
                     <select id="videoAction" class="form-input"><option value="generate">生成</option><option value="edit">编辑</option><option value="extend">延长</option></select>
                   </div>
-                  <div class="settings-block ref-block">
+                  <p class="hint video-web-text-only">Grok Web 目前只支持文字生成视频，不支持首帧图或参考图（与 grok2api 一致）。</p>
+                  <div class="settings-block ref-block" hidden>
                     <label class="field-label" for="videoImageUrl">参考图 URL</label>
                     <div class="ref-controls">
                       <input id="videoImageUrl" class="form-input" placeholder="https://... 或 data:image/...">
@@ -379,12 +380,12 @@
                       <span id="videoImageFileName" class="ref-name">未选择文件</span>
                     </div>
                   </div>
-                  <div class="settings-block upload-block">
+                  <div class="settings-block upload-block" hidden>
                     <label class="field-label" for="videoImageFileInput">参考图文件</label>
                     <button class="btn btn-outline" id="videoSelectImageBtn" type="button">上传</button>
                     <input id="videoImageFileInput" class="ref-file-input" type="file" accept="image/*">
                   </div>
-                  <div class="settings-block clear-block">
+                  <div class="settings-block clear-block" hidden>
                     <span class="field-label">&nbsp;</span>
                     <button class="btn btn-outline" id="videoClearImageBtn" type="button">清除</button>
                   </div>

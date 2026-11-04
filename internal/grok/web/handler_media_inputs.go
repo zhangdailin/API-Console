@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"orchids-api/internal/config"
 	"orchids-api/internal/store"
 )
 
@@ -613,7 +614,8 @@ func fetchAdminMediaInput(ctx context.Context, rawURL string) ([]byte, string, e
 		return nil, "", err
 	}
 	request.Header.Set("Accept", "image/*, video/*")
-	request.Header.Set("User-Agent", "orchids-media-importer/1.0")
+	// Many image hosts and CDNs refuse non-browser client identities.
+	request.Header.Set("User-Agent", config.DefaultGrokWebUserAgent)
 	response, err := client.Do(request)
 	if err != nil {
 		if errors.Is(err, errRemoteFetchBlocked) {

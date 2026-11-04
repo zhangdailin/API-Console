@@ -303,15 +303,23 @@ func (h *Handler) collectImageChatURLs(ctx context.Context, w http.ResponseWrite
 		callsNeeded = 1
 	}
 	var urls []string
-	for i := 0; i < callsNeeded; i++ {
+	excluded := make([]int64, 0, 4)
+	for i, switches := 0, 0; i < callsNeeded; i++ {
 		resp, err := h.doChatWithAutoSwitchRebuild(ctx, sess, rawPayload, rebuildPayload)
 		if err != nil {
 			writeGrokUpstreamError(w, err)
 			return nil, false
 		}
 		h.syncGrokQuota(sess.acc, resp.Header)
+		// The edit stream echoes the uploaded inputs; they are not results.
+		inputs := imageEditInputAssets(*rawPayload)
+		limitHit := false
+		var callURLs []string
 		err = parseUpstreamLines(resp.Body, func(line map[string]interface{}) error {
-			urls = appendImageResultURLs(urls, line)
+			if isAppChatImageLimitResponse(line) {
+				limitHit = true
+			}
+			callURLs = appendImageResultURLs(callURLs, line)
 			return nil
 		})
 		resp.Body.Close()
@@ -319,6 +327,37 @@ func (h *Handler) collectImageChatURLs(ctx context.Context, w http.ResponseWrite
 			writeGrokUpstreamError(w, err)
 			return nil, false
 		}
+		callURLs = withoutInputAssets(callURLs, inputs)
+		if len(callURLs) == 0 && limitHit {
+			// This account's media allowance is spent: park it and try the
+			// request on another account before giving up.
+			limitErr := fmt.Errorf("grok upstream status=429 body=image generation limit reached (media generation credits used up)")
+			h.markAccountStatus(ctx, sess.acc, limitErr)
+			if sess.acc != nil && sess.acc.ID != 0 {
+				excluded = append(excluded, sess.acc.ID)
+			}
+			if switches >= 3 || rebuildPayload == nil {
+				writeGrokErrorCode(w, http.StatusTooManyRequests, "rate_limit", "所有可用 Grok Web 账号的图片额度已用完，请稍后再试")
+				return nil, false
+			}
+			sess.Close()
+			next, switchErr := h.openChatAccountSessionExcludingWithPools(ctx, excluded, sess.poolCandidates)
+			if switchErr != nil {
+				writeGrokErrorCode(w, http.StatusTooManyRequests, "rate_limit", "所有可用 Grok Web 账号的图片额度已用完，请稍后再试")
+				return nil, false
+			}
+			sess.acc, sess.token, sess.poolCandidates, sess.release = next.acc, next.token, next.poolCandidates, next.release
+			rebuilt, rebuildErr := rebuildPayload(sess.token)
+			if rebuildErr != nil {
+				writeGrokUpstreamError(w, rebuildErr)
+				return nil, false
+			}
+			*rawPayload = rebuilt
+			switches++
+			i--
+			continue
+		}
+		urls = append(urls, callURLs...)
 	}
 	urls = normalizeGeneratedImageURLs(urls, n)
 	if len(urls) == 0 {
@@ -326,6 +365,46 @@ func (h *Handler) collectImageChatURLs(ctx context.Context, w http.ResponseWrite
 		return nil, false
 	}
 	return urls, true
+}
+
+// imageEditInputAssets returns the asset IDs an edit request uploaded.
+func imageEditInputAssets(payload map[string]interface{}) []string {
+	media, _ := payload["mediaGenInput"].(map[string]interface{})
+	edit, _ := media["imageToImage"].(map[string]interface{})
+	var out []string
+	switch assets := edit["inputAssets"].(type) {
+	case []string:
+		out = append(out, assets...)
+	case []interface{}:
+		for _, value := range assets {
+			if id, ok := value.(string); ok {
+				out = append(out, id)
+			}
+		}
+	}
+	return out
+}
+
+// withoutInputAssets drops the URLs that point at one of the request's own
+// uploaded inputs.
+func withoutInputAssets(urls, inputs []string) []string {
+	if len(inputs) == 0 {
+		return urls
+	}
+	out := urls[:0]
+	for _, value := range urls {
+		echoed := false
+		for _, id := range inputs {
+			if id = strings.TrimSpace(id); id != "" && strings.Contains(value, id) {
+				echoed = true
+				break
+			}
+		}
+		if !echoed {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func (h *Handler) cacheMediaBytes(rawURL, mediaType string, data []byte, mimeType string) (string, error) {

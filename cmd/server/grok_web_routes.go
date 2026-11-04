@@ -60,16 +60,20 @@ func registerGrokWebAdminRoutes(mux *http.ServeMux, sessionAuth func(http.Handle
 	toolRoute := func(path string, next http.HandlerFunc) {
 		mux.HandleFunc(toolsPrefix+path, sessionAuth(withAdminToolsOwner(asGrokChannel(withToolsLinks(next)))))
 	}
+	// File-upload routes accept multipart/form-data from the admin session.
+	uploadToolRoute := func(path string, next http.HandlerFunc) {
+		mux.HandleFunc(toolsPrefix+path, middleware.AllowMultipartAdminWrite(sessionAuth(withAdminToolsOwner(asGrokChannel(withToolsLinks(next))))))
+	}
 	toolRoute("/models", h.HandleModels)
 	toolRoute("/chat/completions", grokHandler.HandleChatCompletions)
 	toolRoute("/responses", grokHandler.HandleResponses)
 	toolRoute("/responses/", grokHandler.HandleResponseResource)
 	toolRoute("/images/generations", webHandler.HandleImagesGenerations)
-	toolRoute("/images/edits", webHandler.HandleImagesEdits)
+	uploadToolRoute("/images/edits", webHandler.HandleImagesEdits)
 	toolRoute("/videos", webHandler.HandleVideosCreate)
 	toolRoute("/videos/", webVideoResource(webHandler))
 	toolRoute("/files/", webHandler.HandleFiles)
-	toolRoute("/media/inputs", webHandler.HandleMediaInputs)
+	uploadToolRoute("/media/inputs", webHandler.HandleMediaInputs)
 	toolRoute("/media/inputs/import", webHandler.HandleMediaInputImport)
 	toolRoute("/media/inputs/", webHandler.HandleMediaInputResource)
 
@@ -109,6 +113,10 @@ func registerGrokWebAdminRoutes(mux *http.ServeMux, sessionAuth func(http.Handle
 		{"/video/sse", webHandler.HandleAdminVideoSSE},
 	}
 	for _, route := range adminRoutes {
-		mux.HandleFunc("/api/grok/admin"+route.path, sessionAuth(withAdminToolsOwner(withToolsLinks(route.handler))))
+		handler := sessionAuth(withAdminToolsOwner(withToolsLinks(route.handler)))
+		if route.path == "/media/inputs/upload" {
+			handler = middleware.AllowMultipartAdminWrite(handler)
+		}
+		mux.HandleFunc("/api/grok/admin"+route.path, handler)
 	}
 }

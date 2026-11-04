@@ -325,6 +325,12 @@ func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
 	if !requireAPIKeyModel(w, r, model) {
 		return
 	}
+	// Grok Web edits through one route. A client that names a generation
+	// model (the tools page names the one its quality tier selected) means an
+	// edit of the supplied images, so it is served by the edit route.
+	if generation, known := ResolveModel(model); known && generation.IsImage && !isImageEditModel(model) {
+		model = "grok-imagine-image-edit"
+	}
 	spec, ok := ResolveModel(model)
 	if !isImageEditModel(model) {
 		writeGrokError(w, http.StatusBadRequest, "image edit model must be grok-imagine-image-edit")
