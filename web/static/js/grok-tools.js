@@ -3278,8 +3278,9 @@
     resolution.disabled = !generate;
     const length = document.getElementById("videoLength");
     const range = constraints.lengths?.[action.value];
-    length.min = Number(range?.min ?? (consoleRoute ? (action.value === "extend" ? 2 : 1) : 6));
-    length.max = Number(range?.max ?? (consoleRoute ? (action.value === "extend" ? 10 : 15) : 30));
+    // Grok Web accepts 1–15 seconds (Free accounts are capped at 6 server-side).
+    length.min = Number(range?.min ?? (consoleRoute ? (action.value === "extend" ? 2 : 1) : 1));
+    length.max = Number(range?.max ?? (consoleRoute ? (action.value === "extend" ? 10 : 15) : 15));
     length.disabled = action.value === "edit";
   }
 
