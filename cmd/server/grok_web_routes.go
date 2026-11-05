@@ -30,7 +30,7 @@ func webVideoResource(h *web.Handler) http.HandlerFunc {
 // registerGrokWebAdminRoutes mounts the Grok Web management surface: SSO
 // account import and maintenance, and the Grok tools page (Imagine, video,
 // voice, media cache). Everything here sits behind the admin session.
-func registerGrokWebAdminRoutes(mux *http.ServeMux, sessionAuth func(http.HandlerFunc) http.HandlerFunc, h *handler.Handler, grokHandler *grok.Handler) {
+func registerGrokWebAdminRoutes(mux *http.ServeMux, sessionAuth func(http.HandlerFunc) http.HandlerFunc, h *handler.Handler, grokHandler *grok.Handler, flowTracker *middleware.FlowTracker) {
 	webHandler := grokHandler.Web()
 
 	// SSO accounts. Cookies are write-only; responses name accounts by ID.
@@ -58,12 +58,15 @@ func registerGrokWebAdminRoutes(mux *http.ServeMux, sessionAuth func(http.Handle
 			next(w, rewritten)
 		}
 	}
+	// Tools traffic reaches the same upstream accounts as API-key traffic, so
+	// the live flow screen counts it too. The tracker runs after the rewrite:
+	// it reads the provider and protocol from the /grok/v1 path.
 	toolRoute := func(path string, next http.HandlerFunc) {
-		mux.HandleFunc(toolsPrefix+path, sessionAuth(withAdminToolsOwner(asGrokChannel(withToolsLinks(next)))))
+		mux.HandleFunc(toolsPrefix+path, sessionAuth(withAdminToolsOwner(asGrokChannel(flowTracker.Track(withToolsLinks(next))))))
 	}
 	// File-upload routes accept multipart/form-data from the admin session.
 	uploadToolRoute := func(path string, next http.HandlerFunc) {
-		mux.HandleFunc(toolsPrefix+path, middleware.AllowMultipartAdminWrite(sessionAuth(withAdminToolsOwner(asGrokChannel(withToolsLinks(next))))))
+		mux.HandleFunc(toolsPrefix+path, middleware.AllowMultipartAdminWrite(sessionAuth(withAdminToolsOwner(asGrokChannel(flowTracker.Track(withToolsLinks(next)))))))
 	}
 	toolRoute("/models", h.HandleModels)
 	toolRoute("/chat/completions", grokHandler.HandleChatCompletions)

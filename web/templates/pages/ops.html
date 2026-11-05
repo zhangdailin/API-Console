@@ -122,7 +122,7 @@
             </section>
           </section>
           <aside class="flow-side" aria-label="实时关键指标">
-            <div class="flow-hero flow-stat-qps"><span>请求速率 · 近 5 秒</span><p><strong id="flowTotal-qps">—</strong><span>req/s</span></p><small id="flowHeroNote">等待实时采样</small></div>
+            <div class="flow-hero flow-stat-qps"><span>请求速率 · 近 60 秒</span><p><strong id="flowTotal-qps">—</strong><span>req/s</span></p><small id="flowHeroNote">等待实时采样</small></div>
             <div class="flow-summary">
               <div class="flow-stat flow-stat-active"><span>进行中</span><p><strong id="flowTotal-active">—</strong><span>个</span></p></div>
               <div class="flow-stat flow-stat-tps"><span>输出速率 · 上游上报</span><p><strong id="flowTotal-tps">—</strong><span>tok/s</span></p></div>
@@ -141,13 +141,13 @@
               </div><p id="flowQualityNote">尚未收到数据</p></section>
           </aside>
         </div>
-        <footer class="flow-footnote"><span>带宽 = 近 5 秒请求速率（无流量时按进行中请求）；光点为汇总活动示意，不是逐请求或逐 Token 回放</span><button type="button" id="flowHelpOpen">数据口径与范围 ↗</button></footer>
+        <footer class="flow-footnote"><span>带宽 = 近 60 秒请求速率（无流量时按进行中请求）；光点为汇总活动示意，不是逐请求或逐 Token 回放</span><button type="button" id="flowHelpOpen">数据口径与范围 ↗</button></footer>
         <dialog class="flow-drawer" id="flowDrawer" aria-labelledby="opsFlowDetailTitle">
           <div class="flow-drawer-head"><div><span class="flow-eyebrow">TRAFFIC INSIGHT</span><h3 id="opsFlowDetailTitle">节点详情</h3></div><button type="button" id="flowDrawerClose" aria-label="关闭节点详情">×</button></div>
           <p id="flowDetailScope" class="flow-detail-scope"></p>
           <div class="flow-detail-tabs" role="tablist" aria-label="详情分类"><button type="button" id="flowTabOverview" role="tab" aria-selected="true" aria-controls="flowOverviewPanel" tabindex="0" data-flow-tab="overview">概览</button><button type="button" id="flowTabDetails" role="tab" aria-selected="false" aria-controls="flowDetailsPanel" tabindex="-1" data-flow-tab="details">详细指标</button></div>
           <div id="flowOverviewPanel" role="tabpanel" aria-labelledby="flowTabOverview"><div id="opsFlowDetailFacts" class="flow-facts"></div></div>
-          <div id="flowDetailsPanel" role="tabpanel" aria-labelledby="flowTabDetails" hidden><div id="flowDetailedFacts" class="flow-facts"></div><details class="flow-definitions"><summary>数据口径与范围</summary><p>当前请求状态和流量仅统计本实例通过鉴权与准入的生成请求。速率为近5秒滚动值；输出 token/s 随上游用量上报更新，不是逐字生成速度。失败与重试按近60秒结束的请求统计，不同原因可能重叠。延迟使用近15分钟结束请求保留的原始样本，每条渠道×协议最多256个；首生成包含推理与工具，可见首字只统计文本，非流式正文 TTFB 独立展示。账号池来自共享容量观测，可能包含其他实例占用；未扣除模型级限制。历史时间选择和模型筛选不改变本图窗口。</p></details></div>
+          <div id="flowDetailsPanel" role="tabpanel" aria-labelledby="flowTabDetails" hidden><div id="flowDetailedFacts" class="flow-facts"></div><details class="flow-definitions"><summary>数据口径与范围</summary><p>当前请求状态和流量仅统计本实例通过鉴权与准入的生成请求（Chat、Responses、Messages），包含 Grok 工具页的对话请求；图片与视频生成不计入。速率为近60秒滚动值；输出 token/s 随上游用量上报更新，不是逐字生成速度。失败与重试按近60秒结束的请求统计，不同原因可能重叠。延迟使用近15分钟结束请求保留的原始样本，每条渠道×协议最多256个；首生成包含推理与工具，可见首字只统计文本，非流式正文 TTFB 独立展示。账号池来自共享容量观测，可能包含其他实例占用；未扣除模型级限制。历史时间选择和模型筛选不改变本图窗口。</p></details></div>
         </dialog>
       </article>
 

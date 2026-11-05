@@ -158,5 +158,5 @@ test('sankey bands follow the request rate and fall back to in-flight requests',
  assert.match(band('cline'),/Z$/);assert.match(band('responses'),/Z$/);
  assert.equal(h.get('opsWire-workbuddy').classList.contains('is-idle'),true);assert.doesNotMatch(band('workbuddy'),/Z$/);
  const idle=snapshot(h.time());idle.routes[4]={...idle.routes[4],qps:0};h.send(idle);await h.settle();
- assert.match(band('cline'),/Z$/,'an in-flight request keeps its band when the 5-second rate is zero');
+ assert.match(band('cline'),/Z$/,'an in-flight request keeps its band when the windowed rate is zero');
 });

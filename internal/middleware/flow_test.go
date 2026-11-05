@@ -75,21 +75,21 @@ func TestFlowRatesUseObservedUsageWithoutDoubleCounting(t *testing.T) {
 		logger := ObserveAuditLogger(nil)
 		logger.Log(r.Context(), audit.Event{Action: "cline_upstream_attempt", Status: "ok", UsageSource: audit.UsageSourceUpstream, InputTokens: 100, OutputTokens: 50})
 		during := tracker.Snapshot("cline").Routes[1]
-		if !during.UsageAvailable || during.QPS != 0.2 || during.TPS != 30 {
+		if !during.UsageAvailable || during.QPS != 1.0/flowRateSeconds || during.TPS != 150.0/flowRateSeconds {
 			t.Fatalf("live usage: %+v", during)
 		}
 		logger.Log(r.Context(), audit.Event{Action: "chat_request", Status: "ok", UsageSource: audit.UsageSourceUpstream, InputTokens: 100, OutputTokens: 50})
 	})(httptest.NewRecorder(), req)
 	route := tracker.Snapshot("cline").Routes[1]
-	if route.InputTokens != 100 || route.OutputTokens != 50 || route.TPS != 30 {
+	if route.InputTokens != 100 || route.OutputTokens != 50 || route.TPS != 150.0/flowRateSeconds {
 		t.Fatalf("repeated final usage was counted twice: %+v", route)
 	}
-	if route.InputTPS != 20 || route.OutputTPS != 10 {
+	if route.InputTPS != 100.0/flowRateSeconds || route.OutputTPS != 50.0/flowRateSeconds {
 		t.Fatalf("input/output rates: %+v", route)
 	}
 	tracker.mu.Lock()
 	for i := range tracker.routes["cline:responses"].buckets {
-		tracker.routes["cline:responses"].buckets[i].second -= 6
+		tracker.routes["cline:responses"].buckets[i].second -= flowRateSeconds + 1
 	}
 	tracker.mu.Unlock()
 	route = tracker.Snapshot("cline").Routes[1]
@@ -188,7 +188,7 @@ func TestFlowSampleBoundAndPooledPercentile(t *testing.T) {
 	}
 	for _, route := range tracker.routes {
 		for i := range route.buckets {
-			route.buckets[i].second -= 61
+			route.buckets[i].second -= flowRateSeconds + 11
 		}
 		for i := range route.samples {
 			if !route.samples[i].at.IsZero() {
@@ -240,7 +240,7 @@ func TestFlowCountsOnlyUpstreamReportedUsage(t *testing.T) {
 				}
 				if source == audit.UsageSourceUpstream {
 					testutil.True(t, route.UsageAvailable)
-					testutil.Equal(t, route.TPS, float64(30))
+					testutil.Equal(t, route.TPS, 150.0/flowRateSeconds)
 				} else {
 					testutil.False(t, route.UsageAvailable)
 					testutil.Equal(t, route.TPS, float64(0))

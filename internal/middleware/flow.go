@@ -50,7 +50,11 @@ type flowBucket struct {
 	phases [5]flowPhase
 }
 
-const flowRateSeconds = 5
+// flowRateSeconds is the rate window. LLM requests are few and long, and a
+// request counts toward the rate when it starts, so a short window read 0
+// for almost the whole life of a streamed answer. It equals the bucket ring
+// (flowWindowSeconds); a longer window would need more buckets.
+const flowRateSeconds = flowWindowSeconds
 
 func (route *flowRouteState) bucket(now time.Time) *flowBucket {
 	second := now.Unix()

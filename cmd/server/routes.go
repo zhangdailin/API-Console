@@ -189,7 +189,7 @@ func registerRoutes(
 	mux.HandleFunc("/api/cline/login/", sessionAuth(apiHandler.HandleClineLogin))
 	mux.HandleFunc("/api/grok/device-auth", sessionAuth(apiHandler.HandleGrokDeviceAuthorization))
 	mux.HandleFunc("/api/grok/device-auth/", sessionAuth(apiHandler.HandleGrokDeviceAuthorization))
-	registerGrokWebAdminRoutes(mux, sessionAuth, h, grokHandler)
+	registerGrokWebAdminRoutes(mux, sessionAuth, h, grokHandler, flowTracker)
 	mux.HandleFunc("/api/keys", sessionAuth(apiHandler.HandleKeys))
 	mux.HandleFunc("/api/keys/", sessionAuth(apiHandler.HandleKeyByID))
 	// POST /api/keys/{id}/reset-usage lands on the same handler, which dispatches

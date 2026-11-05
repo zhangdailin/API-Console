@@ -129,7 +129,7 @@
     }
     setText('flowQualityNote',!metric?'尚未收到数据':metric.completed===0?'近60秒暂无结束请求样本':`${M.number(metric.completed)} 个请求结束 · 失败率 ${M.percent(metric.failure_rate)}${live()?'':' · 上次观测'}`);
   }
-  const overviewLabels={rate:'请求速率 · 近5秒',active:'请求状态 · 当前',usage:'上报用量速率 · 近5秒',total:'实例累计',failure:'失败记录 · 近60秒',accounts:'账号池',capacity:'共享账号池槽位',routes:'关联流量'};
+  const overviewLabels={rate:'请求速率 · 近60秒',active:'请求状态 · 当前',usage:'上报用量速率 · 近60秒',total:'实例累计',failure:'失败记录 · 近60秒',accounts:'账号池',capacity:'共享账号池槽位',routes:'关联流量'};
   const detailLabels={generation:'首生成延迟 · 近15分钟',visible:'可见首字延迟 · 近15分钟',body:'非流式正文 TTFB · 近15分钟',duration:'请求总时长 · 近15分钟',retry:'重试与切号 · 近60秒',wait:'平均等待 · 近60秒',longest:'最长进行时长 · 当前',coverage:'用量上报覆盖 · 近60秒',phases:'HTTP 阶段均值 · 近60秒'};
   function facts(container,labels,target){
     if(!container)return;
@@ -178,7 +178,7 @@
     if(details){const definitions=drawer.querySelector('details');if(definitions)definitions.open=true;}
   }
   function closeDetail(){el('flowDrawer').close();}
-  // Band widths follow the 5-second request rate; with no rate in the window
+  // Band widths follow the 60-second request rate; with no rate in the window
   // they fall back to in-flight requests so long streams stay visible.
   function bandValues(){
     const keys=[...M.protocols,...M.channels],read=field=>Object.fromEntries(keys.map(key=>[key,snapshot&&!outside(key)?M.rate(rows(key))[field]:0]));
