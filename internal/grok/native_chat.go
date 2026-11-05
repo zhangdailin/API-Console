@@ -24,36 +24,6 @@ import (
 	"orchids-api/internal/util"
 )
 
-func chatMessageContentText(content any) string {
-	switch v := content.(type) {
-	case nil:
-		return ""
-	case string:
-		return v
-	case []any:
-		var b strings.Builder
-		for _, part := range v {
-			m, ok := part.(map[string]any)
-			if !ok {
-				continue
-			}
-			t := strings.ToLower(strings.TrimSpace(fmt.Sprint(m["type"])))
-			switch t {
-			case "text", "input_text":
-				if s := strings.TrimSpace(fmt.Sprint(m["text"])); s != "" {
-					if b.Len() > 0 {
-						b.WriteByte('\n')
-					}
-					b.WriteString(s)
-				}
-			}
-		}
-		return b.String()
-	default:
-		return strings.TrimSpace(fmt.Sprint(v))
-	}
-}
-
 func buildToolsFromOpenAI(tools []chatwire.ToolDef) []map[string]any {
 	if len(tools) == 0 {
 		return nil
@@ -884,7 +854,7 @@ func (h *Handler) collectBuildChat(w http.ResponseWriter, req *chatwire.Request,
 		outcome.Usage = upstreamUsage
 		outcome.UsageSource = audit.UsageSourceUpstream
 	} else {
-		outcome.Usage = addReasoningUsage(buildChatUsagePayload(req, text+refusal, toolCalls), reasoning)
+		outcome.Usage = grokbase.AddReasoningUsage(buildChatUsagePayload(req, text+refusal, toolCalls), reasoning)
 		outcome.UsageSource = audit.UsageSourceEstimated
 	}
 	outcome.Finish = finishReason

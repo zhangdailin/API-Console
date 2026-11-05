@@ -2,119 +2,9 @@ package web
 
 import (
 	"encoding/json"
-	"fmt"
-	"strconv"
+	"orchids-api/internal/chatwire"
 	"strings"
 )
-
-func parseLooseBoolAnyForField(value interface{}, field string) (bool, error) {
-	if strings.TrimSpace(field) == "" {
-		field = "value"
-	}
-	errText := field + " must be a boolean"
-	switch v := value.(type) {
-	case nil:
-		return false, nil
-	case bool:
-		return v, nil
-	case string:
-		raw := strings.TrimSpace(v)
-		if raw == "" {
-			return false, nil
-		}
-		switch strings.ToLower(raw) {
-		case "1", "true", "yes", "y", "on":
-			return true, nil
-		case "0", "false", "no", "n", "off":
-			return false, nil
-		default:
-			return false, fmt.Errorf("%s", errText)
-		}
-	case float64:
-		if v == 1 {
-			return true, nil
-		}
-		if v == 0 {
-			return false, nil
-		}
-		return false, fmt.Errorf("%s", errText)
-	default:
-		return false, fmt.Errorf("%s", errText)
-	}
-}
-
-func parseLooseBoolAny(value interface{}) (bool, error) {
-	return parseLooseBoolAnyForField(value, "stream")
-}
-
-func parseLooseIntAny(value interface{}) (int, error) {
-	switch v := value.(type) {
-	case nil:
-		return 0, nil
-	case int:
-		return v, nil
-	case int32:
-		return int(v), nil
-	case int64:
-		return int(v), nil
-	case float64:
-		return int(v), nil
-	case string:
-		raw := strings.TrimSpace(v)
-		if raw == "" {
-			return 0, nil
-		}
-		n, err := strconv.Atoi(raw)
-		if err != nil {
-			return 0, err
-		}
-		return n, nil
-	default:
-		return 0, fmt.Errorf("invalid integer value")
-	}
-}
-
-func parseLooseFloatAny(value interface{}) (*float64, error) {
-	switch v := value.(type) {
-	case nil:
-		return nil, nil
-	case float64:
-		out := v
-		return &out, nil
-	case int:
-		out := float64(v)
-		return &out, nil
-	case int32:
-		out := float64(v)
-		return &out, nil
-	case int64:
-		out := float64(v)
-		return &out, nil
-	case string:
-		raw := strings.TrimSpace(v)
-		if raw == "" {
-			return nil, nil
-		}
-		n, err := strconv.ParseFloat(raw, 64)
-		if err != nil {
-			return nil, err
-		}
-		return &n, nil
-	default:
-		return nil, fmt.Errorf("invalid float value")
-	}
-}
-
-func parseLooseStringAny(value interface{}) string {
-	switch v := value.(type) {
-	case nil:
-		return ""
-	case string:
-		return strings.TrimSpace(v)
-	default:
-		return strings.TrimSpace(fmt.Sprint(v))
-	}
-}
 
 func parseVideoInputReferences(value interface{}) []string {
 	var out []string
@@ -133,7 +23,7 @@ func parseVideoInputReferences(value interface{}) []string {
 			}
 		case map[string]interface{}:
 			for _, key := range []string{"image_url", "url", "data"} {
-				if s := parseLooseStringAny(x[key]); s != "" {
+				if s := chatwire.ParseLooseStringAny(x[key]); s != "" {
 					out = append(out, s)
 					return
 				}
@@ -157,21 +47,21 @@ func (v *VideoConfig) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	videoLength, err := parseLooseIntAny(raw.VideoLength)
+	videoLength, err := chatwire.ParseLooseIntAny(raw.VideoLength)
 	if err != nil {
 		return err
 	}
 	if videoLength == 0 {
-		videoLength, err = parseLooseIntAny(raw.Seconds)
+		videoLength, err = chatwire.ParseLooseIntAny(raw.Seconds)
 		if err != nil {
 			return err
 		}
 	}
-	v.AspectRatio = parseLooseStringAny(raw.AspectRatio)
+	v.AspectRatio = chatwire.ParseLooseStringAny(raw.AspectRatio)
 	v.VideoLength = videoLength
-	v.ResolutionName = parseLooseStringAny(raw.ResolutionName)
-	v.Preset = parseLooseStringAny(raw.Preset)
-	v.Size = parseLooseStringAny(raw.Size)
+	v.ResolutionName = chatwire.ParseLooseStringAny(raw.ResolutionName)
+	v.Preset = chatwire.ParseLooseStringAny(raw.Preset)
+	v.Size = chatwire.ParseLooseStringAny(raw.Size)
 	return nil
 }
 
@@ -185,13 +75,13 @@ func (c *ImageConfig) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	n, err := parseLooseIntAny(raw.N)
+	n, err := chatwire.ParseLooseIntAny(raw.N)
 	if err != nil {
 		return err
 	}
 	c.N = n
-	c.Size = parseLooseStringAny(raw.Size)
-	c.ResponseFormat = parseLooseStringAny(raw.ResponseFormat)
+	c.Size = chatwire.ParseLooseStringAny(raw.Size)
+	c.ResponseFormat = chatwire.ParseLooseStringAny(raw.ResponseFormat)
 	return nil
 }
 
@@ -238,27 +128,27 @@ func (r *ChatCompletionsRequest) UnmarshalJSON(data []byte) error {
 			streamProvided = false
 		}
 	}
-	stream, err := parseLooseBoolAny(raw.Stream)
+	stream, err := chatwire.ParseLooseBoolAny(raw.Stream)
 	if err != nil {
 		return err
 	}
-	temp, err := parseLooseFloatAny(raw.Temperature)
+	temp, err := chatwire.ParseLooseFloatAny(raw.Temperature)
 	if err != nil {
 		return err
 	}
-	topP, err := parseLooseFloatAny(raw.TopP)
+	topP, err := chatwire.ParseLooseFloatAny(raw.TopP)
 	if err != nil {
 		return err
 	}
-	maxTokens, err := parseLooseIntAny(raw.MaxTokens)
+	maxTokens, err := chatwire.ParseLooseIntAny(raw.MaxTokens)
 	if err != nil {
 		return err
 	}
-	maxCompletionTokens, err := parseLooseIntAny(raw.MaxCompletionTokens)
+	maxCompletionTokens, err := chatwire.ParseLooseIntAny(raw.MaxCompletionTokens)
 	if err != nil {
 		return err
 	}
-	parallelToolCalls, err := parseLooseBoolAnyForField(raw.ParallelToolCalls, "parallel_tool_calls")
+	parallelToolCalls, err := chatwire.ParseLooseBoolAnyForField(raw.ParallelToolCalls, "parallel_tool_calls")
 	if err != nil {
 		return err
 	}
@@ -282,7 +172,7 @@ func (r *ChatCompletionsRequest) UnmarshalJSON(data []byte) error {
 		r.MaxTokens = &maxCompletionTokens
 	}
 	r.ResponseFormat = raw.ResponseFormat
-	r.SafetyIdentifier = firstNonEmpty(parseLooseStringAny(raw.SafetyIdentifier), parseLooseStringAny(raw.User))
+	r.SafetyIdentifier = firstNonEmpty(chatwire.ParseLooseStringAny(raw.SafetyIdentifier), chatwire.ParseLooseStringAny(raw.User))
 	r.ResponseText = raw.ResponseText
 	r.ResponsesTools = append([]map[string]interface{}(nil), raw.ResponsesTools...)
 	r.Include = append([]string(nil), raw.Include...)
@@ -293,7 +183,7 @@ func (r *ChatCompletionsRequest) UnmarshalJSON(data []byte) error {
 	if _, ok := rawMap["parallel_tool_calls"]; ok {
 		r.ParallelToolCalls = &parallelToolCalls
 	}
-	r.Stop, err = parseStringList(raw.Stop, "stop")
+	r.Stop, err = chatwire.ParseStringList(raw.Stop, "stop")
 	if err != nil {
 		return err
 	}
@@ -302,27 +192,6 @@ func (r *ChatCompletionsRequest) UnmarshalJSON(data []byte) error {
 	r.OutputConfig = raw.OutputConfig
 	r.ThinkingConfig = raw.ThinkingConfig
 	return nil
-}
-
-func parseStringList(value interface{}, field string) ([]string, error) {
-	switch item := value.(type) {
-	case nil:
-		return nil, nil
-	case string:
-		return []string{item}, nil
-	case []interface{}:
-		out := make([]string, 0, len(item))
-		for _, raw := range item {
-			text, ok := raw.(string)
-			if !ok {
-				return nil, fmt.Errorf("%s must be a string or array of strings", field)
-			}
-			out = append(out, text)
-		}
-		return out, nil
-	default:
-		return nil, fmt.Errorf("%s must be a string or array of strings", field)
-	}
 }
 
 func (r *ImagesGenerationsRequest) UnmarshalJSON(data []byte) error {
@@ -344,7 +213,7 @@ func (r *ImagesGenerationsRequest) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	n, err := parseLooseIntAny(raw.N)
+	n, err := chatwire.ParseLooseIntAny(raw.N)
 	if err != nil {
 		return err
 	}
@@ -356,35 +225,35 @@ func (r *ImagesGenerationsRequest) UnmarshalJSON(data []byte) error {
 	}
 	var partialImages *int
 	if raw.PartialImages != nil {
-		value, err := parseLooseIntAny(raw.PartialImages)
+		value, err := chatwire.ParseLooseIntAny(raw.PartialImages)
 		if err != nil {
 			return err
 		}
 		partialImages = &value
 	}
-	stream, err := parseLooseBoolAny(raw.Stream)
+	stream, err := chatwire.ParseLooseBoolAny(raw.Stream)
 	if err != nil {
 		return err
 	}
 	var nsfw *bool
 	if raw.NSFW != nil {
-		nsfwVal, err := parseLooseBoolAnyForField(raw.NSFW, "nsfw")
+		nsfwVal, err := chatwire.ParseLooseBoolAnyForField(raw.NSFW, "nsfw")
 		if err != nil {
 			return err
 		}
 		nsfw = &nsfwVal
 	}
-	r.Model = parseLooseStringAny(raw.Model)
-	r.Prompt = parseLooseStringAny(raw.Prompt)
+	r.Model = chatwire.ParseLooseStringAny(raw.Model)
+	r.Prompt = chatwire.ParseLooseStringAny(raw.Prompt)
 	r.N = n
 	r.PartialImages = partialImages
-	r.Size = parseLooseStringAny(raw.Size)
-	r.AspectRatio = parseLooseStringAny(raw.AspectRatio)
-	r.Resolution = parseLooseStringAny(raw.Resolution)
-	r.Quality = parseLooseStringAny(raw.Quality)
+	r.Size = chatwire.ParseLooseStringAny(raw.Size)
+	r.AspectRatio = chatwire.ParseLooseStringAny(raw.AspectRatio)
+	r.Resolution = chatwire.ParseLooseStringAny(raw.Resolution)
+	r.Quality = chatwire.ParseLooseStringAny(raw.Quality)
 	r.Stream = stream
 	r.NSFW = nsfw
-	r.ResponseFormat = parseLooseStringAny(raw.ResponseFormat)
+	r.ResponseFormat = chatwire.ParseLooseStringAny(raw.ResponseFormat)
 	r.StorageOptions = append(r.StorageOptions[:0], raw.StorageOptions...)
 	return nil
 }
@@ -408,34 +277,34 @@ func (r *VideosRequest) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	seconds, err := parseLooseIntAny(raw.Seconds)
+	seconds, err := chatwire.ParseLooseIntAny(raw.Seconds)
 	if err != nil {
 		return err
 	}
 	if seconds == 0 {
-		seconds, err = parseLooseIntAny(raw.Duration)
+		seconds, err = chatwire.ParseLooseIntAny(raw.Duration)
 		if err != nil {
 			return err
 		}
 	}
 	if seconds == 0 {
-		seconds, err = parseLooseIntAny(raw.VideoLength)
+		seconds, err = chatwire.ParseLooseIntAny(raw.VideoLength)
 		if err != nil {
 			return err
 		}
 	}
-	r.Model = parseLooseStringAny(raw.Model)
-	r.Prompt = parseLooseStringAny(raw.Prompt)
+	r.Model = chatwire.ParseLooseStringAny(raw.Model)
+	r.Prompt = chatwire.ParseLooseStringAny(raw.Prompt)
 	r.Seconds = seconds
-	r.Size = parseLooseStringAny(raw.Size)
+	r.Size = chatwire.ParseLooseStringAny(raw.Size)
 	if r.Size == "" {
-		r.Size = parseLooseStringAny(raw.AspectRatio)
+		r.Size = chatwire.ParseLooseStringAny(raw.AspectRatio)
 	}
-	r.ResolutionName = parseLooseStringAny(raw.ResolutionName)
+	r.ResolutionName = chatwire.ParseLooseStringAny(raw.ResolutionName)
 	if r.ResolutionName == "" {
-		r.ResolutionName = parseLooseStringAny(raw.Resolution)
+		r.ResolutionName = chatwire.ParseLooseStringAny(raw.Resolution)
 	}
-	r.Preset = parseLooseStringAny(raw.Preset)
+	r.Preset = chatwire.ParseLooseStringAny(raw.Preset)
 	r.InputReferences = parseVideoInputReferences(raw.InputReferences)
 	if len(r.InputReferences) == 0 {
 		r.InputReferences = parseVideoInputReferences(raw.InputReference)

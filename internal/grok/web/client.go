@@ -9,6 +9,7 @@ import (
 
 	"encoding/json"
 
+	"orchids-api/internal/chatwire"
 	"orchids-api/internal/config"
 	"orchids-api/internal/grok/web/egress"
 	"orchids-api/internal/httpclient"
@@ -260,7 +261,7 @@ func (c *Client) doChat(ctx context.Context, token string, payload map[string]in
 // separate from doChat so the transport selector can fall back without
 // recursively calling itself.
 func (c *Client) doRESTChat(ctx context.Context, token string, payload map[string]interface{}) (*http.Response, error) {
-	if err := waitScopedRateLimit(ctx, ProviderWeb, token, parseLooseStringAny(payload["modelName"]), c.cfg.GrokWebRequestsPerSecond()); err != nil {
+	if err := waitScopedRateLimit(ctx, ProviderWeb, token, chatwire.ParseLooseStringAny(payload["modelName"]), c.cfg.GrokWebRequestsPerSecond()); err != nil {
 		return nil, err
 	}
 	body, err := json.Marshal(payload)

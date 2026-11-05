@@ -3,8 +3,8 @@ package grok
 import (
 	"context"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/grok/grokbase"
 	"testing"
-	"time"
 
 	"orchids-api/internal/testutil"
 )
@@ -77,20 +77,16 @@ func TestQualityExpectsReasoning(t *testing.T) {
 }
 
 func TestUnbindAffinityDropsTheSessionBinding(t *testing.T) {
-	h := &Handler{affinity: map[string]sessionAffinityEntry{}}
-	ctx := withGrokSession(context.Background(), grokSessionContext{Key: "session-1", Model: "grok-4.6"})
-	h.sessionMu.Lock()
-	key := affinityMapKey(grokSessionContext{Key: "session-1", Model: "grok-4.6"}, ProviderBuild)
-	h.affinity[key] = sessionAffinityEntry{AccountID: 7, ExpiresAt: time.Now().Add(time.Hour)}
-	h.sessionMu.Unlock()
+	h := &Handler{}
+	ctx := grokbase.WithSession(context.Background(), grokbase.Session{Key: "session-1", Model: "grok-4.6"})
+	h.bindAffinity(ctx, ProviderBuild, 7)
+	testutil.Equal(t, h.affinityAccount(ctx, ProviderBuild), 7)
 
 	h.unbindAffinity(ctx, ProviderBuild, 7)
 
 	testutil.Equal(t, h.affinityAccount(ctx, ProviderBuild), 0)
 	// An unrelated account id must not clear the binding.
-	h.sessionMu.Lock()
-	h.affinity[key] = sessionAffinityEntry{AccountID: 7, ExpiresAt: time.Now().Add(time.Hour)}
-	h.sessionMu.Unlock()
+	h.bindAffinity(ctx, ProviderBuild, 7)
 	h.unbindAffinity(ctx, ProviderBuild, 9)
 	testutil.Equal(t, h.affinityAccount(ctx, ProviderBuild), 7)
 }

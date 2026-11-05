@@ -52,45 +52,12 @@ type ChatCompletionsRequest struct {
 	account           *store.Account
 }
 
-type ChatMessage struct {
-	Role                      string      `json:"role"`
-	Content                   interface{} `json:"content"`
-	ToolCalls                 []ToolCall  `json:"tool_calls,omitempty"`
-	ToolCallID                string      `json:"tool_call_id,omitempty"`
-	Name                      string      `json:"name,omitempty"`
-	ReasoningContent          string      `json:"reasoning_content,omitempty"`
-	ReasoningEncryptedContent string      `json:"reasoning_encrypted_content,omitempty"`
-}
-
-type ToolDef struct {
-	Type     string                 `json:"type"`
-	Function map[string]interface{} `json:"function,omitempty"`
-	// Raw keeps every field of the declaration. Hosted tool types (web_search,
-	// x_search, …) carry their own parameters outside `function`, and dropping
-	// them would silently disable the feature the caller asked for.
-	Raw map[string]interface{} `json:"-"`
-}
-
-// UnmarshalJSON keeps the whole declaration so native (non-function) tools can
-// be forwarded with their own fields intact.
-func (t *ToolDef) UnmarshalJSON(data []byte) error {
-	var raw map[string]interface{}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-	t.Raw = raw
-	t.Type = strings.TrimSpace(parseLooseStringAny(raw["type"]))
-	if fn, ok := raw["function"].(map[string]interface{}); ok {
-		t.Function = fn
-	}
-	return nil
-}
-
-type ToolCall struct {
-	ID       string                 `json:"id,omitempty"`
-	Type     string                 `json:"type,omitempty"`
-	Function map[string]interface{} `json:"function,omitempty"`
-}
+// The message and tool shapes are the shared Chat Completions wire types.
+type (
+	ChatMessage = chatwire.Message
+	ToolDef     = chatwire.ToolDef
+	ToolCall    = chatwire.ToolCall
+)
 
 type VideoConfig struct {
 	AspectRatio    string `json:"aspect_ratio"`
@@ -183,21 +150,10 @@ const (
 
 var grokToolNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
-// nativeToolTypes are the hosted (server-side) tools an OpenAI-compatible
-// client may declare in `tools`. They have no `function` object; they are
-// forwarded to the upstream Responses plane as native tools.
-var nativeToolTypes = map[string]string{
-	"web_search":                    "web_search",
-	"web_search_preview":            "web_search",
-	"web_search_preview_2025_03_11": "web_search",
-	"web_search_2025_08_26":         "web_search",
-	"x_search":                      "x_search",
-}
-
 func validateToolDefinitions(tools []ToolDef) error {
 	seen := make(map[string]struct{}, len(tools))
 	for i, tool := range tools {
-		if normalized, native := nativeToolTypes[strings.ToLower(strings.TrimSpace(tool.Type))]; native {
+		if normalized, native := chatwire.NativeToolTypes[strings.ToLower(strings.TrimSpace(tool.Type))]; native {
 			key := normalized
 			if _, exists := seen[key]; exists {
 				return fmt.Errorf("tools.%d.type duplicates %q", i, normalized)
@@ -255,7 +211,7 @@ func validateWebToolDefinitions(tools []ToolDef) error {
 		if !grokToolNamePattern.MatchString(strings.TrimSpace(tool.Function["name"].(string))) {
 			return fmt.Errorf("tools.%d.function.name must match [A-Za-z0-9_-]{1,64} on Web", i)
 		}
-		if description := strings.TrimSpace(parseLooseStringAny(tool.Function["description"])); len(description) > maxToolDescriptionBytes {
+		if description := strings.TrimSpace(chatwire.ParseLooseStringAny(tool.Function["description"])); len(description) > maxToolDescriptionBytes {
 			return fmt.Errorf("tools.%d.function.description must be at most %d bytes on Web", i, maxToolDescriptionBytes)
 		}
 	}
@@ -269,7 +225,7 @@ func (r *ChatCompletionsRequest) Validate() error {
 	if len(r.Messages) == 0 {
 		return fmt.Errorf("messages is required")
 	}
-	if err := validateChatMessages(r.Messages); err != nil {
+	if err := chatwire.ValidateMessages(r.Messages); err != nil {
 		return err
 	}
 	if err := validateToolDefinitions(r.Tools); err != nil {
@@ -385,24 +341,5 @@ func (r *ChatCompletionsRequest) toolChoiceNameSet() map[string]struct{} {
 	if r == nil {
 		return nil
 	}
-	names := make(map[string]struct{}, len(r.Tools)+len(r.ResponsesTools))
-	for _, tool := range r.Tools {
-		if tool.Function == nil {
-			if normalized, native := nativeToolTypes[strings.ToLower(strings.TrimSpace(tool.Type))]; native {
-				names[normalized] = struct{}{}
-			}
-			continue
-		}
-		if name := strings.TrimSpace(fmt.Sprint(tool.Function["name"])); name != "" && name != "<nil>" {
-			names[name] = struct{}{}
-		}
-	}
-	for _, tool := range r.ResponsesTools {
-		for _, key := range []string{"name", "type"} {
-			if name := strings.TrimSpace(parseLooseStringAny(tool[key])); name != "" {
-				names[name] = struct{}{}
-			}
-		}
-	}
-	return names
+	return chatwire.ToolChoiceNames(r.Tools, r.ResponsesTools)
 }

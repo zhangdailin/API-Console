@@ -32,19 +32,17 @@ const grokModelValidationCacheTTL = 3 * time.Second
 // Imagine images, videos, media inputs, the media cache and the SSO account
 // tools. The parent grok channel dispatches Web models here.
 type Handler struct {
-	base          *grokbase.AccountTracker
-	runtimeMu     sync.RWMutex
-	cfg           *config.Config
-	lb            *loadbalancer.LoadBalancer
-	client        *Client
-	connTracker   loadbalancer.ConnTracker
-	modelCacheMu  sync.RWMutex
-	modelCache    map[string]time.Time
-	sessionMu     sync.Mutex
-	affinityLocks [64]sync.Mutex
-	affinity      map[string]sessionAffinityEntry
-	instanceID    string
-	auditLogger   audit.Logger
+	base         *grokbase.AccountTracker
+	runtimeMu    sync.RWMutex
+	cfg          *config.Config
+	lb           *loadbalancer.LoadBalancer
+	client       *Client
+	connTracker  loadbalancer.ConnTracker
+	modelCacheMu sync.RWMutex
+	modelCache   map[string]time.Time
+	affinity     grokbase.Affinity
+	instanceID   string
+	auditLogger  audit.Logger
 
 	quotaOnce    sync.Once
 	quotaMu      sync.Mutex
@@ -95,7 +93,6 @@ func NewHandler(cfg *config.Config, lb *loadbalancer.LoadBalancer) *Handler {
 		client:      New(cfg),
 		connTracker: loadbalancer.NewMemoryConnTracker(),
 		modelCache:  make(map[string]time.Time),
-		affinity:    make(map[string]sessionAffinityEntry),
 		instanceID:  instanceID,
 		auditLogger: audit.NewNopLogger(),
 	}

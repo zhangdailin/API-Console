@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"orchids-api/internal/chatwire"
 	"os"
 	"sort"
 	"strings"
@@ -104,7 +105,7 @@ func normalizeVideoRequestAliases(req *VideosRequest) {
 		return
 	}
 	if req.Seconds == 0 && len(req.Duration) > 0 {
-		if seconds, err := parseLooseIntAny(req.Duration); err == nil && seconds > 0 {
+		if seconds, err := chatwire.ParseLooseIntAny(req.Duration); err == nil && seconds > 0 {
 			req.Seconds = seconds
 		}
 	}

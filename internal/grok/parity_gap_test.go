@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/grok/grokbase"
 	"strings"
 	"sync"
 	"testing"
@@ -116,7 +117,7 @@ func TestAnthropicAdvancedFieldsAndReasoningReplayArePreserved(t *testing.T) {
 }
 
 func TestReasoningReplayIsModelAndSessionIsolated(t *testing.T) {
-	h := &Handler{affinity: map[string]sessionAffinityEntry{}, replay: map[string]reasoningReplayEntry{}}
+	h := &Handler{replay: map[string]reasoningReplayEntry{}}
 	replayCipher := func(model, key string) string {
 		items := h.loadReasoningReplayItems(model, key)
 		if len(items) != 1 {
@@ -157,7 +158,7 @@ func TestReasoningReplayUsesPortableShapeAndCanBeStripped(t *testing.T) {
 }
 
 func TestNativeReasoningReplayConvertsStringInput(t *testing.T) {
-	h := &Handler{affinity: map[string]sessionAffinityEntry{}, replay: map[string]reasoningReplayEntry{}}
+	h := &Handler{replay: map[string]reasoningReplayEntry{}}
 	h.storeReasoningReplay("grok-4.6", "session", validTestReplayCipher())
 	payload := map[string]any{"input": "continue"}
 	h.applyNativeReasoningReplay("grok-4.6", "session", payload)
@@ -171,10 +172,10 @@ func TestNativeReasoningReplayConvertsStringInput(t *testing.T) {
 func TestPrepareGrokSessionSeparatesTenantsAndSoftReplay(t *testing.T) {
 	reqA := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	reqA.Header.Set("x-session-id", "same-client-session")
-	a := prepareGrokSession(reqA, "grok-4.6", "", []chatwire.Message{{Role: "user", Content: "hello"}})
+	a := grokbase.PrepareSession(reqA, "grok-4.6", "", []chatwire.Message{{Role: "user", Content: "hello"}})
 	testutil.Falsef(t, a.Key == "" || !a.Replay, "explicit session=%#v", a)
-	soft := prepareGrokSession(httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), "grok-4.6", "", []chatwire.Message{{Role: "user", Content: "hello"}})
+	soft := grokbase.PrepareSession(httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), "grok-4.6", "", []chatwire.Message{{Role: "user", Content: "hello"}})
 	testutil.Falsef(t, soft.Key == "" || soft.Replay, "soft session=%#v", soft)
-	otherModel := prepareGrokSession(reqA, "grok-4.5", "", []chatwire.Message{{Role: "user", Content: "hello"}})
+	otherModel := grokbase.PrepareSession(reqA, "grok-4.5", "", []chatwire.Message{{Role: "user", Content: "hello"}})
 	testutil.NotEqual(t, otherModel.Key, a.Key)
 }

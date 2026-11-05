@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/responses"
 
 	"orchids-api/internal/middleware"
@@ -48,10 +49,10 @@ func (h *Handler) HandleResponses(w http.ResponseWriter, r *http.Request) {
 		nativePayload["stream"] = req.Stream
 	}
 	identityMessages, _ := responses.InputToMessagesMode(req.Input, false)
-	session := prepareGrokSession(r, req.Model, req.PromptCacheKey, identityMessages)
+	session := grokbase.PrepareSession(r, req.Model, req.PromptCacheKey, identityMessages)
 	if session.Key != "" {
 		nativePayload["prompt_cache_key"] = session.Key
-		r = r.WithContext(withGrokSession(r.Context(), session))
+		r = r.WithContext(grokbase.WithSession(r.Context(), session))
 		if session.Replay {
 			h.applyNativeReasoningReplay(req.Model, session.Key, nativePayload)
 		}

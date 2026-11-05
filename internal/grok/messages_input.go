@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/responses"
 	"slices"
 	"strings"
@@ -191,7 +192,7 @@ func anthropicResponsesInput(messages []anthropicMessage) ([]any, error) {
 				flush()
 				input = append(input, map[string]any{
 					"type": "function_call", "call_id": chatwire.ParseLooseStringAny(block["id"]),
-					"name": chatwire.ParseLooseStringAny(block["name"]), "arguments": stringifyToolArguments(block["input"]),
+					"name": chatwire.ParseLooseStringAny(block["name"]), "arguments": grokbase.StringifyToolArguments(block["input"]),
 				})
 			case "tool_result":
 				flush()

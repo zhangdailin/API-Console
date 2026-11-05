@@ -13,6 +13,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
+	"orchids-api/internal/chatwire"
 	"orchids-api/internal/config"
 	"orchids-api/internal/debug"
 	"orchids-api/internal/grok/ratelimit"
@@ -200,7 +201,7 @@ func appChatRateLimitRequest(body []byte, headers http.Header) (token, model str
 	}
 	var payload map[string]interface{}
 	if json.Unmarshal(body, &payload) == nil {
-		model = firstNonEmpty(parseLooseStringAny(payload["modelName"]), parseLooseStringAny(payload["model"]))
+		model = firstNonEmpty(chatwire.ParseLooseStringAny(payload["modelName"]), chatwire.ParseLooseStringAny(payload["model"]))
 	}
 	return token, model
 }

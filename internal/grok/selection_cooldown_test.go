@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/grok/ratelimit"
 	"orchids-api/internal/store"
 )
@@ -19,7 +20,7 @@ func TestCLISelectionSkipsSharedCooldownBeforeAttempt(t *testing.T) {
 				server := httptest.NewServer(http.NotFoundHandler())
 				defer server.Close()
 				h, base := parityBuildHandler(t, server)
-				ctx := withGrokSession(context.Background(), grokSessionContext{Key: t.Name(), Model: "grok-4.7"})
+				ctx := grokbase.WithSession(context.Background(), grokbase.Session{Key: t.Name(), Model: "grok-4.7"})
 				var accounts []*store.Account
 				for i := 0; i < 4; i++ {
 					acc := *base

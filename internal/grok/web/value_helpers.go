@@ -3,7 +3,6 @@ package web
 import (
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
 	"net/http"
 	"strings"
 )
@@ -25,19 +24,6 @@ func interfaceMaps(value interface{}) []map[string]interface{} {
 	default:
 		return nil
 	}
-}
-
-func stringifyToolArguments(value interface{}) string {
-	if text, ok := value.(string); ok && strings.TrimSpace(text) != "" {
-		return strings.TrimSpace(text)
-	}
-	if value == nil {
-		return "{}"
-	}
-	if raw, err := json.Marshal(value); err == nil {
-		return string(raw)
-	}
-	return "{}"
 }
 
 func writeResponsesAPIError(w http.ResponseWriter, status int, code, message string) {

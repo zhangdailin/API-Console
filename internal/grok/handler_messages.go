@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/httpserver"
 	"orchids-api/internal/util"
 	"strings"
@@ -109,8 +110,8 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	subReq.ContentLength = int64(len(body))
 
 	if req.Stream {
-		prompt := estimatePromptUsageFromRequest(&chat)
-		inputTokens := prompt.promptTextTokens + prompt.promptAudioTokens + prompt.promptImageTokens
+		prompt := grokbase.EstimatePrompt(chat.Messages, chat.Tools, chat.ToolChoice)
+		inputTokens := prompt.PromptTextTokens + prompt.PromptAudioTokens + prompt.PromptImageTokens
 		h.serveAnthropicMessageStream(w, subReq, req.Model, inputTokens)
 		return
 	}

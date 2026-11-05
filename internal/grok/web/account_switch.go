@@ -3,7 +3,6 @@ package web
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -110,35 +109,5 @@ func (h *Handler) retryWithAccountSwitchLimit(ctx context.Context, sess *chatAcc
 				return nil, err
 			}
 		}
-	}
-}
-
-func chatMessageContentText(content interface{}) string {
-	switch v := content.(type) {
-	case nil:
-		return ""
-	case string:
-		return v
-	case []interface{}:
-		var b strings.Builder
-		for _, part := range v {
-			m, ok := part.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			t := strings.ToLower(strings.TrimSpace(fmt.Sprint(m["type"])))
-			switch t {
-			case "text", "input_text":
-				if s := strings.TrimSpace(fmt.Sprint(m["text"])); s != "" {
-					if b.Len() > 0 {
-						b.WriteByte('\n')
-					}
-					b.WriteString(s)
-				}
-			}
-		}
-		return b.String()
-	default:
-		return strings.TrimSpace(fmt.Sprint(v))
 	}
 }

@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"fmt"
+	"orchids-api/internal/chatwire"
 	"regexp"
 	"strings"
 )
@@ -295,7 +296,7 @@ func formatToolHistory(messages []ChatMessage) []ChatMessage {
 func toolHistoryContentWithImages(text string, original interface{}) interface{} {
 	parts := []interface{}{map[string]interface{}{"type": "text", "text": text}}
 	for _, part := range interfaceMaps(original) {
-		if parseLooseStringAny(part["type"]) == "image_url" {
+		if chatwire.ParseLooseStringAny(part["type"]) == "image_url" {
 			parts = append(parts, part)
 		}
 	}

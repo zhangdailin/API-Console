@@ -6,8 +6,10 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"orchids-api/internal/chatwire"
 	"orchids-api/internal/config"
 	"orchids-api/internal/debug"
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/logutil"
 	"orchids-api/internal/middleware"
 	"orchids-api/internal/store"
@@ -177,7 +179,7 @@ func isThinkingResponse(resp map[string]interface{}) bool {
 		if raw == nil {
 			continue
 		}
-		val, err := parseLooseBoolAnyForField(raw, path[len(path)-1])
+		val, err := chatwire.ParseLooseBoolAnyForField(raw, path[len(path)-1])
 		if err == nil {
 			return val
 		}
@@ -237,14 +239,14 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 	if !requireAPIKeyModel(w, r, req.Model) {
 		return
 	}
-	session := sessionFromContext(r.Context())
+	session := grokbase.SessionFromContext(r.Context())
 	if session.Key == "" {
-		session = prepareGrokSession(r, req.Model, req.PromptCacheKey, req.Messages)
+		session = grokbase.PrepareSession(r, req.Model, req.PromptCacheKey, req.Messages)
 	}
 	if session.Key != "" {
 		req.PromptCacheKey = session.Key
 		req.ReasoningReplay = session.Replay
-		r = r.WithContext(withGrokSession(r.Context(), session))
+		r = r.WithContext(grokbase.WithSession(r.Context(), session))
 	}
 	spec, ok := h.resolveConversationModel(r.Context(), req.Model)
 	if !ok {

@@ -106,27 +106,7 @@ var (
 		"nextreset":       {},
 	}
 	renderableImageExtensions = []string{".png", ".jpg", ".jpeg", ".webp", ".gif"}
-	allowedMessageRoles       = map[string]struct{}{
-		"developer": {},
-		"system":    {},
-		"user":      {},
-		"assistant": {},
-		"tool":      {},
-	}
-	userContentTypes = map[string]struct{}{
-		"text":        {},
-		"image_url":   {},
-		"input_audio": {},
-		"file":        {},
-		// The Anthropic Messages front end lowers its blocks onto this same
-		// validator, so the Responses-shaped parts it produces are valid here
-		// too. Without them a document or a multi-part tool_result is rejected
-		// before the request ever reaches the upstream.
-		"input_text":  {},
-		"input_image": {},
-		"input_file":  {},
-	}
-	videoAspectRatioMap = map[string]string{
+	videoAspectRatioMap       = map[string]string{
 		"1280x720":  "16:9",
 		"720x1280":  "9:16",
 		"1792x1024": "3:2",

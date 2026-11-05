@@ -105,7 +105,7 @@ func TestReplayItemsRejectLegacyCipher(t *testing.T) {
 }
 
 func TestCaptureReasoningReplayClearsStateWithoutAnchor(t *testing.T) {
-	h := &Handler{affinity: map[string]sessionAffinityEntry{}, replay: map[string]reasoningReplayEntry{}}
+	h := &Handler{replay: map[string]reasoningReplayEntry{}}
 	h.storeReasoningReplay("grok-4.6", "session", validTestReplayCipher())
 	// The completed response carries only a message, so nothing is anchorable.
 	h.captureReasoningReplayFromMap(context.Background(), "grok-4.6", "session", map[string]any{
@@ -118,7 +118,7 @@ func TestCaptureReasoningReplayClearsStateWithoutAnchor(t *testing.T) {
 }
 
 func TestCaptureReasoningReplayFromStream(t *testing.T) {
-	h := &Handler{affinity: map[string]sessionAffinityEntry{}, replay: map[string]reasoningReplayEntry{}}
+	h := &Handler{replay: map[string]reasoningReplayEntry{}}
 	cipher := testReplayCipher(5)
 	stream := "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"reasoning\",\"encrypted_content\":\"" + cipher + "\"}}\n\n" +
 		"data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"reasoning\",\"encrypted_content\":\"" + cipher + "\"}]}}\n\n"
@@ -129,7 +129,7 @@ func TestCaptureReasoningReplayFromStream(t *testing.T) {
 }
 
 func TestReasoningReplayCacheReturnsDeepCopies(t *testing.T) {
-	h := &Handler{affinity: map[string]sessionAffinityEntry{}, replay: map[string]reasoningReplayEntry{}}
+	h := &Handler{replay: map[string]reasoningReplayEntry{}}
 	cipher := testReplayCipher(7)
 	original := []any{map[string]any{
 		"type": "reasoning", "encrypted_content": cipher,

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/httpserver"
 	"orchids-api/internal/responses"
 	"orchids-api/internal/util"
@@ -551,7 +552,7 @@ func (h *Handler) streamBuildChatHolding(w http.ResponseWriter, req *chatwire.Re
 		return
 	}
 	if outcome.Usage == nil {
-		outcome.Usage = addReasoningUsage(buildChatUsagePayload(req, text.String()+refusal.String(), calls), reasoning.String())
+		outcome.Usage = grokbase.AddReasoningUsage(buildChatUsagePayload(req, text.String()+refusal.String(), calls), reasoning.String())
 		outcome.UsageSource = audit.UsageSourceEstimated
 	}
 	delta := map[string]any{}

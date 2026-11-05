@@ -71,7 +71,7 @@ func (h *Handler) serveNativeResponses(w http.ResponseWriter, r *http.Request, s
 			return response, failure
 		}
 		h.auditAttemptDiagnostic(ctx, sess.acc, ProviderBuild, physical, initialStarted, failure, "reasoning_decode_rejected", response, nil, "")
-		if session := sessionFromContext(ctx); session.Key != "" {
+		if session := grokbase.SessionFromContext(ctx); session.Key != "" {
 			h.clearReasoningReplay(ctx, spec.ID, session.Key)
 		}
 		lastStage := ""

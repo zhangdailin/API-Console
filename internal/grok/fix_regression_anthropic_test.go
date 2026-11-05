@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/grok/grokbase"
 	"strings"
 	"testing"
 
@@ -73,7 +74,7 @@ func TestPrepareGrokSessionRecognizesAgentSessionHeaders(t *testing.T) {
 	for header, value := range cases {
 		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 		req.Header.Set(header, value)
-		session := prepareGrokSession(req, "grok-4.6", "", base)
+		session := grokbase.PrepareSession(req, "grok-4.6", "", base)
 		testutil.NotEqual(t, session.Key, "")
 		// An explicit client identity permits encrypted reasoning replay; the
 		// message-prefix fallback is affinity-only.
@@ -84,11 +85,11 @@ func TestPrepareGrokSessionRecognizesAgentSessionHeaders(t *testing.T) {
 	reqA.Header.Set("X-Claude-Code-Session-Id", "shared")
 	reqB := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	reqB.Header.Set("X-Codex-Session-Id", "shared")
-	a, b := prepareGrokSession(reqA, "grok-4.6", "", base), prepareGrokSession(reqB, "grok-4.6", "", base)
+	a, b := grokbase.PrepareSession(reqA, "grok-4.6", "", base), grokbase.PrepareSession(reqB, "grok-4.6", "", base)
 	testutil.False(t, a.Key == b.Key, "identical seeds from different clients collided")
 	// Without any client identity the fallback is affinity-only.
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	fallback := prepareGrokSession(req, "grok-4.6", "", base)
+	fallback := grokbase.PrepareSession(req, "grok-4.6", "", base)
 	testutil.False(t, fallback.Replay, "a message-prefix fallback must not enable reasoning replay")
 }
 

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/responses"
 	"orchids-api/internal/util"
 	"strconv"
@@ -34,7 +35,7 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 	// normalized, so the summary reaches the upstream as an ordinary user
 	// message and the reasoning-replay machinery never sees a sealed blob.
 	if codec := h.compactionCodecSnapshot(); codec.Available() {
-		drifted, expandErr := responses.ExpandCompactionHistory(payload, codec, sessionFromContext(r.Context()).Key)
+		drifted, expandErr := responses.ExpandCompactionHistory(payload, codec, grokbase.SessionFromContext(r.Context()).Key)
 		if expandErr != nil {
 			writeResponsesAPIErrorWithParam(w, http.StatusBadRequest, "invalid_compaction_blob", expandErr.Error(), compactionErrorParam(expandErr))
 			return
@@ -117,7 +118,7 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 		payload["reasoning"] = reasoning
 	}
 	responseID, captured, result := h.serveNativeResponses(w, r, sess, pinned, spec, payload, upstreamPath, namespaces)
-	if session := sessionFromContext(r.Context()); session.Replay && len(captured) > 0 && result.Err == nil {
+	if session := grokbase.SessionFromContext(r.Context()); session.Replay && len(captured) > 0 && result.Err == nil {
 		h.captureReasoningReplay(r.Context(), modelID, session.Key, captured)
 	}
 

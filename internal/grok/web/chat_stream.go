@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"orchids-api/internal/audit"
 	"orchids-api/internal/debug"
+	"orchids-api/internal/grok/grokbase"
 	"strings"
 	"time"
 )
@@ -484,7 +485,7 @@ func (h *Handler) streamChat(w http.ResponseWriter, req *ChatCompletionsRequest,
 	if toolStreamMode {
 		flushToolStreamChunk()
 		if toolPump != nil && toolPump.EmittedToolCalls {
-			finalUsage = addReasoningUsage(buildChatUsagePayload(req, strings.TrimSpace(finalBufferedText), []map[string]interface{}{{"type": "function"}}), reasoningContent.String())
+			finalUsage = grokbase.AddReasoningUsage(buildChatUsagePayload(req, strings.TrimSpace(finalBufferedText), []map[string]interface{}{{"type": "function"}}), reasoningContent.String())
 			emitChunk("", "", "tool_calls", true)
 			emitRaw([]byte("[DONE]"))
 			return
@@ -492,14 +493,14 @@ func (h *Handler) streamChat(w http.ResponseWriter, req *ChatCompletionsRequest,
 		textContent, toolCalls := toolParser.parseCalls(strings.TrimSpace(finalBufferedText))
 		textContent = strings.TrimSpace(textContent)
 		if len(toolCalls) > 0 {
-			finalUsage = addReasoningUsage(buildChatUsagePayload(req, textContent, toolCalls), reasoningContent.String())
+			finalUsage = grokbase.AddReasoningUsage(buildChatUsagePayload(req, textContent, toolCalls), reasoningContent.String())
 			emitToolCallsChunk(textContent, toolCalls, "tool_calls", true)
 			emitRaw([]byte("[DONE]"))
 			return
 		}
 	}
 
-	finalUsage = addReasoningUsage(buildChatUsagePayload(req, finalUsageText, nil), reasoningContent.String())
+	finalUsage = grokbase.AddReasoningUsage(buildChatUsagePayload(req, finalUsageText, nil), reasoningContent.String())
 	if finalSnapshotEnabled && finalSnapshotContent != "" {
 		raw := appendChatCompletionSnapshotChunkWithUsage(chunkScratch[:0], id, time.Now().Unix(), model, fingerprint, finalSnapshotContent, "stop", true, finalUsage)
 		chunkScratch = raw[:0]
@@ -646,7 +647,7 @@ func (h *Handler) collectChat(w http.ResponseWriter, req *ChatCompletionsRequest
 	if strings.TrimSpace(reasoningContent) != "" {
 		message["reasoning_content"] = reasoningContent
 	}
-	usage := addReasoningUsage(buildChatUsagePayload(req, finalContent, toolCalls), reasoningContent)
+	usage := grokbase.AddReasoningUsage(buildChatUsagePayload(req, finalContent, toolCalls), reasoningContent)
 	resp := map[string]interface{}{
 		"id":                 id,
 		"object":             "chat.completion",

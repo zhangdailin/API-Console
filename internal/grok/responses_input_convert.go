@@ -4,11 +4,10 @@ import (
 	"fmt"
 	"maps"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/responses"
 	"orchids-api/internal/util"
 	"strings"
-
-	"encoding/json"
 )
 
 func responsesInputFromChatMessages(messages []chatwire.Message) ([]any, string) {
@@ -17,7 +16,7 @@ func responsesInputFromChatMessages(messages []chatwire.Message) ([]any, string)
 	for _, message := range messages {
 		role := strings.ToLower(strings.TrimSpace(message.Role))
 		if role == "system" || role == "developer" {
-			text := strings.TrimSpace(chatMessageContentText(message.Content))
+			text := strings.TrimSpace(grokbase.MessageContentText(message.Content))
 			if text != "" {
 				if instructions.Len() > 0 {
 					instructions.WriteString("\n\n")
@@ -59,7 +58,7 @@ func responsesInputFromChatMessages(messages []chatwire.Message) ([]any, string)
 				}
 				items = append(items, map[string]any{
 					"type": "function_call", "call_id": util.FirstNonEmpty(strings.TrimSpace(call.ID), "call_"+util.RandomHex(12)),
-					"name": name, "arguments": stringifyToolArguments(call.Function["arguments"]),
+					"name": name, "arguments": grokbase.StringifyToolArguments(call.Function["arguments"]),
 				})
 			}
 		}
@@ -156,7 +155,7 @@ func responsesToolOutput(content any) any {
 	if parts := responsesMessageParts(content, false); len(parts) > 0 {
 		return parts
 	}
-	return chatMessageContentText(content)
+	return grokbase.MessageContentText(content)
 }
 
 func responseImageURL(block map[string]any) string {
@@ -170,19 +169,6 @@ func responseImageURL(block map[string]any) string {
 		}
 	}
 	return ""
-}
-
-func stringifyToolArguments(value any) string {
-	if text, ok := value.(string); ok && strings.TrimSpace(text) != "" {
-		return strings.TrimSpace(text)
-	}
-	if value == nil {
-		return "{}"
-	}
-	if raw, err := json.Marshal(value); err == nil {
-		return string(raw)
-	}
-	return "{}"
 }
 
 func normalizeChatResponseFormat(format map[string]any) map[string]any {

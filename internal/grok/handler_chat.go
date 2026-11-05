@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"orchids-api/internal/chatwire"
 	"orchids-api/internal/config"
+	"orchids-api/internal/grok/grokbase"
 	"strings"
 	"time"
 
@@ -59,14 +60,14 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 	if !requireAPIKeyModel(w, r, req.Model) {
 		return
 	}
-	session := sessionFromContext(r.Context())
+	session := grokbase.SessionFromContext(r.Context())
 	if session.Key == "" {
-		session = prepareGrokSession(r, req.Model, req.PromptCacheKey, req.Messages)
+		session = grokbase.PrepareSession(r, req.Model, req.PromptCacheKey, req.Messages)
 	}
 	if session.Key != "" {
 		req.PromptCacheKey = session.Key
 		req.ReasoningReplay = session.Replay
-		r = r.WithContext(withGrokSession(r.Context(), session))
+		r = r.WithContext(grokbase.WithSession(r.Context(), session))
 	}
 	spec, ok := h.resolveConversationModel(r.Context(), req.Model)
 	if !ok {

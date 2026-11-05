@@ -53,8 +53,14 @@ func (r *Request) toolChoiceNameSet() map[string]struct{} {
 	if r == nil {
 		return nil
 	}
-	names := make(map[string]struct{}, len(r.Tools)+len(r.ResponsesTools))
-	for _, tool := range r.Tools {
+	return ToolChoiceNames(r.Tools, r.ResponsesTools)
+}
+
+// ToolChoiceNames collects every tool name a tool_choice may refer to: function
+// names, hosted tool types, and the names and types of Responses-shaped tools.
+func ToolChoiceNames(tools []ToolDef, responsesTools []map[string]any) map[string]struct{} {
+	names := make(map[string]struct{}, len(tools)+len(responsesTools))
+	for _, tool := range tools {
 		if tool.Function == nil {
 			if normalized, native := NativeToolTypes[strings.ToLower(strings.TrimSpace(tool.Type))]; native {
 				names[normalized] = struct{}{}
@@ -65,7 +71,7 @@ func (r *Request) toolChoiceNameSet() map[string]struct{} {
 			names[name] = struct{}{}
 		}
 	}
-	for _, tool := range r.ResponsesTools {
+	for _, tool := range responsesTools {
 		for _, key := range []string{"name", "type"} {
 			if name := strings.TrimSpace(ParseLooseStringAny(tool[key])); name != "" {
 				names[name] = struct{}{}
