@@ -88,8 +88,14 @@
 
   function syncQualityModel() {
     const quality = normalizeQuality(readToggle("#imagineQualityToggle", "imagineQuality", "lite"));
-    const model = document.getElementById("imagineModel")?.value || qualityModel(quality);
+    const model = qualityModel(quality);
     return { quality, model };
+  }
+
+  // The lite route has no resolution choice; the other tiers accept 1k/2k.
+  function syncResolution(quality) {
+    const resolution = document.getElementById("imagineResolution");
+    if (resolution) resolution.disabled = normalizeQuality(quality) === "lite";
   }
 
   function aspectRatioCss(value) {
@@ -835,7 +841,8 @@
       btn.addEventListener("click", () => {
         const value = normalizeQuality(btn.dataset.imagineQuality);
         setToggle("#imagineQualityToggle", "imagineQuality", value);
-		saveState({ imagineQuality: value });
+        syncResolution(value);
+        saveState({ imagineQuality: value });
       });
     });
     const prompt = $("imaginePrompt");
@@ -889,6 +896,7 @@
     const models = qualityModels();
     const quality = normalizeQuality(ui.imagineQuality || (ui.imagineModel === models.quality ? "quality" : "lite"));
     setToggle("#imagineQualityToggle", "imagineQuality", quality);
+    syncResolution(quality);
     setToggle("#imagineOperationToggle", "imagineOperation", ui.imagineOperation === "edit" ? "edit" : "generate");
     setToggle("#imagineRunModeToggle", "imagineRunMode", ui.imagineRunMode === "continuous" ? "continuous" : "single");
     bindEvents();

@@ -1091,7 +1091,6 @@
   min-height: var(--control-h);
 }
 
-.imagine-basic-field.is-model { flex: 1 1 200px; }
 .imagine-basic-field.is-count { flex: 0 0 84px; }
 .imagine-basic-field.is-resolution { flex: 0 0 96px; }
 .imagine-basic-field.is-quality { flex: 0 0 auto; }
@@ -2329,7 +2328,6 @@
     flex: 1 1 100%;
   }
 
-  .imagine-basic-field.is-model,
   .imagine-basic-field.is-count,
   .imagine-basic-field.is-resolution,
   .imagine-basic-field.is-quality,

@@ -286,34 +286,6 @@
     } catch (error) { body.innerHTML = `<tr><td colspan="6" class="table-empty-cell">加载失败：${escapeMediaHTML(error.message)}</td></tr>`; }
   }
 
-  // The image model picker belongs to the Imagine tab and must not depend on
-  // the (Console-only, absent) speech tools being on the page.
-  const IMAGE_MODEL_LABELS = {
-    'grok-imagine-image-lite': '快速 · grok-imagine-image-lite（Free 可用，走 fast 对话）',
-    'grok-imagine-image': '标准 · grok-imagine-image',
-    'grok-imagine-image-2.0': '高质量 · grok-imagine-image-2.0',
-  };
-  function initImagineModels() {
-    const select = document.getElementById('imagineModel');
-    if (!select || select.dataset.initialized === 'true') return;
-    select.dataset.initialized = 'true';
-    const resolution = document.getElementById('imagineResolution');
-    const accept = (value) => {
-      const routes = Array.isArray(value) ? value : [];
-      const previous = select.value;
-      while (select.options.length > 1) select.remove(1);
-      for (const route of routes.filter((item) => capability(item, 'image'))) {
-        select.appendChild(new Option(IMAGE_MODEL_LABELS[route.id] || route.id, route.id));
-      }
-      if (Array.from(select.options).some((option) => option.value === previous)) select.value = previous;
-      if (resolution) resolution.disabled = !select.value;
-    };
-    select.addEventListener('change', () => { if (resolution) resolution.disabled = !select.value; });
-    window.addEventListener('grok-models-loaded', (event) => accept(event.detail));
-    const catalog = window.GrokModelCatalogPromise;
-    if (catalog) catalog.then(accept).catch(() => {});
-  }
-
   function initAdminMediaHistory() {
     const gallery = document.getElementById('mediaImageGallery'); if (!gallery) return;
     document.getElementById('mediaImageRefreshBtn')?.addEventListener('click', () => { mediaHistoryState.imagePage = 1; loadAdminImages(); }); document.getElementById('mediaVideoRefreshBtn')?.addEventListener('click', () => { mediaHistoryState.videoPage = 1; loadAdminVideos(); });
@@ -325,5 +297,5 @@
   }
 
   if (typeof window !== 'undefined') window.GrokMediaTools = { normalizeVoices, jsonAudioSource, formatSeconds, loadAdminImages, loadAdminVideos };
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { init(); initImagineModels(); initAdminMediaHistory(); }); else { init(); initImagineModels(); initAdminMediaHistory(); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { init(); initAdminMediaHistory(); }); else { init(); initAdminMediaHistory(); }
 })();
