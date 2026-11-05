@@ -87,3 +87,20 @@ func TestAdminPasswordEntrancesShareFailureBudget(t *testing.T) {
 	protected(out, req)
 	testutil.Equal(t, out.Code, 204)
 }
+
+func TestSaveRejectsUnsafeStatsigSignerURL(t *testing.T) {
+	a, _, _ := setupConfigAPI(t)
+	ctx := context.Background()
+	for _, bad := range []string{"http://signer.example.com/sign", "https://signer.example.com:8443/sign", "https://user:pw@10.0.0.2/sign", "not a url"} {
+		next := a.ConfigSnapshot().Clone()
+		next.GrokStatsigSignerURL = &bad
+		err := a.persistConfig(ctx, a.ConfigSnapshot(), next)
+		testutil.Error(t, err)
+		testutil.MustContain(t, err.Error(), "grok_statsig_signer_url")
+	}
+	for _, good := range []string{"", "https://signer.example.com/sign", "http://grok-signer-go:8788/sign", "http://10.0.0.2:8788/sign"} {
+		next := a.ConfigSnapshot().Clone()
+		next.GrokStatsigSignerURL = &good
+		testutil.NoError(t, a.persistConfig(ctx, a.ConfigSnapshot(), next))
+	}
+}
