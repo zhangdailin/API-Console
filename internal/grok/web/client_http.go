@@ -245,13 +245,19 @@ func (c *Client) doRequestWithHTTPClient(ctx context.Context, httpClient *http.C
 		var lease *egress.Lease
 		leaseNodeID := ""
 		releaseLease := func() {}
-		if c.egress != nil && c.egress.Enabled() {
+		if scope := c.egressScopeForURL(reqURL); c.egress != nil && c.egress.Routes(scope) {
 			affinity := requestCredentialAffinity(req.Header, reqURL)
-			lease, err = c.egress.Acquire(ctx, c.egressScopeForURL(reqURL), affinity)
+			lease, err = c.egress.Acquire(ctx, scope, affinity)
 			if err != nil {
 				recordEgressAcquireError()
 				return nil, fmt.Errorf("grok egress unavailable: %w", err)
 			}
+			if lease.Direct {
+				// The scope fell back to the general proxy.
+				lease = nil
+			}
+		}
+		if lease != nil {
 			leaseNodeID = lease.NodeID
 			req.Header.Set("User-Agent", lease.UserAgent)
 			applyChromiumClientHints(req.Header, lease.UserAgent)
@@ -269,7 +275,7 @@ func (c *Client) doRequestWithHTTPClient(ctx context.Context, httpClient *http.C
 		resp, err = doUpstreamHTTP(req, do, c.cfg.GrokWebStreamIdleTimeout(), upstreamIdleBytes)
 		diagnosticAttempt.Response(resp, err)
 		if err != nil {
-			if c.egress != nil && c.egress.Enabled() && leaseNodeID != "" {
+			if c.egress != nil && leaseNodeID != "" {
 				c.egress.FeedbackOutcome(leaseNodeID, egress.OutcomeTransportError)
 			}
 			releaseLease()
@@ -285,7 +291,7 @@ func (c *Client) doRequestWithHTTPClient(ctx context.Context, httpClient *http.C
 		}
 		resp.Body = diagnosticAttempt.CaptureBody(resp.Body)
 		if resp.StatusCode == okStatus {
-			if c.egress != nil && c.egress.Enabled() && leaseNodeID != "" {
+			if c.egress != nil && leaseNodeID != "" {
 				c.egress.FeedbackOutcome(leaseNodeID, egress.OutcomeSuccess)
 			}
 			if lease != nil {
@@ -309,7 +315,7 @@ func (c *Client) doRequestWithHTTPClient(ctx context.Context, httpClient *http.C
 					lastBody = lastBody + " " + desc
 				}
 			}
-			if c.egress != nil && c.egress.Enabled() && leaseNodeID != "" {
+			if c.egress != nil && leaseNodeID != "" {
 				c.egress.FeedbackOutcome(leaseNodeID, egress.OutcomeRateLimited)
 			}
 			releaseLease()
@@ -331,7 +337,7 @@ func (c *Client) doRequestWithHTTPClient(ctx context.Context, httpClient *http.C
 		kind := ClassifyUpstreamResponse(lastStatus, resp.Header, raw)
 		if kind == UpstreamErrorCloudflareChallenge {
 			recordUpstreamChallenge("cloudflare")
-			if c.egress != nil && c.egress.Enabled() && !challengeRetried {
+			if lease != nil && !challengeRetried {
 				// Invalidate this exact clearance and re-acquire once. The retry
 				// does not consume the attempt budget (decrement before continue).
 				challengeRetried = true
@@ -351,7 +357,7 @@ func (c *Client) doRequestWithHTTPClient(ctx context.Context, httpClient *http.C
 			}
 		}
 
-		if c.egress != nil && c.egress.Enabled() && leaseNodeID != "" {
+		if c.egress != nil && leaseNodeID != "" {
 			c.egress.FeedbackOutcome(leaseNodeID, egressOutcomeForKind(kind))
 		}
 		releaseLease()
@@ -368,8 +374,8 @@ func (c *Client) egressScopeForURL(reqURL string) string {
 	switch {
 	case strings.Contains(host, "cli-chat-proxy.grok.com"):
 		return "cli"
-	case strings.Contains(host, "console.x.ai"):
-		return "console"
+	case strings.Contains(host, "assets.grok.com"):
+		return "asset"
 	default:
 		return "app_chat"
 	}

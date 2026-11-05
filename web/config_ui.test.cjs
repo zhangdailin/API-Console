@@ -61,7 +61,11 @@ test('save sends security and proxy settings but no local cache settings',async(
  node('cfg_anonymous_allow_ips').value='203.0.113.1';
  node('cfg_proxy_bypass').value='example.com';
  await api.saveConfiguration();
- same(saved,{admin_password:'changed',proxy_url:'http://proxy.example:8080',proxy_bypass:['example.com'],grok_low_latency:false,grok_clearance_mode:'manual',grok_cf_clearance:'',grok_flaresolverr_url:'',grok_web_proxy_url:''});
+ same(saved,{admin_password:'changed',proxy_url:'http://proxy.example:8080',proxy_bypass:['example.com'],grok_low_latency:false,grok_clearance_mode:'manual',grok_cf_clearance:'',grok_flaresolverr_url:'',grok_web_proxy_url:'',
+  grok_clearance_timeout_seconds:0,grok_clearance_refresh_interval:0,grok_cli_base_url:'',grok_cli_client_version:'',grok_cli_client_identifier:'',grok_cli_user_agent:'',grok_build_rps:0,
+  grok_web_base_url:'',grok_web_user_agent:'',grok_statsig_id:'',grok_statsig_signer_url:null,grok_web_timeout_seconds:0,grok_web_stream_idle_seconds:0,grok_web_rps:0,
+  grok_temporary:true,grok_disable_memory:false,grok_custom_instruction:'',grok_image_nsfw:true});
+ assert.equal(saved.anonymous_allow_ips,undefined);
 });
 
 test('configuration page omits simulated cache section, stats and clear actions',()=>{
@@ -200,4 +204,21 @@ test('blank admin password is omitted when saving unrelated settings',async()=>{
  node('cfg_admin_pass').value='   ';
  await api.saveConfiguration();
  assert.equal(Object.hasOwn(saved,'admin_password'),false);
+});
+
+test('statsig source and clearance mode round-trip through their radio groups',async()=>{
+ let saved;
+ const {api,node}=loadConfig(async(_url,options)=>{saved=JSON.parse(options.body);return {ok:true,json:async()=>({code:0})};});
+ api.applyConfigurationPayload({grok_statsig_id:'abc',grok_clearance_mode:'on_demand',grok_web_timeout_seconds:600});
+ assert.equal(node('cfg_statsig_mode_manual').checked,true);
+ assert.equal(node('cfg_clearance_mode_on_demand').checked,true);
+ await api.saveConfiguration();
+ assert.equal(saved.grok_statsig_id,'abc');
+ assert.equal(saved.grok_statsig_signer_url,'');
+ assert.equal(saved.grok_clearance_mode,'on_demand');
+ assert.equal(saved.grok_web_timeout_seconds,600);
+ node('cfg_statsig_mode_manual').checked=false;node('cfg_statsig_mode_url').checked=true;
+ await api.saveConfiguration();
+ assert.equal(saved.grok_statsig_id,'');
+ assert.equal(saved.grok_statsig_signer_url,null);
 });

@@ -111,8 +111,7 @@ Grok 默认 base 为 `https://cli-chat-proxy.grok.com/v1`，CLI 版本当前默�
 |---|---|
 | `grok_low_latency` | 默认 `false`；设为 `true` 跳过 Build 输出质量缓存和质量重试，直接交付上游内容；保留错误处理、用量统计和质量审计，代价是不再拦截疑似降质输出 |
 | `grok_build_rps` | 非正 / 非有限关闭节奏；正值夹取 0.01–1000，按账号 / 团队范围执行 |
-| `grok_egress_enabled` | 默认未启用，开启后没有健康节点则失败，不静默直连 |
-| `grok_egress_nodes` | name、url、weight、scope、proxied；URL 支持 http / socks5 / socks5h，scope 用 cli（仅 Build）/ all（Build 与 Web） |
+| `grok_egress_enabled`、`grok_egress_nodes` | 已退役：出口节点改在「配置管理 → 投递与网络 → 出口节点」维护（见 8.2）。启动时若 Redis 中还没有节点，这两项定义的节点会一次性迁移进去（scope `cli` → Build，`app_chat` → Web，其余两者各一份），此后不再读取 |
 
 ### 8.1 Grok Web（grok.com SSO）
 
@@ -124,11 +123,28 @@ Grok 渠道同时承载 Build（OAuth CLI）与 Web（grok.com 网页 SSO Cookie
 | `grok_web_proxy_url` | 只给 grok.com（Web SSO）请求使用的代理；留空沿用通用代理。服务器 IP 被 Cloudflare 拦截（403 `cf-mitigated: challenge`）时填写，WorkBuddy / Cline / Build 仍按通用代理设置出网。修改代理或 clearance 后会自动重试尚未同步成功的 Web 账号 |
 | `grok_web_user_agent` | 浏览器 UA，TLS 指纹随 UA 的 Chrome 主版本选择 |
 | `grok_cf_clearance`、`grok_cf_bm` | 手动维护的 Cloudflare Cookie；出现 “Just a moment” 验证时需要 |
-| `grok_clearance_mode`、`grok_flaresolverr_url`、`grok_clearance_refresh_interval` | `manual`（默认）或 `flaresolverr`；后者通过 FlareSolverr 定期刷新 clearance（秒，默认 600），需同时启用 `grok_egress_enabled` 并配置 scope 为 `all` 的出口节点 |
+| `grok_clearance_mode` | `manual`（默认，从不调用 FlareSolverr）、`flaresolverr`（按刷新周期主动为每个出口重新求解过期的 clearance）、`on_demand`（保留最后一次成功的 clearance，只在上游明确拒绝后重新求解）。只作用于走出口节点的 Web 请求 |
+| `grok_flaresolverr_url`、`grok_clearance_timeout_seconds`、`grok_clearance_refresh_interval` | FlareSolverr 地址；单次求解超时（10–300 秒，默认 60）；`flaresolverr` 模式的刷新周期（秒，默认 600）。FlareSolverr 只接受 http / socks5 代理地址，隧道分享链接节点无法自动求解 |
 | `grok_statsig_signer_url`、`grok_statsig_id` | `x-statsig-id` 签名：未设置用默认签名器，显式空串关闭，`grok_statsig_id` 为手动值 |
 | `grok_temporary`、`grok_disable_memory`、`grok_custom_instruction` | 网页会话选项：默认临时会话，记忆开关与自定义指令 |
 | `grok_web_rps`、`grok_web_timeout_seconds`、`grok_web_stream_idle_seconds` | 每账号节奏、单请求期限（默认推理期限）、流空闲（默认 90 秒，30–600） |
 | `grok_image_nsfw`、`grok_image_final_min_bytes`、`grok_image_medium_min_bytes` | Imagine 工具页的 NSFW 与图片质量阈值 |
+
+### 8.2 出口节点
+
+出口节点、代理配置、订阅与自动化在「配置管理 → 投递与网络 → 出口节点」维护，存于 Redis（`grok:egress:*`），保存即生效，多实例在 3 秒内同步，不需要保存配置。代理地址、订阅地址和 Cloudflare Cookie 以凭据加密密钥加密存储，只写不读：管理接口只返回脱敏地址（`scheme://***@host:port`）与指纹。
+
+| 概念 | 说明 |
+|---|---|
+| 范围 | `grok_build`（Build）、`grok_web`（Web 对话 / Imagine / 视频）、`grok_web_asset`（assets.grok.com 下载；没有该范围节点时使用 Web 节点） |
+| 节点 | 名称、范围、启用、代理地址（http / socks5 / socks5h；trojan / vless / ss / vmess 分享链接需隧道运行时，当前保留但标记“不可路由”）、代理配置、账号容量、代理池、手动模式下的 UA 与 Cookie |
+| 代理池 | 地址中的 `{account}` 按账号替换为稳定的会话标识，用于轮换代理的会话粘滞 |
+| 账号绑定 | 每个账号在每个范围固定使用一个节点，节点健康时不变；开启“自动分配”时，未绑定账号在首次请求时绑定到负载最低、仍有容量的节点 |
+| 兜底 | 范围内没有可用节点时：`direct` 通用代理（默认，与未配置节点时行为一致）、`none` 拒绝请求、`fixed` 固定节点 |
+| 自动化 | 定时探测（默认 15 分钟，Cloudflare 或 IPinfo 查询出口 IP 与延迟）、定时分配 / 均衡（默认 5 分钟），任务以 Redis 租约保证多实例只执行一次 |
+| 订阅 | Clash YAML、Base64 或逐行分享链接 / 代理地址；按周期同步，新增出口建节点，消失的出口删除节点 |
+
+节点健康（失败冷却、恢复探测）与 clearance 缓存保存在进程内并跨配置保存保留；节点健康另写入媒体目录下的 `.egress-health.json`（Web）与 `.egress-health-build.json`（Build）。
 
 Web 模型路由表（`grok-chat-fast/auto/expert/heavy`、`grok-imagine-image(-lite/-2.0/-edit)`、`grok-imagine-video`）只在存在启用、认证有效且 24 小时内成功读取过对应模式额度窗口的 Web 账号时发布；`grok-chat-heavy` 还要求 Heavy 账号。没有这样的账号时 Web 行被清理，不发布内置列表。Web 模型支持 `/chat/completions`、`/responses`（经 Chat 桥接）、`/images/*`、`/videos`、`/media/inputs`，不支持 `/messages`。
 

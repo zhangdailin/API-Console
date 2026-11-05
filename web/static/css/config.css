@@ -321,3 +321,105 @@
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
+
+/* ── Runtime settings tabs (grok2api layout) ────────────────────────────── */
+button.config-nav-link { width: 100%; border-top: 0; border-right: 0; border-bottom: 0; background: transparent; text-align: left; cursor: pointer; font-family: inherit; }
+button.config-nav-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.config-panel { display: grid; gap: var(--space-5); min-width: 0; }
+.config-panel[hidden] { display: none; }
+.form-row[hidden] { display: none; }
+
+.segmented { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-inset); }
+.segmented label { position: relative; cursor: pointer; }
+.segmented input { position: absolute; opacity: 0; pointer-events: none; }
+.segmented span { display: inline-flex; align-items: center; min-height: calc(var(--control-h) - 8px); padding: 0 var(--space-3); border-radius: var(--radius-sm); color: var(--text-secondary); font-size: 0.8rem; font-weight: 550; }
+.segmented input:checked + span { background: var(--surface-1); color: var(--text-main); box-shadow: var(--shadow-md); }
+.segmented input:focus-visible + span { outline: 2px solid var(--accent); }
+
+.duration-input { display: flex; gap: var(--space-2); max-width: 280px; }
+.duration-input .form-input:first-child { flex: 1; min-width: 0; }
+.duration-input select.form-input { width: 76px; flex: none; }
+
+/* ── Egress nodes ────────────────────────────────────────────────────────── */
+.egress-subtabs { display: flex; gap: var(--space-1); padding: var(--space-3) var(--space-5) 0; border-bottom: 1px solid var(--border-color); overflow-x: auto; }
+.egress-subtab { padding: var(--space-2) var(--space-3); border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-secondary); font: inherit; font-size: 0.82rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.egress-subtab.active { border-bottom-color: var(--accent); color: var(--accent); }
+.egress-pane { display: grid; gap: var(--space-3); padding: var(--space-4) var(--space-5) var(--space-5); min-width: 0; }
+.egress-pane[hidden] { display: none; }
+.egress-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-2); }
+.egress-summary-item { display: flex; flex-direction: column; gap: 2px; padding: var(--space-3); border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-inset); }
+.egress-summary-item strong { font-size: 1.2rem; font-variant-numeric: tabular-nums; }
+.egress-summary-item span { color: var(--text-muted); font-size: 0.74rem; }
+.egress-summary-item.is-ok strong { color: var(--ok); }
+.egress-summary-item.is-bad strong { color: var(--bad); }
+.egress-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.egress-toolbar .helper-text { max-width: 640px; }
+.egress-filters, .egress-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.egress-filters .form-input { width: auto; min-width: 0; }
+.egress-filters input[type="search"] { width: 240px; max-width: 100%; }
+.egress-batchbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--accent-line); border-radius: var(--radius-md); background: var(--accent-soft); font-size: 0.8rem; }
+.egress-batchbar[hidden] { display: none; }
+.egress-batchbar span { margin-right: auto; font-weight: 600; }
+.egress-table-wrap { overflow-x: auto; }
+
+.egress-table td { vertical-align: top; }
+.egress-table tr.is-disabled td { opacity: 0.62; }
+.egress-check { width: 36px; }
+.egress-ops { width: 1%; white-space: nowrap; }
+.egress-sort { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.egress-sort[aria-sort="descending"]::after { content: " ↓"; }
+.egress-sort[aria-sort="ascending"]::after { content: " ↑"; }
+.egress-name, .egress-proxy, .egress-probe { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.egress-name-line { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.egress-proxy code { font-family: var(--font-mono); font-size: 0.76rem; overflow-wrap: anywhere; }
+.egress-muted { color: var(--text-muted); font-size: 0.74rem; overflow-wrap: anywhere; }
+.egress-ip { font-family: var(--font-mono); font-size: 0.76rem; }
+.egress-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--idle); }
+.egress-dot.is-on { background: var(--ok); }
+.egress-pill { display: inline-flex; align-items: center; width: fit-content; max-width: 100%; padding: 1px 8px; border: 1px solid var(--border-color); border-radius: var(--radius-pill); color: var(--text-secondary); font-size: 0.72rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.egress-pill.is-ok { color: var(--ok); border-color: transparent; background: var(--ok-soft); }
+.egress-pill.is-warn { color: var(--warn); border-color: transparent; background: var(--warn-soft); }
+.egress-pill.is-bad { color: var(--bad); border-color: transparent; background: var(--bad-soft); }
+.egress-pill.is-scope { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
+.egress-health { display: flex; align-items: center; gap: var(--space-2); min-width: 110px; }
+.egress-meter { flex: 1; height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
+.egress-meter > span { display: block; height: 100%; border-radius: 3px; background: var(--ok); }
+.egress-meter.is-warn > span { background: var(--warn); }
+.egress-meter.is-bad > span { background: var(--bad); }
+.egress-meter-label { color: var(--text-secondary); font-size: 0.74rem; font-variant-numeric: tabular-nums; min-width: 3.2em; }
+.egress-row-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); justify-content: flex-end; }
+.egress-row-actions .btn { min-height: 30px; padding: 0 var(--space-2); font-size: 0.74rem; }
+.egress-danger { color: var(--bad); }
+.egress-fallbacks { display: grid; gap: var(--space-2); max-width: 560px; }
+.egress-fallback-row { display: grid; grid-template-columns: 76px 140px minmax(0, 1fr); gap: var(--space-2); align-items: center; }
+.egress-fallback-label { color: var(--text-secondary); font-size: 0.8rem; font-weight: 600; }
+.egress-ops-form { padding: 0; }
+.egress-ops-actions { border-top: 1px solid var(--border-color); padding-top: var(--space-3); }
+.egress-form { display: grid; gap: var(--space-2); }
+.egress-form h4 { margin-top: var(--space-2); }
+.egress-form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); }
+.egress-switch-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; }
+.egress-switch-row > span:first-child { display: flex; flex-direction: column; gap: 2px; }
+.egress-check-inline { display: flex; align-items: center; gap: var(--space-2); color: var(--text-secondary); font-size: 0.78rem; }
+.egress-check-inline[hidden], #egressNodeManualRows[hidden], #egressNodeProxyRow[hidden] { display: none; }
+.egress-inline-note { padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--bg-inset); color: var(--text-secondary); font-size: 0.78rem; }
+.egress-mono { font-family: var(--font-mono); font-size: 0.78rem; }
+
+@media (max-width: 900px) {
+  .config-layout { grid-template-columns: minmax(0, 1fr); }
+  .config-nav { position: static; flex-direction: row; overflow-x: auto; max-height: none; }
+  .config-nav-head { display: none; }
+  button.config-nav-link { width: auto; white-space: nowrap; border-left: 0; border-bottom: 2px solid transparent; }
+  button.config-nav-link.active { border-bottom-color: var(--accent); }
+  .egress-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .egress-form-grid { grid-template-columns: minmax(0, 1fr); }
+  .egress-fallback-row { grid-template-columns: minmax(0, 1fr); }
+  .egress-table { min-width: 0; }
+}
+.egress-proxy code { display: block; max-width: 230px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+.egress-menu { position: relative; display: inline-block; }
+.egress-menu-list { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; display: grid; min-width: 140px; padding: var(--space-1); border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--surface-1); box-shadow: var(--shadow-lg); }
+.egress-menu-list[hidden] { display: none; }
+.egress-menu-item { padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-main); font: inherit; font-size: 0.8rem; text-align: left; cursor: pointer; }
+.egress-menu-item:hover, .egress-menu-item:focus-visible { background: var(--surface-2); outline: none; }
+@media (min-width: 901px) { .egress-table { min-width: 760px; } }

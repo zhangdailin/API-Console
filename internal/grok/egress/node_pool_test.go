@@ -13,38 +13,43 @@ import (
 )
 
 func TestNodesFromConfigDisabled(t *testing.T) {
-	cfg := &config.Config{GrokEgressEnabled: false}
-	nodes := nodesFromConfig(cfg)
-	testutil.Falsef(t, len(nodes) != 0, "disabled egress should yield no nodes, got %d", len(nodes))
+	m := NewManager(&config.Config{GrokEgressEnabled: false})
+	testutil.Equal(t, len(m.nodes), 0)
+	testutil.False(t, m.Routes("cli"), "without nodes Build keeps the general proxy")
 }
 
 func TestNodesFromConfig(t *testing.T) {
 	cfg := &config.Config{
 		GrokEgressEnabled: true,
 		GrokEgressNodes: []config.EgressNodeConfig{
-			{Name: "a", URL: "http://proxy1:8080", Weight: 2, Scope: "cli"},
-			{Name: "b", URL: "", Scope: "all"}, // direct
+			{Name: "a", URL: "http://proxy1:8080", Scope: "cli"},
+			{Name: "b", URL: "", Scope: "all"}, // direct; serves Build and Web
 		},
 	}
-	nodes := nodesFromConfig(cfg)
-	testutil.Equal(t, len(nodes), 2)
-	testutil.Equal(t, nodes[0].Weight, 2)
-	testutil.False(t, !nodes[0].Proxied, "node a should be proxied")
-	testutil.False(t, nodes[1].Proxied, "node b should be direct")
+	m := NewManager(cfg)
+	var build []Node
+	for _, node := range m.nodes {
+		if nodeMatchesScope(node, "cli") {
+			build = append(build, node)
+		}
+	}
+	testutil.Equal(t, len(build), 2)
+	testutil.Equal(t, len(m.nodes), 3)
+	testutil.True(t, build[0].Proxied, "node a should be proxied")
+	testutil.False(t, build[1].Proxied, "node b should be direct")
 }
 
 func TestNodeMatchesScope(t *testing.T) {
-	node := Node{Name: "n", Scope: "cli"}
-	testutil.False(t, !nodeMatchesScope(node, "cli"), "cli node should match cli scope")
-	testutil.False(t, nodeMatchesScope(node, "other"), "cli node should not match another scope")
-	all := Node{Name: "n", Scope: "all"}
-	testutil.False(t, !nodeMatchesScope(all, "cli") || !nodeMatchesScope(all, "other"), "all scope should match any scope")
+	node := Node{Name: "n", Scope: "grok_build"}
+	testutil.True(t, nodeMatchesScope(node, "cli"), "Build node should match the cli scope")
+	testutil.False(t, nodeMatchesScope(node, "app_chat"), "Build node should not match Web")
 }
 
 func TestManagerAcquireDisabled(t *testing.T) {
-	cfg := &config.Config{GrokEgressEnabled: false}
-	m := NewManager(cfg)
-	testutil.False(t, m != nil, "disabled egress should yield nil manager")
+	m := NewManager(&config.Config{GrokEgressEnabled: false})
+	lease, err := m.Acquire(context.Background(), "cli", "acct")
+	testutil.NoError(t, err)
+	testutil.True(t, lease.Direct, "a scope without nodes falls back to the general proxy")
 }
 
 func TestManagerAcquireDirectNode(t *testing.T) {

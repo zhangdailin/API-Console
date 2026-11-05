@@ -27,6 +27,7 @@ import (
 	"orchids-api/internal/config"
 	"orchids-api/internal/debug"
 	"orchids-api/internal/grok"
+	"orchids-api/internal/grok/egressnodes"
 	"orchids-api/internal/handler"
 	"orchids-api/internal/loadbalancer"
 	"orchids-api/internal/logutil"
@@ -166,6 +167,12 @@ func run() error {
 	apiHandler.SetConnectionTracker(accountTracker)
 	h := handler.NewWithLoadBalancer(cfg, lb)
 	defer h.Close()
+	// The egress registry outlives configuration saves: node health, account
+	// bindings and Cloudflare clearance must survive them. It is initialized
+	// before the Grok handler so the first clients already route through it.
+	egressCtx, stopEgress := context.WithCancel(context.Background())
+	defer stopEgress()
+	egressnodes.Init(egressCtx, s, cfg)
 	grokHandler := grok.NewHandler(cfg, lb)
 	// Gateway-owned Responses compaction seals its summaries with a key derived
 	// from the credential key, so the state survives a restart and a request
@@ -174,6 +181,7 @@ func run() error {
 	apiHandler.SetConfigChangeHook(func(next *config.Config) {
 		configureRuntimeLogging(next)
 		h.SetConfig(next)
+		egressnodes.Default().SetConfig(next)
 		grokHandler.SetConfig(next)
 	})
 	if accountTracker != nil {

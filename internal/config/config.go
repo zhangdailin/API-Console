@@ -111,8 +111,9 @@ type Config struct {
 	GrokWebTimeout             int     `json:"grok_web_timeout_seconds,omitempty"`
 	GrokWebStreamIdleSeconds   int     `json:"grok_web_stream_idle_seconds,omitempty"`
 	GrokFlareSolverrURL        string  `json:"grok_flaresolverr_url,omitempty"`
-	GrokClearanceMode          string  `json:"grok_clearance_mode,omitempty"`             // "manual"|"flaresolverr"
+	GrokClearanceMode          string  `json:"grok_clearance_mode,omitempty"`             // "manual"|"flaresolverr"|"on_demand"
 	GrokClearanceRefreshInterv int     `json:"grok_clearance_refresh_interval,omitempty"` // seconds
+	GrokClearanceTimeout       int     `json:"grok_clearance_timeout_seconds,omitempty"`  // seconds
 	GrokImageNSFW              *bool   `json:"grok_image_nsfw,omitempty"`
 	GrokImageFinalMinBytes     int     `json:"grok_image_final_min_bytes,omitempty"`
 	GrokImageMediumMinBytes    int     `json:"grok_image_medium_min_bytes,omitempty"`

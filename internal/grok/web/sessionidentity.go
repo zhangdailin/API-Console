@@ -123,16 +123,19 @@ func (c *Client) FetchSessionIdentity(ctx context.Context, token string) (Accoun
 
 	do := c.httpClient.Do
 	var leaseRelease func()
-	if c.egress != nil && c.egress.Enabled() {
+	if c.egress != nil && c.egress.Routes("app_chat") {
 		lease, acquireErr := c.egress.Acquire(reqCtx, "app_chat", credentialAffinity(token))
 		if acquireErr != nil {
 			return AccountIdentity{}, fmt.Errorf("grok session egress unavailable: %w", acquireErr)
 		}
-		req.Header.Set("User-Agent", lease.UserAgent)
-		applyChromiumClientHints(req.Header, lease.UserAgent)
-		mergeCFCookies(req.Header, lease.CFCookies)
-		do = lease.Do
-		leaseRelease = lease.Release
+		// A Direct lease means the scope fell back to the general proxy.
+		if !lease.Direct {
+			req.Header.Set("User-Agent", lease.UserAgent)
+			applyChromiumClientHints(req.Header, lease.UserAgent)
+			mergeCFCookies(req.Header, lease.CFCookies)
+			do = lease.Do
+			leaseRelease = lease.Release
+		}
 	}
 
 	resp, err := do(req)

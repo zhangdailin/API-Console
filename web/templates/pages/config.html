@@ -11,7 +11,7 @@
     <section class="header-section" id="configHeader">
       <div>
         <h1>配置管理</h1>
-        <p>管理后台凭据、Grok 交付方式与代理网络；改动后底部保存栏会显示未保存数量。</p>
+        <p>Grok Build / Web 上游、Clearance、出口节点与代理网络；表单改动后底部保存栏显示未保存数量，出口节点的操作即时生效。</p>
       </div>
     </section>
 
@@ -22,160 +22,148 @@
 
     <div id="basicConfig" class="config-section-shell config-body">
       <div class="config-layout">
-        <nav class="config-nav" id="configNav" aria-label="配置分组">
-          <div class="config-nav-head">配置分组</div>
-          <a class="config-nav-link active" href="#groupOverview" data-nav-group="groupOverview">概览</a>
-          <a class="config-nav-link" href="#groupAuth" data-nav-group="groupAuth">认证与密钥</a>
-          <a class="config-nav-link" href="#groupGrok" data-nav-group="groupGrok">Grok 交付</a>
-          <a class="config-nav-link" href="#groupProxy" data-nav-group="groupProxy">代理</a>
+        <nav class="config-nav" id="configNav" role="tablist" aria-label="运行设置" aria-orientation="vertical">
+          <div class="config-nav-head">运行设置</div>
+          <button type="button" class="config-nav-link active" role="tab" id="cfgTab-build" aria-controls="cfgPanel-build" aria-selected="true" data-cfg-tab="build">Grok Build</button>
+          <button type="button" class="config-nav-link" role="tab" id="cfgTab-web" aria-controls="cfgPanel-web" aria-selected="false" tabindex="-1" data-cfg-tab="web">Grok Web</button>
+          <button type="button" class="config-nav-link" role="tab" id="cfgTab-delivery" aria-controls="cfgPanel-delivery" aria-selected="false" tabindex="-1" data-cfg-tab="delivery">投递与网络</button>
+          <button type="button" class="config-nav-link" role="tab" id="cfgTab-auth" aria-controls="cfgPanel-auth" aria-selected="false" tabindex="-1" data-cfg-tab="auth">认证</button>
         </nav>
 
         <div class="config-cards">
 
-          <section class="settings-card" id="groupOverview">
-            <div class="settings-card-head">
-              <h2 class="settings-card-title">概览</h2>
-              <span class="mini-badge">只读</span>
-            </div>
-            <p class="settings-card-note">
-              配置分为认证与密钥、Grok 交付、代理；密钥类字段带「密钥」标记。
-              改动任意字段后，底部保存栏显示未保存数量，保存成功才成为新的对比基准。
-            </p>
-            <div class="settings-card-body">
-              <div class="form-row">
-                <div class="form-row-label">
-                  <span class="form-label">配置接口</span>
-                  <span class="helper-text">页面加载读取 /api/config/list，保存写入 /api/config/save。</span>
-                </div>
-                <div class="form-row-control config-inline-tags">
-                  <span class="inline-code">/api/config/list</span>
-                  <span class="inline-code">/api/config/save</span>
-                </div>
+          <!-- Grok Build ─────────────────────────────────────────────── -->
+          <div class="config-panel" id="cfgPanel-build" role="tabpanel" aria-labelledby="cfgTab-build">
+            <section class="settings-card">
+              <div class="settings-card-head"><h2 class="settings-card-title">Build 上游</h2><span class="mini-badge">新请求生效</span></div>
+              <p class="settings-card-note">Grok Build（OAuth CLI）身份与上游地址。留空使用内置推荐值；客户端版本低于内置版本时会自动升级到推荐值。</p>
+              <div class="settings-card-body">
+                <div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_grok_cli_base_url">Base URL</label><span class="helper-text">默认 https://cli-chat-proxy.grok.com/v1。</span></div>
+                  <div class="form-row-control"><input type="url" id="cfg_grok_cli_base_url" class="form-input" placeholder="https://cli-chat-proxy.grok.com/v1" spellcheck="false"></div></div>
+                <div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_grok_cli_client_version">客户端版本</label><span class="helper-text">随请求发送的 Grok CLI 版本号。</span></div>
+                  <div class="form-row-control"><input type="text" id="cfg_grok_cli_client_version" class="form-input" placeholder="内置推荐版本" spellcheck="false"></div></div>
+                <div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_grok_cli_client_identifier">客户端标识</label><span class="helper-text">x-grok-client 标识。</span></div>
+                  <div class="form-row-control"><input type="text" id="cfg_grok_cli_client_identifier" class="form-input" placeholder="内置推荐标识" spellcheck="false"></div></div>
+                <div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_grok_cli_user_agent">User-Agent</label><span class="helper-text">Build 请求的 UA；留空按客户端版本生成。</span></div>
+                  <div class="form-row-control"><input type="text" id="cfg_grok_cli_user_agent" class="form-input" placeholder="自动生成" spellcheck="false"></div></div>
               </div>
+            </section>
+            <section class="settings-card">
+              <div class="settings-card-head"><h2 class="settings-card-title">Build 交付</h2><span class="mini-badge">新请求生效</span></div>
+              <div class="settings-card-body">
+                <div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_grok_low_latency">低延迟</label><span class="helper-text">直接交付上游内容，跳过输出前质量暂存与质量重试；异常结果仍会记录，但可能已被客户端收到。仅作用于 Build。</span></div>
+                  <div class="form-row-control"><label class="toggle"><input type="checkbox" id="cfg_grok_low_latency" aria-label="Build 低延迟"><span class="toggle-slider"></span></label></div></div>
+                <div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_grok_build_rps">每秒请求上限</label><span class="helper-text">发往 Build 上游的全局速率上限；0 表示使用默认值。</span></div>
+                  <div class="form-row-control"><input type="number" id="cfg_grok_build_rps" class="form-input" min="0" max="1000" step="0.1" placeholder="默认"></div></div>
+                <div class="form-row"><div class="form-row-label"><span class="form-label">超时</span><span class="helper-text">响应头与流空闲超时由网关统一固定，保证长推理不被截断，不可在此修改。</span></div>
+                  <div class="form-row-control"><span class="mini-badge">固定策略</span></div></div>
+              </div>
+            </section>
+          </div>
 
-            </div>
-          </section>
+          <!-- Grok Web ───────────────────────────────────────────────── -->
+          <div class="config-panel" id="cfgPanel-web" role="tabpanel" aria-labelledby="cfgTab-web" hidden>
+            <section class="settings-card">
+              <div class="settings-card-head"><h2 class="settings-card-title">Web 上游</h2><span class="mini-badge">新请求生效</span></div>
+              <p class="settings-card-note">grok.com（SSO）对话、Imagine 与视频。</p>
+              <div class="settings-card-body">
+                <div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_grok_web_base_url">Base URL</label><span class="helper-text">默认 https://grok.com。</span></div>
+                  <div class="form-row-control"><input type="url" id="cfg_grok_web_base_url" class="form-input" placeholder="https://grok.com" spellcheck="false"></div></div>
+                <div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_grok_web_user_agent">User-Agent</label><span class="helper-text">未走出口节点时的浏览器 UA；出口节点可单独设置。</span></div>
+                  <div class="form-row-control"><input type="text" id="cfg_grok_web_user_agent" class="form-input" placeholder="内置 Chrome UA" spellcheck="false"></div></div>
+                <div class="form-row"><div class="form-row-label"><span class="form-label">Statsig</span><span class="helper-text">x-statsig-id 的来源：手动填写固定值，或调用签名服务按请求生成。</span></div>
+                  <div class="form-row-control">
+                    <div class="segmented" role="radiogroup" aria-label="Statsig 来源">
+                      <label><input type="radio" name="cfg_statsig_mode" id="cfg_statsig_mode_manual" value="manual"><span>手动</span></label>
+                      <label><input type="radio" name="cfg_statsig_mode" id="cfg_statsig_mode_url" value="url"><span>签名服务</span></label>
+                    </div>
+                  </div></div>
+                <div class="form-row" data-statsig="manual"><div class="form-row-label"><label class="form-label" for="cfg_grok_statsig_id">Statsig ID <span class="secret-badge">密钥</span></label><span class="helper-text">Base64，解码后 70 字节。</span></div>
+                  <div class="form-row-control"><input type="text" id="cfg_grok_statsig_id" class="form-input secret-field" autocomplete="off" spellcheck="false"></div></div>
+                <div class="form-row" data-statsig="url"><div class="form-row-label"><label class="form-label" for="cfg_grok_statsig_signer_url">签名服务 URL</label><span class="helper-text">留空使用内置签名服务。</span></div>
+                  <div class="form-row-control"><input type="url" id="cfg_grok_statsig_signer_url" class="form-input" placeholder="http://grok-signer-go:8788/sign" spellcheck="false"></div></div>
+              </div>
+            </section>
+            <section class="settings-card">
+              <div class="settings-card-head"><h2 class="settings-card-title">超时与速率</h2><span class="mini-badge">新请求生效</span></div>
+              <div class="settings-card-body">
+                <div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_grok_web_timeout_seconds">请求超时</label><span class="helper-text">单次 Web 请求的总时长上限；0 使用默认值。</span></div>
+                  <div class="form-row-control"><div class="duration-input"><input type="number" id="cfg_grok_web_timeout_seconds" class="form-input" min="0" step="1" placeholder="默认"><select id="cfg_grok_web_timeout_seconds_unit" class="form-input" aria-label="单位"><option value="1">秒</option><option value="60">分</option><option value="3600">时</option></select></div></div></div>
+                <div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_grok_web_stream_idle_seconds">流空闲超时</label><span class="helper-text">流式响应无数据的最长时间，30 秒至 10 分钟，默认 90 秒。</span></div>
+                  <div class="form-row-control"><div class="duration-input"><input type="number" id="cfg_grok_web_stream_idle_seconds" class="form-input" min="0" step="1" placeholder="90"><select id="cfg_grok_web_stream_idle_seconds_unit" class="form-input" aria-label="单位"><option value="1">秒</option><option value="60">分</option></select></div></div></div>
+                <div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_grok_web_rps">每秒请求上限</label><span class="helper-text">发往 grok.com 的全局速率上限；0 表示使用默认值。</span></div>
+                  <div class="form-row-control"><input type="number" id="cfg_grok_web_rps" class="form-input" min="0" max="1000" step="0.1" placeholder="默认"></div></div>
+              </div>
+            </section>
+            <section class="settings-card">
+              <div class="settings-card-head"><h2 class="settings-card-title">对话与媒体</h2><span class="mini-badge">新请求生效</span></div>
+              <div class="settings-card-body">
+                <div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_grok_temporary">临时对话</label><span class="helper-text">不在 grok.com 账号历史中保留对话。默认开启。</span></div>
+                  <div class="form-row-control"><label class="toggle"><input type="checkbox" id="cfg_grok_temporary" aria-label="临时对话"><span class="toggle-slider"></span></label></div></div>
+                <div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_grok_disable_memory">关闭记忆</label><span class="helper-text">请求不读取也不写入账号的个性化记忆。</span></div>
+                  <div class="form-row-control"><label class="toggle"><input type="checkbox" id="cfg_grok_disable_memory" aria-label="关闭记忆"><span class="toggle-slider"></span></label></div></div>
+                <div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_grok_custom_instruction">自定义指令</label><span class="helper-text">附加到每个 Web 对话的系统指令；留空不附加。</span></div>
+                  <div class="form-row-control"><textarea id="cfg_grok_custom_instruction" class="form-input" rows="3" maxlength="4000"></textarea></div></div>
+                <div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_grok_image_nsfw">允许 NSFW</label><span class="helper-text">Imagine 出图与视频请求携带 NSFW 许可；账号本身仍需开启 NSFW（账号管理 → Grok Web）。</span></div>
+                  <div class="form-row-control"><label class="toggle"><input type="checkbox" id="cfg_grok_image_nsfw" aria-label="允许 NSFW"><span class="toggle-slider"></span></label></div></div>
+                <div class="form-row"><div class="form-row-label"><span class="form-label">免费账号视频时长</span><span class="helper-text">免费套餐单段视频上限 6 秒，由上游决定。</span></div>
+                  <div class="form-row-control"><span class="mini-badge">6 秒</span></div></div>
+              </div>
+            </section>
+          </div>
 
-          <section class="settings-card" id="groupAuth">
-            <div class="settings-card-head">
-              <h2 class="settings-card-title">认证与密钥</h2>
-              <span class="mini-badge">访问控制</span>
-            </div>
-            <p class="settings-card-note">后台登录凭据与推理 API Key 访问控制。API Key 请在本页“API Key 管理”标签创建、复制和管理。</p>
-            <div class="settings-card-body">
-              <div class="form-row">
-                <div class="form-row-label">
-                  <label class="form-label" for="cfg_admin_pass">管理员密码 <span class="secret-badge">密钥</span></label>
-                  <span class="helper-text">控制台登录密码；留空表示不修改当前密码。</span>
-                </div>
-                <div class="form-row-control">
-                  <div class="input-wrapper secret-shell">
-                    <input type="password" id="cfg_admin_pass" class="form-input secret-field" placeholder="留空则不修改">
-                    <button type="button" class="btn-icon password-toggle" onclick="togglePassword('cfg_admin_pass')">••</button>
-                  </div>
-                </div>
+          <!-- Delivery & network ─────────────────────────────────────── -->
+          <div class="config-panel" id="cfgPanel-delivery" role="tabpanel" aria-labelledby="cfgTab-delivery" hidden>
+            <section class="settings-card">
+              <div class="settings-card-head"><h2 class="settings-card-title">Clearance</h2><span class="mini-badge">新请求生效</span></div>
+              <p class="settings-card-note">grok.com 位于 Cloudflare 之后。FlareSolverr 只接受 http / socks5 代理地址，隧道分享链接无法自动刷新。</p>
+              <div class="settings-card-body">
+                <div class="form-row"><div class="form-row-label"><span class="form-label">模式</span><span class="helper-text" id="cfgClearanceHelp"></span></div>
+                  <div class="form-row-control">
+                    <div class="segmented" role="radiogroup" aria-label="Clearance 模式">
+                      <label><input type="radio" name="cfg_clearance_mode" id="cfg_clearance_mode_flaresolverr" value="flaresolverr"><span>FlareSolverr</span></label>
+                      <label><input type="radio" name="cfg_clearance_mode" id="cfg_clearance_mode_on_demand" value="on_demand"><span>按需刷新</span></label>
+                      <label><input type="radio" name="cfg_clearance_mode" id="cfg_clearance_mode_manual" value="manual"><span>手动维护</span></label>
+                    </div>
+                  </div></div>
+                <div class="form-row" data-clearance="solver"><div class="form-row-label"><label class="form-label" for="cfg_grok_flaresolverr_url">FlareSolverr URL</label><span class="helper-text">例如 http://flaresolverr:8191。</span></div>
+                  <div class="form-row-control"><input type="url" id="cfg_grok_flaresolverr_url" class="form-input" placeholder="http://flaresolverr:8191" spellcheck="false"></div></div>
+                <div class="form-row" data-clearance="solver"><div class="form-row-label"><label class="form-label" for="cfg_grok_clearance_timeout_seconds">求解超时</label><span class="helper-text">单次求解上限，10 秒至 300 秒，默认 60 秒。</span></div>
+                  <div class="form-row-control"><div class="duration-input"><input type="number" id="cfg_grok_clearance_timeout_seconds" class="form-input" min="0" step="1" placeholder="60"><select id="cfg_grok_clearance_timeout_seconds_unit" class="form-input" aria-label="单位"><option value="1">秒</option><option value="60">分</option></select></div></div></div>
+                <div class="form-row" data-clearance="flaresolverr"><div class="form-row-label"><label class="form-label" for="cfg_grok_clearance_refresh_interval">刷新周期</label><span class="helper-text">超过该时长的 Clearance 在下次请求前重新求解，默认 10 分钟。</span></div>
+                  <div class="form-row-control"><div class="duration-input"><input type="number" id="cfg_grok_clearance_refresh_interval" class="form-input" min="0" step="1" placeholder="600"><select id="cfg_grok_clearance_refresh_interval_unit" class="form-input" aria-label="单位"><option value="1">秒</option><option value="60">分</option><option value="3600">时</option></select></div></div></div>
+                <div class="form-row" data-clearance="manual"><div class="form-row-label"><label class="form-label" for="cfg_grok_cf_clearance">全局 cf_clearance <span class="secret-badge">密钥</span></label><span class="helper-text">未走出口节点、或节点未单独设置 Cookie 时使用；须与出网 IP 和 UA 匹配。</span></div>
+                  <div class="form-row-control"><input type="text" id="cfg_grok_cf_clearance" class="form-input secret-field" autocomplete="off" spellcheck="false"></div></div>
               </div>
+            </section>
 
-            </div>
-          </section>
+            <section class="settings-card">
+              <div class="settings-card-head"><h2 class="settings-card-title">通用代理</h2><span class="mini-badge">出网</span></div>
+              <p class="settings-card-note">没有出口节点、且兜底为“通用代理”的请求走这里；留空表示直连。</p>
+              <div class="settings-card-body">
+                <div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_proxy_url">代理 URL <span class="secret-badge">密钥</span></label><span class="helper-text">支持 http://、https://、socks5://。</span></div>
+                  <div class="form-row-control"><input type="text" id="cfg_proxy_url" class="form-input secret-field" placeholder="http://user:pass@host:port/ 或 socks5://user:pass@host:port/"></div></div>
+                <div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_grok_web_proxy_url">Grok Web 代理 <span class="secret-badge">密钥</span></label><span class="helper-text">只用于 grok.com；留空使用上面的通用代理。</span></div>
+                  <div class="form-row-control"><input type="text" id="cfg_grok_web_proxy_url" class="form-input secret-field" autocomplete="off" spellcheck="false" placeholder="http://user:pass@host:port/"></div></div>
+                <div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_proxy_bypass">直连域名/网段</label><span class="helper-text">每行一个域名或 CIDR。</span></div>
+                  <div class="form-row-control"><textarea id="cfg_proxy_bypass" class="form-input" rows="3" placeholder="example.com&#10;10.0.0.0/8"></textarea></div></div>
+              </div>
+            </section>
 
-          <section class="settings-card" id="groupGrok">
-            <div class="settings-card-head">
-              <h2 class="settings-card-title">Grok 交付</h2>
-              <span class="mini-badge">新请求生效</span>
-            </div>
-            <div class="settings-card-body">
-              <div class="form-row">
-                <div class="form-row-label">
-                  <label class="form-label" for="cfg_grok_low_latency">Grok 低延迟</label>
-                  <span class="helper-text">直接交付上游内容，跳过输出前质量暂存与质量重试；异常结果仍会记录，但可能已被客户端收到。默认关闭。</span>
-                </div>
-                <div class="form-row-control">
-                  <label class="toggle"><input type="checkbox" id="cfg_grok_low_latency" aria-label="Grok 低延迟"><span class="toggle-slider"></span></label>
-                </div>
-              </div>
-            </div>
-          </section>
+            {{template "egress-panel.html" .}}
+          </div>
 
-          <section class="settings-card" id="groupGrokWeb">
-            <div class="settings-card-head">
-              <h2 class="settings-card-title">Grok Web（SSO）</h2>
-              <span class="mini-badge">新请求生效</span>
-            </div>
-            <p class="settings-card-note">grok.com 位于 Cloudflare 之后；出现 “Just a moment” 验证时，填写浏览器中的 cf_clearance，或改用 FlareSolverr 自动刷新。</p>
-            <div class="settings-card-body">
-              <div class="form-row">
-                <div class="form-row-label">
-                  <label class="form-label" for="cfg_grok_web_proxy_url">Grok Web 代理 <span class="secret-badge">密钥</span></label>
-                  <span class="helper-text">只用于 grok.com（SSO）请求；留空则使用下方通用代理。服务器 IP 被 Cloudflare 拦截时填写能访问 grok.com 的 http:// 或 socks5:// 代理。</span>
-                </div>
-                <div class="form-row-control">
-                  <input type="text" id="cfg_grok_web_proxy_url" class="form-input secret-field" autocomplete="off" spellcheck="false" placeholder="http://user:pass@host:port/">
-                </div>
+          <!-- Authentication ─────────────────────────────────────────── -->
+          <div class="config-panel" id="cfgPanel-auth" role="tabpanel" aria-labelledby="cfgTab-auth" hidden>
+            <section class="settings-card">
+              <div class="settings-card-head"><h2 class="settings-card-title">认证与密钥</h2><span class="mini-badge">访问控制</span></div>
+              <p class="settings-card-note">后台登录凭据。推理 API Key 请在“API Key 管理”标签创建与管理。</p>
+              <div class="settings-card-body">
+                <div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_admin_pass">管理员密码 <span class="secret-badge">密钥</span></label><span class="helper-text">控制台登录密码；留空表示不修改当前密码。</span></div>
+                  <div class="form-row-control"><div class="input-wrapper secret-shell"><input type="password" id="cfg_admin_pass" class="form-input secret-field" placeholder="留空则不修改"><button type="button" class="btn-icon password-toggle" onclick="togglePassword('cfg_admin_pass')" aria-label="显示或隐藏密码">••</button></div></div></div>
               </div>
-              <div class="form-row">
-                <div class="form-row-label">
-                  <label class="form-label" for="cfg_grok_clearance_mode">Clearance 模式</label>
-                  <span class="helper-text">手动维护使用下方 Cookie；FlareSolverr 按间隔自动获取。</span>
-                </div>
-                <div class="form-row-control">
-                  <select id="cfg_grok_clearance_mode" class="form-input">
-                    <option value="manual">手动维护</option>
-                    <option value="flaresolverr">FlareSolverr</option>
-                  </select>
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="form-row-label">
-                  <label class="form-label" for="cfg_grok_cf_clearance">cf_clearance <span class="secret-badge">密钥</span></label>
-                  <span class="helper-text">需与出网 IP 和浏览器 UA 匹配；留空则不发送。</span>
-                </div>
-                <div class="form-row-control">
-                  <input type="text" id="cfg_grok_cf_clearance" class="form-input secret-field" autocomplete="off" spellcheck="false">
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="form-row-label">
-                  <label class="form-label" for="cfg_grok_flaresolverr_url">FlareSolverr URL</label>
-                  <span class="helper-text">例如 http://127.0.0.1:8191/v1。FlareSolverr 模式还需启用 Grok 出口池并配置 scope 为 all 的节点（配置文件）。</span>
-                </div>
-                <div class="form-row-control">
-                  <input type="text" id="cfg_grok_flaresolverr_url" class="form-input" placeholder="http://127.0.0.1:8191/v1">
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section class="settings-card" id="groupProxy">
-            <div class="settings-card-head">
-              <h2 class="settings-card-title">代理</h2>
-              <span class="mini-badge">出网</span>
-            </div>
-            <p class="settings-card-note">上游请求的出网方式，留空表示直连。</p>
-            <div class="settings-card-body">
-              <div class="form-row">
-                <div class="form-row-label">
-                  <label class="form-label" for="cfg_proxy_url">代理 URL <span class="secret-badge">密钥</span></label>
-                  <span class="helper-text">支持 http://、https://、socks5://；URL 内可包含 user:pass 凭据，不要泄露给他人。</span>
-                </div>
-                <div class="form-row-control">
-                  <input type="text" id="cfg_proxy_url" class="form-input secret-field"
-                    placeholder="http://user:pass@host:port/ 或 socks5://user:pass@host:port/">
-                </div>
-              </div>
-
-              <div class="form-row">
-                <div class="form-row-label">
-                  <label class="form-label" for="cfg_proxy_bypass">直连域名/网段</label>
-                  <span class="helper-text">每行一个域名或 CIDR，列表内的目标不走代理。</span>
-                </div>
-                <div class="form-row-control">
-                  <textarea id="cfg_proxy_bypass" class="form-input" rows="3"
-                    placeholder="每行一个域名或 CIDR，例如 example.com 或 10.0.0.0/8"></textarea>
-                </div>
-              </div>
-            </div>
-          </section>
+            </section>
+          </div>
         </div>
       </div>
 
@@ -205,11 +193,13 @@
   </main>
 
   {{template "key-modals.html" .}}
+  {{template "egress-modals.html" .}}
   <div class="toast-container" id="toastContainer"></div>
 
   {{template "page-scripts.html" .}}
   <script src="{{.AdminPath}}/js/provider-registry.js?v={{.AssetVersion}}"></script>
   <script src="{{.AdminPath}}/js/config.js?v={{.AssetVersion}}"></script>
+  <script src="{{.AdminPath}}/js/egress-nodes.js?v={{.AssetVersion}}"></script>
   <script src="{{.AdminPath}}/js/api-keys.js?v={{.AssetVersion}}"></script>
   <script src="{{.AdminPath}}/js/api-key-import.js?v={{.AssetVersion}}"></script>
 </body>

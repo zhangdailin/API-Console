@@ -6,13 +6,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	"orchids-api/internal/config"
+	"orchids-api/internal/grok/egressnodes"
 	"orchids-api/internal/httpclient"
 )
 
@@ -69,9 +70,11 @@ type Manager struct {
 	lastLease   map[string]leaseKeyInfo // scope|affinity -> last fingerprint/version
 	version     uint64                  // clearance generation counter
 	solver      clearanceSolver
+	snap        *egressnodes.Snapshot
 }
 
 type clearanceState struct {
+	nodeID      string
 	cookies     string
 	userAgent   string
 	refreshedAt time.Time
@@ -92,12 +95,8 @@ var errClearanceUnavailable = errors.New("egress clearance unavailable")
 // NewManager builds an egress manager from configuration. Returns nil when
 // egress is disabled.
 func NewManager(cfg *config.Config) *Manager {
-	if cfg == nil || !cfg.GrokEgressEnabled {
-		return nil
-	}
 	manager := &Manager{
 		cfg:        cfg,
-		nodes:      nodesFromConfig(cfg),
 		health:     make(map[string]float64),
 		unhealthy:  make(map[string]time.Time),
 		failures:   make(map[string]int),
@@ -109,13 +108,82 @@ func NewManager(cfg *config.Config) *Manager {
 		lastLease:  make(map[string]leaseKeyInfo),
 		solver:     flaresolverrSolver{},
 	}
+	manager.mu.Lock()
+	manager.refreshNodesLocked()
+	manager.mu.Unlock()
 	manager.restoreHealth()
 	return manager
 }
 
-// Enabled reports whether the manager is active.
-func (m *Manager) Enabled() bool {
-	return m != nil && m.cfg != nil && m.cfg.GrokEgressEnabled
+var (
+	sharedMu      sync.Mutex
+	sharedManager *Manager
+)
+
+// Shared returns the process Web egress manager, updated to cfg. Health,
+// stickiness and Cloudflare clearance survive configuration saves, and the
+// registry's clearance hooks are bound to it.
+func Shared(cfg *config.Config) *Manager {
+	sharedMu.Lock()
+	defer sharedMu.Unlock()
+	if sharedManager == nil {
+		sharedManager = NewManager(cfg)
+		manager := sharedManager
+		egressnodes.SetClearanceHooks(egressnodes.ClearanceHooks{Inspect: manager.InspectClearance, Refresh: manager.RefreshClearance})
+		return sharedManager
+	}
+	sharedManager.mu.Lock()
+	sharedManager.cfg = cfg
+	sharedManager.mu.Unlock()
+	return sharedManager
+}
+
+// refreshNodesLocked converts the current registry snapshot. Callers hold m.mu.
+func (m *Manager) refreshNodesLocked() {
+	snap := egressnodes.SnapshotFor(m.cfg)
+	if snap == m.snap && m.nodes != nil {
+		return
+	}
+	m.snap = snap
+	nodes := make([]Node, 0, len(snap.Nodes))
+	for _, node := range snap.Nodes {
+		nodes = append(nodes, nodeFromRegistry(node))
+	}
+	m.nodes = nodes
+}
+
+func (m *Manager) snapshot() *egressnodes.Snapshot {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.refreshNodesLocked()
+	return m.snap
+}
+
+// targetScopeLocked maps a request scope to the node scope serving it: Web
+// asset downloads use asset nodes when any exist, Web nodes otherwise.
+func (m *Manager) targetScopeLocked(scope string) string {
+	target := egressnodes.RegistryScope(scope)
+	if target == "grok_web_asset" {
+		for _, node := range m.nodes {
+			if node.Scope == target {
+				return target
+			}
+		}
+		return "grok_web"
+	}
+	return target
+}
+
+// Enabled reports whether Web requests route through the egress manager.
+func (m *Manager) Enabled() bool { return m.Routes("app_chat") }
+
+// Routes reports whether requests for scope route through the manager: the
+// scope has nodes, or its fallback is not the general proxy.
+func (m *Manager) Routes(scope string) bool {
+	if m == nil {
+		return false
+	}
+	return m.snapshot().Routes(egressnodes.RegistryScope(scope))
 }
 
 // Acquire selects a healthy node for a scope, binding a UA + clearance
@@ -124,7 +192,7 @@ func (m *Manager) Enabled() bool {
 // healthy node exists, or clearance cannot be resolved for a flare-solve node,
 // Acquire fails closed.
 func (m *Manager) Acquire(ctx context.Context, scope, affinity string) (*Lease, error) {
-	if !m.Enabled() {
+	if m == nil {
 		return nil, errors.New("egress disabled")
 	}
 	node := m.pickNode(scope, affinity)
@@ -137,12 +205,27 @@ func (m *Manager) Acquire(ctx context.Context, scope, affinity string) (*Lease, 
 		}
 	}
 	if node == nil {
+		fallback := m.snapshot().Fallback(egressnodes.RegistryScope(scope))
+		switch fallback.Mode {
+		case "direct":
+			return &Lease{Direct: true}, nil
+		case "fixed":
+			if fixed, ok := m.snapshot().Node(fallback.NodeID); ok {
+				converted := nodeFromRegistry(fixed)
+				node = &converted
+			}
+		}
+	}
+	if node == nil {
 		return nil, errNoHealthyNode
+	}
+	proxy, err := node.proxyFor(affinity)
+	if err != nil {
+		return nil, fmt.Errorf("egress node %q: %w", node.Label, err)
 	}
 	fingerprint := m.fingerprint(*node, affinity)
 	var ua, cookies string
 	var version uint64
-	var err error
 	if usesBrowserClearance(scope) {
 		ua, cookies, version, err = m.resolveFingerprint(ctx, *node, fingerprint)
 		if err != nil {
@@ -156,14 +239,20 @@ func (m *Manager) Acquire(ctx context.Context, scope, affinity string) (*Lease, 
 	// Isolate connection pools by node, proxy URL, and clearance binding. The
 	// proxy component is hashed so credentials never appear in cache keys or
 	// diagnostics, while a same-name node whose URL changes gets a fresh pool.
-	poolKey := "egress:" + node.Name + "|proxy=" + shortHash(node.URL) + "|" + fingerprint
+	proxyKey := ""
+	var proxyFunc func(*http.Request) (*url.URL, error)
+	if proxy != nil {
+		proxyKey = proxy.String()
+		proxyFunc = http.ProxyURL(proxy)
+	}
+	poolKey := "egress:" + node.Name + "|proxy=" + shortHash(proxyKey) + "|" + fingerprint
 	// The ClientHello follows the UA this exit will send, so the TLS fingerprint
 	// and the advertised Chrome version cannot contradict each other.
-	client := httpclient.GetSharedBrowserHTTPClientForUserAgent(poolKey, m.cfg.GrokWebRequestTimeout(), 0, proxyFuncForNode(*node), ua)
+	client := httpclient.GetSharedBrowserHTTPClientForUserAgent(poolKey, m.cfg.GrokWebRequestTimeout(), 0, proxyFunc, ua)
 
 	lease := &Lease{
 		NodeID:           node.Name,
-		ProxyURL:         node.URL,
+		ProxyURL:         proxyKey,
 		UserAgent:        ua,
 		CFCookies:        cookies,
 		clearanceKey:     fingerprint,
@@ -178,13 +267,15 @@ func (m *Manager) pickNode(scope, affinity string) *Node {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	m.refreshNodesLocked()
 	normalizedScope := strings.ToLower(strings.TrimSpace(scope))
+	target := m.targetScopeLocked(normalizedScope)
 	now := time.Now()
 	var candidates []Node
 	totalWeight := 0
 	anyForScope := false
 	for _, node := range m.nodes {
-		if !nodeMatchesScope(node, normalizedScope) {
+		if node.Scope != target {
 			continue
 		}
 		anyForScope = true
@@ -203,6 +294,24 @@ func (m *Manager) pickNode(scope, affinity string) *Node {
 			recordAllNodesUnhealthy(normalizedScope)
 		}
 		return nil
+	}
+
+	// An account bound to a node keeps it while it is healthy.
+	bound := m.snap.Binding(egressnodes.RegistryScope(normalizedScope), affinity)
+	if bound == "" {
+		ids := make([]string, 0, len(candidates))
+		for _, candidate := range candidates {
+			ids = append(ids, candidate.Name)
+		}
+		bound = egressnodes.AutoBind(egressnodes.RegistryScope(normalizedScope), affinity, ids)
+	}
+	if bound != "" {
+		for i := range candidates {
+			if candidates[i].Name == bound {
+				recordNodeSelection(normalizedScope)
+				return &candidates[i]
+			}
+		}
 	}
 
 	// Sticky affinity: prefer the node this affinity last used when healthy.
@@ -278,106 +387,6 @@ func usesBrowserClearance(scope string) bool {
 	}
 }
 
-// resolveFingerprint returns a stable (ua, cookies, version) pair for a
-// fingerprint, solving/refreshing clearance when needed. A failed solve with no
-// reusable cached clearance fails closed (error) so the caller never proceeds
-// with empty cookies pretending to be valid.
-func (m *Manager) resolveFingerprint(ctx context.Context, node Node, fingerprint string) (string, string, uint64, error) {
-	m.mu.Lock()
-	state, ok := m.clearances[fingerprint]
-	m.mu.Unlock()
-
-	if ok && !state.invalid && state.cookies != "" && time.Since(state.refreshedAt) < m.refreshInterval() {
-		return state.userAgent, state.cookies, state.version, nil
-	}
-
-	cfg := m.clearanceConfig()
-	ua := state.userAgent
-	if ua == "" {
-		ua = pickUserAgent(fingerprint)
-	}
-	cookies := state.cookies
-
-	if cfg.Mode == "flaresolverr" && m.solver != nil {
-		solved, err := m.solver.Solve(ctx, cfg, node.URL)
-		if err != nil {
-			// Reuse a stale-but-not-invalidated clearance rather than failing the
-			// request outright, but never write a "fresh" success cache entry.
-			if ok && !state.invalid && state.cookies != "" {
-				slog.Warn("egress clearance solve failed; reusing stale clearance", "node", node.Name, "error", err)
-				recordClearanceSolve(false)
-				return state.userAgent, state.cookies, state.version, nil
-			}
-			recordClearanceSolve(false)
-			return "", "", 0, fmt.Errorf("%w: solve for node %q: %w", errClearanceUnavailable, node.Name, err)
-		}
-		if solved.UserAgent != "" {
-			ua = solved.UserAgent
-		}
-		if strings.TrimSpace(solved.Cookies) == "" {
-			// Empty cookies after a "successful" solve is not a valid clearance.
-			if ok && !state.invalid && state.cookies != "" {
-				slog.Warn("egress clearance solve returned no cookies; reusing stale clearance", "node", node.Name)
-				recordClearanceSolve(false)
-				return state.userAgent, state.cookies, state.version, nil
-			}
-			recordClearanceSolve(false)
-			return "", "", 0, fmt.Errorf("%w: solve returned empty cookies for node %q", errClearanceUnavailable, node.Name)
-		}
-		cookies = solved.Cookies
-		recordClearanceSolve(true)
-	} else if cfg.Mode != "flaresolverr" && cookies == "" {
-		// Manual mode: pull from static config when present. Empty is acceptable
-		// here — the operator explicitly chose manual without clearance.
-		cookies = m.manualClearance()
-	}
-
-	m.mu.Lock()
-	m.version++
-	state = clearanceState{
-		cookies:     cookies,
-		userAgent:   ua,
-		refreshedAt: time.Now(),
-		version:     m.version,
-	}
-	m.clearances[fingerprint] = state
-	m.mu.Unlock()
-	return ua, cookies, state.version, nil
-}
-
-func (m *Manager) manualClearance() string {
-	if m == nil || m.cfg == nil {
-		return ""
-	}
-	parts := make([]string, 0, 2)
-	if v := strings.TrimSpace(m.cfg.GrokConfigCFClearance); v != "" {
-		parts = append(parts, "cf_clearance="+v)
-	}
-	if v := strings.TrimSpace(m.cfg.GrokConfigCFBM); v != "" {
-		parts = append(parts, "__cf_bm="+v)
-	}
-	return strings.Join(parts, "; ")
-}
-
-func (m *Manager) clearanceConfig() ClearanceConfig {
-	if m == nil || m.cfg == nil {
-		return ClearanceConfig{Mode: "manual", TargetURL: "https://grok.com"}
-	}
-	return ClearanceConfig{
-		Mode:            m.cfg.GrokClearanceModeOrDefault(),
-		FlareSolverrURL: strings.TrimSpace(m.cfg.GrokFlareSolverrURL),
-		TargetURL:       "https://grok.com",
-		Timeout:         time.Minute,
-	}
-}
-
-func (m *Manager) refreshInterval() time.Duration {
-	if m == nil || m.cfg == nil {
-		return 10 * time.Minute
-	}
-	return time.Duration(m.cfg.GrokClearanceRefreshIntervalOrDefault()) * time.Second
-}
-
 // FeedbackOutcome updates a node's health score from a classified outcome.
 // Success recovers, transport/server/challenge degrade, and 429/account issues
 // leave the node untouched (they are not the node's fault).
@@ -416,7 +425,12 @@ func (m *Manager) FeedbackOutcome(nodeID string, outcome FeedbackOutcome) {
 	case OutcomeRateLimited, OutcomeAccountBlock, OutcomeForbidden:
 		// No health change: the request failed for account/team-level reasons.
 	}
+	m.reportHealthLocked(nodeID)
 	m.persistHealthLocked()
+}
+
+func (m *Manager) reportHealthLocked(nodeID string) {
+	egressnodes.ReportHealth(nodeID, egressnodes.Health{Score: m.health[nodeID], Failures: m.failures[nodeID], CooldownUntil: m.unhealthy[nodeID], LastError: m.lastError[nodeID]})
 }
 
 func (m *Manager) scopeForNodeLocked(nodeID string) string {
@@ -439,22 +453,6 @@ func outcomeReason(outcome FeedbackOutcome) string {
 	}
 }
 
-// InvalidateAffinityClearance invalidates the clearance used by the last lease
-// for a scope+affinity. Used by request paths that do not hold the lease
-// directly (e.g. CLI) after classifying a Cloudflare challenge.
-func (m *Manager) InvalidateAffinityClearance(scope, affinity string) {
-	if m == nil {
-		return
-	}
-	m.mu.RLock()
-	info, ok := m.lastLease[scope+"|"+affinity]
-	m.mu.RUnlock()
-	if !ok || info.fingerprint == "" {
-		return
-	}
-	m.invalidateClearanceKey(info.fingerprint, info.version)
-}
-
 // FeedbackAffinityOutcome applies a node-health outcome to the node most
 // recently leased for a scope+affinity. Used by request paths that do not hold
 // the lease directly (e.g. CLI) to record a persistent challenge after retry.
@@ -469,27 +467,6 @@ func (m *Manager) FeedbackAffinityOutcome(scope, affinity string, outcome Feedba
 		return
 	}
 	m.FeedbackOutcome(info.nodeID, outcome)
-}
-
-// invalidateClearanceKey marks a fingerprint's clearance stale. When version is
-// non-zero it only applies to that exact generation, so a concurrent re-solve
-// that bumped the version is never invalidated by a stale call.
-func (m *Manager) invalidateClearanceKey(key string, version uint64) {
-	if m == nil || key == "" {
-		return
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	state, ok := m.clearances[key]
-	if !ok {
-		return
-	}
-	if version != 0 && state.version != version {
-		return
-	}
-	state.invalid = true
-	m.clearances[key] = state
-	recordClearanceInvalidation()
 }
 
 // nodeCooldownFor returns the cooldown for a node that has failed n times in a
@@ -519,11 +496,13 @@ func (m *Manager) probeRecovery(ctx context.Context, scope string) bool {
 	now := time.Now()
 
 	m.mu.Lock()
+	m.refreshNodesLocked()
+	target := m.targetScopeLocked(normalizedScope)
 	var candidate *Node
 	var earliest time.Time
 	for i := range m.nodes {
 		node := m.nodes[i]
-		if !nodeMatchesScope(node, normalizedScope) {
+		if node.Scope != target {
 			continue
 		}
 		until, cooling := m.unhealthy[node.Name]
@@ -551,6 +530,7 @@ func (m *Manager) probeRecovery(ctx context.Context, scope string) bool {
 		m.failures[node.Name]++
 		m.lastError[node.Name] = "probe"
 		m.unhealthy[node.Name] = time.Now().Add(nodeCooldownFor(m.failures[node.Name]))
+		m.reportHealthLocked(node.Name)
 		m.mu.Unlock()
 		return false
 	}
@@ -560,6 +540,7 @@ func (m *Manager) probeRecovery(ctx context.Context, scope string) bool {
 	m.health[node.Name] = healthSkipThreshold
 	m.failures[node.Name] = 0
 	delete(m.lastError, node.Name)
+	m.reportHealthLocked(node.Name)
 	m.persistHealthLocked()
 	m.mu.Unlock()
 	recordNodeRecovery(normalizedScope)
@@ -578,9 +559,17 @@ func (m *Manager) probeNode(ctx context.Context, node Node) error {
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, nodeProbeTimeout)
 	defer cancel()
+	proxy, err := node.proxyFor("probe")
+	if err != nil {
+		return err
+	}
+	var proxyFunc func(*http.Request) (*url.URL, error)
+	if proxy != nil {
+		proxyFunc = http.ProxyURL(proxy)
+	}
 	client := httpclient.GetSharedBrowserHTTPClientWithHeaderTimeout(
 		"egress-probe:"+node.Name+"|proxy="+shortHash(node.URL),
-		nodeProbeTimeout, 0, proxyFuncForNode(node))
+		nodeProbeTimeout, 0, proxyFunc)
 	req, err := http.NewRequestWithContext(probeCtx, http.MethodHead, target, nil)
 	if err != nil {
 		return err

@@ -88,7 +88,7 @@ func (t *mgwWebSocketTransport) Open(ctx context.Context, request MGWChatRequest
 	if t == nil || t.client == nil {
 		return nil, fmt.Errorf("grok mgw transport not configured")
 	}
-	if t.client.egress != nil && t.client.egress.Enabled() {
+	if t.client.egress != nil && t.client.egress.Routes("app_chat") {
 		return nil, fmt.Errorf("grok mgw websocket unavailable: egress websocket lease is not supported")
 	}
 	if strings.TrimSpace(request.UserID) == "" || strings.TrimSpace(request.Model) == "" || strings.TrimSpace(request.Prompt) == "" || strings.TrimSpace(request.Token) == "" {

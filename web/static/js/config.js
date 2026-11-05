@@ -37,27 +37,97 @@ function togglePassword(fieldId) {
   if (field) { field.type = field.type === 'password' ? 'text' : 'password'; }
 }
 
-// ── Unsaved-change tracking ───────────────────────────────────────────────────
-// The sticky save bar compares the live control values against the values the
-// server returned on load. Only the fields the save payload actually reads are
-// counted.
-const CONFIG_TRACKED_FIELDS = [
-  "cfg_admin_pass",
-  "cfg_proxy_url",
-  "cfg_proxy_bypass",
-  "cfg_grok_low_latency",
-  "cfg_grok_clearance_mode",
-  "cfg_grok_web_proxy_url",
-  "cfg_grok_cf_clearance",
-  "cfg_grok_flaresolverr_url",
+// ── Settings fields ─────────────────────────────────────────────────────────
+// One table drives hydration, change tracking, reset and the save payload. A
+// control the page does not render is skipped, so the table can name every
+// setting the page may show.
+//   text      trimmed string            lines  newline/comma list
+//   bool      checkbox (def: default)   int    whole number, empty = 0
+//   float     decimal, empty = 0        secs   number + unit select (<id>_unit)
+//   radio     radio group named by ids  (value of the checked option)
+const CONFIG_FIELDS = [
+  { id: "cfg_proxy_url", key: "proxy_url", type: "text" },
+  { id: "cfg_proxy_bypass", key: "proxy_bypass", type: "lines" },
+  { id: "cfg_grok_low_latency", key: "grok_low_latency", type: "bool" },
+  { id: "cfg_grok_clearance_mode", key: "grok_clearance_mode", type: "radio", options: ["flaresolverr", "on_demand", "manual"], radio: "cfg_clearance_mode_", fallback: "manual" },
+  { id: "cfg_grok_cf_clearance", key: "grok_cf_clearance", type: "text" },
+  { id: "cfg_grok_flaresolverr_url", key: "grok_flaresolverr_url", type: "text" },
+  { id: "cfg_grok_web_proxy_url", key: "grok_web_proxy_url", type: "text" },
+  { id: "cfg_grok_clearance_timeout_seconds", key: "grok_clearance_timeout_seconds", type: "secs", optional: true },
+  { id: "cfg_grok_clearance_refresh_interval", key: "grok_clearance_refresh_interval", type: "secs", optional: true },
+  { id: "cfg_grok_cli_base_url", key: "grok_cli_base_url", type: "text", optional: true },
+  { id: "cfg_grok_cli_client_version", key: "grok_cli_client_version", type: "text", optional: true },
+  { id: "cfg_grok_cli_client_identifier", key: "grok_cli_client_identifier", type: "text", optional: true },
+  { id: "cfg_grok_cli_user_agent", key: "grok_cli_user_agent", type: "text", optional: true },
+  { id: "cfg_grok_build_rps", key: "grok_build_rps", type: "float", optional: true },
+  { id: "cfg_grok_web_base_url", key: "grok_web_base_url", type: "text", optional: true },
+  { id: "cfg_grok_web_user_agent", key: "grok_web_user_agent", type: "text", optional: true },
+  { id: "cfg_grok_statsig_id", key: "grok_statsig_id", type: "text", optional: true },
+  { id: "cfg_grok_statsig_signer_url", key: "grok_statsig_signer_url", type: "text", optional: true },
+  { id: "cfg_statsig_mode", key: "", type: "radio", options: ["manual", "url"], radio: "cfg_statsig_mode_", fallback: "url", optional: true },
+  { id: "cfg_grok_web_timeout_seconds", key: "grok_web_timeout_seconds", type: "secs", optional: true },
+  { id: "cfg_grok_web_stream_idle_seconds", key: "grok_web_stream_idle_seconds", type: "secs", optional: true },
+  { id: "cfg_grok_web_rps", key: "grok_web_rps", type: "float", optional: true },
+  { id: "cfg_grok_temporary", key: "grok_temporary", type: "bool", default: true, optional: true },
+  { id: "cfg_grok_disable_memory", key: "grok_disable_memory", type: "bool", optional: true },
+  { id: "cfg_grok_custom_instruction", key: "grok_custom_instruction", type: "text", optional: true },
+  { id: "cfg_grok_image_nsfw", key: "grok_image_nsfw", type: "bool", default: true, optional: true },
 ];
+// The admin password is write-only: tracked for the save bar, sent when set.
+const CONFIG_TRACKED_FIELDS = ["cfg_admin_pass", ...CONFIG_FIELDS.map((field) => field.id)];
 let configBaseline = null;
 let configSaving = false;
 
+function configField(id) { return CONFIG_FIELDS.find((field) => field.id === id); }
+
+// radioValue reads a radio group; a group the page does not render reads null.
+function radioValue(field) {
+  let rendered = false;
+  for (const option of field.options) {
+    const node = document.getElementById(field.radio + option);
+    if (!node) continue;
+    rendered = true;
+    if (node.checked) return option;
+  }
+  return rendered ? field.fallback : null;
+}
+
+function setRadioValue(field, value) {
+  const chosen = field.options.includes(value) ? value : field.fallback;
+  field.options.forEach((option) => {
+    const node = document.getElementById(field.radio + option);
+    if (node) node.checked = option === chosen;
+  });
+}
+
+function unitFactor(id) {
+  const unit = document.getElementById(id + "_unit");
+  const factor = unit ? Number(unit.value) : 1;
+  return Number.isFinite(factor) && factor > 0 ? factor : 1;
+}
+
+// setSeconds shows a duration in the largest unit that divides it evenly.
+function setSeconds(id, seconds) {
+  const input = document.getElementById(id);
+  if (!input) return;
+  const unit = document.getElementById(id + "_unit");
+  let value = Number(seconds) || 0;
+  if (unit && value > 0) {
+    const factors = Array.from(unit.options || []).map((option) => Number(option.value)).sort((a, b) => b - a);
+    const factor = factors.find((f) => value % f === 0) || 1;
+    unit.value = String(factor);
+    value = value / factor;
+  }
+  input.value = value ? String(value) : "";
+}
+
 function readConfigFieldValue(id) {
+  const spec = configField(id);
+  if (spec && spec.type === "radio") return radioValue(spec);
   const field = document.getElementById(id);
   if (!field) return null;
-  if (field.type === "checkbox") return field.checked ? "true" : "false";
+  if (field.type === "checkbox" || (spec && spec.type === "bool")) return field.checked ? "true" : "false";
+  if (spec && spec.type === "secs") return field.value === "" ? "" : String(Number(field.value) * unitFactor(id));
   return field.value;
 }
 
@@ -137,9 +207,15 @@ function handleConfigFieldChange() {
 }
 
 function bindConfigDirtyTracking() {
+  const ids = [];
   CONFIG_TRACKED_FIELDS.forEach((id) => {
+    const spec = configField(id);
+    if (spec && spec.type === "radio") spec.options.forEach((option) => ids.push(spec.radio + option));
+    else ids.push(id, id + "_unit");
+  });
+  ids.forEach((id) => {
     const field = document.getElementById(id);
-    if (!field) return;
+    if (!field || !field.addEventListener) return;
     field.addEventListener("input", handleConfigFieldChange);
     field.addEventListener("change", handleConfigFieldChange);
   });
@@ -154,10 +230,15 @@ function bindConfigDirtyTracking() {
 function resetConfigChanges() {
   if (!configBaseline) return;
   CONFIG_TRACKED_FIELDS.forEach((id) => {
+    if (!(id in configBaseline)) return;
+    const spec = configField(id);
+    if (spec && spec.type === "radio") { setRadioValue(spec, configBaseline[id]); return; }
     const field = document.getElementById(id);
-    if (!field || !(id in configBaseline)) return;
+    if (!field) return;
     if (field.type === "checkbox") {
       field.checked = configBaseline[id] === "true";
+    } else if (spec && spec.type === "secs") {
+      setSeconds(id, configBaseline[id]);
     } else { field.value = configBaseline[id]; }
   });
   setConfigSaveError("");
@@ -165,38 +246,61 @@ function resetConfigChanges() {
   showToast("已重置为服务器上的配置");
 }
 
-// ── Group nav (sticky left rail on the basic tab) ─────────────────────────────
-function setActiveConfigNav(group) {
+// ── Vertical settings tabs ──────────────────────────────────────────────────
+function showConfigPanel(name) {
   const nav = document.getElementById("configNav");
-  if (!nav) return;
-  nav.querySelectorAll(".config-nav-link").forEach((link) => {
-    link.classList.toggle("active", link.getAttribute("data-nav-group") === group);
+  if (!nav || !nav.querySelectorAll) return;
+  nav.querySelectorAll("[data-cfg-tab]").forEach((tab) => {
+    const active = tab.getAttribute("data-cfg-tab") === name;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", String(active));
+    tab.tabIndex = active ? 0 : -1;
+    const panel = document.getElementById(tab.getAttribute("aria-controls"));
+    if (panel) panel.hidden = !active;
   });
+  try { localStorage.setItem("configPanel", name); } catch (_) { /* per-viewer convenience only */ }
+  if (name === "delivery" && globalThis.EgressNodes) EgressNodes.activate();
 }
 
 function bindConfigNav() {
   const nav = document.getElementById("configNav");
-  if (!nav) return;
-  const links = Array.prototype.slice.call(nav.querySelectorAll(".config-nav-link"));
-  if (links.length === 0) return;
-
-  links.forEach((link) => {
-    link.addEventListener("click", () => setActiveConfigNav(link.getAttribute("data-nav-group")));
-  });
-
-  // The highlight follows the last section whose heading passed the fold, so it
-  // stays honest after a manual scroll as well as after a click.
-  const highlight = () => {
-    let current = links[0].getAttribute("data-nav-group");
-    links.forEach((link) => {
-      const section = document.getElementById(link.getAttribute("data-nav-group"));
-      if (section && section.getBoundingClientRect().top <= 160) { current = link.getAttribute("data-nav-group"); }
+  if (!nav || !nav.querySelectorAll) return;
+  const tabs = Array.from(nav.querySelectorAll("[data-cfg-tab]"));
+  tabs.forEach((tab, index) => {
+    tab.addEventListener("click", () => showConfigPanel(tab.getAttribute("data-cfg-tab")));
+    tab.addEventListener("keydown", (event) => {
+      const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key];
+      if (!step) return;
+      event.preventDefault();
+      const next = tabs[(index + step + tabs.length) % tabs.length];
+      showConfigPanel(next.getAttribute("data-cfg-tab"));
+      next.focus();
     });
-    setActiveConfigNav(current);
-  };
+  });
+  let saved = "";
+  try { saved = localStorage.getItem("configPanel") || ""; } catch (_) { saved = ""; }
+  const requested = new URLSearchParams(window.location.search).get("panel") || saved;
+  showConfigPanel(tabs.some((tab) => tab.getAttribute("data-cfg-tab") === requested) ? requested : "build");
+}
 
-  window.addEventListener("scroll", highlight, { passive: true });
-  highlight();
+// Rows that only apply to one radio choice follow it.
+function syncConditionalRows() {
+  if (!document.querySelectorAll) return;
+  const statsig = radioValue(configField("cfg_statsig_mode"));
+  document.querySelectorAll("[data-statsig]").forEach((row) => { row.hidden = row.getAttribute("data-statsig") !== statsig; });
+  const clearance = radioValue(configField("cfg_grok_clearance_mode"));
+  document.querySelectorAll("[data-clearance]").forEach((row) => {
+    const want = row.getAttribute("data-clearance");
+    row.hidden = !(want === clearance || (want === "solver" && clearance !== "manual"));
+  });
+  const help = document.getElementById("cfgClearanceHelp");
+  if (help) {
+    help.textContent = {
+      flaresolverr: "按刷新周期主动为每个出口重新求解过期的 Clearance。",
+      on_demand: "保留最后一次成功的 Clearance，只在上游明确拒绝后重新求解；首个请求可能不带 Clearance。",
+      manual: "从不调用 FlareSolverr；使用节点上的 Cookie 或下方全局 cf_clearance。",
+    }[clearance] || "";
+  }
 }
 
 function parseProxyBypass(raw) {
@@ -223,15 +327,27 @@ function setConfigControlValue(id, value) {
 function applyConfigurationPayload(cfg) {
   if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) { throw new Error("配置接口返回格式无效"); }
   setConfigControlValue("cfg_admin_pass", cfg.admin_password || cfg.admin_pass || "");
-  setConfigControlValue("cfg_proxy_url", cfg.proxy_url || "");
-  setConfigControlValue("cfg_proxy_bypass", normalizeProxyBypass(cfg.proxy_bypass).join("\n"));
-  const lowLatency = document.getElementById("cfg_grok_low_latency");
-  if (lowLatency) lowLatency.checked = cfg.grok_low_latency === true;
-  setConfigControlValue("cfg_grok_clearance_mode", cfg.grok_clearance_mode || "manual");
-  setConfigControlValue("cfg_grok_web_proxy_url", cfg.grok_web_proxy_url || "");
-  setConfigControlValue("cfg_grok_cf_clearance", cfg.grok_cf_clearance || "");
-  setConfigControlValue("cfg_grok_flaresolverr_url", cfg.grok_flaresolverr_url || "");
+  CONFIG_FIELDS.forEach((field) => {
+    if (!field.key) return;
+    const value = cfg[field.key];
+    switch (field.type) {
+      case "bool": {
+        const node = document.getElementById(field.id);
+        if (node) node.checked = value == null ? field.default === true : value === true;
+        break;
+      }
+      case "lines": setConfigControlValue(field.id, normalizeProxyBypass(value).join("\n")); break;
+      case "radio": setRadioValue(field, value); break;
+      case "secs": setSeconds(field.id, value); break;
+      case "int":
+      case "float": setConfigControlValue(field.id, value ? value : ""); break;
+      default: setConfigControlValue(field.id, value == null ? "" : value);
+    }
+  });
+  // Statsig: a fixed ID means manual; otherwise the signer (default or custom).
+  setRadioValue(configField("cfg_statsig_mode"), String(cfg.grok_statsig_id || "").trim() ? "manual" : "url");
   syncAllToggleStates();
+  syncConditionalRows();
 }
 
 async function loadConfiguration() {
@@ -256,17 +372,28 @@ async function loadConfiguration() {
 // Save configuration to API
 async function saveConfiguration() {
   if (configSaving) return;
-  const proxyBypassRaw = document.getElementById("cfg_proxy_bypass").value;
-  const data = {
-    proxy_url: document.getElementById("cfg_proxy_url").value.trim(),
-    proxy_bypass: parseProxyBypass(proxyBypassRaw),
-    grok_low_latency: !!document.getElementById("cfg_grok_low_latency")?.checked,
-  };
-  if (document.getElementById("cfg_grok_clearance_mode")) {
-    data.grok_clearance_mode = document.getElementById("cfg_grok_clearance_mode").value || "manual";
-    data.grok_cf_clearance = document.getElementById("cfg_grok_cf_clearance").value.trim();
-    data.grok_flaresolverr_url = document.getElementById("cfg_grok_flaresolverr_url").value.trim();
-    data.grok_web_proxy_url = document.getElementById("cfg_grok_web_proxy_url")?.value.trim() || "";
+  const data = {};
+  CONFIG_FIELDS.forEach((field) => {
+    if (!field.key) return;
+    const raw = readConfigFieldValue(field.id);
+    if (raw === null) return;
+    switch (field.type) {
+      case "bool": data[field.key] = raw === "true"; break;
+      case "lines": data[field.key] = parseProxyBypass(raw); break;
+      case "int":
+      case "secs": data[field.key] = Math.max(0, Math.round(Number(raw) || 0)); break;
+      case "float": data[field.key] = Math.max(0, Number(raw) || 0); break;
+      default: data[field.key] = String(raw).trim();
+    }
+  });
+  const statsig = readConfigFieldValue("cfg_statsig_mode");
+  if (statsig === "manual") {
+    // A fixed ID replaces the signer entirely.
+    data.grok_statsig_signer_url = "";
+  } else if (statsig === "url") {
+    data.grok_statsig_id = "";
+    // Empty means the built-in signer (null), not "signer disabled" ("").
+    if (!data.grok_statsig_signer_url) data.grok_statsig_signer_url = null;
   }
 	const password = document.getElementById("cfg_admin_pass").value;
 	if (password.trim()) data.admin_password = password;
@@ -303,6 +430,7 @@ async function saveConfiguration() {
 // Load only the active section; key mutations never enter the config save baseline.
 document.addEventListener('DOMContentLoaded', () => {
  bindConfigDirtyTracking(); bindConfigNav();
+ document.addEventListener("change", (event) => { if (event.target && event.target.type === "radio") syncConditionalRows(); });
  loadConfiguration().then(loaded => { if (loaded) captureConfigBaseline(); });
  if (new URLSearchParams(window.location.search).get('section') === 'auth') switchConfigTab('auth');
 });

@@ -1,0 +1,98 @@
+{{define "egress-panel.html"}}
+<section class="settings-card egress-card" id="egressCard">
+  <div class="settings-card-head">
+    <div><h2 class="settings-card-title">出口节点</h2></div>
+    <span class="mini-badge">即时生效</span>
+  </div>
+  <p class="settings-card-note">按范围把 Build、Web、Web 资源下载的请求分配到出口。同一账号固定使用一个节点；节点不可用时按“自动化”中的兜底策略处理。代理地址与 Cookie 只写不读。</p>
+  <div class="egress-subtabs" role="tablist" aria-label="出口管理">
+    <button type="button" class="egress-subtab active" role="tab" aria-selected="true" data-egress-tab="nodes">节点</button>
+    <button type="button" class="egress-subtab" role="tab" aria-selected="false" tabindex="-1" data-egress-tab="profiles">代理配置</button>
+    <button type="button" class="egress-subtab" role="tab" aria-selected="false" tabindex="-1" data-egress-tab="sources">订阅</button>
+    <button type="button" class="egress-subtab" role="tab" aria-selected="false" tabindex="-1" data-egress-tab="operations">自动化</button>
+  </div>
+
+  <div class="egress-pane" data-egress-pane="nodes">
+    <div class="egress-summary" id="egressSummary" aria-live="polite"></div>
+    <div class="egress-toolbar">
+      <div class="egress-filters">
+        <label class="sr-only" for="egressSearch">搜索节点</label>
+        <input type="search" id="egressSearch" class="form-input" placeholder="搜索名称、地址、指纹或订阅">
+        <select id="egressScopeFilter" class="form-input" aria-label="范围"><option value="">全部范围</option><option value="grok_build">Build</option><option value="grok_web">Web</option><option value="grok_web_asset">Web 资源</option></select>
+        <select id="egressEnabledFilter" class="form-input" aria-label="启用状态"><option value="">全部状态</option><option value="true">已启用</option><option value="false">已停用</option></select>
+        <select id="egressProbeFilter" class="form-input" aria-label="探测结果"><option value="">全部探测</option><option value="healthy">可用</option><option value="unhealthy">不可用</option><option value="unknown">未探测</option></select>
+        <select id="egressAssignmentFilter" class="form-input" aria-label="账号绑定"><option value="">全部绑定</option><option value="bound">已绑定账号</option><option value="unbound">未绑定</option></select>
+      </div>
+      <div class="egress-actions">
+        <button type="button" class="btn btn-outline" id="egressRefresh">刷新</button>
+        <button type="button" class="btn btn-outline" id="egressTestAll">测试全部</button>
+        <button type="button" class="btn btn-outline" id="egressCleanup">清理不可用</button>
+        <button type="button" class="btn btn-outline" id="egressImportOpen">文本导入</button>
+        <button type="button" class="btn btn-primary" id="egressAddOpen">+ 添加节点</button>
+      </div>
+    </div>
+    <div class="egress-batchbar" id="egressBatchBar" hidden>
+      <span id="egressSelectedCount">已选 0 个</span>
+      <button type="button" class="btn btn-outline btn-sm" data-egress-batch="enable">启用</button>
+      <button type="button" class="btn btn-outline btn-sm" data-egress-batch="disable">停用</button>
+      <button type="button" class="btn btn-outline btn-sm" data-egress-batch="test">测试</button>
+      <button type="button" class="btn btn-danger btn-sm" data-egress-batch="delete">删除</button>
+    </div>
+    <div class="table-wrap egress-table-wrap">
+      <table class="egress-table">
+        <thead><tr>
+          <th class="egress-check"><input type="checkbox" id="egressSelectPage" aria-label="选择本页"></th>
+          <th><button type="button" class="egress-sort" data-sort="name">名称</button></th>
+          <th>范围</th>
+          <th>代理</th>
+          <th>Clearance</th>
+          <th><button type="button" class="egress-sort" data-sort="accounts">账号</button></th>
+          <th><button type="button" class="egress-sort" data-sort="health">健康</button></th>
+          <th><button type="button" class="egress-sort" data-sort="latency">探测</button></th>
+          <th class="egress-ops"><span class="sr-only">操作</span></th>
+        </tr></thead>
+        <tbody id="egressRows"><tr><td colspan="9" class="table-empty-cell">加载中…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="pagination-shell"><span class="pagination-info" id="egressPageInfo"></span><div class="pagination-controls" id="egressPager"></div></div>
+  </div>
+
+  <div class="egress-pane" data-egress-pane="profiles" hidden>
+    <div class="egress-toolbar"><p class="helper-text">把常用代理地址存成配置，多个节点共用；改地址时所有引用节点一起生效。被节点引用的配置不能删除。</p>
+      <div class="egress-actions"><button type="button" class="btn btn-primary" id="egressProfileAdd">+ 新增配置</button></div></div>
+    <div class="table-wrap"><table class="egress-table"><thead><tr><th>名称</th><th>地址</th><th>节点</th><th class="egress-ops"><span class="sr-only">操作</span></th></tr></thead>
+      <tbody id="egressProfileRows"></tbody></table></div>
+  </div>
+
+  <div class="egress-pane" data-egress-pane="sources" hidden>
+    <div class="egress-toolbar"><p class="helper-text">订阅支持 Clash YAML、Base64 与逐行的分享链接 / 代理地址；按周期同步，新增出口自动建节点，消失的出口自动删除。</p>
+      <div class="egress-actions"><button type="button" class="btn btn-primary" id="egressSourceAdd">+ 新增订阅</button></div></div>
+    <div class="table-wrap"><table class="egress-table"><thead><tr><th>订阅</th><th>范围</th><th>订阅线路</th><th>节点</th><th>最近同步</th><th>默认容量</th><th class="egress-ops"><span class="sr-only">操作</span></th></tr></thead>
+      <tbody id="egressSourceRows"></tbody></table></div>
+  </div>
+
+  <div class="egress-pane" data-egress-pane="operations" hidden>
+    <div class="settings-card-body egress-ops-form">
+      <div class="form-row"><div class="form-row-label"><label class="form-label" for="egressProbeProvider">探测服务</label><span class="helper-text">测试节点时查询出口 IP 的服务。</span></div>
+        <div class="form-row-control"><select id="egressProbeProvider" class="form-input"><option value="cloudflare">Cloudflare</option><option value="ipinfo">IPinfo</option></select></div></div>
+      <div class="form-row"><div class="form-row-label"><label class="form-label" for="egressProbeInterval">定时探测间隔</label><span class="helper-text">60 秒至 24 小时，默认 15 分钟。</span></div>
+        <div class="form-row-control"><div class="duration-input"><input type="number" id="egressProbeInterval" class="form-input" min="1" step="1"><select id="egressProbeIntervalUnit" class="form-input" aria-label="单位"><option value="1">秒</option><option value="60">分</option><option value="3600">时</option></select></div></div></div>
+      <div class="form-row"><div class="form-row-label"><label class="form-label" for="egressAssignInterval">分配间隔</label><span class="helper-text">自动分配 / 均衡的执行周期，默认 5 分钟。</span></div>
+        <div class="form-row-control"><div class="duration-input"><input type="number" id="egressAssignInterval" class="form-input" min="1" step="1"><select id="egressAssignIntervalUnit" class="form-input" aria-label="单位"><option value="1">秒</option><option value="60">分</option><option value="3600">时</option></select></div></div></div>
+      <div class="form-row"><div class="form-row-label"><label class="form-label" for="egressAutoAssign">自动分配</label><span class="helper-text">未绑定节点的账号在首次请求时绑定到负载最低、仍有容量的节点。</span></div>
+        <div class="form-row-control"><label class="toggle"><input type="checkbox" id="egressAutoAssign" aria-label="自动分配"><span class="toggle-slider"></span></label></div></div>
+      <div class="form-row"><div class="form-row-label"><label class="form-label" for="egressAutoBalance">自动均衡</label><span class="helper-text">定时把账号从负载最高的节点迁到最低的节点，直到差距不超过 1。</span></div>
+        <div class="form-row-control"><label class="toggle"><input type="checkbox" id="egressAutoBalance" aria-label="自动均衡"><span class="toggle-slider"></span></label></div></div>
+      <div class="form-row"><div class="form-row-label"><span class="form-label">兜底策略</span><span class="helper-text">某范围没有可用节点时：通用代理（走上面的代理设置）、拒绝（直接报错）、固定节点。</span></div>
+        <div class="form-row-control egress-fallbacks" id="egressFallbacks"></div></div>
+    </div>
+    <div class="egress-toolbar egress-ops-actions">
+      <span class="helper-text" id="egressOpsStatus" role="status"></span>
+      <div class="egress-actions">
+        <button type="button" class="btn btn-outline" id="egressRebalance">立即重新分配</button>
+        <button type="button" class="btn btn-primary" id="egressOpsSave">保存自动化</button>
+      </div>
+    </div>
+  </div>
+</section>
+{{end}}

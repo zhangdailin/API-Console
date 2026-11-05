@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"orchids-api/internal/httpclient"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"orchids-api/internal/config"
+	"orchids-api/internal/grok/egressnodes"
 	"orchids-api/internal/util"
 )
 
@@ -66,6 +68,7 @@ type Manager struct {
 	lastPersist time.Time
 	usedCount   map[string]int
 	sticky      map[string]string // scope|affinity -> node name
+	snap        *egressnodes.Snapshot
 }
 
 var errNoClient = errors.New("egress client not initialized")
@@ -75,12 +78,8 @@ var errNoHealthyNode = errors.New("egress no healthy node for scope")
 // NewManager builds an egress manager from configuration. Returns nil when
 // egress is disabled.
 func NewManager(cfg *config.Config) *Manager {
-	if cfg == nil || !cfg.GrokEgressEnabled {
-		return nil
-	}
 	manager := &Manager{
 		cfg:       cfg,
-		nodes:     nodesFromConfig(cfg),
 		health:    make(map[string]float64),
 		unhealthy: make(map[string]time.Time),
 		failures:  make(map[string]int),
@@ -89,18 +88,71 @@ func NewManager(cfg *config.Config) *Manager {
 		usedCount: make(map[string]int),
 		sticky:    make(map[string]string),
 	}
+	manager.mu.Lock()
+	manager.refreshNodesLocked()
+	manager.mu.Unlock()
 	manager.restoreHealth()
 	return manager
 }
 
-// Enabled reports whether the manager is active.
-func (m *Manager) Enabled() bool { return m != nil && m.cfg != nil && m.cfg.GrokEgressEnabled }
+var (
+	sharedMu      sync.Mutex
+	sharedManager *Manager
+)
+
+// Shared returns the process Build egress manager, updated to cfg. Health,
+// cooldowns and sticky routing survive configuration saves.
+func Shared(cfg *config.Config) *Manager {
+	sharedMu.Lock()
+	defer sharedMu.Unlock()
+	if sharedManager == nil {
+		sharedManager = NewManager(cfg)
+		return sharedManager
+	}
+	sharedManager.mu.Lock()
+	sharedManager.cfg = cfg
+	sharedManager.mu.Unlock()
+	return sharedManager
+}
+
+// refreshNodesLocked converts the current registry snapshot. Callers hold m.mu.
+func (m *Manager) refreshNodesLocked() {
+	snap := egressnodes.SnapshotFor(m.cfg)
+	if snap == m.snap && m.nodes != nil {
+		return
+	}
+	m.snap = snap
+	nodes := make([]Node, 0, len(snap.Nodes))
+	for _, node := range snap.Nodes {
+		nodes = append(nodes, nodeFromRegistry(node))
+	}
+	m.nodes = nodes
+}
+
+func (m *Manager) snapshot() *egressnodes.Snapshot {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.refreshNodesLocked()
+	return m.snap
+}
+
+// Enabled reports whether Build requests route through the egress manager:
+// Build nodes exist, or the Build fallback is not the general proxy.
+func (m *Manager) Enabled() bool { return m.Routes("cli") }
+
+// Routes reports whether requests for scope route through the manager.
+func (m *Manager) Routes(scope string) bool {
+	if m == nil {
+		return false
+	}
+	return m.snapshot().Routes(egressnodes.RegistryScope(scope))
+}
 
 // Acquire selects a healthy Build proxy node and returns a sticky lease.
 // affinity keeps the same account on the same exit. When no healthy node exists,
 // Acquire fails closed.
 func (m *Manager) Acquire(ctx context.Context, scope, affinity string) (*Lease, error) {
-	if !m.Enabled() {
+	if m == nil {
 		return nil, errors.New("egress disabled")
 	}
 	node := m.pickNode(scope, affinity)
@@ -113,15 +165,37 @@ func (m *Manager) Acquire(ctx context.Context, scope, affinity string) (*Lease, 
 		}
 	}
 	if node == nil {
+		fallback := m.snapshot().Fallback(egressnodes.RegistryScope(scope))
+		switch fallback.Mode {
+		case "direct":
+			return &Lease{Direct: true}, nil
+		case "fixed":
+			if fixed, ok := m.snapshot().Node(fallback.NodeID); ok {
+				converted := nodeFromRegistry(fixed)
+				node = &converted
+			}
+		}
+	}
+	if node == nil {
 		return nil, errNoHealthyNode
+	}
+	proxy, err := node.proxyFor(affinity)
+	if err != nil {
+		return nil, fmt.Errorf("egress node %q: %w", node.Label, err)
 	}
 	fingerprint := m.fingerprint(*node, affinity)
 
 	// Isolate connection pools by node, proxy URL, and affinity binding. The
 	// proxy component is hashed so credentials never appear in cache keys or
 	// diagnostics, while a same-name node whose URL changes gets a fresh pool.
-	poolKey := "egress:" + node.Name + "|proxy=" + shortHash(node.URL) + "|" + fingerprint
-	client := httpclient.GetSharedHTTPClient(poolKey, m.cfg.UpstreamRequestTimeout(), proxyFuncForNode(*node))
+	proxyKey := ""
+	var proxyFunc func(*http.Request) (*url.URL, error)
+	if proxy != nil {
+		proxyKey = proxy.String()
+		proxyFunc = http.ProxyURL(proxy)
+	}
+	poolKey := "egress:" + node.Name + "|proxy=" + shortHash(proxyKey) + "|" + fingerprint
+	client := httpclient.GetSharedHTTPClient(poolKey, m.cfg.UpstreamRequestTimeout(), proxyFunc)
 
 	lease := &Lease{
 		NodeID:   node.Name,
@@ -135,6 +209,7 @@ func (m *Manager) pickNode(scope, affinity string) *Node {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	m.refreshNodesLocked()
 	normalizedScope := strings.ToLower(strings.TrimSpace(scope))
 	now := time.Now()
 	var candidates []Node
@@ -160,6 +235,24 @@ func (m *Manager) pickNode(scope, affinity string) *Node {
 			recordAllNodesUnhealthy(normalizedScope)
 		}
 		return nil
+	}
+
+	// An account bound to a node keeps it while it is healthy.
+	bound := m.snap.Binding(egressnodes.RegistryScope(normalizedScope), affinity)
+	if bound == "" {
+		ids := make([]string, 0, len(candidates))
+		for _, candidate := range candidates {
+			ids = append(ids, candidate.Name)
+		}
+		bound = egressnodes.AutoBind(egressnodes.RegistryScope(normalizedScope), affinity, ids)
+	}
+	if bound != "" {
+		for i := range candidates {
+			if candidates[i].Name == bound {
+				recordNodeSelection(normalizedScope)
+				return &candidates[i]
+			}
+		}
 	}
 
 	// Sticky affinity: prefer the node this affinity last used when healthy.
@@ -259,7 +352,12 @@ func (m *Manager) FeedbackOutcome(nodeID string, outcome FeedbackOutcome) {
 	case OutcomeRateLimited, OutcomeAccountBlock, OutcomeForbidden:
 		// No health change: the request failed for account/team-level reasons.
 	}
+	m.reportHealthLocked(nodeID)
 	m.persistHealthLocked()
+}
+
+func (m *Manager) reportHealthLocked(nodeID string) {
+	egressnodes.ReportHealth(nodeID, egressnodes.Health{Score: m.health[nodeID], Failures: m.failures[nodeID], CooldownUntil: m.unhealthy[nodeID], LastError: m.lastError[nodeID]})
 }
 
 func (m *Manager) scopeForNodeLocked(nodeID string) string {
@@ -307,6 +405,7 @@ func (m *Manager) probeRecovery(ctx context.Context, scope string) bool {
 	now := time.Now()
 
 	m.mu.Lock()
+	m.refreshNodesLocked()
 	var candidate *Node
 	var earliest time.Time
 	for i := range m.nodes {
@@ -339,6 +438,7 @@ func (m *Manager) probeRecovery(ctx context.Context, scope string) bool {
 		m.failures[node.Name]++
 		m.lastError[node.Name] = "probe"
 		m.unhealthy[node.Name] = time.Now().Add(nodeCooldownFor(m.failures[node.Name]))
+		m.reportHealthLocked(node.Name)
 		m.mu.Unlock()
 		return false
 	}
@@ -348,6 +448,7 @@ func (m *Manager) probeRecovery(ctx context.Context, scope string) bool {
 	m.health[node.Name] = healthSkipThreshold
 	m.failures[node.Name] = 0
 	delete(m.lastError, node.Name)
+	m.reportHealthLocked(node.Name)
 	m.persistHealthLocked()
 	m.mu.Unlock()
 	recordNodeRecovery(normalizedScope)
@@ -362,7 +463,15 @@ func (m *Manager) probeNode(ctx context.Context, node Node) error {
 	target := "https://cli-chat-proxy.grok.com/"
 	probeCtx, cancel := context.WithTimeout(ctx, nodeProbeTimeout)
 	defer cancel()
-	client := httpclient.GetSharedHTTPClient("egress-probe:"+node.Name+"|proxy="+shortHash(node.URL), nodeProbeTimeout, proxyFuncForNode(node))
+	proxy, err := node.proxyFor("probe")
+	if err != nil {
+		return err
+	}
+	var proxyFunc func(*http.Request) (*url.URL, error)
+	if proxy != nil {
+		proxyFunc = http.ProxyURL(proxy)
+	}
+	client := httpclient.GetSharedHTTPClient("egress-probe:"+node.Name+"|proxy="+shortHash(node.URL), nodeProbeTimeout, proxyFunc)
 	req, err := http.NewRequestWithContext(probeCtx, http.MethodHead, target, nil)
 	if err != nil {
 		return err
@@ -384,7 +493,7 @@ func (m *Manager) probeNode(ctx context.Context, node Node) error {
 // egressHealthFileName is the per-deployment health snapshot. It lives in the
 // media directory; when replicas mount the same directory, node health survives
 // a restart and is visible to every instance.
-const egressHealthFileName = ".egress-health.json"
+const egressHealthFileName = ".egress-health-build.json"
 
 type egressHealthFile struct {
 	Nodes []egressHealthEntry `json:"nodes"`

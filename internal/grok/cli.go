@@ -57,7 +57,7 @@ func NewCLIClient(cfg *config.Config) *CLIClient {
 	// upstream tolerates browser-like TLS even though headers are CLI identity.
 	client.httpClient = httpclient.GetSharedBrowserHTTPClientWithLimits("cli|"+httpclient.GenerateProxyKeyFromConfig(cfg), cfg.UpstreamRequestTimeout(), 0, httpclient.ProxyFuncFromConfig(cfg), cfg)
 	client.oauth = NewCLIOAuth(cfg, client.httpClient)
-	client.egress = egress.NewManager(cfg)
+	client.egress = egress.Shared(cfg)
 	return client
 }
 
@@ -508,13 +508,16 @@ func cliEgressAffinity(acc *store.Account) string {
 // doCLIRequest is the fail-closed egress adapter. A successful response owns
 // its lease until the shared response lifecycle closes the body.
 func (c *CLIClient) doCLIRequest(ctx context.Context, acc *store.Account, req *http.Request) (*http.Response, error) {
-	if c.egress == nil || !c.egress.Enabled() {
+	if c.egress == nil || !c.egress.Routes("cli") {
 		return c.httpClient.Do(req)
 	}
 	lease, err := c.egress.Acquire(ctx, "cli", cliEgressAffinity(acc))
 	if err != nil {
 		recordEgressAcquireError()
 		return nil, fmt.Errorf("grok cli egress unavailable: %w", err)
+	}
+	if lease.Direct {
+		return c.httpClient.Do(req)
 	}
 	// Build is a CLI identity. Its egress lease intentionally carries no
 	resp, err := lease.Do(req)

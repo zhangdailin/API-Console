@@ -3,6 +3,7 @@ package grok
 import (
 	"orchids-api/internal/audit"
 	"orchids-api/internal/config"
+	"orchids-api/internal/grok/egressnodes"
 	"orchids-api/internal/grok/web"
 	"orchids-api/internal/loadbalancer"
 	"orchids-api/internal/responses"
@@ -79,6 +80,9 @@ func NewHandler(cfg *config.Config, lb *loadbalancer.LoadBalancer) *Handler {
 		instanceID:  instanceID,
 		auditLogger: audit.NewNopLogger(),
 		web:         web.NewHandler(cfg, lb),
+	}
+	if lb != nil && lb.Store != nil {
+		egressnodes.SetAccountLister(egressAccountLister(lb.Store))
 	}
 	return h
 }

@@ -61,7 +61,7 @@ func New(cfg *config.Config) *Client {
 		cfg:         cfg,
 		httpClient:  baseClient,
 		assetClient: baseClient,
-		egress:      egress.NewManager(cfg),
+		egress:      egress.Shared(cfg),
 	}
 	// MGW is available through the explicit request API in
 	// mgw_websocket_transport.go.  Legacy callers only provide a REST payload,
