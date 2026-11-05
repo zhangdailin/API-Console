@@ -3325,16 +3325,6 @@
     return String(data.id || data.task_id || data.request_id || "").trim();
   }
 
-  async function stopVideoTask() {
-    if (!videoState.taskID) return;
-    const res = await fetch("/api/grok/admin/video/stop", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ task_ids: [videoState.taskID] }),
-    });
-    if (handleUnauthorized(res)) return;
-  }
-
   function stopVideoPoll() {
     if (videoState.pollTimer) {
       clearTimeout(videoState.pollTimer);
@@ -3467,11 +3457,6 @@
     setVideoButtons(false);
     setVideoStatus(t("common.notConnected"));
     setVideoIndeterminate(false);
-    try {
-      await stopVideoTask();
-    } catch (err) {
-      // ignore
-    }
     videoState.taskID = "";
   }
 
@@ -4461,17 +4446,6 @@
       }
         stopVideoElapsedTimer();
       revokeVideoObjectURLs();
-      if (videoState.taskID) {
-        try {
-          const payload = JSON.stringify({ task_ids: [videoState.taskID] });
-          navigator.sendBeacon(
-            "/api/grok/admin/video/stop",
-            new Blob([payload], { type: "application/json" }),
-          );
-        } catch (err) {
-          // ignore
-        }
-      }
       stopVoiceSession().catch(() => {});
       closeCacheBatchStream();
       persistChatSessionsNow();

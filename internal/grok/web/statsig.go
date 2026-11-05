@@ -363,14 +363,6 @@ func validStatsigID(value string) bool {
 // explicitly configured internal address. A signer URL arrives from configuration,
 // and this gateway calls it with account-derived metadata, so a public plaintext
 // or custom-port endpoint is refused rather than silently trusted.
-// ValidateStatsigSignerURL reports whether a configured signing endpoint is one
-// this gateway is willing to call. The admin plane validates on save, so a
-// misconfigured endpoint is refused where it is typed instead of silently
-// dropping every signature at request time.
-func ValidateStatsigSignerURL(value string) error {
-	return validateStatsigSignerURL(value)
-}
-
 func validateStatsigSignerURL(value string) error {
 	raw := strings.TrimSpace(value)
 	parsed, err := url.ParseRequestURI(raw)

@@ -34,9 +34,6 @@ func (n Node) proxyFor(affinity string) (*url.URL, error) {
 	return egressnodes.Node{ProxyURL: n.URL}.ProxyFor(affinity)
 }
 
-// parseProxyURL validates and parses a proxy URL; empty means direct.
-func parseProxyURL(raw string) (*url.URL, error) { return egressnodes.ParseProxyURL(raw) }
-
 // Lease is a pinned egress path for one request: a node, its proxy URL, the
 // browser User-Agent and Cloudflare cookies bound to that node/fingerprint, and
 // the clearance key/version so a confirmed challenge can invalidate exactly the
@@ -79,11 +76,4 @@ func (l *Lease) Release() {
 		l.release()
 		l.release = nil
 	}
-}
-
-func proxyFuncForNode(node Node) func(*http.Request) (*url.URL, error) {
-	if node.Proxy == nil {
-		return nil
-	}
-	return http.ProxyURL(node.Proxy)
 }

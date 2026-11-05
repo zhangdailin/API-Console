@@ -190,14 +190,6 @@ func (r *Registry) Config() *config.Config {
 	return r.config.Load()
 }
 
-// Store returns the backing store.
-func (r *Registry) Store() *store.Store {
-	if r == nil {
-		return nil
-	}
-	return r.store
-}
-
 func (r *Registry) watch(ctx context.Context) {
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()

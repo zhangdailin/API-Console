@@ -105,13 +105,6 @@ func registerGrokWebAdminRoutes(mux *http.ServeMux, sessionAuth func(http.Handle
 		{"/media/inputs/", webHandler.HandleAdminMediaInputResource},
 		{"/voice/token", webHandler.HandleAdminVoiceToken},
 		{"/imagine/config", webHandler.HandleAdminImagineConfig},
-		{"/imagine/start", webHandler.HandleAdminImagineStart},
-		{"/imagine/stop", webHandler.HandleAdminImagineStop},
-		{"/imagine/sse", webHandler.HandleAdminImagineSSE},
-		{"/imagine/ws", webHandler.HandleAdminImagineWS},
-		{"/video/start", webHandler.HandleAdminVideoStart},
-		{"/video/stop", webHandler.HandleAdminVideoStop},
-		{"/video/sse", webHandler.HandleAdminVideoSSE},
 	}
 	// Egress nodes, proxy profiles, subscriptions and automation for the
 	// configuration page. Credentials are write-only; see egressnodes/admin.go.

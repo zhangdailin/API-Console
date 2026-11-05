@@ -392,73 +392,10 @@
     slot.body.replaceChildren(link);
   }
 
-  function extractImageValue(data) {
-    return extractImageValues(data)[0] || "";
-  }
-
   function extractImageValues(data) {
     return (Array.isArray(data?.data) ? data.data : [])
       .map((item) => String(item?.url || item?.b64_json || item?.base64 || item?.b64 || ""))
       .filter(Boolean);
-  }
-
-  async function createTask(prompt, ratio, model, route, nsfw, signal) {
-    const body = {
-      prompt,
-      aspect_ratio: ratio,
-      route,
-      nsfw,
-    };
-    if (String(model || "").trim()) body.model = model;
-    const res = await fetch("/api/grok/admin/imagine/start", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders() },
-      signal,
-      body: JSON.stringify(body),
-    });
-    if (res.status === 401) {
-      window.location.href = "/admin/login.html?next=" + encodeURIComponent("/admin/?tab=grok-tools");
-      throw new Error("unauthorized");
-    }
-    if (!res.ok) throw new Error(await res.text());
-    const data = await res.json();
-    const taskID = String(data?.task_id || "").trim();
-    if (!taskID) throw new Error("imagine task not created");
-    return taskID;
-  }
-
-  async function stopTasks(taskIDs) {
-    const ids = Array.isArray(taskIDs) ? taskIDs.filter(Boolean) : [];
-    if (!ids.length) return;
-    try {
-      await fetch("/api/grok/admin/imagine/stop", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ task_ids: ids }),
-      });
-    } catch (err) {
-      // Best-effort cleanup only.
-    }
-  }
-
-  function imageFromImagineEvent(payload) {
-    if (!payload || typeof payload !== "object") return "";
-    if (payload.type === "image") {
-      return String(payload.file_url || payload.url || payload.b64_json || "");
-    }
-    if (payload.type === "image_generation.completed") {
-      return String(payload.url || payload.image || payload.b64_json || "");
-    }
-    return "";
-  }
-
-  function isRetryableImagineError(message) {
-    const lower = String(message || "").toLowerCase();
-    return lower.includes("rate_limit_exceeded") ||
-      lower.includes("rate limit") ||
-      lower.includes("cooling down") ||
-      lower.includes("429") ||
-      lower.includes("no image generated");
   }
 
   // One upstream call yields two images, so a request asks for up to two and

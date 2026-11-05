@@ -40,15 +40,6 @@ func (e *mediaUnavailableError) Error() string { return e.message }
 
 func (e *mediaUnavailableError) Unwrap() error { return e.cause }
 
-func (h *Handler) openChatAccountSessionForImagineLite(ctx context.Context, excludeIDs []int64, spec ModelSpec) (*chatAccountSession, error) {
-	spec.Tier = grokTierLite
-	// Basic is the minimum tier for the lite image model, so a basic credential
-	// is a valid fallback rather than an excluded pool.
-	return h.openChatAccountSessionExcludingWithPoolsAndFilter(ctx, excludeIDs, spec.PoolCandidates(), func(acc *store.Account) bool {
-		return h.routeAllowsAccount(ctx, spec.ID, acc.ID)
-	})
-}
-
 func (h *Handler) routeAllowsAccount(ctx context.Context, modelID string, accountID int64) bool {
 	if h == nil || h.lb == nil || h.lb.Store == nil || accountID == 0 {
 		return true

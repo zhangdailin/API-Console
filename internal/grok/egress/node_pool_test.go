@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"orchids-api/internal/config"
+	"orchids-api/internal/grok/egressnodes"
 	"orchids-api/internal/testutil"
 )
 
@@ -143,7 +144,7 @@ func TestParseProxyURL(t *testing.T) {
 		"socks5h://proxy1:1080",
 	}
 	for _, raw := range valid {
-		_, err := parseProxyURL(raw)
+		_, err := egressnodes.ParseProxyURL(raw)
 		testutil.CheckNoError(t, err)
 	}
 	invalid := []string{
@@ -154,7 +155,7 @@ func TestParseProxyURL(t *testing.T) {
 		"http://host:notaport",
 	}
 	for _, raw := range invalid {
-		_, err := parseProxyURL(raw)
+		_, err := egressnodes.ParseProxyURL(raw)
 		testutil.CheckError(t, err)
 	}
 }

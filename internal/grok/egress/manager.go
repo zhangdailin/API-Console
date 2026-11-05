@@ -136,10 +136,6 @@ func (m *Manager) snapshot() *egressnodes.Snapshot {
 	return m.snap
 }
 
-// Enabled reports whether Build requests route through the egress manager:
-// Build nodes exist, or the Build fallback is not the general proxy.
-func (m *Manager) Enabled() bool { return m.Routes("cli") }
-
 // Routes reports whether requests for scope route through the manager.
 func (m *Manager) Routes(scope string) bool {
 	if m == nil {

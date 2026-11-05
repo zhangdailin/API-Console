@@ -38,9 +38,6 @@ func nodeMatchesScope(node Node, scope string) bool {
 	return node.Scope == egressnodes.RegistryScope(scope)
 }
 
-// parseProxyURL validates and parses a proxy URL; empty means direct.
-func parseProxyURL(raw string) (*url.URL, error) { return egressnodes.ParseProxyURL(raw) }
-
 // Lease is a pinned egress path for one Build request. A Direct lease means
 // the scope fell back to the general proxy: the caller uses its own client.
 type Lease struct {
@@ -68,11 +65,4 @@ func (l *Lease) Release() {
 	if l != nil {
 		l.released.Store(true)
 	}
-}
-
-func proxyFuncForNode(node Node) func(*http.Request) (*url.URL, error) {
-	if node.Proxy == nil {
-		return nil
-	}
-	return http.ProxyURL(node.Proxy)
 }
