@@ -4,17 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/redis/go-redis/v9"
 	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"orchids-api/internal/grok/ratelimit"
 	"orchids-api/internal/store"
 	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 )
 
 func TestOptimizationStreamingDurationUsesFirstAndLastDelta(t *testing.T) {
@@ -144,32 +147,29 @@ func (h *cooldownIOHook) ProcessPipelineHook(next redis.ProcessPipelineHook) red
 }
 
 func TestOptimizationCooldownBatchDeduplicatesAndCancels(t *testing.T) {
-	backend := withTestDistributedGrokLimits(t)
-	if err := backend.client.Ping(context.Background()).Err(); err != nil {
-		t.Fatal(err)
-	}
+	mini := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mini.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
 	hook := &cooldownIOHook{}
-	backend.client.AddHook(hook)
+	client.AddHook(hook)
+	t.Cleanup(ratelimit.ConfigureRedis(client, "test:"))
+	previous := ratelimit.Cooldowns
+	ratelimit.Cooldowns = ratelimit.NewRegistry()
+	t.Cleanup(func() { ratelimit.Cooldowns = previous })
 	teamID := t.Name()
-	t.Cleanup(func() {
-		teamCooldown.mu.Lock()
-		defer teamCooldown.mu.Unlock()
-		for _, q := range identityCooldownQueries(ProviderBuild+":team:"+teamID, "grok-4.7") {
-			delete(teamCooldown.entries, teamCooldownKey(q.scope, q.identity, q.model))
-		}
-	})
-	snapshot := &cooldownSnapshot{}
-	var queries []cooldownQuery
+
+	snapshot := &ratelimit.Snapshot{}
+	var queries []ratelimit.Query
 	for i := 0; i < 23; i++ {
 		queries = append(queries, cooldownQueries(context.Background(), &store.Account{ID: int64(i + 1), TeamID: teamID}, "grok-4.7")...)
 	}
-	if err := snapshot.prepare(context.Background(), queries); err != nil {
+	if err := snapshot.Prepare(context.Background(), queries); err != nil {
 		t.Fatal(err)
 	}
 	if hook.pipelines.Load() != 1 || hook.commands.Load() != 4 {
 		t.Fatalf("not batched/deduplicated: pipelines=%d commands=%d", hook.pipelines.Load(), hook.commands.Load())
 	}
-	if err := snapshot.prepare(context.Background(), queries); err != nil {
+	if err := snapshot.Prepare(context.Background(), queries); err != nil {
 		t.Fatal(err)
 	}
 	if hook.pipelines.Load() != 1 {
@@ -183,11 +183,11 @@ func TestOptimizationCooldownBatchDeduplicatesAndCancels(t *testing.T) {
 	if hook.pipelines.Load() != 1 || hook.commands.Load() != 4 {
 		t.Fatal("canceled request performed Redis IO")
 	}
-	if err := snapshot.check(context.Background(), queries); err != nil {
+	if err := cooldownError(snapshot.Check(context.Background(), queries)); err != nil {
 		t.Fatalf("negative snapshot was not clear: %v", err)
 	}
 	// Dispatch must not reuse the negative selection snapshot.
-	teamCooldown.Note(RateLimitScopeRPM, ProviderBuild+":team:"+teamID, "grok-4.7", time.Minute)
+	ratelimit.Cooldowns.Note(ratelimit.ScopeRPM, ProviderBuild+":team:"+teamID, "grok-4.7", time.Minute)
 	fresh := withRateLimitAccount(context.Background(), &store.Account{TeamID: teamID})
 	if err := scopedRateLimitCooldown(fresh, ProviderBuild, "", "grok-4.7"); err == nil {
 		t.Fatal("fresh cooldown bypassed at dispatch")

@@ -4,6 +4,7 @@ import (
 	"orchids-api/internal/audit"
 	"orchids-api/internal/config"
 	"orchids-api/internal/grok/egressnodes"
+	"orchids-api/internal/grok/ratelimit"
 	"orchids-api/internal/grok/web"
 	"orchids-api/internal/loadbalancer"
 	"orchids-api/internal/responses"
@@ -60,7 +61,7 @@ func NewHandler(cfg *config.Config, lb *loadbalancer.LoadBalancer) *Handler {
 	if lb != nil {
 		cliClient.SetAccountStore(lb.Store)
 		if lb.Store != nil {
-			configureDistributedGrokLimits(lb.Store.RedisClient(), lb.Store.RedisPrefix())
+			ratelimit.ConfigureRedis(lb.Store.RedisClient(), lb.Store.RedisPrefix())
 		}
 	}
 	instanceID := "grok-" + util.RandomHex(16)

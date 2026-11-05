@@ -1,4 +1,4 @@
-package web
+package ratelimit
 
 import (
 	"context"
@@ -11,24 +11,27 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// redisGrokLimits shares pacing and team/model cooldowns across replicas.
-type redisGrokLimits struct {
+// redisBackend shares pacing and team/model cooldowns across replicas.
+type redisBackend struct {
 	client *redis.Client
 	prefix string
 	note   *redis.Script
 	pace   *redis.Script
 }
 
-var distributedGrokLimits struct {
+var distributed struct {
 	sync.RWMutex
-	backend *redisGrokLimits
+	backend *redisBackend
 }
 
-func configureDistributedGrokLimits(client *redis.Client, prefix string) {
+// ConfigureRedis shares cooldowns and pacing through Redis. Both planes call it
+// with the same store; the last call wins, which is the same client. It
+// returns a function restoring the previous backend, for tests.
+func ConfigureRedis(client *redis.Client, prefix string) (restore func()) {
 	if client == nil {
-		return
+		return func() {}
 	}
-	backend := &redisGrokLimits{
+	backend := &redisBackend{
 		client: client,
 		prefix: prefix + "grok:limits:",
 		note: redis.NewScript(`
@@ -49,24 +52,30 @@ func configureDistributedGrokLimits(client *redis.Client, prefix string) {
 			return remaining
 		`),
 	}
-	distributedGrokLimits.Lock()
-	distributedGrokLimits.backend = backend
-	distributedGrokLimits.Unlock()
+	distributed.Lock()
+	previous := distributed.backend
+	distributed.backend = backend
+	distributed.Unlock()
+	return func() {
+		distributed.Lock()
+		distributed.backend = previous
+		distributed.Unlock()
+	}
 }
 
-func grokLimitsBackend() *redisGrokLimits {
-	distributedGrokLimits.RLock()
-	backend := distributedGrokLimits.backend
-	distributedGrokLimits.RUnlock()
+func sharedBackend() *redisBackend {
+	distributed.RLock()
+	backend := distributed.backend
+	distributed.RUnlock()
 	return backend
 }
 
-func (b *redisGrokLimits) key(kind string, parts ...string) string {
+func (b *redisBackend) key(kind string, parts ...string) string {
 	hash := sha256.Sum256([]byte(fmt.Sprint(parts)))
 	return b.prefix + kind + ":" + hex.EncodeToString(hash[:16])
 }
 
-func (b *redisGrokLimits) noteCooldown(scope RateLimitScope, identity, model string, duration time.Duration) error {
+func (b *redisBackend) noteCooldown(scope Scope, identity, model string, duration time.Duration) error {
 	if b == nil || b.client == nil || duration <= 0 {
 		return nil
 	}
@@ -75,7 +84,7 @@ func (b *redisGrokLimits) noteCooldown(scope RateLimitScope, identity, model str
 	return b.note.Run(ctx, b.client, []string{b.key("cooldown", string(scope), identity, model)}, duration.Milliseconds()).Err()
 }
 
-func (b *redisGrokLimits) cooldownRemaining(scope RateLimitScope, identity, model string) time.Duration {
+func (b *redisBackend) cooldownRemaining(scope Scope, identity, model string) time.Duration {
 	if b == nil || b.client == nil {
 		return 0
 	}
@@ -88,14 +97,11 @@ func (b *redisGrokLimits) cooldownRemaining(scope RateLimitScope, identity, mode
 	return remaining
 }
 
-func (b *redisGrokLimits) waitPacing(ctx context.Context, identity string, rate float64) error {
+func (b *redisBackend) waitPacing(ctx context.Context, identity string, rate float64) error {
 	if b == nil || b.client == nil || rate <= 0 {
 		return nil
 	}
-	interval := time.Duration(float64(time.Second) / rate)
-	if interval < time.Millisecond {
-		interval = time.Millisecond
-	}
+	interval := max(time.Duration(float64(time.Second)/rate), time.Millisecond)
 	key := b.key("pace", identity)
 	pace := b.pace
 	if pace == nil {
@@ -117,10 +123,7 @@ func (b *redisGrokLimits) waitPacing(ctx context.Context, identity string, rate 
 		// Spread waiters across the last 10% of the window. Without jitter every
 		// replica wakes on the same millisecond and all but one immediately collide.
 		remaining := time.Duration(remainingMS) * time.Millisecond
-		jitterRange := remaining / 10
-		if jitterRange > 25*time.Millisecond {
-			jitterRange = 25 * time.Millisecond
-		}
+		jitterRange := min(remaining/10, 25*time.Millisecond)
 		if jitterRange > 0 {
 			digest := sha256.Sum256([]byte(fmt.Sprintf("%s:%d", identity, time.Now().UnixNano())))
 			remaining += time.Duration(digest[0]) * jitterRange / 255
@@ -138,4 +141,34 @@ func (b *redisGrokLimits) waitPacing(ctx context.Context, identity string, rate 
 		case <-timer.C:
 		}
 	}
+}
+
+// cooldownsRemaining reads one selection window in one network round trip.
+// The timeout is bounded by the caller so canceled requests do no further I/O.
+func (b *redisBackend) cooldownsRemaining(ctx context.Context, queries []Query) (map[Query]time.Duration, error) {
+	result := make(map[Query]time.Duration, len(queries))
+	if ctx.Err() != nil {
+		return result, context.Cause(ctx)
+	}
+	if b == nil || b.client == nil || len(queries) == 0 {
+		return result, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	commands := make([]*redis.DurationCmd, len(queries))
+	_, err := b.client.Pipelined(ctx, func(pipe redis.Pipeliner) error {
+		for i, q := range queries {
+			commands[i] = pipe.PTTL(ctx, b.key("cooldown", string(q.Scope), q.Identity, q.Model))
+		}
+		return nil
+	})
+	if err != nil {
+		return result, err
+	}
+	for i, q := range queries {
+		if remaining := commands[i].Val(); remaining > 0 {
+			result[q] = remaining
+		}
+	}
+	return result, nil
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"orchids-api/internal/grok/ratelimit"
 	"orchids-api/internal/util"
 	"strings"
 	"time"
@@ -69,7 +70,7 @@ func (e *grokUpstreamError) RetryAfter() time.Duration {
 	if e == nil || e.header == nil {
 		return 0
 	}
-	return parseRetryAfterHeader(e.header.Get("Retry-After"), time.Now())
+	return ratelimit.ParseRetryAfter(e.header.Get("Retry-After"), time.Now())
 }
 
 // newCLIUpstreamError builds a typed error with a sanitized header copy, a

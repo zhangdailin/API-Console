@@ -1,4 +1,4 @@
-package grok
+package ratelimit
 
 import (
 	"strings"
@@ -6,44 +6,51 @@ import (
 	"time"
 )
 
-// teamCooldownRegistry tracks upstream resource-exhausted 429 cooldowns at
-// (scope, teamID, model) granularity. When one account in an xAI team hits a
+// Registry tracks upstream resource-exhausted 429 cooldowns at
+// (scope, identity, model) granularity. When one account in an xAI team hits a
 // rate limit for a model, sibling accounts sharing the team should not blindly
-// retry the same model. This replaces
-// the previous single global consoleTeamCooldownUntil with a bounded map.
+// retry the same model.
+//
+// Identities carry their plane prefix ("build:", "web:"), so both planes share
+// one registry without seeing each other's entries.
 const (
-	teamCooldownMaxSize = 4096
-	teamCooldownGCAfter = time.Minute
+	// MaxEntries bounds the registry and the pacing buckets. It covers both
+	// planes, which kept 4096 each before they shared the registry.
+	MaxEntries      = 8192
+	cooldownGCAfter = time.Minute
 )
 
-type teamCooldownEntry struct {
+type cooldownEntry struct {
 	until time.Time
 }
 
-// teamCooldownRegistry is a process-local, bounded, per-key cooldown store.
-type teamCooldownRegistry struct {
+// The registry itself is process-local and bounded; Note and RetryAfterFor
+// also consult the Redis backend when one is configured.
+type Registry struct {
 	mu      sync.Mutex
-	entries map[string]teamCooldownEntry
+	entries map[string]cooldownEntry
 	lastGC  time.Time
 }
 
-var teamCooldown = newTeamCooldownRegistry()
+// Cooldowns is the process registry shared by both planes.
+var Cooldowns = NewRegistry()
 
-func newTeamCooldownRegistry() *teamCooldownRegistry {
-	return &teamCooldownRegistry{
-		entries: make(map[string]teamCooldownEntry),
+// NewRegistry returns an empty registry.
+func NewRegistry() *Registry {
+	return &Registry{
+		entries: make(map[string]cooldownEntry),
 		lastGC:  time.Now(),
 	}
 }
 
-func teamCooldownKey(scope RateLimitScope, teamID, model string) string {
+func cooldownKey(scope Scope, teamID, model string) string {
 	return string(scope) + "|" + strings.ToLower(strings.TrimSpace(teamID)) + "|" + strings.ToLower(strings.TrimSpace(model))
 }
 
 // Note records that a scope+team+model triple is cooling down until
 // time.Now().Add(retryAfter). A zero teamID (not parsed) is a no-op so it does
 // not block unrelated traffic.
-func (r *teamCooldownRegistry) Note(scope RateLimitScope, teamID, model string, retryAfter time.Duration) {
+func (r *Registry) Note(scope Scope, teamID, model string, retryAfter time.Duration) {
 	if strings.TrimSpace(teamID) == "" || strings.TrimSpace(model) == "" {
 		return
 	}
@@ -51,28 +58,28 @@ func (r *teamCooldownRegistry) Note(scope RateLimitScope, teamID, model string, 
 	if retryAfter <= 0 {
 		retryAfter = time.Minute
 	}
-	key := teamCooldownKey(scope, teamID, model)
+	key := cooldownKey(scope, teamID, model)
 	r.mu.Lock()
 	until := now.Add(retryAfter)
 	if cur, ok := r.entries[key]; ok && cur.until.After(until) {
 		r.mu.Unlock()
 		return
 	}
-	r.entries[key] = teamCooldownEntry{until: until}
+	r.entries[key] = cooldownEntry{until: until}
 	r.maybeGC(now)
 	r.mu.Unlock()
 	// Redis is deliberately outside the local registry lock. A slow or failed
 	// shared backend must not serialize unrelated in-process model checks.
-	if backend := grokLimitsBackend(); backend != nil {
+	if backend := sharedBackend(); backend != nil {
 		_ = backend.noteCooldown(scope, teamID, model, retryAfter)
 	}
 }
 
 // RetryAfterFor returns the remaining cooldown for a scope+team+model, or 0 if
 // none is active. An expired entry is removed.
-func (r *teamCooldownRegistry) RetryAfterFor(scope RateLimitScope, teamID, model string) time.Duration {
-	remaining := r.localRetryAfterFor(scope, teamID, model)
-	if backend := grokLimitsBackend(); backend != nil {
+func (r *Registry) RetryAfterFor(scope Scope, teamID, model string) time.Duration {
+	remaining := r.LocalRetryAfterFor(scope, teamID, model)
+	if backend := sharedBackend(); backend != nil {
 		if shared := backend.cooldownRemaining(scope, teamID, model); shared > remaining {
 			remaining = shared
 		}
@@ -80,11 +87,12 @@ func (r *teamCooldownRegistry) RetryAfterFor(scope RateLimitScope, teamID, model
 	return remaining
 }
 
-func (r *teamCooldownRegistry) localRetryAfterFor(scope RateLimitScope, teamID, model string) time.Duration {
+// LocalRetryAfterFor is RetryAfterFor without the Redis read.
+func (r *Registry) LocalRetryAfterFor(scope Scope, teamID, model string) time.Duration {
 	if strings.TrimSpace(teamID) == "" {
 		return 0
 	}
-	key := teamCooldownKey(scope, teamID, model)
+	key := cooldownKey(scope, teamID, model)
 	now := time.Now()
 	r.mu.Lock()
 	cur, ok := r.entries[key]
@@ -102,8 +110,8 @@ func (r *teamCooldownRegistry) localRetryAfterFor(scope RateLimitScope, teamID, 
 
 // maybeGC prunes expired entries when the store exceeds a bound or a GC
 // interval elapses. Caller must hold r.mu.
-func (r *teamCooldownRegistry) maybeGC(now time.Time) {
-	if len(r.entries) < teamCooldownMaxSize && now.Sub(r.lastGC) < teamCooldownGCAfter {
+func (r *Registry) maybeGC(now time.Time) {
+	if len(r.entries) < MaxEntries && now.Sub(r.lastGC) < cooldownGCAfter {
 		return
 	}
 	for key, entry := range r.entries {

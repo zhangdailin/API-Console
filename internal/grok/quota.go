@@ -3,6 +3,7 @@ package grok
 import (
 	"net/http"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/grok/ratelimit"
 	"regexp"
 	"strconv"
 	"strings"
@@ -140,28 +141,28 @@ func ApplyBuildRateLimits(acc *store.Account, headers http.Header) bool {
 }
 
 func parseBuildRateLimitWindow(headers http.Header, dimension string) store.GrokQuotaWindow {
-	limit := firstHeaderValue(headers,
+	limit := ratelimit.FirstHeader(headers,
 		"x-ratelimit-limit-"+dimension,
 		"x-rate-limit-limit-"+dimension,
 	)
-	remaining := firstHeaderValue(headers,
+	remaining := ratelimit.FirstHeader(headers,
 		"x-ratelimit-remaining-"+dimension,
 		"x-rate-limit-remaining-"+dimension,
 	)
-	reset := firstHeaderValue(headers,
+	reset := ratelimit.FirstHeader(headers,
 		"x-ratelimit-reset-"+dimension,
 		"x-rate-limit-reset-"+dimension,
 	)
 	window := store.GrokQuotaWindow{}
-	if value, ok := parseRateLimitValue(limit); ok {
+	if value, ok := ratelimit.ParseValue(limit); ok {
 		window.Limit = float64(value)
 		window.HasLimit = true
 	}
-	if value, ok := parseRateLimitValue(remaining); ok {
+	if value, ok := ratelimit.ParseValue(remaining); ok {
 		window.Remaining = float64(value)
 		window.HasRemaining = true
 	}
-	window.ResetAt = parseRateLimitReset(reset)
+	window.ResetAt = ratelimit.ParseReset(reset)
 	return window
 }
 

@@ -2,6 +2,7 @@ package grok
 
 import (
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/grok/ratelimit"
 	"testing"
 	"time"
 
@@ -69,15 +70,15 @@ func TestParseRateLimitValue_ComplexFormats(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got, ok := parseRateLimitValue(tt.in)
-		testutil.True(t, ok, "parseRateLimitValue(%q) not parsed")
+		got, ok := ratelimit.ParseValue(tt.in)
+		testutil.True(t, ok, "ratelimit.ParseValue(%q) not parsed")
 		testutil.Equal(t, got, tt.want)
 	}
 }
 
 func TestParseRateLimitReset_RFC3339(t *testing.T) {
 	raw := "2026-03-05T19:00:00Z"
-	got := parseRateLimitReset(raw)
+	got := ratelimit.ParseReset(raw)
 	want, _ := time.Parse(time.RFC3339, raw)
-	testutil.Falsef(t, !got.Equal(want), "parseRateLimitReset(%q)=%v want=%v", raw, got, want)
+	testutil.Falsef(t, !got.Equal(want), "ratelimit.ParseReset(%q)=%v want=%v", raw, got, want)
 }

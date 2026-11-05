@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"orchids-api/internal/config"
 	"orchids-api/internal/debug"
+	"orchids-api/internal/grok/ratelimit"
 	"orchids-api/internal/grok/web/egress"
 	"orchids-api/internal/httpclient"
 	"orchids-api/internal/util"
@@ -36,7 +37,7 @@ func newHTTPClient(cfg *config.Config, timeout time.Duration, proxyFunc func(*ht
 }
 
 func parseRetryAfter(raw string) time.Duration {
-	return parseRetryAfterHeader(raw, time.Now())
+	return ratelimit.ParseRetryAfter(raw, time.Now())
 }
 
 func parseUpstreamStatus(err error) int {

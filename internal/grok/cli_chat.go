@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"orchids-api/internal/accountpolicy"
+	"orchids-api/internal/grok/ratelimit"
 	"orchids-api/internal/loadbalancer"
 	"orchids-api/internal/store"
 )
@@ -95,16 +96,16 @@ func (h *Handler) openCLIAccountSession(ctx context.Context, excludeIDs []int64,
 			pinned.Close()
 		}
 	}
-	snapshot := &cooldownSnapshot{}
+	snapshot := &ratelimit.Snapshot{}
 	prepare := func(accounts []*store.Account) error {
-		var queries []cooldownQuery
+		var queries []ratelimit.Query
 		for _, acc := range accounts {
 			if acc == nil || containsAccountID(excludeIDs, acc.ID) || !accountpolicy.IsGrokAccount(acc) || !AccountSupportsModel(acc, modelID) || !accountUsableForModel(ctx, acc) {
 				continue
 			}
 			queries = append(queries, cooldownQueries(ctx, acc, modelID)...)
 		}
-		return snapshot.prepare(ctx, queries)
+		return snapshot.Prepare(ctx, queries)
 	}
 	match := func(acc *store.Account) error {
 		// A model this credential is cooling down for must not be retried on the
@@ -120,7 +121,7 @@ func (h *Handler) openCLIAccountSession(ctx context.Context, excludeIDs []int64,
 		}
 		// Sibling accounts can look healthy while their shared team is cooling
 		// down. Skip them before they consume the request's attempt budget.
-		if snapshot.check(ctx, cooldownQueries(ctx, acc, modelID)) != nil {
+		if cooldownError(snapshot.Check(ctx, cooldownQueries(ctx, acc, modelID))) != nil {
 			return loadbalancer.ErrModelThrottled
 		}
 		return nil

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"orchids-api/internal/config"
+	"orchids-api/internal/grok/ratelimit"
 	"orchids-api/internal/modelcatalog"
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
@@ -266,10 +267,10 @@ func TestCLIClientFetchModelsReadsOfficialControlPlaneCatalog(t *testing.T) {
 }
 
 func TestCLIResponsesRejectsTeamModelCooldownBeforeUpstream(t *testing.T) {
-	previous := teamCooldown
-	teamCooldown = newTeamCooldownRegistry()
-	defer func() { teamCooldown = previous }()
-	teamCooldown.Note(RateLimitScopeRPM, ProviderBuild+":team:team-1", "grok-4.6", time.Minute)
+	previous := ratelimit.Cooldowns
+	ratelimit.Cooldowns = ratelimit.NewRegistry()
+	defer func() { ratelimit.Cooldowns = previous }()
+	ratelimit.Cooldowns.Note(ratelimit.ScopeRPM, ProviderBuild+":team:team-1", "grok-4.6", time.Minute)
 
 	client := &CLIClient{}
 	started := time.Now()

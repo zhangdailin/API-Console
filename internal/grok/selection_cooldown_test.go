@@ -8,11 +8,12 @@ import (
 	"testing"
 	"time"
 
+	"orchids-api/internal/grok/ratelimit"
 	"orchids-api/internal/store"
 )
 
 func TestCLISelectionSkipsSharedCooldownBeforeAttempt(t *testing.T) {
-	for _, scope := range []RateLimitScope{RateLimitScopeRPM, RateLimitScopeRPS} {
+	for _, scope := range []ratelimit.Scope{ratelimit.ScopeRPM, ratelimit.ScopeRPS} {
 		for _, target := range []string{"grok-4.7", "*"} {
 			t.Run(string(scope)+"/"+target, func(t *testing.T) {
 				server := httptest.NewServer(http.NotFoundHandler())
@@ -33,7 +34,7 @@ func TestCLISelectionSkipsSharedCooldownBeforeAttempt(t *testing.T) {
 					}
 					accounts = append(accounts, &acc)
 				}
-				teamCooldown.Note(scope, ProviderBuild+":team:"+accounts[0].TeamID, target, time.Minute)
+				ratelimit.Cooldowns.Note(scope, ProviderBuild+":team:"+accounts[0].TeamID, target, time.Minute)
 				for _, acc := range accounts[:3] {
 					// An existing session must not return to a sibling whose status
 					// is still healthy while its team is already throttled.
@@ -79,20 +80,10 @@ func TestCLISelectionUsesAccountIdentityWithoutTeam(t *testing.T) {
 		t.Fatal(err)
 	}
 	identity := fmt.Sprintf("%s:account:%d", ProviderBuild, acc.ID)
-	key := teamCooldownKey(RateLimitScopeRPM, identity, "grok-4.7")
-	teamCooldown.mu.Lock()
-	previous, existed := teamCooldown.entries[key]
-	teamCooldown.mu.Unlock()
-	t.Cleanup(func() {
-		teamCooldown.mu.Lock()
-		defer teamCooldown.mu.Unlock()
-		if existed {
-			teamCooldown.entries[key] = previous
-		} else {
-			delete(teamCooldown.entries, key)
-		}
-	})
-	teamCooldown.Note(RateLimitScopeRPM, identity, "grok-4.7", time.Minute)
+	previous := ratelimit.Cooldowns
+	ratelimit.Cooldowns = ratelimit.NewRegistry()
+	t.Cleanup(func() { ratelimit.Cooldowns = previous })
+	ratelimit.Cooldowns.Note(ratelimit.ScopeRPM, identity, "grok-4.7", time.Minute)
 	_, err := h.openCLIAccountSession(ctx, nil, "grok-4.7")
 	if err == nil || classifyGrokPoolFailure(err, "", "").status != http.StatusTooManyRequests {
 		t.Fatalf("expected account cooldown to be honored, got %v", err)

@@ -1,4 +1,4 @@
-package grok
+package ratelimit
 
 import (
 	"net/http"
@@ -8,11 +8,12 @@ import (
 	"time"
 )
 
-func parseRateLimitInfo(headers http.Header) *chatwire.RateLimitInfo {
+// ParseHeaders reads the request-window rate-limit headers upstreams send.
+func ParseHeaders(headers http.Header) *chatwire.RateLimitInfo {
 	if headers == nil {
 		return nil
 	}
-	limitRaw := firstHeaderValue(
+	limitRaw := FirstHeader(
 		headers,
 		"ratelimit-limit",
 		"x-ratelimit-limit",
@@ -21,7 +22,7 @@ func parseRateLimitInfo(headers http.Header) *chatwire.RateLimitInfo {
 		"x-ratelimit-limit-requests",
 		"x-ratelimit-limit-reqs",
 	)
-	remainingRaw := firstHeaderValue(
+	remainingRaw := FirstHeader(
 		headers,
 		"ratelimit-remaining",
 		"x-ratelimit-remaining",
@@ -30,7 +31,7 @@ func parseRateLimitInfo(headers http.Header) *chatwire.RateLimitInfo {
 		"x-ratelimit-remaining-requests",
 		"x-ratelimit-remaining-reqs",
 	)
-	resetRaw := firstHeaderValue(
+	resetRaw := FirstHeader(
 		headers,
 		"ratelimit-reset",
 		"x-ratelimit-reset",
@@ -38,9 +39,9 @@ func parseRateLimitInfo(headers http.Header) *chatwire.RateLimitInfo {
 		"x-ratelimit-reset-requests",
 	)
 
-	limit, okLimit := parseRateLimitValue(limitRaw)
-	remaining, okRemaining := parseRateLimitValue(remainingRaw)
-	resetAt := parseRateLimitReset(resetRaw)
+	limit, okLimit := ParseValue(limitRaw)
+	remaining, okRemaining := ParseValue(remainingRaw)
+	resetAt := ParseReset(resetRaw)
 
 	if !okLimit && !okRemaining && resetRaw == "" {
 		return nil
@@ -57,7 +58,8 @@ func parseRateLimitInfo(headers http.Header) *chatwire.RateLimitInfo {
 	return info
 }
 
-func firstHeaderValue(headers http.Header, keys ...string) string {
+// FirstHeader returns the first non-empty header among keys.
+func FirstHeader(headers http.Header, keys ...string) string {
 	for _, key := range keys {
 		if key == "" {
 			continue
@@ -69,7 +71,8 @@ func firstHeaderValue(headers http.Header, keys ...string) string {
 	return ""
 }
 
-func parseRateLimitValue(raw string) (int64, bool) {
+// ParseValue reads a numeric rate-limit value, tolerating units and decoration.
+func ParseValue(raw string) (int64, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return 0, false
@@ -186,7 +189,8 @@ func extractFirstNumberToken(raw string) string {
 	return raw[start:end]
 }
 
-func parseRateLimitReset(raw string) time.Time {
+// ParseReset reads a reset time: RFC 3339, or Unix seconds or milliseconds.
+func ParseReset(raw string) time.Time {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return time.Time{}
@@ -194,7 +198,7 @@ func parseRateLimitReset(raw string) time.Time {
 	if t, err := time.Parse(time.RFC3339, raw); err == nil {
 		return t
 	}
-	if v, ok := parseRateLimitValue(raw); ok {
+	if v, ok := ParseValue(raw); ok {
 		// Treat large values as milliseconds.
 		if v > 1_000_000_000_000 {
 			return time.UnixMilli(v)
@@ -205,3 +209,5 @@ func parseRateLimitReset(raw string) time.Time {
 	}
 	return time.Time{}
 }
+
+func isDigit(c byte) bool { return c >= '0' && c <= '9' }

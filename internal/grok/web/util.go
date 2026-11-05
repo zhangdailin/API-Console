@@ -352,10 +352,6 @@ func NormalizeSSOToken(raw string) string {
 	return strings.TrimSpace(token)
 }
 
-func isDigit(c byte) bool {
-	return c >= '0' && c <= '9'
-}
-
 func encodeJSONBytes(v interface{}) []byte {
 	buf := bytes.Buffer{}
 	enc := json.NewEncoder(&buf)

@@ -14,6 +14,7 @@ import (
 
 	"orchids-api/internal/debug"
 	apperrors "orchids-api/internal/errors"
+	"orchids-api/internal/grok/ratelimit"
 	"orchids-api/internal/httpserver"
 )
 
@@ -149,11 +150,11 @@ func upstreamRetryAfterSeconds(err error) int {
 	if !errors.As(err, &typed) || typed.header == nil {
 		return 0
 	}
-	if value := parseRetryAfterHeader(typed.header.Get("Retry-After"), time.Now()); value > 0 {
+	if value := ratelimit.ParseRetryAfter(typed.header.Get("Retry-After"), time.Now()); value > 0 {
 		seconds := max(int(value.Round(time.Second)/time.Second), 1)
 		return seconds
 	}
-	if info := parseRateLimitInfo(typed.header); info != nil {
+	if info := ratelimit.ParseHeaders(typed.header); info != nil {
 		if seconds := int(time.Until(info.ResetAt).Round(time.Second) / time.Second); seconds > 0 {
 			return seconds
 		}

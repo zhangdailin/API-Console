@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"orchids-api/internal/chatwire"
 	"orchids-api/internal/store"
 )
 
@@ -173,16 +174,7 @@ type ImagesGenerationsRequest struct {
 	StorageOptions json.RawMessage `json:"storage_options,omitempty"`
 }
 
-type RateLimitInfo struct {
-	Limit        int64
-	HasLimit     bool
-	Remaining    int64
-	HasRemaining bool
-	ResetAt      time.Time
-	Unit         string
-	// WindowSeconds is the upstream windowSizeSeconds, when present.
-	WindowSeconds int64
-}
+type RateLimitInfo = chatwire.RateLimitInfo
 
 const (
 	maxToolDefinitions      = 128

@@ -1,4 +1,4 @@
-package grok
+package ratelimit
 
 import (
 	"encoding/json"
@@ -10,8 +10,16 @@ import (
 	"time"
 )
 
-// Rate limit metadata parsing. xAI Build CLI and the Grok Build endpoint both
-// return a structured `resource-exhausted` 429 body carrying the team, the
+// Package ratelimit is the upstream rate-limit handling shared by the Grok
+// Build and Grok Web planes: parsing the structured resource-exhausted 429,
+// team+model cooldowns (process-local and shared through Redis), request
+// pacing and rate-limit headers.
+//
+// What differs per plane stays with the plane: how a request's identity is
+// derived, the error it returns for an active cooldown, and its metrics
+// namespace.
+//
+// xAI returns a structured `resource-exhausted` 429 body carrying the team, the
 // model, and the RPS/RPM window. Parsing it lets the gateway cool down at the
 // team+model granularity instead of a fixed 60s blanket cooldown.
 
@@ -23,16 +31,17 @@ var (
 	rateLimitResetPattern   = regexp.MustCompile(`(?i)(\d+)\s*([dhms])`)
 )
 
-type RateLimitScope string
+// Scope is the window a rate limit applies to.
+type Scope string
 
 const (
-	RateLimitScopeRPS RateLimitScope = "rps"
-	RateLimitScopeRPM RateLimitScope = "rpm"
+	ScopeRPS Scope = "rps"
+	ScopeRPM Scope = "rpm"
 )
 
-// RateLimitMetadata is the structured form of a resource-exhausted 429 body.
-type RateLimitMetadata struct {
-	Scope      RateLimitScope
+// Metadata is the structured form of a resource-exhausted 429 body.
+type Metadata struct {
+	Scope      Scope
 	TeamID     string
 	Model      string
 	Actual     int
@@ -40,10 +49,10 @@ type RateLimitMetadata struct {
 	RetryAfter time.Duration
 }
 
-// ParseRateLimitMetadata extracts Team+Model RPS/RPM limit metadata from an
-// upstream 429 body. It accepts both Build CLI resource-exhausted
-// text shapes.
-func ParseRateLimitMetadata(body []byte) *RateLimitMetadata {
+// ParseMetadata extracts Team+Model RPS/RPM limit metadata from an
+// upstream 429 body. It accepts both Build CLI and Grok Web
+// resource-exhausted text shapes.
+func ParseMetadata(body []byte) *Metadata {
 	for _, text := range rateLimitTexts(body) {
 		if metadata := parseRateLimitText(text); metadata != nil {
 			return metadata
@@ -52,25 +61,57 @@ func ParseRateLimitMetadata(body []byte) *RateLimitMetadata {
 	return nil
 }
 
-// RateLimitFromResponse derives RateLimitMetadata from a 429 status, headers,
+// FromResponse derives Metadata from a 429 status, headers,
 // and body. When Retry-After is absent but the body contains a reset window,
 // the metadata RetryAfter is populated from the body text.
-func RateLimitFromResponse(status int, header http.Header, body []byte) *RateLimitMetadata {
+func FromResponse(status int, header http.Header, body []byte) *Metadata {
 	if status != http.StatusTooManyRequests {
 		return nil
 	}
-	metadata := ParseRateLimitMetadata(body)
+	metadata := ParseMetadata(body)
 	if metadata == nil {
 		return nil
 	}
 	if header != nil {
 		if headerValue := header.Get("Retry-After"); headerValue != "" {
-			if retryAfter := parseRetryAfterHeader(headerValue, time.Now().UTC()); retryAfter > 0 {
+			if retryAfter := ParseRetryAfter(headerValue, time.Now().UTC()); retryAfter > 0 {
 				metadata.RetryAfter = retryAfter
 			}
 		}
 	}
 	return metadata
+}
+
+// Describe renders a short human-readable summary appended to error text so
+// existing string-matching classifiers keep working while adding diagnostics.
+func (m *Metadata) Describe() string {
+	if m == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("team=" + m.TeamID)
+	if m.Model != "" {
+		b.WriteString(" model=" + m.Model)
+	}
+	b.WriteString(" scope=" + string(m.Scope))
+	if m.Limit > 0 {
+		b.WriteString(" limit=" + strconv.Itoa(m.Actual) + "/" + strconv.Itoa(m.Limit))
+	}
+	if m.RetryAfter > 0 {
+		b.WriteString(" reset=" + formatDurationShort(m.RetryAfter))
+	}
+	return b.String()
+}
+
+func formatDurationShort(d time.Duration) string {
+	switch {
+	case d >= time.Hour:
+		return strconv.Itoa(int(d.Hours())) + "h"
+	case d >= time.Minute:
+		return strconv.Itoa(int(d.Minutes())) + "m"
+	default:
+		return strconv.Itoa(int(d.Seconds())) + "s"
+	}
 }
 
 func rateLimitTexts(body []byte) []string {
@@ -111,7 +152,7 @@ func appendRateLimitText(text string, texts *[]string) {
 	*texts = append(*texts, text)
 }
 
-func parseRateLimitText(text string) *RateLimitMetadata {
+func parseRateLimitText(text string) *Metadata {
 	match := rateLimitUsagePattern.FindStringSubmatch(text)
 	if match == nil {
 		return nil
@@ -121,19 +162,19 @@ func parseRateLimitText(text string) *RateLimitMetadata {
 	if actualErr != nil || limitErr != nil {
 		return nil
 	}
-	scope := RateLimitScopeRPM
+	scope := ScopeRPM
 	retryAfter := time.Minute
 	if strings.EqualFold(match[1], "second") {
-		scope = RateLimitScopeRPS
+		scope = ScopeRPS
 		retryAfter = 2 * time.Second
 	}
 	if parsed := rateLimitResetAfter(text); parsed > 0 {
 		retryAfter = parsed
-		if scope == RateLimitScopeRPS && retryAfter < 2*time.Second {
+		if scope == ScopeRPS && retryAfter < 2*time.Second {
 			retryAfter = 2 * time.Second
 		}
 	}
-	return &RateLimitMetadata{
+	return &Metadata{
 		Scope:      scope,
 		TeamID:     rateLimitTeamID(text),
 		Model:      rateLimitModel(text),
@@ -182,6 +223,7 @@ func rateLimitResetAfter(body string) time.Duration {
 	return total
 }
 
-func parseRetryAfterHeader(value string, now time.Time) time.Duration {
+// ParseRetryAfter reads a Retry-After header (seconds or an HTTP date).
+func ParseRetryAfter(value string, now time.Time) time.Duration {
 	return httpclient.ParseRetryAfter(value, now, 0)
 }

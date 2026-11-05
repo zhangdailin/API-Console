@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
+	"orchids-api/internal/grok/ratelimit"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -142,7 +143,7 @@ func (c *Client) getUsageBySpec(ctx context.Context, token string, spec ModelSpe
 	if info := parseRateLimitPayload(payloadResp); info != nil {
 		return info, nil
 	}
-	return parseRateLimitInfo(resp.Header), nil
+	return ratelimit.ParseHeaders(resp.Header), nil
 }
 
 func rateLimitModelName(spec ModelSpec) string {
@@ -412,10 +413,10 @@ func grpcWebEncode(payload []byte) []byte {
 
 func parseGRPCStatus(headers http.Header, body []byte) (int, string) {
 	if headers != nil {
-		rawStatus := strings.TrimSpace(firstHeaderValue(headers, "grpc-status", "Grpc-Status"))
+		rawStatus := strings.TrimSpace(ratelimit.FirstHeader(headers, "grpc-status", "Grpc-Status"))
 		if rawStatus != "" {
 			if code, err := strconv.Atoi(rawStatus); err == nil {
-				return code, strings.TrimSpace(firstHeaderValue(headers, "grpc-message", "Grpc-Message"))
+				return code, strings.TrimSpace(ratelimit.FirstHeader(headers, "grpc-message", "Grpc-Message"))
 			}
 		}
 	}

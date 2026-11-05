@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"orchids-api/internal/accountpolicy"
+	"orchids-api/internal/grok/ratelimit"
 	"orchids-api/internal/store"
 	"time"
 )
@@ -65,7 +66,7 @@ func (h *Handler) persistGrokQuotaSync(job grokQuotaSyncJob) {
 	}
 
 	headers := job.headers
-	info := parseRateLimitInfo(headers)
+	info := ratelimit.ParseHeaders(headers)
 	requests := parseBuildRateLimitWindow(headers, "requests")
 	tokens := parseBuildRateLimitWindow(headers, "tokens")
 	hasBuildHeaders := requests.HasLimit || requests.HasRemaining || !requests.ResetAt.IsZero() || tokens.HasLimit || tokens.HasRemaining || !tokens.ResetAt.IsZero()

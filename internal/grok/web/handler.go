@@ -8,6 +8,7 @@ import (
 	"orchids-api/internal/accountpolicy"
 	"orchids-api/internal/audit"
 	"orchids-api/internal/config"
+	"orchids-api/internal/grok/ratelimit"
 	"orchids-api/internal/loadbalancer"
 	"orchids-api/internal/middleware"
 	"orchids-api/internal/modelpolicy"
@@ -77,7 +78,7 @@ type imageEditReference struct {
 
 func NewHandler(cfg *config.Config, lb *loadbalancer.LoadBalancer) *Handler {
 	if lb != nil && lb.Store != nil {
-		configureDistributedGrokLimits(lb.Store.RedisClient(), lb.Store.RedisPrefix())
+		ratelimit.ConfigureRedis(lb.Store.RedisClient(), lb.Store.RedisPrefix())
 	}
 	instanceID := "grok-web-" + randomHex(16)
 	if cfg != nil && strings.TrimSpace(cfg.DeploymentInstance) != "" {
@@ -508,9 +509,9 @@ func (h *Handler) markAccountStatus(ctx context.Context, acc *store.Account, err
 	// granularity), falling back to a 60s blanket cooldown.
 	if err != nil && isResourceExhaustedError(err) && acc != nil {
 		cooldown := accountpolicy.CooldownRateLimitBase
-		if meta := ParseRateLimitMetadata([]byte(err.Error())); meta != nil {
+		if meta := ratelimit.ParseMetadata([]byte(err.Error())); meta != nil {
 			identity := ProviderForAccount(acc) + ":" + rateLimitIdentity(withRateLimitAccount(ctx, acc), "")
-			if remaining := teamCooldown.RetryAfterFor(meta.Scope, identity, meta.Model); remaining > 0 {
+			if remaining := ratelimit.Cooldowns.RetryAfterFor(meta.Scope, identity, meta.Model); remaining > 0 {
 				cooldown = accountpolicy.BoundRateLimitCooldown(remaining)
 			} else if meta.RetryAfter > 0 {
 				cooldown = accountpolicy.BoundRateLimitCooldown(meta.RetryAfter)

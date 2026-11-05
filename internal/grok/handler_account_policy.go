@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"orchids-api/internal/accountpolicy"
 	apperrors "orchids-api/internal/errors"
+	"orchids-api/internal/grok/ratelimit"
 	"orchids-api/internal/loadbalancer"
 	"orchids-api/internal/store"
 	"strings"
@@ -65,9 +66,9 @@ func (h *Handler) markAccountStatus(ctx context.Context, acc *store.Account, err
 	// granularity), falling back to a 60s blanket cooldown.
 	if err != nil && isResourceExhaustedError(err) && acc != nil {
 		cooldown := accountpolicy.CooldownRateLimitBase
-		if meta := ParseRateLimitMetadata([]byte(err.Error())); meta != nil {
+		if meta := ratelimit.ParseMetadata([]byte(err.Error())); meta != nil {
 			identity := ProviderBuild + ":" + rateLimitIdentity(withRateLimitAccount(ctx, acc), "")
-			if remaining := teamCooldown.RetryAfterFor(meta.Scope, identity, meta.Model); remaining > 0 {
+			if remaining := ratelimit.Cooldowns.RetryAfterFor(meta.Scope, identity, meta.Model); remaining > 0 {
 				cooldown = accountpolicy.BoundRateLimitCooldown(remaining)
 			} else if meta.RetryAfter > 0 {
 				cooldown = accountpolicy.BoundRateLimitCooldown(meta.RetryAfter)
@@ -297,7 +298,7 @@ func isSharedGrokRateLimitError(err error) bool {
 	// requests" is account-scoped and must cool the selected account;
 	// treating it as shared left every account looking healthy while requests
 	// repeatedly rotated through a pool of throttled credentials.
-	if ParseRateLimitMetadata([]byte(err.Error())) != nil {
+	if ratelimit.ParseMetadata([]byte(err.Error())) != nil {
 		return true
 	}
 	return false

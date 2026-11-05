@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/grok/ratelimit"
 	"orchids-api/internal/responses"
 	"strings"
 	"testing"
@@ -61,23 +62,14 @@ func TestRestrictionsEmptyAndImageToolOutputs(t *testing.T) {
 }
 
 func TestRestrictionsScopedCooldownAndPacing(t *testing.T) {
-	old := teamCooldown
-	teamCooldown = newTeamCooldownRegistry()
-	defer func() { teamCooldown = old }()
-	endpointRateLimiterMu.Lock()
-	oldPacing := endpointRateLimiters
-	endpointRateLimiters = map[string]*tokenBucket{}
-	endpointRateLimiterMu.Unlock()
-	defer func() {
-		endpointRateLimiterMu.Lock()
-		endpointRateLimiters = oldPacing
-		endpointRateLimiterMu.Unlock()
-	}()
+	old := ratelimit.Cooldowns
+	ratelimit.Cooldowns = ratelimit.NewRegistry()
+	defer func() { ratelimit.Cooldowns = old }()
 	ctxA := withRateLimitAccount(context.Background(), &store.Account{ID: 1, TeamID: "restriction-team-a"})
 	ctxSibling := withRateLimitAccount(context.Background(), &store.Account{ID: 2, TeamID: "restriction-team-a"})
 	ctxB := withRateLimitAccount(context.Background(), &store.Account{ID: 3, TeamID: "restriction-team-b"})
 	noteScopedRateLimit(ctxA, ProviderBuild, "tokenA", "grok-4.3", 429, http.Header{"Retry-After": []string{"2"}}, []byte(`{"error":"limited"}`))
-	if remaining := teamCooldown.RetryAfterFor(RateLimitScopeRPM, ProviderBuild+":team:restriction-team-a", "grok-4.3"); remaining <= time.Second || remaining > 2*time.Second {
+	if remaining := ratelimit.Cooldowns.RetryAfterFor(ratelimit.ScopeRPM, ProviderBuild+":team:restriction-team-a", "grok-4.3"); remaining <= time.Second || remaining > 2*time.Second {
 		t.Fatal(remaining)
 	}
 	for _, test := range []struct {
