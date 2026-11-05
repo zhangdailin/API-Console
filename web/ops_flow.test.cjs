@@ -152,3 +152,11 @@ test('pool refresh failures do not close the flow stream and capacity becomes un
  fail=true;h.advance(15000);await h.settle();assert.equal(h.streams.filter(stream=>!stream.closed).length,1);assert.match(h.get('flowCapacity-cline').textContent,/5\/20/);
  h.advance(16000);h.send(snapshot(h.time()));await h.settle();assert.equal(h.get('flowCapacity-cline').textContent,'槽位 —');assert.match(h.get('flowPool-cline').textContent,/读取失败/);assert.equal(h.root.dataset.live,'true');
 });
+test('sankey bands follow the request rate and fall back to in-flight requests',async()=>{
+ const h=harness();h.send(snapshot(h.time()));await h.settle();
+ const band=key=>h.get('opsWire-'+key).querySelectorAll('path')[0].getAttribute('d');
+ assert.match(band('cline'),/Z$/);assert.match(band('responses'),/Z$/);
+ assert.equal(h.get('opsWire-workbuddy').classList.contains('is-idle'),true);assert.doesNotMatch(band('workbuddy'),/Z$/);
+ const idle=snapshot(h.time());idle.routes[4]={...idle.routes[4],qps:0};h.send(idle);await h.settle();
+ assert.match(band('cline'),/Z$/,'an in-flight request keeps its band when the 5-second rate is zero');
+});

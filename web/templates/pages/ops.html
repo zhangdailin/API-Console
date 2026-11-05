@@ -53,87 +53,95 @@
     <section class="ops-top">
       <article class="flow-screen" id="opsFlowScreen" aria-label="实时流量态势大屏">
         <header class="flow-header">
-          <div><div class="flow-eyebrow"><span class="flow-live-dot" id="opsFlowDot"></span> LIVE TRAFFIC <span class="flow-instance">当前实例</span></div><h2>实时流量态势<span class="flow-title-dot">.</span></h2></div>
+          <div class="flow-heading">
+            <div class="flow-connection"><span class="flow-live-dot" id="opsFlowDot"></span><span id="opsFlowStatus" role="status">正在连接实时流量…</span><span id="flowUpdated">尚未收到数据</span><span id="flowScope">全部渠道</span><span class="flow-instance">当前实例</span></div>
+            <h2>实时流量态势</h2>
+          </div>
           <div class="flow-controls">
             <label class="sr-only" for="flowChannel">拓扑渠道筛选</label><select id="flowChannel" aria-label="拓扑渠道筛选"><option value="">全部渠道</option><option value="workbuddy">WorkBuddy</option><option value="cline">Cline</option><option value="grok">Grok</option></select>
             <button type="button" id="flowMotion" aria-pressed="true">动画开启</button>
             <button type="button" id="flowFullscreen" aria-label="全屏查看实时拓扑"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg><span>全屏</span></button>
           </div>
         </header>
-        <div class="flow-connection"><span id="opsFlowStatus" role="status">正在连接实时流量…</span><span id="flowUpdated">尚未收到数据</span><span id="flowScope">全部渠道</span></div>
-        <div class="flow-summary" aria-label="实时关键指标">
-          <div class="flow-stat flow-stat-qps"><div><span>请求速率</span><small>近 5 秒</small></div><p><strong id="flowTotal-qps">—</strong><span>req/s</span></p></div>
-          <div class="flow-stat flow-stat-active"><div><span>进行中请求</span><small>当前</small></div><p><strong id="flowTotal-active">—</strong><span>个</span></p></div>
-          <div class="flow-stat flow-stat-waiting"><div><span>等待输出</span><small>当前</small></div><p><strong id="flowTotal-waiting">—</strong><span>个</span></p></div>
-          <div class="flow-stat flow-stat-responding"><div><span>已开始输出</span><small>当前</small></div><p><strong id="flowTotal-responding">—</strong><span>个</span></p></div>
-          <div class="flow-stat flow-stat-failed"><div><span>近期失败</span><small>近 60 秒</small></div><p><strong id="flowTotal-failed">—</strong><span>次</span></p></div>
-          <div class="flow-stat flow-stat-tps"><div><span>上报输出</span><small>近 5 秒 · 上游上报</small></div><p><strong id="flowTotal-tps">—</strong><span>token/s</span></p></div>
-        </div>
-        <div class="flow-board" id="flowBoard">
-          <svg class="flow-wires" id="flowWires" aria-hidden="true"><defs><filter id="flowWireGlow"><feGaussianBlur stdDeviation="2.5"/></filter></defs>
-            <g id="opsWire-workbuddy" class="flow-wire" data-wire="workbuddy"><path class="flow-wire-base"/><path class="flow-wire-active"/><path class="flow-wire-in"/><path class="flow-wire-out"/></g>
-            <g id="opsWire-cline" class="flow-wire" data-wire="cline"><path class="flow-wire-base"/><path class="flow-wire-active"/><path class="flow-wire-in"/><path class="flow-wire-out"/></g>
-            <g id="opsWire-grok" class="flow-wire" data-wire="grok"><path class="flow-wire-base"/><path class="flow-wire-active"/><path class="flow-wire-in"/><path class="flow-wire-out"/></g>
-            <g id="opsWire-chat" class="flow-wire" data-wire="chat"><path class="flow-wire-base"/><path class="flow-wire-active"/><path class="flow-wire-in"/><path class="flow-wire-out"/></g>
-            <g id="opsWire-responses" class="flow-wire" data-wire="responses"><path class="flow-wire-base"/><path class="flow-wire-active"/><path class="flow-wire-in"/><path class="flow-wire-out"/></g>
-            <g id="opsWire-messages" class="flow-wire" data-wire="messages"><path class="flow-wire-base"/><path class="flow-wire-active"/><path class="flow-wire-in"/><path class="flow-wire-out"/></g>
-          </svg>
-          <section class="flow-column flow-channels" aria-label="上游渠道与账号池"><div class="flow-column-title"><span>上游渠道</span><span>账号池汇总</span></div>
-            <button type="button" class="flow-node flow-channel" id="opsNode-workbuddy" data-flow-node="workbuddy" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
-              <span class="flow-node-head"><span class="flow-brand" aria-hidden="true">W</span><strong>WorkBuddy</strong><span class="flow-node-state" id="flowState-workbuddy">等待数据</span><span class="flow-node-chevron" aria-hidden="true">↗</span></span>
-              <span class="flow-node-metrics"><span><b id="opsNodeQps-workbuddy">—</b><small>req/s · 近5秒</small></span><span><b id="flowActive-workbuddy">—</b><small>进行中</small></span><span class="flow-node-tokens"><b id="opsNodeTps-workbuddy">—</b><small>上报 token/s</small></span></span>
-              <span class="flow-pool-line"><span id="flowPool-workbuddy">可用账号 —</span><span id="flowCapacity-workbuddy">槽位 —</span></span><span class="flow-capacity-track"><span id="flowCapacityBar-workbuddy"></span></span>
-            </button>
-            <button type="button" class="flow-node flow-channel" id="opsNode-cline" data-flow-node="cline" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
-              <span class="flow-node-head"><span class="flow-brand" aria-hidden="true">C</span><strong>Cline</strong><span class="flow-node-state" id="flowState-cline">等待数据</span><span class="flow-node-chevron" aria-hidden="true">↗</span></span>
-              <span class="flow-node-metrics"><span><b id="opsNodeQps-cline">—</b><small>req/s · 近5秒</small></span><span><b id="flowActive-cline">—</b><small>进行中</small></span><span class="flow-node-tokens"><b id="opsNodeTps-cline">—</b><small>上报 token/s</small></span></span>
-              <span class="flow-pool-line"><span id="flowPool-cline">可用账号 —</span><span id="flowCapacity-cline">槽位 —</span></span><span class="flow-capacity-track"><span id="flowCapacityBar-cline"></span></span>
-            </button>
-            <button type="button" class="flow-node flow-channel" id="opsNode-grok" data-flow-node="grok" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
-              <span class="flow-node-head"><span class="flow-brand" aria-hidden="true">G</span><strong>Grok</strong><span class="flow-node-state" id="flowState-grok">等待数据</span><span class="flow-node-chevron" aria-hidden="true">↗</span></span>
-              <span class="flow-node-metrics"><span><b id="opsNodeQps-grok">—</b><small>req/s · 近5秒</small></span><span><b id="flowActive-grok">—</b><small>进行中</small></span><span class="flow-node-tokens"><b id="opsNodeTps-grok">—</b><small>上报 token/s</small></span></span>
-              <span class="flow-pool-line"><span id="flowPool-grok">可用账号 —</span><span id="flowCapacity-grok">槽位 —</span></span><span class="flow-capacity-track"><span id="flowCapacityBar-grok"></span></span>
-            </button>
+        <div class="flow-layout">
+          <section class="flow-main" aria-label="流量分布">
+            <div class="flow-axis" aria-hidden="true"><span>调用接口（入）</span><span>统一网关</span><span>上游渠道（出）</span></div>
+            <div class="flow-board" id="flowBoard">
+              <section class="flow-column flow-protocols" aria-label="调用接口">
+                <button type="button" class="flow-node flow-protocol" id="opsNode-chat" data-flow-node="chat" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
+                  <span class="flow-node-head"><strong>Chat Completions</strong><code>/chat/completions</code></span>
+                  <span class="flow-node-line"><span><b id="opsNodeQps-chat">—</b> req/s</span><span><b id="flowShare-chat">—</b></span><span><b id="flowActive-chat">—</b> 进行中</span></span>
+                </button>
+                <button type="button" class="flow-node flow-protocol" id="opsNode-responses" data-flow-node="responses" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
+                  <span class="flow-node-head"><strong>Responses</strong><code>/responses</code></span>
+                  <span class="flow-node-line"><span><b id="opsNodeQps-responses">—</b> req/s</span><span><b id="flowShare-responses">—</b></span><span><b id="flowActive-responses">—</b> 进行中</span></span>
+                </button>
+                <button type="button" class="flow-node flow-protocol" id="opsNode-messages" data-flow-node="messages" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
+                  <span class="flow-node-head"><strong>Messages</strong><code>/messages</code></span>
+                  <span class="flow-node-line"><span><b id="opsNodeQps-messages">—</b> req/s</span><span><b id="flowShare-messages">—</b></span><span><b id="flowActive-messages">—</b> 进行中</span></span>
+                </button>
+              </section>
+              <div class="flow-sankey" id="flowSankey">
+                <svg class="flow-wires" id="flowWires" aria-hidden="true">
+                  <g id="opsWire-chat" class="flow-wire" data-wire="chat"><path class="flow-band"/><path class="flow-wire-in"/><path class="flow-wire-out"/></g>
+                  <g id="opsWire-responses" class="flow-wire" data-wire="responses"><path class="flow-band"/><path class="flow-wire-in"/><path class="flow-wire-out"/></g>
+                  <g id="opsWire-messages" class="flow-wire" data-wire="messages"><path class="flow-band"/><path class="flow-wire-in"/><path class="flow-wire-out"/></g>
+                  <g id="opsWire-workbuddy" class="flow-wire" data-wire="workbuddy"><path class="flow-band"/><path class="flow-wire-in"/><path class="flow-wire-out"/></g>
+                  <g id="opsWire-cline" class="flow-wire" data-wire="cline"><path class="flow-band"/><path class="flow-wire-in"/><path class="flow-wire-out"/></g>
+                  <g id="opsWire-grok" class="flow-wire" data-wire="grok"><path class="flow-band"/><path class="flow-wire-in"/><path class="flow-wire-out"/></g>
+                  <rect id="flowBar-chat" class="flow-bar" data-wire="chat"/><rect id="flowBar-responses" class="flow-bar" data-wire="responses"/><rect id="flowBar-messages" class="flow-bar" data-wire="messages"/>
+                  <rect id="flowBar-workbuddy" class="flow-bar" data-wire="workbuddy"/><rect id="flowBar-cline" class="flow-bar" data-wire="cline"/><rect id="flowBar-grok" class="flow-bar" data-wire="grok"/>
+                  <rect id="flowGatewayBar" class="flow-bar flow-gateway-bar"/>
+                </svg>
+                <button type="button" class="flow-node flow-gateway" id="opsNode-gateway" data-flow-node="gateway" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
+                  <span class="flow-gateway-total"><strong id="flowGatewayActive">—</strong> <span id="opsFlowActive">等待实时数据</span></span>
+                  <span class="flow-gateway-split"><span>等待 <b id="flowGatewayWaiting">—</b></span><span>输出中 <b id="flowGatewayResponding">—</b></span></span>
+                </button>
+              </div>
+              <section class="flow-column flow-channels" aria-label="上游渠道与账号池">
+                <button type="button" class="flow-node flow-channel" id="opsNode-workbuddy" data-flow-node="workbuddy" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
+                  <span class="flow-node-head"><strong>WorkBuddy</strong><span class="flow-node-state" id="flowState-workbuddy">等待数据</span></span>
+                  <span class="flow-node-line"><span><b id="opsNodeQps-workbuddy">—</b> req/s</span><span><b id="flowActive-workbuddy">—</b> 进行中</span><span><b id="opsNodeTps-workbuddy">—</b> tok/s</span></span>
+                  <span class="flow-pool-line"><span id="flowPool-workbuddy">可用账号 —</span><span id="flowCapacity-workbuddy">槽位 —</span></span><span class="flow-capacity-track"><span id="flowCapacityBar-workbuddy"></span></span>
+                </button>
+                <button type="button" class="flow-node flow-channel" id="opsNode-cline" data-flow-node="cline" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
+                  <span class="flow-node-head"><strong>Cline</strong><span class="flow-node-state" id="flowState-cline">等待数据</span></span>
+                  <span class="flow-node-line"><span><b id="opsNodeQps-cline">—</b> req/s</span><span><b id="flowActive-cline">—</b> 进行中</span><span><b id="opsNodeTps-cline">—</b> tok/s</span></span>
+                  <span class="flow-pool-line"><span id="flowPool-cline">可用账号 —</span><span id="flowCapacity-cline">槽位 —</span></span><span class="flow-capacity-track"><span id="flowCapacityBar-cline"></span></span>
+                </button>
+                <button type="button" class="flow-node flow-channel" id="opsNode-grok" data-flow-node="grok" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
+                  <span class="flow-node-head"><strong>Grok</strong><span class="flow-node-state" id="flowState-grok">等待数据</span></span>
+                  <span class="flow-node-line"><span><b id="opsNodeQps-grok">—</b> req/s</span><span><b id="flowActive-grok">—</b> 进行中</span><span><b id="opsNodeTps-grok">—</b> tok/s</span></span>
+                  <span class="flow-pool-line"><span id="flowPool-grok">可用账号 —</span><span id="flowCapacity-grok">槽位 —</span></span><span class="flow-capacity-track"><span id="flowCapacityBar-grok"></span></span>
+                </button>
+              </section>
+            </div>
+            <section class="flow-trend" aria-label="近60秒趋势">
+              <header><h3>近 60 秒</h3><span class="flow-legend is-qps">请求速率 <b id="flowTrendQpsValue">—</b></span><span class="flow-legend is-active">进行中 <b id="flowTrendActiveValue">—</b></span><span class="flow-trend-note" id="flowTrendNote">等待实时采样</span></header>
+              <svg viewBox="0 0 360 64" preserveAspectRatio="none" role="img" aria-label="最近60秒请求速率与进行中请求趋势，各自按最大值缩放"><path class="flow-chart-grid" d="M0 12H360M0 34H360M0 56H360"/><path id="flowTrendActive" class="flow-chart-line flow-chart-secondary"/><path id="flowTrendQps" class="flow-chart-line"/></svg>
+            </section>
           </section>
-          <section class="flow-center" aria-label="网关"><div class="flow-column-title">统一网关</div>
-            <button type="button" class="flow-node flow-gateway" id="opsNode-gateway" data-flow-node="gateway" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
-              <span class="flow-reactor" aria-hidden="true"><svg viewBox="0 0 160 160"><circle class="flow-orbit-a" cx="80" cy="80" r="68"/><circle class="flow-orbit-b" cx="80" cy="80" r="55"/><path class="flow-core" d="M80 41 114 60v40l-34 19-34-19V60Z"/><path class="flow-core-lines" d="m46 60 34 20 34-20M80 80v39"/><circle cx="80" cy="80" r="5" class="flow-core-dot"/></svg></span>
-              <span class="flow-gateway-label">API CONSOLE</span><strong id="flowGatewayActive">—</strong><span id="opsFlowActive">等待实时数据</span>
-              <span class="flow-gateway-split"><span><b id="flowGatewayWaiting">—</b><small>等待输出</small></span><span><b id="flowGatewayResponding">—</b><small>已开始输出</small></span></span>
-            </button>
-            <p class="flow-center-note"><span class="flow-note-desktop">右向左接收请求<br>左向右返回响应</span><span class="flow-note-mobile">向上接收请求 · 向下返回响应</span></p>
-          </section>
-          <section class="flow-column flow-protocols" aria-label="调用接口"><div class="flow-column-title"><span>调用接口</span><span>流量分布</span></div>
-            <button type="button" class="flow-node flow-protocol" id="opsNode-chat" data-flow-node="chat" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
-              <span class="flow-node-head"><span class="flow-brand" aria-hidden="true">O</span><strong>Chat Completions</strong><span class="flow-node-chevron" aria-hidden="true">↗</span></span><code>/chat/completions</code>
-              <span class="flow-node-metrics"><span><b id="opsNodeQps-chat">—</b><small>req/s · 近5秒</small></span><span><b id="flowActive-chat">—</b><small>进行中</small></span></span>
-              <span class="flow-pool-line"><span>请求占比 · 近5秒</span><b id="flowShare-chat">—</b></span><span class="flow-capacity-track"><span id="flowShareBar-chat"></span></span>
-            </button>
-            <button type="button" class="flow-node flow-protocol" id="opsNode-responses" data-flow-node="responses" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
-              <span class="flow-node-head"><span class="flow-brand" aria-hidden="true">R</span><strong>Responses</strong><span class="flow-node-chevron" aria-hidden="true">↗</span></span><code>/responses</code>
-              <span class="flow-node-metrics"><span><b id="opsNodeQps-responses">—</b><small>req/s · 近5秒</small></span><span><b id="flowActive-responses">—</b><small>进行中</small></span></span>
-              <span class="flow-pool-line"><span>请求占比 · 近5秒</span><b id="flowShare-responses">—</b></span><span class="flow-capacity-track"><span id="flowShareBar-responses"></span></span>
-            </button>
-            <button type="button" class="flow-node flow-protocol" id="opsNode-messages" data-flow-node="messages" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
-              <span class="flow-node-head"><span class="flow-brand" aria-hidden="true">A</span><strong>Messages</strong><span class="flow-node-chevron" aria-hidden="true">↗</span></span><code>/messages</code>
-              <span class="flow-node-metrics"><span><b id="opsNodeQps-messages">—</b><small>req/s · 近5秒</small></span><span><b id="flowActive-messages">—</b><small>进行中</small></span></span>
-              <span class="flow-pool-line"><span>请求占比 · 近5秒</span><b id="flowShare-messages">—</b></span><span class="flow-capacity-track"><span id="flowShareBar-messages"></span></span>
-            </button>
-          </section>
+          <aside class="flow-side" aria-label="实时关键指标">
+            <div class="flow-hero flow-stat-qps"><span>请求速率 · 近 5 秒</span><p><strong id="flowTotal-qps">—</strong><span>req/s</span></p><small id="flowHeroNote">等待实时采样</small></div>
+            <div class="flow-summary">
+              <div class="flow-stat flow-stat-active"><span>进行中</span><p><strong id="flowTotal-active">—</strong><span>个</span></p></div>
+              <div class="flow-stat flow-stat-tps"><span>输出速率 · 上游上报</span><p><strong id="flowTotal-tps">—</strong><span>tok/s</span></p></div>
+              <div class="flow-stat flow-stat-waiting"><span>等待输出</span><p><strong id="flowTotal-waiting">—</strong><span>个</span></p></div>
+              <div class="flow-stat flow-stat-responding"><span>已开始输出</span><p><strong id="flowTotal-responding">—</strong><span>个</span></p></div>
+              <div class="flow-stat flow-stat-failed"><span>近期失败 · 近 60 秒</span><p><strong id="flowTotal-failed">—</strong><span>次</span></p></div>
+            </div>
+            <section class="flow-incidents"><header><h3>异常与恢复</h3><span>近 60 秒 · 已结束请求</span></header>
+              <div class="flow-incident-list">
+                <div><span>限流</span><i><em id="flowIncidentBar-rate_limited"></em></i><strong id="flowIncident-rate_limited">—</strong></div>
+                <div><span>超时</span><i><em id="flowIncidentBar-timeouts"></em></i><strong id="flowIncident-timeouts">—</strong></div>
+                <div><span>流中断</span><i><em id="flowIncidentBar-stream_errors"></em></i><strong id="flowIncident-stream_errors">—</strong></div>
+                <div><span>取消</span><i><em id="flowIncidentBar-canceled"></em></i><strong id="flowIncident-canceled">—</strong></div>
+                <div><span>重试</span><i><em id="flowIncidentBar-retried"></em></i><strong id="flowIncident-retried">—</strong></div>
+                <div><span>切换账号</span><i><em id="flowIncidentBar-account_switches"></em></i><strong id="flowIncident-account_switches">—</strong></div>
+              </div><p id="flowQualityNote">尚未收到数据</p></section>
+          </aside>
         </div>
-        <div class="flow-bottom">
-          <section class="flow-trend"><header><h3>请求速率</h3><span>近60秒 · 每秒取样</span><b id="flowTrendQpsValue">—</b></header><svg viewBox="0 0 360 64" preserveAspectRatio="none" role="img" aria-label="最近60秒请求速率趋势"><path class="flow-chart-grid" d="M0 12H360M0 34H360M0 56H360"/><path id="flowTrendQps" class="flow-chart-line"/></svg><span id="flowTrendNote">等待实时采样</span></section>
-          <section class="flow-trend"><header><h3>进行中请求</h3><span>近60秒 · 每秒取样</span><b id="flowTrendActiveValue">—</b></header><svg viewBox="0 0 360 64" preserveAspectRatio="none" role="img" aria-label="最近60秒进行中请求趋势"><path class="flow-chart-grid" d="M0 12H360M0 34H360M0 56H360"/><path id="flowTrendActive" class="flow-chart-line flow-chart-secondary"/></svg><span>空白表示未采样或连接中断</span></section>
-          <section class="flow-incidents"><header><h3>异常与恢复</h3><span>近60秒 · 已结束请求</span></header><div class="flow-incident-grid">
-            <div><span>限流</span><strong id="flowIncident-rate_limited">—</strong></div>
-            <div><span>超时</span><strong id="flowIncident-timeouts">—</strong></div>
-            <div><span>流中断</span><strong id="flowIncident-stream_errors">—</strong></div>
-            <div><span>取消</span><strong id="flowIncident-canceled">—</strong></div>
-            <div><span>重试</span><strong id="flowIncident-retried">—</strong></div>
-            <div><span>切换账号</span><strong id="flowIncident-account_switches">—</strong></div>
-          </div><p id="flowQualityNote">尚未收到数据</p></section>
-        </div>
-        <footer class="flow-footnote"><span>光轨表示汇总活动，不是逐请求或逐 Token 回放</span><button type="button" id="flowHelpOpen">数据口径与范围 ↗</button></footer>
+        <footer class="flow-footnote"><span>带宽 = 近 5 秒请求速率（无流量时按进行中请求）；光点为汇总活动示意，不是逐请求或逐 Token 回放</span><button type="button" id="flowHelpOpen">数据口径与范围 ↗</button></footer>
         <dialog class="flow-drawer" id="flowDrawer" aria-labelledby="opsFlowDetailTitle">
           <div class="flow-drawer-head"><div><span class="flow-eyebrow">TRAFFIC INSIGHT</span><h3 id="opsFlowDetailTitle">节点详情</h3></div><button type="button" id="flowDrawerClose" aria-label="关闭节点详情">×</button></div>
           <p id="flowDetailScope" class="flow-detail-scope"></p>

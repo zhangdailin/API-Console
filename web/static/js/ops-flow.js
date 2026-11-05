@@ -100,6 +100,7 @@
         const state=out?'范围外':!fresh?(snapshot?'上次数据':'等待数据'):rates.active>0?'有流量':capacity.fresh&&capacity.enabled===0?'未启用':capacity.fresh&&capacity.available===0?'池受限':metric?.failed>0?'近期失败':'空闲';
         setText('flowState-'+key,state);
         el('flowState-'+key)?.classList.toggle('is-warning',state==='池受限'||state==='近期失败');
+        node?.classList.toggle('is-warning',state==='池受限'||state==='近期失败');
         if(el('flowPool-'+key))el('flowPool-'+key).title=poolError?'刷新失败，保留上次采样；30秒后过期':capacity.fresh?'账号池采样 '+clock(capacity.sampledAt)+'；未扣除模型级限制':'';
       }else{
         const share=snapshot&&rate.qps>0?rates.qps/rate.qps:null;
@@ -109,17 +110,21 @@
     }
     if(pulseTimer!=null)window.clearTimeout(pulseTimer);
     pulseTimer=fresh&&Number.isFinite(nextPulse)?window.setTimeout(()=>{pulseTimer=null;schedule();},Math.max(1,nextPulse-now()+1)):null;
-    renderTrends();renderIncidents(total);renderDetail();
+    renderTrends();renderIncidents(total);renderDetail();layout();
   }
   function renderTrends(){
     for(const [id,key]of [['flowTrendQps','qps'],['flowTrendActive','active']])el(id)?.setAttribute('d',trend.path(key,now()));
     const points=trend.values(now()).filter(Boolean), last=points.at(-1);
     setText('flowTrendQpsValue',last?M.number(last.qps,2)+' req/s':'—');setText('flowTrendActiveValue',last?M.number(last.active)+' 个':'—');
-    setText('flowTrendNote',points.length?'已采样 '+points.length+'/60 秒 · 缺失区间留空':'等待实时采样');
+    setText('flowTrendNote',points.length?'已采样 '+points.length+'/60 秒 · 各自按最大值缩放 · 缺失区间留空':'等待实时采样');
+    setText('flowHeroNote',points.length?'近 60 秒均值 '+M.number(M.sum(points,'qps')/points.length,2)+' req/s':'等待实时采样');
   }
   function renderIncidents(metric){
-    for(const key of ['rate_limited','timeouts','stream_errors','canceled','retried','account_switches']){
+    const incidentKeys=['rate_limited','timeouts','stream_errors','canceled','retried','account_switches'];
+    const incidentPeak=Math.max(1,...incidentKeys.map(key=>M.numeric(metric?.[key])??0));
+    for(const key of incidentKeys){
       setText('flowIncident-'+key,M.number(metric?.[key]));
+      bar('flowIncidentBar-'+key,metric?(M.numeric(metric[key])??0)/incidentPeak:null);
       el('flowIncident-'+key)?.classList.toggle('is-degraded',(metric?.[key]||0)>0);
     }
     setText('flowQualityNote',!metric?'尚未收到数据':metric.completed===0?'近60秒暂无结束请求样本':`${M.number(metric.completed)} 个请求结束 · 失败率 ${M.percent(metric.failure_rate)}${live()?'':' · 上次观测'}`);
@@ -173,18 +178,46 @@
     if(details){const definitions=drawer.querySelector('details');if(definitions)definitions.open=true;}
   }
   function closeDetail(){el('flowDrawer').close();}
+  // Band widths follow the 5-second request rate; with no rate in the window
+  // they fall back to in-flight requests so long streams stay visible.
+  function bandValues(){
+    const keys=[...M.protocols,...M.channels],read=field=>Object.fromEntries(keys.map(key=>[key,snapshot&&!outside(key)?M.rate(rows(key))[field]:0]));
+    const qps=read('qps');
+    return M.protocols.some(key=>qps[key]>0)?qps:read('active');
+  }
   function layout(){
     if(!root || document.hidden)return;
-    const board=el('flowBoard'),svg=el('flowWires');if(!board||!svg)return;
-    const rect=board.getBoundingClientRect(),gateway=el('opsNode-gateway')?.getBoundingClientRect();
-    if(!gateway||!rect.width||!rect.height)return;
-    svg.setAttribute('viewBox',`0 0 ${rect.width} ${rect.height}`);
-    for(const key of [...M.channels,...M.protocols]){
-      const node=el('opsNode-'+key)?.getBoundingClientRect();if(!node)continue;
-      const left=M.channels.includes(key),x1=(left?node.right:gateway.right)-rect.left,x2=(left?gateway.left:node.left)-rect.left;
-      const y1=(left?node.top+node.height/2:gateway.top+gateway.height/2)-rect.top,y2=(left?gateway.top+gateway.height/2:node.top+node.height/2)-rect.top;
-      const bend=Math.max(12,(x2-x1)*.5),path=`M ${x1} ${y1} C ${x1+bend} ${y1}, ${x2-bend} ${y2}, ${x2} ${y2}`;
-      el('opsWire-'+key)?.querySelectorAll('path').forEach(item=>item.setAttribute('d',path));
+    const area=el('flowSankey'),svg=el('flowWires');if(!area||!svg)return;
+    const rect=area.getBoundingClientRect();
+    if(!rect.width||!rect.height)return;
+    const W=rect.width,H=rect.height,value=bandValues(),gx=W/2,gy=H*.42;
+    svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
+    const total=M.protocols.reduce((sum,key)=>sum+value[key],0),peak=Math.max(0,...Object.values(value));
+    const scale=total>0?Math.min(.62*H/total,.26*H/peak):0;
+    const width=key=>value[key]>0?Math.max(3,value[key]*scale):0;
+    const center=key=>{const node=el('opsNode-'+key)?.getBoundingClientRect();return node&&node.height?Math.max(0,Math.min(H,node.top+node.height/2-rect.top)):null;};
+    const stacks={};
+    for(const [side,keys]of [['left',M.protocols],['right',M.channels]]){
+      let top=gy-keys.reduce((sum,key)=>sum+width(key),0)/2;
+      for(const key of keys){stacks[key]=top;top+=width(key);}
+    }
+    const sides=[M.protocols,M.channels].map(keys=>keys.reduce((sum,key)=>sum+width(key),0));
+    const gh=Math.max(18,...sides);
+    const gate=el('flowGatewayBar');
+    if(gate){gate.setAttribute('x',gx-6);gate.setAttribute('y',gy-gh/2);gate.setAttribute('width',12);gate.setAttribute('height',gh);gate.setAttribute('rx',3);}
+    for(const key of [...M.protocols,...M.channels]){
+      const cy=center(key),wire=el('opsWire-'+key),node=el('flowBar-'+key);
+      if(cy==null||!wire)continue;
+      const left=M.protocols.includes(key),w=width(key),b0=stacks[key],bc=b0+w/2;
+      const x0=left?8:gx+6,x1=left?gx-6:W-8,m=(x0+x1)/2;
+      const [ya,yb]=left?[cy,bc]:[bc,cy];
+      const [a0,b1]=left?[cy-w/2,b0]:[b0,cy-w/2];
+      const line=`M ${x0} ${ya} C ${m} ${ya}, ${m} ${yb}, ${x1} ${yb}`;
+      const band=w>0?`M ${x0} ${a0} C ${m} ${a0}, ${m} ${b1}, ${x1} ${b1} L ${x1} ${b1+w} C ${m} ${b1+w}, ${m} ${a0+w}, ${x0} ${a0+w} Z`:line;
+      const paths=wire.querySelectorAll('path');
+      paths[0]?.setAttribute('d',band);paths[1]?.setAttribute('d',line);paths[2]?.setAttribute('d',line);
+      wire.classList.toggle('is-idle',w===0);
+      if(node){const h=Math.max(w,14);node.setAttribute('x',left?0:W-8);node.setAttribute('y',cy-h/2);node.setAttribute('width',8);node.setAttribute('height',h);node.setAttribute('rx',2);node.classList.toggle('is-idle',w===0);}
     }
   }
   function scheduleLayout(){if(document.hidden)return;if(layoutFrame==null)layoutFrame=raf(()=>{layoutFrame=null;layout();});}
@@ -232,7 +265,7 @@
   }
   function start(){
     if(document.hidden||tickTimer!=null)return;
-    if(resizeObserver){resizeObserver.observe(el('flowBoard'));root.querySelectorAll('[data-flow-node]').forEach(node=>resizeObserver.observe(node));}
+    if(resizeObserver){resizeObserver.observe(el('flowSankey')||el('flowBoard'));root.querySelectorAll('[data-flow-node]').forEach(node=>resizeObserver.observe(node));}
     connect();loadPools();tickTimer=window.setInterval(heartbeat,1000);scheduleLayout();
   }
   function fullscreenState(){
