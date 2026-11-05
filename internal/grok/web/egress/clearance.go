@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"orchids-api/internal/config"
 	"orchids-api/internal/grok/egressnodes"
 	"strings"
 	"time"
@@ -105,52 +106,42 @@ func (m *Manager) resolveFingerprint(ctx context.Context, node Node, fingerprint
 }
 
 func (m *Manager) manualClearance() string {
-	if m == nil || m.cfg == nil {
+	cfg := m.config()
+	if cfg == nil {
 		return ""
 	}
 	parts := make([]string, 0, 2)
-	if v := strings.TrimSpace(m.cfg.GrokConfigCFClearance); v != "" {
+	if v := strings.TrimSpace(cfg.GrokConfigCFClearance); v != "" {
 		parts = append(parts, "cf_clearance="+v)
 	}
-	if v := strings.TrimSpace(m.cfg.GrokConfigCFBM); v != "" {
+	if v := strings.TrimSpace(cfg.GrokConfigCFBM); v != "" {
 		parts = append(parts, "__cf_bm="+v)
 	}
 	return strings.Join(parts, "; ")
 }
 
 func (m *Manager) clearanceConfig() ClearanceConfig {
-	if m == nil || m.cfg == nil {
+	return clearanceConfigFor(m.config())
+}
+
+func clearanceConfigFor(cfg *config.Config) ClearanceConfig {
+	if cfg == nil {
 		return ClearanceConfig{Mode: "manual", TargetURL: "https://grok.com"}
 	}
 	return ClearanceConfig{
-		Mode:            m.cfg.GrokClearanceModeOrDefault(),
-		FlareSolverrURL: strings.TrimSpace(m.cfg.GrokFlareSolverrURL),
+		Mode:            cfg.GrokClearanceModeOrDefault(),
+		FlareSolverrURL: strings.TrimSpace(cfg.GrokFlareSolverrURL),
 		TargetURL:       "https://grok.com",
-		Timeout:         m.cfg.GrokClearanceTimeoutOrDefault(),
+		Timeout:         cfg.GrokClearanceTimeoutOrDefault(),
 	}
 }
 
 func (m *Manager) refreshInterval() time.Duration {
-	if m == nil || m.cfg == nil {
+	cfg := m.config()
+	if cfg == nil {
 		return 10 * time.Minute
 	}
-	return time.Duration(m.cfg.GrokClearanceRefreshIntervalOrDefault()) * time.Second
-}
-
-// InvalidateAffinityClearance invalidates the clearance used by the last lease
-// for a scope+affinity. Used by request paths that do not hold the lease
-// directly (e.g. CLI) after classifying a Cloudflare challenge.
-func (m *Manager) InvalidateAffinityClearance(scope, affinity string) {
-	if m == nil {
-		return
-	}
-	m.mu.RLock()
-	info, ok := m.lastLease[scope+"|"+affinity]
-	m.mu.RUnlock()
-	if !ok || info.fingerprint == "" {
-		return
-	}
-	m.invalidateClearanceKey(info.fingerprint, info.version)
+	return time.Duration(cfg.GrokClearanceRefreshIntervalOrDefault()) * time.Second
 }
 
 // invalidateClearanceKey marks a fingerprint's clearance stale. When version is
@@ -178,14 +169,11 @@ func (m *Manager) invalidateClearanceKey(key string, version uint64) {
 func (m *Manager) InspectClearance(nodeID string) egressnodes.ClearanceInfo {
 	cfg := m.clearanceConfig()
 	info := egressnodes.ClearanceInfo{Mode: cfg.Mode, Status: "missing"}
-	m.mu.Lock()
-	m.refreshNodesLocked()
 	var node *Node
-	for i := range m.nodes {
-		if m.nodes[i].Name == nodeID {
-			node = &m.nodes[i]
-		}
+	if found, ok := m.pool.Node(nodeID); ok {
+		node = &found
 	}
+	m.mu.Lock()
 	for _, state := range m.clearances {
 		if state.nodeID != nodeID || state.refreshedAt.Before(info.RefreshedAt) {
 			continue
@@ -216,15 +204,11 @@ func (m *Manager) RefreshClearance(ctx context.Context, nodeID string) error {
 	if cfg.Mode == "manual" {
 		return errors.New("clearance is maintained manually")
 	}
-	m.mu.Lock()
-	m.refreshNodesLocked()
 	var node *Node
-	for i := range m.nodes {
-		if m.nodes[i].Name == nodeID {
-			copied := m.nodes[i]
-			node = &copied
-		}
+	if found, ok := m.pool.Node(nodeID); ok {
+		node = &found
 	}
+	m.mu.Lock()
 	for key, state := range m.clearances {
 		if state.nodeID == nodeID {
 			state.invalid = true
