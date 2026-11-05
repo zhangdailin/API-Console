@@ -210,10 +210,6 @@
   padding: var(--space-4) var(--space-5) var(--space-5);
 }
 
-.ops-hero { min-height: 220px; }
-
-.ops-hero .ops-card-head { margin-bottom: var(--space-3); }
-
 .ops-card-head {
   display: flex;
   flex-wrap: wrap;

@@ -123,13 +123,6 @@
 .form-row-control > .form-input,
 .form-row-control > .input-wrapper { max-width: 560px; }
 
-.config-inline-tags {
-  flex-direction: row;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-}
-
 .secret-field {
   border-color: var(--accent-line);
   border-left: 3px solid var(--accent);
@@ -317,11 +310,6 @@
 .key-catalog-status { justify-content:space-between; margin:var(--space-4) 0; font-size:.85rem; }
 @media(max-width:900px) { .key-form-grid { grid-template-columns:1fr; } .key-toolbar-actions { width:100%; } .key-actions { min-width:0; } .key-list { overflow:visible; } .key-list-footer .pagination { flex-wrap:wrap; } }
 @media(prefers-reduced-motion:reduce) { .key-loading { animation:none; } }
-#groupGrok .toggle:focus-within {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-}
-
 /* ── Runtime settings tabs (grok2api layout) ────────────────────────────── */
 button.config-nav-link { width: 100%; border-top: 0; border-right: 0; border-bottom: 0; background: transparent; text-align: left; cursor: pointer; font-family: inherit; }
 button.config-nav-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
