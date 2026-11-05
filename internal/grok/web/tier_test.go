@@ -55,4 +55,30 @@ func TestLiteImagePayloadIsAPlainFastChat(t *testing.T) {
 	testutil.Equal(t, payload["modeId"], "fast")
 	testutil.Equal(t, payload["enableImageGeneration"], true)
 	testutil.Equal(t, payload["message"], "Drawing: a red boat")
+	// Shared Free accounts: no memory of other callers' prompts, no searched
+	// pictures standing in for a drawing.
+	testutil.Equal(t, payload["disableMemory"], true)
+	testutil.Equal(t, payload["disableSearch"], true)
+}
+
+func TestExtractAppChatImageURLsKeepsOnlyGrokHostedImages(t *testing.T) {
+	resp := map[string]interface{}{
+		"result": map[string]interface{}{"response": map[string]interface{}{
+			"cardAttachment": map[string]interface{}{
+				"jsonData": `{"image":{"url":"https://example.com/searched/cat.jpg"},"url":"https://news.example.org/photo.png"}`,
+			},
+		}},
+	}
+	testutil.Equal(t, len(extractAppChatImageURLs(resp)), 0)
+
+	generated := map[string]interface{}{
+		"result": map[string]interface{}{"response": map[string]interface{}{
+			"cardAttachment": map[string]interface{}{
+				"jsonData": `{"image_chunk":{"imageUrl":"users/u1/generated/a1/image.jpg","progress":100}}`,
+			},
+		}},
+	}
+	got := extractAppChatImageURLs(generated)
+	testutil.Equal(t, len(got), 1)
+	testutil.Equal(t, got[0], "https://assets.grok.com/users/u1/generated/a1/image.jpg")
 }

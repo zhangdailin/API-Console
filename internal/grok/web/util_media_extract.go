@@ -2,6 +2,7 @@ package web
 
 import (
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 )
@@ -104,7 +105,10 @@ func extractAppChatImageURLs(resp map[string]interface{}) []string {
 	seen := map[string]struct{}{}
 	addURL := func(u string) {
 		u = strings.TrimSpace(normalizeGrokAssetURL(u))
-		if u == "" {
+		// Only images grok.com drew are results. Cards also carry searched
+		// web pictures and link previews; returning those as "generated"
+		// images hands the caller pictures unrelated to the prompt.
+		if u == "" || !isGrokHostedAssetURL(u) {
 			return
 		}
 		if _, ok := seen[u]; ok {
@@ -149,6 +153,17 @@ func extractAppChatImageURLs(resp map[string]interface{}) []string {
 		}
 	}
 	return urls
+}
+
+// isGrokHostedAssetURL reports whether u is served by grok.com itself
+// (assets.grok.com or another grok.com host), as generated images are.
+func isGrokHostedAssetURL(u string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(u))
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	return host == "grok.com" || strings.HasSuffix(host, ".grok.com")
 }
 
 func appChatImageNoImageDiagnostics(resp map[string]interface{}) []string {

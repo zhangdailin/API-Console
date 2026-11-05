@@ -174,6 +174,12 @@ func (c *Client) appChatImagePayload(spec ModelSpec, prompt, _ string, _ int) ma
 	payload["modeId"] = "fast"
 	payload["enableImageGeneration"] = true
 	payload["imageGenerationCount"] = 2
+	// Free accounts are shared by every caller: account memory would steer the
+	// drawing toward earlier prompts, and web search lets the chat model answer
+	// with searched pictures instead of drawing. Neither belongs in an image
+	// request, whatever the chat settings say.
+	payload["disableMemory"] = true
+	payload["disableSearch"] = true
 	return payload
 }
 
