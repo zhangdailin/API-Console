@@ -195,8 +195,9 @@ func TestHandleResponsesCompactFailsOnDegenerateSummary(t *testing.T) {
 	rec := httptest.NewRecorder()
 	// A degenerate summary is retryable, so this exercises the real retry loop;
 	// only the pause is shrunk, because the production value is three seconds.
-	previousPause := responses.SetCompactionRetryPause(time.Millisecond)
-	defer responses.SetCompactionRetryPause(previousPause)
+	previousPause := responses.CompactionRetryPause
+	responses.CompactionRetryPause = time.Millisecond
+	defer func() { responses.CompactionRetryPause = previousPause }()
 	h.HandleResponsesCompact(rec, req)
 
 	testutil.Equal(t, rec.Code, http.StatusBadGateway)

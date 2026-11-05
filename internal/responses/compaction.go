@@ -675,7 +675,3 @@ func compactionHTTPErrorIsTransient(status int, body string) bool {
 	}
 	return status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= 500
 }
-
-// gatewayCompactionRetryPause is a variable so a test can drive the retry
-// without sleeping for the production pause.
-var gatewayCompactionRetryPause = gatewayCompactionRetryDelay

@@ -1,8 +1,9 @@
 package responses
 
-import "maps"
-
-import "orchids-api/internal/chatwire"
+import (
+	"maps"
+	"orchids-api/internal/chatwire"
+)
 
 // ParseLooseStringAny renders an arbitrary JSON-decoded value as a trimmed
 // string. A Responses payload routinely carries a number or a bool where the

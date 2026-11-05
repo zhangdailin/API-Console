@@ -2,7 +2,6 @@ package responses
 
 import (
 	"io"
-	"time"
 
 	"orchids-api/internal/secureblob"
 )
@@ -84,15 +83,7 @@ func CompactionContinuation(raw string) string { return gatewayCompactionContinu
 
 // CompactionRetryPause is the delay between summary-turn attempts. It is a
 // variable so a test can drive the retry loop without sleeping for seconds.
-var CompactionRetryPause = gatewayCompactionRetryPause
-
-// SetCompactionRetryPause overrides the retry pause and returns the previous
-// value, for tests.
-func SetCompactionRetryPause(d time.Duration) time.Duration {
-	previous := gatewayCompactionRetryPause
-	gatewayCompactionRetryPause = d
-	return previous
-}
+var CompactionRetryPause = gatewayCompactionRetryDelay
 
 // CompactionPrompt is the summary prompt sent for a gateway compaction turn.
 var CompactionPrompt = gatewayCompactionPrompt
