@@ -11,6 +11,7 @@ import (
 
 	"orchids-api/internal/chatwire"
 	"orchids-api/internal/config"
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/httpserver"
 	"orchids-api/internal/middleware"
 	"orchids-api/internal/responses"
@@ -52,7 +53,7 @@ func (h *Handler) serveNativeResponses(w http.ResponseWriter, r *http.Request, s
 		physical++
 		used = append(used, sess.acc.ID)
 		started := time.Now()
-		response, failure := h.buildClient().doResponsesAt(withReasoningDiagnostics(ctx, payload), sess.acc, path, payload)
+		response, failure := h.buildClient().doResponsesAt(grokbase.WithReasoningDiagnostics(ctx, payload), sess.acc, path, payload)
 		if stage != "" {
 			h.auditAttemptDiagnostic(ctx, sess.acc, ProviderBuild, physical, started, failure, stage, response, nil, "")
 		}
@@ -62,7 +63,7 @@ func (h *Handler) serveNativeResponses(w http.ResponseWriter, r *http.Request, s
 		if err := prepareBuildPayload(immutable, payload, sess.acc, spec.UpstreamModel); err != nil {
 			return nil, err
 		}
-		ctx = withReasoningDiagnostics(ctx, payload)
+		ctx = grokbase.WithReasoningDiagnostics(ctx, payload)
 		req = nativeQualityRequest(spec.ID, payload)
 		initialStarted := time.Now()
 		response, failure := oneCall("")

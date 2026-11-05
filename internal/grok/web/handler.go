@@ -8,6 +8,7 @@ import (
 	"orchids-api/internal/accountpolicy"
 	"orchids-api/internal/audit"
 	"orchids-api/internal/config"
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/grok/ratelimit"
 	"orchids-api/internal/loadbalancer"
 	"orchids-api/internal/middleware"
@@ -31,7 +32,7 @@ const grokModelValidationCacheTTL = 3 * time.Second
 // Imagine images, videos, media inputs, the media cache and the SSO account
 // tools. The parent grok channel dispatches Web models here.
 type Handler struct {
-	base          *baseHandler
+	base          *grokbase.AccountTracker
 	runtimeMu     sync.RWMutex
 	cfg           *config.Config
 	lb            *loadbalancer.LoadBalancer
@@ -88,7 +89,7 @@ func NewHandler(cfg *config.Config, lb *loadbalancer.LoadBalancer) *Handler {
 		cacheBaseDir = strings.TrimSpace(cfg.MediaDir)
 	}
 	h := &Handler{
-		base:        newBaseHandler(lb),
+		base:        grokbase.NewAccountTracker(lb),
 		cfg:         cfg,
 		lb:          lb,
 		client:      New(cfg),
@@ -198,7 +199,7 @@ func (h *Handler) auditChatOutcome(ctx context.Context, acc *store.Account, req 
 	prompt, _ := usage["prompt_tokens_details"].(map[string]interface{})
 	completion, _ := usage["completion_tokens_details"].(map[string]interface{})
 	metadata := map[string]interface{}{"finish_reason": result.Finish}
-	addReasoningDiagnostics(ctx, metadata)
+	grokbase.AddReasoningDiagnostics(ctx, metadata)
 	duration := int64(0)
 	if !req.startedAt.IsZero() {
 		duration = time.Since(req.startedAt).Milliseconds()

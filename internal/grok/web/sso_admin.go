@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/store"
 	"orchids-api/internal/util"
 )
@@ -341,7 +342,7 @@ func redactSSOError(err error, acc *store.Account) string {
 	if isEgressChallengeError(err) || strings.Contains(err.Error(), "Just a moment") {
 		return "grok.com 返回了 Cloudflare 验证：请在配置中设置 grok_cf_clearance，或配置 FlareSolverr / 代理出口"
 	}
-	return diagnosticText(err.Error(), acc)
+	return grokbase.DiagnosticText(err.Error(), acc)
 }
 
 // HandleSSORefresh re-reads identity and quota for the named Web accounts.

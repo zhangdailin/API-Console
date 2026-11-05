@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"orchids-api/internal/chatwire"
 	"orchids-api/internal/config"
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/httpserver"
 	"orchids-api/internal/responses"
 	"strings"
@@ -519,7 +520,7 @@ func (h *Handler) serveNativeChat(ctx context.Context, w http.ResponseWriter, re
 		return
 	}
 	provider, endpoint, model := ProviderBuild, h.cliBaseURL()+"/responses", spec.UpstreamModel
-	ctx = withReasoningDiagnostics(ctx, payload)
+	ctx = grokbase.WithReasoningDiagnostics(ctx, payload)
 	immutable, err := cloneBuildPayload(payload)
 	if err != nil {
 		writeGrokUpstreamError(w, err)
@@ -541,7 +542,7 @@ func (h *Handler) serveNativeChat(ctx context.Context, w http.ResponseWriter, re
 		if prepareErr := prepareBuildPayload(immutable, payload, sess.acc, model); prepareErr != nil {
 			return nil, prepareErr
 		}
-		ctx = withReasoningDiagnostics(ctx, payload)
+		ctx = grokbase.WithReasoningDiagnostics(ctx, payload)
 		attemptStarted := time.Now()
 		resp, requestErr := h.buildClient().doResponsesAt(ctx, sess.acc, "/responses", payload)
 		if requestErr == nil || !req.ReasoningReplay || !isReasoningReplayDecodeError(requestErr) || preservesClientCompaction(payload, requestErr) {

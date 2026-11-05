@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"orchids-api/internal/audit"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/middleware"
 	"orchids-api/internal/pricing"
 	"orchids-api/internal/responses"
@@ -70,7 +71,7 @@ func (h *Handler) auditChatOutcome(ctx context.Context, acc *store.Account, req 
 		// delivered anyway when the retry budget ran out.
 		metadata["quality_delivered"] = result.DeliveredDegraded
 	}
-	addReasoningDiagnostics(ctx, metadata)
+	grokbase.AddReasoningDiagnostics(ctx, metadata)
 	duration := int64(0)
 	if !req.StartedAt.IsZero() {
 		duration = time.Since(req.StartedAt).Milliseconds()

@@ -4,6 +4,7 @@ import (
 	"orchids-api/internal/audit"
 	"orchids-api/internal/config"
 	"orchids-api/internal/grok/egressnodes"
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/grok/ratelimit"
 	"orchids-api/internal/grok/web"
 	"orchids-api/internal/loadbalancer"
@@ -18,7 +19,7 @@ import (
 const grokModelValidationCacheTTL = 3 * time.Second
 
 type Handler struct {
-	base          *baseHandler
+	base          *grokbase.AccountTracker
 	runtimeMu     sync.RWMutex
 	cfg           *config.Config
 	lb            *loadbalancer.LoadBalancer
@@ -69,7 +70,7 @@ func NewHandler(cfg *config.Config, lb *loadbalancer.LoadBalancer) *Handler {
 		instanceID = strings.TrimSpace(cfg.DeploymentInstance)
 	}
 	h := &Handler{
-		base:        newBaseHandler(lb),
+		base:        grokbase.NewAccountTracker(lb),
 		cfg:         cfg,
 		lb:          lb,
 		cliClient:   cliClient,

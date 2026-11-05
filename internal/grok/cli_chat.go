@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"orchids-api/internal/accountpolicy"
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/grok/ratelimit"
 	"orchids-api/internal/loadbalancer"
 	"orchids-api/internal/store"
@@ -45,7 +46,7 @@ func (h *Handler) doCLIWithAutoSwitchAt(ctx context.Context, sess *chatAccountSe
 	if err := prepare(); err != nil {
 		return nil, err
 	}
-	ctx = withReasoningDiagnostics(ctx, payload)
+	ctx = grokbase.WithReasoningDiagnostics(ctx, payload)
 	return h.retryWithAccountSwitch(ctx, sess, 1500*time.Millisecond,
 		func() (*http.Response, error) { return h.buildClient().doResponsesAt(ctx, sess.acc, path, payload) },
 		func(used []int64) (*chatAccountSession, error) { return h.openCLIAccountSession(ctx, used, modelID) }, prepare)

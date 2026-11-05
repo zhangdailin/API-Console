@@ -3,6 +3,7 @@ package grok
 import (
 	"context"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/grok/grokbase"
 	"testing"
 	"time"
 
@@ -130,7 +131,7 @@ func TestReasoningDiagnosticsReachAttemptAndOutcome(t *testing.T) {
 		if effort != "" {
 			r["effort"] = effort
 		}
-		ctx := withReasoningDiagnostics(context.Background(), map[string]any{"reasoning": r})
+		ctx := grokbase.WithReasoningDiagnostics(context.Background(), map[string]any{"reasoning": r})
 		log := &parityAuditLog{}
 		h := &Handler{auditLogger: log}
 		h.auditAttempt(ctx, nil, ProviderBuild, 1, time.Now(), nil)
