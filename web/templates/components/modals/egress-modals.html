@@ -20,7 +20,7 @@
         <div id="egressNodeProxyRow">
           <label class="form-label" for="egressNodeProxy">代理地址 <span class="secret-badge">密钥</span></label>
           <input class="form-input secret-field" id="egressNodeProxy" autocomplete="off" spellcheck="false" placeholder="socks5h://user:pass@host:port">
-          <p class="form-hint" id="egressNodeProxyHint">支持 http、socks5、socks5h 与 trojan / vless / ss / vmess 分享链接；留空为直连。</p>
+          <p class="form-hint" id="egressNodeProxyHint">支持 http、socks5、socks5h 与 trojan / vless / ss / vmess 分享链接（隧道在本机转发，FlareSolverr 无法使用）；留空为直连。</p>
           <label class="egress-check-inline"><input type="checkbox" id="egressNodeClearProxy"> 清除已保存的代理地址（改为直连）</label>
         </div>
         <label class="egress-switch-row"><span><span class="form-label">代理池</span><span class="form-hint">地址里的 {account} 按账号替换，用于轮换代理的会话粘滞；代理池节点不参与固定兜底。</span></span><span class="toggle"><input type="checkbox" id="egressNodePool" aria-label="代理池"><span class="toggle-slider"></span></span></label>

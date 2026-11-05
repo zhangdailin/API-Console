@@ -137,7 +137,8 @@ Grok 渠道同时承载 Build（OAuth CLI）与 Web（grok.com 网页 SSO Cookie
 | 概念 | 说明 |
 |---|---|
 | 范围 | `grok_build`（Build）、`grok_web`（Web 对话 / Imagine / 视频）、`grok_web_asset`（assets.grok.com 下载；没有该范围节点时使用 Web 节点） |
-| 节点 | 名称、范围、启用、代理地址（http / socks5 / socks5h；trojan / vless / ss / vmess 分享链接需隧道运行时，当前保留但标记“不可路由”）、代理配置、账号容量、代理池、手动模式下的 UA 与 Cookie |
+| 节点 | 名称、范围、启用、代理地址（http / socks5 / socks5h，或 trojan / vless / ss / vmess 分享链接）、代理配置、账号容量、代理池、手动模式下的 UA 与 Cookie |
+| 隧道 | 分享链接节点由进程内的本地 SOCKS5 监听（127.0.0.1 随机端口）承载，每个连接按链接协议转发：trojan（TLS，可 WebSocket）、VLESS（无 / TLS，TCP 或 WebSocket；不支持 REALITY 与 flow）、Shadowsocks AEAD（aes-128-gcm、aes-256-gcm、chacha20-ietf-poly1305）、VMess AEAD（alterId 0，aes-128-gcm / chacha20-poly1305，TCP 或 WebSocket）。FlareSolverr 位于其他容器，无法使用这些本地端点，因此隧道节点的 clearance 只能在手动模式下用节点 Cookie 维护 |
 | 代理池 | 地址中的 `{account}` 按账号替换为稳定的会话标识，用于轮换代理的会话粘滞 |
 | 账号绑定 | 每个账号在每个范围固定使用一个节点，节点健康时不变；开启“自动分配”时，未绑定账号在首次请求时绑定到负载最低、仍有容量的节点 |
 | 兜底 | 范围内没有可用节点时：`direct` 通用代理（默认，与未配置节点时行为一致）、`none` 拒绝请求、`fixed` 固定节点 |

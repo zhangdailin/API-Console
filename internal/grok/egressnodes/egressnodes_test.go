@@ -115,13 +115,18 @@ func TestImportReadsClashBase64AndPlainLists(t *testing.T) {
 	testutil.Equal(t, len(Current().Candidates(store.GrokEgressScopeBuild)), 2)
 }
 
-func TestTunnelLinksAreKeptButNotRouted(t *testing.T) {
+func TestTunnelLinksRouteThroughALocalEndpoint(t *testing.T) {
 	r, _ := newTestRegistry(t, nil)
 	code, body := call(t, r, http.MethodPost, "nodes", map[string]any{"name": "vless", "scope": "grok_web", "proxy_url": "vless://11111111-1111-1111-1111-111111111111@example.com:443?security=tls&type=ws&path=%2Fws"})
 	testutil.Equal(t, code, http.StatusCreated)
-	testutil.MustContain(t, body, `"routable":false`)
+	testutil.MustContain(t, body, `"routable":true`)
 	testutil.MustContain(t, body, "vless://example.com:443")
-	testutil.Equal(t, len(Current().Candidates(store.GrokEgressScopeWeb)), 0)
+	nodes := Current().Candidates(store.GrokEgressScopeWeb)
+	testutil.Equal(t, len(nodes), 1)
+	endpoint, err := nodes[0].ProxyFor("sso_x")
+	testutil.NoError(t, err)
+	testutil.Equal(t, endpoint.Scheme, "socks5h")
+	testutil.True(t, strings.HasPrefix(endpoint.Host, "127.0.0.1:"), "a tunnel is served on loopback")
 	code, _ = call(t, r, http.MethodPost, "nodes", map[string]any{"name": "reality", "scope": "grok_web", "proxy_url": "vless://11111111-1111-1111-1111-111111111111@example.com:443?security=reality"})
 	testutil.Equal(t, code, http.StatusBadRequest)
 }

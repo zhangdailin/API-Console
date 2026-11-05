@@ -149,7 +149,6 @@ func TestParseProxyURL(t *testing.T) {
 	invalid := []string{
 		"https://proxy1:8443", // https proxy unsupported by the browser transport
 		"socks4://proxy1:1080",
-		"trojan://secret@host:443",
 		"://missing-scheme",
 		"http://", // no host
 		"http://host:notaport",
