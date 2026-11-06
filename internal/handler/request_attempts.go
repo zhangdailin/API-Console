@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"orchids-api/internal/provider"
+	"regexp"
+	"strings"
 	"time"
 
 	"orchids-api/internal/accountpolicy"
@@ -45,6 +47,9 @@ type messageExecution struct {
 	trackedAccountID   int64
 	failedAccountIDs   []int64
 	failedAccountSet   map[int64]struct{}
+	// blockedRefusal fingerprints the 403/404 this request last recorded on an
+	// account (see sameRefusalOnAnotherAccount).
+	blockedRefusal blockedRefusal
 }
 
 func (e *messageExecution) run() {
@@ -178,6 +183,16 @@ func (e *messageExecution) run() {
 		// retried. The scheduler reads the same policy, so a failure cannot be
 		// "cooling down" for one entrance and "retryable" for the other.
 		verdict := accountpolicy.Classify(e.currentAccount, err, e.req.Model)
+		// The same refusal from a second account is about the request, not the
+		// accounts: stop here rather than stamp the next one. Without this an
+		// unrecognised request-scoped 403 walks the whole pool and empties it.
+		if e.sameRefusalOnAnotherAccount(verdict, errStr) {
+			slog.Error("Identical refusal from a second account; not marking further accounts",
+				"trace_id", e.traceID, "status", verdict.Status, "category", errClass.Category)
+			e.sh.reportRequestFailure("Reporting a refusal repeated across accounts",
+				errClass.Category, apperrors.PublicMessage(errStr), upstreamRetryAfter(err))
+			return
+		}
 		// Mark the account status (auth-class errors are always marked,
 		// whether or not they are retryable)
 		if e.currentAccount != nil && e.h.loadBalancer != nil && e.h.loadBalancer.Store != nil {
@@ -427,4 +442,38 @@ func cancellationCategory(ctx context.Context) string {
 		return "timeout"
 	}
 	return "client_closed"
+}
+
+// blockedRefusal is one account-blocking refusal: its status, a fingerprint of
+// its text with identifiers removed, and the account that received it.
+type blockedRefusal struct {
+	status      string
+	fingerprint string
+	accountID   int64
+}
+
+var refusalVolatile = regexp.MustCompile(`[0-9a-f]{8,}|\d+`)
+
+// sameRefusalOnAnotherAccount reports whether verdict would block a second
+// account with the refusal this request already blocked one account for, and
+// records the refusal otherwise. A credential problem is per account and reads
+// differently, or at least arrives on a later request; an identical 403/404 on
+// two accounts within one request is the request's own.
+func (e *messageExecution) sameRefusalOnAnotherAccount(verdict accountpolicy.Verdict, errStr string) bool {
+	if verdict.Scope != accountpolicy.ScopeAccount || (verdict.Status != "403" && verdict.Status != "404") || e.currentAccount == nil {
+		return false
+	}
+	text := strings.ToLower(errStr)
+	if len(text) > 512 {
+		text = text[:512]
+	}
+	current := blockedRefusal{
+		status:      verdict.Status,
+		fingerprint: refusalVolatile.ReplaceAllString(text, "#"),
+		accountID:   e.currentAccount.ID,
+	}
+	previous := e.blockedRefusal
+	e.blockedRefusal = current
+	return previous.accountID != 0 && previous.accountID != current.accountID &&
+		previous.status == current.status && previous.fingerprint == current.fingerprint
 }

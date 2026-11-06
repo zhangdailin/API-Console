@@ -108,6 +108,10 @@ func ClassifyAccountStatus(errStr string) string {
 	if isClineModelEntitlement(lower) {
 		return ""
 	}
+	// The model's provider refused, not the channel: the credential was accepted.
+	if IsUpstreamModelRefusal(lower) {
+		return ""
+	}
 	// A status reason persisted by an admin handler is the wrapped error string,
 	// so recognise the code that sits inside the wrap chain as well.
 	if code := LeadingStatusCode(lower); code != "" {
@@ -209,6 +213,10 @@ func ClassifyUpstreamError(errStr string) UpstreamErrorClass {
 		strings.Contains(lower, "signed_out") ||
 		strings.Contains(lower, "invalid_api_key"):
 		return UpstreamErrorClass{Category: "auth", Retryable: true, SwitchAccount: true}
+	// Every account gets the same answer from the model's provider, so neither a
+	// retry nor another account can help.
+	case IsUpstreamModelRefusal(lower):
+		return UpstreamErrorClass{Category: "model_unavailable"}
 	case isClineModelEntitlement(lower):
 		return UpstreamErrorClass{Category: "model_unavailable", Retryable: true, SwitchAccount: true}
 	case HasExplicitHTTPStatus(lower, "403"):

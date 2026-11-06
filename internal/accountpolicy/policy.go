@@ -261,6 +261,19 @@ func Classify(acc *store.Account, err error, model string) Verdict {
 		}
 	}
 
+	// The channel accepted the credential and the model's provider refused the
+	// model. That answer is the same on every account: the account keeps its
+	// status, and the request fails instead of walking the pool.
+	if apperrors.IsUpstreamModelRefusal(lower) {
+		return Verdict{
+			Scope:         ScopeNone,
+			Message:       message,
+			Retryable:     false,
+			SwitchAccount: false,
+			At:            now,
+		}
+	}
+
 	// A model-scoped complaint must not take the account out of service: the
 	// other models of the same account remain usable.
 	if isModelScopedFailure(lower) {
