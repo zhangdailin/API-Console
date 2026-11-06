@@ -76,7 +76,7 @@
 
 .accounts-stats { margin-bottom: var(--space-4); }
 
-.accounts-actions .accounts-action-cluster.is-danger { background: var(--bad-soft); }
+
 
 .account-cooldown-until { white-space: normal; line-height: 1.5; }
 
@@ -100,34 +100,12 @@
   margin-bottom: var(--space-3);
 }
 
-.accounts-platform-switch {
-  display: inline-flex;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-pill);
-  background: var(--surface-1);
-}
-
-.accounts-platform-switch .tab-item {
-  height: var(--control-h-sm);
-  border-color: transparent;
-  background: transparent;
-}
-
-.accounts-platform-switch .tab-item.active {
-  background: var(--accent-soft);
-  border-color: var(--accent-line);
-  color: var(--accent);
-}
+.accounts-platform-switch { display: inline-flex; }
 
 .accounts-actions .accounts-action-cluster {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-1);
-  border-radius: var(--radius-md);
-  background: var(--surface-1);
 }
 
 .accounts-table tbody tr:hover td { background: var(--surface-2); }

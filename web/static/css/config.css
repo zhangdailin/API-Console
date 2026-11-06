@@ -26,15 +26,11 @@
 .config-body { display: block; }
 
 .config-tabs-switch {
-  gap: var(--space-2);
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
   margin-bottom: var(--space-5);
-  padding: var(--space-2);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  background: var(--surface-1);
 }
-
-.config-tabs-switch .tab-item { background: transparent; }
 
 .config-layout {
   display: grid;

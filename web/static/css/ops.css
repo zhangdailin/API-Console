@@ -58,7 +58,6 @@
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   background: var(--surface-1);
-  box-shadow: none;
 }
 
 .ops-hint {
@@ -494,11 +493,35 @@
 
 .ops-coverage { margin: 0; padding: 0 var(--space-4) var(--space-4); color: var(--text-muted); font-size: 0.78rem; line-height: 1.75; }
 
-.logs-tabs { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
+.logs-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-bottom: var(--space-4);
+  padding: 3px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--track-bg);
+}
 
-.logs-tab { height: var(--control-h); padding: 0 var(--space-4); font-size: 0.82rem; border-radius: var(--radius-pill); }
+.logs-tab {
+  height: var(--control-h-sm);
+  padding: 0 var(--space-4);
+  border-color: transparent;
+  border-radius: 7px;
+  font-size: 0.8rem;
+}
 
-.logs-tab.is-active { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent); }
+.logs-tab:hover { border-color: transparent; background: color-mix(in srgb, var(--surface-1) 55%, transparent); }
+
+.logs-tab.is-active {
+  background: var(--surface-1);
+  border-color: var(--border-color);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-main);
+}
+
+:root[data-theme="dark"] .logs-tab.is-active { background: var(--surface-3); border-color: transparent; }
 
 .logs-filters {
   display: grid;

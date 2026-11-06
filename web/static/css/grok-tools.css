@@ -2,8 +2,8 @@
 
 .grok-tools-page {
   --grok-card-border: var(--border-color);
-  --grok-soft-bg: rgba(255, 255, 255, 0.045);
-  --grok-muted-bg: rgba(255, 255, 255, 0.075);
+  --grok-soft-bg: color-mix(in srgb, var(--text-main) 3%, transparent);
+  --grok-muted-bg: color-mix(in srgb, var(--text-main) 6%, transparent);
   --grok-line: var(--border-color);
   display: flex;
   flex-direction: column;
