@@ -209,6 +209,12 @@ func auditOutcomeClass(event audit.Event) string {
 	if httpStatus >= 200 && httpStatus < 300 && status != "error" && status != "failed" {
 		return "success"
 	}
+	if httpStatus >= 200 && httpStatus < 300 {
+		// The status line was committed (a keep-alive for a slow non-streaming
+		// reply) before the request failed: the same class as a broken stream,
+		// and the class the overview records it under.
+		return "stream_error"
+	}
 	switch {
 	case httpStatus == 429 || httpStatus == 529:
 		return "rate_limited"

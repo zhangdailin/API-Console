@@ -138,3 +138,27 @@ func TestRequestJournalCarriesUpstreamRoute(t *testing.T) {
 	testutil.Equal(t, meta[upstream.RouteSentModel], "grok-build-mapped")
 	testutil.Equal(t, meta[upstream.RouteServedModel], "grok-build-mapped-0309")
 }
+
+// A non-streaming reply that committed 200 early and then failed is journalled
+// as an error; the overview must record a failure, not a success.
+func TestCommittedTwoHundredThatFailedIsNotASuccess(t *testing.T) {
+	journal := &diagnosticJournal{}
+	previous, oldDetailed := requestJournal, detailedOutcomeRecorder
+	defer func() { requestJournal, detailedOutcomeRecorder = previous, oldDetailed }()
+	requestJournal = journal
+	var outcomes []opsagg.Outcome
+	detailedOutcomeRecorder = func(_ context.Context, o opsagg.Outcome) { outcomes = append(outcomes, o) }
+	observed := ObserveAuditLogger(journal)
+	h := TraceMiddleware(LoggingMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(" "))
+		observed.Log(r.Context(), audit.Event{Action: "chat_request", Kind: audit.KindRequest, Channel: "cline", Status: "error"})
+		w.Write([]byte(`{"error":{"message":"upstream failed"}}`))
+	})))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", "/cline/v1/chat/completions", strings.NewReader("{}")))
+	testutil.Equal(t, len(outcomes), 1)
+	testutil.False(t, outcomes[0].OK, "a committed 200 that failed was counted as a success")
+	testutil.Equal(t, outcomes[0].Status, streamFailureClass)
+	testutil.Equal(t, len(journal.events), 1)
+	testutil.Equal(t, journal.events[0].Status, "error")
+}

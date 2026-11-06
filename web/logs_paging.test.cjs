@@ -280,7 +280,7 @@ test('request rows show the upstream route, cost and latency in the list', () =>
     kind: 'request', action: 'chat_request', status: 'success', channel: 'cline', model: 'claude-sonnet-4.6',
     input_tokens: 3789, output_tokens: 1214, cost_in_usd_ticks: 197180000, duration_ms: 26810, client_ip: '161.118.140.32',
     metadata: { path: '/cline/v1/messages', upstream_endpoint: '/api/v1/chat/completions', upstream_model_sent: 'anthropic/claude-sonnet-4.6',
-      upstream_model: 'grok-4.5-0309', first_visible_token_ms: 1320 } } }];
+      upstream_model: 'grok-4.5-0309', first_token_ms: 1320, first_visible_token_ms: 1320 } } }];
   api.renderRows(false);
   const row = allText(api.ids.logsRows);
   for (const expected of ['claude-sonnet-4.6', '上游', 'grok-4.5-0309', '/cline/v1/messages', '/api/v1/chat/completions',
@@ -321,4 +321,29 @@ test('the gateway provider and its retry count are shown under the model', () =>
   const detail = allText(api.ids.logsDetailBody);
   assert.match(detail, /上游服务商[\s\S]*alibaba/);
   assert.match(detail, /服务商尝试[\s\S]*2 次/);
+});
+
+test('output speed is never divided by the last milliseconds of a reply', () => {
+  const api = load();
+  api.state.kind = 'request';
+  const row = (meta, extra = {}) => ({ id: String(Math.random()), event: { kind: 'request', action: 'chat_request', status: 'success', channel: 'cline',
+    model: 'm', output_tokens: 10240, duration_ms: 117616, ...extra, metadata: { path: '/cline/v1/chat/completions', ...meta } } });
+  api.state.records = [
+    // Non-streaming: the body arrives in one piece at the end.
+    row({ first_token_kind: 'body_ttfb', first_token_ms: 117615, ttfb_ms: 117615 }),
+    // A stream held back and released at the end (Grok quality hold).
+    row({ first_token_ms: 117600, first_visible_token_ms: 117600 }),
+    // A real stream: reasoning from 2 s, visible text from 30 s; the window
+    // starts at the first generated token, reasoning included.
+    row({ first_token_ms: 2000, first_visible_token_ms: 30000 }),
+  ];
+  api.renderRows();
+  const rows = api.ids.logsRows.querySelectorAll('tr[data-index]').map(allText);
+  assert.match(rows[0], /首字\s*非流式/);
+  assert.match(rows[0], /87\.1 tok\/s（整体）/, rows[0]);
+  assert.match(rows[1], /87\.1 tok\/s（整体）/, rows[1]);
+  assert.match(rows[2], /首字\s*30\.00s/);
+  assert.match(rows[2], /88\.6 tok\/s/);
+  assert.doesNotMatch(rows[2], /整体/);
+  for (const text of rows) assert.doesNotMatch(text, /\d{4,}\.\d tok\/s/, 'an output speed in the thousands');
 });

@@ -390,6 +390,12 @@ func recordRequestOutcome(r *http.Request, wrapped *TracedResponseWriter, durati
 		firstTokenMS = max(firstWrite.Sub(wrapped.startedAt).Milliseconds(), 0)
 	}
 	statusClass := httpStatusClass(wrapped.StatusCode)
+	if statusClass == "2xx" && handlerRecordedFailure(r) {
+		// A slow non-streaming reply commits 200 early (a keep-alive) and can
+		// still fail afterwards: the client then reads an error under a 2xx.
+		// The journal row says error, so the overview must not count a success.
+		statusClass = streamFailureClass
+	}
 	if wrapped.StreamFailed() && statusClass == "2xx" {
 		// The status line is already committed, so the only honest record of a
 		// stream that died after it is a failure class of its own.
@@ -431,6 +437,22 @@ func recordRequestOutcome(r *http.Request, wrapped *TracedResponseWriter, durati
 		defer cancel()
 		detailedOutcomeRecorder(ctx, outcome)
 	}
+}
+
+// handlerRecordedFailure reports whether the handler's own journal row for this
+// request ended in an error.
+func handlerRecordedFailure(r *http.Request) bool {
+	box, ok := r.Context().Value(requestObservationKey{}).(*requestObservation)
+	if !ok {
+		return false
+	}
+	box.mu.Lock()
+	defer box.mu.Unlock()
+	if box.finalEvent == nil {
+		return false
+	}
+	status := strings.ToLower(strings.TrimSpace(box.finalEvent.Status))
+	return status == "error" || status == "failed"
 }
 
 // Reserved synthetic-traffic labels. They are not routable models, so a client

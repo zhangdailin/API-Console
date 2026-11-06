@@ -214,7 +214,9 @@ func TestJournalRecordsOutcomeClassMatchesOverview(t *testing.T) {
 		"req-tools":        "success",
 		"req-length":       "success",
 		"req-filtered":     "success",
-		"req-error-200":    "failed",
+		// 200 was committed (a keep-alive) before the request failed: the overview
+		// records that as a stream failure, and the log centre agrees.
+		"req-error-200": "stream_error",
 	}
 	for id, class := range want {
 		testutil.Equal(t, classes[id], class)
