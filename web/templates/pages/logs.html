@@ -65,7 +65,7 @@
       <p class="logs-filter-note" id="logsFilterScope">—</p>
     </form>
 
-    <div class="logs-table-wrap">
+    <div class="logs-table-wrap" id="logsTableWrap">
       <table class="ops-table logs-table is-request" id="logsTable">
         <thead>
           <tr id="logsHeadRow">
@@ -84,9 +84,22 @@
         </tbody>
       </table>
     </div>
-    <div class="logs-more">
-      <button class="btn" id="logsMore" type="button" hidden>加载更早的记录</button>
-    </div>
+    <nav class="pagination-shell logs-pager" id="logsPager" aria-label="日志分页" hidden>
+      <span class="pagination-info" id="logsPageInfo">第 1 页</span>
+      <div class="pagination-controls">
+        <label class="logs-page-size"><span>每页</span>
+          <select id="logsPageSize" class="compact-select" aria-label="每页条数">
+            <option value="20">20 条</option>
+            <option value="50" selected>50 条</option>
+            <option value="100">100 条</option>
+          </select>
+        </label>
+        <button class="btn btn-page btn-outline" id="logsFirst" type="button">首页</button>
+        <button class="btn btn-page btn-outline" id="logsPrev" type="button">上一页</button>
+        <span class="btn btn-page btn-primary" id="logsPageNo" aria-current="page">1</span>
+        <button class="btn btn-page btn-outline" id="logsNext" type="button">下一页</button>
+      </div>
+    </nav>
 
     <p class="ops-coverage logs-coverage" id="logsCoverage">—</p>
 

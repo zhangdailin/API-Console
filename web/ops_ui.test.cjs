@@ -48,7 +48,9 @@ test('the log centre has the three tabs and one shared detail panel', () => {
   }
   assert.match(page, /id="logsRows"/, 'missing record list');
   assert.match(page, /id="logsDetail"/, 'missing detail panel');
-  assert.match(page, /id="logsMore"/, 'missing cursor pagination control');
+  for (const control of ['logsPager', 'logsFirst', 'logsPrev', 'logsNext', 'logsPageSize']) {
+    assert.match(page, new RegExp(`id="${control}"`), `missing pagination control ${control}`);
+  }
 });
 
 test('request details show every upstream attempt and operation details show the change', () => {

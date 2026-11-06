@@ -7,7 +7,14 @@
   const { el, make, attach, emptyRow } = ConsoleUI;
 
   const listLoads = ConsoleUI.requestGate();
-  const state = { kind: 'request', cursor: '', records: [], selected: null, back: '' };
+  // The journal pages with a cursor: the server answers one window and the
+  // cursor that starts the next. pageStarts[n] is the cursor page n began at, so
+  // going back re-reads exactly the window that was shown. A filtered total
+  // cannot be known without scanning the whole ledger, so pages are numbered but
+  // never counted.
+  const PAGE_SIZES = [20, 50, 100];
+  const DEFAULT_PAGE_SIZE = 50;
+  const state = { kind: 'request', cursor: '', records: [], selected: null, back: '', page: 0, pageStarts: [''], pageSize: DEFAULT_PAGE_SIZE };
 
   // RESULT_LABELS names the classes the overview counts with, so the chip the log
   // centre shows and the chart that opened it use the same words.
@@ -290,8 +297,17 @@
       upstream,
       // Only a model the upstream reported can prove a substitution; a sent
       // name that differs is the gateway's own mapping.
-      remapped: !!served && !!requested && bareModel(served) !== bareModel(requested),
+      remapped: !!served && !!requested && !sameModel(served, requested),
     };
+  }
+
+  // sameModel treats a vendor prefix and a dated snapshot suffix as the same
+  // model: "anthropic/claude-x" is "claude-x", and "grok-4.7-0401" is a snapshot
+  // of "grok-4.7". Any other difference ("grok-4" vs "grok-4-fast") is a swap.
+  function sameModel(served, requested) {
+    const a = bareModel(served);
+    const b = bareModel(requested);
+    return a === b || (a.startsWith(b + '-') && /^-\d[\d.-]*$/.test(a.slice(b.length)));
   }
 
   // bareModel drops a vendor prefix ("anthropic/claude-x" → "claude-x") so a
@@ -430,6 +446,10 @@
     // where the same bundles are reachable from the requests that produced them.
     // The tab is gone; the addresses that pointed at it keep working.
     state.back = params.get('back') || '';
+    const size = Number(params.get('size'));
+    state.pageSize = PAGE_SIZES.includes(size) ? size : DEFAULT_PAGE_SIZE;
+    const sizeSelect = el('logsPageSize');
+    if (sizeSelect) sizeSelect.value = String(state.pageSize);
     return applied;
   }
 
@@ -442,6 +462,7 @@
     params.set('tab', 'logs');
     params.set('kind', state.kind);
     if (state.back) params.set('back', state.back);
+    if (state.pageSize !== DEFAULT_PAGE_SIZE) params.set('size', String(state.pageSize));
     window.history.replaceState(null, '', window.location.pathname + '?' + params.toString());
   }
 
@@ -478,11 +499,11 @@
     ]);
   }
 
-  function renderRows(append) {
+  function renderRows() {
     const body = el('logsRows');
     if (!body) return;
-    if (!append) body.replaceChildren();
-    if (state.records.length === 0 && !append) {
+    body.replaceChildren();
+    if (state.records.length === 0) {
       // An empty page and a broken page look alike, so say which one this is and
       // what the window actually covers.
       emptyRow(body, tableColumns().length, state.kind === 'request'
@@ -490,19 +511,10 @@
         : '保留窗口内没有匹配的记录。');
       return;
     }
-    if (append) {
-      // The "no matching records" placeholder is a row but carries no record. Counting
-      // it as one made the FIRST record of the appended page look like an extra row, so
-      // it was never drawn: "加载更多" returned data and the list stayed empty.
-      body.querySelectorAll('tr').forEach((tr) => {
-        if (!tr.dataset || tr.dataset.index === undefined) tr.remove();
-      });
-    }
-    const start = append ? body.querySelectorAll('tr[data-index]').length : 0;
-    const rows = state.records.slice(start).map((record, index) => {
+    const rows = state.records.map((record, index) => {
       const event = record.event || {};
       const tr = make('tr');
-      tr.dataset.index = String(start + index);
+      tr.dataset.index = String(index);
       const probe = isProbeRecord(event);
       const channelLabel = KIND_LABELS[event.channel] || event.channel || '';
       const label = text(ACTION_LABELS[event.action] || actionLabel(event.action), '—');
@@ -548,7 +560,7 @@
           make('td', 'logs-cell-duration', event.duration_ms ? event.duration_ms + ' ms' : '—'),
         ]);
       }
-      tr.addEventListener('click', () => select(start + index));
+      tr.addEventListener('click', () => select(index));
       return tr;
     });
     rows.forEach((row) => body.appendChild(row));
@@ -961,9 +973,8 @@
     const model = el('filterModel');
     if (channel) channel.value = String(event.channel || '');
     if (model) model.value = String(event.model || '');
-    state.cursor = '';
     syncUrl();
-    load(false);
+    restart();
   }
 
   // renderDiagnosticsSection shows the request's captured chain. The bundle is a
@@ -1192,11 +1203,17 @@
     openDrawer();
   }
 
-  async function load(append) {
+  // load reads page `page` (0-based) of the current tab and filters. Page 0, or
+  // a page whose starting cursor is unknown, restarts at the newest record.
+  async function load(page) {
+    let index = Number(page) || 0;
+    if (index < 0 || index >= state.pageStarts.length) index = 0;
+    if (index === 0) state.pageStarts = [''];
     const params = filters();
     params.set('kind', state.kind);
-    params.set('limit', '50');
-    if (append && state.cursor) params.set('before', state.cursor);
+    params.set('limit', String(state.pageSize));
+    const before = state.pageStarts[index];
+    if (before) params.set('before', before);
     // This load owns the list from here on. Anything still in flight answers an older
     // question (a previous tab, or a previous filter) and is dropped when it lands.
     const ticket = listLoads.begin();
@@ -1204,8 +1221,14 @@
       const payload = await ConsoleAPI.journal(params, { signal: ticket.signal });
       if (!ticket.isCurrent()) return;
       state.cursor = payload.next_cursor || '';
-      state.records = append ? state.records.concat(payload.data || []) : payload.data || [];
-      renderRows(append);
+      state.page = index;
+      state.pageStarts = state.pageStarts.slice(0, index + 1);
+      if (state.cursor) state.pageStarts.push(state.cursor);
+      state.records = payload.data || [];
+      renderRows();
+      renderPager();
+      const wrap = el('logsTableWrap');
+      if (wrap) wrap.scrollTop = 0;
       renderScope();
       const filterUsed = payload.filter_used || {};
       const matched = payload.matched;
@@ -1234,9 +1257,7 @@
         parts.push('为空的含义是"保留窗口内没有匹配"，不代表从未发生。');
         coverage.textContent = parts.join('；');
       }
-      const more = el('logsMore');
-      if (more) more.hidden = !state.cursor;
-      if (!append) renderDetail(null);
+      renderDetail(null);
     } catch (error) {
       // A failure that belongs to a superseded load must not replace the newer list
       // with an error row either.
@@ -1246,13 +1267,42 @@
         body.replaceChildren();
         const tr = document.createElement('tr');
         const td = document.createElement('td');
-        td.colSpan = 5;
+        td.colSpan = tableColumns().length;
         td.className = 'table-empty-cell';
         td.textContent = '读取日志失败：' + (error.message || error);
         tr.appendChild(td);
         body.appendChild(tr);
       }
     }
+  }
+
+  function renderPager() {
+    const pager = el('logsPager');
+    if (!pager) return;
+    const hasNext = !!state.cursor;
+    const first = state.page === 0;
+    pager.hidden = first && !hasNext;
+    const info = el('logsPageInfo');
+    if (info) {
+      const count = state.records.length;
+      // A short page with a cursor means the scan budget ran out before the
+      // ledger did: there may be more matches further back.
+      info.textContent = `第 ${state.page + 1} 页 · 本页 ${count} 条` + (hasNext ? '' : ' · 已到最早记录');
+    }
+    const number = el('logsPageNo');
+    if (number) number.textContent = String(state.page + 1);
+    [['logsFirst', first], ['logsPrev', first], ['logsNext', !hasNext]].forEach(([id, disabled]) => {
+      const button = el(id);
+      if (button) button.disabled = disabled;
+    });
+  }
+
+  // restart reloads the first page: the scope changed, so later pages no longer
+  // describe the same list.
+  function restart() {
+    state.cursor = '';
+    state.pageStarts = [''];
+    return load(0);
   }
 
   function toggleFilters(force) {
@@ -1273,9 +1323,8 @@
       const node = el(entry.id);
       if (node) node.value = '';
     });
-    state.cursor = '';
     syncUrl();
-    load(false);
+    restart();
   }
 
   function bind() {
@@ -1293,19 +1342,19 @@
         tab.classList.add('is-active');
         tab.setAttribute('aria-selected', 'true');
         state.kind = tab.getAttribute('data-kind') || 'request';
-        state.cursor = '';
         scopeNote();
         closeDrawer();
         syncUrl();
-        load(false);
+        restart();
       });
     });
     const toggle = el('logsFiltersToggle');
     if (toggle) toggle.addEventListener('click', () => toggleFilters());
     const form = el('logsFilters');
-    if (form) form.addEventListener('submit', (event) => { event.preventDefault(); state.cursor = ''; syncUrl(); load(false); });
+    if (form) form.addEventListener('submit', (event) => { event.preventDefault(); syncUrl(); restart(); });
+    // 刷新 re-reads the page in view; page 1 therefore picks up new records.
     const reload = el('logsReload');
-    if (reload) reload.addEventListener('click', () => { state.cursor = ''; load(false); });
+    if (reload) reload.addEventListener('click', () => load(state.page));
     const clear = el('logsClear');
     if (clear) clear.addEventListener('click', clearFilters);
     const scopeClear = el('logsScopeClear');
@@ -1318,8 +1367,20 @@
         window.location.href = state.back || (window.location.pathname + '?tab=ops');
       });
     }
-    const more = el('logsMore');
-    if (more) more.addEventListener('click', () => load(true));
+    const pageActions = { logsFirst: () => load(0), logsPrev: () => load(state.page - 1), logsNext: () => load(state.page + 1) };
+    Object.entries(pageActions).forEach(([id, action]) => {
+      const button = el(id);
+      if (button) button.addEventListener('click', () => { closeDrawer(); action(); });
+    });
+    const sizeSelect = el('logsPageSize');
+    if (sizeSelect) {
+      sizeSelect.addEventListener('change', () => {
+        const size = Number(sizeSelect.value);
+        state.pageSize = PAGE_SIZES.includes(size) ? size : DEFAULT_PAGE_SIZE;
+        syncUrl();
+        restart();
+      });
+    }
     const close = el('logsDetailClose');
     if (close) close.addEventListener('click', closeDrawer);
     const backdrop = el('logsDetailBackdrop');
