@@ -161,6 +161,7 @@ func (c *Client) runChat(ctx context.Context, req upstream.UpstreamRequest, time
 	}
 
 	url := c.baseURL + "/v2/chat/completions"
+	upstream.NoteUpstreamCall(ctx, url, upstreamModel(req))
 	if logger != nil && !logger.Capturing() {
 		logger.LogUpstreamRequest(url, map[string]string{"provider": "workbuddy"}, body)
 	}
@@ -204,6 +205,7 @@ func (c *Client) runChat(ctx context.Context, req upstream.UpstreamRequest, time
 			onMessage(msg)
 		}
 	}, req.StreamToolDeltas)
+	upstream.NoteServedModel(ctx, result.Model)
 	if err != nil {
 		if typed, ok := err.(*APIError); ok && typed.RetryDelay == 0 {
 			typed.RetryDelay = parseRetryAfter(resp.Header.Get("Retry-After"))
@@ -266,14 +268,19 @@ func (c *Client) tokenUpdater() *tokenUpdater {
 }
 
 // buildBody renders the OpenAI-shaped request body the upstream expects.
+// upstreamModel is the model identifier sent upstream for req.
+func upstreamModel(req upstream.UpstreamRequest) string {
+	if model := strings.TrimSpace(req.Model); model != "" {
+		return model
+	}
+	return defaultModel
+}
+
 func (c *Client) buildBody(req upstream.UpstreamRequest) ([]byte, error) {
 	if err := req.ValidateProtocolControls("workbuddy"); err != nil {
 		return nil, err
 	}
-	model := strings.TrimSpace(req.Model)
-	if model == "" {
-		model = defaultModel
-	}
+	model := upstreamModel(req)
 	body := map[string]any{
 		"model":          model,
 		"stream":         true,

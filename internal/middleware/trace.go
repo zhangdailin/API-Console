@@ -20,6 +20,7 @@ import (
 	"orchids-api/internal/debug"
 	"orchids-api/internal/logutil"
 	"orchids-api/internal/opsagg"
+	"orchids-api/internal/upstream"
 	"orchids-api/internal/util"
 )
 
@@ -280,6 +281,16 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 				box.httpPhases[k] += v
 				box.httpPhaseCounts[k]++
 			}
+		})
+		// Upstream clients report the endpoint they called and the model the
+		// upstream says it served; the journal row carries the last attempt's.
+		requestCtx = upstream.WithRouteObserver(requestCtx, func(field, value string) {
+			box.mu.Lock()
+			defer box.mu.Unlock()
+			if box.annotations == nil {
+				box.annotations = make(map[string]any, 4)
+			}
+			box.annotations[field] = value
 		})
 		r = r.WithContext(requestCtx)
 

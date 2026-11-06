@@ -239,3 +239,31 @@ test('an in-progress or interrupted quality check remains visible without a pare
   assert.doesNotMatch(allText(api.ids.logsDetailBody),/客户端没有收到被拦截的回答/);
  }
 });
+
+test('request rows show the upstream route, cost and latency in the list', () => {
+  const api = load();
+  api.state.kind = 'request';
+  api.state.records = [{ id: '1', outcome: 'success', event: {
+    kind: 'request', action: 'chat_request', status: 'success', channel: 'cline', model: 'claude-sonnet-4.6',
+    input_tokens: 3789, output_tokens: 1214, cost_in_usd_ticks: 197180000, duration_ms: 26810, client_ip: '161.118.140.32',
+    metadata: { path: '/cline/v1/messages', upstream_endpoint: '/api/v1/chat/completions', upstream_model_sent: 'anthropic/claude-sonnet-4.6',
+      upstream_model: 'grok-4.5-0309', first_visible_token_ms: 1320 } } }];
+  api.renderRows(false);
+  const row = allText(api.ids.logsRows);
+  for (const expected of ['claude-sonnet-4.6', '上游', 'grok-4.5-0309', '/cline/v1/messages', '/api/v1/chat/completions',
+    '↓ 3,789', '↑ 1,214', '$0.019718', '1.32s', '26.81s', '47.6 tok/s', '161.118.140.32']) {
+    assert.ok(row.includes(expected), 'row is missing ' + expected + ': ' + row);
+  }
+});
+
+test('a provider-prefixed spelling of the requested model is not flagged as a substitution', () => {
+  const api = load();
+  api.state.kind = 'request';
+  const event = (served) => ({ kind: 'request', action: 'chat_request', status: 'success', model: 'claude-sonnet-4.6', metadata: { upstream_model: served } });
+  api.state.records = [{ id: '1', event: event('anthropic/claude-sonnet-4.6') }, { id: '2', event: event('claude-opus-4.6') }];
+  api.renderRows(false);
+  const classes = [];
+  const walk = (n) => { if (/logs-model-upstream/.test(n.className || '')) classes.push(n.className); n.children.forEach(walk); };
+  walk(api.ids.logsRows);
+  assert.deepEqual(classes, ['logs-model-upstream', 'logs-model-upstream is-remapped']);
+});

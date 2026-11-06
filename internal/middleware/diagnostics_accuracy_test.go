@@ -14,6 +14,7 @@ import (
 	"orchids-api/internal/debug"
 	"orchids-api/internal/opsagg"
 	"orchids-api/internal/testutil"
+	"orchids-api/internal/upstream"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
@@ -116,4 +117,24 @@ func TestDiagnosticsStreamFailureSummaryMatchesJournal(t *testing.T) {
 		}
 	}
 	testutil.True(t, found, "diagnostic bundle is missing 6_http_summary.json")
+}
+
+func TestRequestJournalCarriesUpstreamRoute(t *testing.T) {
+	journal := &diagnosticJournal{}
+	previous := requestJournal
+	requestJournal = journal
+	defer func() { requestJournal = previous }()
+	h := TraceMiddleware(LoggingMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstream.NoteUpstreamCall(r.Context(), "https://cli.example.com/v1/responses?x=1", "grok-build-mapped")
+		upstream.NoteServedModel(r.Context(), "grok-build-mapped-0309")
+		w.Write([]byte("ok"))
+	})))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", "/grok/v1/chat/completions", strings.NewReader("{}")))
+	testutil.Equal(t, len(journal.events), 1)
+	meta := journal.events[0].Metadata
+	testutil.Equal(t, meta["path"], "/grok/v1/chat/completions")
+	testutil.Equal(t, meta[upstream.RouteEndpoint], "/v1/responses")
+	testutil.Equal(t, meta[upstream.RouteHost], "cli.example.com")
+	testutil.Equal(t, meta[upstream.RouteSentModel], "grok-build-mapped")
+	testutil.Equal(t, meta[upstream.RouteServedModel], "grok-build-mapped-0309")
 }

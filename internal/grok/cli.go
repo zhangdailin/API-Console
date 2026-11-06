@@ -294,6 +294,7 @@ func (c *CLIClient) doResponsesOnceAt(ctx context.Context, acc *store.Account, p
 	requestID := util.RandomHex(16)
 	headers.Set("x-grok-req-id", requestID)
 	headers.Set("traceparent", util.Traceparent(requestID))
+	upstream.NoteUpstreamCall(ctx, c.baseURL()+path, fmt.Sprint(payload["model"]))
 	return c.request(ctx, acc, http.MethodPost, c.baseURL()+path, body, headers)
 }
 

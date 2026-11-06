@@ -66,18 +66,21 @@
     </form>
 
     <div class="logs-table-wrap">
-      <table class="ops-table logs-table">
+      <table class="ops-table logs-table is-request" id="logsTable">
         <thead>
-          <tr>
+          <tr id="logsHeadRow">
             <th>时间</th>
-            <th id="logsActionHeader">渠道 / 动作</th>
-            <th>对象</th>
+            <th>渠道 / 模型</th>
+            <th>端点</th>
             <th>状态</th>
-            <th>耗时</th>
+            <th>Token</th>
+            <th>费用</th>
+            <th>延迟</th>
+            <th>IP</th>
           </tr>
         </thead>
         <tbody id="logsRows">
-          <tr><td colspan="5" class="table-empty-cell">正在加载…</td></tr>
+          <tr><td colspan="8" class="table-empty-cell">正在加载…</td></tr>
         </tbody>
       </table>
     </div>

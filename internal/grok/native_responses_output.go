@@ -46,6 +46,7 @@ func copyNativeResponseWithQuality(w http.ResponseWriter, body io.Reader, conten
 		}
 		responseID = chatwire.ParseLooseStringAny(response["id"])
 		result.Usage = responsesUsage(response)
+		result.ServedModel = responsesServedModel(response)
 		if len(result.Usage) > 0 {
 			result.UsageSource = audit.UsageSourceUpstream
 		}
@@ -137,6 +138,9 @@ func copyNativeResponseWithQuality(w http.ResponseWriter, body io.Reader, conten
 		if target.Err != nil {
 			result.Err = target.Err
 			return target.Err
+		}
+		if model := responsesServedModel(event); model != "" {
+			result.ServedModel = model
 		}
 		if usage := responsesUsageFromStreamEvent(event); len(usage) > 0 {
 			result.Usage = usage

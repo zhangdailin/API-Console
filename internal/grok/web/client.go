@@ -13,6 +13,7 @@ import (
 	"orchids-api/internal/config"
 	"orchids-api/internal/grok/web/egress"
 	"orchids-api/internal/httpclient"
+	"orchids-api/internal/upstream"
 )
 
 const (
@@ -274,6 +275,13 @@ func (c *Client) doRESTChat(ctx context.Context, token string, payload map[strin
 	if media, _ := payload["mediaGenInput"].(map[string]interface{}); media["imageToImage"] != nil {
 		headers.Set("Referer", c.baseURL()+"/imagine")
 	}
+	// grok.com does not name a model on its answer, so only the sent mode is
+	// recorded for the journal.
+	sent := chatwire.ParseLooseStringAny(payload["modelName"])
+	if sent == "" {
+		sent = chatwire.ParseLooseStringAny(payload["modeId"])
+	}
+	upstream.NoteUpstreamCall(ctx, reqURL, sent)
 	return c.doAppChatRequest(ctx, reqURL, body, headers)
 }
 

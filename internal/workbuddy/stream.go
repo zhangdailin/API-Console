@@ -17,6 +17,8 @@ import (
 // streamResult accumulates what the upstream produced so the caller can decide
 // whether the attempt was meaningful and which stop reason to report.
 type streamResult struct {
+	// Model is the model identifier the upstream reported on its chunks.
+	Model              string
 	SawMeaningfulEvent bool
 	ToolCallCount      int
 	Usage              map[string]any
@@ -122,6 +124,9 @@ func consumeStream(body io.Reader, onMessage func(upstream.SSEMessage), streamTo
 		var chunk streamChunk
 		if err := json.Unmarshal(payload, &chunk); err != nil {
 			return result, fmt.Errorf("workbuddy stream protocol error: invalid JSON: %w", err)
+		}
+		if model := strings.TrimSpace(chunk.Model); model != "" {
+			result.Model = model
 		}
 		if chunk.Code != 0 {
 			return result, apiError(http.StatusOK, payload)

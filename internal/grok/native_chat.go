@@ -799,6 +799,7 @@ func (h *Handler) collectBuildChat(w http.ResponseWriter, req *chatwire.Request,
 		FirstVisibleMS: -1,
 	}
 	upstreamUsage := responsesUsage(raw)
+	outcome.ServedModel = responsesServedModel(raw)
 	if details, _ := upstreamUsage["completion_tokens_details"].(map[string]any); details != nil {
 		outcome.Quality.ReasoningTokens = int64(responses.InterfaceToInt(details["reasoning_tokens"]))
 	}
@@ -981,6 +982,17 @@ func responsesToolCallFromItem(raw any) map[string]any {
 			"arguments": arguments,
 		},
 	}
+}
+
+// responsesServedModel returns the model a Responses object, or a stream event
+// wrapping one, says it ran. Empty when the upstream did not name one.
+func responsesServedModel(v map[string]any) string {
+	if response, ok := v["response"].(map[string]any); ok {
+		if model := strings.TrimSpace(chatwire.ParseLooseStringAny(response["model"])); model != "" {
+			return model
+		}
+	}
+	return strings.TrimSpace(chatwire.ParseLooseStringAny(v["model"]))
 }
 
 func responsesUsageFromStreamEvent(ev map[string]any) map[string]any {

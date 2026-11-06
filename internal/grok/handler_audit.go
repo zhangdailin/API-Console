@@ -10,6 +10,7 @@ import (
 	"orchids-api/internal/pricing"
 	"orchids-api/internal/responses"
 	"orchids-api/internal/store"
+	"orchids-api/internal/upstream"
 	"time"
 )
 
@@ -72,6 +73,7 @@ func (h *Handler) auditChatOutcome(ctx context.Context, acc *store.Account, req 
 		metadata["quality_delivered"] = result.DeliveredDegraded
 	}
 	grokbase.AddReasoningDiagnostics(ctx, metadata)
+	upstream.NoteServedModel(ctx, result.ServedModel)
 	duration := int64(0)
 	if !req.StartedAt.IsZero() {
 		duration = time.Since(req.StartedAt).Milliseconds()

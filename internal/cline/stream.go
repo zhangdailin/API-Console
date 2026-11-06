@@ -16,6 +16,8 @@ import (
 // streamResult accumulates what the upstream produced so the caller can decide
 // whether the attempt was meaningful and which stop reason to report.
 type streamResult struct {
+	// Model is the model identifier the upstream reported on its chunks.
+	Model                string
 	SawMeaningfulEvent   bool
 	ToolCallCount        int
 	UpstreamFinishReason string
@@ -218,6 +220,9 @@ func consumeStreamWithToolNames(body io.Reader, toolsEnabled bool, toolNames map
 			return result, fmt.Errorf("cline stream protocol error: invalid chunk")
 		}
 
+		if model := strings.TrimSpace(chunk.Model); model != "" {
+			result.Model = model
+		}
 		if msg := strings.TrimSpace(chunk.Error.Message); msg != "" {
 			return result, &attemptStreamError{err: fmt.Errorf("cline stream error: %s", msg), detail: msg}
 		}

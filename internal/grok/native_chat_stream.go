@@ -36,9 +36,11 @@ type chatOutcome struct {
 	DeliveredDegraded bool
 	Usage             map[string]any
 	UsageSource       audit.UsageSource
-	Finish            string
-	FirstToken        time.Time
-	Err               error
+	// ServedModel is the model the upstream named on its response object.
+	ServedModel string
+	Finish      string
+	FirstToken  time.Time
+	Err         error
 	// Quality carries what the quality guard needs to tell a healthy turn from
 	// a degraded one (see quality_guard.go).
 	Quality qualitySignals
@@ -333,6 +335,9 @@ func (h *Handler) streamBuildChatHolding(w http.ResponseWriter, req *chatwire.Re
 			return nil
 		}
 		annotations = appendUniqueResponsesAnnotations(annotations, responsesFlatAnnotations(ev))
+		if model := responsesServedModel(ev); model != "" {
+			outcome.ServedModel = model
+		}
 		if usage := responsesUsageFromStreamEvent(ev); len(usage) > 0 {
 			outcome.Usage = usage
 			outcome.UsageSource = audit.UsageSourceUpstream

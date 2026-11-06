@@ -619,6 +619,61 @@
 
 .logs-cell-duration { text-align: right; font-variant-numeric: tabular-nums; }
 
+/* Inference rows: two-line cells for model, endpoint and latency. */
+.logs-table.is-request { min-width: 1080px; }
+
+.logs-table.is-request tbody td { vertical-align: top; padding-block: 10px; }
+
+.logs-model-requested { color: var(--text-main); font-weight: 600; overflow-wrap: anywhere; }
+
+.logs-model-upstream,
+.logs-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  font-size: 0.76rem;
+  line-height: 1.6;
+}
+
+.logs-model-upstream { margin-top: 2px; color: var(--text-secondary); font-weight: 500; }
+
+.logs-model-upstream .logs-line-value { font-family: var(--font-mono); overflow-wrap: anywhere; }
+
+.logs-model-upstream.is-remapped .logs-line-value { color: var(--warn); font-weight: 600; }
+
+.logs-line-label {
+  flex: none;
+  color: var(--text-faint);
+  font-size: 0.7rem;
+  font-weight: 550;
+}
+
+.logs-line-value { min-width: 0; color: var(--text-soft); font-variant-numeric: tabular-nums; }
+
+.logs-cell-endpoint .logs-line-value { font-family: var(--font-mono); font-size: 0.74rem; overflow-wrap: anywhere; }
+
+.logs-cell-tokens { white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+.logs-cell-tokens span + span { margin-left: 10px; }
+
+.logs-token-in { color: var(--info); }
+
+.logs-token-out { color: var(--ok); }
+
+.logs-cell-cost { color: var(--ok); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.logs-cell-latency { padding-left: 10px; border-left: 2px solid var(--border-strong); white-space: nowrap; }
+
+.logs-cell-latency.is-success { border-left-color: var(--ok); }
+
+.logs-table.is-request .logs-cell-status,
+.logs-table.is-request .logs-cell-status .logs-badge { white-space: nowrap; }
+
+.logs-table.is-request .logs-cell-endpoint { min-width: 220px; }
+
+.logs-cell-ip { color: var(--text-secondary); font-family: var(--font-mono); font-size: 0.76rem; white-space: nowrap; }
+
 .logs-badge {
   display: inline-flex;
   align-items: center;
@@ -869,6 +924,27 @@ button.ops-error-row { width: 100%; border: 0; background: none; text-align: lef
 .logs-cell-status { grid-area: status; justify-self: end; }
 
 .logs-cell-action .logs-badge { margin-top: var(--space-1); }
+
+.logs-table.is-request { min-width: 0; }
+
+.logs-table.is-request tr {
+    grid-template-areas:
+      'time status'
+      'action action'
+      'endpoint endpoint'
+      'tokens cost'
+      'latency ip';
+  }
+
+.logs-cell-endpoint { grid-area: endpoint; }
+
+.logs-cell-tokens { grid-area: tokens; }
+
+.logs-cell-cost { grid-area: cost; justify-self: end; }
+
+.logs-cell-latency { grid-area: latency; }
+
+.logs-cell-ip { grid-area: ip; justify-self: end; align-self: end; }
 
 .table-empty-cell { display: block; padding: var(--space-4); text-align: center; }
 }
