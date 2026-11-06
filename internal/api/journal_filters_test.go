@@ -17,6 +17,15 @@ import (
 
 // requestEvent builds an inference record the way the request middleware writes it:
 // the HTTP status lives in metadata, not in a column of its own.
+// withAttempts records how many upstream calls a journal row made.
+func withAttempts(event audit.Event, attempts int) audit.Event {
+	if event.Metadata == nil {
+		event.Metadata = map[string]any{}
+	}
+	event.Metadata["upstream_attempts"] = float64(attempts)
+	return event
+}
+
 func requestEvent(id string, status string, httpStatus int) audit.Event {
 	event := audit.Event{
 		Kind:      audit.KindRequest,
@@ -179,6 +188,8 @@ func TestJournalRecordsOutcomeClassMatchesOverview(t *testing.T) {
 		requestEvent("req-length", "length", 200),
 		requestEvent("req-filtered", "content_filter", 200),
 		requestEvent("req-error-200", "error", 200),
+		withAttempts(requestEvent("req-503-gateway", "error", 503), 0),
+		withAttempts(requestEvent("req-502-upstream", "error", 502), 2),
 	})
 
 	payload := journalRequest(t, a, "?kind=request&limit=50")
@@ -190,17 +201,20 @@ func TestJournalRecordsOutcomeClassMatchesOverview(t *testing.T) {
 		classes[fmt.Sprint(event["request_id"])] = fmt.Sprint(row["outcome_class"])
 	}
 	want := map[string]string{
-		"req-429":       "rate_limited",
-		"req-402":       "quota_exhausted",
-		"req-401":       "upstream_auth",
-		"req-500":       "server_error",
-		"req-400":       "client_error",
-		"req-ok":        "success",
-		"req-stop":      "success",
-		"req-tools":     "success",
-		"req-length":    "success",
-		"req-filtered":  "success",
-		"req-error-200": "failed",
+		"req-429": "rate_limited",
+		"req-402": "quota_exhausted",
+		"req-401": "upstream_auth",
+		"req-500": "server_error",
+		// The gateway refused before any upstream call: not the provider's fault.
+		"req-503-gateway":  "gateway_unavailable",
+		"req-502-upstream": "server_error",
+		"req-400":          "client_error",
+		"req-ok":           "success",
+		"req-stop":         "success",
+		"req-tools":        "success",
+		"req-length":       "success",
+		"req-filtered":     "success",
+		"req-error-200":    "failed",
 	}
 	for id, class := range want {
 		testutil.Equal(t, classes[id], class)

@@ -24,6 +24,7 @@
     rate_limited: '限流 429/529',
     client_error: '客户端错误 4xx',
     server_error: '上游错误 5xx',
+    gateway_unavailable: '未到上游 5xx（无可用账号等）',
     stream_error: '流中断',
     // Two 401/403 rows, because the status alone does not say who refused: the
     // provider refusing our credential is a channel failure, our gate refusing the
@@ -378,6 +379,7 @@
     rate_limited: { tone: 'is-info', label: '限流' },
     client_error: { tone: 'is-error', label: '客户端错误' },
     server_error: { tone: 'is-error', label: '上游错误' },
+    gateway_unavailable: { tone: 'is-error', label: '未到上游' },
     stream_error: { tone: 'is-error', label: '流中断' },
     // Our gate refusing the caller is a warning about the caller; the provider
     // refusing our credential is an error about the channel.

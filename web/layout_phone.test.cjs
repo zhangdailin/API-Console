@@ -184,7 +184,7 @@ function renderOpsPhoneRows() {
     totals: {}, coverage: {}, series: [], matrix: [{
       channel: 'grok', accounts_enabled: 2, accounts_available: 1, model_cooldowns: 3,
       summary: { requests: 8, samples: 8, success_rate: 0.75 }, series: [],
-      models: [{ model: 'fixture-model', requests: 4, samples: 4, success_rate: 0.5 }],
+      models: [{ model: 'fixture-model', requests: 8, samples: 8, success_rate: 0.75 }],
     }],
   };
   const context = vm.createContext({

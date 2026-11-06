@@ -506,12 +506,16 @@
     }
 
     // 请求
+    const usageKnown = totals.usage_samples > 0 || totals.input_tokens > 0 || totals.output_tokens > 0 || real === 0;
     const requests = kpiCard('请求', payload.window_minutes + ' 分钟窗口');
     bigValue(requests, fmtInt(real));
     rowList(requests, [
       { label: 'Token 数', value: fmtAmount((totals.input_tokens || 0) + (totals.output_tokens || 0)) },
       { label: '平均 QPS', value: (totals.qps != null ? Number(totals.qps) : Number(totals.rpm || 0) / 60).toFixed(2) + ' 次/秒' },
-      { label: '平均 TPS', value: totals.usage_samples > 0 || totals.input_tokens > 0 || totals.output_tokens > 0 || real === 0 ? Number(totals.tps || 0).toFixed(1) + ' token/秒' : '未采集' },
+      // Token 吞吐 counts the prompt too, which dominates agent traffic; 输出 TPS
+      // counts generated tokens only, the speed the request log reports.
+      { label: 'Token 吞吐（含输入）', value: usageKnown ? Number(totals.tps || 0).toFixed(1) + ' token/秒' : '未采集' },
+      { label: '输出 TPS', value: usageKnown ? Number(totals.output_tps ?? 0).toFixed(1) + ' token/秒' : '未采集' },
     ]);
     if (real > 0) rowList(requests, [{ label: '用量覆盖', value: fmtInt(totals.usage_samples || 0) + ' / ' + fmtInt(real) + ' 次请求' }]);
     if (real > 0 && Number(totals.detailed_requests || 0) < real) rowList(requests, [{ label: '数据覆盖', value: '窗口含旧数据，部分用量和错误分类未采集' }]);
@@ -552,6 +556,7 @@
       { label: '最终失败', value: fmtInt(totals.failed || 0) },
       { label: '上游尝试失败', value: fmtInt(totals.attempt_failures || 0) },
       { label: '流中断', value: fmtInt(totals.stream_errors || 0) },
+      { label: '未到上游 5xx', value: fmtInt(totals.gateway_unavailable || 0) },
       { label: '业务限制', value: fmtInt(limited) },
     ]);    container.appendChild(errors);
 
@@ -595,6 +600,7 @@
     bigValue(upstream, String(upstreamCount), '次', upstreamCount === 0 ? 'is-ok' : 'is-error');
     rowList(upstream, [
       { label: '5xx（上游错误）', value: fmtInt(totals.server_errors || 0) },
+      { label: '未到上游 5xx（网关无可用账号等，未计入）', value: fmtInt(totals.gateway_unavailable || 0) },
       { label: '流中断（已提交 2xx）', value: fmtInt(totals.stream_errors || 0) },
       { label: '上游认证失败（账号被上游拒绝）', value: fmtInt(totals.upstream_auth || 0) },
       { label: '4xx（客户端，非限流）', value: fmtInt(totals.client_errors || 0) },
@@ -728,12 +734,13 @@
     const throughput = el('opsThroughput');
     if (throughput) {
       const qps = rateSeries((point) => point.requests || 0);
-      const tps = rateSeries((point) => (point.input_tokens || 0) + (point.output_tokens || 0));
+      // Output tokens only: the input side is the prompt and would bury the speed.
+      const tps = rateSeries((point) => point.output_tokens || 0);
       const hasTokens = tps.some((point) => point.value > 0);
       lineChart(throughput, {
         points: qps, secondaryPoints: hasTokens ? tps : null, area: true, className: 'series-qps', height: 190, rightAxis: hasTokens, emptyText: '这段时间没有流量样本。' });
       setText('opsThroughputHint', hasTokens
-        ? '左轴 QPS（次/秒） · 右轴 TPS（token/秒） · 当前分钟按已过时间计算'
+        ? '左轴 QPS（次/秒） · 右轴 输出 TPS（输出 token/秒） · 当前分钟按已过时间计算'
         : '左轴 QPS（次/秒） · 窗口内请求未上报用量，TPS 暂不绘制');
     }
     const switchTrend = el('opsSwitchTrend');
@@ -824,6 +831,7 @@
       const groups = [
         { label: '4xx 客户端', hint: '客户端请求错误，不含限流', value: totals.client_errors || 0, tone: 'is-warn', outcome: 'client_error' },
         { label: '5xx 上游', hint: '上游服务端错误', value: totals.server_errors || 0, tone: '', outcome: 'server_error' },
+        { label: '未到上游', hint: '网关在调用上游前返回 5xx，通常是没有可用账号', value: totals.gateway_unavailable || 0, tone: '', outcome: 'gateway_unavailable' },
         { label: '流中断', hint: '已返回 2xx 后流中断', value: totals.stream_errors || 0, tone: '', outcome: 'stream_error' },
         // A 401/403 from the provider is the channel's own credential failing, and it
         // is a failure. Our gate's 401/403 is the row below, and the two are never
@@ -976,11 +984,16 @@
     // labelled the heading twice. The other seven cells carry theirs.
     // The row name is the drill-down: a channel opens its own traffic, a model its
     // channel-and-model traffic, both over the window the page is showing.
-    name.classList.add('is-clickable');
-    name.title = '点击查看该' + (options.isModel ? '模型的请求日志' : '渠道的请求日志');
-    makeActivatable(name, () => drilldownToLogs(options.isModel
-      ? { channel: options.channel || state.channel, model: label }
-      : { channel: label }));
+    if (options.unattributed) {
+      name.classList.add('ops-empty');
+      name.title = '在识别模型之前就结束的请求（例如没有可用账号），不属于任何模型';
+    } else {
+      name.classList.add('is-clickable');
+      name.title = '点击查看该' + (options.isModel ? '模型的请求日志' : '渠道的请求日志');
+      makeActivatable(name, () => drilldownToLogs(options.isModel
+        ? { channel: options.channel || state.channel, model: label }
+        : { channel: label }));
+    }
     tr.appendChild(name);
 
     // A model row inherits its channel's account pool and cooldowns, so those two
@@ -1038,7 +1051,24 @@
         .forEach((model) => {
           body.appendChild(matrixRow(model.model, model, { isModel: true, channel: row.channel }));
         });
+      if (!state.model) {
+        const remainder = unattributedModelRow(row);
+        if (remainder) body.appendChild(matrixRow('未识别模型', remainder, { isModel: true, channel: row.channel, unattributed: true }));
+      }
     });
+  }
+
+  // unattributedModelRow is the part of a channel's traffic no model row owns:
+  // requests that failed before the model was resolved (no usable account, a
+  // malformed body). Without it the model rows read healthier than the channel.
+  function unattributedModelRow(row) {
+    const summary = row.summary || {};
+    const models = row.models || [];
+    const sum = (field) => models.reduce((total, model) => total + (Number(model[field]) || 0), 0);
+    const requests = (Number(summary.requests) || 0) - sum('requests');
+    if (requests <= 0) return null;
+    const success = Math.max(0, (Number(summary.success) || 0) - sum('success'));
+    return { model: '', requests, success, failed: requests - success, success_rate: success / requests, samples: requests };
   }
 
   // --- coverage --------------------------------------------------------------

@@ -20,11 +20,15 @@ type Counters struct {
 	AccountSwitchCount    int64 `json:"account_switch_count"`
 	ClientErrors          int64 `json:"client_errors"`
 	ServerErrors          int64 `json:"server_errors"`
-	StreamErrors          int64 `json:"stream_errors"`
-	UpstreamAuth          int64 `json:"upstream_auth"`
-	RateLimited           int64 `json:"rate_limited"`
-	Rejected              int64 `json:"rejected"`
-	QuotaExhausted        int64 `json:"quota_exhausted"`
+	// GatewayUnavailable is a 5xx the gateway answered before any upstream call
+	// (typically no usable account). It is not the provider's failure, so it is
+	// kept out of ServerErrors, while still counting as a failed request.
+	GatewayUnavailable int64 `json:"gateway_unavailable"`
+	StreamErrors       int64 `json:"stream_errors"`
+	UpstreamAuth       int64 `json:"upstream_auth"`
+	RateLimited        int64 `json:"rate_limited"`
+	Rejected           int64 `json:"rejected"`
+	QuotaExhausted     int64 `json:"quota_exhausted"`
 }
 
 func (c *Counters) Add(other Counters) {
@@ -39,6 +43,7 @@ func (c *Counters) Add(other Counters) {
 	c.AccountSwitchCount += other.AccountSwitchCount
 	c.ClientErrors += other.ClientErrors
 	c.ServerErrors += other.ServerErrors
+	c.GatewayUnavailable += other.GatewayUnavailable
 	c.StreamErrors += other.StreamErrors
 	c.UpstreamAuth += other.UpstreamAuth
 	c.RateLimited += other.RateLimited
@@ -46,7 +51,7 @@ func (c *Counters) Add(other Counters) {
 	c.QuotaExhausted += other.QuotaExhausted
 }
 func (c Counters) Values() map[string]int64 {
-	return map[string]int64{"output_evidence_samples": c.OutputEvidenceSamples, "visible_answers": c.VisibleAnswers, "reasoning_only": c.ReasoningOnly, "output_truncated": c.OutputTruncated, "detailed_requests": c.DetailedRequests, "usage_samples": c.UsageSamples, "attempt_failures": c.AttemptFailures, "account_switch_sum": c.AccountSwitchSum, "account_switch_count": c.AccountSwitchCount, "client_errors": c.ClientErrors, "server_errors": c.ServerErrors, "stream_errors": c.StreamErrors, "upstream_auth": c.UpstreamAuth, "rate_limited": c.RateLimited, "rejected": c.Rejected, "quota_exhausted": c.QuotaExhausted}
+	return map[string]int64{"output_evidence_samples": c.OutputEvidenceSamples, "visible_answers": c.VisibleAnswers, "reasoning_only": c.ReasoningOnly, "output_truncated": c.OutputTruncated, "detailed_requests": c.DetailedRequests, "usage_samples": c.UsageSamples, "attempt_failures": c.AttemptFailures, "account_switch_sum": c.AccountSwitchSum, "account_switch_count": c.AccountSwitchCount, "client_errors": c.ClientErrors, "server_errors": c.ServerErrors, "gateway_unavailable": c.GatewayUnavailable, "stream_errors": c.StreamErrors, "upstream_auth": c.UpstreamAuth, "rate_limited": c.RateLimited, "rejected": c.Rejected, "quota_exhausted": c.QuotaExhausted}
 }
 func countersFrom(fields map[string]string) Counters {
 	var c Counters
@@ -61,6 +66,7 @@ func countersFrom(fields map[string]string) Counters {
 	c.AccountSwitchCount, _ = strconv.ParseInt(fields["account_switch_count"], 10, 64)
 	c.ClientErrors, _ = strconv.ParseInt(fields["client_errors"], 10, 64)
 	c.ServerErrors, _ = strconv.ParseInt(fields["server_errors"], 10, 64)
+	c.GatewayUnavailable, _ = strconv.ParseInt(fields["gateway_unavailable"], 10, 64)
 	c.StreamErrors, _ = strconv.ParseInt(fields["stream_errors"], 10, 64)
 	c.UpstreamAuth, _ = strconv.ParseInt(fields["upstream_auth"], 10, 64)
 	c.RateLimited, _ = strconv.ParseInt(fields["rate_limited"], 10, 64)
@@ -153,6 +159,10 @@ func (a *Aggregator) observeDetails(ctx context.Context, pipe redis.Pipeliner, k
 			} else {
 				c.Rejected = 1
 			}
+		case o.HTTPStatus >= 500 && o.UpstreamAttempts == 0:
+			// No upstream call was made: the gateway itself refused, usually
+			// because no account could take the request.
+			c.GatewayUnavailable = 1
 		case o.HTTPStatus >= 500:
 			c.ServerErrors = 1
 		case o.HTTPStatus >= 400:

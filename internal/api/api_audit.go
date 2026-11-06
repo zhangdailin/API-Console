@@ -47,15 +47,18 @@ type auditQueryFilter struct {
 // drill-down chip and the chart that opened it use the same words. The ids are the
 // ones the log centre's select offers.
 var auditOutcomeLabels = map[string]string{
-	"failed":          "失败（全部失败类型）",
-	"success":         "成功",
-	"rate_limited":    "限流 429/529",
-	"client_error":    "客户端错误 4xx",
-	"server_error":    "上游错误 5xx",
-	"stream_error":    "流中断",
-	"upstream_auth":   "上游认证失败 401/403",
-	"rejected":        "网关拒绝 401/403",
-	"quota_exhausted": "额度用尽 402",
+	"failed":       "失败（全部失败类型）",
+	"success":      "成功",
+	"rate_limited": "限流 429/529",
+	"client_error": "客户端错误 4xx",
+	"server_error": "上游错误 5xx",
+	// A 5xx the gateway answered before calling any upstream (usually no
+	// usable account): a failure, but not the provider's.
+	"gateway_unavailable": "未到上游 5xx（无可用账号等）",
+	"stream_error":        "流中断",
+	"upstream_auth":       "上游认证失败 401/403",
+	"rejected":            "网关拒绝 401/403",
+	"quota_exhausted":     "额度用尽 402",
 }
 
 // auditTimeFormats are the spellings a time filter accepts. The log centre's form
@@ -220,6 +223,12 @@ func auditOutcomeClass(event audit.Event) string {
 		}
 		return "upstream_auth"
 	case httpStatus >= 500:
+		// Rows record how many upstream calls were made. Zero means the gateway
+		// refused before any provider was reached; older rows without the field
+		// keep the provider attribution they always had.
+		if _, recorded := event.Metadata["upstream_attempts"]; recorded && metadataInt(event.Metadata, "upstream_attempts") == 0 {
+			return "gateway_unavailable"
+		}
 		return "server_error"
 	case httpStatus >= 400:
 		return "client_error"

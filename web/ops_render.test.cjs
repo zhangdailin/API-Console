@@ -248,11 +248,17 @@ test('the matrix renders provider rows plus their model rows', async () => {
   await new Promise((resolve) => setImmediate(resolve));
 
   const rows = node('opsMatrix').querySelector('tbody').children;
-  assert.equal(rows.length, 3, `expected grok + grok-4.6 + cline rows, got ${rows.length}`);
+  assert.equal(rows.length, 4, `expected grok + grok-4.6 + unattributed + cline rows, got ${rows.length}`);
   const labels = rows.map((row) => (row.children[0] ? row.children[0].textContent : ''));
-  assert.deepEqual(labels, ['grok', 'grok-4.6', 'cline']);
+  assert.deepEqual(labels, ['grok', 'grok-4.6', '未识别模型', 'cline']);
+  // grok has 20 requests and its one model row owns 8: the other 12 ended
+  // before a model was resolved and get a row of their own, so the model rows
+  // cannot read healthier than the channel.
+  const remainder = rows[2].children.map((cell) => cell.textContent);
+  assert.ok(remainder.includes('12'), `unattributed row shows ${remainder.join('|')}`);
+  assert.ok(remainder.includes('100.0%'), `unattributed success rate: ${remainder.join('|')}`);
   // The traffic-free channel must read 暂无样本, never a healthy 100%.
-  const clineCells = rows[2].children.map((cell) => cell.textContent);
+  const clineCells = rows[3].children.map((cell) => cell.textContent);
   assert.ok(clineCells.includes('暂无样本'), `cline row shows ${clineCells.join('|')}`);
 });
 
@@ -329,7 +335,7 @@ test('throughput with real token usage draws TPS and closes the QPS area', async
   const area = svg.children.find(child => child.class === 'series-area');
   assert.match(area.d, /^M[\d.]+,[\d.]+ L/);
   assert.ok(area.d.endsWith(' Z'), 'QPS area not closed');
-  assert.match(node('opsThroughputHint').textContent, /右轴 TPS/);
+  assert.match(node('opsThroughputHint').textContent, /右轴 输出 TPS/);
 
 });
 
@@ -355,4 +361,23 @@ test('latencies are printed in readable units, not raw milliseconds', async () =
   // The matrix uses the same formatter: grok's 8536 ms P95.
   const grok = node('opsMatrix').querySelector('tbody').children[0].children.map((cell) => cell.textContent);
   assert.ok(grok.includes('8.54 s'), `matrix shows ${grok.join('|')}`);
+});
+
+test('gateway refusals are shown apart from upstream errors and token rates are named', async () => {
+  const totals = { ...realPayload.totals, server_errors: 1, stream_errors: 0, gateway_unavailable: 154,
+    input_tokens: 5400, output_tokens: 600, usage_samples: 10, tps: 0.6, output_tps: 0.06,
+    detailed_requests: realPayload.totals.requests };
+  const { node } = renderPage({ ...realPayload, totals });
+  await settle();
+  const text = (n) => [n.textContent || '', ...(n.children || []).map(text)].join(' ');
+  const kpis = text(node('opsKpis'));
+  assert.match(kpis, /Token 吞吐（含输入）\s*0\.6 token\/秒/);
+  assert.match(kpis, /输出 TPS\s*0\.1 token\/秒/);
+  assert.match(kpis, /未到上游 5xx\s*154/);
+  assert.match(kpis, /未到上游 5xx（网关无可用账号等，未计入）\s*154/);
+  // The upstream-error headline counts the provider's failures only.
+  const upstreamCard = node('opsKpis').children.find((card) => text(card).includes('上游错误'));
+  assert.match(text(upstreamCard), /上游错误[\s\S]*?\b1\b\s*次/);
+  const mix = text(node('opsErrorMix'));
+  assert.match(mix, /未到上游\s*154/);
 });

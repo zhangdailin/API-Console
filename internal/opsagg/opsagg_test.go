@@ -457,3 +457,26 @@ func TestCheckedSamplesAndWriteHealthDoNotHideRedisFailure(t *testing.T) {
 	testutil.EqualAny(t, health["written"], uint64(1))
 	testutil.EqualAny(t, health["write_failed"], uint64(1))
 }
+
+// A 5xx the gateway answered before any upstream call is not the provider's
+// failure: it is counted apart from server_errors, while still failing the
+// request. Output TPS counts generated tokens only.
+func TestGatewayRefusalIsNotAnUpstreamErrorAndOutputTPSExcludesInput(t *testing.T) {
+	agg, _ := newAggregator(t)
+	ctx := context.Background()
+	at := time.Now().Truncate(time.Minute)
+	agg.Observe(ctx, Outcome{Channel: "cline", At: at, Detailed: true, HTTPStatus: 503, Status: "5xx", UpstreamAttempts: 0})
+	agg.Observe(ctx, Outcome{Channel: "cline", At: at, Detailed: true, HTTPStatus: 502, Status: "5xx", UpstreamAttempts: 1, ProviderReached: true})
+	agg.Observe(ctx, Outcome{Channel: "cline", At: at, Detailed: true, OK: true, HTTPStatus: 200, Status: "2xx", UpstreamAttempts: 1,
+		UsageReported: true, InputTokens: 5400, OutputTokens: 600, TotalTokens: 6000})
+	buckets, err := agg.Range(ctx, "cline", at, at)
+	testutil.NoError(t, err, "range: %v")
+	summary := agg.SummarizeWith(ctx, SummaryInput{Channel: "cline", Buckets: buckets, WindowMinutes: 1, SamplesProvided: true})
+	testutil.Equal(t, summary.Failed, 2)
+	testutil.Equal(t, summary.GatewayUnavailable, 1)
+	testutil.Equal(t, summary.ServerErrors, 1)
+	testutil.Equal(t, summary.TPS, 100.0)
+	testutil.Equal(t, summary.OutputTPS, 10.0)
+	// The refusal still fails the SLA: the client got no answer.
+	testutil.Equal(t, summary.Attributable, 3)
+}

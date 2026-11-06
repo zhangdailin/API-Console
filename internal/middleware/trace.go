@@ -422,6 +422,7 @@ func recordRequestOutcome(r *http.Request, wrapped *TracedResponseWriter, durati
 			outcome.CostInUSDTicks = box.costTicks
 			outcome.Priced = box.priced
 			outcome.AttemptFailures = box.failures
+			outcome.UpstreamAttempts = box.attempts
 			outcome.AccountSwitches = box.switches
 			outcome.ProviderReached = box.providerReached
 			box.mu.Unlock()

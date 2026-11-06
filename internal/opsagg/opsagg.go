@@ -34,9 +34,12 @@ type Outcome struct {
 	HTTPStatus                                                    int
 	Detailed, UsageReported, ProviderReached                      bool
 	AttemptFailures, AccountSwitches                              int64
-	Channel                                                       string
-	Model                                                         string
-	Status                                                        string
+	// UpstreamAttempts is how many upstream calls the request made; zero means
+	// the gateway answered without reaching a provider.
+	UpstreamAttempts int64
+	Channel          string
+	Model            string
+	Status           string
 	// OK decides the success ratio. A retry that eventually succeeded is OK.
 	OK bool
 	// DurationMS is the whole request; FirstTokenMS is the first generated SSE
@@ -89,8 +92,12 @@ type Summary struct {
 	Attributable   int64   `json:"attributable"`
 	SLASuccessRate float64 `json:"sla_success_rate"`
 	Counters
-	QPS                      float64        `json:"qps"`
+	QPS float64 `json:"qps"`
+	// TPS is every token (input and output) per second of the window; prompt
+	// tokens dominate it. OutputTPS counts generated tokens only, the figure the
+	// request log's per-request speed uses.
 	TPS                      float64        `json:"tps"`
+	OutputTPS                float64        `json:"output_tps"`
 	Duration                 Distribution   `json:"duration"`
 	FirstToken               Distribution   `json:"first_token"`
 	DurationFailed           Distribution   `json:"duration_failed"`
@@ -572,6 +579,7 @@ func (a *Aggregator) SummarizeWith(ctx context.Context, input SummaryInput) Summ
 	summary.QPS = summary.RPM / 60
 	if windowMinutes > 0 {
 		summary.TPS = float64(summary.TotalTokens) / (windowMinutes * 60)
+		summary.OutputTPS = float64(summary.OutputTokens) / (windowMinutes * 60)
 	}
 	summary.Duration = distribution(durations)
 	summary.FirstToken = distribution(ttfts)
