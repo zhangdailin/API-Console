@@ -49,7 +49,8 @@ func TestStreamBuildChatStreamsFirstReasoningSourceWithoutDuplicates(t *testing.
 func TestCollectBuildChatSeparatesReasoningFromContent(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	body := `{"id":"resp_1","output":[{"id":"rs_1","type":"reasoning","content":[{"type":"reasoning_text","text":"private plan"}],"summary":[{"type":"summary_text","text":"duplicate summary"}]},{"id":"msg_1","type":"message","content":[{"type":"output_text","text":"public answer"}]}]}`
-	(&Handler{}).collectBuildChat(recorder, &chatwire.Request{Model: "grok-4.3"}, strings.NewReader(body))
+	outcome := (&Handler{}).collectBuildChat(recorder, &chatwire.Request{Model: "grok-4.3"}, strings.NewReader(body))
+	testutil.True(t, outcome.SawText, "a non-streaming answer with text must be journaled as visible output")
 	var response map[string]any
 	testutil.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
 	choice := responses.InterfaceSlice(response["choices"])[0].(map[string]any)

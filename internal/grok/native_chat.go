@@ -859,6 +859,9 @@ func (h *Handler) collectBuildChat(w http.ResponseWriter, req *chatwire.Request,
 	}
 	outcome.Finish = finishReason
 	outcome.FirstToken = time.Now()
+	// The streaming path marks this as text arrives. Without it every
+	// non-streaming answer was journaled with visible_output=false.
+	outcome.SawText = text != ""
 	resp := map[string]any{
 		"id":                 util.FirstNonEmpty(chatwire.ParseLooseStringAny(raw["id"]), "chatcmpl_"+util.RandomHex(8)),
 		"object":             "chat.completion",
