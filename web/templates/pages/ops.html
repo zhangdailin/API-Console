@@ -16,7 +16,7 @@
           <svg viewBox="0 0 24 24"><path d="M3 3v18h18" /><path d="M7 15l3-4 3 3 4-6" /></svg>
         </span>
         <div>
-          <h1>运维监控</h1>
+          <h1>运维总览</h1>
           <p class="ops-status">
             <span class="ops-dot" id="opsStatusDot" aria-hidden="true"></span>
             <span id="opsStatusText">就绪</span>
@@ -51,6 +51,11 @@
     <p class="hint">顶部时间范围用于请求统计、趋势、分布和告警事件；拓扑使用固定的实时窗口，资源与活跃请求 / 账号显示当前状态。模型筛选仅作用于下方状态表。</p>
 
     <section class="ops-top">
+      <!-- The windowed health summary leads: it is what the 渠道 / 模型 / 时间窗口
+           filters above control. The live 60-second screen follows it, so an idle
+           minute of zeros no longer fills the first screen. -->
+      <div class="ops-kpi-grid" id="opsKpis" aria-live="polite"></div>
+
       <article class="flow-screen" id="opsFlowScreen" aria-label="实时流量态势大屏">
         <header class="flow-header">
           <div class="flow-heading">
@@ -150,8 +155,6 @@
           <div id="flowDetailsPanel" role="tabpanel" aria-labelledby="flowTabDetails" hidden><div id="flowDetailedFacts" class="flow-facts"></div><details class="flow-definitions"><summary>数据口径与范围</summary><p>当前请求状态和流量仅统计本实例通过鉴权与准入的生成请求（Chat、Responses、Messages），包含 Grok 工具页的对话请求；图片与视频生成不计入。速率为近60秒滚动值；输出 token/s 随上游用量上报更新，不是逐字生成速度。失败与重试按近60秒结束的请求统计，不同原因可能重叠。延迟使用近15分钟结束请求保留的原始样本，每条渠道×协议最多256个；首生成包含推理与工具，可见首字只统计文本，非流式正文 TTFB 独立展示。账号池来自共享容量观测，可能包含其他实例占用；未扣除模型级限制。历史时间选择和模型筛选不改变本图窗口。</p></details></div>
         </dialog>
       </article>
-
-      <div class="ops-kpi-grid" id="opsKpis" aria-live="polite"></div>
     </section>
 
     <section class="ops-resources" id="opsResources" aria-live="polite"></section>

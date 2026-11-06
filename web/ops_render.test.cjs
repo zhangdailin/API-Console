@@ -340,3 +340,19 @@ test('throughput without usage keeps TPS absent and explains why', async () => {
   assert.equal(svg.children.some(child => child.class === 'series-tps'), false);
   assert.match(node('opsThroughputHint').textContent, /未上报用量/);
 });
+
+test('latencies are printed in readable units, not raw milliseconds', async () => {
+  const totals = { ...realPayload.totals, duration: { p50_ms: 640, p90_ms: 8536, p95_ms: 41200, p99_ms: 88000, avg_ms: 5200, max_ms: 212000, samples: 240 } };
+  const { node } = renderPage({ ...realPayload, totals });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  const text = (n) => [n.textContent || '', ...(n.children || []).map(text)].join(' ');
+  const kpis = text(node('opsKpis'));
+  for (const expected of ['640 ms', '8.54 s', '41.2 s', '1 分 28 秒', '3 分 32 秒']) {
+    assert.ok(kpis.includes(expected), `KPI cards miss ${expected}`);
+  }
+  assert.doesNotMatch(kpis, /\d{4,} ms/, 'a latency of a second or more is still printed in ms');
+  // The matrix uses the same formatter: grok's 8536 ms P95.
+  const grok = node('opsMatrix').querySelector('tbody').children[0].children.map((cell) => cell.textContent);
+  assert.ok(grok.includes('8.54 s'), `matrix shows ${grok.join('|')}`);
+});

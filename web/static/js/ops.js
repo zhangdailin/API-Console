@@ -205,9 +205,21 @@
     return (rate * 100).toFixed(3) + '%';
   }
 
+  // fmtMs prints a latency at the precision an operator reads: milliseconds
+  // under a second, seconds under a minute, then minutes and seconds.
+  // "88000 ms" made a P99 unreadable at a glance.
   function fmtMs(value, samples) {
     if (!samples || !value) return '暂无样本';
-    return value + ' ms';
+    return fmtDuration(Number(value));
+  }
+
+  function fmtDuration(ms) {
+    if (!Number.isFinite(ms) || ms < 0) return '—';
+    if (ms < 1000) return Math.round(ms) + ' ms';
+    if (ms < 10000) return (ms / 1000).toFixed(2) + ' s';
+    if (ms < 60000) return (ms / 1000).toFixed(1) + ' s';
+    const seconds = Math.round(ms / 1000);
+    return Math.floor(seconds / 60) + ' 分 ' + String(seconds % 60).padStart(2, '0') + ' 秒';
   }
 
   function fmtClock(date) { return date.toLocaleTimeString('zh-CN', { hour12: false }); }
@@ -810,17 +822,17 @@
       // the failure count the drill-down lists: 4xx + 5xx + 流中断 = 最终失败, and
       // 限流 is shown apart because it is a business limit, not a failure.
       const groups = [
-        { label: '4xx（非限流）', value: totals.client_errors || 0, tone: 'is-warn', outcome: 'client_error' },
-        { label: '5xx 上游错误', value: totals.server_errors || 0, tone: '', outcome: 'server_error' },
-        { label: '流中断（已提交 2xx）', value: totals.stream_errors || 0, tone: '', outcome: 'stream_error' },
+        { label: '4xx 客户端', hint: '客户端请求错误，不含限流', value: totals.client_errors || 0, tone: 'is-warn', outcome: 'client_error' },
+        { label: '5xx 上游', hint: '上游服务端错误', value: totals.server_errors || 0, tone: '', outcome: 'server_error' },
+        { label: '流中断', hint: '已返回 2xx 后流中断', value: totals.stream_errors || 0, tone: '', outcome: 'stream_error' },
         // A 401/403 from the provider is the channel's own credential failing, and it
         // is a failure. Our gate's 401/403 is the row below, and the two are never
         // added together: they are opposite statements about the channel.
-        { label: '上游认证失败 401/403（账号被上游拒绝）', value: totals.upstream_auth || 0, tone: '', outcome: 'upstream_auth' },
-        { label: '429 / 529 限流', value: totals.rate_limited || 0, tone: 'is-info', outcome: 'rate_limited' },
-        { label: '402 额度用尽', value: totals.quota_exhausted || 0, tone: 'is-info', outcome: 'quota_exhausted' },
-        { label: '网关拒绝 401/403（我方拒绝，非上游故障）', value: totals.rejected || 0, tone: 'is-info', outcome: 'rejected' },
-        { label: '上游尝试失败（含已重试成功）', value: totals.attempt_failures || 0, tone: 'is-warn', outcome: 'failed' },
+        { label: '上游认证', hint: '上游拒绝账号凭据（401/403）', value: totals.upstream_auth || 0, tone: '', outcome: 'upstream_auth' },
+        { label: '限流 429/529', hint: '上游限流，属于业务限制', value: totals.rate_limited || 0, tone: 'is-info', outcome: 'rate_limited' },
+        { label: '额度用尽 402', hint: '账号额度用尽，属于业务限制', value: totals.quota_exhausted || 0, tone: 'is-info', outcome: 'quota_exhausted' },
+        { label: '网关拒绝', hint: '本网关拒绝调用方（401/403），不是上游故障', value: totals.rejected || 0, tone: 'is-info', outcome: 'rejected' },
+        { label: '上游尝试失败', hint: '单次上游尝试失败，含之后重试成功的请求', value: totals.attempt_failures || 0, tone: 'is-warn', outcome: 'failed' },
       ];
       const maxValue = Math.max(1, ...groups.map((group) => group.value));
       // 未采集 when the window predates the classifier: a 0 next to seven other 0s
@@ -829,6 +841,9 @@
       const rows = groups.map((group) => {
         const row = make('button', 'ops-error-row is-clickable');
         row.type = 'button';
+        // The label stays short so it fits one line; what the class means is
+        // one hover away instead of wrapping the card to four lines a row.
+        row.title = group.label + '：' + group.hint + '。点击查看对应请求日志';
         // Clicking a class opens the log centre filtered to exactly that class.
         row.addEventListener('click', () => drilldownToLogs({ outcome: group.outcome }));
         const fill = make('span', group.tone || '');

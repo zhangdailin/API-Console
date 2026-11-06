@@ -331,8 +331,10 @@
 
 .ops-grid-3 > .ops-card { display: flex; flex-direction: column; }
 
+/* Rows stack from the top: spreading them across a card stretched to its
+   tallest neighbour left wide empty bands between them. */
 .ops-grid-3 > .ops-card > .ops-concurrency,
-.ops-grid-3 > .ops-card > .ops-errors { justify-content: space-between; }
+.ops-grid-3 > .ops-card > .ops-errors { justify-content: flex-start; }
 
 .ops-concurrency { display: flex; flex-direction: column; gap: var(--space-3); }
 
@@ -1072,8 +1074,11 @@ button.ops-error-row { width: 100%; border: 0; background: none; text-align: lef
 }
 
 @media (max-width: 640px) {
-.ops-resources,
 .ops-kpi-grid { grid-template-columns: minmax(0, 1fr); }
+
+/* Resource tiles are a label and one number: two fit side by side on a phone,
+   which halves a ~600px column of six tiles. */
+.ops-resources { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
 .ops-head-filters { width: 100%; }
 }
