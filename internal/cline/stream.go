@@ -17,7 +17,11 @@ import (
 // whether the attempt was meaningful and which stop reason to report.
 type streamResult struct {
 	// Model is the model identifier the upstream reported on its chunks.
-	Model                string
+	Model string
+	// Provider is the provider the gateway says finally served the request,
+	// and ProviderAttempts how many provider attempts it reported (0: unsaid).
+	Provider             string
+	ProviderAttempts     int
 	SawMeaningfulEvent   bool
 	ToolCallCount        int
 	UpstreamFinishReason string
@@ -49,11 +53,15 @@ func newThinkingSignature() string { return util.NewThinkingSignature("cline-v1"
 
 // streamChunk is one `data:` line of the SSE response.
 type streamChunk struct {
-	Data    json.RawMessage `json:"data"`
-	ID      string          `json:"id"`
-	Object  string          `json:"object"`
-	Model   string          `json:"model"`
-	Choices []struct {
+	Data json.RawMessage `json:"data"`
+	// The gateway's routing block is kept raw and read leniently: a field of an
+	// unexpected type must never fail the whole chunk.
+	ProviderMetadata      json.RawMessage `json:"provider_metadata"`
+	ProviderMetadataCamel json.RawMessage `json:"providerMetadata"`
+	ID                    string          `json:"id"`
+	Object                string          `json:"object"`
+	Model                 string          `json:"model"`
+	Choices               []struct {
 		Index        int    `json:"index"`
 		FinishReason string `json:"finish_reason"`
 		Delta        struct {
@@ -223,6 +231,9 @@ func consumeStreamWithToolNames(body io.Reader, toolsEnabled bool, toolNames map
 		if model := strings.TrimSpace(chunk.Model); model != "" {
 			result.Model = model
 		}
+		if provider, attempts := gatewayRouting(chunk.ProviderMetadata, chunk.ProviderMetadataCamel); provider != "" {
+			result.Provider, result.ProviderAttempts = provider, attempts
+		}
 		if msg := strings.TrimSpace(chunk.Error.Message); msg != "" {
 			return result, &attemptStreamError{err: fmt.Errorf("cline stream error: %s", msg), detail: msg}
 		}
@@ -305,4 +316,51 @@ func chunkLooksDecoded(payload string) bool {
 // deltas, usage, errors and wrapped frames are decoded once at each level.
 func (c *streamChunk) decoded() bool {
 	return c.Choices != nil || c.Usage != nil || c.ID != "" || c.Object != "" || c.Model != "" || c.Error.Message != ""
+}
+
+// gatewayRouting reads the provider the Cline gateway reports it finally routed
+// a request to, from provider_metadata.gateway.routing. finalProvider is the
+// explicit statement; resolvedProvider is the fallback. Candidate lists are
+// never read: they name providers that were considered, not the one that ran.
+func gatewayRouting(blocks ...json.RawMessage) (string, int) {
+	for _, block := range blocks {
+		if len(block) == 0 {
+			continue
+		}
+		var metadata struct {
+			Gateway struct {
+				Routing map[string]any `json:"routing"`
+			} `json:"gateway"`
+		}
+		if json.Unmarshal(block, &metadata) != nil || metadata.Gateway.Routing == nil {
+			continue
+		}
+		routing := metadata.Gateway.Routing
+		for _, key := range []string{"finalProvider", "resolvedProvider"} {
+			if provider, _ := routing[key].(string); strings.TrimSpace(provider) != "" {
+				attempts := 0
+				if count, ok := routing["totalProviderAttemptCount"].(float64); ok && count > 0 {
+					attempts = int(count)
+				}
+				return strings.TrimSpace(provider), attempts
+			}
+		}
+	}
+	return "", 0
+}
+
+// gatewayRoutingFromBody reads the same routing block from a non-stream body,
+// such as an error reply, where it names the provider that refused.
+func gatewayRoutingFromBody(raw []byte) (string, int) {
+	var body struct {
+		ProviderMetadata      json.RawMessage `json:"provider_metadata"`
+		ProviderMetadataCamel json.RawMessage `json:"providerMetadata"`
+		Error                 struct {
+			ProviderMetadata json.RawMessage `json:"provider_metadata"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(raw, &body) != nil {
+		return "", 0
+	}
+	return gatewayRouting(body.ProviderMetadata, body.ProviderMetadataCamel, body.Error.ProviderMetadata)
 }

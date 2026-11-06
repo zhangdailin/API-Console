@@ -32,3 +32,18 @@ func TestRouteNotesWithoutObserverAreNoOps(t *testing.T) {
 	NoteServedModel(context.Background(), "m")
 	testutil.Equal(t, WithRouteObserver(context.Background(), nil), context.Background())
 }
+
+func TestNoteServedProviderRecordsProviderAndAttemptsTogether(t *testing.T) {
+	got := map[string]string{}
+	ctx := WithRouteObserver(context.Background(), func(field, value string) { got[field] = value })
+	NoteServedProvider(ctx, "alibaba", 2)
+	testutil.Equal(t, got[RouteProvider], "alibaba")
+	testutil.Equal(t, got[RouteProviderAttempts], "2")
+	// A later attempt that names a provider but no count must not keep the old count.
+	NoteServedProvider(ctx, "deepseek", 0)
+	testutil.Equal(t, got[RouteProvider], "deepseek")
+	testutil.Equal(t, got[RouteProviderAttempts], "0")
+	// No provider: nothing is recorded.
+	NoteServedProvider(ctx, " ", 5)
+	testutil.Equal(t, got[RouteProvider], "deepseek")
+}

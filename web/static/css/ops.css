@@ -642,6 +642,12 @@
 
 .logs-model-upstream.is-remapped .logs-line-value { color: var(--warn); font-weight: 600; }
 
+.logs-model-provider { display: flex; align-items: baseline; gap: 6px; font-size: 0.76rem; line-height: 1.6; color: var(--text-secondary); }
+
+.logs-model-provider .logs-line-value { font-family: var(--font-mono); }
+
+.logs-model-provider.is-retried .logs-line-value { color: var(--warn); font-weight: 600; }
+
 .logs-line-label {
   flex: none;
   color: var(--text-faint);

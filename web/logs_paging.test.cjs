@@ -301,3 +301,24 @@ test('a vendor prefix or a dated snapshot of the requested model is not flagged 
   walk(api.ids.logsRows);
   assert.deepEqual(classes, ['logs-model-upstream', 'logs-model-upstream is-remapped', 'logs-model-upstream', 'logs-model-upstream is-remapped']);
 });
+
+test('the gateway provider and its retry count are shown under the model', () => {
+  const api = load();
+  api.state.kind = 'request';
+  const ev = (meta) => ({ kind: 'request', action: 'chat_request', status: 'success', channel: 'cline', model: 'deepseek-v4.1-flash', metadata: meta });
+  api.state.records = [
+    { id: '1', event: ev({ upstream_model: 'deepseek-v4.1-flash', upstream_provider: 'alibaba', upstream_provider_attempts: '2' }) },
+    { id: '2', event: ev({ upstream_provider: 'deepseek', upstream_provider_attempts: '1' }) },
+    { id: '3', event: ev({ upstream_model: 'deepseek-v4.1-flash' }) },
+  ];
+  api.renderRows();
+  const rows = api.ids.logsRows.querySelectorAll('tr[data-index]').map(allText);
+  assert.match(rows[0], /服务商[\s\S]*alibaba · 第 2 次尝试/);
+  assert.match(rows[1], /服务商[\s\S]*deepseek/);
+  assert.doesNotMatch(rows[1], /次尝试/, 'a first-attempt success carries no retry note');
+  assert.doesNotMatch(rows[2], /服务商/, 'no provider line without a gateway report');
+  api.renderDetail(api.state.records[0]);
+  const detail = allText(api.ids.logsDetailBody);
+  assert.match(detail, /上游服务商[\s\S]*alibaba/);
+  assert.match(detail, /服务商尝试[\s\S]*2 次/);
+});

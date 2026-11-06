@@ -336,6 +336,7 @@ func (c *Client) runChat(ctx context.Context, url string, payload chatPayload, t
 		}
 		result, err := c.attemptChat(ctx, url, payload, taskID, attemptCredentials, emit)
 		upstream.NoteServedModel(ctx, result.Model)
+		upstream.NoteServedProvider(ctx, result.Provider, result.ProviderAttempts)
 		if err == nil {
 			if !result.SawMeaningfulEvent {
 				return fmt.Errorf("cline stream produced no usable events")
@@ -415,7 +416,8 @@ func (c *Client) attemptChat(ctx context.Context, url string, payload chatPayloa
 
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
-		return streamResult{}, classifyStatus(resp.StatusCode, raw)
+		provider, attempts := gatewayRoutingFromBody(raw)
+		return streamResult{Provider: provider, ProviderAttempts: attempts}, classifyStatus(resp.StatusCode, raw)
 	}
 
 	monitored, progress := httpclient.MonitorProgressIdle(resp.Body, c.streamIdle, cancel, "cline")

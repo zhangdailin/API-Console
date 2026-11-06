@@ -287,7 +287,11 @@
     const served = String(meta.upstream_model || '').trim();
     const sent = String(meta.upstream_model_sent || '').trim();
     const upstream = served || sent;
+    const provider = String(meta.upstream_provider || '').trim();
+    const providerAttempts = Number(meta.upstream_provider_attempts) || 0;
     return {
+      provider,
+      providerAttempts,
       inbound: String(meta.path || '').trim(),
       endpoint: String(meta.upstream_endpoint || '').trim(),
       host: String(meta.upstream_host || '').trim(),
@@ -573,13 +577,30 @@
     const requested = make('div', 'logs-model-requested', route.requested || '未标注模型');
     requested.title = '客户端请求的模型';
     cell.appendChild(requested);
-    if (!route.upstream) return;
+    if (!route.upstream) {
+      appendProviderLine(cell, route);
+      return;
+    }
     const line = make('div', 'logs-model-upstream' + (route.remapped ? ' is-remapped' : ''));
     line.appendChild(make('span', 'logs-line-label', route.served ? '上游' : '发送'));
     line.appendChild(make('span', 'logs-line-value', route.upstream));
     line.title = route.served
       ? '上游返回的实际模型' + (route.sent && route.sent !== route.served ? '（网关发送：' + route.sent + '）' : '')
       : '网关发送给上游的模型（上游未在响应中标注模型）';
+    cell.appendChild(line);
+    appendProviderLine(cell, route);
+  }
+
+  // appendProviderLine names the provider the upstream gateway says finally
+  // served the request, and how many provider attempts that took. Only a
+  // gateway that reports it (Cline) has this line.
+  function appendProviderLine(cell, route) {
+    if (!route.provider) return;
+    const retried = route.providerAttempts > 1;
+    const line = make('div', 'logs-model-provider' + (retried ? ' is-retried' : ''));
+    line.appendChild(make('span', 'logs-line-label', '服务商'));
+    line.appendChild(make('span', 'logs-line-value', route.provider + (retried ? ' · 第 ' + route.providerAttempts + ' 次尝试' : '')));
+    line.title = '上游网关报告的最终服务商' + (route.providerAttempts > 0 ? '；网关共尝试 ' + route.providerAttempts + ' 个服务商' : '');
     cell.appendChild(line);
   }
 
@@ -749,6 +770,10 @@
       requestFacts.push(fact('请求模型', text(event.model, '未标注'), { empty: !event.model }));
       requestFacts.push(fact('上游实际模型', route.served || '上游未标注', { empty: !route.served }));
       if (route.sent) requestFacts.push(fact('发送模型', route.sent));
+      if (route.provider) {
+        requestFacts.push(fact('上游服务商', route.provider, { title: '上游网关报告的最终服务商' }));
+        if (route.providerAttempts > 0) requestFacts.push(fact('服务商尝试', route.providerAttempts + ' 次'));
+      }
       if (route.inbound) requestFacts.push(fact('入站端点', route.inbound));
       if (route.endpoint) requestFacts.push(fact('上游端点', route.endpoint, { title: route.host ? route.host + route.endpoint : '' }));
     } else {

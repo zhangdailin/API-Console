@@ -3,6 +3,7 @@ package upstream
 import (
 	"context"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -21,6 +22,12 @@ const (
 	// RouteServedModel is the model identifier the upstream reported in its
 	// response. It is absent when the upstream does not report one.
 	RouteServedModel = "upstream_model"
+	// RouteProvider is the provider an upstream gateway reports it finally
+	// routed the request to (Cline: provider_metadata.gateway.routing).
+	RouteProvider = "upstream_provider"
+	// RouteProviderAttempts is how many provider attempts the gateway reports
+	// for that request; "0" means it did not say.
+	RouteProviderAttempts = "upstream_provider_attempts"
 )
 
 type routeObserverKey struct{}
@@ -54,6 +61,17 @@ func NoteUpstreamCall(ctx context.Context, rawURL, sentModel string) {
 		noteRoute(ctx, RouteEndpoint, parsed.Path)
 	}
 	noteRoute(ctx, RouteSentModel, sentModel)
+}
+
+// NoteServedProvider records the provider a gateway says served the request
+// and how many provider attempts it took. The two are recorded together so a
+// retry never pairs one attempt's provider with another attempt's count.
+func NoteServedProvider(ctx context.Context, provider string, attempts int) {
+	if strings.TrimSpace(provider) == "" {
+		return
+	}
+	noteRoute(ctx, RouteProvider, provider)
+	noteRoute(ctx, RouteProviderAttempts, strconv.Itoa(max(attempts, 0)))
 }
 
 // NoteServedModel records the model identifier the upstream reported for the
