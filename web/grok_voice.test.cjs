@@ -60,3 +60,18 @@ test('the Grok tools page carries no retired Console plane', () => {
   assert.doesNotMatch(source, /provider === "console"|counts\.console|个 Console|"console"\]/);
   assert.doesNotMatch(page, /Console/);
 });
+
+test('chat markdown gives code blocks a language header and copy button, and keeps lists', () => {
+  // The page escapes with common.js's escapeHtml; the sandbox provides the same contract.
+  const escapeHtml = (value) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const context = vm.createContext({ window: {}, escapeHtml,
+    document: { addEventListener() {}, getElementById() { return null; } } });
+  const source = fs.readFileSync(path.join(__dirname, 'static/js/grok-tools.js'), 'utf8');
+  vm.runInContext(source.replace('document.addEventListener("DOMContentLoaded", init);', 'window.md = renderBasicMarkdown;'), context);
+  const html = context.window.md('示例：\n\n```go\nfmt.Println("<hi>")\n```\n\n- 第一\n- 第二');
+  assert.match(html, /<div class="code-block-wrap"><div class="code-block-head"><span>go<\/span><button type="button" class="code-copy-btn" data-code-copy>复制<\/button><\/div><pre class="code-block"><code class="language-go">/);
+  assert.match(html, /fmt\.Println\(&quot;&lt;hi&gt;&quot;\)/, 'code stays escaped');
+  assert.match(html, /<ul><li>第一<\/li><li>第二<\/li><\/ul>/);
+  const plain = context.window.md('```\nx\n```');
+  assert.match(plain, /<span>代码<\/span>/, 'a fence without a language is labelled 代码');
+});

@@ -305,7 +305,7 @@
 .grok-sso-body { display: grid; gap: var(--space-4); }
 .grok-sso-source { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--surface-1); justify-self: start; }
 .grok-sso-source-tab { padding: 6px 14px; border: 0; border-radius: calc(var(--radius-md) - 2px); background: transparent; color: var(--text-secondary); font: inherit; font-size: 0.84rem; cursor: pointer; }
-.grok-sso-source-tab.active { background: var(--accent); color: var(--text-on-accent); }
+.grok-sso-source-tab.active { background: var(--accent-solid); color: var(--text-on-accent); }
 .grok-sso-textarea { width: 100%; min-height: 180px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8rem; line-height: 1.55; resize: vertical; }
 .grok-sso-title { font-weight: 650; margin-bottom: 2px; }
 .grok-sso-body code { padding: 0 4px; border-radius: 4px; background: var(--surface-3); font-size: 0.78rem; }

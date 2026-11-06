@@ -580,7 +580,7 @@
     state.selectionMode = false;
     const toolbar = $("selectionToolbar");
     if (toolbar) toolbar.classList.add("hidden");
-    setStatus("未连接");
+    setStatus("空闲");
   }
 
   function dataUrlToBlob(dataUrl) {
@@ -841,7 +841,7 @@
     syncRatioUI();
     resizePrompt();
     setButtons(false);
-    setStatus("未连接");
+    setStatus("空闲");
   }
 
   window.addEventListener("grok-models-loaded", (event) => {

@@ -26,8 +26,8 @@
 }
 
 .models-primary-action {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--accent-solid);
+  border-color: var(--accent-solid);
   color: var(--text-on-accent);
   font-weight: 650;
 }

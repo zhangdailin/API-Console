@@ -34,7 +34,8 @@
       </section>
       <div class="toolbar toolbar-compact grok-tools-toolbar" aria-label="Grok 工具导航">
         <div class="grok-api-mode" aria-label="API 测试身份">
-          <select id="grokRequestMode" class="form-input" title="管理员模式使用当前登录会话；Client Key 模式按真实密钥权限、限流和计费测试">
+          <label class="grok-api-mode-label" for="grokRequestMode">调用身份</label>
+          <select id="grokRequestMode" class="form-input compact-select" title="管理员模式使用当前登录会话；Client Key 模式按真实密钥权限、限流和计费测试">
             <option value="admin">管理员模式</option>
             <option value="client">Client Key 模式</option>
           </select>
@@ -176,8 +177,7 @@
             <p class="function-subtitle">每轮生成 6 张图片，可选择单轮或连续创作。</p>
           </div>
           <div class="imagine-header-status">
-            <span id="imagineStatus" class="badge status-badge">未连接</span>
-            <span class="hint">未开始生成；缺少账号时请先在账号管理添加 Grok 账号。</span>
+            <span id="imagineStatus" class="badge status-badge">空闲</span>
           </div>
           <div id="imagineHeaderActions" class="function-actions imagine-header-actions is-empty">
             <button id="batchDownloadBtn" class="btn btn-outline" type="button">批量下载</button>
@@ -417,9 +417,9 @@
           <div class="grok-panel video-card">
             <div class="status-header">
               <div class="card-title">运行状态</div>
-              <span id="videoStatus" class="badge status-badge">未连接</span>
+              <span id="videoStatus" class="badge status-badge">空闲</span>
             </div>
-            <p class="hint video-status-hint">未连接表示当前没有生成任务；生成需要可用的 Grok Web 账号。</p>
+            <p class="hint video-status-hint">空闲表示当前没有生成任务；生成需要可用的 Grok Web 账号。</p>
             <div class="progress-wrap progress-wrap-spaced">
               <div id="videoProgressBar" class="progress-bar">
                 <div id="videoProgressFill" class="progress-fill"></div>
@@ -540,10 +540,10 @@
                 <span id="voiceStatus" class="status-text">未连接</span>
               </div>
               <div class="meta-grid">
-                <div class="meta-item"><div class="meta-label">Voice</div><div id="voiceStatusVoice" class="meta-value">-</div></div>
-                <div class="meta-item"><div class="meta-label">Personality</div><div id="voiceStatusPersonality" class="meta-value">-</div></div>
-                <div class="meta-item"><div class="meta-label">Speed</div><div id="voiceStatusSpeed" class="meta-value">-</div></div>
-                <div class="meta-item"><div class="meta-label">LiveKit</div><div id="voiceStatusURL" class="meta-value">-</div></div>
+                <div class="meta-item"><div class="meta-label">声音</div><div id="voiceStatusVoice" class="meta-value">-</div></div>
+                <div class="meta-item"><div class="meta-label">个性</div><div id="voiceStatusPersonality" class="meta-value">-</div></div>
+                <div class="meta-item"><div class="meta-label">语速</div><div id="voiceStatusSpeed" class="meta-value">-</div></div>
+                <div class="meta-item"><div class="meta-label">LiveKit 地址</div><div id="voiceStatusURL" class="meta-value">-</div></div>
               </div>
               <div id="voiceVisualizer" class="visualizer"></div>
             </div>
@@ -565,14 +565,14 @@
         <div class="grok-panel">
           <h3>缓存总览</h3>
           <p>本地缓存 + 在线资产概览。</p>
-          <div class="grok-form-grid">
+          <div class="grok-form-grid cache-stats">
             <div class="grok-kv"><span>图片缓存</span><strong id="cacheImageSummary">0 / 0 B</strong></div>
             <div class="grok-kv"><span>视频缓存</span><strong id="cacheVideoSummary">0 / 0 B</strong></div>
             <div class="grok-kv"><span>总计</span><strong id="cacheTotalSummary">0 / 0 B</strong></div>
             <div class="grok-kv"><span>目录</span><strong id="cacheBaseDir">-</strong></div>
             <div class="grok-kv"><span>在线资产</span><strong id="cacheOnlineCount">0</strong></div>
             <div class="grok-kv"><span>在线状态</span><strong id="cacheOnlineStatus">未加载</strong></div>
-            <div class="grok-kv"><span>在线范围</span><strong id="cacheOnlineScope">none</strong></div>
+            <div class="grok-kv"><span>在线范围</span><strong id="cacheOnlineScope">未加载</strong></div>
             <div class="grok-kv"><span>上次清理</span><strong id="cacheOnlineLastClear">-</strong></div>
           </div>
           <div class="grok-form-grid">
@@ -580,8 +580,8 @@
               <label class="form-label">类型过滤</label>
               <select id="cacheTypeFilter" class="form-input">
                 <option value="">全部</option>
-                <option value="image">image</option>
-                <option value="video">video</option>
+                <option value="image">图片</option>
+                <option value="video">视频</option>
               </select>
             </div>
             <div class="cache-inline-actions">

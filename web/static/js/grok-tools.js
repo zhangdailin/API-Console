@@ -89,6 +89,8 @@
     requestGeneration: 0,
     persistenceTimer: null,
   };
+  // The cache endpoint reports which accounts its online figures cover.
+  const ONLINE_SCOPE_LABELS = { none: "未加载", single: "单个账号", selected: "选中账号", all: "全部账号" };
   const grokCapabilityState = {
     loaded: false,
     failed: false,
@@ -99,6 +101,8 @@
   const grokToolsUIStorageKey = "grok_tools_ui_v1";
   const i18nMap = {
     "common.notConnected": "未连接",
+    // A generator that is not running is idle; 未连接 is for live sessions.
+    "common.idle": "空闲",
     "common.connecting": "连接中...",
     "common.generating": "生成中",
     "common.done": "已完成",
@@ -817,7 +821,11 @@
     const codeBlocks = [];
     const fenced = escaped.replace(/```([a-zA-Z0-9_-]+)?\n([\s\S]*?)```/g, (_match, lang, code) => {
       const safeLang = lang ? escapeHTML(lang) : "";
-      const html = `<pre class="code-block"><code${safeLang ? ` class="language-${safeLang}"` : ""}>${code}</code></pre>`;
+      // The header names the language and carries a copy button; the click is
+      // handled once on the chat log (see bindChatEvents).
+      const html = `<div class="code-block-wrap"><div class="code-block-head"><span>${safeLang || "代码"}</span>`
+        + `<button type="button" class="code-copy-btn" data-code-copy>复制</button></div>`
+        + `<pre class="code-block"><code${safeLang ? ` class="language-${safeLang}"` : ""}>${code}</code></pre></div>`;
       const token = `@@CODEBLOCK_${codeBlocks.length}@@`;
       codeBlocks.push(html);
       return token;
@@ -1377,6 +1385,7 @@
     copyBtn.type = "button";
     copyBtn.className = "action-btn";
     copyBtn.textContent = "复制";
+    copyBtn.title = "复制这条消息";
     copyBtn.addEventListener("click", () => {
       const text = role === "assistant"
         ? String(bubble.innerText || "").trim()
@@ -2264,7 +2273,25 @@
     await requestChatCompletion(session, contentEl);
   }
 
+  // Code-block copy buttons live in rendered markup that is replaced while a
+  // reply streams, so one delegated listener serves every block.
+  function bindCodeCopy() {
+    const log = document.getElementById("grokChatLog");
+    if (!log || log.dataset.codeCopyBound) return;
+    log.dataset.codeCopyBound = "1";
+    log.addEventListener("click", (event) => {
+      const button = event.target && event.target.closest ? event.target.closest("[data-code-copy]") : null;
+      if (!button) return;
+      const code = button.closest(".code-block-wrap")?.querySelector("pre");
+      if (!code) return;
+      copyToClipboard(code.innerText || "");
+      button.textContent = "已复制";
+      setTimeout(() => { button.textContent = "复制"; }, 1500);
+    });
+  }
+
   function bindChatEvents() {
+    bindCodeCopy();
     const newBtn = document.getElementById("grokChatNewBtn");
     const clearBtn = document.getElementById("grokChatClearBtn");
     const sendBtn = document.getElementById("grokSendBtn");
@@ -2936,7 +2963,9 @@
     if (aspectValue && ratioInput) aspectValue.textContent = ratioInput.value || "-";
     if (lengthValue && lengthInput) lengthValue.textContent = `${lengthInput.value || "-"}s`;
     if (resolutionValue && resolutionInput) resolutionValue.textContent = resolutionInput.value || "-";
-    if (presetValue && presetInput) presetValue.textContent = presetInput.value || "-";
+    // The tile repeats what the select shows, so it reads the option's label
+    // ("自定义"), not its wire value ("custom").
+    if (presetValue && presetInput) presetValue.textContent = presetInput.selectedOptions?.[0]?.textContent || presetInput.value || "-";
   }
 
   function setVideoProgress(value) {
@@ -3395,7 +3424,7 @@
     stopVideoPoll();
     stopVideoElapsedTimer();
     setVideoButtons(false);
-    setVideoStatus(t("common.notConnected"));
+    setVideoStatus(t("common.idle"));
     setVideoIndeterminate(false);
     videoState.taskID = "";
   }
@@ -3553,7 +3582,7 @@
     const onlineLastClearEl = document.getElementById("cacheOnlineLastClear");
     if (onlineCountEl) onlineCountEl.textContent = String(toNumberOrZero(online.count));
     if (onlineStatusEl) onlineStatusEl.textContent = resolveOnlineStatusText(online.status);
-    if (onlineScopeEl) onlineScopeEl.textContent = onlineScope;
+    if (onlineScopeEl) onlineScopeEl.textContent = ONLINE_SCOPE_LABELS[onlineScope] || onlineScope;
     if (onlineLastClearEl) onlineLastClearEl.textContent = formatDateTime(online.last_asset_clear_at);
 
     renderCacheOnlineTable();
@@ -4058,7 +4087,7 @@
     if (videoClearBtn) {
       videoClearBtn.addEventListener("click", () => {
         resetVideoOutput();
-        setVideoStatus(t("common.notConnected"));
+        setVideoStatus(t("common.idle"));
       });
     }
     const videoStage = document.getElementById("videoStage");
@@ -4409,7 +4438,7 @@
     resetVideoOutput();
     updateVideoMeta();
     setVideoButtons(false);
-    setVideoStatus(t("common.notConnected"));
+    setVideoStatus(t("common.idle"));
     const voiceName = document.getElementById("voiceName");
     const voiceCustomID = document.getElementById("voiceCustomID");
     const voicePersonality = document.getElementById("voicePersonality");

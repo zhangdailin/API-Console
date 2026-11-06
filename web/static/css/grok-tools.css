@@ -2332,3 +2332,188 @@
   .imagine-masonry-grid,
   #imagineGrid .imagine-masonry-grid { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
 }
+
+/* ==== Workbench refinements ============================================================
+   Later rules of equal specificity win, so the page's earlier layout stays the base and
+   these adjust what read poorly: the toolbar, section padding, chat messages, code
+   blocks, the image controls, the cache overview and idle panels. */
+
+/* Toolbar: tabs on the left, the request identity as a small labelled control. */
+.grok-tools-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.grok-tools-toolbar .grok-tabs { order: 1; flex: 1 1 auto; width: auto; }
+
+.grok-tools-toolbar .grok-api-mode {
+  order: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+  padding-right: var(--space-1);
+}
+
+.grok-api-mode-label { color: var(--text-muted); font-size: 0.76rem; font-weight: 600; white-space: nowrap; }
+
+.grok-api-mode #grokRequestMode { width: auto; min-width: 150px; }
+
+.grok-api-mode #grokClientKey { width: 260px; max-width: 100%; }
+
+/* Section headers sat flush against the card border. */
+.grok-section > .function-header-row { padding: var(--space-4) var(--space-5) var(--space-1); }
+
+.grok-section > .function-divider { width: auto; margin: 0 var(--space-5); }
+
+/* Chat: markdown lists keep their markers (the global list reset removed them). */
+.message-content.rendered ul,
+.message-content.rendered ol { margin: var(--space-1) 0 var(--space-2); padding-left: 1.5em; }
+
+.message-content.rendered ul { list-style: disc; }
+
+.message-content.rendered ol { list-style: decimal; }
+
+.message-content.rendered li + li { margin-top: 2px; }
+
+.message-content.rendered ul.task-list { list-style: none; padding-left: var(--space-3); }
+
+.message-content.rendered p + p { margin-top: var(--space-2); }
+
+/* Message actions: a small row under the message, revealed on hover or focus.
+   They used to sit beside the bubble as 36px blocks and overflowed on phones. */
+.message-row { flex-wrap: wrap; }
+
+.message-actions {
+  display: flex;
+  flex: 0 0 100%;
+  gap: 2px;
+  margin-top: 2px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.message-row.user .message-actions { justify-content: flex-end; }
+
+.message-row:hover .message-actions,
+.message-row:focus-within .message-actions { opacity: 1; }
+
+/* Touch screens have no hover: keep the actions visible, but quiet. */
+@media (hover: none) {
+  .message-actions { opacity: 0.75; }
+}
+
+.message-actions .action-btn {
+  width: auto;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  font-weight: 500;
+}
+
+.message-actions .action-btn:hover { background: var(--surface-2); color: var(--text-main); }
+
+.message-actions .action-btn-danger:hover { background: var(--bad-soft); color: var(--bad); border-color: transparent; }
+
+/* Code blocks: a header with the language and a copy button. */
+.code-block-wrap {
+  margin: var(--space-2) 0;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-inset);
+}
+
+.code-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px 4px 12px;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
+.code-copy-btn {
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.code-copy-btn:hover { border-color: var(--border-color); background: var(--surface-1); color: var(--text-main); }
+
+.code-block-wrap .code-block { margin: 0; border: 0; border-radius: 0; background: transparent; }
+
+/* Image controls: toggles match the 34px fields so every label sits on one line,
+   filled segments use the solid accent (legible in dark mode), and labels never
+   wrap one character per line on a phone. */
+.imagine-masonry-toggle { padding: 2px; gap: 2px; background: var(--track-bg); }
+
+.imagine-masonry-toggle-btn { min-height: 28px; white-space: nowrap; }
+
+.imagine-masonry-toggle-btn.is-active { background: var(--accent-solid); box-shadow: var(--shadow-btn-primary); }
+
+.imagine-masonry-ratio-icon { border: 1.5px solid var(--text-muted); background: transparent; }
+
+/* Cache overview: a compact stat grid instead of eight full-width bars. */
+.cache-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+.cache-stats .grok-kv {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  min-height: 0;
+  padding: 10px 12px;
+}
+
+.cache-stats .grok-kv span { color: var(--text-muted); font-size: 0.74rem; }
+
+.cache-stats .grok-kv strong { font-size: 0.95rem; }
+
+@media (max-width: 900px) {
+  .cache-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Idle voice panels say what will appear instead of showing an empty box. */
+.voice-log:empty::before,
+.audio-root:empty::before {
+  display: block;
+  color: var(--text-faint);
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+}
+
+.voice-log:empty::before { content: "开始会话后，这里显示连接与对话事件。"; }
+
+.audio-root:empty::before { content: "会话中的音频轨会出现在这里。"; padding: 4px 2px; }
+
+@media (max-width: 760px) {
+  /* Stacked and left-aligned: wrapping put the title at the far end of the
+     eyebrow's line. */
+  .grok-tools-page .grok-page-header { flex-direction: column; align-items: flex-start; gap: var(--space-1); }
+  .grok-tools-page .grok-page-header .grok-account-link { margin-left: 0; }
+  /* An older phone rule sized this wrapper for a row (flex-basis 104px); inside
+     the column field that basis became a 104px height that detached the label. */
+  .imagine-basic-field .imagine-masonry-ratio { flex: 0 0 auto; width: 100%; }
+  .imagine-basic-field .imagine-masonry-ratio .form-input { flex: 1 1 auto; }
+}
+
+@media (max-width: 640px) {
+  .grok-tools-toolbar .grok-api-mode { width: 100%; margin-left: 0; }
+  .grok-api-mode #grokRequestMode { flex: 1 1 auto; }
+  .grok-section > .function-header-row { padding: var(--space-3) var(--space-4) 0; }
+}
