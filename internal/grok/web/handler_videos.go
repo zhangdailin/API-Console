@@ -334,7 +334,7 @@ func (h *Handler) HandleVideosCreate(w http.ResponseWriter, r *http.Request) {
 // startVideoJob validates the video configuration, registers the job and starts
 // its worker. It is shared by the legacy /videos endpoint and by the standard
 // /videos/generations endpoint when the resolved model is routed to the Web
-// plane rather than to Console.
+// plane.
 func (h *Handler) startVideoJob(w http.ResponseWriter, r *http.Request, req VideosRequest, spec ModelSpec) {
 	cfg, err := validateVideoConfigForModel(&VideoConfig{
 		VideoLength:    req.Seconds,

@@ -190,7 +190,7 @@ func (m *Manager) fingerprint(node Node, affinity string) string {
 
 func usesBrowserClearance(scope string) bool {
 	switch strings.ToLower(strings.TrimSpace(scope)) {
-	case "cli", "build", "console_asset":
+	case "cli", "build":
 		return false
 	default:
 		return true

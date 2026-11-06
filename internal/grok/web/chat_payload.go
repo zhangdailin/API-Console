@@ -75,7 +75,7 @@ func (h *Handler) buildVideoCreatePayload(
 	videoCfg.Normalize()
 	for _, item := range attachmentInputs {
 		if strings.EqualFold(strings.TrimSpace(item.Type), "image") && strings.TrimSpace(item.Data) != "" {
-			return nil, fmt.Errorf("web video generation currently supports text-to-video only; use a Console/Build video model for image references")
+			return nil, fmt.Errorf("web video generation currently supports text-to-video only; image references are not supported")
 		}
 	}
 	prompt := strings.TrimSpace(text)

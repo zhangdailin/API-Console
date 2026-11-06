@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"orchids-api/internal/accountpolicy"
 	"orchids-api/internal/audit"
 	"orchids-api/internal/config"
@@ -295,9 +294,8 @@ func (h *Handler) cacheValidatedModel(modelID string) {
 	h.modelCacheMu.Unlock()
 }
 
-// isGrokWebAccount selects only Grok Web SSO sessions. Build OAuth and
-// Console SSO sessions are deliberately separate products and must never be
-// sent to the legacy web transport.
+// isGrokWebAccount selects only Grok Web SSO sessions. Build OAuth sessions are
+// a separate product and must never be sent to the legacy web transport.
 func isGrokWebAccount(acc *store.Account) bool {
 	return acc != nil && ProviderForAccount(acc) == ProviderWeb &&
 		!strings.EqualFold(strings.TrimSpace(acc.CredentialType), "oauth")
@@ -579,15 +577,6 @@ func isModelScopedRefusal(err error) bool {
 		}
 	}
 	return false
-}
-
-func isConsoleFreeQuotaExhaustedError(err error) bool {
-	if err == nil || parseUpstreamStatus(err) != http.StatusTooManyRequests {
-		return false
-	}
-	lower := strings.ToLower(err.Error())
-	return strings.Contains(lower, "free usage quota exceeded") ||
-		strings.Contains(lower, "free usage exhausted")
 }
 
 func isResourceExhaustedError(err error) bool {

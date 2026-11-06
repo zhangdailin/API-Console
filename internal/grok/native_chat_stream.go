@@ -332,8 +332,8 @@ func (h *Handler) streamBuildChatHolding(w http.ResponseWriter, req *chatwire.Re
 		if terminal {
 			return nil
 		}
-		annotations = appendUniqueConsoleAnnotations(annotations, consoleFlatAnnotations(ev))
-		if usage := consoleUsageFromStreamEvent(ev); len(usage) > 0 {
+		annotations = appendUniqueResponsesAnnotations(annotations, responsesFlatAnnotations(ev))
+		if usage := responsesUsageFromStreamEvent(ev); len(usage) > 0 {
 			outcome.Usage = usage
 			outcome.UsageSource = audit.UsageSourceUpstream
 		}
@@ -375,7 +375,7 @@ func (h *Handler) streamBuildChatHolding(w http.ResponseWriter, req *chatwire.Re
 				state := thought(key)
 				if kind == "response.output_item.done" {
 					if state.text.Len() == 0 {
-						value := consoleExtractReasoningText(map[string]any{"output": []any{item}})
+						value := responsesExtractReasoningText(map[string]any{"output": []any{item}})
 						if err := emitThought(key, "snapshot", value); err != nil {
 							return err
 						}
@@ -419,7 +419,7 @@ func (h *Handler) streamBuildChatHolding(w http.ResponseWriter, req *chatwire.Re
 			}
 			return nil
 		}
-		if value := consoleReasoningDelta(kind, ev); value != "" && filter.matched == "" {
+		if value := responsesReasoningDelta(kind, ev); value != "" && filter.matched == "" {
 			source := "raw"
 			if strings.Contains(kind, "summary") {
 				source = "summary"
@@ -457,7 +457,7 @@ func (h *Handler) streamBuildChatHolding(w http.ResponseWriter, req *chatwire.Re
 						lastSignature = signature
 					}
 					if state.text.Len() == 0 {
-						if err := emitThought(key, "snapshot", consoleExtractReasoningText(map[string]any{"output": []any{entry}})); err != nil {
+						if err := emitThought(key, "snapshot", responsesExtractReasoningText(map[string]any{"output": []any{entry}})); err != nil {
 							return err
 						}
 					}
@@ -494,7 +494,7 @@ func (h *Handler) streamBuildChatHolding(w http.ResponseWriter, req *chatwire.Re
 				}
 			}
 			if !sawText && filter.matched == "" {
-				if err := emitText(filter.push(consoleExtractMessageText(response), false)); err != nil {
+				if err := emitText(filter.push(responsesExtractMessageText(response), false)); err != nil {
 					return err
 				}
 			}
@@ -557,7 +557,7 @@ func (h *Handler) streamBuildChatHolding(w http.ResponseWriter, req *chatwire.Re
 	}
 	delta := map[string]any{}
 	if len(annotations) > 0 {
-		delta["annotations"] = consoleChatAnnotations(annotations)
+		delta["annotations"] = responsesChatAnnotations(annotations)
 	}
 	if filter.matched != "" {
 		delta["stop_sequence"] = filter.matched

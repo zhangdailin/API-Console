@@ -103,6 +103,8 @@ func TestRegisterRoutes_GrokConversationSurfacesAreRetired(t *testing.T) {
 		rec = httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 		testutil.CheckEqual(t, rec.Code, http.StatusOK)
+		// The retired Console plane must not resurface in the availability counts.
+		testutil.CheckNotContain(t, rec.Body.String(), `"console"`)
 	}
 
 	rec = httptest.NewRecorder()

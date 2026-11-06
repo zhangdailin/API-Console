@@ -190,7 +190,7 @@ func validateToolDefinitions(tools []ToolDef) error {
 	return nil
 }
 
-// Web emulates tools in a prompt; its limits are not Build/Console contracts.
+// Web emulates tools in a prompt; its limits are not Build contracts.
 func validateWebToolDefinitions(tools []ToolDef) error {
 	if err := validateToolDefinitions(tools); err != nil {
 		return err

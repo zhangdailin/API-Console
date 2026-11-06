@@ -33,7 +33,7 @@ func anthropicResponseFromChat(model string, chat map[string]any) map[string]any
 		if items := responses.InterfaceSlice(message["x_grok_reasoning"]); len(items) > 0 {
 			for _, item := range items {
 				wrapper := map[string]any{"output": []any{item}}
-				content = append(content, map[string]any{"type": "thinking", "thinking": consoleExtractReasoningText(wrapper), "signature": consoleExtractEncryptedReasoning(wrapper)})
+				content = append(content, map[string]any{"type": "thinking", "thinking": responsesExtractReasoningText(wrapper), "signature": responsesExtractEncryptedReasoning(wrapper)})
 			}
 			thinking = ""
 			signature = ""

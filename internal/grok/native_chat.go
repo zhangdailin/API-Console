@@ -96,7 +96,7 @@ func buildToolChoiceFromOpenAI(choice any) any {
 	}
 }
 
-func consoleExtractText(v any) string {
+func responsesExtractText(v any) string {
 	switch x := v.(type) {
 	case nil:
 		return ""
@@ -110,26 +110,26 @@ func consoleExtractText(v any) string {
 				}
 			}
 			if raw := x["content"]; raw != nil {
-				if s := strings.TrimSpace(consoleExtractText(raw)); s != "" {
+				if s := strings.TrimSpace(responsesExtractText(raw)); s != "" {
 					return s
 				}
 			}
 			if raw := x["summary"]; raw != nil {
-				if s := strings.TrimSpace(consoleExtractText(raw)); s != "" {
+				if s := strings.TrimSpace(responsesExtractText(raw)); s != "" {
 					return s
 				}
 			}
 		}
 		if t := strings.TrimSpace(fmt.Sprint(x["type"])); t == "message" || t == "response.output_message" {
 			if raw := x["content"]; raw != nil {
-				if s := strings.TrimSpace(consoleExtractText(raw)); s != "" {
+				if s := strings.TrimSpace(responsesExtractText(raw)); s != "" {
 					return s
 				}
 			}
 		}
 		for _, key := range []string{"output_text", "content", "output", "text", "message"} {
 			if raw := x[key]; raw != nil {
-				if s := consoleExtractText(raw); strings.TrimSpace(s) != "" {
+				if s := responsesExtractText(raw); strings.TrimSpace(s) != "" {
 					return s
 				}
 			}
@@ -137,7 +137,7 @@ func consoleExtractText(v any) string {
 	case []any:
 		var b strings.Builder
 		for _, item := range x {
-			if s := strings.TrimSpace(consoleExtractText(item)); s != "" {
+			if s := strings.TrimSpace(responsesExtractText(item)); s != "" {
 				if b.Len() > 0 {
 					b.WriteByte('\n')
 				}
@@ -149,7 +149,7 @@ func consoleExtractText(v any) string {
 	return ""
 }
 
-func consoleExtractMessageText(v any) string {
+func responsesExtractMessageText(v any) string {
 	if x, ok := v.(map[string]any); ok {
 		if output, ok := x["output"].([]any); ok {
 			var text strings.Builder
@@ -172,10 +172,10 @@ func consoleExtractMessageText(v any) string {
 			return text.String()
 		}
 	}
-	return strings.TrimSpace(consoleExtractText(v))
+	return strings.TrimSpace(responsesExtractText(v))
 }
 
-func consoleFlatAnnotations(v any) []map[string]any {
+func responsesFlatAnnotations(v any) []map[string]any {
 	seen := map[string]struct{}{}
 	out := make([]map[string]any, 0)
 	add := func(url, title string, start, end int) {
@@ -230,7 +230,7 @@ func consoleFlatAnnotations(v any) []map[string]any {
 	return out
 }
 
-func consoleChatAnnotations(flat []map[string]any) []any {
+func responsesChatAnnotations(flat []map[string]any) []any {
 	if len(flat) == 0 {
 		return []any{}
 	}
@@ -249,7 +249,7 @@ func consoleChatAnnotations(flat []map[string]any) []any {
 	return out
 }
 
-func appendUniqueConsoleAnnotations(dst []map[string]any, src []map[string]any) []map[string]any {
+func appendUniqueResponsesAnnotations(dst []map[string]any, src []map[string]any) []map[string]any {
 	if len(src) == 0 {
 		return dst
 	}
@@ -268,7 +268,7 @@ func appendUniqueConsoleAnnotations(dst []map[string]any, src []map[string]any) 
 	return dst
 }
 
-func consoleUsage(v map[string]any) map[string]any {
+func responsesUsage(v map[string]any) map[string]any {
 	raw, ok := v["usage"].(map[string]any)
 	if !ok {
 		return nil
@@ -330,8 +330,8 @@ func consoleUsage(v map[string]any) map[string]any {
 }
 
 // finishUpstreamChat completes a chat response after an upstream call: error
-// reporting, quota sync, then streaming or collection. Shared by the console and
-// CLI chat paths; url is used for both error and request logging and headers is
+// reporting, quota sync, then streaming or collection. Used by the Build chat
+// path; url is used for both error and request logging and headers is
 // evaluated lazily so it is only built on the success path.
 //
 // It reports a withheld turn: the response was held back by the quality guard,
@@ -746,13 +746,13 @@ func (h *Handler) collectBuildChat(w http.ResponseWriter, req *chatwire.Request,
 		writeGrokUpstreamError(w, outcome.Err)
 		return
 	}
-	text := consoleExtractMessageText(raw)
+	text := responsesExtractMessageText(raw)
 	refusal := responses.ExtractRefusal(raw)
 	filter := stopFilter{sequences: req.Stop}
 	text = filter.push(text, true)
-	reasoning := consoleExtractReasoningText(raw)
-	encryptedReasoning := consoleExtractEncryptedReasoning(raw)
-	annotations := consoleChatAnnotations(consoleFlatAnnotations(raw))
+	reasoning := responsesExtractReasoningText(raw)
+	encryptedReasoning := responsesExtractEncryptedReasoning(raw)
+	annotations := responsesChatAnnotations(responsesFlatAnnotations(raw))
 	// A single pass over the upstream output collects the tool calls, the
 	// searches and the reasoning items; each of them used to walk the same slice
 	// again. A malformed function_call is recorded and reported after the
@@ -775,7 +775,7 @@ func (h *Handler) collectBuildChat(w http.ResponseWriter, req *chatwire.Request,
 			}
 		}
 		if strings.EqualFold(kind, "function_call") {
-			if call := consoleToolCallFromItem(item); call != nil {
+			if call := responsesToolCallFromItem(item); call != nil {
 				toolCalls = append(toolCalls, call)
 			}
 		}
@@ -798,7 +798,7 @@ func (h *Handler) collectBuildChat(w http.ResponseWriter, req *chatwire.Request,
 		// Parsing latency must not trigger stream-only dump detectors.
 		FirstVisibleMS: -1,
 	}
-	upstreamUsage := consoleUsage(raw)
+	upstreamUsage := responsesUsage(raw)
 	if details, _ := upstreamUsage["completion_tokens_details"].(map[string]any); details != nil {
 		outcome.Quality.ReasoningTokens = int64(responses.InterfaceToInt(details["reasoning_tokens"]))
 	}
@@ -888,10 +888,10 @@ func (h *Handler) collectBuildChat(w http.ResponseWriter, req *chatwire.Request,
 	return
 }
 
-// consoleReasoningField concatenates the text of the parts of item[field]. A
+// responsesReasoningField concatenates the text of the parts of item[field]. A
 // non-empty partType keeps only parts of that type, which is how reasoning
 // content differs from the (untyped) summary.
-func consoleReasoningField(item map[string]any, field, partType string) string {
+func responsesReasoningField(item map[string]any, field, partType string) string {
 	var out strings.Builder
 	for _, value := range responses.InterfaceSlice(item[field]) {
 		part, _ := value.(map[string]any)
@@ -908,7 +908,7 @@ func consoleReasoningField(item map[string]any, field, partType string) string {
 	return out.String()
 }
 
-func consoleExtractReasoningText(raw map[string]any) string {
+func responsesExtractReasoningText(raw map[string]any) string {
 	if raw == nil {
 		return ""
 	}
@@ -918,16 +918,16 @@ func consoleExtractReasoningText(raw map[string]any) string {
 		if item == nil || !strings.EqualFold(strings.TrimSpace(fmt.Sprint(item["type"])), "reasoning") {
 			continue
 		}
-		text := consoleReasoningField(item, "content", "reasoning_text")
+		text := responsesReasoningField(item, "content", "reasoning_text")
 		if text == "" {
-			text = consoleReasoningField(item, "summary", "")
+			text = responsesReasoningField(item, "summary", "")
 		}
 		result.WriteString(text)
 	}
 	return result.String()
 }
 
-func consoleExtractEncryptedReasoning(raw map[string]any) string {
+func responsesExtractEncryptedReasoning(raw map[string]any) string {
 	if raw == nil {
 		return ""
 	}
@@ -944,7 +944,7 @@ func consoleExtractEncryptedReasoning(raw map[string]any) string {
 	return latest
 }
 
-func consoleToolCallFromItem(raw any) map[string]any {
+func responsesToolCallFromItem(raw any) map[string]any {
 	item, _ := raw.(map[string]any)
 	if item == nil || !strings.EqualFold(strings.TrimSpace(fmt.Sprint(item["type"])), "function_call") {
 		return nil
@@ -983,19 +983,19 @@ func consoleToolCallFromItem(raw any) map[string]any {
 	}
 }
 
-func consoleUsageFromStreamEvent(ev map[string]any) map[string]any {
+func responsesUsageFromStreamEvent(ev map[string]any) map[string]any {
 	if ev == nil {
 		return nil
 	}
 	if resp, _ := ev["response"].(map[string]any); resp != nil {
-		if usage := consoleUsage(resp); len(usage) > 0 {
+		if usage := responsesUsage(resp); len(usage) > 0 {
 			return usage
 		}
 	}
-	return consoleUsage(ev)
+	return responsesUsage(ev)
 }
 
-func consoleReasoningDelta(event string, ev map[string]any) string {
+func responsesReasoningDelta(event string, ev map[string]any) string {
 	event = strings.ToLower(strings.TrimSpace(event))
 	if !strings.Contains(event, "reasoning") || !strings.Contains(event, "delta") {
 		return ""

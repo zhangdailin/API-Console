@@ -142,7 +142,7 @@ func IsDefinitiveAccountBlockText(value string) bool {
 	return strings.Contains(value, "blocked-user") || strings.Contains(value, "user is blocked")
 }
 
-// IsDPoPProofRequiredBody reports the Console protocol-level DPoP challenge. It
+// IsDPoPProofRequiredBody reports a protocol-level DPoP challenge. It
 // must not be attributed to an account credential or physical egress node.
 func IsDPoPProofRequiredBody(body []byte) bool {
 	var payload map[string]any
@@ -153,7 +153,7 @@ func IsDPoPProofRequiredBody(body []byte) bool {
 }
 
 // IsDPoPProofRequiredText normalizes separators and matches the DPoP challenge
-// vocabulary used by console.x.ai and the CLI proxy.
+// vocabulary used by the xAI CLI proxy.
 func IsDPoPProofRequiredText(value string) bool {
 	normalized := strings.NewReplacer("-", "_", ":", "_", ".", "_", " ", "_").Replace(strings.ToLower(strings.TrimSpace(value)))
 	for _, marker := range []string{

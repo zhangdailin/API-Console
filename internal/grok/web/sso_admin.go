@@ -444,7 +444,7 @@ func (h *Handler) HandleAvailability(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	counts := map[string]int{ProviderBuild: 0, ProviderWeb: 0, "console": 0}
+	counts := map[string]int{ProviderBuild: 0, ProviderWeb: 0}
 	webSynced, webError := 0, ""
 	if h != nil && h.lb != nil && h.lb.Store != nil {
 		accounts, err := h.lb.Store.ListAccounts(r.Context())

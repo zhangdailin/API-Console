@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('./test-support.cjs');
 
-function voiceUI({ web = 0, build = 0, console = 0, modelsLoaded = true } = {}) {
+function voiceUI({ web = 0, build = 0, modelsLoaded = true } = {}) {
   const button = {
     disabled: false, dataset: {}, title: '',
     removeAttribute(name) { delete this[name]; },
@@ -22,7 +22,7 @@ function voiceUI({ web = 0, build = 0, console = 0, modelsLoaded = true } = {}) 
     window.voiceTest = { grokCapabilityState, chatState, applyGrokCapabilityControls };
   `), context);
   const state = context.window.voiceTest;
-  Object.assign(state.grokCapabilityState, { loaded: true, counts: { web, build, console } });
+  Object.assign(state.grokCapabilityState, { loaded: true, counts: { web, build } });
   state.chatState.modelsLoaded = modelsLoaded;
   return { button, state, apply: () => state.applyGrokCapabilityControls() };
 }
@@ -36,8 +36,8 @@ test('a Web account enables LiveKit without voice models in the catalog', () => 
   }
 });
 
-test('Build and Console accounts cannot supply a Web LiveKit token', () => {
-  const ui = voiceUI({ build: 31, console: 1 });
+test('Build accounts cannot supply a Web LiveKit token', () => {
+  const ui = voiceUI({ build: 31 });
   ui.state.chatState.capabilities.voice = true;
   ui.apply();
   assert.equal(ui.button.disabled, true);
@@ -52,4 +52,11 @@ test('adding a Web account clears the blocked button and stale account hint', ()
   ui.apply();
   assert.equal(ui.button.disabled, false);
   assert.equal(ui.button.title, undefined);
+});
+
+test('the Grok tools page carries no retired Console plane', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'static/js/grok-tools.js'), 'utf8');
+  const page = fs.readFileSync(path.join(__dirname, 'templates/pages/grok-tools.html'), 'utf8');
+  assert.doesNotMatch(source, /provider === "console"|counts\.console|个 Console|"console"\]/);
+  assert.doesNotMatch(page, /Console/);
 });

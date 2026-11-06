@@ -48,7 +48,7 @@ func TestGrokPublicCatalogUsesConfiguredModelIDs(t *testing.T) {
 	}
 }
 
-// The catalog publishes bare model names: the console/ and build/ qualifiers are
+// The catalog publishes bare model names: plane qualifiers such as build/ are
 // routing details, and two routes that differ only by plane are the same public
 // model. Resolution keeps accepting both spellings.
 func TestPublicModelsPublishExternalIDs(t *testing.T) {

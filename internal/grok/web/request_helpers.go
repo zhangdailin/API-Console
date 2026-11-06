@@ -20,7 +20,7 @@ const (
 )
 
 // doUpstreamHTTP owns response execution, decompression and stream idleness.
-// Web/Console use byte activity; only Build understands Responses events well
+// Web uses byte activity; only Build understands Responses events well
 // enough to ignore keepalives and control frames semantically.
 func doUpstreamHTTP(req *http.Request, do func(*http.Request) (*http.Response, error), idle time.Duration, modes ...upstreamIdleMode) (*http.Response, error) {
 	resp, err := do(req)

@@ -17,8 +17,6 @@ import (
 // it actually implies.
 const (
 	grokResponseAccountUnavailableMessage = "No Grok account is currently available for this response. Retry later, or check the account pool in Admin UI."
-	grokVoiceAccountUnavailableMessage    = "No Grok Console account is currently available for realtime voice. Retry later, or check the account pool in Admin UI."
-	grokVideoAccountUnavailableMessage    = "No Grok Console account is currently available for video generation. Retry later, or check the account pool in Admin UI."
 	grokModelAccountUnavailableMessage    = "No upstream account is currently available for this model. Retry later or add capacity."
 )
 
@@ -36,8 +34,7 @@ type grokPoolAnswer struct {
 // classifyGrokPoolFailure turns "no account could take this request" into the
 // answer the client gets, logging the pool's own note either way.
 //
-// The Grok handlers select their own sessions (openCLIAccountSession,
-// openConsoleAccountSession, …) rather than going through the generic session
+// The Grok handlers select their own sessions (openCLIAccountSession, …) rather than going through the generic session
 // handler, so they used to answer a pool failure with 503 and — in several
 // handlers — the pool's error text. A cooling pool, a rate-limited pool and a
 // spent allowance are all retryable capacity conditions and are answered 429 by

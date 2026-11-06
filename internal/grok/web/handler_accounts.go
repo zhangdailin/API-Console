@@ -113,8 +113,8 @@ func (h *Handler) openChatAccountSessionExcludingWithPoolsAndFilter(ctx context.
 		err     error
 		lastErr error
 	)
-	// App-chat/media only accepts Web SSO cookie accounts. OAuth Build and
-	// Console SSO are selected by their own provider-specific selectors.
+	// App-chat/media only accepts Web SSO cookie accounts. OAuth Build accounts
+	// are selected by their own provider-specific selector.
 	ssoFilter := func(acc *store.Account) bool {
 		if !isGrokWebAccount(acc) {
 			return false
@@ -223,13 +223,6 @@ type grokAccountStatusPolicy func(error) bool
 func markAllGrokAccountStatuses(err error) bool {
 	if err == nil {
 		return false
-	}
-	// A Console Free allowance refusal is account quota exhaustion, not a shared
-	// Team+Model throttle, even though xAI uses the resource-exhausted code for
-	// both. It must reach markAccountStatus so the dead Console row leaves the
-	// pool instead of being selected forever while its Web parent looks healthy.
-	if isConsoleFreeQuotaExhaustedError(err) {
-		return true
 	}
 	// Egress challenges and shared team rate limits are not account failures.
 	if isEgressChallengeError(err) {

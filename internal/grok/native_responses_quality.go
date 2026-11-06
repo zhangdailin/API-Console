@@ -30,7 +30,7 @@ func (q *nativeResponseQuality) observe(event map[string]any, kind string, resul
 	}
 	q.result, q.hold.outcome = result, result
 	result.Quality.ExpectReasoning = true
-	if usage := consoleUsageFromStreamEvent(event); len(usage) > 0 {
+	if usage := responsesUsageFromStreamEvent(event); len(usage) > 0 {
 		result.Usage = usage
 	}
 	if details, ok := result.Usage["completion_tokens_details"].(map[string]any); ok {
@@ -75,7 +75,7 @@ func (q *nativeResponseQuality) observe(event map[string]any, kind string, resul
 
 func reasoningItemText(item map[string]any) string {
 	// The extractor already prefers raw reasoning over its summary.
-	return consoleExtractReasoningText(map[string]any{"output": []any{item}})
+	return responsesExtractReasoningText(map[string]any{"output": []any{item}})
 }
 
 func (q *nativeResponseQuality) observeResponse(response map[string]any, result *chatOutcome) {
@@ -84,10 +84,10 @@ func (q *nativeResponseQuality) observeResponse(response map[string]any, result 
 	}
 	q.result, q.hold.outcome = result, result
 	result.Quality.ExpectReasoning = true
-	result.Quality.VisibleChars = max(result.Quality.VisibleChars, int64(utf8.RuneCountInString(consoleExtractMessageText(response))))
-	result.Quality.ReasoningChars = max(result.Quality.ReasoningChars, int64(utf8.RuneCountInString(consoleExtractReasoningText(response))))
+	result.Quality.VisibleChars = max(result.Quality.VisibleChars, int64(utf8.RuneCountInString(responsesExtractMessageText(response))))
+	result.Quality.ReasoningChars = max(result.Quality.ReasoningChars, int64(utf8.RuneCountInString(responsesExtractReasoningText(response))))
 	result.Quality.SawReasoning = result.Quality.ReasoningChars > 0
-	result.Quality.EncryptedChars = max(result.Quality.EncryptedChars, int64(len(consoleExtractEncryptedReasoning(response))))
+	result.Quality.EncryptedChars = max(result.Quality.EncryptedChars, int64(len(responsesExtractEncryptedReasoning(response))))
 	if details, ok := result.Usage["completion_tokens_details"].(map[string]any); ok {
 		result.Quality.ReasoningTokens = int64(responses.InterfaceToInt(details["reasoning_tokens"]))
 	}

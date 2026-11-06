@@ -81,6 +81,6 @@ func TestReasoningReplayAndSessionAffinityLifecycle(t *testing.T) {
 	affinity, err := s.GetSessionAffinity(ctx, "build", "grok-4.6", "session-a")
 	testutil.Equal(t, err, nil)
 	testutil.Equal(t, affinity.AccountID, 42)
-	_, err = s.GetSessionAffinity(ctx, "console", "grok-4.6", "session-a")
+	_, err = s.GetSessionAffinity(ctx, "web", "grok-4.6", "session-a")
 	testutil.Falsef(t, !errors.Is(err, ErrNoRows), "cross-provider affinity err=%v", err)
 }

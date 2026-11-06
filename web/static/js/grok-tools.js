@@ -92,7 +92,7 @@
   const grokCapabilityState = {
     loaded: false,
     failed: false,
-    counts: { build: 0, web: 0, console: 0 },
+    counts: { build: 0, web: 0 },
   };
   const chatStorageKey = "grok_tools_chat_sessions_v1";
   const chatSidebarStateKey = "grok_tools_chat_sidebar_collapsed";
@@ -134,7 +134,7 @@
     // Only the admin session middleware answers a bare plain-text 401. A JSON
     // 401 comes from a Grok handler — for example every upstream account needing
     // re-login, or a rejected client key — and is a tool failure, not an expired
-    // console session. Redirecting on that logged the operator out of a page
+    // admin session. Redirecting on that logged the operator out of a page
     // that was still authenticated, which made the tools look unusable.
     const contentType = String(res.headers?.get?.("Content-Type") || "").toLowerCase();
     const sessionExpired = contentType.includes("text/plain");
@@ -156,8 +156,8 @@
     // inference model catalog and its realtime/TTS/STT capabilities.
     if (tab === "voice") return counts.web > 0;
     if (chatState.modelsLoaded) return chatState.capabilities[tab] === true;
-    if (tab === "chat") return counts.build + counts.web + counts.console > 0;
-    return chatState.capabilities[tab] || counts.web + counts.console > 0;
+    if (tab === "chat") return counts.build + counts.web > 0;
+    return chatState.capabilities[tab] || counts.web > 0;
   }
 
   function grokAccountSummary() {
@@ -165,7 +165,6 @@
     const parts = [];
     if (counts.build) parts.push(`${counts.build} 个 Build`);
     if (counts.web) parts.push(`${counts.web} 个 Web`);
-    if (counts.console) parts.push(`${counts.console} 个 Console`);
     return parts.length ? parts.join("、") : "没有可用的 Grok 账号";
   }
 
@@ -249,7 +248,7 @@
       const payload = await res.json();
       const rawCounts = payload && payload.counts;
       const counts = {};
-      for (const provider of ["build", "web", "console"]) {
+      for (const provider of ["build", "web"]) {
         const count = Number(rawCounts && rawCounts[provider]);
         if (!Number.isFinite(count) || count < 0 || !Number.isInteger(count)) {
           throw new Error(`invalid ${provider} account count`);
@@ -1953,7 +1952,6 @@
 
   function syncChatModelUI() {
     const route = chatState.routes?.find((item) => item.id === chatState.model);
-    const fixed = route?.provider === "console" && route.upstream_model === "grok-4.20-0309-reasoning";
     const effortControl = document.getElementById("grokReasoningEffort");
     const session = activeChatSession();
     if (effortControl) {
@@ -1974,9 +1972,9 @@
         option.textContent = labels[value] || value;
         effortControl.appendChild(option);
       });
-      effortControl.disabled = fixed || route?.supports_reasoning_effort === false;
+      effortControl.disabled = route?.supports_reasoning_effort === false;
       const fallback = efforts.includes(String(route?.default_reasoning_effort || "")) ? String(route.default_reasoning_effort) : "";
-      effortControl.value = fixed ? "" : efforts.includes(previous) ? previous : fallback;
+      effortControl.value = efforts.includes(previous) ? previous : fallback;
       if (session) session.reasoningEffort = effortControl.value;
     }
     const webSearch = document.getElementById("grokWebSearch");
@@ -2220,17 +2218,9 @@
     const systemPrompt = String(document.getElementById("grokSystemInput")?.value || "").trim();
     if (systemPrompt) payload.instructions = systemPrompt;
     const route = chatState.routes?.find((item) => item.id === chatState.model);
-    // The Responses API defines no sampling controls. Console maps them onto its
-    // chat payload; Build would forward them upstream verbatim, so only send
-    // them where the backend is known to accept them.
-    if (route?.provider === "console") {
-      payload.temperature = Number(document.getElementById("grokTempRange")?.value || 0.8);
-      payload.top_p = Number(document.getElementById("grokTopPRange")?.value || 0.95);
-    }
-    // The fixed-reasoning console model only accepts its built-in level: the
-    // upstream page pins it to auto and never sends an effort for it.
-    const fixedReasoning = route?.provider === "console" && route.upstream_model === "grok-4.20-0309-reasoning";
-    const effort = fixedReasoning ? "" : String(session.reasoningEffort || "").trim();
+    // The Responses API defines no sampling controls, so temperature and top_p
+    // are never sent: Build would forward them upstream verbatim.
+    const effort = String(session.reasoningEffort || "").trim();
     const reasoning = {};
     if (effort) reasoning.effort = effort;
     // Every reasoning request is paired with a summary; only "none" must not ask for one.
@@ -2288,10 +2278,6 @@
     const sidebarOverlay = document.getElementById("grokChatSidebarOverlay");
     const collapseBtn = document.getElementById("grokChatCollapseBtn");
     const expandBtn = document.getElementById("grokChatExpandBtn");
-    const tempRange = document.getElementById("grokTempRange");
-    const tempValue = document.getElementById("grokTempValue");
-    const topPRange = document.getElementById("grokTopPRange");
-    const topPValue = document.getElementById("grokTopPValue");
     const reasoningEffort = document.getElementById("grokReasoningEffort");
     const webSearch = document.getElementById("grokWebSearch");
     const xSearch = document.getElementById("grokXSearch");
@@ -2384,18 +2370,6 @@
       modelDropdown?.classList.remove("show");
       closeChatSettingsPanel(settingsToggle, settingsPanel);
     });
-    if (tempRange && tempValue) {
-      tempRange.addEventListener("input", () => {
-        tempValue.textContent = String(Number(tempRange.value).toFixed(2)).replace(/\.00$/, "");
-        saveGrokToolsUIState({ chatTemperature: Number(tempRange.value) });
-      });
-    }
-    if (topPRange && topPValue) {
-      topPRange.addEventListener("input", () => {
-        topPValue.textContent = String(Number(topPRange.value).toFixed(2)).replace(/\.00$/, "");
-        saveGrokToolsUIState({ chatTopP: Number(topPRange.value) });
-      });
-    }
     [reasoningEffort, webSearch, xSearch].forEach((control) => {
       if (!control) return;
       control.addEventListener("change", () => {
@@ -2496,23 +2470,7 @@
     if (!chatState.models.includes(chatState.model)) {
       chatState.model = preferredAppChatModel(chatState.models);
     }
-    const tempRange = document.getElementById("grokTempRange");
-    const tempValue = document.getElementById("grokTempValue");
-    const topPRange = document.getElementById("grokTopPRange");
-    const topPValue = document.getElementById("grokTopPValue");
     const systemInput = document.getElementById("grokSystemInput");
-    if (tempRange && typeof uiState.chatTemperature === "number") {
-      tempRange.value = String(uiState.chatTemperature);
-    }
-    if (tempValue && tempRange) {
-      tempValue.textContent = String(Number(tempRange.value).toFixed(2)).replace(/\.00$/, "");
-    }
-    if (topPRange && typeof uiState.chatTopP === "number") {
-      topPRange.value = String(uiState.chatTopP);
-    }
-    if (topPValue && topPRange) {
-      topPValue.textContent = String(Number(topPRange.value).toFixed(2)).replace(/\.00$/, "");
-    }
     if (systemInput && typeof uiState.chatSystemPrompt === "string") {
       systemInput.value = uiState.chatSystemPrompt;
     }
@@ -3244,25 +3202,21 @@
       ? route.video_actions.map((value) => String(value || "").trim().toLowerCase()).filter(Boolean)
       : [];
     if (explicit.length) return new Set(explicit);
-    // Compatibility for older catalogs: use provider/upstream targets, never a
-    // public id alone (one public id may aggregate several provider routes).
-    const provider = String(route?.provider || "").toLowerCase();
-    const upstream = String(route?.upstream_model || "").toLowerCase();
-    return new Set(provider === "console" && upstream === "grok-imagine-video" ? ["generate", "edit", "extend"] : ["generate"]);
+    // A route that advertises no actions generates only.
+    return new Set(["generate"]);
   }
 
   function syncVideoRouteControls() {
     const route = chatState.routes?.find((item) => item.id === document.getElementById("videoModel")?.value);
     const actions = videoRouteActions(route);
     const constraints = route?.video_constraints || {};
-    const consoleRoute = route?.provider === "console";
     const action = document.getElementById("videoAction");
     if (!action) return;
     for (const option of action.options) option.disabled = !actions.has(option.value);
     if (action.selectedOptions[0]?.disabled) action.value = actions.has("generate") ? "generate" : [...actions][0] || "generate";
     const generate = action.value === "generate";
-    const canReferenceImages = constraints.reference_images ?? consoleRoute;
-    const canReferenceAudio = constraints.reference_audio ?? consoleRoute;
+    const canReferenceImages = constraints.reference_images === true;
+    const canReferenceAudio = constraints.reference_audio === true;
     document.getElementById("videoReferenceURL").disabled = !canReferenceImages || !generate;
     document.getElementById("videoReferenceVoice").disabled = !canReferenceAudio || !generate;
     document.getElementById("videoSourceURL").disabled = generate;
@@ -3270,7 +3224,7 @@
     const references = document.getElementById("videoReferenceURL").value || videoState.referenceFileID || document.getElementById("videoReferenceVoice").value;
     const resolutions = Array.isArray(constraints.resolutions) ? new Set(constraints.resolutions) : null;
     for (const option of resolution.options) {
-      const unsupported = resolutions ? !resolutions.has(option.value) : option.value === "1080p" && !(consoleRoute && route?.upstream_model === "grok-imagine-video-1.5");
+      const unsupported = resolutions ? !resolutions.has(option.value) : option.value === "1080p";
       const blockedByReferences = !!references && option.value === "1080p" && constraints.max_resolution_with_references === "720p";
       option.disabled = unsupported || blockedByReferences;
     }
@@ -3279,8 +3233,8 @@
     const length = document.getElementById("videoLength");
     const range = constraints.lengths?.[action.value];
     // Grok Web accepts 1–15 seconds (Free accounts are capped at 6 server-side).
-    length.min = Number(range?.min ?? (consoleRoute ? (action.value === "extend" ? 2 : 1) : 1));
-    length.max = Number(range?.max ?? (consoleRoute ? (action.value === "extend" ? 10 : 15) : 15));
+    length.min = Number(range?.min ?? 1);
+    length.max = Number(range?.max ?? 15);
     length.disabled = action.value === "edit";
   }
 
@@ -3291,25 +3245,11 @@
     if (action !== "generate") {
       if (!videoRouteActions(route).has(action)) throw new Error("所选模型不支持此操作");
       path += action === "edit" ? "/edits" : "/extensions";
-    } else if (route?.provider === "console") {
-      path += "/generations";
-    }
-    if (route?.provider === "console" || action !== "generate") {
       const body = { model: payload.model, prompt: payload.prompt };
-      if (action === "generate") {
-        Object.assign(body, { duration: payload.seconds, resolution: payload.resolution_name, aspect_ratio: document.getElementById("videoRatio").value });
-        if (payload.input_references[0]) body.image = payload.input_references[0];
-        const reference = await stagedVideoInput(videoState.referenceFileID, document.getElementById("videoReferenceURL").value, "image", true);
-        const voice = document.getElementById("videoReferenceVoice").value.trim();
-        if (body.image && (reference || voice)) throw new Error("首帧图片与参考素材不能同时使用");
-        if (reference) body.reference_images = [reference];
-        if (voice) body.reference_audios = [{ voice_id: voice }];
-      } else {
-        const video = await stagedVideoInput(videoState.sourceFileID, document.getElementById("videoSourceURL").value, "video", true);
-        if (!video) throw new Error("请填写原视频 URL 或上传原视频");
-        body.video = video;
-        if (action === "extend") body.duration = payload.seconds;
-      }
+      const video = await stagedVideoInput(videoState.sourceFileID, document.getElementById("videoSourceURL").value, "video", true);
+      if (!video) throw new Error("请填写原视频 URL 或上传原视频");
+      body.video = video;
+      if (action === "extend") body.duration = payload.seconds;
       payload = body;
     }
     const res = await fetch(path, {

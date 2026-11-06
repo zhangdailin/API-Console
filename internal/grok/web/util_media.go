@@ -411,7 +411,7 @@ func validateVideoConfig(cfg *VideoConfig) (*VideoConfig, error) {
 
 // validateVideoConfigForModel extends the legacy Web validator with the one
 // extra resolution exposed by the official 1.5 media routes. Reference-image
-// generation remains capped at 720p by both Console and Build.
+// generation remains capped at 720p.
 func validateVideoConfigForModel(cfg *VideoConfig, spec ModelSpec, referenceCount int) (*VideoConfig, error) {
 	if cfg == nil || !strings.EqualFold(strings.TrimSpace(cfg.ResolutionName), "1080p") {
 		return validateVideoConfig(cfg)

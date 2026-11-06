@@ -307,7 +307,7 @@ func (c *Client) doRequestWithHTTPClient(ctx context.Context, httpClient *http.C
 		lastBody = string(raw)
 
 		if lastStatus == http.StatusTooManyRequests {
-			// Web/app-chat must use the same scoped registry as Console and Build.
+			// Web/app-chat must use the same scoped registry as Build.
 			// noteTeamRateLimit only recorded a raw TeamID key, while request
 			// admission checks provider+account/team identities; that mismatch made
 			// every later Web request miss the cooldown and hit upstream again.

@@ -113,7 +113,7 @@ func InferQuotaLimit(acc *store.Account) float64 {
 }
 
 // inferSubscriptionFromRateLimitInfo classifies an account from a SINGLE quota
-// window whose mode is not known (the Console/Build header paths). It must never
+// window whose mode is not known (the Build header path). It must never
 // see a Web auto/fast projection: those windows describe the same tiers with
 // different numbers, so a mixed-mode number would pick the wrong pool. Web
 // snapshots go through inferSubscriptionFromWebQuota instead.
