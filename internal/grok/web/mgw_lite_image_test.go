@@ -19,19 +19,20 @@ import (
 // handshake, records session.create and the user turn, and answers with
 // progress frames and a finished card_attachment image.
 type fakeMGW struct {
-	mu      sync.Mutex
-	query   string
-	cookie  string
-	session map[string]any
-	prompt  string
-	frames  []map[string]any
+	mu        sync.Mutex
+	query     string
+	cookie    string
+	fetchDest string
+	session   map[string]any
+	prompt    string
+	frames    []map[string]any
 }
 
 func (f *fakeMGW) serve(t *testing.T) *httptest.Server {
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
-		f.query, f.cookie = r.URL.RawQuery, r.Header.Get("Cookie")
+		f.query, f.cookie, f.fetchDest = r.URL.RawQuery, r.Header.Get("Cookie"), r.Header.Get("Sec-Fetch-Dest")
 		f.mu.Unlock()
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -81,6 +82,9 @@ func done() map[string]any {
 func mgwTestClient(server *httptest.Server) *Client {
 	cfg := &config.Config{}
 	cfg.GrokWebBaseURL = server.URL
+	// No statsig signer: it would fetch the account page from the fake gateway.
+	noSigner := ""
+	cfg.GrokStatsigSignerURL = &noSigner
 	return New(cfg)
 }
 
@@ -107,6 +111,7 @@ func TestLiteImageViaMGWDrawsTheFirstFinishedImage(t *testing.T) {
 	testutil.MustContain(t, fake.query, "uid=11111111-2222-3333-4444-555555555555")
 	testutil.MustContain(t, fake.cookie, "sso=sso-token")
 	testutil.MustContain(t, fake.cookie, "x-userid=11111111-2222-3333-4444-555555555555")
+	testutil.Equal(t, fake.fetchDest, "websocket")
 	testutil.Equal(t, fake.session["model"], any("fast"))
 	xGrok, _ := fake.session["x_grok"].(map[string]any)
 	testutil.Equal(t, xGrok["enable_image_generation"], any(true))

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"orchids-api/internal/httpclient"
@@ -104,8 +105,22 @@ func (t *mgwWebSocketTransport) Open(ctx context.Context, request MGWChatRequest
 	if err != nil {
 		return nil, err
 	}
-	dialer := websocket.Dialer{HandshakeTimeout: mgwHandshakeTimeout, Proxy: mgwProxyFunc(t.client)}
-	connection, handshake, err := dialer.DialContext(ctx, endpoint, mgwHeaders(t.client, origin, request.UserID, request.Token))
+	// The handshake has to look like the browser's: grok.com answered a
+	// Go-TLS handshake without a statsig signature with stock pictures in
+	// place of the drawing. The TLS dial presents the Chrome ClientHello
+	// the HTTP transport uses (and routes through the configured proxy).
+	proxyFunc := mgwProxyFunc(t.client)
+	userAgent := t.client.userAgent()
+	dialer := websocket.Dialer{
+		HandshakeTimeout: mgwHandshakeTimeout,
+		NetDialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return httpclient.DialBrowserWebSocketTLS(ctx, network, addr, proxyFunc, userAgent)
+		},
+	}
+	if !strings.EqualFold(strings.SplitN(endpoint, ":", 2)[0], "wss") {
+		dialer.Proxy = proxyFunc
+	}
+	connection, handshake, err := dialer.DialContext(ctx, endpoint, mgwHeaders(ctx, t.client, endpoint, origin, request.UserID, request.Token))
 	if err != nil {
 		if handshake != nil {
 			return handshake, nil
@@ -138,13 +153,17 @@ func mgwEndpoint(baseURL, userID string) (string, string, error) {
 	return parsed.String(), origin, nil
 }
 
-func mgwHeaders(client *Client, origin, userID, token string) http.Header {
-	header := http.Header{}
+// mgwHeaders builds the upgrade request the way the Imagine WebSocket (which
+// grok.com serves real pictures on) does: the browser header set with a
+// statsig signature for the request, then the WebSocket fetch metadata.
+func mgwHeaders(ctx context.Context, client *Client, endpoint, origin, userID, token string) http.Header {
+	signed := strings.Replace(strings.Replace(endpoint, "wss://", "https://", 1), "ws://", "http://", 1)
+	header := client.headersFor(ctx, token, http.MethodGet, signed)
+	header.Del("Content-Type")
 	header.Set("Origin", origin)
-	header.Set("User-Agent", client.userAgent())
-	header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-	header.Set("Cache-Control", "no-cache")
-	header.Set("Pragma", "no-cache")
+	header.Set("Referer", origin+"/")
+	header.Set("Sec-Fetch-Dest", "websocket")
+	header.Set("Sec-Fetch-Mode", "websocket")
 	// SSO is a browser cookie, never an Authorization: Bearer credential. The
 	// Cloudflare clearance the REST requests carry is needed by the handshake too.
 	if cookie := mgwCookie(client, token, userID); cookie != "" {
