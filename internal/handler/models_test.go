@@ -142,3 +142,32 @@ func TestGrokCatalogFiltersUnobservedDisabledAndBoundModels(t *testing.T) {
 	h.HandleModelByID(rec, httptest.NewRequest(http.MethodGet, "/grok/v1/models/future-model", nil))
 	testutil.Equal(t, rec.Code, http.StatusNotFound)
 }
+
+// A Grok Web route answers through the chat bridge, which refuses the hosted
+// search tools; the tools page read the missing flag as "supported" and sent
+// x_search, which failed with "requires a native Responses provider".
+func TestGrokWebRoutesPublishNoHostedSearch(t *testing.T) {
+	h, s, _ := setupModelValidationHandler(t)
+	publishModel(t, s, &store.Model{Channel: "Grok", ModelID: "grok-chat-fast", Provider: "web"})
+	testutil.NoError(t, s.CreateAccount(context.Background(), &store.Account{AccountType: "grok", GrokProvider: "web", CredentialType: "sso", ClientCookie: "sso=x", Enabled: true}))
+
+	rec := httptest.NewRecorder()
+	h.HandleModels(rec, httptest.NewRequest(http.MethodGet, "http://example.com/grok/v1/models", nil))
+	testutil.Equal(t, rec.Code, http.StatusOK)
+	var payload struct {
+		Data []struct {
+			ID                    string `json:"id"`
+			SupportsBackendSearch *bool  `json:"supports_backend_search"`
+		} `json:"data"`
+	}
+	testutil.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+	found := false
+	for _, entry := range payload.Data {
+		if entry.ID != "grok-chat-fast" {
+			continue
+		}
+		found = true
+		testutil.True(t, entry.SupportsBackendSearch != nil && !*entry.SupportsBackendSearch, "a Web route must publish supports_backend_search=false")
+	}
+	testutil.True(t, found, "grok-chat-fast is listed")
+}

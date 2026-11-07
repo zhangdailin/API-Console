@@ -47,3 +47,31 @@ test('the workbench stylesheet is loaded after the base one', () => {
   const page = fs.readFileSync(path.join(__dirname, 'templates/pages/grok-tools.html'), 'utf8');
   assert.ok(page.indexOf('css/grok-workbench.css') > page.indexOf('css/grok-tools.css'));
 });
+
+function chatPayloadHarness() {
+  const context = vm.createContext({
+    window: {}, console, Date, Math, JSON, Number, String, Array, Object, Set, Map, Promise,
+    escapeHtml: (value) => String(value),
+    localStorage: { getItem: () => null, setItem() {} }, sessionStorage: { getItem: () => null, setItem() {} },
+    document: { addEventListener() {}, getElementById: () => null, querySelector: () => null, querySelectorAll: () => [] },
+  });
+  const source = fs.readFileSync(path.join(__dirname, 'static/js/grok-tools.js'), 'utf8');
+  vm.runInContext(source.replace('document.addEventListener("DOMContentLoaded", init);', 'window.chatTest = { chatState, buildResponsesPayload };'), context);
+  return context.window.chatTest;
+}
+
+// Grok Web routes publish supports_backend_search=false; X search used to be
+// sent anyway and failed with "requires a native Responses provider".
+test('hosted search tools are only sent to routes that support them', () => {
+  const { chatState, buildResponsesPayload } = chatPayloadHarness();
+  chatState.sessions = [{ id: 's', messages: [{ role: 'user', content: 'hi' }], webSearch: true, xSearch: true }];
+  chatState.activeId = 's';
+
+  chatState.routes = [{ id: 'grok-chat-fast', supports_backend_search: false }];
+  chatState.model = 'grok-chat-fast';
+  assert.equal(buildResponsesPayload().tools, undefined, 'a Web route gets no hosted search tools');
+
+  chatState.routes = [{ id: 'grok-4.7', supports_backend_search: true }];
+  chatState.model = 'grok-4.7';
+  assert.deepEqual(JSON.parse(JSON.stringify(buildResponsesPayload().tools)), [{ type: 'web_search' }, { type: 'x_search' }]);
+});

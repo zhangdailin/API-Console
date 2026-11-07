@@ -1998,15 +1998,20 @@
       effortControl.value = efforts.includes(previous) ? previous : fallback;
       if (session) session.reasoningEffort = effortControl.value;
     }
-    const webSearch = document.getElementById("grokWebSearch");
-    if (webSearch) {
-      const unsupported = route?.supports_backend_search === false;
-      webSearch.disabled = unsupported;
-      if (unsupported) {
-        webSearch.checked = false;
-        if (session) session.webSearch = false;
+    // Web and X search are hosted tools: a route that publishes
+    // supports_backend_search=false (every Grok Web route) cannot run either.
+    const searchUnsupported = route?.supports_backend_search === false;
+    [["grokWebSearch", "webSearch"], ["grokXSearch", "xSearch"]].forEach(([id, key]) => {
+      const control = document.getElementById(id);
+      if (!control) return;
+      control.disabled = searchUnsupported;
+      control.closest("label")?.classList.toggle("is-disabled", searchUnsupported);
+      control.title = searchUnsupported ? "该模型不支持托管搜索工具；Grok Web 会自行决定是否联网搜索" : "";
+      if (searchUnsupported) {
+        control.checked = false;
+        if (session) session[key] = false;
       }
-    }
+    });
     const label = document.getElementById("grokModelLabel");
     if (label) label.textContent = chatState.model;
     if (session) {
@@ -2248,8 +2253,9 @@
     if (Object.keys(reasoning).length) payload.reasoning = reasoning;
     if (session.promptCacheKey) payload.prompt_cache_key = session.promptCacheKey;
     const tools = [];
-    if (session.webSearch && route?.supports_backend_search !== false) tools.push({ type: "web_search" });
-    if (session.xSearch) tools.push({ type: "x_search" });
+    const hostedSearch = route?.supports_backend_search !== false;
+    if (hostedSearch && session.webSearch) tools.push({ type: "web_search" });
+    if (hostedSearch && session.xSearch) tools.push({ type: "x_search" });
     if (tools.length) payload.tools = tools;
     return payload;
   }
