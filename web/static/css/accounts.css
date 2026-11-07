@@ -959,3 +959,57 @@
 @media (max-width: 520px) {
   .oauth-code { font-size: 1.25rem; letter-spacing: 0.12em; }
 }
+
+/* ── List view: compact columns, icon actions pinned to the right edge ───── */
+
+/* table-layout is fixed, so the flexible account column only gets what the
+   fixed ones leave: the minimum width is their sum (966px) plus room for it. */
+.accounts-panel:not(.is-card-view) .accounts-table { min-width: 1200px; }
+.accounts-panel:not(.is-card-view) .accounts-table .col-token { width: auto; }
+.accounts-panel:not(.is-card-view) .accounts-table .col-id { width: 48px; }
+.accounts-panel:not(.is-card-view) .accounts-table .col-tier { width: 140px; }
+.accounts-panel:not(.is-card-view) .accounts-table .col-quota { width: 170px; }
+.accounts-panel:not(.is-card-view) .accounts-table .col-status { width: 140px; }
+.accounts-panel:not(.is-card-view) .accounts-table .col-tokens { width: 120px; }
+.accounts-panel:not(.is-card-view) .accounts-table .col-usage { width: 80px; }
+.accounts-panel:not(.is-card-view) .accounts-table .col-created { width: 96px; }
+
+/* Below 1600px the list drops its two secondary columns (the card view keeps
+   them) so the rest fits without scrolling under the pinned actions. */
+@media (min-width: 641px) and (max-width: 1599px) {
+  .accounts-panel:not(.is-card-view) .accounts-table { min-width: 1040px; }
+  .accounts-panel:not(.is-card-view) .accounts-table .col-id,
+  .accounts-panel:not(.is-card-view) .accounts-table .col-created { display: none; }
+}
+.accounts-panel:not(.is-card-view) .accounts-table .col-actions {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  width: 132px;
+  background: var(--surface-1);
+  box-shadow: -8px 0 12px -10px rgb(0 0 0 / 0.25);
+}
+
+.accounts-panel:not(.is-card-view) .accounts-table thead th.col-actions { z-index: 3; background: var(--surface-2); }
+.accounts-panel:not(.is-card-view) .accounts-table tbody tr:hover td.col-actions { background: var(--surface-2); }
+
+/* Icon-only buttons in both views; the word stays for screen readers and the
+   title gives the tooltip. */
+.accounts-row-actions .action-icon { width: 32px; height: 32px; padding: 0; border-radius: 9px; }
+.accounts-row-actions .action-icon .action-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.accounts-row-actions .action-icon.is-danger:hover { color: var(--bad); }
+
+/* Long plan names wrap inside the pill instead of overflowing it. */
+.account-tier-tag { border-radius: 10px; }
+
+@media (max-width: 640px) {
+  .accounts-panel:not(.is-card-view) .accounts-table .col-actions { position: static; box-shadow: none; background: none; width: auto; }
+}

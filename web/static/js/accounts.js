@@ -143,11 +143,13 @@ function quotaTooltip(acc, quota) {
 
 // PLAN_BADGE_STYLES colours the subscription badge by tier. The server
 // publishes plan_tier for every channel, so one table serves all of them.
+// Theme tokens, not fixed colours: the light theme needs darker text than the
+// dark one, and fixed pastel text was unreadable on a light page.
 const PLAN_BADGE_STYLES = {
-  free: { bg: "rgba(52, 211, 153, 0.16)", color: "#34d399" },
-  inferredFree: { bg: "rgba(148, 163, 184, 0.16)", color: "#cbd5e1" },
-  paid: { bg: "rgba(167, 139, 250, 0.16)", color: "#c4b5fd" },
-  muted: { bg: "rgba(100, 116, 139, 0.12)", color: "#94a3b8" },
+  free: { bg: "var(--ok-soft)", color: "var(--ok)" },
+  inferredFree: { bg: "var(--surface-3)", color: "var(--text-soft)" },
+  paid: { bg: "var(--accent-soft)", color: "var(--accent)" },
+  muted: { bg: "var(--surface-3)", color: "var(--text-muted)" },
 };
 
 // subscriptionBadge renders plan_name / plan_tier / plan_confidence. The tier
