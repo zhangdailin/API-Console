@@ -116,6 +116,10 @@ type TracedResponseWriter struct {
 	streamFailed atomic.Bool
 	// The admitted flow tracker observes the existing content detector once.
 	flowProgress func()
+	// flowOutput receives the estimated output tokens streamed since its last
+	// call, so the live output rate moves while an answer is generated.
+	flowOutput func(tokens int64)
+	liveTokens int64
 }
 
 // NewTracedResponseWriter creates a new TracedResponseWriter.
@@ -208,6 +212,12 @@ func (w *TracedResponseWriter) Write(b []byte) (int, error) {
 			payload = w.tokenDetector.observe(b[:n])
 			if w.visibleWriteAt.IsZero() && w.tokenDetector.visible {
 				w.visibleWriteAt = now
+			}
+			if tokens := w.tokenDetector.outputUnits / 4; tokens > w.liveTokens {
+				if w.flowOutput != nil && w.StatusCode < 400 {
+					w.flowOutput(tokens - w.liveTokens)
+				}
+				w.liveTokens = tokens
 			}
 		} else {
 			payload = isPayloadWrite(b[:n])

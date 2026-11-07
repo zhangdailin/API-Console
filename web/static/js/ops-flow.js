@@ -147,7 +147,7 @@
     const known=snapshot&&!out;
     field(overviewFacts,'rate',known?M.number(rate.qps,2)+' req/s':'—');
     field(overviewFacts,'active',known?`${M.number(rate.active)} 进行中 · ${M.number(metric?.waiting)} 等待输出 · ${M.number(metric?.responding)} 已开始输出`:'—');
-    field(overviewFacts,'usage',known&&rate.output!=null?`输入 ${data.every(row=>M.numeric(row.input_tps)!=null)?M.number(M.sum(data,'input_tps'),1):'待上报'} / 输出 ${M.number(rate.output,1)} token/s；上游用量上报，不是逐字生成速度`:'待上报');
+    field(overviewFacts,'usage',known&&rate.output!=null?`输入 ${data.every(row=>M.numeric(row.input_tps)!=null)?M.number(M.sum(data,'input_tps'),1):'待上报'} / 输出 ${M.number(rate.output,1)} token/s`:'待上报');
     field(overviewFacts,'total',known?`接收 ${M.number(M.sum(data,'started'))} · 结束 ${M.number(M.sum(data,'completed'))}`:'—');
     field(overviewFacts,'failure',metric?`${M.number(metric.failed)}/${M.number(metric.completed)} 失败 · ${M.percent(metric.failure_rate)} · 限流 ${M.number(metric.rate_limited)} · 超时 ${M.number(metric.timeouts)} · 流中断 ${M.number(metric.stream_errors)} · 取消 ${M.number(metric.canceled)}`:'暂无样本');
     for(const key of ['accounts','capacity'])if(overviewFacts.get(key))overviewFacts.get(key).card.hidden=M.protocols.includes(selected);

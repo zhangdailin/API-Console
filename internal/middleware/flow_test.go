@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"orchids-api/internal/audit"
 	"orchids-api/internal/testutil"
+	"strings"
 	"testing"
 	"time"
 )
@@ -248,4 +249,50 @@ func TestFlowCountsOnlyUpstreamReportedUsage(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFlowOutputRateIsLiveWhileStreaming(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		reported int
+	}{{"estimate corrected upward", 120}, {"estimate corrected downward", 3}} {
+		t.Run(tc.name, func(t *testing.T) {
+			tracker := NewFlowTracker()
+			box := &requestObservation{}
+			req := httptest.NewRequest("POST", "/cline/v1/chat/completions", nil)
+			req = req.WithContext(context.WithValue(req.Context(), requestObservationKey{}, box))
+			var during FlowRoute
+			tracker.Track(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				// 40 ASCII bytes = 10 tokens, 10 CJK characters = 10 tokens.
+				_, _ = w.Write([]byte(`data: {"choices":[{"delta":{"content":"` + strings.Repeat("abcd", 10) + `"}}]}` + "\n\n"))
+				_, _ = w.Write([]byte(`data: {"choices":[{"delta":{"reasoning_content":"` + strings.Repeat("思", 10) + `"}}]}` + "\n\n"))
+				during = tracker.Snapshot("cline").Routes[0]
+				ObserveAuditLogger(nil).Log(r.Context(), audit.Event{Action: "chat_request", Status: "ok", UsageSource: audit.UsageSourceUpstream, InputTokens: 7, OutputTokens: tc.reported})
+			})(httptest.NewRecorder(), req)
+
+			testutil.Equal(t, during.Active, int64(1))
+			testutil.True(t, during.UsageAvailable, "a streaming answer must report a live output rate")
+			testutil.Equal(t, during.OutputTokens, int64(20))
+			testutil.Equal(t, during.OutputTPS, 20.0/flowRateSeconds)
+
+			route := tracker.Snapshot("cline").Routes[0]
+			testutil.Equal(t, route.OutputTokens, int64(tc.reported))
+			testutil.Equal(t, route.OutputTPS, float64(tc.reported)/flowRateSeconds)
+		})
+	}
+}
+
+func TestFlowOutputEstimateStopsOnceUsageIsReported(t *testing.T) {
+	tracker := NewFlowTracker()
+	box := &requestObservation{}
+	req := httptest.NewRequest("POST", "/cline/v1/chat/completions", nil)
+	req = req.WithContext(context.WithValue(req.Context(), requestObservationKey{}, box))
+	tracker.Track(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		ObserveAuditLogger(nil).Log(r.Context(), audit.Event{Action: "cline_upstream_attempt", Status: "ok", UsageSource: audit.UsageSourceUpstream, OutputTokens: 50})
+		// Text translated after the upstream reported its usage is already in it.
+		_, _ = w.Write([]byte(`data: {"choices":[{"delta":{"content":"` + strings.Repeat("abcd", 100) + `"}}]}` + "\n\n"))
+	})(httptest.NewRecorder(), req)
+	testutil.Equal(t, tracker.Snapshot("cline").Routes[0].OutputTokens, int64(50))
 }

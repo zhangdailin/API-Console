@@ -16,12 +16,14 @@ func (w *TracedResponseWriter) isSSE() bool {
 type tokenSSEDetector struct {
 	visible, reasoning, tool bool
 	finish                   string
-	line                     []byte
-	data                     []byte
-	event                    string
-	size                     int
-	overflow                 bool
-	lineNonempty             bool
+	// outputUnits accumulates the generated text seen so far (outputUnits).
+	outputUnits  int64
+	line         []byte
+	data         []byte
+	event        string
+	size         int
+	overflow     bool
+	lineNonempty bool
 }
 
 const maxTokenEventBytes = 1 << 20
@@ -51,6 +53,7 @@ func (d *tokenSSEDetector) observe(chunk []byte) bool {
 				d.visible = d.visible || s.visible
 				d.reasoning = d.reasoning || s.reasoning
 				d.tool = d.tool || s.tool
+				d.outputUnits += s.units
 				if s.finish != "" {
 					d.finish = s.finish
 				}
