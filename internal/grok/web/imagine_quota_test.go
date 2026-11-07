@@ -21,13 +21,12 @@ func TestImagineQuotaFencesMediaRouting(t *testing.T) {
 	freeAcc := &store.Account{}
 	freeAcc.GrokWebQuota.Imagine = free
 	// Free plans offer no edits and no 480p video, have spent today's Imagine
-	// images, keep their 720p video and always draw lite images by chat.
+	// images and keep their 720p video.
 	testutil.False(t, mediaAllowed(freeAcc, mediaImageEdit, now))
 	testutil.False(t, mediaAllowed(freeAcc, mediaVideo, now))
 	testutil.False(t, mediaAllowed(freeAcc, mediaImagePro, now))
 	testutil.True(t, mediaAllowed(freeAcc, mediaImagePro, now.Add(8*time.Hour)))
 	testutil.True(t, mediaAllowed(freeAcc, mediaVideo720p, now))
-	testutil.True(t, mediaAllowed(freeAcc, mediaLite, now))
 
 	paid, err := parseImagineQuota([]byte(paidImagineQuota), now)
 	testutil.NoError(t, err)
@@ -38,7 +37,7 @@ func TestImagineQuotaFencesMediaRouting(t *testing.T) {
 	// A spent weekly pool refuses every media product, its own counters aside.
 	paidAcc.GrokWebQuota.Weekly = store.GrokQuotaWindow{HasLimit: true, Limit: 100, HasRemaining: true, Remaining: 0, ResetAt: now.Add(48 * time.Hour)}
 	testutil.False(t, mediaAllowed(paidAcc, mediaImageEdit, now))
-	testutil.False(t, mediaAllowed(paidAcc, mediaLite, now))
+	testutil.False(t, mediaAllowed(paidAcc, mediaImagePro, now))
 
 	// An account never observed is allowed: its first request reveals it.
 	testutil.True(t, mediaAllowed(&store.Account{}, mediaImageEdit, now))
@@ -48,10 +47,10 @@ func TestMediaProductForRoutes(t *testing.T) {
 	video, _ := ResolveModel("grok-imagine-video")
 	edit, _ := ResolveModel("grok-imagine-image-edit")
 	image, _ := ResolveModel("grok-imagine-image")
-	lite, _ := ResolveModel("grok-imagine-image-lite")
 	testutil.Equal(t, mediaProductFor(video, "720p"), mediaVideo720p)
 	testutil.Equal(t, mediaProductFor(video, "480p"), mediaVideo)
 	testutil.Equal(t, mediaProductFor(edit, ""), mediaImageEdit)
 	testutil.Equal(t, mediaProductFor(image, ""), mediaImagePro)
-	testutil.Equal(t, mediaProductFor(lite, ""), mediaLite)
+	_, liteKnown := ResolveModel("grok-imagine-image-lite")
+	testutil.False(t, liteKnown, "the lite image model is no longer served")
 }

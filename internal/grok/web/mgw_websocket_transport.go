@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"orchids-api/internal/httpclient"
@@ -68,13 +67,7 @@ type MGWChatRequest struct {
 	Model  string
 	Prompt string
 	Token  string
-	// ImageGeneration asks the session to draw: grok.com's fast chat answers
-	// "Drawing: …" with pictures only when the session enables it (the REST
-	// app-chat flag no longer does). Mirrors grok2api's gateway session.
-	ImageGeneration bool
 }
-
-const mgwHeartbeatPeriod = 25 * time.Second
 
 type mgwWebSocketTransport struct {
 	client *Client
@@ -105,22 +98,8 @@ func (t *mgwWebSocketTransport) Open(ctx context.Context, request MGWChatRequest
 	if err != nil {
 		return nil, err
 	}
-	// The handshake has to look like the browser's: grok.com answered a
-	// Go-TLS handshake without a statsig signature with stock pictures in
-	// place of the drawing. The TLS dial presents the Chrome ClientHello
-	// the HTTP transport uses (and routes through the configured proxy).
-	proxyFunc := mgwProxyFunc(t.client)
-	userAgent := t.client.userAgent()
-	dialer := websocket.Dialer{
-		HandshakeTimeout: mgwHandshakeTimeout,
-		NetDialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return httpclient.DialBrowserWebSocketTLS(ctx, network, addr, proxyFunc, userAgent)
-		},
-	}
-	if !strings.EqualFold(strings.SplitN(endpoint, ":", 2)[0], "wss") {
-		dialer.Proxy = proxyFunc
-	}
-	connection, handshake, err := dialer.DialContext(ctx, endpoint, mgwHeaders(ctx, t.client, endpoint, origin, request.UserID, request.Token))
+	dialer := websocket.Dialer{HandshakeTimeout: mgwHandshakeTimeout, Proxy: mgwProxyFunc(t.client)}
+	connection, handshake, err := dialer.DialContext(ctx, endpoint, mgwHeaders(t.client, origin, request.UserID, request.Token))
 	if err != nil {
 		if handshake != nil {
 			return handshake, nil
@@ -153,31 +132,22 @@ func mgwEndpoint(baseURL, userID string) (string, string, error) {
 	return parsed.String(), origin, nil
 }
 
-// mgwHeaders builds the upgrade request the way the Imagine WebSocket (which
-// grok.com serves real pictures on) does: the browser header set with a
-// statsig signature for the request, then the WebSocket fetch metadata.
-func mgwHeaders(ctx context.Context, client *Client, endpoint, origin, userID, token string) http.Header {
-	signed := strings.Replace(strings.Replace(endpoint, "wss://", "https://", 1), "ws://", "http://", 1)
-	header := client.headersFor(ctx, token, http.MethodGet, signed)
-	header.Del("Content-Type")
+func mgwHeaders(client *Client, origin, userID, token string) http.Header {
+	header := http.Header{}
 	header.Set("Origin", origin)
-	header.Set("Referer", origin+"/")
-	header.Set("Sec-Fetch-Dest", "websocket")
-	header.Set("Sec-Fetch-Mode", "websocket")
-	// SSO is a browser cookie, never an Authorization: Bearer credential. The
-	// Cloudflare clearance the REST requests carry is needed by the handshake too.
-	if cookie := mgwCookie(client, token, userID); cookie != "" {
+	header.Set("User-Agent", client.userAgent())
+	header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	header.Set("Cache-Control", "no-cache")
+	header.Set("Pragma", "no-cache")
+	// SSO is a browser cookie, never an Authorization: Bearer credential.
+	if cookie := mgwCookie(token, userID); cookie != "" {
 		header.Set("Cookie", cookie)
 	}
 	return header
 }
 
-func mgwCookie(client *Client, token, userID string) string {
-	cfClearance, cfBM := "", ""
-	if client != nil {
-		cfClearance, cfBM = client.cloudflareCookies()
-	}
-	items := grokCookieItems(buildGrokCookie(token, cfClearance, cfBM))
+func mgwCookie(token, userID string) string {
+	items := grokCookieItems(buildGrokCookie(token, "", ""))
 	withoutUserID := items[:0]
 	for _, item := range items {
 		if item.name != "x-userid" {
@@ -206,14 +176,11 @@ func streamMGW(ctx context.Context, connection *websocket.Conn, writer *io.PipeW
 	initialID := "evt_init_" + randomUUID()
 	if err := sender.write(map[string]any{"event": map[string]any{
 		"type": "session.create", "event_id": initialID,
-		"session": map[string]any{"model": request.Model, "x_grok": mgwSessionOptions(request)},
+		"session": map[string]any{"model": request.Model, "x_grok": map[string]any{"protocol_capabilities": []string{"conversation_attached", "custom_methods_v1"}, "use_chunk": true, "is_temporary": true, "disable_memory": true}},
 	}}); err != nil {
 		_ = writer.CloseWithError(fmt.Errorf("send grok mgw session.create: %w", err))
 		return
 	}
-	heartbeatDone := make(chan struct{})
-	defer close(heartbeatDone)
-	go mgwHeartbeat(sender, heartbeatDone)
 	created, attached, sent := false, false, false
 	for {
 		messageType, data, err := connection.ReadMessage()
@@ -236,14 +203,7 @@ func streamMGW(ctx context.Context, connection *websocket.Conn, writer *io.PipeW
 			created = true
 		case "conversation.attached":
 			attached = true
-		case "response.done":
-			// A drawing outlives the text turn: grok.com ends the response with
-			// a render placeholder and delivers the picture afterwards. The
-			// reader closes the body once it has what it needs.
-			if !request.ImageGeneration {
-				return
-			}
-		case "error":
+		case "response.done", "error":
 			return
 		case "session.ended":
 			_ = writer.CloseWithError(fmt.Errorf("grok mgw session ended before response completion"))
@@ -260,42 +220,6 @@ func streamMGW(ctx context.Context, connection *websocket.Conn, writer *io.PipeW
 			}
 			if err := sender.write(response); err != nil {
 				_ = writer.CloseWithError(err)
-				return
-			}
-		}
-	}
-}
-
-// mgwSessionOptions is the x_grok block of session.create: a temporary
-// session without memory, and image generation when the request draws.
-func mgwSessionOptions(request MGWChatRequest) map[string]any {
-	options := map[string]any{
-		"protocol_capabilities": []string{"conversation_attached", "custom_methods_v1"},
-		"use_chunk":             true, "is_temporary": true, "disable_memory": true, "keep_context": false,
-	}
-	if request.ImageGeneration {
-		options["enable_image_generation"] = true
-		options["image_generation_count"] = 2
-		options["enable_side_by_side"] = true
-		options["force_side_by_side"] = false
-		options["disable_artifact"] = true
-		options["disable_text_follow_ups"] = false
-		options["force_concise"] = false
-	}
-	return options
-}
-
-// mgwHeartbeat keeps a long generation's socket alive.
-func mgwHeartbeat(sender *mgwSender, done <-chan struct{}) {
-	ticker := time.NewTicker(mgwHeartbeatPeriod)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-done:
-			return
-		case now := <-ticker.C:
-			if err := sender.write(map[string]any{"event": map[string]any{"type": "ping", "event_id": fmt.Sprintf("evt_hb_%d", now.UnixMilli())}}); err != nil {
-				_ = sender.connection.Close()
 				return
 			}
 		}
