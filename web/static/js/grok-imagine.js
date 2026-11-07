@@ -2,6 +2,19 @@
   const batchSize = () => Math.max(1, Math.min(6, Number(document.getElementById("imagineCount")?.value) || 6));
   const STORAGE_KEY = "grok_tools_ui_v1";
   let imageModels = [];
+  // availability is what the tools page learned about the Grok Web pool:
+  // webPlans counts accounts by plan, media whether any account still has
+  // the image_pro / image_edit allowance. Unknown (null) changes nothing.
+  let availability = { webPlans: null, media: null };
+  const PARALLELISM = 2;
+
+  // freeOnlyPool reports a pool of Free Web accounts only. Such a pool runs
+  // one image at a time; any paid or unclassified account keeps the parallel
+  // batch.
+  function freeOnlyPool() {
+    const plans = availability.webPlans;
+    return Boolean(plans) && Number(plans.free) > 0 && !Number(plans.paid) && !Number(plans.unknown);
+  }
 
   // Quality tiers, as grok2api names them: 快速 is the lite model (a fast
   // chat every plan can use), 标准 the Imagine model, 高质量 Imagine 2.0.
@@ -469,10 +482,11 @@
     }
   }
 
-  // runBatch fills the slots one image at a time: one request in flight, for
-  // one image, so generation and edits never run several upstream jobs at once.
-  // The other slots wait as 排队中 until their turn.
+  // runBatch fills the slots of one round. A Free-only pool runs one request
+  // for one image at a time (the other slots wait as 排队中); otherwise two
+  // requests of two images each run side by side.
   async function runBatch(batch, prompt, ratio, model, quality, nsfw, signal) {
+    if (!freeOnlyPool()) return runBatchParallel(batch, prompt, ratio, model, quality, nsfw, signal);
     const results = new Array(batch.slots.length).fill(false);
     for (let index = 0; index < batch.slots.length; index += 1) {
       if (signal?.aborted) break;
@@ -482,6 +496,50 @@
       if (batch.quotaExhausted) break;
     }
     return results;
+  }
+
+  async function runBatchParallel(batch, prompt, ratio, model, quality, nsfw, signal) {
+    const results = new Array(batch.slots.length).fill(false);
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(PARALLELISM, Math.ceil(batch.slots.length / 2)) }, async () => {
+      while (cursor < batch.slots.length) {
+        if (signal?.aborted) break;
+        const index = cursor;
+        cursor += 2;
+        const slots = batch.slots.slice(index, index + 2);
+        const outcome = await runSlots(batch, slots, prompt, ratio, model, quality, nsfw, signal);
+        outcome.forEach((ok, offset) => { results[index + offset] = ok; });
+        // A spent allowance does not come back within the batch.
+        if (batch.quotaExhausted) break;
+      }
+    });
+    await Promise.all(workers);
+    return results;
+  }
+
+  // applyAvailability offers only what the pool can serve: 标准/高质量 need an
+  // account with the image_pro allowance, and 编辑 one with image_edit (Free
+  // plans have none). A choice that is no longer offered falls back.
+  function applyAvailability() {
+    const media = availability.media || {};
+    const proAllowed = media.image_pro !== false;
+    const editAllowed = media.image_edit !== false;
+    document.querySelectorAll("#imagineQualityToggle [data-imagine-quality]").forEach((btn) => {
+      if (btn.dataset.imagineQuality !== "lite") btn.classList.toggle("hidden", !proAllowed);
+    });
+    if (!proAllowed && normalizeQuality(readToggle("#imagineQualityToggle", "imagineQuality", "lite")) !== "lite") {
+      setToggle("#imagineQualityToggle", "imagineQuality", "lite");
+      syncResolution("lite");
+    }
+    document.querySelectorAll("#imagineOperationToggle [data-imagine-operation='edit']").forEach((btn) => {
+      btn.disabled = !editAllowed;
+      if (editAllowed) btn.removeAttribute("title");
+      else btn.title = "当前账号没有改图额度（Free 账号不提供改图）";
+    });
+    if (!editAllowed && imageOperation() === "edit") {
+      setToggle("#imagineOperationToggle", "imagineOperation", "generate");
+      syncEditUI();
+    }
   }
 
   async function start() {
@@ -831,12 +889,19 @@
     setToggle("#imagineOperationToggle", "imagineOperation", ui.imagineOperation === "edit" ? "edit" : "generate");
     setToggle("#imagineRunModeToggle", "imagineRunMode", ui.imagineRunMode === "continuous" ? "continuous" : "single");
     bindEvents();
+    if (window.GrokAvailability) availability = window.GrokAvailability;
     syncEditUI();
     syncRatioUI();
     resizePrompt();
     setButtons(false);
+    applyAvailability();
     setStatus("空闲");
   }
+
+  window.addEventListener("grok-availability", (event) => {
+    availability = event?.detail && typeof event.detail === "object" ? event.detail : { webPlans: null, media: null };
+    applyAvailability();
+  });
 
   window.addEventListener("grok-models-loaded", (event) => {
     imageModels = (Array.isArray(event.detail) ? event.detail : []).filter((item) => Array.isArray(item?.capabilities) && item.capabilities.includes("image"));

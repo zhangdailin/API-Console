@@ -262,12 +262,19 @@
       grokCapabilityState.counts = counts;
       grokCapabilityState.webSynced = Number(payload?.web_synced || 0);
       grokCapabilityState.webSyncError = String(payload?.web_sync_error || "");
+      // The Web plan mix and the media allowances steer the Imagine panel:
+      // a Free-only pool runs one image at a time, and a product no account
+      // has an allowance for is not offered.
+      grokCapabilityState.webPlans = payload?.web_plans && typeof payload.web_plans === "object" ? payload.web_plans : null;
+      grokCapabilityState.media = payload?.media && typeof payload.media === "object" ? payload.media : null;
       grokCapabilityState.failed = false;
     } catch (err) {
       grokCapabilityState.failed = true;
       console.debug("Failed to load Grok capabilities:", err);
     }
     grokCapabilityState.loaded = true;
+    window.GrokAvailability = Object.freeze({ webPlans: grokCapabilityState.webPlans || null, media: grokCapabilityState.media || null });
+    window.dispatchEvent(new CustomEvent("grok-availability", { detail: window.GrokAvailability }));
     ["chat", "imagine", "video", "voice", "cache"].forEach((tab) => {
       const badge = document.querySelector(`[data-capability="${tab}"]`);
       if (!badge) return;

@@ -405,22 +405,22 @@ func (h *Handler) collectAppChatImageURLs(ctx context.Context, sess *chatAccount
 	var debugShapes []string
 	var debugNoImage []string
 
-	// Grok upstream may return only 2 images per call and may repeat.
-	// To reach N, request 1 image per call without rewriting the user's prompt.
+	// A lite call is a fast chat that always draws two pictures, and only the
+	// first is the drawing of the prompt: the second is often unrelated to it.
+	// grok2api keeps the first and repeats the call for each image ("Lite 上游固定
+	// 生成两张……按旧协议取首张并为 n 重复查询"); so does this collector. Each call
+	// costs one fast query either way.
 	maxAttempts := max(req.N*2, 4)
-	deadline := time.Now().Add(60 * time.Second)
+	deadline := time.Now().Add(max(60*time.Second, time.Duration(req.N)*40*time.Second))
 	excludedAccountIDs := make([]int64, 0, maxAttempts)
 	for i := range maxAttempts {
-		cur := normalizeGeneratedImageURLs(urls, 0)
-		if len(cur) >= req.N {
-			urls = cur
+		if len(urls) >= req.N {
 			break
 		}
 		if time.Now().After(deadline) {
 			break
 		}
-		count := req.N
-		payload := h.webClient().appChatImagePayload(spec, req.Prompt, req.Size, count)
+		payload := h.webClient().appChatImagePayload(spec, req.Prompt, req.Size, 1)
 		ensureImageNSFW(payload)
 		resp, err := h.doAppChatImageRequest(ctx, sess, spec, &payload, allowSwitch)
 		if err != nil {
@@ -432,6 +432,7 @@ func (h *Handler) collectAppChatImageURLs(ctx context.Context, sess *chatAccount
 			return nil, err
 		}
 		imageLimitHit := false
+		var callURLs []string
 		h.syncGrokQuota(sess.acc, resp.Header)
 		err = parseUpstreamLines(resp.Body, func(line map[string]any) error {
 			if len(debugShapes) < 20 {
@@ -443,14 +444,16 @@ func (h *Handler) collectAppChatImageURLs(ctx context.Context, sess *chatAccount
 			if isAppChatImageLimitResponse(line) {
 				imageLimitHit = true
 			}
-			urls = append(urls, extractAppChatImageURLs(line)...)
+			callURLs = append(callURLs, extractAppChatImageURLs(line)...)
 			return nil
 		})
 		resp.Body.Close()
 		if err != nil {
 			return nil, fmt.Errorf("stream parse error: %w", err)
 		}
-		urls = normalizeGeneratedImageURLs(urls, 0)
+		if first := firstLiteImage(callURLs, urls); first != "" {
+			urls = append(urls, first)
+		}
 		if len(urls) == 0 && imageLimitHit {
 			err := fmt.Errorf("grok upstream status=429 body=image generation limit reached")
 			if sess.acc != nil && sess.acc.GrokWebQuota.Weekly.HasLimit {
@@ -510,4 +513,17 @@ func (h *Handler) doAppChatImageRequest(ctx context.Context, sess *chatAccountSe
 		return h.doAutoSwitchRequest(ctx, sess, payload, nil, (*Client).doAppChatCreateAndRespond)
 	}
 	return h.doSingleAccountRequest(ctx, sess, *payload, markAllGrokAccountStatuses, (*Client).doAppChatCreateAndRespond)
+}
+
+// firstLiteImage returns the first finished image of one lite call, in the
+// order the stream delivered it, skipping one already taken by an earlier call.
+func firstLiteImage(callURLs, taken []string) string {
+	for _, candidate := range callURLs {
+		candidate = strings.TrimSpace(candidate)
+		if imageURLScore(candidate) < 0 || slices.Contains(taken, candidate) {
+			continue
+		}
+		return candidate
+	}
+	return ""
 }

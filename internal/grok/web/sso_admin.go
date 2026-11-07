@@ -446,6 +446,12 @@ func (h *Handler) HandleAvailability(w http.ResponseWriter, r *http.Request) {
 	}
 	counts := map[string]int{ProviderBuild: 0, ProviderWeb: 0}
 	webSynced, webError := 0, ""
+	// plans counts the active Web accounts by plan, so the tools page can tell
+	// a Free-only pool. media reports whether any of them still has the
+	// allowance of each media product (the same fence account selection uses).
+	plans := map[string]int{"free": 0, "paid": 0, "unknown": 0}
+	media := map[string]bool{mediaImagePro: false, mediaImageEdit: false}
+	now := time.Now()
 	if h != nil && h.lb != nil && h.lb.Store != nil {
 		accounts, err := h.lb.Store.ListAccounts(r.Context())
 		if err != nil {
@@ -460,7 +466,11 @@ func (h *Handler) HandleAvailability(w http.ResponseWriter, r *http.Request) {
 				counts[provider]++
 			}
 			if IsWebAccount(acc) {
-				if accountObservesRoutes(acc, time.Now()) {
+				plans[webPlanTier(acc)]++
+				for product := range media {
+					media[product] = media[product] || mediaAllowed(acc, product, now)
+				}
+				if accountObservesRoutes(acc, now) {
 					webSynced++
 				} else if webError == "" {
 					webError = acc.GrokWebSyncError
@@ -468,5 +478,5 @@ func (h *Handler) HandleAvailability(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, map[string]any{"counts": counts, "web_synced": webSynced, "web_sync_error": webError})
+	writeJSON(w, map[string]any{"counts": counts, "web_synced": webSynced, "web_sync_error": webError, "web_plans": plans, "media": media})
 }
