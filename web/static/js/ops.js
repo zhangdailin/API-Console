@@ -10,12 +10,14 @@
     window: 180,
     channel: '',
     model: '',
-    refreshSeconds: 15,
-    countdown: 15,
-    timer: null,
-    // Set when a refresh interval elapses while the tab is hidden; the work is
-    // deferred to the moment the operator looks at the dashboard again.
+    // Set when new data arrives while the tab is hidden or a read is in flight;
+    // the read happens as soon as the operator can see it.
     refreshPending: false,
+    // The live-update bookkeeping: the request counters last seen on the flow
+    // stream, when the last read started, and the timer of a deferred one.
+    flowMark: '',
+    lastLoadAt: 0,
+    liveTimer: null,
     // Prevent slow overview/runtime requests from overlapping on each refresh
     // tick and multiplying server aggregation plus SVG rendering work.
     loading: false,
@@ -853,7 +855,8 @@
 
   // --- alerts ----------------------------------------------------------------
 
-  async function loadAlertEvents() {
+  async function loadAlertEvents(options) {
+    const live = Boolean(options && options.live);
     const table = el('opsAlertTable');
     if (!table) return;
     const body = table.querySelector('tbody');
@@ -864,13 +867,16 @@
     const ticket = alertLoads.begin();
     const current = () => ticket.isCurrent() && scope.window === state.window && scope.channel === state.channel;
     const range = windowRange();
-    body.replaceChildren();
+    // A live update replaces the rows only once the new ones are read, so the
+    // table does not blink empty on every request.
+    if (!live) body.replaceChildren();
     try {
       const params = assignParams(new URLSearchParams({ kind: 'system', action: 'alert_', limit: '50' }), {
         channel, since: range.since.toISOString(), until: range.until.toISOString(),
       });
       const payload = await ConsoleAPI.journal(params, { signal: ticket.signal });
       if (!current()) return;
+      body.replaceChildren();
       const rows = (payload.data || []).filter((record) => {
         const event = record.event || {};
         if (event.action !== 'alert_fired' && event.action !== 'alert_recovered') return false;
@@ -1108,18 +1114,25 @@
 
   const overviewLoads = ConsoleUI.requestGate();
   const alertLoads = ConsoleUI.requestGate();
-  async function load() {
+  // load reads the overview. A live update (a request started or ended) keeps the
+  // page as it is until the new figures arrive and never cancels a read in
+  // flight; an operator's action (a filter, the refresh button) supersedes it.
+  async function load(options) {
+    const live = Boolean(options && options.live);
     if (state.loading) {
       state.refreshPending = true;
-      overviewLoads.cancel();
-      alertLoads.cancel();
+      if (!live) {
+        overviewLoads.cancel();
+        alertLoads.cancel();
+      }
       return;
     }
     state.loading = true;
+    state.lastLoadAt = Date.now();
     const ticket = overviewLoads.begin();
     const scope = { window: state.window, channel: state.channel };
     if (!state.overview) renderSkeletons();
-    setStatus('读取中…', 'is-warn');
+    if (!live) setStatus('读取中…', 'is-warn');
     syncUrl();
     try {
       const params = assignParams(new URLSearchParams({ window: String(state.window) }), { channel: state.channel });
@@ -1145,8 +1158,7 @@
       const aggregationLoss = payload.aggregation_health && payload.aggregation_health.write_failed;
       if (payload.available === false && payload.note) setStatus(payload.note, 'is-warn');
       else setStatus(collectionLoss ? '日志采集存在丢失' : aggregationLoss ? '指标采集存在丢失' : '就绪', collectionLoss || aggregationLoss ? 'is-warn' : '');
-      state.countdown = state.refreshSeconds;
-      await loadAlertEvents();
+      await loadAlertEvents({ live });
     } catch (error) {
       if (!ticket.accepts(error) || scope.window !== state.window || scope.channel !== state.channel) return;
       // A failed filter change has no valid historical scope to display.
@@ -1176,7 +1188,7 @@
       // follow-up pass, rather than losing a filter change or starting N passes.
       if (state.refreshPending && (typeof document === 'undefined' || !document.hidden)) {
         state.refreshPending = false;
-        window.setTimeout(load, 0);
+        scheduleLiveRefresh();
       }
     }
   }
@@ -1257,30 +1269,46 @@
     });
   }
 
-  function tick() {
-    state.countdown -= 1;
-    if (state.countdown > 0) {
-      setText('opsCountdown', String(state.countdown));
-      return;
-    }
-    state.countdown = state.refreshSeconds;
-    // A background tab keeps no one informed: the dashboard it refreshes is not
-    // on screen, so the poll only burns the operator's quota and the server's
-    // aggregation budget. The backlog is fetched as soon as the tab is shown.
+  // The overview follows the live flow stream instead of a countdown: a request
+  // that starts or finishes changes the aggregates, so it triggers a read. Reads
+  // are spaced at least LIVE_MIN_GAP_MS apart so a busy gateway costs one read
+  // per gap, not one per request. LIVE_IDLE_MS re-reads a quiet page so the
+  // resource gauges and alert events still move with no traffic at all.
+  const LIVE_MIN_GAP_MS = 2000;
+  const LIVE_IDLE_MS = 30000;
+
+  function scheduleLiveRefresh() {
     if (typeof document !== 'undefined' && document.hidden) {
       state.refreshPending = true;
       return;
     }
-    flushPendingRefresh();
+    if (state.liveTimer != null) return;
+    const wait = Math.max(0, state.lastLoadAt + LIVE_MIN_GAP_MS - Date.now());
+    state.liveTimer = window.setTimeout(() => {
+      state.liveTimer = null;
+      return load({ live: true });
+    }, wait);
   }
 
-  // Returning to the tab has to catch up immediately: without this the operator
-  // can sit down to a dashboard that is up to a full refresh interval stale.
+  function onFlow(event) {
+    const detail = (event && event.detail) || {};
+    const mark = [detail.instance, detail.started, detail.completed].join(':');
+    if (mark === state.flowMark) return;
+    const first = state.flowMark === '';
+    state.flowMark = mark;
+    if (!first) scheduleLiveRefresh();
+  }
+
+  function idleRefresh() {
+    if (Date.now() - state.lastLoadAt >= LIVE_IDLE_MS) scheduleLiveRefresh();
+  }
+
+  // Returning to the tab catches up at once with whatever arrived while hidden.
   function flushPendingRefresh() {
     if (typeof document !== 'undefined' && document.hidden) return;
+    if (!state.refreshPending) return;
     state.refreshPending = false;
-    state.countdown = state.refreshSeconds;
-    load();
+    scheduleLiveRefresh();
   }
 
   // applyUrlState puts the page back where the URL says it should be: the filters
@@ -1311,5 +1339,6 @@
     load();
   }
   if (typeof document.addEventListener === 'function') { document.addEventListener('visibilitychange', flushPendingRefresh); }
-  state.timer = setInterval(tick, 1000);
+  if (typeof window.addEventListener === 'function') window.addEventListener('ops:flow', onFlow);
+  setInterval(idleRefresh, 5000);
 })();

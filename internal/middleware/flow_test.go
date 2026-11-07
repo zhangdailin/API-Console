@@ -296,3 +296,22 @@ func TestFlowOutputEstimateStopsOnceUsageIsReported(t *testing.T) {
 	})(httptest.NewRecorder(), req)
 	testutil.Equal(t, tracker.Snapshot("cline").Routes[0].OutputTokens, int64(50))
 }
+
+func TestFlowInputRateIsLiveFromMessageStart(t *testing.T) {
+	tracker := NewFlowTracker()
+	box := &requestObservation{}
+	req := httptest.NewRequest("POST", "/cline/v1/messages", nil)
+	req = req.WithContext(context.WithValue(req.Context(), requestObservationKey{}, box))
+	var during FlowRoute
+	tracker.Track(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":900,\"output_tokens\":1}}}\n\n"))
+		during = tracker.Snapshot("cline").Routes[2]
+		ObserveAuditLogger(nil).Log(r.Context(), audit.Event{Action: "chat_request", Status: "ok", UsageSource: audit.UsageSourceUpstream, InputTokens: 1000, OutputTokens: 5})
+	})(httptest.NewRecorder(), req)
+	testutil.Equal(t, during.InputTokens, int64(900))
+	testutil.Equal(t, during.InputTPS, 900.0/flowRateSeconds)
+	route := tracker.Snapshot("cline").Routes[2]
+	testutil.Equal(t, route.InputTokens, int64(1000))
+	testutil.Equal(t, route.OutputTokens, int64(5))
+}

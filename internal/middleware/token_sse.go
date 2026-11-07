@@ -17,7 +17,9 @@ type tokenSSEDetector struct {
 	visible, reasoning, tool bool
 	finish                   string
 	// outputUnits accumulates the generated text seen so far (outputUnits).
-	outputUnits  int64
+	outputUnits int64
+	// inputTokens is the prompt size the stream announced, if it did.
+	inputTokens  int64
 	line         []byte
 	data         []byte
 	event        string
@@ -54,6 +56,7 @@ func (d *tokenSSEDetector) observe(chunk []byte) bool {
 				d.reasoning = d.reasoning || s.reasoning
 				d.tool = d.tool || s.tool
 				d.outputUnits += s.units
+				d.inputTokens = max(d.inputTokens, s.input)
 				if s.finish != "" {
 					d.finish = s.finish
 				}

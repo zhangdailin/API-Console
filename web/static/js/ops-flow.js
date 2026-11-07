@@ -47,6 +47,9 @@
     if(snapshot && snapshot.instance_started!==next.instance_started){trend.clear();pulses.clear();}
     const delta=M.deltas(snapshot,next);
     snapshot=next;lastReceived=now();connected=true;
+    // The overview below has no stream of its own: every request that starts or
+    // ends here is its cue to re-read the aggregates.
+    if(typeof CustomEvent!=='undefined')window.dispatchEvent(new CustomEvent('ops:flow',{detail:{started:M.sum(next.routes||[],'started'),completed:M.sum(next.routes||[],'completed'),instance:next.instance_started}}));
     for(const [key,value] of delta)pulse(key,value);
     sample();schedule();
   }

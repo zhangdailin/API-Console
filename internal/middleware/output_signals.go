@@ -12,6 +12,9 @@ type outputSignals struct {
 	// units sizes the generated text of the event in quarter tokens; see
 	// outputUnits.
 	units int64
+	// input is the prompt size a stream announces before generating
+	// (Messages message_start usage.input_tokens).
+	input int64
 }
 
 func streamOutputSignals(event string, data []byte) outputSignals {
@@ -42,6 +45,14 @@ func streamOutputSignals(event string, data []byte) outputSignals {
 		s.visible = s.text(d["text"])
 		s.reasoning = s.text(d["thinking"])
 		s.tool = s.text(d["partial_json"]) || kind == "content_block_start" && nonemptyJSONString(d["name"])
+	case "message_start":
+		var m struct {
+			Usage struct {
+				InputTokens int64 `json:"input_tokens"`
+			} `json:"usage"`
+		}
+		_ = json.Unmarshal(p["message"], &m)
+		s.input = max(m.Usage.InputTokens, 0)
 	case "message_delta":
 		var d struct {
 			StopReason string `json:"stop_reason"`
