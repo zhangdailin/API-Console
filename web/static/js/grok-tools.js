@@ -279,6 +279,14 @@
       badge.textContent = grokCapabilityState.failed ? "未知" : tab === "cache" ? "本地" : ready ? "可用" : "需账号";
       badge.classList.toggle("is-ready", ready && !grokCapabilityState.failed);
       badge.classList.toggle("is-unavailable", !ready || grokCapabilityState.failed);
+      // The tab carries the same verdict as a dot, so a missing capability is
+      // visible before the tab is opened.
+      const dot = document.querySelector(`[data-capability-dot="${tab}"]`);
+      if (dot) {
+        dot.classList.toggle("is-ready", ready && !grokCapabilityState.failed);
+        dot.classList.toggle("is-unavailable", !ready || grokCapabilityState.failed);
+        dot.title = badge.textContent;
+      }
     });
     applyGrokCapabilityControls();
     updateGrokCapabilityPresentation(currentGrokToolTab());
@@ -3477,7 +3485,7 @@
     if (!body) return;
     const rows = currentOnlineRows();
     if (rows.length === 0) {
-      body.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-secondary);padding:24px;">暂无在线账号</td></tr>`;
+      body.innerHTML = `<tr><td colspan="7" class="gw-empty-cell">暂无在线账号</td></tr>`;
       syncCacheOnlineSelectAll();
       return;
     }
@@ -3489,18 +3497,19 @@
       const accountStatus = String(row.account_status || "").trim();
       const accountStatusText = accountStatus && accountStatus !== "active" ? `账号: ${accountStatus}` : "";
       const lastClear = formatDateTime(row.last_asset_clear_at);
+      const tone = row.status === "ok" ? "is-ok" : row.status === "error" || row.status === "failed" ? "is-bad" : "is-idle";
       return `
         <tr>
-          <td style="text-align:center;">
+          <td class="gw-col-check">
             <input type="checkbox" class="cache-online-check" data-token="${encodeURIComponent(row.token)}" ${checked} />
           </td>
           <td><code>${escapeHTML(row.token_masked || formatTokenMask(row.token))}</code></td>
-          <td><span class="tag">${escapeHTML(row.pool || "-")}</span></td>
-          <td>${escapeHTML(countText)}</td>
-          <td>${escapeHTML(statusText)}${accountStatusText ? `<br><small>${escapeHTML(accountStatusText)}</small>` : ""}</td>
-          <td>${escapeHTML(lastClear)}</td>
-          <td>
-            <button class="btn btn-danger-outline cache-online-clear-btn" data-token="${encodeURIComponent(row.token)}" style="padding:4px 8px;">清理</button>
+          <td><span class="gw-chip">${escapeHTML(row.pool || "-")}</span></td>
+          <td class="gw-num">${escapeHTML(countText)}</td>
+          <td><span class="gw-status ${tone}">${escapeHTML(statusText)}</span>${accountStatusText ? `<span class="gw-subline">${escapeHTML(accountStatusText)}</span>` : ""}</td>
+          <td class="gw-muted">${escapeHTML(lastClear)}</td>
+          <td class="gw-col-actions">
+            <button class="btn btn-danger-outline btn-sm cache-online-clear-btn" data-token="${encodeURIComponent(row.token)}">清理</button>
           </td>
         </tr>
       `;
@@ -3585,12 +3594,14 @@
     return data;
   }
 
+  // renderCacheList draws the local cache as a file list with a thumbnail for
+  // each image and a film glyph for each video.
   function renderCacheList(items) {
     const body = document.getElementById("cacheListBody");
     if (!body) return;
     const list = Array.isArray(items) ? items : [];
     if (list.length === 0) {
-      body.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--text-secondary);padding:24px;">暂无缓存数据</td></tr>`;
+      body.innerHTML = `<tr><td colspan="4" class="gw-empty-cell">暂无缓存数据</td></tr>`;
       return;
     }
 
@@ -3600,14 +3611,25 @@
       const url = String(item.view_url || item.url || "");
       const size = formatBytes(item.size_bytes || item.size || 0);
       const updatedAt = formatDateTime(item.mtime_ms || item.updated_at || 0);
+      const safeURL = isSafeLinkURL(url);
+      const thumb = mediaType === "image" && safeURL
+        ? `<img src="${escapeHTML(url)}" alt="" loading="lazy">`
+        : `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="15" height="14" rx="2"/><path d="m22 8-5 4 5 4z"/></svg>`;
+      const label = safeURL
+        ? `<a href="${escapeHTML(url)}" target="_blank" rel="noopener" title="${escapeHTML(name)}">${escapeHTML(name)}</a>`
+        : `<span title="${escapeHTML(name)}">${escapeHTML(name)}</span>`;
       return `
         <tr>
-          <td><span class="tag">${escapeHTML(mediaType)}</span></td>
-          <td>${isSafeLinkURL(url) ? `<a href="${escapeHTML(url)}" target="_blank" rel="noopener"><code>${escapeHTML(name)}</code></a>` : `<code>${escapeHTML(name)}</code>`}</td>
-          <td>${escapeHTML(size)}</td>
-          <td>${escapeHTML(updatedAt)}</td>
           <td>
-            <button class="btn btn-danger-outline cache-delete-btn" data-media-type="${encodeURIComponent(mediaType)}" data-name="${encodeURIComponent(name)}" style="padding:4px 8px;">删除</button>
+            <div class="gw-file">
+              <span class="gw-file-thumb is-${escapeHTML(mediaType)}">${thumb}</span>
+              <span class="gw-file-copy"><span class="gw-file-name">${label}</span><span class="gw-file-type">${mediaType === "video" ? "视频" : "图片"}</span></span>
+            </div>
+          </td>
+          <td class="gw-num">${escapeHTML(size)}</td>
+          <td class="gw-muted">${escapeHTML(updatedAt)}</td>
+          <td class="gw-col-actions">
+            <button class="btn btn-danger-outline btn-sm cache-delete-btn" data-media-type="${encodeURIComponent(mediaType)}" data-name="${encodeURIComponent(name)}">删除</button>
           </td>
         </tr>
       `;

@@ -243,6 +243,55 @@
   }
   async function deleteAdminVideo(id) { if (!window.confirm(`确认删除终态任务 ${id}？`)) return; await mediaPost('/api/grok/admin/media/videos/delete', { id }); await loadAdminVideos(); }
 
+  const MEDIA_ICON = {
+    download: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>',
+    trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>',
+    open: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M21 14v7H3V3h7"/></svg>',
+    film: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="15" height="14" rx="2"/><path d="m22 8-5 4 5 4z"/></svg>',
+  };
+  const VIDEO_STATUS = { completed: ['已完成', 'is-ok'], failed: ['失败', 'is-bad'], cancelled: ['已取消', 'is-idle'], canceled: ['已取消', 'is-idle'], queued: ['排队中', 'is-warn'], in_progress: ['生成中', 'is-info'] };
+  function videoStatusLabel(status) { return (VIDEO_STATUS[String(status || '').toLowerCase()] || [String(status || '-')])[0]; }
+
+  // mediaImageTile is one generated image: the picture fills the tile, the
+  // selection box and the actions sit on it, the name and size below.
+  function mediaImageTile(item) {
+    const name = escapeMediaHTML(item.name), view = escapeMediaHTML(item.view_url), selected = mediaHistoryState.selectedImages.has(item.name);
+    const time = item.updated_at ? new Date(Number(item.updated_at)).toLocaleString() : '-';
+    return `<article class="gw-media-tile${selected ? ' is-selected' : ''}">
+      <a class="gw-media-thumb" href="${view}" target="_blank" rel="noopener" title="${name}"><img src="${escapeMediaHTML(item.preview_url || item.view_url)}" loading="lazy" alt="${name}"></a>
+      <label class="gw-media-check" title="选择"><input type="checkbox" data-image-select="${name}" ${selected ? 'checked' : ''}><span aria-hidden="true"></span></label>
+      <div class="gw-media-actions"><a class="gw-media-action" href="${view}?download=1" title="下载" aria-label="下载">${MEDIA_ICON.download}</a><button class="gw-media-action is-danger" type="button" data-image-delete="${name}" title="删除" aria-label="删除">${MEDIA_ICON.trash}</button></div>
+      <div class="gw-media-meta"><span class="gw-media-name" title="${name}">${name}</span><span class="gw-media-sub">${formatMediaBytes(item.size_bytes)} · ${escapeMediaHTML(time)}</span></div>
+    </article>`;
+  }
+
+  // mediaVideoCard is one video task: the player (or its status) on top, the
+  // prompt and metadata below.
+  function mediaVideoCard(item) {
+    const status = String(item.status || '').toLowerCase();
+    const [label, tone] = VIDEO_STATUS[status] || [String(item.status || '-'), 'is-idle'];
+    const terminal = ['completed', 'failed', 'cancelled', 'canceled'].includes(status);
+    const frame = item.content_url
+      ? `<video src="${escapeMediaHTML(item.content_url)}" preload="metadata" controls playsinline></video>`
+      : `<div class="gw-video-placeholder ${tone}">${MEDIA_ICON.film}<span>${status === 'in_progress' ? `${Number(item.progress || 0)}%` : escapeMediaHTML(label)}</span></div>`;
+    const created = item.created_at ? new Date(Number(item.created_at) * 1000).toLocaleString() : '-';
+    const actions = [
+      item.content_url ? `<a class="btn btn-outline btn-sm" target="_blank" rel="noopener" href="${escapeMediaHTML(item.content_url)}">${MEDIA_ICON.open}打开</a>` : '',
+      item.download_url ? `<a class="btn btn-outline btn-sm" href="${escapeMediaHTML(item.download_url)}">${MEDIA_ICON.download}下载</a>` : '',
+      terminal ? `<button class="btn btn-danger-outline btn-sm" type="button" data-video-delete="${escapeMediaHTML(item.id)}">删除</button>` : '',
+    ].join('');
+    return `<article class="gw-video-card">
+      <div class="gw-video-frame">${frame}</div>
+      <div class="gw-video-body">
+        <div class="gw-video-top"><span class="gw-status ${tone}">${escapeMediaHTML(label)}</span><code title="${escapeMediaHTML(item.id)}">${escapeMediaHTML(item.id)}</code></div>
+        <p class="gw-video-prompt" title="${escapeMediaHTML(item.prompt || item.error_message || '')}">${escapeMediaHTML(item.prompt || item.error_message || '无提示词')}</p>
+        <div class="gw-video-meta"><span>${escapeMediaHTML(item.model || '-')}</span><span>${escapeMediaHTML(item.size || '-')}</span><span>${Number(item.seconds || 0)}s</span></div>
+        <div class="gw-video-time">${escapeMediaHTML(created)}</div>
+        ${actions ? `<div class="gw-video-actions">${actions}</div>` : ''}
+      </div>
+    </article>`;
+  }
+
   async function loadAdminImages() {
     const host = document.getElementById('mediaImageGallery'); if (!host) return;
     const query = String(document.getElementById('mediaImageSearch')?.value || '').trim();
@@ -259,11 +308,11 @@
         mediaHistoryState.imagePage = pages;
         return loadAdminImages();
       }
-      host.innerHTML = items.length ? items.map((item) => `<article class="admin-media-card"><label class="admin-media-select"><input type="checkbox" data-image-select="${escapeMediaHTML(item.name)}" ${mediaHistoryState.selectedImages.has(item.name) ? 'checked' : ''}> 选择</label><a href="${escapeMediaHTML(item.view_url)}" target="_blank" rel="noopener"><img src="${escapeMediaHTML(item.preview_url)}" loading="lazy" alt="${escapeMediaHTML(item.name)}"></a><strong title="${escapeMediaHTML(item.name)}">${escapeMediaHTML(item.name)}</strong><span class="meta-text">${formatMediaBytes(item.size_bytes)} · ${new Date(Number(item.updated_at)).toLocaleString()}</span><div class="media-card-actions"><a class="btn btn-outline" href="${escapeMediaHTML(item.view_url)}?download=1">下载</a><button class="btn btn-danger-outline" type="button" data-image-delete="${escapeMediaHTML(item.name)}">删除</button></div></article>`).join('') : '<div class="table-empty-cell">暂无图片</div>';
+      host.innerHTML = items.length ? items.map(mediaImageTile).join('') : '<div class="gw-empty">暂无图片</div>';
       mediaHistoryState.imagePage = Math.min(mediaHistoryState.imagePage, pages);
       document.getElementById('mediaImagePage').textContent = `${mediaHistoryState.imagePage} / ${pages}`; document.getElementById('mediaImagePrevBtn').disabled = mediaHistoryState.imagePage <= 1; document.getElementById('mediaImageNextBtn').disabled = mediaHistoryState.imagePage >= pages;
       document.getElementById('mediaImageStats').textContent = `${stats.count || 0} 张 · ${Number(stats.size_mb || 0).toFixed(2)} MB`;
-    } catch (error) { host.innerHTML = `<div class="table-empty-cell">加载失败：${escapeMediaHTML(error.message)}</div>`; }
+    } catch (error) { host.innerHTML = `<div class="gw-empty is-error">加载失败：${escapeMediaHTML(error.message)}</div>`; }
   }
 
   async function loadAdminVideos() {
@@ -280,10 +329,10 @@
         mediaHistoryState.videoPage = pages;
         return loadAdminVideos();
       }
-      body.innerHTML = items.length ? items.map((item) => { const terminal = ['completed', 'failed', 'cancelled', 'canceled'].includes(String(item.status).toLowerCase()); const media = item.content_url ? `<video class="admin-video-preview" src="${escapeMediaHTML(item.content_url)}" preload="metadata" controls></video><div class="media-card-actions"><a class="btn btn-outline" target="_blank" rel="noopener" href="${escapeMediaHTML(item.content_url)}">打开</a><a class="btn btn-outline" href="${escapeMediaHTML(item.download_url)}">下载</a></div>` : '-'; return `<tr><td><code>${escapeMediaHTML(item.id)}</code><br><span class="meta-text">${escapeMediaHTML(item.provider || '-')} · account ${escapeMediaHTML(item.account_id || '-')}</span></td><td><span class="tag">${escapeMediaHTML(item.status)}</span></td><td><strong>${escapeMediaHTML(item.model || '-')}</strong><br><span class="meta-text">${escapeMediaHTML(item.prompt || item.error_message || '-')}</span><br><span class="meta-text">${escapeMediaHTML(item.size || '-')} · ${escapeMediaHTML(item.quality || '-')} · ${Number(item.seconds || 0)}s</span></td><td>${media}</td><td>${Number(item.progress || 0)}%<br><span class="meta-text">${item.created_at ? new Date(Number(item.created_at) * 1000).toLocaleString() : '-'}</span></td><td>${terminal ? `<button class="btn btn-danger-outline" type="button" data-video-delete="${escapeMediaHTML(item.id)}">删除</button>` : '-'}</td></tr>`; }).join('') : '<tr><td colspan="6" class="table-empty-cell">暂无视频任务</td></tr>';
+      body.innerHTML = items.length ? items.map(mediaVideoCard).join('') : '<div class="gw-empty">暂无视频任务</div>';
       mediaHistoryState.videoPage = Math.min(mediaHistoryState.videoPage, pages); document.getElementById('mediaVideoPage').textContent = `${mediaHistoryState.videoPage} / ${pages}`; document.getElementById('mediaVideoPrevBtn').disabled = mediaHistoryState.videoPage <= 1; document.getElementById('mediaVideoNextBtn').disabled = mediaHistoryState.videoPage >= pages;
-      const statuses = stats.statuses || {}; document.getElementById('mediaVideoStats').textContent = `${stats.total || 0} 个任务` + Object.entries(statuses).map(([key, value]) => ` · ${key}: ${value}`).join('');
-    } catch (error) { body.innerHTML = `<tr><td colspan="6" class="table-empty-cell">加载失败：${escapeMediaHTML(error.message)}</td></tr>`; }
+      const statuses = stats.statuses || {}; document.getElementById('mediaVideoStats').textContent = `${stats.total || 0} 个任务` + Object.entries(statuses).map(([key, value]) => ` · ${videoStatusLabel(key)} ${value}`).join('');
+    } catch (error) { body.innerHTML = `<div class="gw-empty is-error">加载失败：${escapeMediaHTML(error.message)}</div>`; }
   }
 
   function initAdminMediaHistory() {
@@ -292,10 +341,10 @@
     document.getElementById('mediaImageSearch')?.addEventListener('input', debounceMedia(() => { mediaHistoryState.imagePage = 1; loadAdminImages(); })); document.getElementById('mediaVideoSearch')?.addEventListener('input', debounceMedia(() => { mediaHistoryState.videoPage = 1; loadAdminVideos(); }));
     ['mediaVideoStatus', 'mediaVideoSort'].forEach((id) => document.getElementById(id)?.addEventListener('change', () => { mediaHistoryState.videoPage = 1; loadAdminVideos(); })); document.getElementById('mediaImageSort')?.addEventListener('change', () => { mediaHistoryState.imagePage = 1; loadAdminImages(); });
     document.getElementById('mediaImagePageSize')?.addEventListener('change', (event) => { mediaHistoryState.imagePageSize = Number(event.target.value); mediaHistoryState.imagePage = 1; loadAdminImages(); }); document.getElementById('mediaVideoPageSize')?.addEventListener('change', (event) => { mediaHistoryState.videoPageSize = Number(event.target.value); mediaHistoryState.videoPage = 1; loadAdminVideos(); });
-    document.getElementById('mediaImageDeleteSelectedBtn')?.addEventListener('click', () => deleteAdminImages([...mediaHistoryState.selectedImages])); gallery.addEventListener('change', (event) => { const name = event.target?.dataset?.imageSelect; if (name) event.target.checked ? mediaHistoryState.selectedImages.add(name) : mediaHistoryState.selectedImages.delete(name); }); gallery.addEventListener('click', (event) => { const name = event.target?.dataset?.imageDelete; if (name) deleteAdminImages([name]); }); document.getElementById('mediaVideoHistory')?.addEventListener('click', (event) => { const id = event.target?.dataset?.videoDelete; if (id) deleteAdminVideo(id); });
+    document.getElementById('mediaImageDeleteSelectedBtn')?.addEventListener('click', () => deleteAdminImages([...mediaHistoryState.selectedImages])); gallery.addEventListener('change', (event) => { const name = event.target?.dataset?.imageSelect; if (!name) return; if (event.target.checked) mediaHistoryState.selectedImages.add(name); else mediaHistoryState.selectedImages.delete(name); event.target.closest('.gw-media-tile')?.classList.toggle('is-selected', event.target.checked); }); gallery.addEventListener('click', (event) => { const name = event.target?.closest?.('[data-image-delete]')?.dataset.imageDelete; if (name) deleteAdminImages([name]); }); document.getElementById('mediaVideoHistory')?.addEventListener('click', (event) => { const id = event.target?.closest?.('[data-video-delete]')?.dataset.videoDelete; if (id) deleteAdminVideo(id); });
     document.getElementById('mediaImagePrevBtn')?.addEventListener('click', () => { mediaHistoryState.imagePage--; loadAdminImages(); }); document.getElementById('mediaImageNextBtn')?.addEventListener('click', () => { mediaHistoryState.imagePage++; loadAdminImages(); }); document.getElementById('mediaVideoPrevBtn')?.addEventListener('click', () => { mediaHistoryState.videoPage--; loadAdminVideos(); }); document.getElementById('mediaVideoNextBtn')?.addEventListener('click', () => { mediaHistoryState.videoPage++; loadAdminVideos(); }); loadAdminImages(); loadAdminVideos();
   }
 
-  if (typeof window !== 'undefined') window.GrokMediaTools = { normalizeVoices, jsonAudioSource, formatSeconds, loadAdminImages, loadAdminVideos };
+  if (typeof window !== 'undefined') window.GrokMediaTools = { normalizeVoices, jsonAudioSource, formatSeconds, loadAdminImages, loadAdminVideos, mediaImageTile, mediaVideoCard };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { init(); initAdminMediaHistory(); }); else { init(); initAdminMediaHistory(); }
 })();

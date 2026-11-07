@@ -2,6 +2,7 @@
 {{template "doc-head.html" .}}
   {{template "page-styles.html" .}}
   <link rel="stylesheet" href="{{.AdminPath}}/css/grok-tools.css?v={{.AssetVersion}}">
+  <link rel="stylesheet" href="{{.AdminPath}}/css/grok-workbench.css?v={{.AssetVersion}}">
 </head>
 
 <body>
@@ -9,15 +10,40 @@
 
 
   <main class="main-content grok-tools-page">
-    <section class="header-section grok-page-header">
-      <span class="grok-eyebrow">GROK WORKSPACE</span>
-      <h1>Grok 工作台</h1>
-      <p class="grok-page-lede">对话、图片、视频和语音集中管理；操作前会检查账号是否支持所需能力。</p>
-      <a class="btn btn-outline grok-account-link" href="{{.AdminPath}}/?tab=accounts">管理 Grok 账号</a>
-    </section>
+    <header class="gw-header">
+      <div class="gw-title">
+        <span class="gw-eyebrow">Grok Workspace</span>
+        <h1>Grok 工作台</h1>
+        <p>对话、图片、视频与语音在一处完成；每项操作前都会检查账号是否具备对应能力。</p>
+      </div>
+      <div class="gw-header-actions">
+        <div class="gw-identity" aria-label="API 测试身份">
+          <label class="gw-identity-label" for="grokRequestMode">调用身份</label>
+          <select id="grokRequestMode" class="form-input compact-select" title="管理员模式使用当前登录会话；Client Key 模式按真实密钥权限、限流和计费测试">
+            <option value="admin">管理员模式</option>
+            <option value="client">Client Key 模式</option>
+          </select>
+          <input id="grokClientKey" class="form-input hidden" type="password" autocomplete="off" placeholder="粘贴 sk-…（仅保存在当前标签页）">
+          <button id="grokClientKeyApply" class="btn btn-outline hidden" type="button">应用密钥</button>
+          <span id="grokClientKeyStatus" class="hint"></span>
+        </div>
+        <a class="btn btn-outline gw-account-link" href="{{.AdminPath}}/?tab=accounts">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          管理 Grok 账号
+        </a>
+      </div>
+    </header>
 
     <div class="grok-tools-workspace">
-      <section id="grokCapabilityBanner" class="grok-capability-banner is-loading" aria-live="polite">
+      <nav class="gw-tabs filter-tabs grok-tabs" id="grokToolsTabs" aria-label="Grok 工具导航">
+        <button class="tab-item" data-tab="chat" onclick="switchGrokToolTab('chat')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span>对话</span><i class="gw-tab-dot" data-capability-dot="chat" aria-hidden="true"></i></button>
+        <button class="tab-item active" data-tab="imagine" onclick="switchGrokToolTab('imagine')"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg><span>图片</span><i class="gw-tab-dot" data-capability-dot="imagine" aria-hidden="true"></i></button>
+        <button class="tab-item" data-tab="video" onclick="switchGrokToolTab('video')"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="15" height="14" rx="2"/><path d="m22 8-5 4 5 4z"/></svg><span>视频</span><i class="gw-tab-dot" data-capability-dot="video" aria-hidden="true"></i></button>
+        <button class="tab-item" data-tab="voice" onclick="switchGrokToolTab('voice')"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><path d="M12 18v4"/></svg><span>语音</span><i class="gw-tab-dot" data-capability-dot="voice" aria-hidden="true"></i></button>
+        <button class="tab-item" data-tab="cache" onclick="switchGrokToolTab('cache')"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/></svg><span>媒体库</span><i class="gw-tab-dot" data-capability-dot="cache" aria-hidden="true"></i></button>
+      </nav>
+
+      <section id="grokCapabilityBanner" class="grok-capability-banner gw-capability is-loading" aria-live="polite">
         <span class="capability-indicator" aria-hidden="true"></span>
         <div class="capability-copy">
           <strong id="grokCapabilityTitle">正在检查可用能力</strong>
@@ -32,25 +58,6 @@
         </span>
         <a id="grokCapabilityAction" class="capability-action hidden" href="{{.AdminPath}}/?tab=accounts">添加所需账号</a>
       </section>
-      <div class="toolbar toolbar-compact grok-tools-toolbar" aria-label="Grok 工具导航">
-        <div class="grok-api-mode" aria-label="API 测试身份">
-          <label class="grok-api-mode-label" for="grokRequestMode">调用身份</label>
-          <select id="grokRequestMode" class="form-input compact-select" title="管理员模式使用当前登录会话；Client Key 模式按真实密钥权限、限流和计费测试">
-            <option value="admin">管理员模式</option>
-            <option value="client">Client Key 模式</option>
-          </select>
-          <input id="grokClientKey" class="form-input hidden" type="password" autocomplete="off" placeholder="粘贴 sk-…（仅保存在当前标签页）">
-          <button id="grokClientKeyApply" class="btn btn-outline hidden" type="button">应用密钥</button>
-          <span id="grokClientKeyStatus" class="hint"></span>
-        </div>
-        <div class="filter-tabs grok-tabs" id="grokToolsTabs">
-          <button class="tab-item" data-tab="chat" onclick="switchGrokToolTab('chat')">对话</button>
-          <button class="tab-item active" data-tab="imagine" onclick="switchGrokToolTab('imagine')">图片</button>
-          <button class="tab-item" data-tab="video" onclick="switchGrokToolTab('video')">视频</button>
-          <button class="tab-item" data-tab="voice" onclick="switchGrokToolTab('voice')">语音</button>
-          <button class="tab-item" data-tab="cache" onclick="switchGrokToolTab('cache')">缓存</button>
-        </div>
-      </div>
 
       <section id="grokChatSection" class="content-card grok-section chat-main section-hidden">
         <div class="chat-layout">
@@ -498,116 +505,115 @@
         </div>
       </section>
 
-      <section id="grokCacheSection" class="content-card grok-section grok-tools-grid section-hidden">
-        <div class="grok-panel">
-          <h3>缓存总览</h3>
-          <p>本地缓存 + 在线资产概览。</p>
-          <div class="grok-form-grid cache-stats">
-            <div class="grok-kv"><span>图片缓存</span><strong id="cacheImageSummary">0 / 0 B</strong></div>
-            <div class="grok-kv"><span>视频缓存</span><strong id="cacheVideoSummary">0 / 0 B</strong></div>
-            <div class="grok-kv"><span>总计</span><strong id="cacheTotalSummary">0 / 0 B</strong></div>
-            <div class="grok-kv"><span>目录</span><strong id="cacheBaseDir">-</strong></div>
-            <div class="grok-kv"><span>在线资产</span><strong id="cacheOnlineCount">0</strong></div>
-            <div class="grok-kv"><span>在线状态</span><strong id="cacheOnlineStatus">未加载</strong></div>
-            <div class="grok-kv"><span>在线范围</span><strong id="cacheOnlineScope">未加载</strong></div>
-            <div class="grok-kv"><span>上次清理</span><strong id="cacheOnlineLastClear">-</strong></div>
-          </div>
-          <div class="grok-form-grid">
-            <div>
-              <label class="form-label">类型过滤</label>
-              <select id="cacheTypeFilter" class="form-input">
-                <option value="">全部</option>
+      <section id="grokCacheSection" class="grok-section gw-library section-hidden">
+        <div class="gw-stat-strip">
+          <article class="gw-stat">
+            <span class="gw-stat-label">图片缓存</span>
+            <strong id="cacheImageSummary" class="gw-stat-value">0 / 0 B</strong>
+            <span class="gw-stat-sub">数量 / 占用</span>
+          </article>
+          <article class="gw-stat">
+            <span class="gw-stat-label">视频缓存</span>
+            <strong id="cacheVideoSummary" class="gw-stat-value">0 / 0 B</strong>
+            <span class="gw-stat-sub">数量 / 占用</span>
+          </article>
+          <article class="gw-stat">
+            <span class="gw-stat-label">本地合计</span>
+            <strong id="cacheTotalSummary" class="gw-stat-value">0 / 0 B</strong>
+            <span class="gw-stat-sub" title="缓存目录"><code id="cacheBaseDir">-</code></span>
+          </article>
+          <article class="gw-stat">
+            <span class="gw-stat-label">在线资产</span>
+            <strong id="cacheOnlineCount" class="gw-stat-value">0</strong>
+            <span class="gw-stat-sub"><span id="cacheOnlineStatus">未加载</span> · <span id="cacheOnlineScope">未加载</span> · 上次清理 <span id="cacheOnlineLastClear">-</span></span>
+          </article>
+        </div>
+
+        <section class="gw-panel">
+          <header class="gw-panel-head">
+            <div class="gw-panel-title">
+              <h3>生成图片</h3>
+              <span id="mediaImageStats" class="gw-count">加载中…</span>
+            </div>
+            <div class="gw-toolbar">
+              <input id="mediaImageSearch" class="form-input gw-search" type="search" placeholder="搜索文件名" />
+              <select id="mediaImageSort" class="form-input"><option value="updated:desc">最新</option><option value="updated:asc">最早</option><option value="name:asc">名称 A-Z</option><option value="size:desc">大小降序</option></select>
+              <select id="mediaImagePageSize" class="form-input"><option value="12">12 / 页</option><option value="24">24 / 页</option><option value="48">48 / 页</option></select>
+              <button class="btn btn-danger-outline" id="mediaImageDeleteSelectedBtn" type="button">删除选中</button>
+              <button class="btn btn-outline gw-icon-btn" id="mediaImageRefreshBtn" type="button" title="刷新" aria-label="刷新"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg></button>
+            </div>
+          </header>
+          <div id="mediaImageGallery" class="gw-media-grid"><div class="gw-empty">暂无图片</div></div>
+          <footer class="gw-pager"><button class="btn btn-outline" id="mediaImagePrevBtn" type="button">上一页</button><span id="mediaImagePage">1 / 1</span><button class="btn btn-outline" id="mediaImageNextBtn" type="button">下一页</button></footer>
+        </section>
+
+        <section class="gw-panel">
+          <header class="gw-panel-head">
+            <div class="gw-panel-title">
+              <h3>视频任务</h3>
+              <span id="mediaVideoStats" class="gw-count">加载中…</span>
+            </div>
+            <div class="gw-toolbar">
+              <input id="mediaVideoSearch" class="form-input gw-search" type="search" placeholder="搜索任务、提示词或模型" />
+              <select id="mediaVideoStatus" class="form-input"><option value="">全部状态</option><option value="queued">排队中</option><option value="in_progress">生成中</option><option value="completed">已完成</option><option value="failed">失败</option></select>
+              <select id="mediaVideoSort" class="form-input"><option value="updated:desc">最近更新</option><option value="updated:asc">最早更新</option><option value="created:desc">创建时间</option><option value="model:asc">模型</option><option value="status:asc">状态</option></select>
+              <select id="mediaVideoPageSize" class="form-input"><option value="12">12 / 页</option><option value="24">24 / 页</option><option value="48">48 / 页</option></select>
+              <button class="btn btn-outline gw-icon-btn" id="mediaVideoRefreshBtn" type="button" title="刷新" aria-label="刷新"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg></button>
+            </div>
+          </header>
+          <div id="mediaVideoHistory" class="gw-video-grid"><div class="gw-empty">暂无视频任务</div></div>
+          <footer class="gw-pager"><button class="btn btn-outline" id="mediaVideoPrevBtn" type="button">上一页</button><span id="mediaVideoPage">1 / 1</span><button class="btn btn-outline" id="mediaVideoNextBtn" type="button">下一页</button></footer>
+        </section>
+
+        <section class="gw-panel">
+          <header class="gw-panel-head">
+            <div class="gw-panel-title">
+              <h3>本地缓存文件</h3>
+              <span class="gw-count">网关为客户端缓存的图片与视频</span>
+            </div>
+            <div class="gw-toolbar">
+              <select id="cacheTypeFilter" class="form-input" aria-label="类型过滤">
+                <option value="">全部类型</option>
                 <option value="image">图片</option>
                 <option value="video">视频</option>
               </select>
+              <button class="btn btn-danger-outline" id="cacheClearBtn" type="button">清空</button>
+              <button class="btn btn-outline gw-icon-btn" id="cacheRefreshBtn" type="button" title="刷新" aria-label="刷新"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg></button>
             </div>
-            <div class="cache-inline-actions">
-              <button class="btn btn-outline" id="cacheRefreshBtn">刷新</button>
-              <button class="btn btn-danger-outline" id="cacheClearBtn">清空</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="grok-panel">
-          <h3>本地缓存列表</h3>
-          <p>支持单个缓存文件删除。</p>
-          <div class="cache-list">
-            <table>
-              <thead>
-                <tr>
-                  <th>类型</th>
-                  <th>文件</th>
-                  <th>大小</th>
-                  <th>更新时间</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody id="cacheListBody">
-                <tr>
-                  <td colspan="5" class="table-empty-cell">暂无数据</td>
-                </tr>
-              </tbody>
+          </header>
+          <div class="gw-table-wrap">
+            <table class="gw-table">
+              <thead><tr><th>文件</th><th>大小</th><th class="gw-col-time">更新时间</th><th class="gw-col-actions">操作</th></tr></thead>
+              <tbody id="cacheListBody"><tr><td colspan="4" class="gw-empty-cell">暂无数据</td></tr></tbody>
             </table>
           </div>
-        </div>
+        </section>
 
-        <div class="grok-panel">
-          <div class="media-gallery-heading">
-            <div><h3>生成图片</h3><p>浏览本地生成结果；输入素材不会显示。</p></div>
-            <div class="media-gallery-controls"><input id="mediaImageSearch" class="form-input" type="search" placeholder="搜索文件名" /><select id="mediaImageSort" class="form-input"><option value="updated:desc">最新</option><option value="updated:asc">最早</option><option value="name:asc">名称 A-Z</option><option value="size:desc">大小降序</option></select><select id="mediaImagePageSize" class="form-input"><option value="12">12 / 页</option><option value="24">24 / 页</option><option value="48">48 / 页</option></select><button class="btn btn-danger-outline" id="mediaImageDeleteSelectedBtn" type="button">删除选中</button><button class="btn btn-outline" id="mediaImageRefreshBtn" type="button">刷新</button></div>
-          </div>
-          <div id="mediaImageStats" class="meta-text">正在加载图片统计…</div>
-          <div id="mediaImageGallery" class="admin-media-gallery"><div class="table-empty-cell">暂无图片</div></div>
-          <div class="media-gallery-pager"><button class="btn btn-outline" id="mediaImagePrevBtn" type="button">上一页</button><span id="mediaImagePage">1 / 1</span><button class="btn btn-outline" id="mediaImageNextBtn" type="button">下一页</button></div>
-        </div>
-
-        <div class="grok-panel">
-          <div class="media-gallery-heading">
-            <div><h3>视频任务历史</h3><p>来自持久化视频任务存储。</p></div>
-            <div class="media-gallery-controls"><input id="mediaVideoSearch" class="form-input" type="search" placeholder="搜索任务、Prompt 或模型" /><select id="mediaVideoStatus" class="form-input"><option value="">全部状态</option><option value="queued">queued</option><option value="in_progress">in_progress</option><option value="completed">completed</option><option value="failed">failed</option></select><select id="mediaVideoSort" class="form-input"><option value="updated:desc">最近更新</option><option value="updated:asc">最早更新</option><option value="created:desc">创建时间</option><option value="model:asc">模型</option><option value="status:asc">状态</option></select><select id="mediaVideoPageSize" class="form-input"><option value="12">12 / 页</option><option value="24">24 / 页</option><option value="48">48 / 页</option></select><button class="btn btn-outline" id="mediaVideoRefreshBtn" type="button">刷新</button></div>
-          </div>
-          <div id="mediaVideoStats" class="meta-text">正在加载任务统计…</div>
-          <div class="cache-list"><table><thead><tr><th>任务</th><th>状态</th><th>模型 / Prompt / 元数据</th><th>预览 / 文件</th><th>进度 / 创建时间</th><th>操作</th></tr></thead><tbody id="mediaVideoHistory"><tr><td colspan="6" class="table-empty-cell">暂无视频任务</td></tr></tbody></table></div>
-          <div class="media-gallery-pager"><button class="btn btn-outline" id="mediaVideoPrevBtn" type="button">上一页</button><span id="mediaVideoPage">1 / 1</span><button class="btn btn-outline" id="mediaVideoNextBtn" type="button">下一页</button></div>
-        </div>
-
-        <div class="grok-panel">
-          <h3>在线资产账号</h3>
-          <p>支持按账号加载在线资产数量并执行在线清理。</p>
-          <div class="cache-batch-actions">
-            <button class="btn btn-outline" id="cacheOnlineLoadSelectedBtn">加载选中统计</button>
-            <button class="btn btn-outline" id="cacheOnlineLoadAllBtn">加载全部统计</button>
-            <button class="btn btn-danger-outline" id="cacheOnlineClearSelectedBtn">清理选中在线资产</button>
-          </div>
-          <div class="cache-batch-progress">
+        <section class="gw-panel">
+          <header class="gw-panel-head">
+            <div class="gw-panel-title">
+              <h3>在线资产账号</h3>
+              <span class="gw-count">按账号统计并清理 grok.com 上的在线资产</span>
+            </div>
+            <div class="gw-toolbar">
+              <button class="btn btn-outline" id="cacheOnlineLoadSelectedBtn" type="button">统计选中</button>
+              <button class="btn btn-outline" id="cacheOnlineLoadAllBtn" type="button">统计全部</button>
+              <button class="btn btn-danger-outline" id="cacheOnlineClearSelectedBtn" type="button">清理选中</button>
+            </div>
+          </header>
+          <div class="gw-batch">
             <span class="tag" id="cacheOnlineBatchStatus">空闲</span>
-            <span class="cache-progress-text" id="cacheOnlineBatchProgress">0/0</span>
-            <progress id="cacheOnlineBatchBar" class="cache-progress-bar" value="0" max="100"></progress>
-            <button class="btn btn-outline is-hidden" id="cacheOnlineBatchCancelBtn">取消任务</button>
+            <progress id="cacheOnlineBatchBar" class="gw-progress" value="0" max="100"></progress>
+            <span class="gw-batch-text" id="cacheOnlineBatchProgress">0/0</span>
+            <button class="btn btn-outline is-hidden" id="cacheOnlineBatchCancelBtn" type="button">取消任务</button>
           </div>
-          <div class="cache-list">
-            <table>
-              <thead>
-                <tr>
-                  <th class="table-checkbox-cell">
-                    <input id="cacheOnlineSelectAll" type="checkbox" />
-                  </th>
-                  <th>Token</th>
-                  <th>池</th>
-                  <th>资产数</th>
-                  <th>状态</th>
-                  <th>上次清理</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody id="cacheOnlineBody">
-                <tr>
-                  <td colspan="7" class="table-empty-cell">暂无在线账号</td>
-                </tr>
-              </tbody>
+          <div class="gw-table-wrap">
+            <table class="gw-table">
+              <thead><tr><th class="gw-col-check"><input id="cacheOnlineSelectAll" type="checkbox" aria-label="全选" /></th><th>账号凭据</th><th>池</th><th>资产数</th><th>状态</th><th class="gw-col-time">上次清理</th><th class="gw-col-actions">操作</th></tr></thead>
+              <tbody id="cacheOnlineBody"><tr><td colspan="7" class="gw-empty-cell">暂无在线账号</td></tr></tbody>
             </table>
           </div>
-        </div>
+        </section>
       </section>
     </div>
   </main>
