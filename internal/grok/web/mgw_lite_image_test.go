@@ -149,3 +149,41 @@ func TestLiteImageViaMGWHandshakeRefusalFallsBack(t *testing.T) {
 	testutil.False(t, opened, "a refused handshake drew nothing; REST may be tried")
 	testutil.False(t, strings.Contains(err.Error(), "t;"), "no cookie in the error")
 }
+
+func TestReadMGWLiteImageFallbacks(t *testing.T) {
+	frames := func(events ...map[string]any) *strings.Reader {
+		var b strings.Builder
+		for _, e := range events {
+			raw, _ := json.Marshal(map[string]any{"event": e})
+			b.Write(raw)
+			b.WriteByte('\n')
+		}
+		return strings.NewReader(b.String())
+	}
+	// A finished image_chunk outside card_attachment, inside a JSON string.
+	nested, _ := json.Marshal(map[string]any{"image_chunk": map[string]any{"imageUrl": "users/u/generated/n/image.jpg", "progress": 100}})
+	result, err := readMGWLiteImage(frames(
+		map[string]any{"type": "response.chunk", "chunk": map[string]any{"card": string(nested)}},
+		map[string]any{"type": "response.done", "response": map[string]any{"status": "completed"}},
+	))
+	testutil.NoError(t, err)
+	testutil.Equal(t, result.URL, "https://assets.grok.com/users/u/generated/n/image.jpg")
+
+	// A Markdown image in the assistant text.
+	result, err = readMGWLiteImage(frames(
+		map[string]any{"type": "response.chunk", "chunk": map[string]any{"text": map[string]any{"text": "Here: ![image](https://assets.grok.com/users/u/generated/m/image.jpg)"}}},
+		map[string]any{"type": "response.done", "response": map[string]any{"status": "completed"}},
+	))
+	testutil.NoError(t, err)
+	testutil.Equal(t, result.URL, "https://assets.grok.com/users/u/generated/m/image.jpg")
+
+	// Text only: no image, and the log can tell what came back.
+	result, err = readMGWLiteImage(frames(
+		map[string]any{"type": "response.chunk", "chunk": map[string]any{"text": map[string]any{"text": "I can't draw that."}}},
+		map[string]any{"type": "response.done", "response": map[string]any{"status": "completed"}},
+	))
+	testutil.NoError(t, err)
+	testutil.Equal(t, result.URL, "")
+	testutil.MustContain(t, result.Diagnostics, "response.chunk=1")
+	testutil.MustContain(t, result.Diagnostics, "I can't draw that.")
+}

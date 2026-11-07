@@ -435,7 +435,7 @@ func (h *Handler) collectAppChatImageURLs(ctx context.Context, sess *chatAccount
 				if result.URL != "" {
 					callURLs = append(callURLs, result.URL)
 				} else {
-					slog.Warn("grok mgw lite turn produced no image", "account_id", sess.acc.ID, "error", mgwErr)
+					slog.Warn("grok mgw lite turn produced no image", "account_id", sess.acc.ID, "error", mgwErr, "turn", result.Diagnostics)
 				}
 			} else if !errors.Is(mgwErr, errMGWLiteUnavailable) {
 				slog.Warn("grok mgw lite image unavailable; using the REST request", "account_id", sess.acc.ID, "error", mgwErr)
