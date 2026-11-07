@@ -103,9 +103,9 @@ func upstreamErrorBody(err error) string {
 		return ""
 	}
 	raw := err.Error()
-	idx := strings.Index(raw, "body=")
-	if idx < 0 {
+	_, after, ok := strings.Cut(raw, "body=")
+	if !ok {
 		return ""
 	}
-	return raw[idx+len("body="):]
+	return after
 }

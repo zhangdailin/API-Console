@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 )
 
-func extractImageURLs(value interface{}) []string {
+func extractImageURLs(value any) []string {
 	seen := map[string]struct{}{}
 	var out []string
 	add := func(raw string) {
@@ -23,10 +23,10 @@ func extractImageURLs(value interface{}) []string {
 		seen[s] = struct{}{}
 		out = append(out, s)
 	}
-	var walk func(interface{})
-	walk = func(v interface{}) {
+	var walk func(any)
+	walk = func(v any) {
 		switch x := v.(type) {
-		case map[string]interface{}:
+		case map[string]any:
 			for k, item := range x {
 				lk := strings.ToLower(k)
 				if lk == "jsondata" || lk == "cardattachmentsjson" {
@@ -35,7 +35,7 @@ func extractImageURLs(value interface{}) []string {
 				}
 				if lk == "generatedimageurls" || lk == "imageurls" || lk == "image_urls" || lk == "imageurl" || lk == "image_url" {
 					switch vv := item.(type) {
-					case []interface{}:
+					case []any:
 						for _, one := range vv {
 							if s, ok := one.(string); ok && s != "" {
 								add(s)
@@ -48,7 +48,7 @@ func extractImageURLs(value interface{}) []string {
 				}
 				walk(item)
 			}
-		case []interface{}:
+		case []any:
 			for _, item := range x {
 				walk(item)
 			}
@@ -66,7 +66,7 @@ func extractImageURLs(value interface{}) []string {
 // Some Grok responses include image card/tool metadata where URLs aren't under the known keys.
 // We conservatively collect http(s) links that look like images and point to Grok-related hosts.
 
-func collectAssetLikeStrings(value interface{}, limit int) []string {
+func collectAssetLikeStrings(value any, limit int) []string {
 	out := make([]string, 0, 32)
 	seen := map[string]struct{}{}
 	walkJSONStrings(value, func(s string) {
@@ -230,7 +230,7 @@ func stripAngleTags(s string) string {
 	return b.String()
 }
 
-func extractRenderableImageLinks(value interface{}) []string {
+func extractRenderableImageLinks(value any) []string {
 	seen := map[string]struct{}{}
 	var out []string
 
@@ -254,7 +254,7 @@ func extractRenderableImageLinks(value interface{}) []string {
 
 	walkJSONStrings(value, func(s string) {
 		// Some fields may contain multiple URLs; split on whitespace.
-		for _, part := range strings.Fields(s) {
+		for part := range strings.FieldsSeq(s) {
 			p := strings.Trim(part, "\"'()[]{}<>,")
 			if isLikelyImageURL(p) {
 				if _, ok := seen[p]; !ok {

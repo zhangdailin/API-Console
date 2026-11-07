@@ -38,7 +38,7 @@ func TestPassedNativeEncryptedReasoningKeepsAccountAvailable(t *testing.T) {
 				if err := h.lb.Store.CreateAccount(ctx, acc); err != nil {
 					t.Fatal(err)
 				}
-				for attempt := 0; attempt < 2; attempt++ {
+				for attempt := range 2 {
 					sess, err := h.openCLIAccountSession(ctx, nil, "grok-4.7")
 					if err != nil {
 						t.Fatalf("account unavailable on turn %d: %v", attempt, err)
@@ -141,7 +141,7 @@ func TestNativeCommentaryWithToolCallKeepsAccountAvailable(t *testing.T) {
 			if err := h.lb.Store.CreateAccount(ctx, acc); err != nil {
 				t.Fatal(err)
 			}
-			for turn := 0; turn < 2; turn++ {
+			for range 2 {
 				sess, err := h.openCLIAccountSession(ctx, nil, "grok-4.7")
 				if err != nil {
 					t.Fatal(err)

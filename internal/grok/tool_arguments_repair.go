@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"maps"
 	"math"
 	"net/http"
 	"strconv"
@@ -442,7 +443,7 @@ func (s *toolArgumentsRepairStream) writeEvent(event string, payload map[string]
 }
 
 func parseSSEFrame(frame []byte) (event string, data []byte) {
-	for _, line := range bytes.Split(frame, []byte("\n")) {
+	for line := range bytes.SplitSeq(frame, []byte("\n")) {
 		line = bytes.TrimSuffix(line, []byte("\r"))
 		if value, ok := bytes.CutPrefix(line, []byte("event:")); ok {
 			event = string(bytes.TrimSpace(value))
@@ -461,8 +462,6 @@ func parseSSEFrame(frame []byte) (event string, data []byte) {
 
 func cloneEventPayload(payload map[string]any) map[string]any {
 	clone := make(map[string]any, len(payload))
-	for key, value := range payload {
-		clone[key] = value
-	}
+	maps.Copy(clone, payload)
 	return clone
 }

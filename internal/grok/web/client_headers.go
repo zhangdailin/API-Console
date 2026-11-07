@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"orchids-api/internal/store"
@@ -161,9 +162,7 @@ func cloneHeaderShallow(src http.Header, extraCapacity int) http.Header {
 		return make(http.Header, extraCapacity)
 	}
 	dst := make(http.Header, len(src)+extraCapacity)
-	for k, v := range src {
-		dst[k] = v
-	}
+	maps.Copy(dst, src)
 	return dst
 }
 
@@ -270,8 +269,8 @@ func buildGrokCookie(token, cfClearance, cfBM string) string {
 	return joinGrokCookieItems(items)
 }
 
-func appChatDeviceEnvInfo() map[string]interface{} {
-	return map[string]interface{}{
+func appChatDeviceEnvInfo() map[string]any {
+	return map[string]any{
 		"darkModeEnabled":  true,
 		"devicePixelRatio": 1.75,
 		"screenWidth":      2560,
@@ -287,11 +286,11 @@ func applyChromiumClientHints(header http.Header, userAgent string) {
 	header.Del("Sec-Ch-Ua-Platform")
 	ua := strings.TrimSpace(userAgent)
 	marker := "Chrome/"
-	idx := strings.Index(ua, marker)
-	if idx < 0 {
+	_, after, ok := strings.Cut(ua, marker)
+	if !ok {
 		return
 	}
-	version := ua[idx+len(marker):]
+	version := after
 	if end := strings.IndexAny(version, ". "); end >= 0 {
 		version = version[:end]
 	}

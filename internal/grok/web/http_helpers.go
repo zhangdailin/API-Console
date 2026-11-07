@@ -83,8 +83,8 @@ func writeGrokErrorCode(w http.ResponseWriter, status int, code, message string)
 	case status >= 500:
 		errorType = "server_error"
 	}
-	writeJSONStatus(w, status, map[string]interface{}{
-		"error": map[string]interface{}{
+	writeJSONStatus(w, status, map[string]any{
+		"error": map[string]any{
 			"message": message,
 			"type":    errorType,
 			"code":    strings.TrimSpace(code),
@@ -151,8 +151,7 @@ func isUpstreamFailure(err error) bool {
 	if err == nil {
 		return false
 	}
-	var typed *grokUpstreamError
-	if errors.As(err, &typed) {
+	if _, ok := errors.AsType[*grokUpstreamError](err); ok {
 		return true
 	}
 	if strings.Contains(strings.ToLower(err.Error()), upstreamStatusMarker) && parseUpstreamStatus(err) > 0 {
@@ -166,12 +165,10 @@ func isUpstreamFailure(err error) bool {
 		(strings.HasPrefix(strings.TrimSpace(text), "grok cli upstream") || strings.HasPrefix(strings.TrimSpace(text), "grok upstream")) {
 		return true
 	}
-	var urlErr *url.Error
-	if errors.As(err, &urlErr) {
+	if _, ok := errors.AsType[*url.Error](err); ok {
 		return true
 	}
-	var netErr net.Error
-	if errors.As(err, &netErr) {
+	if _, ok := errors.AsType[net.Error](err); ok {
 		return true
 	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) ||
@@ -196,10 +193,7 @@ func upstreamRetryAfterSeconds(err error) int {
 		return 0
 	}
 	if value := ratelimit.ParseRetryAfter(typed.header.Get("Retry-After"), time.Now()); value > 0 {
-		seconds := int(value.Round(time.Second) / time.Second)
-		if seconds < 1 {
-			seconds = 1
-		}
+		seconds := max(int(value.Round(time.Second)/time.Second), 1)
 		return seconds
 	}
 	if info := ratelimit.ParseHeaders(typed.header); info != nil {
@@ -226,12 +220,12 @@ func requireMethod(w http.ResponseWriter, r *http.Request, method string) bool {
 
 // writeJSON writes v to w as a JSON response with the application/json content
 // type.
-func writeJSON(w http.ResponseWriter, v interface{}) {
+func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func writeJSONStatus(w http.ResponseWriter, status int, v interface{}) {
+func writeJSONStatus(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
@@ -244,7 +238,7 @@ const maxGrokJSONBodyBytes = 32 << 20
 // decodeJSONBody decodes the request body into v and writes the standard error
 // response on failure: 415 for a non-JSON content type, 413 for an oversized
 // body and 400 for malformed JSON.
-func decodeJSONBody(w http.ResponseWriter, r *http.Request, v interface{}) bool {
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, v any) bool {
 	if r == nil {
 		writeGrokError(w, http.StatusBadRequest, "invalid request")
 		return false
@@ -260,8 +254,7 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, v interface{}) bool 
 		r.Body = http.MaxBytesReader(w, r.Body, maxGrokJSONBodyBytes)
 	}
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			writeGrokErrorCode(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body exceeds the configured limit")
 			return false
 		}
@@ -369,11 +362,11 @@ func writeSSEError(w http.ResponseWriter, message, errType, code string) {
 	if strings.TrimSpace(errType) == "" {
 		errType = "server_error"
 	}
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		// The top-level type is what OpenAI-compatible clients dispatch on; a
 		// frame without it looks like an ordinary chunk to them.
 		"type": "error",
-		"error": map[string]interface{}{
+		"error": map[string]any{
 			"message":    apperrors.PublicMessage(message),
 			"type":       strings.TrimSpace(errType),
 			"code":       strings.TrimSpace(code),
@@ -409,7 +402,7 @@ func writeSSELog(w http.ResponseWriter, flusher http.Flusher, logger *debug.Logg
 // Completions clients. Responses and Anthropic keep their named error events.
 func writeOpenAIStreamError(w http.ResponseWriter, message, code string) error {
 	middleware.MarkStreamFailure(w)
-	payload := map[string]interface{}{"error": map[string]interface{}{
+	payload := map[string]any{"error": map[string]any{
 		"message": apperrors.PublicMessage(message), "type": "api_error", "code": strings.TrimSpace(code),
 	}}
 	return writeSSEBytes(w, "", encodeJSONBytes(payload))

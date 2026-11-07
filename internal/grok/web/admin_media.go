@@ -52,10 +52,7 @@ type adminVideoDeleteRequest struct {
 
 func parseAdminMediaPagination(r *http.Request) (int, int) {
 	page := parsePositiveInt(r.URL.Query().Get("page"), 1)
-	pageSize := parsePositiveInt(r.URL.Query().Get("page_size"), defaultAdminMediaPageSize)
-	if pageSize > maxCachePageSize {
-		pageSize = maxCachePageSize
-	}
+	pageSize := min(parsePositiveInt(r.URL.Query().Get("page_size"), defaultAdminMediaPageSize), maxCachePageSize)
 	return page, pageSize
 }
 
@@ -128,7 +125,7 @@ func (h *Handler) HandleAdminMediaImages(w http.ResponseWriter, r *http.Request)
 	sortAdminImages(entries, r.URL.Query().Get("sort"), adminMediaDescending(r))
 	page, pageSize := parseAdminMediaPagination(r)
 	items, total := paginateAdminImages(entries, page, pageSize)
-	writeJSON(w, map[string]interface{}{"status": "success", "items": items, "total": total, "page": page, "page_size": pageSize})
+	writeJSON(w, map[string]any{"status": "success", "items": items, "total": total, "page": page, "page_size": pageSize})
 }
 
 func adminImageNameFromPath(path string) string {
@@ -205,7 +202,7 @@ func (h *Handler) HandleAdminMediaImagesDelete(w http.ResponseWriter, r *http.Re
 		writeGrokError(w, http.StatusBadRequest, "no valid image names")
 		return
 	}
-	writeJSON(w, map[string]interface{}{"status": "success", "removed_count": removed})
+	writeJSON(w, map[string]any{"status": "success", "removed_count": removed})
 }
 
 func (h *Handler) HandleAdminMediaImageStats(w http.ResponseWriter, r *http.Request) {
@@ -217,7 +214,7 @@ func (h *Handler) HandleAdminMediaImageStats(w http.ResponseWriter, r *http.Requ
 		writeGrokError(w, http.StatusInternalServerError, "failed to read image stats")
 		return
 	}
-	writeJSON(w, map[string]interface{}{"status": "success", "count": len(entries), "bytes": size, "size_bytes": size, "size_mb": bytesToMB(size)})
+	writeJSON(w, map[string]any{"status": "success", "count": len(entries), "bytes": size, "size_bytes": size, "size_mb": bytesToMB(size)})
 }
 
 func storedJobForAdmin(job *store.StoredVideoJob) adminVideoJob {
@@ -378,7 +375,7 @@ func (h *Handler) HandleAdminMediaVideoDelete(w http.ResponseWriter, r *http.Req
 	if strings.TrimSpace(job.ContentPath) != "" && validPersistedVideoContentPath(job.ContentPath) {
 		_ = os.Remove(job.ContentPath)
 	}
-	writeJSON(w, map[string]interface{}{"status": "success", "deleted": job.ID})
+	writeJSON(w, map[string]any{"status": "success", "deleted": job.ID})
 }
 
 func (h *Handler) HandleAdminMediaVideos(w http.ResponseWriter, r *http.Request) {
@@ -396,7 +393,7 @@ func (h *Handler) HandleAdminMediaVideos(w http.ResponseWriter, r *http.Request)
 	}
 	page, pageSize := parseAdminMediaPagination(r)
 	items, total := paginateAdminVideos(jobs, page, pageSize)
-	writeJSON(w, map[string]interface{}{"status": "success", "items": items, "total": total, "page": page, "page_size": pageSize})
+	writeJSON(w, map[string]any{"status": "success", "items": items, "total": total, "page": page, "page_size": pageSize})
 }
 func (h *Handler) HandleAdminMediaVideoStats(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
@@ -422,5 +419,5 @@ func (h *Handler) HandleAdminMediaVideoStats(w http.ResponseWriter, r *http.Requ
 		}
 		statuses[status]++
 	}
-	writeJSON(w, map[string]interface{}{"status": "success", "total": len(jobs), "statuses": statuses})
+	writeJSON(w, map[string]any{"status": "success", "total": len(jobs), "statuses": statuses})
 }

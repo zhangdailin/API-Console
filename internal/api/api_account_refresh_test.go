@@ -75,7 +75,7 @@ func TestHandleAccountByID_PutEnabledAfterAtomicQualityVerdict(t *testing.T) {
 	if err := s.CreateAccount(ctx, acc); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if _, err := s.ApplyAccountQuality(ctx, acc.ID, store.AccountQualityUpdate{Reason: "no_reasoning", CooldownUntil: time.Now().Add(time.Hour), DisableThreshold: 2}); err != nil {
 			t.Fatal(err)
 		}

@@ -47,8 +47,8 @@ func (h *Handler) serveVideoChatCompletion(
 func (h *Handler) runVideoSegment(
 	ctx context.Context,
 	sess *chatAccountSession,
-	payload map[string]interface{},
-	rebuild func(token string) (map[string]interface{}, error),
+	payload map[string]any,
+	rebuild func(token string) (map[string]any, error),
 	logger *debug.Logger,
 	onProgress func(int),
 ) (videoSegmentResult, error) {
@@ -71,7 +71,7 @@ func (h *Handler) runVideoSegment(
 
 func (h *Handler) collectVideoSegmentFromBody(body io.Reader, logger *debug.Logger, onProgress func(int)) (videoSegmentResult, error) {
 	var result videoSegmentResult
-	err := parseUpstreamLines(body, func(resp map[string]interface{}) error {
+	err := parseUpstreamLines(body, func(resp map[string]any) error {
 		if logger != nil {
 			if raw, err := json.Marshal(resp); err == nil {
 				logger.LogOutputSSE("response", string(raw))
@@ -110,11 +110,11 @@ func (h *Handler) collectVideoSegmentFromBody(body io.Reader, logger *debug.Logg
 	return result, nil
 }
 
-func videoParentPostIDFromPayload(payload map[string]interface{}) string {
-	respMeta, _ := payload["responseMetadata"].(map[string]interface{})
-	modelCfg, _ := respMeta["modelConfigOverride"].(map[string]interface{})
-	modelMap, _ := modelCfg["modelMap"].(map[string]interface{})
-	videoCfg, _ := modelMap["videoGenModelConfig"].(map[string]interface{})
+func videoParentPostIDFromPayload(payload map[string]any) string {
+	respMeta, _ := payload["responseMetadata"].(map[string]any)
+	modelCfg, _ := respMeta["modelConfigOverride"].(map[string]any)
+	modelMap, _ := modelCfg["modelMap"].(map[string]any)
+	videoCfg, _ := modelMap["videoGenModelConfig"].(map[string]any)
 	return strings.TrimSpace(fmt.Sprint(videoCfg["parentPostId"]))
 }
 
@@ -141,19 +141,19 @@ func (h *Handler) runVideoSegments(
 	for idx, length := range segments {
 		segmentCfg := *cfg
 		segmentCfg.VideoLength = length
-		var payload map[string]interface{}
-		var rebuild func(string) (map[string]interface{}, error)
+		var payload map[string]any
+		var rebuild func(string) (map[string]any, error)
 		if idx == 0 {
 			payload, err = h.buildVideoCreatePayload(ctx, sess.token, spec, prompt, attachments, &segmentCfg)
 			if err != nil {
 				return videoSegmentResult{}, err
 			}
-			rebuild = func(token string) (map[string]interface{}, error) {
+			rebuild = func(token string) (map[string]any, error) {
 				return h.buildVideoCreatePayload(ctx, token, spec, prompt, attachments, &segmentCfg)
 			}
 		} else {
 			payload = h.buildVideoExtendPayload(spec, prompt, parentPostID, extendPostID, &segmentCfg, length, elapsed)
-			rebuild = func(string) (map[string]interface{}, error) {
+			rebuild = func(string) (map[string]any, error) {
 				return h.buildVideoExtendPayload(spec, prompt, parentPostID, extendPostID, &segmentCfg, length, elapsed), nil
 			}
 		}
@@ -215,7 +215,7 @@ func (h *Handler) streamVideoChatCompletion(
 	flusher := streamResponseHeaders(w)
 	id := "chatcmpl_" + randomHex(8)
 	chunkScratch := make([]byte, 0, 256)
-	emit := func(content string, finish string, hasFinish bool, usage map[string]interface{}) {
+	emit := func(content string, finish string, hasFinish bool, usage map[string]any) {
 		raw := appendChatCompletionChunkWithUsage(chunkScratch[:0], id, time.Now().Unix(), req.Model, "", "", content, finish, hasFinish, usage)
 		chunkScratch = raw[:0]
 		writeSSELog(w, flusher, logger, raw)
@@ -268,21 +268,21 @@ func (h *Handler) collectVideoChatCompletion(
 		return
 	}
 	content := h.videoOutputURL(ctx, sess.token, artifact.URL, publicBase)
-	resp := map[string]interface{}{
+	resp := map[string]any{
 		"id":                 "chatcmpl_" + randomHex(8),
 		"object":             "chat.completion",
 		"created":            time.Now().Unix(),
 		"model":              req.Model,
 		"service_tier":       nil,
 		"system_fingerprint": "",
-		"choices": []map[string]interface{}{
+		"choices": []map[string]any{
 			{
 				"index": 0,
-				"message": map[string]interface{}{
+				"message": map[string]any{
 					"role":        "assistant",
 					"content":     content,
 					"refusal":     nil,
-					"annotations": []interface{}{},
+					"annotations": []any{},
 				},
 				"finish_reason": "stop",
 			},
@@ -290,8 +290,8 @@ func (h *Handler) collectVideoChatCompletion(
 		"usage": buildChatUsagePayload(req, content, nil),
 	}
 	if len(reasoning) > 0 {
-		choice := resp["choices"].([]map[string]interface{})[0]
-		message := choice["message"].(map[string]interface{})
+		choice := resp["choices"].([]map[string]any)[0]
+		message := choice["message"].(map[string]any)
 		message["reasoning_content"] = strings.Join(reasoning, "\n")
 	}
 	writeJSON(w, resp)

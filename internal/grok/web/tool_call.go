@@ -20,7 +20,7 @@ type toolCallParser struct {
 	validNames map[string]struct{}
 }
 
-func newToolCallParser(tools []ToolDef, toolChoice interface{}) toolCallParser {
+func newToolCallParser(tools []ToolDef, toolChoice any) toolCallParser {
 	validNames := make(map[string]struct{}, len(tools))
 	for _, tool := range tools {
 		if !strings.EqualFold(strings.TrimSpace(tool.Type), "function") {
@@ -36,19 +36,19 @@ func newToolCallParser(tools []ToolDef, toolChoice interface{}) toolCallParser {
 	}
 }
 
-func forcedToolName(toolChoice interface{}) string {
-	choice, ok := toolChoice.(map[string]interface{})
+func forcedToolName(toolChoice any) string {
+	choice, ok := toolChoice.(map[string]any)
 	if !ok {
 		return ""
 	}
 	if strings.TrimSpace(fmt.Sprint(choice["type"])) != "function" {
 		return ""
 	}
-	fn, _ := choice["function"].(map[string]interface{})
+	fn, _ := choice["function"].(map[string]any)
 	return strings.TrimSpace(fmt.Sprint(fn["name"]))
 }
 
-func buildToolPrompt(tools []ToolDef, toolChoice interface{}, parallelToolCalls bool) string {
+func buildToolPrompt(tools []ToolDef, toolChoice any, parallelToolCalls bool) string {
 	if len(tools) == 0 {
 		return ""
 	}
@@ -101,7 +101,7 @@ func buildToolPrompt(tools []ToolDef, toolChoice interface{}, parallelToolCalls 
 			lines = append(lines, "IMPORTANT: You MUST call at least one tool in your response. Do not respond with only text.")
 			forced = true
 		}
-	case map[string]interface{}:
+	case map[string]any:
 		if name := forcedToolName(choice); name != "" {
 			lines = append(lines, fmt.Sprintf("IMPORTANT: You MUST call the tool %q in your response.", name))
 			forced = true
@@ -171,7 +171,7 @@ func balanceJSONBraces(text string) string {
 	return text
 }
 
-func repairToolCallJSON(text string) map[string]interface{} {
+func repairToolCallJSON(text string) map[string]any {
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
@@ -182,18 +182,18 @@ func repairToolCallJSON(text string) map[string]interface{} {
 	cleaned = strings.ReplaceAll(cleaned, "\n", " ")
 	cleaned = toolCallTrailingCommaRE.ReplaceAllString(cleaned, "$1")
 	cleaned = balanceJSONBraces(cleaned)
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal([]byte(cleaned), &parsed); err != nil {
 		return nil
 	}
 	return parsed
 }
 
-func (p toolCallParser) parseBlock(rawJSON string) map[string]interface{} {
+func (p toolCallParser) parseBlock(rawJSON string) map[string]any {
 	if strings.TrimSpace(rawJSON) == "" {
 		return nil
 	}
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal([]byte(rawJSON), &parsed); err != nil {
 		parsed = repairToolCallJSON(rawJSON)
 	}
@@ -226,10 +226,10 @@ func (p toolCallParser) parseBlock(rawJSON string) map[string]interface{} {
 			}
 		}
 	}
-	return map[string]interface{}{
+	return map[string]any{
 		"id":   "call_" + randomHex(12),
 		"type": "function",
-		"function": map[string]interface{}{
+		"function": map[string]any{
 			"name":      name,
 			"arguments": argsRaw,
 		},
@@ -293,8 +293,8 @@ func formatToolHistory(messages []ChatMessage) []ChatMessage {
 
 // Web emulates tool history in text, but images must remain attachments rather
 // than becoming a printed Go map (or disappearing from assistant history).
-func toolHistoryContentWithImages(text string, original interface{}) interface{} {
-	parts := []interface{}{map[string]interface{}{"type": "text", "text": text}}
+func toolHistoryContentWithImages(text string, original any) any {
+	parts := []any{map[string]any{"type": "text", "text": text}}
 	for _, part := range interfaceMaps(original) {
 		if chatwire.ParseLooseStringAny(part["type"]) == "image_url" {
 			parts = append(parts, part)
@@ -306,7 +306,7 @@ func toolHistoryContentWithImages(text string, original interface{}) interface{}
 	return parts
 }
 
-func (p toolCallParser) parseCalls(content string) (string, []map[string]interface{}) {
+func (p toolCallParser) parseCalls(content string) (string, []map[string]any) {
 	if strings.TrimSpace(content) == "" {
 		return content, nil
 	}
@@ -315,7 +315,7 @@ func (p toolCallParser) parseCalls(content string) (string, []map[string]interfa
 		return content, nil
 	}
 
-	toolCalls := make([]map[string]interface{}, 0, len(matches))
+	toolCalls := make([]map[string]any, 0, len(matches))
 	textParts := make([]string, 0, len(matches)+1)
 	lastEnd := 0
 	for _, m := range matches {
@@ -357,7 +357,7 @@ func newToolStreamPump(parser toolCallParser) *toolStreamPump {
 	return &toolStreamPump{parser: parser, state: "text"}
 }
 
-func (p *toolStreamPump) feed(chunk string, onText func(string), onTool func(map[string]interface{})) {
+func (p *toolStreamPump) feed(chunk string, onText func(string), onTool func(map[string]any)) {
 	if p == nil || chunk == "" {
 		return
 	}
@@ -415,7 +415,7 @@ func (p *toolStreamPump) feed(chunk string, onText func(string), onTool func(map
 	}
 }
 
-func (p *toolStreamPump) flush(onText func(string), onTool func(map[string]interface{})) {
+func (p *toolStreamPump) flush(onText func(string), onTool func(map[string]any)) {
 	if p == nil {
 		return
 	}

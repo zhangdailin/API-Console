@@ -3,6 +3,7 @@ package responses
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 )
 
 // NormalizeNamespacePayload preserves native fields outside the tool contract.
@@ -32,9 +33,7 @@ func NormalizeNamespacePayload(payload map[string]any) (ToolNamespaces, error) {
 	if err != nil {
 		return nil, err
 	}
-	for name, identity := range lowered {
-		aliases[name] = identity
-	}
+	maps.Copy(aliases, lowered)
 	for key, value := range map[string]any{"tools": req.Tools, "input": req.Input, "tool_choice": req.ToolChoice} {
 		if _, exists := payload[key]; exists {
 			payload[key] = value

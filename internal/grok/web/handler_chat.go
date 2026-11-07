@@ -23,7 +23,7 @@ import (
 // maxChatAttachments bounds how many media inputs one request may reference.
 const maxChatAttachments = 8
 
-func appendUsage(dst []byte, usage map[string]interface{}) []byte {
+func appendUsage(dst []byte, usage map[string]any) []byte {
 	if len(usage) == 0 {
 		dst = append(dst, `,"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0,"prompt_tokens_details":{"cached_tokens":0,"text_tokens":0,"audio_tokens":0,"image_tokens":0},"completion_tokens_details":{"text_tokens":0,"audio_tokens":0,"reasoning_tokens":0}}`...)
 		return dst
@@ -55,7 +55,7 @@ func appendChatCompletionChunkPrefix(dst []byte, id string, created int64, model
 
 // appendChatCompletionChunkFinish writes the trailing logprobs/finish/usage
 // fields shared by every chat.completion.chunk frame.
-func appendChatCompletionChunkFinish(dst []byte, finish string, hasFinish bool, usage map[string]interface{}) []byte {
+func appendChatCompletionChunkFinish(dst []byte, finish string, hasFinish bool, usage map[string]any) []byte {
 	dst = append(dst, `,"logprobs":null,"finish_reason":`...)
 	if hasFinish {
 		dst = strconv.AppendQuote(dst, finish)
@@ -70,7 +70,7 @@ func appendChatCompletionChunkFinish(dst []byte, finish string, hasFinish bool, 
 	return dst
 }
 
-func appendChatCompletionChunkWithUsage(dst []byte, id string, created int64, model, fingerprint, role, content string, finish string, hasFinish bool, usage map[string]interface{}) []byte {
+func appendChatCompletionChunkWithUsage(dst []byte, id string, created int64, model, fingerprint, role, content string, finish string, hasFinish bool, usage map[string]any) []byte {
 	dst = appendChatCompletionChunkPrefix(dst, id, created, model, fingerprint)
 	dst = append(dst, `,"choices":[{"index":0,"delta":`...)
 	switch {
@@ -96,7 +96,7 @@ func appendChatCompletionReasoningChunk(dst []byte, id string, created int64, mo
 	return appendChatCompletionChunkFinish(dst, "", false, nil)
 }
 
-func appendChatCompletionSnapshotChunkWithUsage(dst []byte, id string, created int64, model, fingerprint, messageContent string, finish string, hasFinish bool, usage map[string]interface{}) []byte {
+func appendChatCompletionSnapshotChunkWithUsage(dst []byte, id string, created int64, model, fingerprint, messageContent string, finish string, hasFinish bool, usage map[string]any) []byte {
 	dst = appendChatCompletionChunkPrefix(dst, id, created, model, fingerprint)
 	dst = append(dst, `,"choices":[{"index":0,"delta":{},"message":{"role":"assistant","content":`...)
 	dst = strconv.AppendQuote(dst, messageContent)
@@ -104,7 +104,7 @@ func appendChatCompletionSnapshotChunkWithUsage(dst []byte, id string, created i
 	return appendChatCompletionChunkFinish(dst, finish, hasFinish, usage)
 }
 
-func appendChatCompletionToolCallsChunkWithUsage(dst []byte, id string, created int64, model, fingerprint string, toolCalls []map[string]interface{}, finish string, hasFinish bool, usage map[string]interface{}) []byte {
+func appendChatCompletionToolCallsChunkWithUsage(dst []byte, id string, created int64, model, fingerprint string, toolCalls []map[string]any, finish string, hasFinish bool, usage map[string]any) []byte {
 	dst = appendChatCompletionChunkPrefix(dst, id, created, model, fingerprint)
 	dst = append(dst, `,"choices":[{"index":0,"delta":{"tool_calls":`...)
 	if len(toolCalls) == 0 {
@@ -165,7 +165,7 @@ func detectPublicBaseURL(r *http.Request) string {
 	return proto + "://" + host
 }
 
-func isThinkingResponse(resp map[string]interface{}) bool {
+func isThinkingResponse(resp map[string]any) bool {
 	if resp == nil {
 		return false
 	}
@@ -426,7 +426,7 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 	defer sess.Close()
 	req.account = sess.acc
 
-	buildPayload := func(token string) (map[string]interface{}, error) {
+	buildPayload := func(token string) (map[string]any, error) {
 		fileAttachments := []string(nil)
 		if !spec.IsVideo {
 			var upErr error

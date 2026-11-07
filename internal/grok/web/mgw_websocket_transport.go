@@ -20,12 +20,12 @@ import (
 // Keeping this at the client boundary prevents an SSO cookie from ever being
 // used as a Build/CLI Bearer token.
 type appChatTransport interface {
-	Chat(context.Context, *Client, string, map[string]interface{}) (*http.Response, error)
+	Chat(context.Context, *Client, string, map[string]any) (*http.Response, error)
 }
 
 type restAppChatTransport struct{}
 
-func (restAppChatTransport) Chat(ctx context.Context, client *Client, token string, payload map[string]interface{}) (*http.Response, error) {
+func (restAppChatTransport) Chat(ctx context.Context, client *Client, token string, payload map[string]any) (*http.Response, error) {
 	return client.doRESTChat(ctx, token, payload)
 }
 
@@ -43,7 +43,7 @@ func newAppChatFallbackTransport(client *Client) *appChatFallbackTransport {
 	return &appChatFallbackTransport{mgw: &mgwWebSocketTransport{client: client}, rest: restAppChatTransport{}}
 }
 
-func (t *appChatFallbackTransport) Chat(ctx context.Context, client *Client, token string, payload map[string]interface{}) (*http.Response, error) {
+func (t *appChatFallbackTransport) Chat(ctx context.Context, client *Client, token string, payload map[string]any) (*http.Response, error) {
 	if t != nil && t.mgw != nil {
 		_, _ = t.mgw.fromLegacyPayload(token, payload)
 	}
@@ -73,7 +73,7 @@ type mgwWebSocketTransport struct {
 	client *Client
 }
 
-func (t *mgwWebSocketTransport) fromLegacyPayload(_ string, _ map[string]interface{}) (MGWChatRequest, error) {
+func (t *mgwWebSocketTransport) fromLegacyPayload(_ string, _ map[string]any) (MGWChatRequest, error) {
 	// The old payload has no stable user id and can contain app-chat-only model
 	// controls/attachments.  Guessing those fields could send an altered request
 	// to an account, so no implicit conversion is permitted.
@@ -174,9 +174,9 @@ func streamMGW(ctx context.Context, connection *websocket.Conn, writer *io.PipeW
 	}
 	sender := &mgwSender{connection: connection}
 	initialID := "evt_init_" + randomUUID()
-	if err := sender.write(map[string]interface{}{"event": map[string]interface{}{
+	if err := sender.write(map[string]any{"event": map[string]any{
 		"type": "session.create", "event_id": initialID,
-		"session": map[string]interface{}{"model": request.Model, "x_grok": map[string]interface{}{"protocol_capabilities": []string{"conversation_attached", "custom_methods_v1"}, "use_chunk": true, "is_temporary": true, "disable_memory": true}},
+		"session": map[string]any{"model": request.Model, "x_grok": map[string]any{"protocol_capabilities": []string{"conversation_attached", "custom_methods_v1"}, "use_chunk": true, "is_temporary": true, "disable_memory": true}},
 	}}); err != nil {
 		_ = writer.CloseWithError(fmt.Errorf("send grok mgw session.create: %w", err))
 		return
@@ -212,8 +212,8 @@ func streamMGW(ctx context.Context, connection *websocket.Conn, writer *io.PipeW
 		if created && attached && !sent && sessionID != "" {
 			sent = true
 			now := time.Now().UnixMilli()
-			item := map[string]interface{}{"session_id": sessionID, "event": map[string]interface{}{"type": "conversation.item.create", "event_id": fmt.Sprintf("evt_msg_%d", now), "item": map[string]interface{}{"type": "message", "role": "user", "x_grok": map[string]interface{}{"client_message_id": randomUUID(), "input_chunks": []interface{}{map[string]interface{}{"text": map[string]interface{}{"text": request.Prompt}}}}}}}
-			response := map[string]interface{}{"session_id": sessionID, "event": map[string]interface{}{"type": "response.create", "event_id": fmt.Sprintf("evt_resp_%d", now)}}
+			item := map[string]any{"session_id": sessionID, "event": map[string]any{"type": "conversation.item.create", "event_id": fmt.Sprintf("evt_msg_%d", now), "item": map[string]any{"type": "message", "role": "user", "x_grok": map[string]any{"client_message_id": randomUUID(), "input_chunks": []any{map[string]any{"text": map[string]any{"text": request.Prompt}}}}}}}
+			response := map[string]any{"session_id": sessionID, "event": map[string]any{"type": "response.create", "event_id": fmt.Sprintf("evt_resp_%d", now)}}
 			if err := sender.write(item); err != nil {
 				_ = writer.CloseWithError(err)
 				return
@@ -231,7 +231,7 @@ type mgwSender struct {
 	connection *websocket.Conn
 }
 
-func (s *mgwSender) write(value interface{}) error {
+func (s *mgwSender) write(value any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_ = s.connection.SetWriteDeadline(time.Now().Add(15 * time.Second))

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -30,12 +31,7 @@ var GrokEgressScopes = []string{GrokEgressScopeBuild, GrokEgressScopeWeb, GrokEg
 
 // ValidGrokEgressScope reports whether scope names a known egress scope.
 func ValidGrokEgressScope(scope string) bool {
-	for _, known := range GrokEgressScopes {
-		if scope == known {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(GrokEgressScopes, scope)
 }
 
 // ErrGrokEgressNotFound is returned when a node, profile or source is missing.

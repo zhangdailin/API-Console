@@ -29,7 +29,7 @@ func buildRateLimitNumericKeySet(families []rateLimitFieldFamily) map[string]str
 	return out
 }
 
-func parseRateLimitPayload(payload map[string]interface{}) *RateLimitInfo {
+func parseRateLimitPayload(payload map[string]any) *RateLimitInfo {
 	if payload == nil {
 		return nil
 	}
@@ -48,9 +48,9 @@ func parseRateLimitPayload(payload map[string]interface{}) *RateLimitInfo {
 	return info
 }
 
-func collectRateLimitPayloadFields(value interface{}, numericFields map[string]int64, resetFields map[string]time.Time) {
+func collectRateLimitPayloadFields(value any, numericFields map[string]int64, resetFields map[string]time.Time) {
 	switch v := value.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		keys := make([]string, 0, len(v))
 		for k := range v {
 			keys = append(keys, k)
@@ -77,7 +77,7 @@ func collectRateLimitPayloadFields(value interface{}, numericFields map[string]i
 		for _, k := range keys {
 			collectRateLimitPayloadFields(v[k], numericFields, resetFields)
 		}
-	case []interface{}:
+	case []any:
 		for _, item := range v {
 			collectRateLimitPayloadFields(item, numericFields, resetFields)
 		}
@@ -163,7 +163,7 @@ func firstRateLimitReset(fields map[string]time.Time) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-func parseNumberAny(raw interface{}) (int64, bool) {
+func parseNumberAny(raw any) (int64, bool) {
 	switch v := raw.(type) {
 	case int:
 		return int64(v), true
@@ -202,7 +202,7 @@ func parseNumberAny(raw interface{}) (int64, bool) {
 		return 0, false
 	case string:
 		return ratelimit.ParseValue(v)
-	case map[string]interface{}, []interface{}:
+	case map[string]any, []any:
 		return 0, false
 	default:
 		return ratelimit.ParseValue(fmt.Sprint(v))

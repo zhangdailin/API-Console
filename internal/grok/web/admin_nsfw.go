@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"sort"
 	"strings"
@@ -49,8 +50,8 @@ type nsfwBatchTask struct {
 	fail    int
 	status  string
 	errMsg  string
-	results map[string]interface{}
-	result  interface{}
+	results map[string]any
+	result  any
 
 	cancel   context.CancelFunc
 	doneOnce sync.Once
@@ -222,7 +223,7 @@ func newNSFWBatchTask(total int, cancel context.CancelFunc) *nsfwBatchTask {
 		ID:      id,
 		Total:   total,
 		status:  "running",
-		results: map[string]interface{}{},
+		results: map[string]any{},
 		cancel:  cancel,
 		doneCh:  make(chan struct{}),
 	}
@@ -233,7 +234,7 @@ func newNSFWBatchTask(total int, cancel context.CancelFunc) *nsfwBatchTask {
 }
 
 func writeAsyncTaskStarted(w http.ResponseWriter, task *nsfwBatchTask) {
-	writeJSON(w, map[string]interface{}{
+	writeJSON(w, map[string]any{
 		"status":  "success",
 		"task_id": task.ID,
 		"total":   task.Total,
@@ -260,7 +261,7 @@ func scheduleDeleteNSFWBatchTask(id string) {
 	}()
 }
 
-func (t *nsfwBatchTask) record(masked string, ok bool, payload interface{}) {
+func (t *nsfwBatchTask) record(masked string, ok bool, payload any) {
 	if t == nil {
 		return
 	}
@@ -307,7 +308,7 @@ func (t *nsfwBatchTask) finish(status string, errMsg string) {
 	t.doneOnce.Do(func() { close(t.doneCh) })
 }
 
-func (t *nsfwBatchTask) setResult(payload interface{}) {
+func (t *nsfwBatchTask) setResult(payload any) {
 	if t == nil {
 		return
 	}
@@ -316,16 +317,14 @@ func (t *nsfwBatchTask) setResult(payload interface{}) {
 	t.mu.Unlock()
 }
 
-func (t *nsfwBatchTask) snapshot() map[string]interface{} {
+func (t *nsfwBatchTask) snapshot() map[string]any {
 	if t == nil {
-		return map[string]interface{}{}
+		return map[string]any{}
 	}
 	t.mu.RLock()
-	results := make(map[string]interface{}, len(t.results))
-	for k, v := range t.results {
-		results[k] = v
-	}
-	out := map[string]interface{}{
+	results := make(map[string]any, len(t.results))
+	maps.Copy(results, t.results)
+	out := map[string]any{
 		"task_id":   t.ID,
 		"status":    t.status,
 		"total":     t.Total,
@@ -333,7 +332,7 @@ func (t *nsfwBatchTask) snapshot() map[string]interface{} {
 		"done":      t.done,
 		"ok":        t.ok,
 		"fail":      t.fail,
-		"summary": map[string]interface{}{
+		"summary": map[string]any{
 			"total": t.Total,
 			"done":  t.done,
 			"ok":    t.ok,
@@ -393,9 +392,9 @@ func (h *Handler) HandleAdminNSFWEnable(w http.ResponseWriter, r *http.Request) 
 	}
 
 	okCount, results := h.runNSFWEnableBatch(r.Context(), targets, tokenAccounts, req.Concurrency, nil)
-	out := map[string]interface{}{
+	out := map[string]any{
 		"status": "success",
-		"summary": map[string]interface{}{
+		"summary": map[string]any{
 			"total": len(targets),
 			"ok":    okCount,
 			"fail":  len(targets) - okCount,
@@ -454,7 +453,7 @@ func (h *Handler) HandleAdminBatchTask(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		task.requestCancel()
-		out := map[string]interface{}{
+		out := map[string]any{
 			"status": "success",
 		}
 		writeJSON(w, out)
@@ -466,7 +465,7 @@ func (h *Handler) HandleAdminBatchTask(w http.ResponseWriter, r *http.Request) {
 		flusher := streamResponseHeaders(w)
 
 		var lastPayload []byte
-		send := func(payload map[string]interface{}) bool {
+		send := func(payload map[string]any) bool {
 			raw := encodeJSONBytes(payload)
 			if bytes.Equal(raw, lastPayload) {
 				return true

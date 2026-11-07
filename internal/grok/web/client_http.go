@@ -41,11 +41,11 @@ func parseUpstreamStatus(err error) int {
 		return 0
 	}
 	raw := err.Error()
-	idx := strings.Index(raw, "status=")
-	if idx < 0 {
+	_, after, ok := strings.Cut(raw, "status=")
+	if !ok {
 		return 0
 	}
-	rest := raw[idx+len("status="):]
+	rest := after
 	n := 0
 	for n < len(rest) && rest[n] >= '0' && rest[n] <= '9' {
 		n++
@@ -79,10 +79,7 @@ func backoffDelay(baseDelay, retry429Delay, lastDelay time.Duration, attempt int
 		if lastDelay <= 0 {
 			lastDelay = baseDelay
 		}
-		upper := lastDelay * 3
-		if upper < baseDelay {
-			upper = baseDelay
-		}
+		upper := max(lastDelay*3, baseDelay)
 		delay := baseDelay + time.Duration(rand.Int63n(int64(upper-baseDelay)+1))
 		if delay > maxDelay {
 			return maxDelay
@@ -93,10 +90,7 @@ func backoffDelay(baseDelay, retry429Delay, lastDelay time.Duration, attempt int
 	if baseDelay <= 0 {
 		baseDelay = 500 * time.Millisecond
 	}
-	exp := baseDelay * time.Duration(1<<max(0, attempt))
-	if exp > maxDelay {
-		exp = maxDelay
-	}
+	exp := min(baseDelay*time.Duration(1<<max(0, attempt)), maxDelay)
 	if exp <= 0 {
 		return baseDelay
 	}
@@ -118,7 +112,7 @@ func appChatRateLimitRequest(body []byte, headers http.Header) (token, model str
 	if len(body) == 0 {
 		return token, ""
 	}
-	var payload map[string]interface{}
+	var payload map[string]any
 	if json.Unmarshal(body, &payload) == nil {
 		model = firstNonEmpty(chatwire.ParseLooseStringAny(payload["modelName"]), chatwire.ParseLooseStringAny(payload["model"]))
 	}

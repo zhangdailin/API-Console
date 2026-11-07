@@ -37,7 +37,7 @@ func TestTypedChatEntryMatchesHTTPDecode(t *testing.T) {
 
 func BenchmarkChatEntryLongHistory(b *testing.B) {
 	c := chatwire.Request{Model: "test"}
-	for i := 0; i < 200; i++ {
+	for range 200 {
 		c.Messages = append(c.Messages, chatwire.Message{Role: "user", Content: strings.Repeat("example text ", 100)})
 	}
 	b.Run("HTTPDecode", func(b *testing.B) {

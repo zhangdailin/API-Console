@@ -80,7 +80,7 @@ func TestHostedToolFreeUsageRejectionSwitchesWithinBudget(t *testing.T) {
 				}
 				h.SetConfig(cfg)
 				ctx := WithRequestModel(context.Background(), "grok-4.7")
-				for i := 0; i < 3; i++ {
+				for i := range 3 {
 					if mode == "no spare" && i > 0 {
 						break
 					}

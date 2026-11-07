@@ -3,6 +3,7 @@ package store
 import (
 	"orchids-api/internal/testutil"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -49,13 +50,7 @@ func TestSecretsCoversEveryCredentialShapedField(t *testing.T) {
 		probe := "probe-" + field.Name
 		value.Field(i).SetString(probe)
 
-		covered := false
-		for _, secret := range acc.Secrets() {
-			if secret == probe {
-				covered = true
-				break
-			}
-		}
+		covered := slices.Contains(acc.Secrets(), probe)
 		testutil.CheckTrue(t, covered, "Account.%s looks like a credential but Secrets() does not return it")
 		value.Field(i).SetString("")
 	}

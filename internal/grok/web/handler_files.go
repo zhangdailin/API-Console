@@ -93,7 +93,7 @@ func (h *Handler) HandleFiles(w http.ResponseWriter, r *http.Request) {
 		// http.ServeContent evaluates the conditional request against the
 		// Content-Type and range handling below; ServeFile does not.
 		if ifNoneMatch := strings.TrimSpace(r.Header.Get("If-None-Match")); ifNoneMatch != "" {
-			for _, candidate := range strings.Split(ifNoneMatch, ",") {
+			for candidate := range strings.SplitSeq(ifNoneMatch, ",") {
 				if strings.TrimSpace(candidate) == etag || strings.TrimSpace(candidate) == "*" {
 					w.WriteHeader(http.StatusNotModified)
 					return

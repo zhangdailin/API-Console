@@ -2,6 +2,7 @@ package web
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -10,7 +11,7 @@ type AttachmentInput struct {
 	Data string
 }
 
-func extractMessageAndAttachmentsWithTools(messages []ChatMessage, isVideo bool, tools []ToolDef, toolChoice interface{}, parallelToolCalls bool) (string, []AttachmentInput, error) {
+func extractMessageAndAttachmentsWithTools(messages []ChatMessage, isVideo bool, tools []ToolDef, toolChoice any, parallelToolCalls bool) (string, []AttachmentInput, error) {
 	if len(tools) > 0 {
 		messages = formatToolHistory(messages)
 	}
@@ -31,10 +32,10 @@ func extractMessageAndAttachmentsWithTools(messages []ChatMessage, isVideo bool,
 					Text string
 				}{Role: role, Text: text})
 			}
-		case []interface{}:
+		case []any:
 			var parts []string
 			for _, block := range content {
-				m, ok := block.(map[string]interface{})
+				m, ok := block.(map[string]any)
 				if !ok {
 					continue
 				}
@@ -83,8 +84,8 @@ func extractMessageAndAttachmentsWithTools(messages []ChatMessage, isVideo bool,
 	}
 
 	lastUser := -1
-	for i := len(flatten) - 1; i >= 0; i-- {
-		if flatten[i].Role == "user" {
+	for i, f := range slices.Backward(flatten) {
+		if f.Role == "user" {
 			lastUser = i
 			break
 		}
@@ -120,18 +121,18 @@ func extractMessageAndAttachmentsWithTools(messages []ChatMessage, isVideo bool,
 }
 
 func extractLastUserText(messages []ChatMessage) string {
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg := messages[i]
+	for _, msg := range slices.Backward(messages) {
+
 		if normalizeMessageRole(msg.Role) != "user" {
 			continue
 		}
 		switch content := msg.Content.(type) {
 		case string:
 			return strings.TrimSpace(content)
-		case []interface{}:
+		case []any:
 			parts := make([]string, 0, len(content))
 			for _, block := range content {
-				m, ok := block.(map[string]interface{})
+				m, ok := block.(map[string]any)
 				if !ok {
 					continue
 				}
@@ -149,14 +150,14 @@ func extractLastUserText(messages []ChatMessage) string {
 	return ""
 }
 
-func extractContentText(content interface{}) string {
+func extractContentText(content any) string {
 	switch v := content.(type) {
 	case string:
 		return v
-	case []interface{}:
+	case []any:
 		var parts []string
 		for _, block := range v {
-			m, ok := block.(map[string]interface{})
+			m, ok := block.(map[string]any)
 			if !ok {
 				continue
 			}
@@ -187,11 +188,11 @@ func normalizeMessageRole(role string) string {
 	}
 }
 
-func extractAttachmentURL(v interface{}) string {
+func extractAttachmentURL(v any) string {
 	switch x := v.(type) {
 	case string:
 		return strings.TrimSpace(x)
-	case map[string]interface{}:
+	case map[string]any:
 		if u, ok := x["url"].(string); ok && strings.TrimSpace(u) != "" {
 			return strings.TrimSpace(u)
 		}
@@ -205,11 +206,11 @@ func extractAttachmentURL(v interface{}) string {
 	return ""
 }
 
-func extractAttachmentData(v interface{}, field string) string {
+func extractAttachmentData(v any, field string) string {
 	switch x := v.(type) {
 	case string:
 		return strings.TrimSpace(x)
-	case map[string]interface{}:
+	case map[string]any:
 		if u, ok := x[field].(string); ok && strings.TrimSpace(u) != "" {
 			return strings.TrimSpace(u)
 		}
@@ -229,9 +230,9 @@ func extractPromptAndImageURLs(messages []ChatMessage) (string, []string) {
 			if text != "" {
 				prompt = text
 			}
-		case []interface{}:
+		case []any:
 			for _, block := range content {
-				m, ok := block.(map[string]interface{})
+				m, ok := block.(map[string]any)
 				if !ok {
 					continue
 				}
@@ -261,19 +262,19 @@ func extractPromptAndImageURLs(messages []ChatMessage) (string, []string) {
 }
 
 func extractVideoPromptAndAttachments(messages []ChatMessage) (string, []AttachmentInput, error) {
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg := messages[i]
+	for _, msg := range slices.Backward(messages) {
+
 		content := msg.Content
 		switch c := content.(type) {
 		case string:
 			if text := strings.TrimSpace(c); text != "" {
 				return text, nil, nil
 			}
-		case []interface{}:
+		case []any:
 			textParts := make([]string, 0)
 			refs := make([]AttachmentInput, 0)
 			for _, block := range c {
-				m, ok := block.(map[string]interface{})
+				m, ok := block.(map[string]any)
 				if !ok {
 					continue
 				}

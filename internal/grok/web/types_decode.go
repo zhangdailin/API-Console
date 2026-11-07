@@ -6,10 +6,10 @@ import (
 	"strings"
 )
 
-func parseVideoInputReferences(value interface{}) []string {
+func parseVideoInputReferences(value any) []string {
 	var out []string
-	var walk func(interface{})
-	walk = func(v interface{}) {
+	var walk func(any)
+	walk = func(v any) {
 		switch x := v.(type) {
 		case nil:
 			return
@@ -17,11 +17,11 @@ func parseVideoInputReferences(value interface{}) []string {
 			if s := strings.TrimSpace(x); s != "" {
 				out = append(out, s)
 			}
-		case []interface{}:
+		case []any:
 			for _, item := range x {
 				walk(item)
 			}
-		case map[string]interface{}:
+		case map[string]any:
 			for _, key := range []string{"image_url", "url", "data"} {
 				if s := chatwire.ParseLooseStringAny(x[key]); s != "" {
 					out = append(out, s)
@@ -36,12 +36,12 @@ func parseVideoInputReferences(value interface{}) []string {
 
 func (v *VideoConfig) UnmarshalJSON(data []byte) error {
 	type rawVideoConfig struct {
-		AspectRatio    interface{} `json:"aspect_ratio"`
-		VideoLength    interface{} `json:"video_length"`
-		Seconds        interface{} `json:"seconds"`
-		ResolutionName interface{} `json:"resolution_name"`
-		Preset         interface{} `json:"preset"`
-		Size           interface{} `json:"size"`
+		AspectRatio    any `json:"aspect_ratio"`
+		VideoLength    any `json:"video_length"`
+		Seconds        any `json:"seconds"`
+		ResolutionName any `json:"resolution_name"`
+		Preset         any `json:"preset"`
+		Size           any `json:"size"`
 	}
 	var raw rawVideoConfig
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -67,9 +67,9 @@ func (v *VideoConfig) UnmarshalJSON(data []byte) error {
 
 func (c *ImageConfig) UnmarshalJSON(data []byte) error {
 	type rawImageConfig struct {
-		N              interface{} `json:"n"`
-		Size           interface{} `json:"size"`
-		ResponseFormat interface{} `json:"response_format"`
+		N              any `json:"n"`
+		Size           any `json:"size"`
+		ResponseFormat any `json:"response_format"`
 	}
 	var raw rawImageConfig
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -87,32 +87,32 @@ func (c *ImageConfig) UnmarshalJSON(data []byte) error {
 
 func (r *ChatCompletionsRequest) UnmarshalJSON(data []byte) error {
 	type rawChatRequest struct {
-		Model               string                   `json:"model"`
-		Messages            []ChatMessage            `json:"messages"`
-		Stream              interface{}              `json:"stream"`
-		Thinking            *string                  `json:"thinking,omitempty"`
-		ReasoningEffort     *string                  `json:"reasoning_effort,omitempty"`
-		ReasoningSummary    *string                  `json:"reasoning_summary,omitempty"`
-		Temperature         interface{}              `json:"temperature,omitempty"`
-		TopP                interface{}              `json:"top_p,omitempty"`
-		MaxTokens           interface{}              `json:"max_tokens,omitempty"`
-		MaxCompletionTokens interface{}              `json:"max_completion_tokens,omitempty"`
-		ResponseFormat      map[string]interface{}   `json:"response_format,omitempty"`
-		User                interface{}              `json:"user,omitempty"`
-		SafetyIdentifier    interface{}              `json:"safety_identifier,omitempty"`
-		ResponseText        map[string]interface{}   `json:"text,omitempty"`
-		ResponsesTools      []map[string]interface{} `json:"x_responses_tools,omitempty"`
-		Include             []string                 `json:"include,omitempty"`
-		VideoConfig         *VideoConfig             `json:"video_config,omitempty"`
-		ImageConfig         *ImageConfig             `json:"image_config,omitempty"`
-		Tools               []ToolDef                `json:"tools,omitempty"`
-		ToolChoice          interface{}              `json:"tool_choice,omitempty"`
-		ParallelToolCalls   interface{}              `json:"parallel_tool_calls,omitempty"`
-		Stop                interface{}              `json:"stop,omitempty"`
-		PromptCacheKey      string                   `json:"prompt_cache_key,omitempty"`
-		MCPServers          []map[string]interface{} `json:"mcp_servers,omitempty"`
-		OutputConfig        map[string]interface{}   `json:"output_config,omitempty"`
-		ThinkingConfig      map[string]interface{}   `json:"thinking_config,omitempty"`
+		Model               string           `json:"model"`
+		Messages            []ChatMessage    `json:"messages"`
+		Stream              any              `json:"stream"`
+		Thinking            *string          `json:"thinking,omitempty"`
+		ReasoningEffort     *string          `json:"reasoning_effort,omitempty"`
+		ReasoningSummary    *string          `json:"reasoning_summary,omitempty"`
+		Temperature         any              `json:"temperature,omitempty"`
+		TopP                any              `json:"top_p,omitempty"`
+		MaxTokens           any              `json:"max_tokens,omitempty"`
+		MaxCompletionTokens any              `json:"max_completion_tokens,omitempty"`
+		ResponseFormat      map[string]any   `json:"response_format,omitempty"`
+		User                any              `json:"user,omitempty"`
+		SafetyIdentifier    any              `json:"safety_identifier,omitempty"`
+		ResponseText        map[string]any   `json:"text,omitempty"`
+		ResponsesTools      []map[string]any `json:"x_responses_tools,omitempty"`
+		Include             []string         `json:"include,omitempty"`
+		VideoConfig         *VideoConfig     `json:"video_config,omitempty"`
+		ImageConfig         *ImageConfig     `json:"image_config,omitempty"`
+		Tools               []ToolDef        `json:"tools,omitempty"`
+		ToolChoice          any              `json:"tool_choice,omitempty"`
+		ParallelToolCalls   any              `json:"parallel_tool_calls,omitempty"`
+		Stop                any              `json:"stop,omitempty"`
+		PromptCacheKey      string           `json:"prompt_cache_key,omitempty"`
+		MCPServers          []map[string]any `json:"mcp_servers,omitempty"`
+		OutputConfig        map[string]any   `json:"output_config,omitempty"`
+		ThinkingConfig      map[string]any   `json:"thinking_config,omitempty"`
 	}
 
 	var raw rawChatRequest
@@ -174,7 +174,7 @@ func (r *ChatCompletionsRequest) UnmarshalJSON(data []byte) error {
 	r.ResponseFormat = raw.ResponseFormat
 	r.SafetyIdentifier = firstNonEmpty(chatwire.ParseLooseStringAny(raw.SafetyIdentifier), chatwire.ParseLooseStringAny(raw.User))
 	r.ResponseText = raw.ResponseText
-	r.ResponsesTools = append([]map[string]interface{}(nil), raw.ResponsesTools...)
+	r.ResponsesTools = append([]map[string]any(nil), raw.ResponsesTools...)
 	r.Include = append([]string(nil), raw.Include...)
 	r.VideoConfig = raw.VideoConfig
 	r.ImageConfig = raw.ImageConfig
@@ -196,17 +196,17 @@ func (r *ChatCompletionsRequest) UnmarshalJSON(data []byte) error {
 
 func (r *ImagesGenerationsRequest) UnmarshalJSON(data []byte) error {
 	type rawImagesGenerationsRequest struct {
-		Model          interface{}     `json:"model"`
-		Prompt         interface{}     `json:"prompt"`
-		N              interface{}     `json:"n"`
-		PartialImages  interface{}     `json:"partial_images"`
-		Size           interface{}     `json:"size"`
-		AspectRatio    interface{}     `json:"aspect_ratio"`
-		Resolution     interface{}     `json:"resolution"`
-		Quality        interface{}     `json:"quality"`
-		Stream         interface{}     `json:"stream"`
-		NSFW           interface{}     `json:"nsfw"`
-		ResponseFormat interface{}     `json:"response_format"`
+		Model          any             `json:"model"`
+		Prompt         any             `json:"prompt"`
+		N              any             `json:"n"`
+		PartialImages  any             `json:"partial_images"`
+		Size           any             `json:"size"`
+		AspectRatio    any             `json:"aspect_ratio"`
+		Resolution     any             `json:"resolution"`
+		Quality        any             `json:"quality"`
+		Stream         any             `json:"stream"`
+		NSFW           any             `json:"nsfw"`
+		ResponseFormat any             `json:"response_format"`
 		StorageOptions json.RawMessage `json:"storage_options"`
 	}
 	var raw rawImagesGenerationsRequest
@@ -260,18 +260,18 @@ func (r *ImagesGenerationsRequest) UnmarshalJSON(data []byte) error {
 
 func (r *VideosRequest) UnmarshalJSON(data []byte) error {
 	type rawVideosRequest struct {
-		Model           interface{} `json:"model"`
-		Prompt          interface{} `json:"prompt"`
-		Seconds         interface{} `json:"seconds"`
-		Duration        interface{} `json:"duration"`
-		VideoLength     interface{} `json:"video_length"`
-		Size            interface{} `json:"size"`
-		AspectRatio     interface{} `json:"aspect_ratio"`
-		ResolutionName  interface{} `json:"resolution_name"`
-		Resolution      interface{} `json:"resolution"`
-		Preset          interface{} `json:"preset"`
-		InputReference  interface{} `json:"input_reference"`
-		InputReferences interface{} `json:"input_references"`
+		Model           any `json:"model"`
+		Prompt          any `json:"prompt"`
+		Seconds         any `json:"seconds"`
+		Duration        any `json:"duration"`
+		VideoLength     any `json:"video_length"`
+		Size            any `json:"size"`
+		AspectRatio     any `json:"aspect_ratio"`
+		ResolutionName  any `json:"resolution_name"`
+		Resolution      any `json:"resolution"`
+		Preset          any `json:"preset"`
+		InputReference  any `json:"input_reference"`
+		InputReferences any `json:"input_references"`
 	}
 	var raw rawVideosRequest
 	if err := json.Unmarshal(data, &raw); err != nil {

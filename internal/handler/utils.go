@@ -133,8 +133,8 @@ func headerValue(r *http.Request, keys ...string) string {
 }
 
 func extractUserText(messages []prompt.Message) string {
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg := messages[i]
+	for _, msg := range slices.Backward(messages) {
+
 		if msg.Role == "user" {
 			if text := msg.ExtractText(); text != "" {
 				return text
@@ -145,8 +145,8 @@ func extractUserText(messages []prompt.Message) string {
 }
 
 func lastUserIsToolResultFollowup(messages []prompt.Message) bool {
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg := messages[i]
+	for _, msg := range slices.Backward(messages) {
+
 		if msg.Role != "user" {
 			continue
 		}
@@ -173,8 +173,8 @@ func lastUserIsToolResultFollowup(messages []prompt.Message) bool {
 }
 
 func lastNonToolResultUserText(messages []prompt.Message) string {
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg := messages[i]
+	for _, msg := range slices.Backward(messages) {
+
 		if !strings.EqualFold(strings.TrimSpace(msg.Role), "user") {
 			continue
 		}
@@ -205,8 +205,8 @@ func lastNonToolResultUserText(messages []prompt.Message) string {
 }
 
 func isSuggestionMode(messages []prompt.Message) bool {
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg := messages[i]
+	for _, msg := range slices.Backward(messages) {
+
 		if msg.Role == "user" {
 			text := msg.ExtractText()
 			if text != "" {
@@ -238,8 +238,8 @@ func containsSuggestionMode(text string) bool {
 // lastMessageText walks the history backwards and returns the stripped text of
 // the newest message whose role matches and whose text satisfies accept.
 func lastMessageText(messages []prompt.Message, role string, accept func(string) bool) string {
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg := messages[i]
+	for _, msg := range slices.Backward(messages) {
+
 		if !strings.EqualFold(strings.TrimSpace(msg.Role), role) {
 			continue
 		}

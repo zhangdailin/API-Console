@@ -58,7 +58,7 @@ func TestNativeResponsesQualityRetriesWithoutLeakingAnalysis(t *testing.T) {
 			}))
 			defer server.Close()
 			h, acc := parityBuildHandler(t, server)
-			for i := 0; i < 2; i++ {
+			for i := range 2 {
 				copy := *acc
 				copy.ID = 0
 				copy.GrokModels = []string{"grok-4.7"}
@@ -103,7 +103,7 @@ func TestNativeResponsesQualityNeverReplaysUnsafeOrPinnedTurns(t *testing.T) {
 			acc.ID = 0
 			acc.GrokModels = []string{"grok-4.7"}
 			acc.GrokModelsSyncedAt = time.Now()
-			for i := 0; i < 2; i++ {
+			for range 2 {
 				copy := *acc
 				copy.ID = 0
 				if err := h.lb.Store.CreateAccount(context.Background(), &copy); err != nil {

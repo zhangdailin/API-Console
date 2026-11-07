@@ -43,8 +43,7 @@ func (h *Handler) HandleAdminMediaInputs(w http.ResponseWriter, r *http.Request)
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxMediaInputRequestBytes)
 	if err := r.ParseMultipartForm(maxMediaInputRequestBytes); err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			writeJSONStatus(w, http.StatusRequestEntityTooLarge, adminMediaError("media_too_large", "media input exceeds 20 MiB"))
 			return
 		}
@@ -91,7 +90,7 @@ func (h *Handler) HandleAdminMediaInputs(w http.ResponseWriter, r *http.Request)
 		writeJSONStatus(w, status, adminMediaError(code, message))
 		return
 	}
-	writeJSONStatus(w, http.StatusCreated, map[string]interface{}{"data": adminMediaInputJSON(input)})
+	writeJSONStatus(w, http.StatusCreated, map[string]any{"data": adminMediaInputJSON(input)})
 }
 
 // HandleMediaInputImport downloads a remote input into the authenticated API
@@ -128,7 +127,7 @@ func (h *Handler) HandleMediaInputImport(w http.ResponseWriter, r *http.Request)
 		writeResponsesAPIError(w, status, strings.ToLower(code), message)
 		return
 	}
-	writeJSONStatus(w, http.StatusCreated, map[string]interface{}{
+	writeJSONStatus(w, http.StatusCreated, map[string]any{
 		"file_id": input.ID, "object": "file", "kind": input.Kind, "mime_type": input.MIMEType,
 		"bytes": input.SizeBytes, "created_at": input.CreatedAt.Unix(), "expires_at": input.ExpiresAt.Format(time.RFC3339),
 	})
@@ -167,7 +166,7 @@ func (h *Handler) HandleAdminMediaInputImport(w http.ResponseWriter, r *http.Req
 		writeJSONStatus(w, status, adminMediaError(code, message))
 		return
 	}
-	writeJSONStatus(w, http.StatusCreated, map[string]interface{}{"data": adminMediaInputJSON(input)})
+	writeJSONStatus(w, http.StatusCreated, map[string]any{"data": adminMediaInputJSON(input)})
 }
 
 func decodeMediaInputImportURL(w http.ResponseWriter, r *http.Request, admin bool) (string, bool) {
@@ -321,7 +320,7 @@ func (h *Handler) HandleAdminMediaInputResource(w http.ResponseWriter, r *http.R
 	}
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, map[string]interface{}{"data": adminMediaInputJSON(input)})
+		writeJSON(w, map[string]any{"data": adminMediaInputJSON(input)})
 	case http.MethodDelete:
 		if err := h.lb.Store.DeleteStoredMediaInput(r.Context(), id, mediaInputAdminOwner); err != nil {
 			writeJSONStatus(w, http.StatusNotFound, adminMediaError("not_found", "media input not found"))
@@ -337,11 +336,11 @@ func (h *Handler) HandleAdminMediaInputResource(w http.ResponseWriter, r *http.R
 }
 
 // adminMediaInputJSON renders an input with the management contract's names.
-func adminMediaInputJSON(input *store.StoredMediaInput) map[string]interface{} {
+func adminMediaInputJSON(input *store.StoredMediaInput) map[string]any {
 	if input == nil {
 		return nil
 	}
-	return map[string]interface{}{
+	return map[string]any{
 		"id":        input.ID,
 		"fileId":    input.ID,
 		"kind":      input.Kind,
@@ -353,6 +352,6 @@ func adminMediaInputJSON(input *store.StoredMediaInput) map[string]interface{} {
 }
 
 // adminMediaError renders the management contract's error object.
-func adminMediaError(code, message string) map[string]interface{} {
-	return map[string]interface{}{"error": map[string]interface{}{"code": code, "message": message}}
+func adminMediaError(code, message string) map[string]any {
+	return map[string]any{"error": map[string]any{"code": code, "message": message}}
 }

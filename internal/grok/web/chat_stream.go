@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"orchids-api/internal/audit"
 	"orchids-api/internal/debug"
@@ -27,10 +28,7 @@ func streamMessageDelta(previous, current string) string {
 	}
 	prevRunes := []rune(previous)
 	currRunes := []rune(current)
-	maxPrefix := len(prevRunes)
-	if len(currRunes) < maxPrefix {
-		maxPrefix = len(currRunes)
-	}
+	maxPrefix := min(len(currRunes), len(prevRunes))
 	prefix := 0
 	for prefix < maxPrefix && prevRunes[prefix] == currRunes[prefix] {
 		prefix++
@@ -47,10 +45,7 @@ func commonPrefixText(a, b string) string {
 	}
 	ar := []rune(a)
 	br := []rune(b)
-	limit := len(ar)
-	if len(br) < limit {
-		limit = len(br)
-	}
+	limit := min(len(br), len(ar))
 	idx := 0
 	for idx < limit && ar[idx] == br[idx] {
 		idx++
@@ -61,7 +56,7 @@ func commonPrefixText(a, b string) string {
 	return string(ar[:idx])
 }
 
-func toolCallsEnabled(tools []ToolDef, toolChoice interface{}) bool {
+func toolCallsEnabled(tools []ToolDef, toolChoice any) bool {
 	if len(tools) == 0 {
 		return false
 	}
@@ -87,7 +82,7 @@ func suffixPrefixOverlap(text, tag string) int {
 	return 0
 }
 
-func (h *Handler) streamChat(w http.ResponseWriter, req *ChatCompletionsRequest, model string, spec ModelSpec, token string, publicBase string, hasAttachments bool, tools []ToolDef, toolChoice interface{}, body io.Reader, logger *debug.Logger) {
+func (h *Handler) streamChat(w http.ResponseWriter, req *ChatCompletionsRequest, model string, spec ModelSpec, token string, publicBase string, hasAttachments bool, tools []ToolDef, toolChoice any, body io.Reader, logger *debug.Logger) {
 	flusher := streamResponseHeaders(w)
 
 	id := "chatcmpl_" + randomHex(8)
@@ -95,7 +90,7 @@ func (h *Handler) streamChat(w http.ResponseWriter, req *ChatCompletionsRequest,
 	sentRole := false
 	lastMessage := ""
 	sentAny := false
-	var finalUsage map[string]interface{}
+	var finalUsage map[string]any
 	defer func() {
 		if len(finalUsage) > 0 {
 			h.auditChatOutcome(context.Background(), req.account, req, chatOutcome{Finish: "stop", Usage: finalUsage, UsageSource: audit.UsageSourceEstimated})
@@ -223,22 +218,20 @@ func (h *Handler) streamChat(w http.ResponseWriter, req *ChatCompletionsRequest,
 		}
 	}
 
-	emitToolCallsChunk := func(content string, toolCalls []map[string]interface{}, finish string, hasFinish bool) {
+	emitToolCallsChunk := func(content string, toolCalls []map[string]any, finish string, hasFinish bool) {
 		if strings.TrimSpace(content) != "" {
 			emitChunk("", strings.TrimSpace(content), "", false)
 		}
 		if len(toolCalls) == 0 {
 			return
 		}
-		indexedToolCalls := make([]map[string]interface{}, 0, len(toolCalls))
+		indexedToolCalls := make([]map[string]any, 0, len(toolCalls))
 		for _, tc := range toolCalls {
 			if tc == nil {
 				continue
 			}
-			cp := make(map[string]interface{}, len(tc)+1)
-			for k, v := range tc {
-				cp[k] = v
-			}
+			cp := make(map[string]any, len(tc)+1)
+			maps.Copy(cp, tc)
 			if _, ok := cp["index"]; !ok {
 				cp["index"] = toolCallIndex
 			}
@@ -257,8 +250,8 @@ func (h *Handler) streamChat(w http.ResponseWriter, req *ChatCompletionsRequest,
 	onToolStreamText := func(s string) {
 		emitChunk("", s, "", false)
 	}
-	onToolStreamCall := func(toolCall map[string]interface{}) {
-		emitToolCallsChunk("", []map[string]interface{}{toolCall}, "", false)
+	onToolStreamCall := func(toolCall map[string]any) {
+		emitToolCallsChunk("", []map[string]any{toolCall}, "", false)
 	}
 	handleToolStreamChunk := func(chunk string) {
 		if toolPump != nil {
@@ -271,7 +264,7 @@ func (h *Handler) streamChat(w http.ResponseWriter, req *ChatCompletionsRequest,
 		}
 	}
 
-	err := parseUpstreamLines(body, func(resp map[string]interface{}) error {
+	err := parseUpstreamLines(body, func(resp map[string]any) error {
 		if downstreamWriteErr != nil {
 			return downstreamWriteErr
 		}
@@ -485,7 +478,7 @@ func (h *Handler) streamChat(w http.ResponseWriter, req *ChatCompletionsRequest,
 	if toolStreamMode {
 		flushToolStreamChunk()
 		if toolPump != nil && toolPump.EmittedToolCalls {
-			finalUsage = grokbase.AddReasoningUsage(buildChatUsagePayload(req, strings.TrimSpace(finalBufferedText), []map[string]interface{}{{"type": "function"}}), reasoningContent.String())
+			finalUsage = grokbase.AddReasoningUsage(buildChatUsagePayload(req, strings.TrimSpace(finalBufferedText), []map[string]any{{"type": "function"}}), reasoningContent.String())
 			emitChunk("", "", "tool_calls", true)
 			emitRaw([]byte("[DONE]"))
 			return
@@ -511,7 +504,7 @@ func (h *Handler) streamChat(w http.ResponseWriter, req *ChatCompletionsRequest,
 	emitRaw([]byte("[DONE]"))
 }
 
-func (h *Handler) collectChat(w http.ResponseWriter, req *ChatCompletionsRequest, model string, spec ModelSpec, token string, publicBase string, hasAttachments bool, tools []ToolDef, toolChoice interface{}, body io.Reader, logger *debug.Logger) {
+func (h *Handler) collectChat(w http.ResponseWriter, req *ChatCompletionsRequest, model string, spec ModelSpec, token string, publicBase string, hasAttachments bool, tools []ToolDef, toolChoice any, body io.Reader, logger *debug.Logger) {
 	id := "chatcmpl_" + randomHex(8)
 	lastMessage := ""
 	videoURL := ""
@@ -534,7 +527,7 @@ func (h *Handler) collectChat(w http.ResponseWriter, req *ChatCompletionsRequest
 		imageCandidates = append(imageCandidates, u)
 	}
 
-	err := parseUpstreamLines(body, func(resp map[string]interface{}) error {
+	err := parseUpstreamLines(body, func(resp map[string]any) error {
 		if logger != nil {
 			if raw, err := json.Marshal(resp); err == nil {
 				logger.LogOutputSSE("response", string(raw))
@@ -604,7 +597,7 @@ func (h *Handler) collectChat(w http.ResponseWriter, req *ChatCompletionsRequest
 		reasoningContent = sanitizeUpstreamText(reasoningTokens.String())
 	}
 
-	var toolCalls []map[string]interface{}
+	var toolCalls []map[string]any
 	if toolCallsEnabled(tools, toolChoice) {
 		textContent, parsedToolCalls := newToolCallParser(tools, toolChoice).parseCalls(finalContent)
 		finalContent = strings.TrimSpace(textContent)
@@ -638,24 +631,24 @@ func (h *Handler) collectChat(w http.ResponseWriter, req *ChatCompletionsRequest
 			finalContent += formatImageMarkdown(val)
 		}
 	}
-	message := map[string]interface{}{
+	message := map[string]any{
 		"role":        "assistant",
 		"content":     finalContent,
 		"refusal":     nil,
-		"annotations": []interface{}{},
+		"annotations": []any{},
 	}
 	if strings.TrimSpace(reasoningContent) != "" {
 		message["reasoning_content"] = reasoningContent
 	}
 	usage := grokbase.AddReasoningUsage(buildChatUsagePayload(req, finalContent, toolCalls), reasoningContent)
-	resp := map[string]interface{}{
+	resp := map[string]any{
 		"id":                 id,
 		"object":             "chat.completion",
 		"created":            time.Now().Unix(),
 		"model":              model,
 		"service_tier":       nil,
 		"system_fingerprint": fingerprint,
-		"choices": []map[string]interface{}{
+		"choices": []map[string]any{
 			{
 				"index":         0,
 				"message":       message,
@@ -665,8 +658,8 @@ func (h *Handler) collectChat(w http.ResponseWriter, req *ChatCompletionsRequest
 		"usage": usage,
 	}
 	if len(toolCalls) > 0 {
-		choice := resp["choices"].([]map[string]interface{})[0]
-		message := choice["message"].(map[string]interface{})
+		choice := resp["choices"].([]map[string]any)[0]
+		message := choice["message"].(map[string]any)
 		message["tool_calls"] = toolCalls
 		if strings.TrimSpace(finalContent) == "" {
 			message["content"] = nil

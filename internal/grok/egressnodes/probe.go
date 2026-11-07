@@ -103,7 +103,7 @@ func parseProbeIP(body, provider string) string {
 	if provider == "ipinfo" {
 		return strings.TrimSpace(body)
 	}
-	for _, line := range strings.Split(body, "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		if value, ok := strings.CutPrefix(strings.TrimSpace(line), "ip="); ok {
 			return value
 		}

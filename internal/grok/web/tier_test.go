@@ -62,18 +62,18 @@ func TestLiteImagePayloadIsAPlainFastChat(t *testing.T) {
 }
 
 func TestExtractAppChatImageURLsKeepsOnlyGrokHostedImages(t *testing.T) {
-	resp := map[string]interface{}{
-		"result": map[string]interface{}{"response": map[string]interface{}{
-			"cardAttachment": map[string]interface{}{
+	resp := map[string]any{
+		"result": map[string]any{"response": map[string]any{
+			"cardAttachment": map[string]any{
 				"jsonData": `{"image":{"url":"https://example.com/searched/cat.jpg"},"url":"https://news.example.org/photo.png"}`,
 			},
 		}},
 	}
 	testutil.Equal(t, len(extractAppChatImageURLs(resp)), 0)
 
-	generated := map[string]interface{}{
-		"result": map[string]interface{}{"response": map[string]interface{}{
-			"cardAttachment": map[string]interface{}{
+	generated := map[string]any{
+		"result": map[string]any{"response": map[string]any{
+			"cardAttachment": map[string]any{
 				"jsonData": `{"image_chunk":{"imageUrl":"users/u1/generated/a1/image.jpg","progress":100}}`,
 			},
 		}},

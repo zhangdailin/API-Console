@@ -98,13 +98,13 @@ func TestRecordCLIRefreshFailure(t *testing.T) {
 	testutil.True(t, recordCLIRefreshFailure(acc, unclassified, now), "the 5th identical unclassified failure needs a login")
 
 	acc = &store.Account{ID: 1, OAuthAccessToken: "a", OAuthExpiresAt: now.Add(time.Hour)}
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		testutil.False(t, recordCLIRefreshFailure(acc, unclassified, now), "a live token never needs a login for an unclassified error")
 	}
 
 	acc = &store.Account{ID: 1}
 	var last time.Time
-	for i := 0; i < 7; i++ {
+	for range 7 {
 		testutil.False(t, recordCLIRefreshFailure(acc, errors.New("connection reset"), now), "transient")
 		testutil.False(t, acc.GrokRefresh.RetryAt.Before(last), "backoff must not shrink")
 		last = acc.GrokRefresh.RetryAt

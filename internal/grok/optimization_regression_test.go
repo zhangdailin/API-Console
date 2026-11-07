@@ -160,7 +160,7 @@ func TestOptimizationCooldownBatchDeduplicatesAndCancels(t *testing.T) {
 
 	snapshot := &ratelimit.Snapshot{}
 	var queries []ratelimit.Query
-	for i := 0; i < 23; i++ {
+	for i := range 23 {
 		queries = append(queries, cooldownQueries(context.Background(), &store.Account{ID: int64(i + 1), TeamID: teamID}, "grok-4.7")...)
 	}
 	if err := snapshot.Prepare(context.Background(), queries); err != nil {
@@ -219,7 +219,7 @@ func TestOptimizationAccountSelectionUsesOneCooldownPipeline(t *testing.T) {
 	defer upstream.Close()
 	h, base := parityBuildHandler(t, upstream)
 	ctx := context.Background()
-	for i := 0; i < 23; i++ {
+	for i := range 23 {
 		acc := base.Clone()
 		acc.ID = 0
 		acc.TeamID = fmt.Sprintf("%s-%d", t.Name(), i)

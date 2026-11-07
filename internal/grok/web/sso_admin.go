@@ -60,7 +60,7 @@ func parseSSOImportTokens(text string, tokens []string) []string {
 	if strings.HasPrefix(trimmed, "[") || strings.HasPrefix(trimmed, "{") {
 		raw = append(raw, jsonSSOTokens(trimmed)...)
 	} else if trimmed != "" {
-		for _, line := range strings.Split(trimmed, "\n") {
+		for line := range strings.SplitSeq(trimmed, "\n") {
 			line = strings.TrimSpace(line)
 			if line == "" || strings.HasPrefix(line, "#") {
 				continue
@@ -89,21 +89,21 @@ func parseSSOImportTokens(text string, tokens []string) []string {
 }
 
 func jsonSSOTokens(text string) []string {
-	var decoded interface{}
+	var decoded any
 	if json.Unmarshal([]byte(text), &decoded) != nil {
 		return nil
 	}
 	var out []string
-	var walk func(value interface{})
-	walk = func(value interface{}) {
+	var walk func(value any)
+	walk = func(value any) {
 		switch v := value.(type) {
 		case string:
 			out = append(out, v)
-		case []interface{}:
+		case []any:
 			for _, item := range v {
 				walk(item)
 			}
-		case map[string]interface{}:
+		case map[string]any:
 			for _, key := range []string{"token", "sso", "cookie", "client_cookie"} {
 				if s, ok := v[key].(string); ok && strings.TrimSpace(s) != "" {
 					out = append(out, s)
@@ -214,7 +214,7 @@ func (h *Handler) HandleSSOImport(w http.ResponseWriter, r *http.Request) {
 		enableNSFW := req.EnableNSFW
 		go h.postImportMaintenance(context.WithoutCancel(ctx), accounts, refresh, enableNSFW)
 	}
-	writeJSON(w, map[string]interface{}{
+	writeJSON(w, map[string]any{
 		"status":     "success",
 		"total":      len(tokens),
 		"created":    counts["created"],
@@ -369,7 +369,7 @@ func (h *Handler) HandleSSORefresh(w http.ResponseWriter, r *http.Request) {
 			ok++
 		}
 	}
-	writeJSON(w, map[string]interface{}{"status": "success", "total": len(results), "ok": ok, "failed": len(results) - ok, "results": results})
+	writeJSON(w, map[string]any{"status": "success", "total": len(results), "ok": ok, "failed": len(results) - ok, "results": results})
 }
 
 // enableNSFWForAccount switches the grok.com NSFW preference on for one
@@ -434,7 +434,7 @@ func (h *Handler) HandleSSONSFW(w http.ResponseWriter, r *http.Request) {
 			ok++
 		}
 	}
-	writeJSON(w, map[string]interface{}{"status": "success", "total": len(results), "ok": ok, "failed": len(results) - ok, "results": results})
+	writeJSON(w, map[string]any{"status": "success", "total": len(results), "ok": ok, "failed": len(results) - ok, "results": results})
 }
 
 // HandleAvailability reports how many usable accounts each Grok plane has, so
@@ -468,5 +468,5 @@ func (h *Handler) HandleAvailability(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, map[string]interface{}{"counts": counts, "web_synced": webSynced, "web_sync_error": webError})
+	writeJSON(w, map[string]any{"counts": counts, "web_synced": webSynced, "web_sync_error": webError})
 }

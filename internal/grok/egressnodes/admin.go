@@ -108,8 +108,7 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 }
 
 func writeErr(w http.ResponseWriter, err error) {
-	var apiErr *apiError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*apiError](err); ok {
 		httpserver.WriteError(w, apiErr.status, apiErr.message)
 		return
 	}
@@ -378,7 +377,7 @@ func normalizeCookies(raw string) string {
 		return "cf_clearance=" + raw
 	}
 	var parts []string
-	for _, item := range strings.Split(raw, ";") {
+	for item := range strings.SplitSeq(raw, ";") {
 		item = strings.TrimSpace(item)
 		if item != "" {
 			parts = append(parts, item)

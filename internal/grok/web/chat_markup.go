@@ -278,7 +278,7 @@ func (c *streamTextImageRefCollector) emit(emitURL func(string)) {
 	}
 }
 
-func forEachImageCandidateFromValue(value interface{}, includeStructured bool, includeAssetLike bool, assetLimit int, emitURL func(string)) {
+func forEachImageCandidateFromValue(value any, includeStructured bool, includeAssetLike bool, assetLimit int, emitURL func(string)) {
 	if emitURL == nil {
 		return
 	}

@@ -50,32 +50,32 @@ func isImageEditModel(modelID string) bool {
 	return normalizeModelID(modelID) == "grok-imagine-image-edit"
 }
 
-func buildImagineWSResetMessage() map[string]interface{} {
-	return map[string]interface{}{
+func buildImagineWSResetMessage() map[string]any {
+	return map[string]any{
 		"type":      "conversation.item.create",
 		"timestamp": time.Now().UnixMilli(),
-		"item": map[string]interface{}{
+		"item": map[string]any{
 			"type":    "message",
-			"content": []map[string]interface{}{{"type": "reset"}},
+			"content": []map[string]any{{"type": "reset"}},
 		},
 	}
 }
 
-func buildImagineWSRequestMessage(prompt, aspectRatio string, nsfw bool, pro bool, generations int) map[string]interface{} {
+func buildImagineWSRequestMessage(prompt, aspectRatio string, nsfw bool, pro bool, generations int) map[string]any {
 	requestID := randomHex(16)
 	if requestID == "" {
 		requestID = fmt.Sprintf("%d", time.Now().UnixNano())
 	}
-	return map[string]interface{}{
+	return map[string]any{
 		"type":      "conversation.item.create",
 		"timestamp": time.Now().UnixMilli(),
-		"item": map[string]interface{}{
+		"item": map[string]any{
 			"type": "message",
-			"content": []map[string]interface{}{{
+			"content": []map[string]any{{
 				"requestId": requestID,
 				"text":      strings.TrimSpace(prompt),
 				"type":      "input_text",
-				"properties": map[string]interface{}{
+				"properties": map[string]any{
 					"section_count":       0,
 					"is_kids_mode":        false,
 					"enable_nsfw":         nsfw,
@@ -169,10 +169,7 @@ func (h *Handler) runImagineWSImages(ctx context.Context, sess *chatAccountSessi
 		return fmt.Errorf("grok client not configured")
 	}
 	collected := 0
-	maxRounds := n * 3
-	if maxRounds < 3 {
-		maxRounds = 3
-	}
+	maxRounds := max(n*3, 3)
 	for round := 0; round < maxRounds && collected < n; round++ {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -251,7 +248,7 @@ func runImagineWSRound(ctx context.Context, conn *websocket.Conn, prompt, aspect
 		if mt != websocket.TextMessage {
 			continue
 		}
-		var msg map[string]interface{}
+		var msg map[string]any
 		if err := json.Unmarshal(raw, &msg); err != nil {
 			continue
 		}
@@ -340,8 +337,8 @@ func (h *Handler) imagineImageOutputValue(ctx context.Context, token string, ev 
 	if blob != "" {
 		if strings.HasPrefix(blob, "data:image/") {
 			if normalizeImageResponseFormat(format) == "b64_json" {
-				if idx := strings.Index(blob, ","); idx >= 0 {
-					return blob[idx+1:], nil
+				if _, after, ok := strings.Cut(blob, ","); ok {
+					return after, nil
 				}
 			}
 			name, err := h.cacheImageDataURI(blob, ev.URL)

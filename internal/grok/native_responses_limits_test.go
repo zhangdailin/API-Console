@@ -32,7 +32,7 @@ func TestNativeRecoveryAndQualitySharePhysicalBudget(t *testing.T) {
 	}))
 	defer server.Close()
 	h, acc := parityBuildHandler(t, server)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		copy := *acc
 		copy.ID = 0
 		copy.GrokModels = []string{"grok-4.7"}

@@ -53,8 +53,7 @@ func (h *Handler) HandleMediaInputs(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxMediaInputRequestBytes)
 	if err := r.ParseMultipartForm(maxMediaInputRequestBytes); err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			writeResponsesAPIError(w, http.StatusRequestEntityTooLarge, "media_too_large", "media input exceeds 20 MiB")
 			return
 		}
@@ -129,7 +128,7 @@ func (h *Handler) HandleMediaInputs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reserved = false
-	writeJSONStatus(w, http.StatusCreated, map[string]interface{}{
+	writeJSONStatus(w, http.StatusCreated, map[string]any{
 		"file_id": id, "object": "file", "kind": kind, "mime_type": mimeType,
 		"bytes": len(data), "created_at": now.Unix(), "expires_at": now.Add(mediaInputTTL).Format(time.RFC3339),
 	})
@@ -247,7 +246,7 @@ func (h *Handler) HandleMediaInputResource(w http.ResponseWriter, r *http.Reques
 	}
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, map[string]interface{}{
+		writeJSON(w, map[string]any{
 			"file_id": input.ID, "object": "file", "kind": input.Kind, "mime_type": input.MIMEType,
 			"bytes": input.SizeBytes, "created_at": input.CreatedAt.Unix(), "expires_at": input.ExpiresAt.Format(time.RFC3339),
 		})
@@ -259,7 +258,7 @@ func (h *Handler) HandleMediaInputResource(w http.ResponseWriter, r *http.Reques
 		if validCachedMediaContentPath(input.ContentPath, input.Kind) {
 			_ = os.Remove(input.ContentPath)
 		}
-		writeJSON(w, map[string]interface{}{"id": id, "object": "file", "deleted": true})
+		writeJSON(w, map[string]any{"id": id, "object": "file", "deleted": true})
 	default:
 		writeGrokError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
@@ -284,8 +283,8 @@ func validMediaInputID(id string) bool {
 
 func mediaInputIDFromPath(path string) string {
 	for _, prefix := range []string{"/grok/v1/media/inputs/", "/v1/media/inputs/"} {
-		if strings.HasPrefix(path, prefix) {
-			return strings.Trim(strings.TrimPrefix(path, prefix), "/")
+		if after, ok := strings.CutPrefix(path, prefix); ok {
+			return strings.Trim(after, "/")
 		}
 	}
 	return ""

@@ -2,6 +2,7 @@
 package errors
 
 import (
+	"maps"
 	"math"
 	"net/http"
 	"strconv"
@@ -76,9 +77,7 @@ func (e *AppError) WithDetails(details map[string]any) *AppError {
 	if e.Details == nil {
 		e.Details = make(map[string]any, len(details))
 	}
-	for key, value := range details {
-		e.Details[key] = value
-	}
+	maps.Copy(e.Details, details)
 	return e
 }
 

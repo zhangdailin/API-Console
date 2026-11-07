@@ -20,15 +20,15 @@ var imageEditPlaceholderRE = regexp.MustCompile(`(?i)@IMAGE(\d+)\b`)
 
 // The Web edit wire format follows grok2api's mediaGenInput.imageToImage
 // contract. inputAssets are metadata IDs, not download URLs.
-func (h *Handler) buildImageEditPayload(spec ModelSpec, prompt string, assets []string, aspectRatio string) map[string]interface{} {
-	input := map[string]interface{}{"prompt": strings.TrimSpace(prompt), "inputAssets": assets}
+func (h *Handler) buildImageEditPayload(spec ModelSpec, prompt string, assets []string, aspectRatio string) map[string]any {
+	input := map[string]any{"prompt": strings.TrimSpace(prompt), "inputAssets": assets}
 	if aspectRatio != "" {
 		input["aspectRatio"] = aspectRatio
 	}
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"modelName": spec.UpstreamModel, "message": strings.TrimSpace(prompt),
 		"enableImageStreaming": true, "enableSideBySide": true, "sendFinalMetadata": true,
-		"mediaGenInput": map[string]interface{}{"imageToImage": input},
+		"mediaGenInput": map[string]any{"imageToImage": input},
 	}
 	if h != nil && h.configSnapshot() != nil {
 		payload["temporary"] = h.configSnapshot().GrokChatTemporary()
@@ -40,7 +40,7 @@ func (h *Handler) buildImageEditPayload(spec ModelSpec, prompt string, assets []
 	return payload
 }
 
-func (h *Handler) buildImageEditRequestPayload(ctx context.Context, token string, spec ModelSpec, prompt string, inputs []imageEditUploadInput, ratio string) (map[string]interface{}, error) {
+func (h *Handler) buildImageEditRequestPayload(ctx context.Context, token string, spec ModelSpec, prompt string, inputs []imageEditUploadInput, ratio string) (map[string]any, error) {
 	values := make([]string, 0, len(inputs))
 	for _, input := range inputs {
 		values = append(values, dataURIFromBytes(input.mime, input.data))
@@ -48,7 +48,7 @@ func (h *Handler) buildImageEditRequestPayload(ctx context.Context, token string
 	return h.buildImageEditPayloadFromInputs(ctx, token, spec, prompt, values, ratio)
 }
 
-func (h *Handler) buildImageEditPayloadFromInputs(ctx context.Context, token string, spec ModelSpec, prompt string, inputs []string, ratio string) (map[string]interface{}, error) {
+func (h *Handler) buildImageEditPayloadFromInputs(ctx context.Context, token string, spec ModelSpec, prompt string, inputs []string, ratio string) (map[string]any, error) {
 	refs := make([]imageEditReference, 0, len(inputs))
 	assets := make([]string, 0, len(inputs))
 	for _, input := range inputs {
@@ -112,10 +112,7 @@ func (h *Handler) handleChatImageEdit(
 		imageCfg = &ImageConfig{}
 	}
 	imageCfg.Normalize()
-	n := imageCfg.N
-	if n < 1 {
-		n = 1
-	}
+	n := max(imageCfg.N, 1)
 	if n > 2 {
 		writeGrokError(w, http.StatusBadRequest, "image_config.n must be between 1 and 2 for image edit")
 		return
@@ -155,7 +152,7 @@ func (h *Handler) handleChatImageEdit(
 		writeGrokUpstreamError(w, err)
 		return
 	}
-	rebuildPayload := func(token string) (map[string]interface{}, error) {
+	rebuildPayload := func(token string) (map[string]any, error) {
 		return h.buildImageEditPayloadFromInputs(ctx, token, spec, prompt, imageURLs, ratio)
 	}
 
@@ -169,7 +166,7 @@ func (h *Handler) handleChatImageEdit(
 		h.syncGrokQuota(sess.acc, resp.Header)
 		h.streamImageGeneration(w, resp.Body, sess.token, prompt, responseFormat, n, publicBase)
 		if cost, priced := pricing.EstimateImageEditCost(spec.UpstreamModel, imageCfg.Resolution, "", n, len(imageURLs)); priced {
-			h.settleMediaBilling(ctx, req.Model, cost, map[string]interface{}{
+			h.settleMediaBilling(ctx, req.Model, cost, map[string]any{
 				"plane": "web", "stream": true, "images": n, "input_images": len(imageURLs),
 			})
 		}
@@ -221,7 +218,7 @@ func decodeImageEditJSON(w http.ResponseWriter, r *http.Request) (*imageEditJSON
 		writeGrokError(w, http.StatusBadRequest, "invalid image edit JSON request")
 		return nil, false
 	}
-	var trailing interface{}
+	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		writeGrokError(w, http.StatusBadRequest, "image edit request must contain one JSON object")
 		return nil, false
@@ -471,7 +468,7 @@ func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
 	defer sess.Close()
 
 	ratio, _ := normalizeImageAspectRatio(formValue("aspect_ratio"), formValue("size"))
-	var rawPayload map[string]interface{}
+	var rawPayload map[string]any
 	if jsonRequest != nil {
 		rawPayload, err = h.buildImageEditPayloadFromInputs(r.Context(), sess.token, spec, prompt, inputValues, ratio)
 	} else {
@@ -484,7 +481,7 @@ func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
 		writeGrokUpstreamError(w, err)
 		return
 	}
-	rebuildPayload := func(token string) (map[string]interface{}, error) {
+	rebuildPayload := func(token string) (map[string]any, error) {
 		if jsonRequest != nil {
 			return h.buildImageEditPayloadFromInputs(r.Context(), token, spec, prompt, inputValues, ratio)
 		}
@@ -505,7 +502,7 @@ func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
 			inputs = len(uploads)
 		}
 		if cost, priced := pricing.EstimateImageEditCost(spec.UpstreamModel, formValue("resolution"), formValue("quality"), n, inputs); priced {
-			h.settleMediaBilling(r.Context(), model, cost, map[string]interface{}{
+			h.settleMediaBilling(r.Context(), model, cost, map[string]any{
 				"plane": "web", "stream": true, "images": n, "input_images": inputs,
 			})
 		}

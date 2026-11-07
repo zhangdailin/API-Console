@@ -73,10 +73,7 @@ func quotaWindowFromRateLimitInfo(info *RateLimitInfo) store.GrokQuotaWindow {
 		WindowSeconds: info.WindowSeconds,
 	}
 	if info.HasLimit && info.Limit > 0 && info.HasRemaining {
-		used := info.Limit - info.Remaining
-		if used < 0 {
-			used = 0
-		}
+		used := max(info.Limit-info.Remaining, 0)
 		window.UsagePercent = float64(used) * 100 / float64(info.Limit)
 		window.HasUsage = true
 	}

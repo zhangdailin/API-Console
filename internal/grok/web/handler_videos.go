@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -42,11 +43,11 @@ func putVideoJob(job *videoJob) {
 	videoJobs[job.ID] = job
 }
 
-func (j *videoJob) toMap() map[string]interface{} {
+func (j *videoJob) toMap() map[string]any {
 	if j.StandardAPI {
 		return j.toStandardMap()
 	}
-	out := map[string]interface{}{
+	out := map[string]any{
 		"id":         j.ID,
 		"object":     "video",
 		"created_at": j.CreatedAt,
@@ -90,13 +91,13 @@ func videoContentURL(id string) string {
 // resolves on either; it is overridable for a deployment behind a path rewrite.
 var grokMediaRoutePrefix = "/v1"
 
-func (j *videoJob) toStandardMap() map[string]interface{} {
+func (j *videoJob) toStandardMap() map[string]any {
 	if j == nil {
-		return map[string]interface{}{"status": "failed", "error": map[string]interface{}{"code": "internal_error", "message": "video job is unavailable"}}
+		return map[string]any{"status": "failed", "error": map[string]any{"code": "internal_error", "message": "video job is unavailable"}}
 	}
 	switch j.Status {
 	case "completed":
-		video := map[string]interface{}{
+		video := map[string]any{
 			// The self-link must resolve: it is emitted with the same prefix the
 			// client called, so a /grok/v1 caller is not handed a /v1 path it
 			// never configured.
@@ -106,7 +107,7 @@ func (j *videoJob) toStandardMap() map[string]interface{} {
 		if j.Operation == "generate" && j.Seconds > 0 {
 			video["duration"] = j.Seconds
 		}
-		return map[string]interface{}{
+		return map[string]any{
 			"status": "done", "model": j.Model, "progress": 100, "video": video,
 		}
 	case "failed":
@@ -124,11 +125,11 @@ func (j *videoJob) toStandardMap() map[string]interface{} {
 		// failure ("the account cannot serve this model") from an internal
 		// fault, and collapsing both onto internal_error told a client to give
 		// up on a job another account could have finished.
-		return map[string]interface{}{
-			"status": "failed", "error": map[string]interface{}{"code": code, "message": message},
+		return map[string]any{
+			"status": "failed", "error": map[string]any{"code": code, "message": message},
 		}
 	default:
-		return map[string]interface{}{
+		return map[string]any{
 			"status": "pending", "model": j.Model, "progress": min(99, clampProgress(j.Progress)),
 		}
 	}
@@ -195,10 +196,8 @@ func cloneVideoJob(job *videoJob) *videoJob {
 	cloned := *job
 	cloned.InputReferences = append([]string(nil), job.InputReferences...)
 	if job.Error != nil {
-		cloned.Error = make(map[string]interface{}, len(job.Error))
-		for key, value := range job.Error {
-			cloned.Error[key] = value
-		}
+		cloned.Error = make(map[string]any, len(job.Error))
+		maps.Copy(cloned.Error, job.Error)
 	}
 	return &cloned
 }
@@ -217,7 +216,7 @@ func runtimeVideoJobFromStored(stored *store.StoredVideoJob) *videoJob {
 		CreatedAt: stored.CreatedAt, CompletedAt: stored.CompletedAt,
 	}
 	if stored.ErrorCode != "" || stored.ErrorMessage != "" {
-		job.Error = map[string]interface{}{"code": stored.ErrorCode, "message": stored.ErrorMessage}
+		job.Error = map[string]any{"code": stored.ErrorCode, "message": stored.ErrorMessage}
 	}
 	if !validPersistedVideoContentPath(job.ContentPath) {
 		job.ContentPath = ""
@@ -372,7 +371,7 @@ func (h *Handler) startVideoJob(w http.ResponseWriter, r *http.Request, req Vide
 	// Video is billed from the request itself (duration, resolution and reference
 	// images), which is what grok2api prices at creation.
 	if cost, priced := pricing.EstimateVideoCost(spec.UpstreamModel, firstNonEmpty(cfg.ResolutionName, req.ResolutionName), cfg.VideoLength, len(req.InputReferences)); priced {
-		h.settleMediaBilling(r.Context(), req.Model, cost, map[string]interface{}{
+		h.settleMediaBilling(r.Context(), req.Model, cost, map[string]any{
 			"plane": "web", "endpoint": "videos", "job_id": job.ID, "seconds": cfg.VideoLength,
 			"resolution": firstNonEmpty(cfg.ResolutionName, req.ResolutionName), "input_images": len(req.InputReferences),
 		})
@@ -423,13 +422,12 @@ func (h *Handler) runVideoCreateJob(ctx context.Context, job *videoJob, spec Mod
 		resolution = cfg.ResolutionName
 	}
 	ctx = withMediaProduct(ctx, mediaProductFor(spec, resolution))
-	for attempt := 0; attempt < 10; attempt++ {
+	for range 10 {
 		sess, sessErr = h.openChatAccountSessionForModel(ctx, spec)
 		if sessErr == nil {
 			break
 		}
-		var media *mediaUnavailableError
-		if errors.As(sessErr, &media) {
+		if _, ok := errors.AsType[*mediaUnavailableError](sessErr); ok {
 			break // waiting does not restore a spent media allowance
 		}
 		time.Sleep(2 * time.Second)
@@ -498,7 +496,7 @@ func (h *Handler) failVideoJobWithCode(job *videoJob, code string, err error) {
 	}
 	videoJobsMu.Lock()
 	job.Status = "failed"
-	job.Error = map[string]interface{}{
+	job.Error = map[string]any{
 		"code":    code,
 		"message": message,
 	}

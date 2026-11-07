@@ -48,7 +48,7 @@ type Handler struct {
 
 // chatOutcome is what one Web turn produced, for the audit journal.
 type chatOutcome struct {
-	Usage       map[string]interface{}
+	Usage       map[string]any
 	UsageSource audit.UsageSource
 	Finish      string
 	FirstToken  time.Time
@@ -189,9 +189,9 @@ func (h *Handler) auditChatOutcome(ctx context.Context, acc *store.Account, req 
 		message = result.Err.Error()
 	}
 	usage := result.Usage
-	prompt, _ := usage["prompt_tokens_details"].(map[string]interface{})
-	completion, _ := usage["completion_tokens_details"].(map[string]interface{})
-	metadata := map[string]interface{}{"finish_reason": result.Finish}
+	prompt, _ := usage["prompt_tokens_details"].(map[string]any)
+	completion, _ := usage["completion_tokens_details"].(map[string]any)
+	metadata := map[string]any{"finish_reason": result.Finish}
 	grokbase.AddReasoningDiagnostics(ctx, metadata)
 	duration := int64(0)
 	if !req.startedAt.IsZero() {

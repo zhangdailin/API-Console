@@ -8,7 +8,7 @@ import (
 	"orchids-api/internal/pricing"
 )
 
-func (h *Handler) settleMediaBilling(ctx context.Context, requestModel string, result pricing.Result, metadata map[string]interface{}) {
+func (h *Handler) settleMediaBilling(ctx context.Context, requestModel string, result pricing.Result, metadata map[string]any) {
 	if h == nil || result.CostInUSDTicks <= 0 {
 		return
 	}

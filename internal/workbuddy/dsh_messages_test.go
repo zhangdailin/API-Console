@@ -23,7 +23,7 @@ func TestDSHPathBoilerplateCompatibilityAcrossMessageForms(t *testing.T) {
 				if form == "system_items" {
 					req.System = []prompt.SystemItem{{Type: "text", Text: original}}
 				} else {
-					role := strings.Split(form, "_")[0]
+					role, _, _ := strings.Cut(form, "_")
 					if strings.HasSuffix(form, "_string") {
 						req.Messages = []prompt.Message{roleMessage(t, role, original)}
 					} else {

@@ -22,7 +22,7 @@ func TestCLISelectionSkipsSharedCooldownBeforeAttempt(t *testing.T) {
 				h, base := parityBuildHandler(t, server)
 				ctx := grokbase.WithSession(context.Background(), grokbase.Session{Key: t.Name(), Model: "grok-4.7"})
 				var accounts []*store.Account
-				for i := 0; i < 4; i++ {
+				for i := range 4 {
 					acc := *base
 					acc.ID = 0
 					acc.TeamID = t.Name() + "-limited"

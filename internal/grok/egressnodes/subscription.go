@@ -88,7 +88,7 @@ func ParseProxyList(text string) []SubscriptionEntry {
 		}
 	}
 	var out []SubscriptionEntry
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue

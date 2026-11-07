@@ -67,7 +67,7 @@ func (h *Handler) HandleAdminVoiceToken(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	out := map[string]interface{}{
+	out := map[string]any{
 		"token":            respToken,
 		"url":              firstVoiceString(data, "livekitUrl", "url"),
 		"participant_name": firstVoiceString(data, "participantName", "participant_name", "identity"),
@@ -79,7 +79,7 @@ func (h *Handler) HandleAdminVoiceToken(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, out)
 }
 
-func firstVoiceString(data map[string]interface{}, keys ...string) string {
+func firstVoiceString(data map[string]any, keys ...string) string {
 	for _, key := range keys {
 		if value := strings.TrimSpace(strings.Trim(strings.TrimSpace(fmt.Sprint(data[key])), `"`)); value != "" && value != "<nil>" {
 			return value

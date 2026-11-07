@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -26,12 +27,7 @@ func accountFilter(match func(*store.Account) bool) loadbalancer.AccountFilter {
 }
 
 func containsAccountID(values []int64, id int64) bool {
-	for _, value := range values {
-		if value == id {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, id)
 }
 
 func accountAffinityUsable(acc *store.Account) bool {

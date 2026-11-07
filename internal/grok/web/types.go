@@ -14,39 +14,39 @@ import (
 type chatSourceOperationKey struct{}
 
 type ChatCompletionsRequest struct {
-	Model               string                   `json:"model"`
-	Messages            []ChatMessage            `json:"messages"`
-	Stream              bool                     `json:"stream"`
-	StreamProvided      bool                     `json:"-"`
-	Thinking            *string                  `json:"thinking,omitempty"`
-	ReasoningEffort     *string                  `json:"reasoning_effort,omitempty"`
-	ReasoningSummary    *string                  `json:"reasoning_summary,omitempty"`
-	Temperature         *float64                 `json:"temperature,omitempty"`
-	TopP                *float64                 `json:"top_p,omitempty"`
-	MaxTokens           *int                     `json:"max_tokens,omitempty"`
-	MaxCompletionTokens *int                     `json:"max_completion_tokens,omitempty"`
-	ResponseFormat      map[string]interface{}   `json:"response_format,omitempty"`
-	SafetyIdentifier    string                   `json:"safety_identifier,omitempty"`
-	ResponseText        map[string]interface{}   `json:"text,omitempty"`
-	ResponsesTools      []map[string]interface{} `json:"x_responses_tools,omitempty"`
-	ResponsesInput      []interface{}            `json:"x_responses_input,omitempty"`
-	Include             []string                 `json:"include,omitempty"`
-	VideoConfig         *VideoConfig             `json:"video_config,omitempty"`
-	ImageConfig         *ImageConfig             `json:"image_config,omitempty"`
-	Tools               []ToolDef                `json:"tools,omitempty"`
-	ToolChoice          interface{}              `json:"tool_choice,omitempty"`
+	Model               string           `json:"model"`
+	Messages            []ChatMessage    `json:"messages"`
+	Stream              bool             `json:"stream"`
+	StreamProvided      bool             `json:"-"`
+	Thinking            *string          `json:"thinking,omitempty"`
+	ReasoningEffort     *string          `json:"reasoning_effort,omitempty"`
+	ReasoningSummary    *string          `json:"reasoning_summary,omitempty"`
+	Temperature         *float64         `json:"temperature,omitempty"`
+	TopP                *float64         `json:"top_p,omitempty"`
+	MaxTokens           *int             `json:"max_tokens,omitempty"`
+	MaxCompletionTokens *int             `json:"max_completion_tokens,omitempty"`
+	ResponseFormat      map[string]any   `json:"response_format,omitempty"`
+	SafetyIdentifier    string           `json:"safety_identifier,omitempty"`
+	ResponseText        map[string]any   `json:"text,omitempty"`
+	ResponsesTools      []map[string]any `json:"x_responses_tools,omitempty"`
+	ResponsesInput      []any            `json:"x_responses_input,omitempty"`
+	Include             []string         `json:"include,omitempty"`
+	VideoConfig         *VideoConfig     `json:"video_config,omitempty"`
+	ImageConfig         *ImageConfig     `json:"image_config,omitempty"`
+	Tools               []ToolDef        `json:"tools,omitempty"`
+	ToolChoice          any              `json:"tool_choice,omitempty"`
 	// WebSearchOptions is the OpenAI-style switch for the hosted search tool.
 	// It is lowered to a native web_search tool on the Responses planes.
-	WebSearchOptions  map[string]interface{}   `json:"web_search_options,omitempty"`
-	ParallelToolCalls *bool                    `json:"parallel_tool_calls,omitempty"`
-	Stop              []string                 `json:"stop,omitempty"`
-	PromptCacheKey    string                   `json:"prompt_cache_key,omitempty"`
-	MCPServers        []map[string]interface{} `json:"mcp_servers,omitempty"`
-	Metadata          map[string]interface{}   `json:"metadata,omitempty"`
-	ServiceTier       string                   `json:"service_tier,omitempty"`
-	OutputConfig      map[string]interface{}   `json:"output_config,omitempty"`
-	ThinkingConfig    map[string]interface{}   `json:"thinking_config,omitempty"`
-	ReasoningReplay   bool                     `json:"-"`
+	WebSearchOptions  map[string]any   `json:"web_search_options,omitempty"`
+	ParallelToolCalls *bool            `json:"parallel_tool_calls,omitempty"`
+	Stop              []string         `json:"stop,omitempty"`
+	PromptCacheKey    string           `json:"prompt_cache_key,omitempty"`
+	MCPServers        []map[string]any `json:"mcp_servers,omitempty"`
+	Metadata          map[string]any   `json:"metadata,omitempty"`
+	ServiceTier       string           `json:"service_tier,omitempty"`
+	OutputConfig      map[string]any   `json:"output_config,omitempty"`
+	ThinkingConfig    map[string]any   `json:"thinking_config,omitempty"`
+	ReasoningReplay   bool             `json:"-"`
 	startedAt         time.Time
 	sourceOperation   string
 	account           *store.Account
@@ -99,7 +99,7 @@ type videoJob struct {
 	Status            string
 	Progress          int
 	CompletedAt       int64
-	Error             map[string]interface{}
+	Error             map[string]any
 	VideoURL          string
 	ContentPath       string
 	RemixedFromID     string
@@ -181,7 +181,7 @@ func validateToolDefinitions(tools []ToolDef) error {
 			if err != nil {
 				return fmt.Errorf("tools.%d.function.parameters must be valid JSON", i)
 			}
-			var decoded interface{}
+			var decoded any
 			if err := json.Unmarshal(raw, &decoded); err != nil {
 				return fmt.Errorf("tools.%d.function.parameters must be valid JSON", i)
 			}
@@ -243,8 +243,8 @@ func (r *ChatCompletionsRequest) Validate() error {
 			default:
 				return fmt.Errorf("tool_choice must be auto, required, none, or a specific function object")
 			}
-		case map[string]interface{}:
-			fn, _ := v["function"].(map[string]interface{})
+		case map[string]any:
+			fn, _ := v["function"].(map[string]any)
 			name, _ := fn["name"].(string)
 			name = strings.TrimSpace(name)
 			if strings.TrimSpace(fmt.Sprint(v["type"])) != "function" || name == "" {

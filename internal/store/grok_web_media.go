@@ -156,7 +156,7 @@ func (s *redisStore) ListStoredVideoJobs(ctx context.Context) ([]*StoredVideoJob
 	// Page each MGET so no single variadic command grows without bound. The
 	// method still returns every live job (its existing contract).
 	jobs := make([]*StoredVideoJob, 0, len(keys))
-	stale := make([]interface{}, 0)
+	stale := make([]any, 0)
 	const mgetBatch = 256
 	for start := 0; start < len(keys); start += mgetBatch {
 		end := min(start+mgetBatch, len(keys))

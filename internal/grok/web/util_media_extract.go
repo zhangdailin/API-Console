@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-func extractImageProgress(resp map[string]interface{}) (index int, progress int, ok bool) {
+func extractImageProgress(resp map[string]any) (index int, progress int, ok bool) {
 	raw := mapAtAnyPath(resp,
 		[]string{"streamingImageGenerationResponse"},
 		[]string{"streaming_image_generation_response"},
@@ -32,18 +32,18 @@ func extractImageProgress(resp map[string]interface{}) (index int, progress int,
 		), true
 }
 
-func imageChunkValuesFromAttachment(attachment map[string]interface{}) []map[string]interface{} {
+func imageChunkValuesFromAttachment(attachment map[string]any) []map[string]any {
 	if attachment == nil {
 		return nil
 	}
-	var values []map[string]interface{}
-	appendChunkContainers := func(v interface{}) {
-		m, ok := parseGrokJSONData(v).(map[string]interface{})
+	var values []map[string]any
+	appendChunkContainers := func(v any) {
+		m, ok := parseGrokJSONData(v).(map[string]any)
 		if !ok || len(m) == 0 {
 			return
 		}
 		for _, key := range []string{"image_chunk", "imageChunk", "image", "media"} {
-			if chunk, ok := m[key].(map[string]interface{}); ok && len(chunk) > 0 {
+			if chunk, ok := m[key].(map[string]any); ok && len(chunk) > 0 {
 				values = append(values, chunk)
 			}
 		}
@@ -56,13 +56,13 @@ func imageChunkValuesFromAttachment(attachment map[string]interface{}) []map[str
 	return values
 }
 
-func appChatImageChunkValues(resp map[string]interface{}) []map[string]interface{} {
+func appChatImageChunkValues(resp map[string]any) []map[string]any {
 	if resp == nil {
 		return nil
 	}
-	var values []map[string]interface{}
-	appendIfMap := func(v interface{}) {
-		if m, ok := v.(map[string]interface{}); ok && len(m) > 0 {
+	var values []map[string]any
+	appendIfMap := func(v any) {
+		if m, ok := v.(map[string]any); ok && len(m) > 0 {
 			values = append(values, m)
 		}
 	}
@@ -76,10 +76,10 @@ func appChatImageChunkValues(resp map[string]interface{}) []map[string]interface
 	for _, key := range []string{"streamingImageGenerationResponse", "imageGenerationResponse", "image_chunk", "imageChunk"} {
 		appendIfMap(response[key])
 	}
-	if attachment, ok := response["cardAttachment"].(map[string]interface{}); ok {
+	if attachment, ok := response["cardAttachment"].(map[string]any); ok {
 		values = append(values, imageChunkValuesFromAttachment(attachment)...)
 	}
-	if metadata, ok := response["finalMetadata"].(map[string]interface{}); ok {
+	if metadata, ok := response["finalMetadata"].(map[string]any); ok {
 		for _, key := range []string{"image_chunk", "imageChunk", "streamingImageGenerationResponse", "imageGenerationResponse"} {
 			appendIfMap(metadata[key])
 		}
@@ -87,7 +87,7 @@ func appChatImageChunkValues(resp map[string]interface{}) []map[string]interface
 	return values
 }
 
-func isModeratedImageChunk(chunk map[string]interface{}) bool {
+func isModeratedImageChunk(chunk map[string]any) bool {
 	if chunk == nil {
 		return false
 	}
@@ -100,7 +100,7 @@ func isModeratedImageChunk(chunk map[string]interface{}) bool {
 	return status == "blocked" || status == "moderated"
 }
 
-func extractAppChatImageURLs(resp map[string]interface{}) []string {
+func extractAppChatImageURLs(resp map[string]any) []string {
 	var urls []string
 	seen := map[string]struct{}{}
 	addURL := func(u string) {
@@ -166,7 +166,7 @@ func isGrokHostedAssetURL(u string) bool {
 	return host == "grok.com" || strings.HasSuffix(host, ".grok.com")
 }
 
-func appChatImageNoImageDiagnostics(resp map[string]interface{}) []string {
+func appChatImageNoImageDiagnostics(resp map[string]any) []string {
 	if resp == nil {
 		return nil
 	}
@@ -198,7 +198,7 @@ func appChatImageNoImageDiagnostics(resp map[string]interface{}) []string {
 	return out
 }
 
-func isAppChatImageLimitResponse(resp map[string]interface{}) bool {
+func isAppChatImageLimitResponse(resp map[string]any) bool {
 	if resp == nil {
 		return false
 	}
@@ -230,7 +230,7 @@ func isAppChatImageLimitResponse(resp map[string]interface{}) bool {
 	return false
 }
 
-func extractVideoProgress(resp map[string]interface{}) (progress int, videoURL string, ok bool) {
+func extractVideoProgress(resp map[string]any) (progress int, videoURL string, ok bool) {
 	raw := mapAtAnyPath(resp,
 		[]string{"streamingVideoGenerationResponse"},
 		[]string{"streaming_video_generation_response"},
@@ -258,7 +258,7 @@ func extractVideoProgress(resp map[string]interface{}) (progress int, videoURL s
 		), true
 }
 
-func extractVideoPostID(resp map[string]interface{}) string {
+func extractVideoPostID(resp map[string]any) string {
 	raw := mapAtAnyPath(resp,
 		[]string{"streamingVideoGenerationResponse"},
 		[]string{"streaming_video_generation_response"},
@@ -276,10 +276,10 @@ func extractVideoPostID(resp map[string]interface{}) string {
 	)
 }
 
-func extractAssetIDs(resp map[string]interface{}) []string {
+func extractAssetIDs(resp map[string]any) []string {
 	seen := map[string]struct{}{}
 	var out []string
-	add := func(v interface{}) {
+	add := func(v any) {
 		s := strings.TrimSpace(fmt.Sprint(v))
 		if s == "" || s == "<nil>" {
 			return
@@ -290,17 +290,17 @@ func extractAssetIDs(resp map[string]interface{}) []string {
 		seen[s] = struct{}{}
 		out = append(out, s)
 	}
-	var walk func(interface{})
-	walk = func(v interface{}) {
+	var walk func(any)
+	walk = func(v any) {
 		switch x := v.(type) {
-		case map[string]interface{}:
+		case map[string]any:
 			for k, item := range x {
 				lk := strings.ToLower(strings.TrimSpace(k))
 				switch lk {
 				case "assetid", "asset_id":
 					add(item)
 				case "fileattachments", "file_attachments":
-					if arr, ok := item.([]interface{}); ok {
+					if arr, ok := item.([]any); ok {
 						for _, one := range arr {
 							add(one)
 						}
@@ -311,7 +311,7 @@ func extractAssetIDs(resp map[string]interface{}) []string {
 					walk(item)
 				}
 			}
-		case []interface{}:
+		case []any:
 			for _, item := range x {
 				walk(item)
 			}
@@ -347,11 +347,11 @@ func assetURLs(assetIDs []string) []string {
 }
 
 // firstAssetURL returns the first resolvable media URL in an upstream response.
-func firstAssetURL(resp map[string]interface{}) string {
+func firstAssetURL(resp map[string]any) string {
 	return firstNonEmpty(assetURLs(extractAssetIDs(resp))...)
 }
 
-func appendImageResultURLs(urls []string, resp map[string]interface{}) []string {
+func appendImageResultURLs(urls []string, resp map[string]any) []string {
 	added := make(map[string]struct{}, len(urls)+8)
 	for _, u := range urls {
 		added[u] = struct{}{}
@@ -381,18 +381,18 @@ func appendImageResultURLs(urls []string, resp map[string]interface{}) []string 
 	return urls
 }
 
-func imageDebugShape(resp map[string]interface{}) string {
+func imageDebugShape(resp map[string]any) string {
 	if resp == nil {
 		return "nil"
 	}
 	var parts []string
-	var walk func(interface{}, string, int)
-	walk = func(v interface{}, prefix string, depth int) {
+	var walk func(any, string, int)
+	walk = func(v any, prefix string, depth int) {
 		if depth > 4 || len(parts) >= 40 {
 			return
 		}
 		switch x := v.(type) {
-		case map[string]interface{}:
+		case map[string]any:
 			keys := make([]string, 0, len(x))
 			for k := range x {
 				keys = append(keys, k)
@@ -420,7 +420,7 @@ func imageDebugShape(resp map[string]interface{}) string {
 					walk(x[k], next, depth+1)
 				}
 			}
-		case []interface{}:
+		case []any:
 			parts = append(parts, prefix+"[]")
 			if len(x) > 0 {
 				walk(x[0], prefix+"[]", depth+1)
@@ -439,7 +439,7 @@ func imageDebugShape(resp map[string]interface{}) string {
 	return strings.Join(parts, " ")
 }
 
-func extractUpstreamModelResponse(resp map[string]interface{}) map[string]interface{} {
+func extractUpstreamModelResponse(resp map[string]any) map[string]any {
 	return mapAtAnyPath(resp,
 		[]string{"modelResponse"},
 		[]string{"model_response"},
@@ -451,7 +451,7 @@ func extractUpstreamModelResponse(resp map[string]interface{}) map[string]interf
 	)
 }
 
-func extractUpstreamFingerprint(resp map[string]interface{}, modelResp map[string]interface{}) string {
+func extractUpstreamFingerprint(resp map[string]any, modelResp map[string]any) string {
 	if fp := stringAtAnyPath(resp,
 		[]string{"llmInfo", "modelHash"},
 		[]string{"llm_info", "modelHash"},
@@ -469,7 +469,7 @@ func extractUpstreamFingerprint(resp map[string]interface{}, modelResp map[strin
 	)
 }
 
-func extractUpstreamResponseID(resp map[string]interface{}, modelResp map[string]interface{}) string {
+func extractUpstreamResponseID(resp map[string]any, modelResp map[string]any) string {
 	if rid := stringAtAnyPath(resp,
 		[]string{"responseId"},
 		[]string{"response_id"},
@@ -488,7 +488,7 @@ func extractUpstreamResponseID(resp map[string]interface{}, modelResp map[string
 	)
 }
 
-func extractUpstreamMessage(modelResp map[string]interface{}) string {
+func extractUpstreamMessage(modelResp map[string]any) string {
 	if modelResp == nil {
 		return ""
 	}
@@ -512,7 +512,7 @@ func extractUpstreamMessage(modelResp map[string]interface{}) string {
 	return ""
 }
 
-func extractUpstreamTokenDelta(resp map[string]interface{}, modelResp map[string]interface{}) string {
+func extractUpstreamTokenDelta(resp map[string]any, modelResp map[string]any) string {
 	if token := rawStringAtAnyPath(resp,
 		[]string{"token"},
 		[]string{"delta"},

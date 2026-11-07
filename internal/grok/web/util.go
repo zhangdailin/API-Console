@@ -149,11 +149,11 @@ func randomUUID() string {
 	)
 }
 
-func parseUpstreamLines(body io.Reader, onLine func(map[string]interface{}) error) error {
+func parseUpstreamLines(body io.Reader, onLine func(map[string]any) error) error {
 	decoder := json.NewDecoder(body)
 
 	for {
-		var line map[string]interface{}
+		var line map[string]any
 		if err := decoder.Decode(&line); err != nil {
 			if err == io.EOF {
 				return nil
@@ -163,11 +163,11 @@ func parseUpstreamLines(body io.Reader, onLine func(map[string]interface{}) erro
 		if message := upstreamStreamErrorMessage(line); message != "" {
 			return fmt.Errorf("grok upstream stream error: %s", message)
 		}
-		result, _ := line["result"].(map[string]interface{})
+		result, _ := line["result"].(map[string]any)
 		if message := upstreamStreamErrorMessage(result); message != "" {
 			return fmt.Errorf("grok upstream stream error: %s", message)
 		}
-		resp, _ := result["response"].(map[string]interface{})
+		resp, _ := result["response"].(map[string]any)
 		if resp == nil {
 			continue
 		}
@@ -177,7 +177,7 @@ func parseUpstreamLines(body io.Reader, onLine func(map[string]interface{}) erro
 	}
 }
 
-func upstreamStreamErrorMessage(value map[string]interface{}) string {
+func upstreamStreamErrorMessage(value map[string]any) string {
 	if value == nil {
 		return ""
 	}
@@ -190,7 +190,7 @@ func upstreamStreamErrorMessage(value map[string]interface{}) string {
 	// Current Grok streams can also carry failures as an event envelope rather
 	// than a top-level error.  Do not silently turn that into a successful empty
 	// completion just because app-chat normally uses result.response envelopes.
-	event, _ := value["event"].(map[string]interface{})
+	event, _ := value["event"].(map[string]any)
 	if !strings.EqualFold(strings.TrimSpace(fmt.Sprint(event["type"])), "error") {
 		return ""
 	}
@@ -206,12 +206,12 @@ func upstreamStreamErrorMessage(value map[string]interface{}) string {
 	return "upstream returned an unspecified error"
 }
 
-func upstreamErrorValueMessage(raw interface{}) string {
+func upstreamErrorValueMessage(raw any) string {
 	if raw == nil {
 		return ""
 	}
 	message := strings.TrimSpace(fmt.Sprint(raw))
-	if details, ok := raw.(map[string]interface{}); ok {
+	if details, ok := raw.(map[string]any); ok {
 		message = firstNonEmpty(
 			strings.TrimSpace(fmt.Sprint(details["message"])),
 			strings.TrimSpace(fmt.Sprint(details["error"])),
@@ -229,13 +229,13 @@ func upstreamErrorValueMessage(raw interface{}) string {
 
 // walkJSONStrings visits every string leaf in a nested JSON value (maps,
 // slices, or plain strings).
-func walkJSONStrings(value interface{}, visit func(string)) {
+func walkJSONStrings(value any, visit func(string)) {
 	switch x := value.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		for _, item := range x {
 			walkJSONStrings(item, visit)
 		}
-	case []interface{}:
+	case []any:
 		for _, item := range x {
 			walkJSONStrings(item, visit)
 		}
@@ -244,16 +244,16 @@ func walkJSONStrings(value interface{}, visit func(string)) {
 	}
 }
 
-func parseGrokJSONData(v interface{}) interface{} {
+func parseGrokJSONData(v any) any {
 	switch x := v.(type) {
-	case map[string]interface{}, []interface{}:
+	case map[string]any, []any:
 		return x
 	case string:
 		raw := strings.TrimSpace(x)
 		if raw == "" {
 			return nil
 		}
-		var parsed interface{}
+		var parsed any
 		if err := json.Unmarshal([]byte(raw), &parsed); err == nil {
 			return parsed
 		}
@@ -263,7 +263,7 @@ func parseGrokJSONData(v interface{}) interface{} {
 	}
 }
 
-func parseGrokJSONText(raw string) interface{} {
+func parseGrokJSONText(raw string) any {
 	s := strings.TrimSpace(raw)
 	if s == "" {
 		return nil
@@ -271,7 +271,7 @@ func parseGrokJSONText(raw string) interface{} {
 	if !strings.HasPrefix(s, "{") && !strings.HasPrefix(s, "[") {
 		return nil
 	}
-	var parsed interface{}
+	var parsed any
 	if err := json.Unmarshal([]byte(s), &parsed); err != nil {
 		return nil
 	}
@@ -311,8 +311,8 @@ func NormalizeSSOToken(raw string) string {
 
 	// Cookie-style input: scan pairs and prefer exact "sso" key.
 	if strings.Contains(token, ";") {
-		parts := strings.Split(token, ";")
-		for _, part := range parts {
+		parts := strings.SplitSeq(token, ";")
+		for part := range parts {
 			kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
 			if len(kv) != 2 {
 				continue
@@ -332,7 +332,7 @@ func NormalizeSSOToken(raw string) string {
 	return strings.TrimSpace(token)
 }
 
-func encodeJSONBytes(v interface{}) []byte {
+func encodeJSONBytes(v any) []byte {
 	buf := bytes.Buffer{}
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
@@ -483,18 +483,18 @@ func parseIntLoose(raw string, fallback int) int {
 	return v
 }
 
-func diagnosticValueSummary(v interface{}) string {
+func diagnosticValueSummary(v any) string {
 	switch x := v.(type) {
 	case nil:
 		return ""
 	case string:
 		return truncateDiagnosticText(x, 220)
-	case []interface{}:
+	case []any:
 		if len(x) == 0 {
 			return "[]"
 		}
 		return fmt.Sprintf("len=%d first=%s", len(x), truncateDiagnosticText(fmt.Sprint(x[0]), 180))
-	case map[string]interface{}:
+	case map[string]any:
 		if len(x) == 0 {
 			return "{}"
 		}
@@ -514,7 +514,7 @@ func truncateDiagnosticText(s string, max int) string {
 	return string(r[:max]) + "..."
 }
 
-func interfaceToInt(v interface{}) int {
+func interfaceToInt(v any) int {
 	switch x := v.(type) {
 	case int:
 		return x
@@ -534,10 +534,10 @@ func interfaceToInt(v interface{}) int {
 	return 0
 }
 
-func valueAtPath(root interface{}, path ...string) interface{} {
+func valueAtPath(root any, path ...string) any {
 	cur := root
 	for _, key := range path {
-		m, ok := cur.(map[string]interface{})
+		m, ok := cur.(map[string]any)
 		if !ok {
 			return nil
 		}
@@ -549,19 +549,19 @@ func valueAtPath(root interface{}, path ...string) interface{} {
 	return cur
 }
 
-func mapAtAnyPath(root interface{}, paths ...[]string) map[string]interface{} {
+func mapAtAnyPath(root any, paths ...[]string) map[string]any {
 	for _, path := range paths {
 		if len(path) == 0 {
 			continue
 		}
-		if m, ok := valueAtPath(root, path...).(map[string]interface{}); ok && len(m) > 0 {
+		if m, ok := valueAtPath(root, path...).(map[string]any); ok && len(m) > 0 {
 			return m
 		}
 	}
 	return nil
 }
 
-func stringAtAnyPath(root interface{}, paths ...[]string) string {
+func stringAtAnyPath(root any, paths ...[]string) string {
 	for _, path := range paths {
 		if len(path) == 0 {
 			continue
@@ -574,7 +574,7 @@ func stringAtAnyPath(root interface{}, paths ...[]string) string {
 	return ""
 }
 
-func rawStringAtAnyPath(root interface{}, paths ...[]string) string {
+func rawStringAtAnyPath(root any, paths ...[]string) string {
 	for _, path := range paths {
 		if len(path) == 0 {
 			continue
@@ -594,7 +594,7 @@ func rawStringAtAnyPath(root interface{}, paths ...[]string) string {
 	return ""
 }
 
-func intAtAnyPath(root interface{}, paths ...[]string) int {
+func intAtAnyPath(root any, paths ...[]string) int {
 	for _, path := range paths {
 		if len(path) == 0 {
 			continue

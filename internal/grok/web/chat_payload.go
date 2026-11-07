@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/http"
 	"orchids-api/internal/httpclient"
 	"strings"
@@ -18,13 +19,13 @@ func (h *Handler) buildChatPayload(
 	attachmentInputs []AttachmentInput,
 	videoCfg *VideoConfig,
 	req *ChatCompletionsRequest,
-) (map[string]interface{}, error) {
+) (map[string]any, error) {
 	payload := h.webClient().chatPayload(spec, text, true, 0)
 	if len(fileAttachments) > 0 {
 		payload["fileAttachments"] = fileAttachments
 	}
 	if req != nil {
-		override := map[string]interface{}{}
+		override := map[string]any{}
 		if req.Temperature != nil {
 			override["temperature"] = *req.Temperature
 		}
@@ -37,19 +38,17 @@ func (h *Handler) buildChatPayload(
 			}
 		}
 		if len(override) > 0 {
-			responseMetadata, _ := payload["responseMetadata"].(map[string]interface{})
+			responseMetadata, _ := payload["responseMetadata"].(map[string]any)
 			if responseMetadata == nil {
-				responseMetadata = map[string]interface{}{}
+				responseMetadata = map[string]any{}
 				payload["responseMetadata"] = responseMetadata
 			}
-			modelConfigOverride, _ := responseMetadata["modelConfigOverride"].(map[string]interface{})
+			modelConfigOverride, _ := responseMetadata["modelConfigOverride"].(map[string]any)
 			if modelConfigOverride == nil {
-				modelConfigOverride = map[string]interface{}{}
+				modelConfigOverride = map[string]any{}
 				responseMetadata["modelConfigOverride"] = modelConfigOverride
 			}
-			for k, v := range override {
-				modelConfigOverride[k] = v
-			}
+			maps.Copy(modelConfigOverride, override)
 		}
 	}
 
@@ -66,7 +65,7 @@ func (h *Handler) buildVideoCreatePayload(
 	text string,
 	attachmentInputs []AttachmentInput,
 	videoCfg *VideoConfig,
-) (map[string]interface{}, error) {
+) (map[string]any, error) {
 	_ = ctx
 	_ = token
 	if videoCfg == nil {
@@ -79,20 +78,20 @@ func (h *Handler) buildVideoCreatePayload(
 		}
 	}
 	prompt := strings.TrimSpace(text)
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"modelName":            firstNonEmpty(strings.TrimSpace(spec.UpstreamModel), "imagine-video-gen"),
 		"message":              prompt + " --mode=custom",
 		"enableImageStreaming": true,
 		"enableSideBySide":     true,
 		"sendFinalMetadata":    true,
-		"responseMetadata": map[string]interface{}{
-			"experiments": []interface{}{},
-			"modelConfigOverride": map[string]interface{}{
-				"modelMap": map[string]interface{}{},
+		"responseMetadata": map[string]any{
+			"experiments": []any{},
+			"modelConfigOverride": map[string]any{
+				"modelMap": map[string]any{},
 			},
 		},
-		"mediaGenInput": map[string]interface{}{
-			"textToVideo": map[string]interface{}{
+		"mediaGenInput": map[string]any{
+			"textToVideo": map[string]any{
 				"prompt":         prompt,
 				"aspectRatio":    videoCfg.AspectRatio,
 				"duration":       videoCfg.VideoLength,
@@ -104,7 +103,7 @@ func (h *Handler) buildVideoCreatePayload(
 	return payload, nil
 }
 
-func (h *Handler) buildVideoExtendPayload(spec ModelSpec, prompt string, parentPostID string, extendPostID string, videoCfg *VideoConfig, segmentLength int, elapsedSeconds int) map[string]interface{} {
+func (h *Handler) buildVideoExtendPayload(spec ModelSpec, prompt string, parentPostID string, extendPostID string, videoCfg *VideoConfig, segmentLength int, elapsedSeconds int) map[string]any {
 	if videoCfg == nil {
 		videoCfg = &VideoConfig{}
 	}
@@ -117,16 +116,16 @@ func (h *Handler) buildVideoExtendPayload(spec ModelSpec, prompt string, parentP
 	if h != nil && h.configSnapshot() != nil {
 		temporary = h.configSnapshot().GrokChatTemporary()
 	}
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"temporary":        temporary,
 		"modelName":        spec.UpstreamModel,
 		"message":          message,
 		"enableSideBySide": true,
-		"responseMetadata": map[string]interface{}{
-			"experiments": []interface{}{},
-			"modelConfigOverride": map[string]interface{}{
-				"modelMap": map[string]interface{}{
-					"videoGenModelConfig": map[string]interface{}{
+		"responseMetadata": map[string]any{
+			"experiments": []any{},
+			"modelConfigOverride": map[string]any{
+				"modelMap": map[string]any{
+					"videoGenModelConfig": map[string]any{
 						"isVideoExtension":        true,
 						"videoExtensionStartTime": videoExtensionStartTime(elapsedSeconds),
 						"extendPostId":            strings.TrimSpace(extendPostID),
@@ -143,7 +142,7 @@ func (h *Handler) buildVideoExtendPayload(spec ModelSpec, prompt string, parentP
 					},
 				},
 			},
-			"requestModelDetails": map[string]interface{}{
+			"requestModelDetails": map[string]any{
 				"modelId": spec.UpstreamModel,
 			},
 		},

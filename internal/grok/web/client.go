@@ -87,7 +87,7 @@ func (c *Client) userAgent() string {
 	return defaultUA
 }
 
-func (c *Client) chatPayload(spec ModelSpec, text string, noMemory bool, imageCount int) map[string]interface{} {
+func (c *Client) chatPayload(spec ModelSpec, text string, noMemory bool, imageCount int) map[string]any {
 	cnt := imageCount
 	if cnt <= 0 {
 		cnt = 2
@@ -98,16 +98,16 @@ func (c *Client) chatPayload(spec ModelSpec, text string, noMemory bool, imageCo
 		noMemory = c.cfg.GrokChatDisableMemory(noMemory)
 	}
 	includeModelFields := spec.IsImage || spec.IsVideo
-	responseMetadata := map[string]interface{}{}
+	responseMetadata := map[string]any{}
 	if includeModelFields {
-		responseMetadata["modelConfigOverride"] = map[string]interface{}{
-			"modelMap": map[string]interface{}{},
+		responseMetadata["modelConfigOverride"] = map[string]any{
+			"modelMap": map[string]any{},
 		}
-		responseMetadata["requestModelDetails"] = map[string]interface{}{
+		responseMetadata["requestModelDetails"] = map[string]any{
 			"modelId": spec.UpstreamModel,
 		}
 	}
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"collectionIds":               []string{},
 		"disabledConnectorIds":        []string{},
 		"temporary":                   temporary,
@@ -137,7 +137,7 @@ func (c *Client) chatPayload(spec ModelSpec, text string, noMemory bool, imageCo
 		payload["modelName"] = spec.UpstreamModel
 	}
 	if imageCount > 0 {
-		payload["toolOverrides"] = map[string]interface{}{"imageGen": true}
+		payload["toolOverrides"] = map[string]any{"imageGen": true}
 	}
 	if includeModelFields && strings.TrimSpace(spec.ModelMode) != "" {
 		payload["modelMode"] = spec.ModelMode
@@ -161,7 +161,7 @@ func (c *Client) chatPayload(spec ModelSpec, text string, noMemory bool, imageCo
 	return payload
 }
 
-func (c *Client) appChatImagePayload(spec ModelSpec, prompt, _ string, _ int) map[string]interface{} {
+func (c *Client) appChatImagePayload(spec ModelSpec, prompt, _ string, _ int) map[string]any {
 	message := strings.TrimSpace(prompt)
 	if message != "" && !strings.HasPrefix(strings.ToLower(message), "drawing:") {
 		message = "Drawing: " + message
@@ -247,7 +247,7 @@ func (c *Client) clientForAppChat() *http.Client {
 	return http.DefaultClient
 }
 
-func (c *Client) doChat(ctx context.Context, token string, payload map[string]interface{}) (*http.Response, error) {
+func (c *Client) doChat(ctx context.Context, token string, payload map[string]any) (*http.Response, error) {
 	if c == nil {
 		return nil, fmt.Errorf("grok client not configured")
 	}
@@ -261,7 +261,7 @@ func (c *Client) doChat(ctx context.Context, token string, payload map[string]in
 // doRESTChat preserves the proven REST app-chat transport.  It is intentionally
 // separate from doChat so the transport selector can fall back without
 // recursively calling itself.
-func (c *Client) doRESTChat(ctx context.Context, token string, payload map[string]interface{}) (*http.Response, error) {
+func (c *Client) doRESTChat(ctx context.Context, token string, payload map[string]any) (*http.Response, error) {
 	if err := waitScopedRateLimit(ctx, ProviderWeb, token, chatwire.ParseLooseStringAny(payload["modelName"]), c.cfg.GrokWebRequestsPerSecond()); err != nil {
 		return nil, err
 	}
@@ -272,7 +272,7 @@ func (c *Client) doRESTChat(ctx context.Context, token string, payload map[strin
 
 	reqURL := c.baseURL() + defaultChatPath
 	headers := c.appChatHeadersFor(ctx, token, http.MethodPost, reqURL)
-	if media, _ := payload["mediaGenInput"].(map[string]interface{}); media["imageToImage"] != nil {
+	if media, _ := payload["mediaGenInput"].(map[string]any); media["imageToImage"] != nil {
 		headers.Set("Referer", c.baseURL()+"/imagine")
 	}
 	// grok.com does not name a model on its answer, so only the sent mode is
@@ -285,7 +285,7 @@ func (c *Client) doRESTChat(ctx context.Context, token string, payload map[strin
 	return c.doAppChatRequest(ctx, reqURL, body, headers)
 }
 
-func (c *Client) doAppChatCreateAndRespond(ctx context.Context, token string, payload map[string]interface{}) (*http.Response, error) {
+func (c *Client) doAppChatCreateAndRespond(ctx context.Context, token string, payload map[string]any) (*http.Response, error) {
 	canvasID, err := c.createAppChatCanvas(ctx, token)
 	if err != nil {
 		return nil, err
@@ -310,7 +310,7 @@ func (c *Client) appChatImagineReferer(canvasID string) string {
 }
 
 func (c *Client) createAppChatCanvas(ctx context.Context, token string) (string, error) {
-	body, err := json.Marshal(map[string]interface{}{
+	body, err := json.Marshal(map[string]any{
 		"name": "",
 	})
 	if err != nil {
@@ -327,7 +327,7 @@ func (c *Client) createAppChatCanvas(ctx context.Context, token string) (string,
 	}
 	defer resp.Body.Close()
 
-	var payload map[string]interface{}
+	var payload map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return "", fmt.Errorf("grok app-chat create canvas decode failed: %w", err)
 	}
@@ -339,7 +339,7 @@ func (c *Client) createAppChatCanvas(ctx context.Context, token string) (string,
 }
 
 func (c *Client) createAppChatConversation(ctx context.Context, token, referer string) (string, error) {
-	body, err := json.Marshal(map[string]interface{}{
+	body, err := json.Marshal(map[string]any{
 		"systemPromptName": "",
 		"temporary":        false,
 	})
@@ -357,7 +357,7 @@ func (c *Client) createAppChatConversation(ctx context.Context, token, referer s
 	}
 	defer resp.Body.Close()
 
-	var payload map[string]interface{}
+	var payload map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return "", fmt.Errorf("grok app-chat create conversation decode failed: %w", err)
 	}
@@ -377,7 +377,7 @@ func (c *Client) linkAppChatConversationToCanvas(ctx context.Context, token, con
 	if canvasID == "" {
 		return fmt.Errorf("empty app-chat canvas id")
 	}
-	body, err := json.Marshal(map[string]interface{}{
+	body, err := json.Marshal(map[string]any{
 		"conversationId": conversationID,
 		"canvasId":       canvasID,
 	})
@@ -393,7 +393,7 @@ func (c *Client) linkAppChatConversationToCanvas(ctx context.Context, token, con
 	return nil
 }
 
-func (c *Client) doAppChatAddResponse(ctx context.Context, token, conversationID, canvasID string, payload map[string]interface{}) (*http.Response, error) {
+func (c *Client) doAppChatAddResponse(ctx context.Context, token, conversationID, canvasID string, payload map[string]any) (*http.Response, error) {
 	id := strings.TrimSpace(conversationID)
 	if id == "" {
 		return nil, fmt.Errorf("empty app-chat conversation id")

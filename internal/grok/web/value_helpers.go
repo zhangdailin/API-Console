@@ -9,14 +9,14 @@ import (
 
 // Small value helpers shared by the Web plane handlers.
 
-func interfaceMaps(value interface{}) []map[string]interface{} {
+func interfaceMaps(value any) []map[string]any {
 	switch values := value.(type) {
-	case []map[string]interface{}:
+	case []map[string]any:
 		return values
-	case []interface{}:
-		out := make([]map[string]interface{}, 0, len(values))
+	case []any:
+		out := make([]map[string]any, 0, len(values))
 		for _, value := range values {
-			if item, ok := value.(map[string]interface{}); ok {
+			if item, ok := value.(map[string]any); ok {
 				out = append(out, item)
 			}
 		}
@@ -45,12 +45,12 @@ func writeResponsesAPIErrorWithParam(w http.ResponseWriter, status int, code, me
 	case status >= 500:
 		errType = "server_error"
 	}
-	var paramValue interface{}
+	var paramValue any
 	if strings.TrimSpace(param) != "" {
 		paramValue = param
 	}
-	writeJSONStatus(w, status, map[string]interface{}{
-		"error": map[string]interface{}{
+	writeJSONStatus(w, status, map[string]any{
+		"error": map[string]any{
 			"message": message,
 			"type":    errType,
 			"code":    code,

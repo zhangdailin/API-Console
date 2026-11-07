@@ -16,24 +16,24 @@ import (
 	"time"
 )
 
-func extractAppChatCanvasID(v interface{}) string {
+func extractAppChatCanvasID(v any) string {
 	return extractIDFromValue(v, []string{"canvasId", "canvas_id", "documentId", "document_id", "id"}, []string{"document", "canvas", "result", "data"})
 }
 
-func extractAppChatConversationID(v interface{}) string {
+func extractAppChatConversationID(v any) string {
 	return extractIDFromValue(v, []string{"conversationId", "conversation_id"}, []string{"conversation", "result", "data"})
 }
 
 // extractIDFromValue walks nested maps and slices, returning the first
 // non-empty string found under any of the idKeys (leaf identifiers), then any
 // of the containerKeys whose values may themselves hold the identifier.
-func extractIDFromValue(v interface{}, idKeys []string, containerKeys []string) string {
+func extractIDFromValue(v any, idKeys []string, containerKeys []string) string {
 	switch x := v.(type) {
 	case nil:
 		return ""
 	case string:
 		return strings.TrimSpace(x)
-	case map[string]interface{}:
+	case map[string]any:
 		for _, key := range idKeys {
 			if id := extractIDFromValue(x[key], idKeys, containerKeys); id != "" {
 				return id
@@ -44,7 +44,7 @@ func extractIDFromValue(v interface{}, idKeys []string, containerKeys []string) 
 				return id
 			}
 		}
-	case []interface{}:
+	case []any:
 		for _, item := range x {
 			if id := extractIDFromValue(item, idKeys, containerKeys); id != "" {
 				return id
@@ -119,7 +119,7 @@ func (c *Client) GetUsage(ctx context.Context, token, modelID string) (*RateLimi
 }
 
 func (c *Client) getUsageBySpec(ctx context.Context, token string, spec ModelSpec) (*RateLimitInfo, error) {
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"requestKind": "DEFAULT",
 		"modelName":   rateLimitModelName(spec),
 	}
@@ -136,7 +136,7 @@ func (c *Client) getUsageBySpec(ctx context.Context, token string, spec ModelSpe
 	}
 	defer resp.Body.Close()
 
-	var payloadResp map[string]interface{}
+	var payloadResp map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&payloadResp); err != nil {
 		return nil, err
 	}
@@ -234,7 +234,7 @@ func (c *Client) downloadAsset(ctx context.Context, token, rawURL string) ([]byt
 	return data, mime, nil
 }
 
-func (c *Client) getVoiceToken(ctx context.Context, token, voice, personality string, speed float64, instruction string) (map[string]interface{}, error) {
+func (c *Client) getVoiceToken(ctx context.Context, token, voice, personality string, speed float64, instruction string) (map[string]any, error) {
 	if strings.TrimSpace(voice) == "" {
 		voice = "ara"
 	}
@@ -245,12 +245,12 @@ func (c *Client) getVoiceToken(ctx context.Context, token, voice, personality st
 		speed = 1.0
 	}
 
-	session := map[string]interface{}{
+	session := map[string]any{
 		"voice":          strings.TrimSpace(voice),
 		"personality":    strings.TrimSpace(personality),
 		"playback_speed": speed,
 		"enable_vision":  false,
-		"turn_detection": map[string]interface{}{"type": "server_vad"},
+		"turn_detection": map[string]any{"type": "server_vad"},
 	}
 	_ = instruction
 
@@ -259,11 +259,11 @@ func (c *Client) getVoiceToken(ctx context.Context, token, voice, personality st
 		return nil, err
 	}
 
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"sessionPayload":       string(sessionPayload),
 		"requestAgentDispatch": false,
 		"livekitUrl":           "wss://livekit.grok.com",
-		"params": map[string]interface{}{
+		"params": map[string]any{
 			"enable_markdown_transcript": "true",
 		},
 	}
@@ -279,7 +279,7 @@ func (c *Client) getVoiceToken(ctx context.Context, token, voice, personality st
 		return nil, err
 	}
 	defer resp.Body.Close()
-	out := map[string]interface{}{}
+	out := map[string]any{}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err
 	}
@@ -301,7 +301,7 @@ func (c *Client) listAssets(ctx context.Context, token string) ([]string, error)
 	assetIDs := make([]string, 0, 64)
 	seenPageTokens := map[string]struct{}{}
 	nextPageToken := ""
-	for page := 0; page < 500; page++ {
+	for page := range 500 {
 		if page > 0 {
 			if strings.TrimSpace(nextPageToken) == "" {
 				break

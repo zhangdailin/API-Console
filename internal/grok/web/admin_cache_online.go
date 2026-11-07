@@ -10,19 +10,19 @@ import (
 	"time"
 )
 
-func (h *Handler) listCacheOnlineAccounts(r *http.Request) []map[string]interface{} {
+func (h *Handler) listCacheOnlineAccounts(r *http.Request) []map[string]any {
 	if h == nil || h.lb == nil || h.lb.Store == nil || r == nil {
-		return []map[string]interface{}{}
+		return []map[string]any{}
 	}
 	accounts, err := h.lb.Store.ListAccounts(r.Context())
 	if err != nil {
-		return []map[string]interface{}{}
+		return []map[string]any{}
 	}
 
-	out := make([]map[string]interface{}, 0, len(accounts))
+	out := make([]map[string]any, 0, len(accounts))
 	for _, acc := range CollectWebSSOSourcesByToken(accounts, true) {
 		token := grokAccountToken(acc)
-		out = append(out, map[string]interface{}{
+		out = append(out, map[string]any{
 			"token":               token,
 			"raw_token":           token,
 			"token_masked":        maskCacheToken(token),
@@ -40,8 +40,8 @@ func (h *Handler) listCacheOnlineAccounts(r *http.Request) []map[string]interfac
 	return out
 }
 
-func cacheOnlineAccountMap(onlineAccounts []map[string]interface{}) map[string]map[string]interface{} {
-	out := make(map[string]map[string]interface{}, len(onlineAccounts))
+func cacheOnlineAccountMap(onlineAccounts []map[string]any) map[string]map[string]any {
+	out := make(map[string]map[string]any, len(onlineAccounts))
 	for _, item := range onlineAccounts {
 		token, _ := item["token"].(string)
 		token = NormalizeSSOToken(token)
@@ -70,7 +70,7 @@ func normalizeOnlineTokenList(tokens []string) []string {
 	return out
 }
 
-func onlineAccountInfo(accountByToken map[string]map[string]interface{}, token string) (string, interface{}) {
+func onlineAccountInfo(accountByToken map[string]map[string]any, token string) (string, any) {
 	masked := maskCacheToken(token)
 	lastClear := getOnlineAssetClearTime(token)
 	if acc, ok := accountByToken[token]; ok {
@@ -84,7 +84,7 @@ func onlineAccountInfo(accountByToken map[string]map[string]interface{}, token s
 	return masked, lastClear
 }
 
-func listOnlineAccountTokens(onlineAccounts []map[string]interface{}) []string {
+func listOnlineAccountTokens(onlineAccounts []map[string]any) []string {
 	out := make([]string, 0, len(onlineAccounts))
 	for _, item := range onlineAccounts {
 		token, _ := item["token"].(string)
@@ -101,9 +101,7 @@ func runWorkerPool[T any](ctx context.Context, items []T, workers int, process f
 	var next atomic.Int64
 	var wg sync.WaitGroup
 	for range max(0, workers) {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for {
 				index := int(next.Add(1) - 1)
 				if index >= len(items) {
@@ -118,7 +116,7 @@ func runWorkerPool[T any](ctx context.Context, items []T, workers int, process f
 					process(items[index])
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -131,19 +129,19 @@ type indexedTokenJob struct {
 func (h *Handler) fetchOnlineAssetDetails(
 	ctx context.Context,
 	tokens []string,
-	accountByToken map[string]map[string]interface{},
-	onItem func(string, map[string]interface{}, bool),
-) ([]map[string]interface{}, int) {
+	accountByToken map[string]map[string]any,
+	onItem func(string, map[string]any, bool),
+) ([]map[string]any, int) {
 	requestTokens := normalizeOnlineTokenList(tokens)
 	if len(requestTokens) == 0 {
-		return []map[string]interface{}{}, 0
+		return []map[string]any{}, 0
 	}
 
-	details := make([]map[string]interface{}, len(requestTokens))
+	details := make([]map[string]any, len(requestTokens))
 	if h == nil || h.webClient() == nil {
 		for i, token := range requestTokens {
 			masked, lastClear := onlineAccountInfo(accountByToken, token)
-			details[i] = map[string]interface{}{
+			details[i] = map[string]any{
 				"token":               token,
 				"token_masked":        masked,
 				"count":               0,
@@ -167,7 +165,7 @@ func (h *Handler) fetchOnlineAssetDetails(
 	}
 	runWorkerPool(ctx, jobs, 4, func(item indexedTokenJob) {
 		masked, lastClear := onlineAccountInfo(accountByToken, item.token)
-		detail := map[string]interface{}{
+		detail := map[string]any{
 			"token":               item.token,
 			"token_masked":        masked,
 			"count":               0,
@@ -216,14 +214,14 @@ func (h *Handler) HandleAdminCacheOnlineClear(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	results := map[string]map[string]interface{}{}
+	results := map[string]map[string]any{}
 	totalAll := 0
 	successAll := 0
 	failedAll := 0
 	for _, token := range tokens {
 		total, success, failed, err := h.webClient().clearAssets(r.Context(), token)
 		if err != nil {
-			results[token] = map[string]interface{}{
+			results[token] = map[string]any{
 				"status": "error",
 				"error":  strings.TrimSpace(err.Error()),
 			}
@@ -235,9 +233,9 @@ func (h *Handler) HandleAdminCacheOnlineClear(w http.ResponseWriter, r *http.Req
 		totalAll += total
 		successAll += success
 		failedAll += failed
-		results[token] = map[string]interface{}{
+		results[token] = map[string]any{
 			"status": "success",
-			"result": map[string]interface{}{
+			"result": map[string]any{
 				"total":   total,
 				"success": success,
 				"failed":  failed,
@@ -248,7 +246,7 @@ func (h *Handler) HandleAdminCacheOnlineClear(w http.ResponseWriter, r *http.Req
 	if clearMode == "single" {
 		single := results[tokens[0]]
 		if status, _ := single["status"].(string); status == "success" {
-			resp := map[string]interface{}{
+			resp := map[string]any{
 				"status": "success",
 				"result": single["result"],
 			}
@@ -261,7 +259,7 @@ func (h *Handler) HandleAdminCacheOnlineClear(w http.ResponseWriter, r *http.Req
 		if errText == "" {
 			errText = "failed to clear cache"
 		}
-		resp := map[string]interface{}{
+		resp := map[string]any{
 			"status": "error",
 			"error":  errText,
 		}
@@ -269,10 +267,10 @@ func (h *Handler) HandleAdminCacheOnlineClear(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	resp := map[string]interface{}{
+	resp := map[string]any{
 		"status":  "success",
 		"results": results,
-		"result": map[string]interface{}{
+		"result": map[string]any{
 			"total":   totalAll,
 			"success": successAll,
 			"failed":  failedAll,
@@ -284,7 +282,7 @@ func (h *Handler) HandleAdminCacheOnlineClear(w http.ResponseWriter, r *http.Req
 
 func resolveCacheOnlineClearTargets(
 	req cacheOnlineClearRequest,
-	onlineAccounts []map[string]interface{},
+	onlineAccounts []map[string]any,
 ) ([]string, string, string) {
 	if req.Tokens != nil {
 		tokens := normalizeOnlineTokenList(req.Tokens)
@@ -308,7 +306,7 @@ func resolveCacheOnlineClearTargets(
 func (h *Handler) resolveCacheOnlineLoadTargets(
 	r *http.Request,
 	req cacheOnlineLoadAsyncRequest,
-) ([]string, string, []map[string]interface{}) {
+) ([]string, string, []map[string]any) {
 	onlineAccounts := h.listCacheOnlineAccounts(r)
 	scope := strings.ToLower(strings.TrimSpace(req.Scope))
 
@@ -353,7 +351,7 @@ func (h *Handler) HandleAdminCacheOnlineLoadAsync(w http.ResponseWriter, r *http
 		defer scheduleDeleteNSFWBatchTask(task.ID)
 
 		details, totalCount := h.fetchOnlineAssetDetails(ctx, tokens, accountByToken,
-			func(token string, detail map[string]interface{}, ok bool) {
+			func(token string, detail map[string]any, ok bool) {
 				task.record(token, ok, detail)
 			})
 
@@ -373,7 +371,7 @@ func (h *Handler) HandleAdminCacheOnlineLoadAsync(w http.ResponseWriter, r *http
 			return
 		}
 
-		online := map[string]interface{}{
+		online := map[string]any{
 			"count":               totalCount,
 			"status":              "ok",
 			"token":               nil,
@@ -388,7 +386,7 @@ func (h *Handler) HandleAdminCacheOnlineLoadAsync(w http.ResponseWriter, r *http
 			online["last_asset_clear_at"] = details[0]["last_asset_clear_at"]
 		}
 
-		result := map[string]interface{}{
+		result := map[string]any{
 			"local_image":     cachedMediaStats(images, imageSize),
 			"local_video":     cachedMediaStats(videos, videoSize),
 			"online":          online,
@@ -434,7 +432,7 @@ func (h *Handler) HandleAdminCacheOnlineClearAsync(w http.ResponseWriter, r *htt
 		defer scheduleDeleteNSFWBatchTask(task.ID)
 
 		var (
-			results   = map[string]map[string]interface{}{}
+			results   = map[string]map[string]any{}
 			okCount   int
 			failCount int
 			mu        sync.Mutex
@@ -442,14 +440,14 @@ func (h *Handler) HandleAdminCacheOnlineClearAsync(w http.ResponseWriter, r *htt
 		runWorkerPool(ctx, tokens, 4, func(token string) {
 			total, success, failed, err := h.webClient().clearAssets(ctx, token)
 			ok := err == nil
-			entry := map[string]interface{}{}
+			entry := map[string]any{}
 			if err != nil {
 				entry["status"] = "error"
 				entry["error"] = strings.TrimSpace(err.Error())
 			} else {
 				setOnlineAssetClearTime(token, time.Now().UnixMilli())
 				entry["status"] = "success"
-				entry["result"] = map[string]interface{}{
+				entry["result"] = map[string]any{
 					"total":   total,
 					"success": success,
 					"failed":  failed,
@@ -473,9 +471,9 @@ func (h *Handler) HandleAdminCacheOnlineClearAsync(w http.ResponseWriter, r *htt
 			return
 		}
 
-		result := map[string]interface{}{
+		result := map[string]any{
 			"status": "success",
-			"summary": map[string]interface{}{
+			"summary": map[string]any{
 				"total": len(tokens),
 				"ok":    okCount,
 				"fail":  failCount,

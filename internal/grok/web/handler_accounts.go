@@ -197,9 +197,9 @@ func (s *chatAccountSession) Close() {
 func (h *Handler) doSingleAccountRequest(
 	ctx context.Context,
 	sess *chatAccountSession,
-	payload map[string]interface{},
+	payload map[string]any,
 	shouldMarkStatus grokAccountStatusPolicy,
-	callAPI func(*Client, context.Context, string, map[string]interface{}) (*http.Response, error),
+	callAPI func(*Client, context.Context, string, map[string]any) (*http.Response, error),
 ) (*http.Response, error) {
 	if sess == nil || strings.TrimSpace(sess.token) == "" {
 		return nil, fmt.Errorf("empty chat session")
@@ -250,8 +250,8 @@ func skipExternalAttachmentFetchGrokAccountStatus(err error) bool {
 func (h *Handler) doChatWithAutoSwitchRebuild(
 	ctx context.Context,
 	sess *chatAccountSession,
-	payload *map[string]interface{},
-	rebuild func(token string) (map[string]interface{}, error),
+	payload *map[string]any,
+	rebuild func(token string) (map[string]any, error),
 ) (*http.Response, error) {
 	return h.doAutoSwitchRequest(ctx, sess, payload, rebuild, (*Client).doChat)
 }
@@ -261,9 +261,9 @@ func (h *Handler) doChatWithAutoSwitchRebuild(
 func (h *Handler) doAutoSwitchRequest(
 	ctx context.Context,
 	sess *chatAccountSession,
-	payload *map[string]interface{},
-	rebuild func(token string) (map[string]interface{}, error),
-	callAPI func(*Client, context.Context, string, map[string]interface{}) (*http.Response, error),
+	payload *map[string]any,
+	rebuild func(token string) (map[string]any, error),
+	callAPI func(*Client, context.Context, string, map[string]any) (*http.Response, error),
 ) (*http.Response, error) {
 	if sess == nil || strings.TrimSpace(sess.token) == "" {
 		return nil, fmt.Errorf("empty chat session")

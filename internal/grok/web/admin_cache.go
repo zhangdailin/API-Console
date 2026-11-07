@@ -65,7 +65,7 @@ func setOnlineAssetClearTime(token string, ts int64) {
 	cacheOnlineClearMu.Unlock()
 }
 
-func getOnlineAssetClearTime(token string) interface{} {
+func getOnlineAssetClearTime(token string) any {
 	token = NormalizeSSOToken(token)
 	if token == "" {
 		return nil
@@ -86,8 +86,8 @@ func bytesToMB(size int64) float64 {
 	return math.Round((float64(size)/1024.0/1024.0)*100) / 100
 }
 
-func cachedMediaStats(entries []cacheEntry, size int64) map[string]interface{} {
-	return map[string]interface{}{
+func cachedMediaStats(entries []cacheEntry, size int64) map[string]any {
+	return map[string]any{
 		"count":      len(entries),
 		"bytes":      size,
 		"size_bytes": size,
@@ -276,14 +276,14 @@ func (h *Handler) HandleAdminCache(w http.ResponseWriter, r *http.Request) {
 		onlineStatus = "no_token"
 	}
 
-	online := map[string]interface{}{
+	online := map[string]any{
 		"count":               0,
 		"status":              onlineStatus,
 		"token":               nil,
 		"token_masked":        nil,
 		"last_asset_clear_at": nil,
 	}
-	onlineDetails := make([]map[string]interface{}, 0)
+	onlineDetails := make([]map[string]any, 0)
 	switch onlineScope {
 	case "single":
 		details, _ := h.fetchOnlineAssetDetails(r.Context(), []string{selectedToken}, accountByToken, nil)
@@ -320,12 +320,12 @@ func (h *Handler) HandleAdminCache(w http.ResponseWriter, r *http.Request) {
 
 	imageStats := cachedMediaStats(images, imageSize)
 	videoStats := cachedMediaStats(videos, videoSize)
-	out := map[string]interface{}{
+	out := map[string]any{
 		"status":   "success",
 		"base_dir": cacheBaseDir,
 		"image":    imageStats,
 		"video":    videoStats,
-		"total": map[string]interface{}{
+		"total": map[string]any{
 			"count": len(images) + len(videos),
 			"bytes": imageSize + videoSize,
 		},
@@ -373,7 +373,7 @@ func (h *Handler) HandleAdminCacheList(w http.ResponseWriter, r *http.Request) {
 	}
 	paged, total := paginateCacheEntries(entries, page, pageSize)
 
-	out := map[string]interface{}{
+	out := map[string]any{
 		"status":    "success",
 		"total":     total,
 		"page":      page,
@@ -419,11 +419,11 @@ func (h *Handler) HandleAdminCacheClear(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	out := map[string]interface{}{
+	out := map[string]any{
 		"status":        "success",
 		"removed_count": removedFiles,
 		"removed_bytes": removedBytes,
-		"result": map[string]interface{}{
+		"result": map[string]any{
 			"count":      removedFiles,
 			"size_mb":    bytesToMB(removedBytes),
 			"size_bytes": removedBytes,
@@ -457,12 +457,12 @@ func (h *Handler) HandleAdminCacheItemDelete(w http.ResponseWriter, r *http.Requ
 			return
 		}
 	}
-	out := map[string]interface{}{
+	out := map[string]any{
 		"status":     "success",
 		"removed":    removed,
 		"media_type": mediaType,
 		"name":       name,
-		"result": map[string]interface{}{
+		"result": map[string]any{
 			"deleted": removed,
 		},
 	}

@@ -22,14 +22,12 @@ func TestAtomicAccountQualityConcurrentFailuresAndStaleRecovery(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make(chan error, count)
 	start := make(chan struct{})
-	for i := 0; i < count; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range count {
+		wg.Go(func() {
 			<-start
 			_, err := s.ApplyAccountQuality(ctx, acc.ID, AccountQualityUpdate{Reason: "no_reasoning", CooldownUntil: time.Now().Add(time.Hour), DisableThreshold: 2})
 			errs <- err
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()

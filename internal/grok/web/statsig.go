@@ -92,7 +92,7 @@ func (s *statsigSigner) signature(ctx context.Context, do func(*http.Request) (*
 	if value, ok := s.cached(key, s.now().UTC()); ok {
 		return value, "cache", nil
 	}
-	value, err, _ := s.refreshes.Do(key, func() (interface{}, error) {
+	value, err, _ := s.refreshes.Do(key, func() (any, error) {
 		now := s.now().UTC()
 		if cached, ok := s.cached(key, now); ok {
 			return statsigSignResult{value: cached, source: "cache"}, nil
@@ -201,7 +201,7 @@ func (s *statsigSigner) requestSignature(ctx context.Context, endpoint, method, 
 	if err := config.ValidateStatsigSignerURL(endpoint); err != nil {
 		return "", err
 	}
-	payload, _ := json.Marshal(map[string]interface{}{
+	payload, _ := json.Marshal(map[string]any{
 		"method": strings.ToUpper(strings.TrimSpace(method)),
 		"path":   path,
 		"environment": map[string]string{

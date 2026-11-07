@@ -48,7 +48,7 @@ func TestAccountSecretFieldsAreComplete(t *testing.T) {
 	`) {
 		nonSecret[name] = true
 	}
-	accountType := reflect.TypeOf(store.Account{})
+	accountType := reflect.TypeFor[store.Account]()
 	seenSecrets := map[string]bool{}
 	seenNonSecrets := map[string]bool{}
 	for i := 0; i < accountType.NumField(); i++ {

@@ -21,7 +21,7 @@ func (h *Handler) streamImageGeneration(w http.ResponseWriter, body io.Reader, t
 	var urls []string
 	targetIndex := -1
 
-	if err := parseUpstreamLines(body, func(resp map[string]interface{}) error {
+	if err := parseUpstreamLines(body, func(resp map[string]any) error {
 		if index, progress, ok := extractImageProgress(resp); ok {
 			outIndex := index
 			if n == 1 {
@@ -33,7 +33,7 @@ func (h *Handler) streamImageGeneration(w http.ResponseWriter, body io.Reader, t
 				}
 				outIndex = 0
 			}
-			data := map[string]interface{}{
+			data := map[string]any{
 				"type":     "image_generation.partial_image",
 				field:      "",
 				"index":    outIndex,
@@ -72,7 +72,7 @@ func (h *Handler) streamImageGeneration(w http.ResponseWriter, body io.Reader, t
 				val = publicBase + val
 			}
 		}
-		data := map[string]interface{}{
+		data := map[string]any{
 			"type":           "image_generation.completed",
 			field:            val,
 			"index":          i,
@@ -227,7 +227,7 @@ func (h *Handler) serveImagesGenerations(ctx context.Context, w http.ResponseWri
 
 	h.writeImageResults(w, ctx, sess.token, req.Prompt, urls, req.ResponseFormat, publicBase, true)
 	if cost, priced := pricing.EstimateImageCost(spec.UpstreamModel, req.Resolution, req.Quality, len(urls)); priced {
-		h.settleMediaBilling(ctx, req.Model, cost, map[string]interface{}{
+		h.settleMediaBilling(ctx, req.Model, cost, map[string]any{
 			"plane": "web", "images": len(urls), "resolution": req.Resolution,
 		})
 	}
@@ -277,7 +277,7 @@ func (h *Handler) streamImagineWSGeneration(ctx context.Context, w http.Response
 			value, err := h.imagineImageOutputValue(ctx, sess.token, ev, "b64_json")
 			if err == nil && strings.TrimSpace(value) != "" {
 				outputFormat := imageOutputFormatFromBase64(value)
-				writeSSE(w, flusher, "image_generation.partial_image", encodeJSONBytes(map[string]interface{}{
+				writeSSE(w, flusher, "image_generation.partial_image", encodeJSONBytes(map[string]any{
 					"type": "image_generation.partial_image", "b64_json": value,
 					"created_at": time.Now().Unix(), "size": imageEventSize("b64_json", value), "quality": "auto",
 					"background": "auto", "output_format": outputFormat, "partial_image_index": partialIndex,
@@ -294,7 +294,7 @@ func (h *Handler) streamImagineWSGeneration(ctx context.Context, w http.Response
 			return
 		}
 		outputFormat := imageOutputFormatFromBase64(value)
-		writeSSE(w, flusher, "image_generation.completed", encodeJSONBytes(map[string]interface{}{
+		writeSSE(w, flusher, "image_generation.completed", encodeJSONBytes(map[string]any{
 			"type": "image_generation.completed", "b64_json": value,
 			"created_at": time.Now().Unix(), "size": imageEventSize("b64_json", value), "quality": "auto",
 			"background": "auto", "output_format": outputFormat,
@@ -318,7 +318,7 @@ func (h *Handler) collectImagineWSGeneration(ctx context.Context, w http.Respons
 	nsfw := h.imagineNSFWAllowed(req.NSFW)
 	events, errs := h.streamImagineWSImages(ctx, sess, req.Prompt, req.AspectRatio, req.N, nsfw, imagineWSProModel(spec.ID))
 	field := imageResponseField(req.ResponseFormat)
-	data := make([]map[string]interface{}, 0, req.N)
+	data := make([]map[string]any, 0, req.N)
 	for ev := range events {
 		if !ev.Final || (strings.TrimSpace(ev.Blob) == "" && strings.TrimSpace(ev.URL) == "") {
 			continue
@@ -337,7 +337,7 @@ func (h *Handler) collectImagineWSGeneration(ctx context.Context, w http.Respons
 				value = publicBase + value
 			}
 		}
-		data = append(data, map[string]interface{}{
+		data = append(data, map[string]any{
 			field:            value,
 			"revised_prompt": "",
 			"mime_type":      imageMimeTypeForValue(field, value),
@@ -351,7 +351,7 @@ func (h *Handler) collectImagineWSGeneration(ctx context.Context, w http.Respons
 		writeGrokError(w, http.StatusBadGateway, "no image generated")
 		return
 	}
-	writeJSON(w, map[string]interface{}{
+	writeJSON(w, map[string]any{
 		"created": time.Now().Unix(), "data": data,
 		"usage": buildImageUsagePayload(req.Prompt, len(data)),
 	})
@@ -374,7 +374,7 @@ func (h *Handler) streamAppChatImagesGeneration(ctx context.Context, w http.Resp
 	h.syncGrokQuota(sess.acc, resp.Header)
 	h.streamImageGeneration(w, resp.Body, sess.token, req.Prompt, req.ResponseFormat, req.N, publicBase)
 	if cost, priced := pricing.EstimateImageCost(spec.UpstreamModel, req.Resolution, req.Quality, req.N); priced {
-		h.settleMediaBilling(ctx, req.Model, cost, map[string]interface{}{
+		h.settleMediaBilling(ctx, req.Model, cost, map[string]any{
 			"plane": "web", "stream": true, "images": req.N,
 		})
 	}
@@ -387,10 +387,7 @@ func (h *Handler) collectAppChatImageURLs(ctx context.Context, sess *chatAccount
 
 	// Grok upstream may return only 2 images per call and may repeat.
 	// To reach N, request 1 image per call without rewriting the user's prompt.
-	maxAttempts := req.N * 2
-	if maxAttempts < 4 {
-		maxAttempts = 4
-	}
+	maxAttempts := max(req.N*2, 4)
 	deadline := time.Now().Add(60 * time.Second)
 	excludedAccountIDs := make([]int64, 0, maxAttempts)
 	for i := 0; i < maxAttempts; i++ {
@@ -416,7 +413,7 @@ func (h *Handler) collectAppChatImageURLs(ctx context.Context, sess *chatAccount
 		}
 		imageLimitHit := false
 		h.syncGrokQuota(sess.acc, resp.Header)
-		err = parseUpstreamLines(resp.Body, func(line map[string]interface{}) error {
+		err = parseUpstreamLines(resp.Body, func(line map[string]any) error {
 			if len(debugShapes) < 20 {
 				debugShapes = append(debugShapes, imageDebugShape(line))
 			}
@@ -479,7 +476,7 @@ func (h *Handler) collectAppChatImageURLs(ctx context.Context, sess *chatAccount
 	return urls, nil
 }
 
-func (h *Handler) doAppChatImageRequest(ctx context.Context, sess *chatAccountSession, spec ModelSpec, payload *map[string]interface{}, allowSwitch bool) (*http.Response, error) {
+func (h *Handler) doAppChatImageRequest(ctx context.Context, sess *chatAccountSession, spec ModelSpec, payload *map[string]any, allowSwitch bool) (*http.Response, error) {
 	if payload == nil {
 		return nil, fmt.Errorf("empty payload")
 	}

@@ -7,8 +7,8 @@ import (
 )
 
 func TestImageEditResultsDropTheEchoedInputs(t *testing.T) {
-	payload := map[string]interface{}{"mediaGenInput": map[string]interface{}{
-		"imageToImage": map[string]interface{}{"inputAssets": []interface{}{"93826fa7-8737-4ed0-b85e-e27442224814"}},
+	payload := map[string]any{"mediaGenInput": map[string]any{
+		"imageToImage": map[string]any{"inputAssets": []any{"93826fa7-8737-4ed0-b85e-e27442224814"}},
 	}}
 	inputs := imageEditInputAssets(payload)
 	testutil.Equal(t, len(inputs), 1)
@@ -22,8 +22,8 @@ func TestImageEditResultsDropTheEchoedInputs(t *testing.T) {
 }
 
 func TestMediaCreditsExhaustedIsAnImageLimit(t *testing.T) {
-	line := map[string]interface{}{"result": map[string]interface{}{"response": map[string]interface{}{
-		"error": map[string]interface{}{"message": "You've used up your media generation credits.", "usagePoolExhausted": map[string]interface{}{}},
+	line := map[string]any{"result": map[string]any{"response": map[string]any{
+		"error": map[string]any{"message": "You've used up your media generation credits.", "usagePoolExhausted": map[string]any{}},
 	}}}
 	testutil.True(t, isAppChatImageLimitResponse(line))
 }
