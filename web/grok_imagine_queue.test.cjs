@@ -103,3 +103,11 @@ test('the panel offers 标准 and 高质量 only, and edits follow the pool allo
   assert.equal(quality[0].title,undefined);
   assert.equal(operations[1].disabled,false);
 });
+
+test('the video panel sends no reasoning effort and forgets a saved one', () => {
+  const page = fs.readFileSync(path.join(__dirname, 'templates/pages/grok-tools.html'), 'utf8');
+  const script = fs.readFileSync(path.join(__dirname, 'static/js/grok-tools.js'), 'utf8');
+  assert.ok(!page.includes('id="videoEffort"'), 'the video page has no reasoning effort control');
+  assert.ok(!script.includes('payload.reasoning_effort'), 'video requests carry no reasoning_effort');
+  assert.match(script, /saveGrokToolsUIState\(\{ videoEffort: undefined \}\)/, 'a saved video effort is cleared');
+});

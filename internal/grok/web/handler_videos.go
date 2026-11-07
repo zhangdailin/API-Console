@@ -298,7 +298,13 @@ func (h *Handler) HandleVideosCreate(w http.ResponseWriter, r *http.Request) {
 	}()
 	req, err := parseVideosRequest(r)
 	if err != nil {
-		writeGrokError(w, http.StatusBadRequest, "invalid request")
+		// Name an unknown field: "invalid request" left a stray client field
+		// (a saved reasoning_effort) undiagnosable from the page.
+		message := "invalid request"
+		if unknown, ok := errors.AsType[*unknownVideoFieldError](err); ok {
+			message = unknown.Error()
+		}
+		writeGrokError(w, http.StatusBadRequest, message)
 		return
 	}
 	if req.Seconds == 0 {

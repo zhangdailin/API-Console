@@ -3385,7 +3385,6 @@
       showToast(t("video.enterPrompt"), "error");
       return;
     }
-    const effort = String(document.getElementById("videoEffort")?.value || "").trim();
     const payload = {
       model: document.getElementById("videoModel")?.value || "grok-imagine-video",
       prompt,
@@ -3398,7 +3397,6 @@
     const imageURL = String(document.getElementById("videoImageUrl")?.value || "").trim();
     const imageRef = videoState.imageFileID ? { file_id: videoState.imageFileID } : (imageURL ? { url: imageURL } : null);
     if (imageRef) payload.input_references = [imageRef];
-    if (effort) payload.reasoning_effort = effort;
     updateVideoMeta();
     resetVideoOutput(true);
     initVideoPreviewSlot();
@@ -4181,13 +4179,12 @@
       ["videoLength", "videoLength"],
       ["videoResolution", "videoResolution"],
       ["videoPreset", "videoPreset"],
-      ["videoEffort", "videoEffort"],
     ].forEach(([id, key]) => {
       const input = document.getElementById(id);
       if (!input) return;
       const sync = () => {
         saveGrokToolsUIState({ [key]: String(input.value || "") });
-        if (id !== "videoEffort") updateVideoMeta();
+        updateVideoMeta();
       };
       input.addEventListener("change", sync);
       input.addEventListener("input", sync);
@@ -4436,12 +4433,13 @@
     const videoLength = document.getElementById("videoLength");
     const videoResolution = document.getElementById("videoResolution");
     const videoPreset = document.getElementById("videoPreset");
-    const videoEffort = document.getElementById("videoEffort");
     if (videoRatio && typeof uiState.videoRatio === "string") videoRatio.value = uiState.videoRatio;
     if (videoLength && typeof uiState.videoLength === "string") videoLength.value = uiState.videoLength;
     if (videoResolution && typeof uiState.videoResolution === "string") videoResolution.value = uiState.videoResolution;
     if (videoPreset && typeof uiState.videoPreset === "string") videoPreset.value = uiState.videoPreset;
-    if (videoEffort && typeof uiState.videoEffort === "string") videoEffort.value = uiState.videoEffort;
+    // Video has no reasoning effort. A choice saved by the control this page
+    // used to show made every video request fail; forget it.
+    if (typeof uiState.videoEffort === "string") saveGrokToolsUIState({ videoEffort: undefined });
     resetVideoOutput();
     updateVideoMeta();
     setVideoButtons(false);

@@ -1900,8 +1900,7 @@
 .ref-block,
 .source-block,
 .action-block,
-.model-block,
-.video-effort-block {
+.model-block {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);

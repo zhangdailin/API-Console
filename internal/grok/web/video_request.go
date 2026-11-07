@@ -95,7 +95,15 @@ func rejectUnknownVideoFields(raw []byte) error {
 		return nil
 	}
 	sort.Strings(unknown)
-	return fmt.Errorf("unknown video request field %q", unknown[0])
+	return &unknownVideoFieldError{field: unknown[0]}
+}
+
+// unknownVideoFieldError names a JSON field the video endpoint does not
+// accept. The name is the caller's own input, so it is safe to echo.
+type unknownVideoFieldError struct{ field string }
+
+func (e *unknownVideoFieldError) Error() string {
+	return fmt.Sprintf("unknown video request field %q", e.field)
 }
 
 // normalizeVideoRequestAliases folds the grok2api-compatible spellings onto the
