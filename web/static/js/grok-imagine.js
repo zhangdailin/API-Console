@@ -1,6 +1,5 @@
 (() => {
   const batchSize = () => Math.max(1, Math.min(6, Number(document.getElementById("imagineCount")?.value) || 6));
-  const PARALLELISM = 2;
   const STORAGE_KEY = "grok_tools_ui_v1";
   let imageModels = [];
 
@@ -308,7 +307,7 @@
       badge.textContent = String(index + 1);
       const body = document.createElement("div");
       body.className = "imagine-masonry-tile-body";
-      body.innerHTML = '<div class="imagine-masonry-tile-progress"><div class="imagine-masonry-tile-progress-value">0%</div><div class="imagine-masonry-tile-progress-track"><div class="imagine-masonry-tile-progress-fill"></div></div></div>';
+      body.innerHTML = '<div class="imagine-masonry-tile-progress"><div class="imagine-masonry-tile-progress-value">排队中</div><div class="imagine-masonry-tile-progress-track"><div class="imagine-masonry-tile-progress-fill"></div></div></div>';
       tile.appendChild(checkbox);
       tile.appendChild(badge);
       tile.appendChild(body);
@@ -398,10 +397,8 @@
       .filter(Boolean);
   }
 
-  // One upstream call yields two images, so a request asks for up to two and
-  // fills two slots: asking one at a time doubled the upstream calls and ran
-  // into the per-minute limit. Every tier goes through /images/generations,
-  // where the server picks an account that still has the tier's allowance.
+  // Every tier goes through /images/generations, where the server picks an
+  // account that still has the tier's allowance. Edits go to /images/edits.
   async function requestImages(prompt, ratio, model, quality, nsfw, signal, count = 1) {
     if (imageOperation() === "edit") return requestImageEdit(prompt, ratio, model, quality, signal, count);
     const chosen = String(model || "").trim() || "grok-imagine-image-lite";
@@ -428,6 +425,7 @@
 
   async function runSlots(batch, slots, prompt, ratio, model, quality, nsfw, signal) {
     let tick = 0;
+    slots.forEach((slot) => setSlotProgress(slot, 0));
     const timer = window.setInterval(() => {
       tick += 1;
       slots.forEach((slot) => setSlotProgress(slot, Math.min(92, 8 + tick * 7)));
@@ -471,22 +469,18 @@
     }
   }
 
+  // runBatch fills the slots one image at a time: one request in flight, for
+  // one image, so generation and edits never run several upstream jobs at once.
+  // The other slots wait as 排队中 until their turn.
   async function runBatch(batch, prompt, ratio, model, quality, nsfw, signal) {
     const results = new Array(batch.slots.length).fill(false);
-    let cursor = 0;
-    const workers = Array.from({ length: Math.min(PARALLELISM, Math.ceil(batch.slots.length / 2)) }, async () => {
-      while (cursor < batch.slots.length) {
-        if (signal?.aborted) break;
-        const index = cursor;
-        cursor += 2;
-        const slots = batch.slots.slice(index, index + 2);
-        const outcome = await runSlots(batch, slots, prompt, ratio, model, quality, nsfw, signal);
-        outcome.forEach((ok, offset) => { results[index + offset] = ok; });
-        // A spent allowance does not come back within the batch.
-        if (batch.quotaExhausted) break;
-      }
-    });
-    await Promise.all(workers);
+    for (let index = 0; index < batch.slots.length; index += 1) {
+      if (signal?.aborted) break;
+      const [ok] = await runSlots(batch, [batch.slots[index]], prompt, ratio, model, quality, nsfw, signal);
+      results[index] = ok;
+      // A spent allowance does not come back within the batch.
+      if (batch.quotaExhausted) break;
+    }
     return results;
   }
 
