@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"orchids-api/internal/accountpolicy"
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/grok/ratelimit"
 	"orchids-api/internal/store"
 )
@@ -32,24 +33,13 @@ func (e *syntheticCooldownError) Unwrap() error { return e.grokUpstreamError }
 
 func (e *syntheticCooldownError) RetryAfter() time.Duration { return e.delay }
 
-type rateLimitAccountContextKey struct{}
-
+// withRateLimitAccount records the account's rate-limit identity on ctx.
 func withRateLimitAccount(ctx context.Context, acc *store.Account) context.Context {
-	if acc == nil {
-		return ctx
-	}
-	identity := ""
-	if acc.TeamID != "" {
-		identity = "team:" + acc.TeamID
-	}
-	if identity == "" && acc.ID != 0 {
-		identity = fmt.Sprintf("account:%d", acc.ID)
-	}
-	return context.WithValue(ctx, rateLimitAccountContextKey{}, identity)
+	return grokbase.WithRateLimitAccount(ctx, acc)
 }
 
 func rateLimitIdentity(ctx context.Context, token string) string {
-	if identity, _ := ctx.Value(rateLimitAccountContextKey{}).(string); identity != "" {
+	if identity := grokbase.RateLimitAccount(ctx); identity != "" {
 		return identity
 	}
 	return "token:" + credentialAffinity(token)

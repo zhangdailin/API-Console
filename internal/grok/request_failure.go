@@ -22,15 +22,9 @@ func grokRequestFailure(err error) (grokPoolAnswer, bool) {
 func grokRequestFailureByCode(code string) (grokPoolAnswer, bool) {
 	switch code {
 	case "content_policy_violation":
-		return grokPoolAnswer{
-			status: http.StatusForbidden, code: "content_policy_violation",
-			message: "The upstream declined this request because of its content policy.",
-		}, true
+		return grokPoolAnswer{Status: http.StatusForbidden, Code: "content_policy_violation", Message: "The upstream declined this request because of its content policy."}, true
 	case "upstream_upgrade_required":
-		return grokPoolAnswer{
-			status: http.StatusServiceUnavailable, code: "upstream_upgrade_required",
-			message: apperrors.CategoryMessage("upstream_upgrade_required"),
-		}, true
+		return grokPoolAnswer{Status: http.StatusServiceUnavailable, Code: "upstream_upgrade_required", Message: apperrors.CategoryMessage("upstream_upgrade_required")}, true
 	default:
 		return grokPoolAnswer{}, false
 	}

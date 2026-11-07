@@ -1,3 +1,5 @@
+//lint:file-ignore SA1019 the browser transport speaks HTTP/2 over a uTLS connection, which only x/net/http2 can do: net/http negotiates HTTP/2 solely on its own *tls.Conn.
+
 package httpclient
 
 import (

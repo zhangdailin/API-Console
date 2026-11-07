@@ -390,7 +390,7 @@ func (h *Handler) collectAppChatImageURLs(ctx context.Context, sess *chatAccount
 	maxAttempts := max(req.N*2, 4)
 	deadline := time.Now().Add(60 * time.Second)
 	excludedAccountIDs := make([]int64, 0, maxAttempts)
-	for i := 0; i < maxAttempts; i++ {
+	for i := range maxAttempts {
 		cur := normalizeGeneratedImageURLs(urls, 0)
 		if len(cur) >= req.N {
 			urls = cur

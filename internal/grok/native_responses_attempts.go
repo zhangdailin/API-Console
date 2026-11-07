@@ -108,13 +108,13 @@ func (h *Handler) serveNativeResponses(w http.ResponseWriter, r *http.Request, s
 		}
 		h.syncGrokQuota(sess.acc, resp.Header)
 		var keepalive *httpserver.SSEKeepalive
-		var delivery http.ResponseWriter = w
+		delivery := http.ResponseWriter(w)
 		if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
 			keepalive = httpserver.NewSSEKeepalive(w, httpserver.SSEKeepaliveInterval, func() { _ = resp.Body.Close() })
 			delivery = keepalive
 		}
 		var quality *nativeResponseQuality
-		var target http.ResponseWriter = delivery
+		target := delivery
 		if path == "/responses" && responses.ClassifyCompactionPayload(immutable) == responses.CompactionNone && h.shouldHoldQualityTurn(req, ProviderBuild) {
 			quality = newNativeResponseQuality(delivery, policy)
 			target = quality.hold.writer

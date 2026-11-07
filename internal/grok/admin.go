@@ -71,6 +71,7 @@ func adminPort() *provider.Admin {
 			}
 			normalizeTokenInput(acc)
 			if !accountIsOAuth(acc) {
+				//lint:ignore ST1005 the message starts with the product name and is shown to operators as is.
 				return errors.New("Grok Build accounts must be added through the Build OAuth device login (/api/grok/device-auth); Grok Web accounts need an SSO cookie")
 			}
 			if !accountHasOAuthCredentials(acc) {

@@ -81,7 +81,7 @@ func writeSSEStreamError(w http.ResponseWriter, flusher http.Flusher, logger *de
 // carries the upstream Retry-After back to the client.
 func writeGrokUpstreamError(w http.ResponseWriter, err error) {
 	if answer, ok := grokRequestFailure(err); ok {
-		writeGrokErrorCode(w, answer.status, answer.code, answer.message)
+		writeGrokErrorCode(w, answer.Status, answer.Code, answer.Message)
 		return
 	}
 	if err == nil {

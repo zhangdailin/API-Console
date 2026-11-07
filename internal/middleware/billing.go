@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -255,7 +255,7 @@ func APIKeyBillingReservation(next http.HandlerFunc, reserver APIKeyBillingReser
 		}
 		body, err := readBillingBody(r)
 		if err != nil {
-			writeAPIKeyError(w, http.StatusBadRequest, err.Error(), "invalid_request_body")
+			writeAPIKeyError(w, http.StatusBadRequest, "Could not read request body", "invalid_request_body")
 			return
 		}
 		if len(body) == 0 {
@@ -334,6 +334,9 @@ func billingRequestPath(path string) bool {
 	return false
 }
 
+// errBillingBodyUnreadable reports a request body that could not be read in full.
+var errBillingBodyUnreadable = errors.New("could not read request body")
+
 // readBillingBody restores accepted bytes and rejects incomplete estimation.
 func readBillingBody(r *http.Request) ([]byte, error) {
 	if r == nil || r.Body == nil {
@@ -343,7 +346,7 @@ func readBillingBody(r *http.Request) ([]byte, error) {
 	defer original.Close()
 	raw, err := io.ReadAll(original)
 	if err != nil {
-		return nil, fmt.Errorf("Could not read request body")
+		return nil, errBillingBodyUnreadable
 	}
 	r.Body = io.NopCloser(bytes.NewReader(raw))
 	r.ContentLength = int64(len(raw))

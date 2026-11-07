@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	apperrors "orchids-api/internal/errors"
+	"orchids-api/internal/grok/grokbase"
 )
 
 // 403/429 classification helpers for Build account handling.
@@ -53,13 +54,13 @@ func ClassifyUpstreamResponse(status int, header http.Header, body []byte) Upstr
 	case http.StatusUpgradeRequired:
 		return UpstreamErrorUpgradeRequired
 	case http.StatusForbidden:
-		if IsDefinitiveAccountBlockBody(body) {
+		if grokbase.IsAccountBlockBody(body) {
 			return UpstreamErrorAccountBlock
 		}
 		var payload any
 		text := string(body)
 		if json.Unmarshal(body, &payload) == nil {
-			text = strings.Join(collectJSONStrings(payload), " ")
+			text = strings.Join(grokbase.JSONStrings(payload), " ")
 		}
 		if apperrors.IsContentPolicyRefusal(text) {
 			return UpstreamErrorContentRefusal
@@ -79,45 +80,4 @@ func ClassifyUpstreamError(err error) UpstreamErrorKind {
 		return ClassifyUpstreamResponse(typed.status, typed.header, []byte(typed.body))
 	}
 	return UpstreamErrorUnknown
-}
-
-// IsDefinitiveAccountBlockBody accepts only explicit error code or message
-// signals that a Grok account is blocked/suspended.
-func IsDefinitiveAccountBlockBody(body []byte) bool {
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return IsDefinitiveAccountBlockText(string(body))
-	}
-	values := collectJSONStrings(payload)
-	return IsDefinitiveAccountBlockText(strings.Join(values, " "))
-}
-
-// IsDefinitiveAccountBlockText matches explicit account-block language.
-func IsDefinitiveAccountBlockText(value string) bool {
-	value = strings.ToLower(value)
-	return strings.Contains(value, "blocked-user") || strings.Contains(value, "user is blocked")
-}
-
-// collectJSONStrings recursively gathers string values from a decoded JSON tree
-// (objects and arrays) so nested error/message fields are inspected, not just
-// the shallow top level.
-func collectJSONStrings(value any) []string {
-	var out []string
-	var walk func(any)
-	walk = func(current any) {
-		switch typed := current.(type) {
-		case map[string]any:
-			for _, child := range typed {
-				walk(child)
-			}
-		case []any:
-			for _, child := range typed {
-				walk(child)
-			}
-		case string:
-			out = append(out, typed)
-		}
-	}
-	walk(value)
-	return out
 }

@@ -33,6 +33,7 @@ func adminPort() *provider.Admin {
 		// Cline is OAuth-only: the WorkOS device grant is the only way to obtain
 		// the credential.
 		PrepareCreate: func(*store.Account) error {
+			//lint:ignore ST1005 the message starts with the product name and is shown to operators as is.
 			return errors.New("Cline accounts must be added using the official browser login (/api/cline/login)")
 		},
 		PrepareUpdate: prepareUpdate,

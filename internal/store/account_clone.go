@@ -8,16 +8,16 @@ import (
 
 // Clone isolates mutable provider collections. Scalar snapshots and immutable
 // credential strings can be copied without serialization.
-func (acc *Account) Clone() *Account {
-	if acc == nil {
+func (a *Account) Clone() *Account {
+	if a == nil {
 		return nil
 	}
-	copy := *acc
-	copy.GrokModels = slices.Clone(acc.GrokModels)
-	copy.GrokModelCatalog = modelcatalog.CloneProfiles(acc.GrokModelCatalog)
-	copy.ModelCooldowns = maps.Clone(acc.ModelCooldowns)
-	copy.ModelCooldownReasons = maps.Clone(acc.ModelCooldownReasons)
-	copy.WorkBuddyModelIDs = slices.Clone(acc.WorkBuddyModelIDs)
-	copy.ClineModelIDs = slices.Clone(acc.ClineModelIDs)
+	copy := *a
+	copy.GrokModels = slices.Clone(a.GrokModels)
+	copy.GrokModelCatalog = modelcatalog.CloneProfiles(a.GrokModelCatalog)
+	copy.ModelCooldowns = maps.Clone(a.ModelCooldowns)
+	copy.ModelCooldownReasons = maps.Clone(a.ModelCooldownReasons)
+	copy.WorkBuddyModelIDs = slices.Clone(a.WorkBuddyModelIDs)
+	copy.ClineModelIDs = slices.Clone(a.ClineModelIDs)
 	return &copy
 }

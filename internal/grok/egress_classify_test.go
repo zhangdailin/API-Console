@@ -4,11 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/testutil"
 	"testing"
 )
 
-func TestIsDefinitiveAccountBlockBody(t *testing.T) {
+func TestIsAccountBlockBody(t *testing.T) {
 	cases := []struct {
 		body string
 		want bool
@@ -22,7 +23,7 @@ func TestIsDefinitiveAccountBlockBody(t *testing.T) {
 		{`{"code":"resource-exhausted"}`, false},
 	}
 	for _, c := range cases {
-		testutil.CheckEqual(t, IsDefinitiveAccountBlockBody([]byte(c.body)), c.want)
+		testutil.CheckEqual(t, grokbase.IsAccountBlockBody([]byte(c.body)), c.want)
 	}
 }
 

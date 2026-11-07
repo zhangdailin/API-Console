@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"orchids-api/internal/grok/grokbase"
 	"strings"
 )
 
@@ -67,7 +68,7 @@ func ClassifyUpstreamResponse(status int, header http.Header, body []byte) Upstr
 		if IsCloudflareChallengeBody(body) {
 			return UpstreamErrorCloudflareChallenge
 		}
-		if IsDefinitiveAccountBlockBody(body) {
+		if grokbase.IsAccountBlockBody(body) {
 			return UpstreamErrorAccountBlock
 		}
 		return UpstreamErrorGenericForbidden
@@ -124,23 +125,6 @@ func hasDPoPChallengeHeader(header http.Header) bool {
 	return false
 }
 
-// IsDefinitiveAccountBlockBody accepts only explicit error code or message
-// signals that a Grok account is blocked/suspended.
-func IsDefinitiveAccountBlockBody(body []byte) bool {
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return IsDefinitiveAccountBlockText(string(body))
-	}
-	values := collectJSONStrings(payload)
-	return IsDefinitiveAccountBlockText(strings.Join(values, " "))
-}
-
-// IsDefinitiveAccountBlockText matches explicit account-block language.
-func IsDefinitiveAccountBlockText(value string) bool {
-	value = strings.ToLower(value)
-	return strings.Contains(value, "blocked-user") || strings.Contains(value, "user is blocked")
-}
-
 // IsDPoPProofRequiredBody reports a protocol-level DPoP challenge. It
 // must not be attributed to an account credential or physical egress node.
 func IsDPoPProofRequiredBody(body []byte) bool {
@@ -148,7 +132,7 @@ func IsDPoPProofRequiredBody(body []byte) bool {
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return IsDPoPProofRequiredText(string(body))
 	}
-	return IsDPoPProofRequiredText(strings.Join(collectJSONStrings(payload), " "))
+	return IsDPoPProofRequiredText(strings.Join(grokbase.JSONStrings(payload), " "))
 }
 
 // IsDPoPProofRequiredText normalizes separators and matches the DPoP challenge
@@ -194,28 +178,4 @@ func IsCloudflareChallengeBody(body []byte) bool {
 		}
 	}
 	return false
-}
-
-// collectJSONStrings recursively gathers string values from a decoded JSON tree
-// (objects and arrays) so nested error/message fields are inspected, not just
-// the shallow top level.
-func collectJSONStrings(value any) []string {
-	var out []string
-	var walk func(any)
-	walk = func(current any) {
-		switch typed := current.(type) {
-		case map[string]any:
-			for _, child := range typed {
-				walk(child)
-			}
-		case []any:
-			for _, child := range typed {
-				walk(child)
-			}
-		case string:
-			out = append(out, typed)
-		}
-	}
-	walk(value)
-	return out
 }

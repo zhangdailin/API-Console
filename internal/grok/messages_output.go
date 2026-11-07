@@ -541,9 +541,9 @@ func writeAnthropicUpstreamError(w http.ResponseWriter, status int, body string)
 	}
 	if json.Unmarshal([]byte(body), &envelope) == nil {
 		if answer, ok := grokRequestFailureByCode(envelope.Error.Code); ok {
-			util.WriteJSONStatus(w, answer.status, map[string]any{
+			util.WriteJSONStatus(w, answer.Status, map[string]any{
 				"type": "error", "error": map[string]any{
-					"type": anthropicErrorType(answer.status), "code": answer.code, "message": answer.message,
+					"type": anthropicErrorType(answer.Status), "code": answer.Code, "message": answer.Message,
 				},
 			})
 			return

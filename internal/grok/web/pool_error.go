@@ -2,11 +2,11 @@ package web
 
 import (
 	"errors"
-	"log/slog"
 	"net/http"
 	"strings"
 
 	apperrors "orchids-api/internal/errors"
+	"orchids-api/internal/grok/grokbase"
 )
 
 // The fallbacks a client gets when the Grok account pool cannot take a request
@@ -20,44 +20,12 @@ const (
 	grokModelAccountUnavailableMessage    = "No upstream account is currently available for this model. Retry later or add capacity."
 )
 
-// grokPoolAnswer is one answer to a pool failure: the status and code a client
-// acts on, and the text it reads. Each endpoint family formats it with its own
-// envelope (writeResponsesAPIError for the responses/voice plane,
-// writeGrokErrorCode for the chat/completions plane), so the two families keep
-// their shapes while sharing the classification and the wording.
-type grokPoolAnswer struct {
-	status  int
-	code    string
-	message string
-}
+// grokPoolAnswer is the shared pool-failure answer (grokbase.PoolAnswer).
+type grokPoolAnswer = grokbase.PoolAnswer
 
-// classifyGrokPoolFailure turns "no account could take this request" into the
-// answer the client gets, logging the pool's own note either way.
-//
-// The Grok handlers select their own sessions (openCLIAccountSession, …) rather than going through the generic session
-// handler, so they used to answer a pool failure with 503 and — in several
-// handlers — the pool's error text. A cooling pool, a rate-limited pool and a
-// spent allowance are all retryable capacity conditions and are answered 429 by
-// the shared classification, the same answer every other entrance gives; a model
-// the pool cannot route is a 404. Only the residual cases (a refused credential,
-// an empty token, no accounts at all) stay 503, and they lose their internal
-// detail: the operator reads it in the log.
+// classifyGrokPoolFailure is grokbase.ClassifyPoolFailure.
 func classifyGrokPoolFailure(err error, fallbackCode, fallbackMessage string) grokPoolAnswer {
-	if out := apperrors.ClassifyPoolExhaustion(err, ""); !out.Empty() {
-		slog.Warn("Grok account pool could not serve the request",
-			"error", err, "category", out.Category)
-		return grokPoolAnswer{
-			status:  apperrors.StatusForCategory(out.Category),
-			code:    out.Category,
-			message: out.Message,
-		}
-	}
-	slog.Error("No Grok account could serve the request", "error", err, "code", fallbackCode)
-	return grokPoolAnswer{
-		status:  http.StatusServiceUnavailable,
-		code:    fallbackCode,
-		message: fallbackMessage,
-	}
+	return grokbase.ClassifyPoolFailure(err, fallbackCode, fallbackMessage)
 }
 
 // writeGrokNoAccountError answers a request the chat/completions plane could not
@@ -71,7 +39,7 @@ func writeGrokNoAccountError(w http.ResponseWriter, err error) {
 		return
 	}
 	answer := classifyGrokPoolFailure(err, "upstream_unavailable", grokModelAccountUnavailableMessage)
-	writeGrokErrorCode(w, answer.status, answer.code, answer.message)
+	writeGrokErrorCode(w, answer.Status, answer.Code, answer.Message)
 }
 
 // writeMediaUnavailable answers a media request no account has allowance for
