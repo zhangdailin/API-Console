@@ -16,14 +16,14 @@
     return Boolean(plans) && Number(plans.free) > 0 && !Number(plans.paid) && !Number(plans.unknown);
   }
 
-  // Quality tiers, as grok2api names them: 快速 is the lite model (a fast
-  // chat every plan can use), 标准 the Imagine model, 高质量 Imagine 2.0.
+  // Quality tiers: 标准 is the Imagine model, 高质量 Imagine 2.0. The lite
+  // (快速) tier is not offered: grok.com answered it with stock pictures
+  // instead of drawings of the prompt.
   function qualityModels() {
     const ids = imageModels.map((item) => String(item?.id || "")).filter(Boolean);
-    const lite = ids.find((id) => /image-lite$/i.test(id)) || ids[0] || "";
-    const basic = ids.find((id) => /^grok-imagine-image$/i.test(id)) || lite;
+    const basic = ids.find((id) => /^grok-imagine-image$/i.test(id)) || "grok-imagine-image";
     const quality = ids.find((id) => /image-2\.0$/i.test(id)) || basic;
-    return { basic, lite, quality };
+    return { basic, quality };
   }
 
   const state = {
@@ -89,25 +89,24 @@
 
   function qualityModel(quality) {
     const models = qualityModels();
-    return models[quality] || models.lite;
+    return models[quality] || models.basic;
   }
 
   function normalizeQuality(value) {
     const raw = String(value || "").toLowerCase();
-    if (raw === "basic" || raw === "quality") return raw;
-    return "lite";
+    return raw === "quality" ? "quality" : "basic";
   }
 
   function syncQualityModel() {
-    const quality = normalizeQuality(readToggle("#imagineQualityToggle", "imagineQuality", "lite"));
+    const quality = normalizeQuality(readToggle("#imagineQualityToggle", "imagineQuality", "basic"));
     const model = qualityModel(quality);
     return { quality, model };
   }
 
-  // The lite route has no resolution choice; the other tiers accept 1k/2k.
-  function syncResolution(quality) {
+  // Both tiers accept a 1k/2k resolution.
+  function syncResolution() {
     const resolution = document.getElementById("imagineResolution");
-    if (resolution) resolution.disabled = normalizeQuality(quality) === "lite";
+    if (resolution) resolution.disabled = false;
   }
 
   function aspectRatioCss(value) {
@@ -414,7 +413,7 @@
   // account that still has the tier's allowance. Edits go to /images/edits.
   async function requestImages(prompt, ratio, model, quality, nsfw, signal, count = 1) {
     if (imageOperation() === "edit") return requestImageEdit(prompt, ratio, model, quality, signal, count);
-    const chosen = String(model || "").trim() || "grok-imagine-image-lite";
+    const chosen = String(model || "").trim() || "grok-imagine-image";
     const res = await fetch(`${inferencePrefix()}/images/generations`, {
       method: "POST",
       headers: inferenceHeaders({ "Content-Type": "application/json" }),
@@ -427,7 +426,7 @@
         size: sizeForRatio(ratio),
         response_format: "url",
         nsfw,
-        ...(chosen !== "grok-imagine-image-lite" ? { resolution: document.getElementById("imagineResolution")?.value || "1k" } : {}),
+        resolution: document.getElementById("imagineResolution")?.value || "1k",
       }),
     });
     if (!res.ok) throw new Error(await res.text());
@@ -517,20 +516,17 @@
     return results;
   }
 
-  // applyAvailability offers only what the pool can serve: 标准/高质量 need an
+  // applyAvailability reflects what the pool can serve: 标准/高质量 need an
   // account with the image_pro allowance, and 编辑 one with image_edit (Free
-  // plans have none). A choice that is no longer offered falls back.
+  // plans have none). An edit choice that is no longer offered falls back.
   function applyAvailability() {
     const media = availability.media || {};
     const proAllowed = media.image_pro !== false;
     const editAllowed = media.image_edit !== false;
     document.querySelectorAll("#imagineQualityToggle [data-imagine-quality]").forEach((btn) => {
-      if (btn.dataset.imagineQuality !== "lite") btn.classList.toggle("hidden", !proAllowed);
+      if (proAllowed) btn.removeAttribute("title");
+      else btn.title = "当前账号的标准/高质量出图额度已用完，等待重置后再试";
     });
-    if (!proAllowed && normalizeQuality(readToggle("#imagineQualityToggle", "imagineQuality", "lite")) !== "lite") {
-      setToggle("#imagineQualityToggle", "imagineQuality", "lite");
-      syncResolution("lite");
-    }
     document.querySelectorAll("#imagineOperationToggle [data-imagine-operation='edit']").forEach((btn) => {
       btn.disabled = !editAllowed;
       if (editAllowed) btn.removeAttribute("title");
@@ -883,7 +879,7 @@
     const ui = options.uiState || loadState();
     if ($("imagineRatio") && typeof ui.imagineRatio === "string" && ui.imagineRatio) $("imagineRatio").value = ui.imagineRatio;
     const models = qualityModels();
-    const quality = normalizeQuality(ui.imagineQuality || (ui.imagineModel === models.quality ? "quality" : "lite"));
+    const quality = normalizeQuality(ui.imagineQuality || (ui.imagineModel === models.quality ? "quality" : "basic"));
     setToggle("#imagineQualityToggle", "imagineQuality", quality);
     syncResolution(quality);
     setToggle("#imagineOperationToggle", "imagineOperation", ui.imagineOperation === "edit" ? "edit" : "generate");

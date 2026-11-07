@@ -40,7 +40,7 @@ function setup(){
 test('a Free-only pool runs one request for one image at a time',async()=>{
   const {state,review,batch}=setup();
   review.setAvailability({webPlans:{free:3,paid:0,unknown:0},media:{image_pro:true,image_edit:false}});
-  const results=await review.runBatch(batch,'a cat','1:1','grok-imagine-image-lite','lite',false,undefined);
+  const results=await review.runBatch(batch,'a cat','1:1','grok-imagine-image','basic',false,undefined);
   assert.equal(state.peak,1,'never more than one request in flight');
   assert.equal(state.bodies.length,6,'one request per image');
   assert.ok(state.bodies.every((body)=>body.n===1),'each request asks for one image');
@@ -51,7 +51,7 @@ test('a pool with a paid account keeps the parallel batch',async()=>{
   for (const plans of [{free:3,paid:1,unknown:0},{free:0,paid:2,unknown:0},{free:2,paid:0,unknown:1},null]) {
     const {state,review,batch}=setup();
     review.setAvailability({webPlans:plans,media:null});
-    const results=await review.runBatch(batch,'a cat','1:1','grok-imagine-image-lite','lite',false,undefined);
+    const results=await review.runBatch(batch,'a cat','1:1','grok-imagine-image','basic',false,undefined);
     assert.equal(state.peak,2,`two requests run side by side for ${JSON.stringify(plans)}`);
     assert.equal(state.bodies.length,3,'three requests of two images fill six slots');
     assert.ok(state.bodies.every((body)=>body.n===2));
@@ -59,9 +59,15 @@ test('a pool with a paid account keeps the parallel batch',async()=>{
   }
 });
 
-test('quality tiers and edits follow the pool allowances',()=>{
-  const button=(attrs)=>{const b=element();Object.assign(b.dataset,attrs);b.attrs={};b.setAttribute=(k,v)=>{b.attrs[k]=v};b.removeAttribute=(k)=>{delete b.attrs[k];b.title=undefined};return b;};
-  const quality=['basic','lite','quality'].map((q)=>button({imagineQuality:q}));
+test('the panel offers 标准 and 高质量 only, and edits follow the pool allowance',()=>{
+  const page=fs.readFileSync(path.join(__dirname,'templates/pages/grok-tools.html'),'utf8');
+  const toggle=page.slice(page.indexOf('id="imagineQualityToggle"'),page.indexOf('</div>',page.indexOf('id="imagineQualityToggle"')));
+  assert.ok(!toggle.includes('快速') && !toggle.includes('data-imagine-quality="lite"'),'快速 is no longer offered');
+  assert.match(toggle,/data-imagine-quality="basic">标准/);
+  assert.match(toggle,/data-imagine-quality="quality">高质量/);
+
+  const button=(attrs)=>{const b=element();Object.assign(b.dataset,attrs);b.removeAttribute=(k)=>{if(k==='title')b.title=undefined};return b;};
+  const quality=['basic','quality'].map((q)=>button({imagineQuality:q}));
   const operations=[button({imagineOperation:'generate'}),button({imagineOperation:'edit'})];
   quality[0].classList.add('is-active'); operations[1].classList.add('is-active');
   const query=(selector)=>{
@@ -79,22 +85,21 @@ test('quality tiers and edits follow the pool allowances',()=>{
     document:{getElementById:()=>null,querySelector:query,querySelectorAll:queryAll,createElement:()=>element(),addEventListener(){}},
     window:{addEventListener(){},setInterval:()=>1,clearInterval(){}},localStorage:{getItem:()=>null,setItem(){}}});
   let src=fs.readFileSync(path.join(__dirname,'static/js/grok-imagine.js'),'utf8');
-  src=src.replace(/  window\.GrokImagine = \{[\s\S]*?\};\n\}\)\(\);\s*$/,'  globalThis.review={applyAvailability,setAvailability:(value)=>{availability=value;}};\n})();');
+  src=src.replace(/  window\.GrokImagine = \{[\s\S]*?\};\n\}\)\(\);\s*$/,'  globalThis.review={applyAvailability,syncQualityModel,setAvailability:(value)=>{availability=value;}};\n})();');
   vm.runInContext(src,context);
 
-  // A Free-only pool whose daily image_pro allowance is spent: only 快速, no edits.
+  // A quality left over from the removed tier resolves to 标准.
+  assert.equal(context.review.syncQualityModel().quality,'basic');
+  assert.equal(context.review.syncQualityModel().model,'grok-imagine-image');
+
   context.review.setAvailability({webPlans:{free:2,paid:0,unknown:0},media:{image_pro:false,image_edit:false}});
   context.review.applyAvailability();
-  assert.equal(quality[0].classList.contains('hidden'),true,'标准 is hidden');
-  assert.equal(quality[2].classList.contains('hidden'),true,'高质量 is hidden');
-  assert.equal(quality[1].classList.contains('hidden'),false,'快速 stays');
-  assert.equal(quality[1].classList.contains('is-active'),true,'the choice falls back to 快速');
+  assert.match(String(quality[0].title),/额度已用完/,'a spent image_pro allowance is explained');
   assert.equal(operations[1].disabled,true,'编辑 is disabled without an edit allowance');
   assert.equal(operations[0].classList.contains('is-active'),true,'the operation falls back to 生成');
 
-  // Free accounts with image_pro left still offer 标准/高质量.
   context.review.setAvailability({webPlans:{free:2,paid:0,unknown:0},media:{image_pro:true,image_edit:true}});
   context.review.applyAvailability();
-  assert.equal(quality[0].classList.contains('hidden'),false);
+  assert.equal(quality[0].title,undefined);
   assert.equal(operations[1].disabled,false);
 });
