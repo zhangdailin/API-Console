@@ -596,6 +596,18 @@
 
 .logs-table tbody tr.is-selected td { background: var(--accent-soft); }
 
+/* A row that arrived with a live update fades in from a highlight. */
+.logs-table tbody tr.is-new td { animation: logs-row-arrive 2.4s ease-out; }
+
+@keyframes logs-row-arrive {
+  from { background: var(--accent-soft); }
+  to { background: transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .logs-table tbody tr.is-new td { animation: none; }
+}
+
 .logs-cell-time { color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .logs-cell-action { color: var(--text-main); font-weight: 550; }

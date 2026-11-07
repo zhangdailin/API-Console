@@ -524,7 +524,9 @@
     ]);
   }
 
-  function renderRows() {
+  // renderRows draws the current page. `previous`, the row keys of the page it
+  // replaces on a live read, marks the rows that just arrived.
+  function renderRows(previous) {
     const body = el('logsRows');
     if (!body) return;
     body.replaceChildren();
@@ -536,6 +538,8 @@
       const event = record.event || {};
       const tr = make('tr');
       tr.dataset.index = String(index);
+      if (state.selected === index) tr.classList.add('is-selected');
+      if (previous && !previous.has(recordKey(record))) tr.classList.add('is-new');
       const probe = isProbeRecord(event);
       const channelLabel = KIND_LABELS[event.channel] || event.channel || '';
       const label = text(ACTION_LABELS[event.action] || actionLabel(event.action), '—');
@@ -1236,6 +1240,13 @@
     document.body.classList.remove('drawer-open');
   }
 
+  // recordKey identifies a journal row across reads, so a live refresh can keep
+  // the open detail and mark the rows that are new.
+  function recordKey(record) {
+    const event = (record && record.event) || {};
+    return [event.request_id || '', event.timestamp || '', event.action || '', event.target || ''].join('|');
+  }
+
   function select(index) {
     const record = state.records[index];
     if (!record) return;
@@ -1249,7 +1260,10 @@
 
   // load reads page `page` (0-based) of the current tab and filters. Page 0, or
   // a page whose starting cursor is unknown, restarts at the newest record.
-  async function load(page) {
+  // A live read (options.live) re-reads the first page in place: it keeps the
+  // scroll position and the open detail, and highlights the rows that are new.
+  async function load(page, options) {
+    const live = Boolean(options && options.live);
     let index = Number(page) || 0;
     if (index < 0 || index >= state.pageStarts.length) index = 0;
     if (index === 0) state.pageStarts = [''];
@@ -1261,14 +1275,29 @@
     // This load owns the list from here on. Anything still in flight answers an older
     // question (a previous tab, or a previous filter) and is dropped when it lands.
     const ticket = listLoads.begin();
+    live_.lastLoadAt = Date.now();
+    // An operator's read (a page, a tab, a filter) must not be superseded by a
+    // live read of page one that fires while it is in flight.
+    if (!live) live_.userTicket = ticket;
     try {
       const payload = await ConsoleAPI.journal(params, { signal: ticket.signal });
       if (!ticket.isCurrent()) return;
+      const previous = new Set(state.records.map(recordKey));
+      const selectedKey = state.selected == null ? '' : recordKey(state.records[state.selected]);
       state.cursor = payload.next_cursor || '';
       state.page = index;
       state.pageStarts = state.pageStarts.slice(0, index + 1);
       if (state.cursor) state.pageStarts.push(state.cursor);
       state.records = payload.data || [];
+      if (live) {
+        // The open detail stays as it is; only its row index moves with the list.
+        const found = selectedKey ? state.records.findIndex((record) => recordKey(record) === selectedKey) : -1;
+        state.selected = found >= 0 ? found : null;
+        renderRows(previous);
+        renderPager();
+        return;
+      }
+      state.selected = null;
       renderRows();
       renderPager();
       const wrap = el('logsTableWrap');
@@ -1277,8 +1306,8 @@
       renderDetail(null);
     } catch (error) {
       // A failure that belongs to a superseded load must not replace the newer list
-      // with an error row either.
-      if (!ticket.accepts(error)) return;
+      // with an error row either. A failed live read keeps the list it had.
+      if (!ticket.accepts(error) || live) return;
       const body = el('logsRows');
       if (body) {
         body.replaceChildren();
@@ -1290,6 +1319,8 @@
         tr.appendChild(td);
         body.appendChild(tr);
       }
+    } finally {
+      if (live_.userTicket === ticket) live_.userTicket = null;
     }
   }
 
@@ -1304,7 +1335,7 @@
       const count = state.records.length;
       // A short page with a cursor means the scan budget ran out before the
       // ledger did: there may be more matches further back.
-      info.textContent = `第 ${state.page + 1} 页 · 本页 ${count} 条` + (hasNext ? '' : ' · 已到最早记录');
+      info.textContent = `第 ${state.page + 1} 页 · 本页 ${count} 条` + (hasNext ? '' : ' · 已到最早记录') + (first ? ' · 实时更新' : '');
     }
     const number = el('logsPageNo');
     if (number) number.textContent = String(state.page + 1);
@@ -1434,11 +1465,86 @@
     button.disabled = false;
   }
 
+  // --- live updates ----------------------------------------------------------
+  // The first page follows new records as they are written. The trigger is the
+  // flow stream the overview's topology uses: it pushes whenever a request
+  // starts or finishes on this gateway, so a finished request is the cue to
+  // re-read page one. Reads wait LIVE_SETTLE_MS for the journal write that
+  // follows completion and are spaced LIVE_MIN_GAP_MS apart; LIVE_IDLE_MS
+  // re-reads anyway, for operation and system records no request produces.
+  // Later pages never move under the reader.
+  const LIVE_SETTLE_MS = 800;
+  const LIVE_MIN_GAP_MS = 2000;
+  const LIVE_IDLE_MS = 30000;
+  const live_ = { source: null, mark: '', timer: null, lastLoadAt: 0, pending: false, userTicket: null };
+
+  function liveEligible() {
+    return state.page === 0 && !(typeof document !== 'undefined' && document.hidden);
+  }
+
+  function scheduleLiveLoad() {
+    if (state.page !== 0) return;
+    if (typeof document !== 'undefined' && document.hidden) {
+      live_.pending = true;
+      return;
+    }
+    if (live_.timer != null) return;
+    const wait = Math.max(LIVE_SETTLE_MS, live_.lastLoadAt + LIVE_MIN_GAP_MS - Date.now());
+    live_.timer = window.setTimeout(() => {
+      live_.timer = null;
+      if (live_.userTicket) { scheduleLiveLoad(); return undefined; }
+      if (liveEligible()) return load(0, { live: true });
+      return undefined;
+    }, wait);
+  }
+
+  function connectLive() {
+    if (live_.source || typeof EventSource === 'undefined') return;
+    if (typeof document !== 'undefined' && document.hidden) return;
+    const source = new EventSource('/api/ops/flow');
+    live_.source = source;
+    source.addEventListener('flow', (event) => {
+      let mark = '';
+      try {
+        const payload = JSON.parse(event.data);
+        const completed = (payload.routes || []).reduce((sum, route) => sum + (Number(route.completed) || 0), 0);
+        mark = String(payload.instance_started || '') + ':' + completed;
+      } catch (_) { return; }
+      const first = live_.mark === '';
+      if (mark === live_.mark) return;
+      live_.mark = mark;
+      if (!first) scheduleLiveLoad();
+    });
+  }
+
+  function disconnectLive() {
+    if (live_.source) live_.source.close();
+    live_.source = null;
+    live_.mark = '';
+  }
+
+  function startLive() {
+    connectLive();
+    if (typeof document.addEventListener === 'function') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) { disconnectLive(); return; }
+        connectLive();
+        if (live_.pending) { live_.pending = false; scheduleLiveLoad(); }
+      });
+    }
+    if (typeof window.setInterval === 'function') {
+      window.setInterval(() => {
+        if (Date.now() - live_.lastLoadAt >= LIVE_IDLE_MS) scheduleLiveLoad();
+      }, 5000);
+    }
+  }
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => { bind(); load(false); initDiagnosticToggle(); });
+    document.addEventListener('DOMContentLoaded', () => { bind(); load(false); initDiagnosticToggle(); startLive(); });
   } else {
     bind();
     load(false);
     initDiagnosticToggle();
+    startLive();
   }
 })();
