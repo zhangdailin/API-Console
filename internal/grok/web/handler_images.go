@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -420,36 +421,56 @@ func (h *Handler) collectAppChatImageURLs(ctx context.Context, sess *chatAccount
 		if time.Now().After(deadline) {
 			break
 		}
-		payload := h.webClient().appChatImagePayload(spec, req.Prompt, req.Size, 1)
-		ensureImageNSFW(payload)
-		resp, err := h.doAppChatImageRequest(ctx, sess, spec, &payload, allowSwitch)
-		if err != nil {
-			slog.Warn("grok app-chat image upstream failed",
-				"model", req.Model,
-				"status", parseUpstreamStatus(err),
-				"error", err,
-			)
-			return nil, err
-		}
 		imageLimitHit := false
 		var callURLs []string
-		h.syncGrokQuota(sess.acc, resp.Header)
-		err = parseUpstreamLines(resp.Body, func(line map[string]any) error {
-			if len(debugShapes) < 20 {
-				debugShapes = append(debugShapes, imageDebugShape(line))
+		// The MGW gateway is how grok.com draws lite images today: the REST
+		// app-chat call answers "Drawing: …" with text. REST stays as the
+		// fallback when the gateway cannot be reached.
+		viaMGW := false
+		if sess.acc != nil {
+			result, opened, mgwErr := h.webClient().liteImageViaMGW(ctx, sess.acc.UserID, sess.token, req.Prompt)
+			if opened {
+				viaMGW = true
+				imageLimitHit = result.LimitHit
+				if result.URL != "" {
+					callURLs = append(callURLs, result.URL)
+				} else {
+					slog.Warn("grok mgw lite turn produced no image", "account_id", sess.acc.ID, "error", mgwErr)
+				}
+			} else if !errors.Is(mgwErr, errMGWLiteUnavailable) {
+				slog.Warn("grok mgw lite image unavailable; using the REST request", "account_id", sess.acc.ID, "error", mgwErr)
 			}
-			if len(debugNoImage) < 20 {
-				debugNoImage = append(debugNoImage, appChatImageNoImageDiagnostics(line)...)
+		}
+		if !viaMGW {
+			payload := h.webClient().appChatImagePayload(spec, req.Prompt, req.Size, 1)
+			ensureImageNSFW(payload)
+			resp, err := h.doAppChatImageRequest(ctx, sess, spec, &payload, allowSwitch)
+			if err != nil {
+				slog.Warn("grok app-chat image upstream failed",
+					"model", req.Model,
+					"status", parseUpstreamStatus(err),
+					"error", err,
+				)
+				return nil, err
 			}
-			if isAppChatImageLimitResponse(line) {
-				imageLimitHit = true
+			h.syncGrokQuota(sess.acc, resp.Header)
+			err = parseUpstreamLines(resp.Body, func(line map[string]any) error {
+				if len(debugShapes) < 20 {
+					debugShapes = append(debugShapes, imageDebugShape(line))
+				}
+				if len(debugNoImage) < 20 {
+					debugNoImage = append(debugNoImage, appChatImageNoImageDiagnostics(line)...)
+				}
+				if isAppChatImageLimitResponse(line) {
+					imageLimitHit = true
+				}
+				callURLs = append(callURLs, extractAppChatImageURLs(line)...)
+				return nil
+			})
+			resp.Body.Close()
+			if err != nil {
+				return nil, fmt.Errorf("stream parse error: %w", err)
 			}
-			callURLs = append(callURLs, extractAppChatImageURLs(line)...)
-			return nil
-		})
-		resp.Body.Close()
-		if err != nil {
-			return nil, fmt.Errorf("stream parse error: %w", err)
 		}
 		if first := firstLiteImage(callURLs, urls); first != "" {
 			urls = append(urls, first)

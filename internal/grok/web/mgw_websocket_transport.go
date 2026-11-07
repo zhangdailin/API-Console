@@ -67,7 +67,13 @@ type MGWChatRequest struct {
 	Model  string
 	Prompt string
 	Token  string
+	// ImageGeneration asks the session to draw: grok.com's fast chat answers
+	// "Drawing: …" with pictures only when the session enables it (the REST
+	// app-chat flag no longer does). Mirrors grok2api's gateway session.
+	ImageGeneration bool
 }
+
+const mgwHeartbeatPeriod = 25 * time.Second
 
 type mgwWebSocketTransport struct {
 	client *Client
@@ -139,15 +145,20 @@ func mgwHeaders(client *Client, origin, userID, token string) http.Header {
 	header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
 	header.Set("Cache-Control", "no-cache")
 	header.Set("Pragma", "no-cache")
-	// SSO is a browser cookie, never an Authorization: Bearer credential.
-	if cookie := mgwCookie(token, userID); cookie != "" {
+	// SSO is a browser cookie, never an Authorization: Bearer credential. The
+	// Cloudflare clearance the REST requests carry is needed by the handshake too.
+	if cookie := mgwCookie(client, token, userID); cookie != "" {
 		header.Set("Cookie", cookie)
 	}
 	return header
 }
 
-func mgwCookie(token, userID string) string {
-	items := grokCookieItems(buildGrokCookie(token, "", ""))
+func mgwCookie(client *Client, token, userID string) string {
+	cfClearance, cfBM := "", ""
+	if client != nil {
+		cfClearance, cfBM = client.cloudflareCookies()
+	}
+	items := grokCookieItems(buildGrokCookie(token, cfClearance, cfBM))
 	withoutUserID := items[:0]
 	for _, item := range items {
 		if item.name != "x-userid" {
@@ -176,11 +187,14 @@ func streamMGW(ctx context.Context, connection *websocket.Conn, writer *io.PipeW
 	initialID := "evt_init_" + randomUUID()
 	if err := sender.write(map[string]any{"event": map[string]any{
 		"type": "session.create", "event_id": initialID,
-		"session": map[string]any{"model": request.Model, "x_grok": map[string]any{"protocol_capabilities": []string{"conversation_attached", "custom_methods_v1"}, "use_chunk": true, "is_temporary": true, "disable_memory": true}},
+		"session": map[string]any{"model": request.Model, "x_grok": mgwSessionOptions(request)},
 	}}); err != nil {
 		_ = writer.CloseWithError(fmt.Errorf("send grok mgw session.create: %w", err))
 		return
 	}
+	heartbeatDone := make(chan struct{})
+	defer close(heartbeatDone)
+	go mgwHeartbeat(sender, heartbeatDone)
 	created, attached, sent := false, false, false
 	for {
 		messageType, data, err := connection.ReadMessage()
@@ -220,6 +234,42 @@ func streamMGW(ctx context.Context, connection *websocket.Conn, writer *io.PipeW
 			}
 			if err := sender.write(response); err != nil {
 				_ = writer.CloseWithError(err)
+				return
+			}
+		}
+	}
+}
+
+// mgwSessionOptions is the x_grok block of session.create: a temporary
+// session without memory, and image generation when the request draws.
+func mgwSessionOptions(request MGWChatRequest) map[string]any {
+	options := map[string]any{
+		"protocol_capabilities": []string{"conversation_attached", "custom_methods_v1"},
+		"use_chunk":             true, "is_temporary": true, "disable_memory": true, "keep_context": false,
+	}
+	if request.ImageGeneration {
+		options["enable_image_generation"] = true
+		options["image_generation_count"] = 2
+		options["enable_side_by_side"] = true
+		options["force_side_by_side"] = false
+		options["disable_artifact"] = true
+		options["disable_text_follow_ups"] = false
+		options["force_concise"] = false
+	}
+	return options
+}
+
+// mgwHeartbeat keeps a long generation's socket alive.
+func mgwHeartbeat(sender *mgwSender, done <-chan struct{}) {
+	ticker := time.NewTicker(mgwHeartbeatPeriod)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case now := <-ticker.C:
+			if err := sender.write(map[string]any{"event": map[string]any{"type": "ping", "event_id": fmt.Sprintf("evt_hb_%d", now.UnixMilli())}}); err != nil {
+				_ = sender.connection.Close()
 				return
 			}
 		}
