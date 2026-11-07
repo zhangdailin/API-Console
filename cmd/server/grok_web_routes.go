@@ -100,6 +100,8 @@ func registerGrokWebAdminRoutes(mux *http.ServeMux, sessionAuth func(http.Handle
 		{"/media/inputs/import", webHandler.HandleAdminMediaInputImport},
 		{"/media/inputs/", webHandler.HandleAdminMediaInputResource},
 		{"/voice/token", webHandler.HandleAdminVoiceToken},
+		// LiveKit signal relay for browsers that cannot reach livekit.grok.com.
+		{"/voice/livekit/", webHandler.HandleAdminVoiceRelay},
 		{"/imagine/config", webHandler.HandleAdminImagineConfig},
 	}
 	// Egress nodes, proxy profiles, subscriptions and automation for the

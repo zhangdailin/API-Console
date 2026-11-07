@@ -150,7 +150,7 @@ Chat 桥接写递增 sequence_number，便于客户端识别顺序；当前没�
 | `/api/grok/sso/nsfw` | POST `{"account_ids":[...]}` 在 grok.com 开启 NSFW |
 | `/api/grok/availability` | GET 各 Grok 平面可用账号数 |
 | `/api/grok/tools/v1/*` | Grok 工具页推理投影（models、chat/completions、responses、images、videos、files、media/inputs），以管理会话鉴权，资源归属固定为 `admin-tools` |
-| `/api/grok/admin/*` | 工具页管理接口：imagine start/stop/sse/ws/config、video start/stop/sse、voice/token（LiveKit）、cache、media 库、NSFW 批任务 |
+| `/api/grok/admin/*` | 工具页管理接口：imagine start/stop/sse/ws/config、video start/stop/sse、voice/token（LiveKit）、voice/livekit（LiveKit 信令中转：浏览器无法直连 livekit.grok.com 时由服务端转发 `/rtc` WebSocket 与 `/rtc/validate`，上游固定、同源校验；媒体 WebRTC 不经过本服务）、media 库、NSFW 批任务 |
 | `/api/grok/admin/egress/*` | 出口管理（会话认证）：`nodes`（GET 列表含筛选 / 排序 / 分页，POST 新建，PUT / DELETE `nodes/{id}`）、`nodes/batch`、`nodes/{id}/test`、`nodes/test-all`、`nodes/{id}/refresh-clearance`、`nodes/cleanup`、`imports`、`profiles`、`sources`（含 `sources/{id}/sync`）、`operations`（含 `operations/rebalance`）。代理地址、订阅地址与 Cookie 只写不读，响应只含脱敏地址与指纹 |
 
 API Key 创建和轮换时返回完整秘密，并使用主密钥派生的独立加密用途保存密文；认证继续使用哈希。管理员可通过 secret 接口读取，列表仅返回掩码及 secret_available。加密能力未配置、密文损坏或解密失败时明确报错，不回退明文。轮换原子替换密文、哈希及索引，使旧 Key 立即失效；列表掩码不能用于调用。前端创建默认消费不限额，编辑不提交预算字段，已有后台预算策略继续生效。支持模型白名单、请求限速、有效期、并发及预算；空模型白名单兼容解释为不限模型。费用预留和结算用整数 USD ticks，1 USD 为 100 亿 ticks。

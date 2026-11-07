@@ -90,3 +90,20 @@ test('a bare video link from a video model renders as a player, and only that', 
   // Script URLs never become a player source.
   assert.doesNotMatch(context.window.md('javascript:alert(1).mp4'), /<video/);
 });
+
+test('voice signal goes through the relay only for livekit.grok.com and only when chosen', () => {
+  const context = vm.createContext({ window: {}, escapeHtml: String, URL,
+    document: { addEventListener() {}, getElementById() { return null; } } });
+  const source = fs.readFileSync(path.join(__dirname, 'static/js/grok-tools.js'), 'utf8');
+  vm.runInContext(source.replace('document.addEventListener("DOMContentLoaded", init);', 'window.signalURL = voiceSignalURL;'), context);
+  const page = { protocol: 'https:', host: 'us1.daige.tech' };
+  const relay = context.window.signalURL;
+  assert.equal(relay('wss://livekit.grok.com', 'relay', page), 'wss://us1.daige.tech/api/grok/admin/voice/livekit');
+  assert.equal(relay('wss://livekit.grok.com', 'relay', { protocol: 'http:', host: 'localhost:3000' }), 'ws://localhost:3000/api/grok/admin/voice/livekit');
+  assert.equal(relay('wss://livekit.grok.com', 'direct', page), 'wss://livekit.grok.com');
+  // The server relays one fixed host; any other URL is used as returned.
+  assert.equal(relay('wss://other.livekit.cloud', 'relay', page), 'wss://other.livekit.cloud');
+  assert.equal(relay('not a url', 'relay', page), 'not a url');
+  const html = fs.readFileSync(path.join(__dirname, 'templates/pages/grok-tools.html'), 'utf8');
+  assert.match(html, /<select id="voiceTransport"[\s\S]*?<option value="relay" selected>/);
+});

@@ -2627,6 +2627,30 @@
     return { token, url: livekitURL };
   }
 
+  // The LiveKit signal connection either goes straight to livekit.grok.com or
+  // through this server's relay (internal/grok/web/voice_relay.go), for
+  // networks that cannot reach that host. Only that host is relayed: any other
+  // URL the token endpoint returns is used as it is.
+  const VOICE_RELAY_HOST = "livekit.grok.com";
+  const VOICE_RELAY_PATH = "/api/grok/admin/voice/livekit";
+
+  function voiceTransport() {
+    return document.getElementById("voiceTransport")?.value === "direct" ? "direct" : "relay";
+  }
+
+  function voiceSignalURL(upstreamURL, transport, pageLocation = window.location) {
+    if (transport !== "relay") return upstreamURL;
+    let host = "";
+    try {
+      host = new URL(upstreamURL).hostname.toLowerCase();
+    } catch (_) {
+      return upstreamURL;
+    }
+    if (host !== VOICE_RELAY_HOST) return upstreamURL;
+    const scheme = pageLocation.protocol === "https:" ? "wss:" : "ws:";
+    return `${scheme}//${pageLocation.host}${VOICE_RELAY_PATH}`;
+  }
+
   async function stopVoiceSession(reason) {
     if (voiceState.stopping) return;
     voiceState.stopping = true;
@@ -2729,8 +2753,14 @@
       }).catch(() => {});
     });
 
+    const transport = voiceTransport();
+    const signalURL = voiceSignalURL(payload.url, transport);
+    const relayed = signalURL !== payload.url;
+    appendVoiceLog(relayed ? `Signal via server relay → ${payload.url}` : `Signal direct: ${payload.url}`);
+    const urlStatus = document.getElementById("voiceStatusURL");
+    if (urlStatus) urlStatus.textContent = relayed ? "服务器中转" : (payload.url || "-");
     try {
-      await room.connect(payload.url, payload.token);
+      await room.connect(signalURL, payload.token);
       appendVoiceLog("Connected to LiveKit signaling server");
       ensureVoiceMicSupport();
       await enableVoiceMicrophone(LiveKitSDK, room);
@@ -2741,6 +2771,11 @@
       startVoiceVisualizer();
     } catch (err) {
       appendVoiceLog(`Voice connect failed: ${err?.message || err}`);
+      if (!isVoiceMicLikeError(err)) {
+        appendVoiceLog(relayed
+          ? "提示：服务器中转失败时，请确认反向代理放行 WebSocket（Upgrade 头），或在「连接方式」改为直连。"
+          : "提示：浏览器无法直连 livekit.grok.com（例如在中国大陆）时，请在「连接方式」选择服务器中转。");
+      }
       await resetVoiceSession("connect failed", {
         skipDisconnect: false,
         statusText: t("voice.connectFailed"),
@@ -3423,6 +3458,8 @@
     const voicePersonality = document.getElementById("voicePersonality");
     const voiceSpeed = document.getElementById("voiceSpeed");
     const voiceInstruction = document.getElementById("voiceInstruction");
+    const voiceTransportSelect = document.getElementById("voiceTransport");
+    voiceTransportSelect?.addEventListener("change", () => saveGrokToolsUIState({ voiceTransport: voiceTransport() }));
     [voiceName, voiceCustomID, voicePersonality, voiceSpeed, voiceInstruction].forEach((input) => {
       if (!input) return;
       const sync = () => {
@@ -3502,6 +3539,8 @@
     if (voiceName && typeof uiState.voiceName === "string" && uiState.voiceName) voiceName.value = uiState.voiceName;
     if (voiceCustomID && typeof uiState.voiceCustomID === "string") voiceCustomID.value = uiState.voiceCustomID;
     if (voicePersonality && typeof uiState.voicePersonality === "string" && uiState.voicePersonality) voicePersonality.value = uiState.voicePersonality;
+    const voiceTransportSelect = document.getElementById("voiceTransport");
+    if (voiceTransportSelect && (uiState.voiceTransport === "direct" || uiState.voiceTransport === "relay")) voiceTransportSelect.value = uiState.voiceTransport;
     if (voiceSpeed && typeof uiState.voiceSpeed === "number" && Number.isFinite(uiState.voiceSpeed)) voiceSpeed.value = String(uiState.voiceSpeed);
     if (voiceInstruction && typeof uiState.voiceInstruction === "string") voiceInstruction.value = uiState.voiceInstruction;
     updateVoiceMeta();

@@ -458,6 +458,13 @@
                   <option value="argumentative">Argumentative 18+</option>
                 </select>
               </label>
+              <label class="gw-param">
+                <span>连接方式</span>
+                <select id="voiceTransport" class="form-input">
+                  <option value="relay" selected>服务器中转（中国大陆可用）</option>
+                  <option value="direct">直连 livekit.grok.com</option>
+                </select>
+              </label>
               <div class="gw-param voice-speed-block">
                 <div class="gw-range-head"><label for="voiceSpeed">语速</label><span class="range-value"><span id="voiceSpeedValue">1.0</span>x</span></div>
                 <input id="voiceSpeed" class="range-input" type="range" min="0.5" max="2" step="0.1" value="1.0">

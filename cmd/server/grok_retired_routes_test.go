@@ -134,3 +134,13 @@ func TestRegisterRoutes_GrokCacheAdminIsRetired(t *testing.T) {
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/grok/admin/media/images", nil))
 	testutil.CheckEqual(t, rec.Code, http.StatusUnauthorized)
 }
+
+// The LiveKit signal relay opens upstream connections, so it is registered
+// behind the admin session like the voice token it carries.
+func TestRegisterRoutes_GrokVoiceRelayRequiresSession(t *testing.T) {
+	cfg := &config.Config{AdminUser: "admin", AdminPass: "secret", AdminToken: "admintoken", AdminPath: "/admin"}
+	mux, _, _ := newRouteMux(t, "grok-voice-relay:", cfg)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/grok/admin/voice/livekit/rtc?access_token=x", nil))
+	testutil.CheckEqual(t, rec.Code, http.StatusUnauthorized)
+}
