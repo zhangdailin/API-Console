@@ -231,3 +231,47 @@ func TestWebCollectChatUpstreamError(t *testing.T) {
 	testutil.MustNotContain(t, recorder.Body.String(), "denied")
 	testutil.MustContain(t, recorder.Body.String(), `"error"`)
 }
+
+// grok.com puts its tool-usage cards in the thinking stream too. They were
+// passed through verbatim, so the console showed raw <xai:tool_usage_card>
+// markup inside 思考过程. Each card must become one readable line, even when
+// a card is split across deltas.
+func TestWebStreamChatThinkingToolCardsAreReadable(t *testing.T) {
+	card := `<xai:tool_usage_card><xai:tool_usage_card_id>1</xai:tool_usage_card_id><xai:tool_name>x_keyword_search</xai:tool_name><xai:tool_args><![CDATA[{"query":"from:realDonaldTrump","limit":"10"}]]></xai:tool_args></xai:tool_usage_card>`
+	page := `<xai:tool_usage_card><xai:tool_name>open_page</xai:tool_name><xai:tool_args><![CDATA[{"url":"https://example.com/"}]]></xai:tool_args></xai:tool_usage_card>`
+	thinking := "Thinking about your request" + card + page + "Summarizing"
+	cut1, cut2 := len("Thinking about your request")+30, len("Thinking about your request")+len(card)+12
+	got := runStream(t, nil, upstreamLines(
+		line(map[string]any{"token": thinking[:cut1], "isThinking": true}),
+		line(map[string]any{"token": thinking[cut1:cut2], "isThinking": true}),
+		line(map[string]any{"token": thinking[cut2:], "isThinking": true}),
+		line(map[string]any{"token": "Answer"}),
+		line(map[string]any{"modelResponse": map[string]any{"message": "Answer"}}),
+	))
+	testutil.Equal(t, got.reasoning, "Thinking about your request\n[XSearch] from:realDonaldTrump\n[OpenPage] https://example.com/\nSummarizing")
+	testutil.Falsef(t, strings.Contains(got.reasoning, "xai:") || strings.Contains(got.reasoning, "<"), "reasoning leaked markup: %q", got.reasoning)
+	testutil.MustContain(t, got.content, "Answer")
+}
+
+// Plain thinking must stream as it arrives, not lag behind a fixed window.
+func TestStreamMarkupFilterHoldsBackOnlyAPossibleMarker(t *testing.T) {
+	var f streamMarkupFilter
+	testutil.Equal(t, f.feed("plain reasoning text"), "plain reasoning text")
+	testutil.Equal(t, f.feed(" then <xai:tool"), " then ")
+	testutil.Equal(t, f.feed("_usage_card><xai:tool_name>web_search</xai:tool_name><xai:tool_args>{\"query\":\"q\"}</xai:tool_args></xai:tool_usage_card>"), "\n[WebSearch] q\n")
+	var g streamMarkupFilter
+	testutil.Equal(t, g.feed("a < b"), "a < b")
+}
+
+// Video progress is not the answer. It used to be streamed as content, so
+// the chat showed a line per update above the video link.
+func TestWebStreamChatVideoProgressIsReasoning(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	req := &ChatCompletionsRequest{Model: "grok-imagine-video", Stream: true}
+	(&Handler{}).streamChat(recorder, req, "grok-imagine-video", ModelSpec{ID: "grok-imagine-video", IsVideo: true}, "token", "", false, nil, nil, upstreamLines(
+		line(map[string]any{"streamingVideoGenerationResponse": map[string]any{"progress": 50}}),
+	), nil)
+	got := readStream(t, recorder.Body.String())
+	testutil.Equal(t, got.reasoning, "视频正在生成 50%\n")
+	testutil.Falsef(t, strings.Contains(got.content, "50%"), "progress leaked into content: %q", got.content)
+}

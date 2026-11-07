@@ -660,6 +660,13 @@
         if (!isSafeLinkURL(url)) return safeLabel;
         return `<a href="${escapeHTML(url || "")}" target="_blank" rel="noopener">${safeLabel}</a>`;
       });
+      // Video models answer with a bare link to the generated file; play it
+      // in place. Only a URL that stands on its own (start, whitespace or a
+      // line break before it) is replaced, never one inside a tag.
+      output = output.replace(/(^|\s|<br>)((?:https?:\/\/|\/(?!\/))[^\s<>"']+\.(?:mp4|webm|mov)(?:\?[^\s<>"']*)?)(?=$|\s|<br>)/gi, (_m, lead, url) => {
+        if (!isSafeLinkURL(url)) return `${lead}${url}`;
+        return `${lead}<video class="chat-video" src="${url}" controls playsinline preload="metadata"></video>`;
+      });
       output = output.replace(/(data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+)/g, (uri) => {
         if (!isSafeImageURL(uri)) return "";
         return `<img src="${escapeHTML(uri)}" alt="image" loading="lazy">`;

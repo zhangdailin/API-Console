@@ -126,6 +126,7 @@ func extractToolUsageCardText(raw string) string {
 		ImageDescription string `json:"image_description"`
 		Description      string `json:"description"`
 		Message          string `json:"message"`
+		URL              string `json:"url"`
 	}
 	if argsRaw != "" {
 		_ = json.Unmarshal([]byte(argsRaw), &payload)
@@ -146,6 +147,21 @@ func extractToolUsageCardText(raw string) string {
 	case "search_images":
 		label = prefix + "[SearchImage]"
 		if s := firstNonEmpty(payload.ImageDescription, payload.Description, payload.Query); s != "" {
+			text = s
+		}
+	case "x_keyword_search", "x_semantic_search":
+		label = prefix + "[XSearch]"
+		if s := firstNonEmpty(payload.Query, payload.Q); s != "" {
+			text = s
+		}
+	case "x_user_search":
+		label = prefix + "[XUserSearch]"
+		if s := firstNonEmpty(payload.Query, payload.Q); s != "" {
+			text = s
+		}
+	case "open_page", "browse_page":
+		label = prefix + "[OpenPage]"
+		if s := payload.URL; s != "" {
 			text = s
 		}
 	case "chatroom_send":

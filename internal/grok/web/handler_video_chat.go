@@ -230,7 +230,11 @@ func (h *Handler) streamVideoChatCompletion(
 			return
 		}
 		lastProgress = progress
-		emit(fmt.Sprintf("正在生成视频中，当前进度%d%%\n", progress), "", false, nil)
+		// Progress is not the answer: it goes to reasoning_content, as the
+		// non-streaming response reports it, and the content is the video URL.
+		raw := appendChatCompletionReasoningChunk(chunkScratch[:0], id, time.Now().Unix(), req.Model, "", fmt.Sprintf("视频正在生成 %d%%\n", progress))
+		chunkScratch = raw[:0]
+		writeSSELog(w, flusher, logger, raw)
 	})
 	if err != nil {
 		writeSSECodedError(w, flusher, err.Error(), "video_generation_failed")

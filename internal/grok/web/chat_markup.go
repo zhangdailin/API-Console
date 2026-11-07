@@ -10,6 +10,9 @@ type streamMarkupFilter struct {
 	pending  string
 	inTool   bool
 	inRender bool
+	// midLine is true when the last text this filter returned did not end
+	// with a newline, so a tool line that follows must start a new one.
+	midLine bool
 }
 
 const (
@@ -58,6 +61,23 @@ func indexFoldASCII(s, sub string) int {
 	return -1
 }
 
+var streamMarkerOpenings = [...]string{"<" + streamToolStartTag, streamToolStartTag, streamRenderStartTag}
+
+// markerPrefixSuffixLen returns the length of the longest suffix of s that
+// is a proper prefix of a markup opening, compared ASCII case-insensitively.
+func markerPrefixSuffixLen(s string) int {
+	best := 0
+	for _, marker := range streamMarkerOpenings {
+		for n := min(len(marker)-1, len(s)); n > best; n-- {
+			if equalFoldASCII(s[len(s)-n:], marker[:n]) {
+				best = n
+				break
+			}
+		}
+	}
+	return best
+}
+
 // Streaming sanitizer/tokenizer.
 // Goal: never leak tool/render markup, never corrupt UTF-8, and keep streaming responsive.
 func (f *streamMarkupFilter) feed(chunk string) string {
@@ -71,13 +91,12 @@ func (f *streamMarkupFilter) feed(chunk string) string {
 	}
 
 	var out strings.Builder
-	endsWithNewline := false
 	writeOut := func(s string) {
 		if s == "" {
 			return
 		}
 		out.WriteString(s)
-		endsWithNewline = s[len(s)-1] == '\n'
+		f.midLine = s[len(s)-1] != '\n'
 	}
 
 	for {
@@ -89,7 +108,7 @@ func (f *streamMarkupFilter) feed(chunk string) string {
 			}
 			raw := f.pending[:end+len(streamToolEndTag)]
 			if line := extractToolUsageCardText(raw); line != "" {
-				if out.Len() > 0 && !endsWithNewline {
+				if f.midLine {
 					writeOut("\n")
 				}
 				writeOut(line)
@@ -123,9 +142,10 @@ func (f *streamMarkupFilter) feed(chunk string) string {
 		}
 
 		if idx < 0 {
-			// No markers. Emit everything except a tail to avoid cutting potential markers.
-			keep := 512
-			if len(f.pending) <= keep {
+			// No markers. Hold back only a tail that could still grow into one,
+			// so text streams as it arrives instead of lagging a fixed window.
+			keep := markerPrefixSuffixLen(f.pending)
+			if keep >= len(f.pending) {
 				break
 			}
 			safe := validUTF8Prefix(f.pending[:len(f.pending)-keep])
@@ -137,8 +157,13 @@ func (f *streamMarkupFilter) feed(chunk string) string {
 			break
 		}
 
-		// Emit prefix before marker
-		prefix := validUTF8Prefix(f.pending[:idx])
+		// Emit prefix before marker. The tool marker is matched without its
+		// '<' (grok.com sometimes omits it), so drop a '<' that opened it.
+		head := f.pending[:idx]
+		if kind == "tool" {
+			head = strings.TrimSuffix(head, "<")
+		}
+		prefix := validUTF8Prefix(head)
 		prefix = sanitizeText(prefix)
 		if prefix != "" {
 			writeOut(prefix)

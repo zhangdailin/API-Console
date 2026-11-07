@@ -52,6 +52,7 @@ type webChatStream struct {
 	sawModelMessage      bool
 	tokenFallback        strings.Builder
 	reasoningContent     strings.Builder
+	thinkingMarkup       streamMarkupFilter
 	lastThinkingMessage  string
 	emittedModelMessage  string
 	pendingModelMessage  string
@@ -115,6 +116,8 @@ func (s *webChatStream) emitChunk(role, content, finish string, hasFinish bool) 
 }
 
 func (s *webChatStream) emitTextChunk(content string) {
+	// Reasoning still held by its filter belongs before the answer.
+	s.flushThinking()
 	if s.toolStreamMode {
 		return
 	}
@@ -281,9 +284,22 @@ func (s *webChatStream) onThinking(tokenDelta string, mr map[string]any) {
 			s.lastThinkingMessage = snapshot
 		}
 	}
-	if thinkingDelta != "" {
-		s.reasoningContent.WriteString(thinkingDelta)
-		s.emitReasoningChunk(thinkingDelta)
+	if thinkingDelta == "" {
+		return
+	}
+	// Thinking carries the same tool-usage cards as the answer; they become
+	// one readable line each instead of raw xai:tool_usage_card markup.
+	if cleaned := s.thinkingMarkup.feed(thinkingDelta); cleaned != "" {
+		s.reasoningContent.WriteString(cleaned)
+		s.emitReasoningChunk(cleaned)
+	}
+}
+
+// flushThinking sends reasoning text the markup filter still holds.
+func (s *webChatStream) flushThinking() {
+	if rest := s.thinkingMarkup.flush(); rest != "" {
+		s.reasoningContent.WriteString(rest)
+		s.emitReasoningChunk(rest)
 	}
 }
 
@@ -329,7 +345,7 @@ func (s *webChatStream) onVideoProgress(resp map[string]any) {
 		return
 	}
 	if progress > 0 && progress < 100 {
-		s.emitChunk("", fmt.Sprintf("正在生成视频中，当前进度%d%%\n", progress), "", false)
+		s.emitReasoningChunk(fmt.Sprintf("视频正在生成 %d%%\n", progress))
 	}
 	if progress >= 100 && strings.TrimSpace(videoURL) == "" {
 		videoURL = firstAssetURL(resp)
@@ -423,6 +439,7 @@ func (s *webChatStream) flushMedia() {
 
 // finish flushes what was held back and sends the final chunk with usage.
 func (s *webChatStream) finish() {
+	s.flushThinking()
 	finalBufferedText := s.flushText()
 	finalUsageText := strings.TrimSpace(finalBufferedText)
 	finalSnapshotContent := ""
