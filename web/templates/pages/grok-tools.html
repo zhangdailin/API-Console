@@ -293,7 +293,7 @@
         <div class="function-header-row video-header-row">
           <div class="video-header-title">
             <h2 class="function-title">视频生成</h2>
-            <p class="function-subtitle">生成短视频，支持参考图、进度展示与预览下载。</p>
+            <p class="function-subtitle">文字生成短视频，支持进度展示与预览下载。</p>
           </div>
         </div>
         <div class="function-divider"></div>
@@ -344,56 +344,6 @@
                   <input id="videoLength" class="form-input" type="number" min="1" max="15" step="1" value="6">
                 </div>
               </div>
-              <details class="advanced-settings video-advanced-settings">
-                <summary>高级设置</summary>
-                <div class="advanced-body video-advanced-body">
-                  <div class="settings-block action-block" hidden>
-                    <label class="field-label" for="videoAction">操作</label>
-                    <select id="videoAction" class="form-input"><option value="generate">生成</option><option value="edit">编辑</option><option value="extend">延长</option></select>
-                  </div>
-                  <p class="hint video-web-text-only">Grok Web 目前只支持文字生成视频，不支持首帧图或参考图（与 grok2api 一致）。</p>
-                  <div class="settings-block ref-block" hidden>
-                    <label class="field-label" for="videoImageUrl">参考图 URL</label>
-                    <div class="ref-controls">
-                      <input id="videoImageUrl" class="form-input" placeholder="https://... 或 data:image/...">
-                    </div>
-                    <div class="ref-meta">
-                      <span id="videoImageFileName" class="ref-name">未选择文件</span>
-                    </div>
-                  </div>
-                  <div class="settings-block upload-block" hidden>
-                    <label class="field-label" for="videoImageFileInput">参考图文件</label>
-                    <button class="btn btn-outline" id="videoSelectImageBtn" type="button">上传</button>
-                    <input id="videoImageFileInput" class="ref-file-input" type="file" accept="image/*">
-                  </div>
-                  <div class="settings-block clear-block" hidden>
-                    <span class="field-label">&nbsp;</span>
-                    <button class="btn btn-outline" id="videoClearImageBtn" type="button">清除</button>
-                  </div>
-                  <div class="settings-block ref-block" hidden>
-                    <label class="field-label" for="videoReferenceURL">参考图片 URL</label>
-                    <input id="videoReferenceURL" class="form-input" type="url" placeholder="https://...">
-                    <div class="ref-meta"><span id="videoReferenceFileName" class="ref-name">未选择文件</span></div>
-                    <div class="ref-controls">
-                      <button class="btn btn-outline" id="videoSelectReferenceBtn" type="button">上传参考图</button>
-                      <button class="btn btn-outline" id="videoClearReferenceBtn" type="button">清除</button>
-                      <input id="videoReferenceFileInput" class="ref-file-input" type="file" accept="image/*">
-                    </div>
-                  </div>
-                  <div class="settings-block source-block" hidden>
-                    <label class="field-label" for="videoSourceURL">原视频 URL（编辑 / 延长）</label>
-                    <input id="videoSourceURL" class="form-input" type="url" placeholder="https://...">
-                    <div class="ref-meta"><span id="videoSourceFileName" class="ref-name">未选择文件</span></div>
-                    <div class="ref-controls">
-                      <button class="btn btn-outline" id="videoSelectSourceBtn" type="button">上传原视频</button>
-                      <button class="btn btn-outline" id="videoClearSourceBtn" type="button">清除</button>
-                      <input id="videoSourceFileInput" class="ref-file-input" type="file" accept="video/mp4,video/webm,video/quicktime">
-                    </div>
-                    <label class="field-label" for="videoReferenceVoice">参考音色 ID</label>
-                    <input id="videoReferenceVoice" class="form-input">
-                  </div>
-                </div>
-              </details>
               <div class="video-generation-actions">
                 <button class="btn btn-primary btn-lg" id="videoStartBtn" type="button">生成视频</button>
                 <button class="btn btn-outline btn-lg hidden" id="videoStopBtn" type="button">停止</button>

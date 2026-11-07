@@ -1868,25 +1868,6 @@
   gap: var(--space-2);
 }
 
-.video-advanced-settings {
-  margin-top: var(--space-1);
-}
-
-.video-advanced-body {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-3);
-}
-
-.video-advanced-body .ref-block,
-.video-advanced-body .source-block {
-  grid-column: 1 / -1;
-}
-
-.video-advanced-body .clear-block {
-  align-self: end;
-}
-
 /* ---- Video / image settings blocks ---------------------------------------------------------------
    main.css reuses ratio-block, upload-block, clear-block, length-block,
    preset-block and ref-block for documentation code blocks, which painted these
@@ -2275,10 +2256,6 @@
 
   .imagine-masonry-send {
     flex: 1 1 auto;
-  }
-
-  .video-advanced-body {
-    grid-template-columns: minmax(0, 1fr);
   }
 
   .video-generation-actions .btn {

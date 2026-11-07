@@ -111,3 +111,13 @@ test('the video panel sends no reasoning effort and forgets a saved one', () => 
   assert.ok(!script.includes('payload.reasoning_effort'), 'video requests carry no reasoning_effort');
   assert.match(script, /saveGrokToolsUIState\(\{ videoEffort: undefined \}\)/, 'a saved video effort is cleared');
 });
+
+test('the video panel has no advanced settings', () => {
+  const page = fs.readFileSync(path.join(__dirname, 'templates/pages/grok-tools.html'), 'utf8');
+  const script = fs.readFileSync(path.join(__dirname, 'static/js/grok-tools.js'), 'utf8');
+  for (const id of ['video-advanced-settings', 'videoAction', 'videoImageUrl', 'videoReferenceURL', 'videoSourceURL', 'videoReferenceVoice']) {
+    assert.ok(!page.includes(id), `${id} is still on the page`);
+    assert.ok(!script.includes(id), `${id} is still wired`);
+  }
+  assert.ok(script.includes('`${toolInferencePrefix()}/videos`'), 'video requests go to the generation endpoint');
+});
