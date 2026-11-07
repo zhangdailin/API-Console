@@ -15,6 +15,19 @@ import (
 )
 
 func (h *Handler) streamImageGeneration(w http.ResponseWriter, body io.Reader, token, prompt, format string, n int, publicBase string) {
+	h.streamImageResults(w, body, token, prompt, format, n, publicBase, nil)
+}
+
+// streamImageEdit streams one edit call. editInputs are the uploaded input
+// asset IDs, which the edit stream echoes back and which are not results.
+func (h *Handler) streamImageEdit(w http.ResponseWriter, body io.Reader, token, prompt, format string, publicBase string, editInputs []string) {
+	h.streamImageResults(w, body, token, prompt, format, 1, publicBase, editInputs)
+}
+
+// streamImageResults relays image progress and then the finished images. A
+// non-nil editInputs marks an edit stream, whose previews and echoed inputs
+// are dropped from the results.
+func (h *Handler) streamImageResults(w http.ResponseWriter, body io.Reader, token, prompt, format string, n int, publicBase string, editInputs []string) {
 	flusher := streamResponseHeaders(w)
 
 	field := imageResponseField(format)
@@ -41,13 +54,20 @@ func (h *Handler) streamImageGeneration(w http.ResponseWriter, body io.Reader, t
 			}
 			writeSSE(w, flusher, "image_generation.partial_image", encodeJSONBytes(data))
 		}
-		urls = appendImageResultURLs(urls, resp)
+		if editInputs != nil {
+			urls = appendImageEditResultURLs(urls, resp)
+		} else {
+			urls = appendImageResultURLs(urls, resp)
+		}
 		return nil
 	}); err != nil {
 		writeSSEStreamError(w, flusher, nil, "stream parse error: "+err.Error())
 		return
 	}
 
+	if editInputs != nil {
+		urls = withoutInputAssets(urls, editInputs)
+	}
 	urls = normalizeGeneratedImageURLs(urls, n)
 	if len(urls) == 0 {
 		writeSSECodedError(w, flusher, "no image generated", "no_image_generated")

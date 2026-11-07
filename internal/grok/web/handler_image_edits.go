@@ -117,6 +117,11 @@ func (h *Handler) handleChatImageEdit(
 		writeGrokError(w, http.StatusBadRequest, "image_config.n must be between 1 and 2 for image edit")
 		return
 	}
+	// One edit call produces one image, and a stream relays one call.
+	if req.Stream && n > 1 {
+		writeGrokError(w, http.StatusBadRequest, "streaming image edits support image_config.n=1 only")
+		return
+	}
 	responseFormat := normalizeImageResponseFormat(imageCfg.ResponseFormat)
 	if _, err := normalizeImageEditSize(imageCfg.Size); err != nil {
 		writeGrokUpstreamError(w, err)
@@ -164,7 +169,7 @@ func (h *Handler) handleChatImageEdit(
 		}
 		defer resp.Body.Close()
 		h.syncGrokQuota(sess.acc, resp.Header)
-		h.streamImageGeneration(w, resp.Body, sess.token, prompt, responseFormat, n, publicBase)
+		h.streamImageEdit(w, resp.Body, sess.token, prompt, responseFormat, publicBase, nonNilStrings(imageEditInputAssets(rawPayload)))
 		if cost, priced := pricing.EstimateImageEditCost(spec.UpstreamModel, imageCfg.Resolution, "", n, len(imageURLs)); priced {
 			h.settleMediaBilling(ctx, req.Model, cost, map[string]any{
 				"plane": "web", "stream": true, "images": n, "input_images": len(imageURLs),
@@ -366,8 +371,9 @@ func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
 	if jsonRequest != nil {
 		stream = jsonRequest.Stream
 	}
-	if stream && n > 2 {
-		writeGrokError(w, http.StatusBadRequest, "streaming is only supported when n=1 or n=2")
+	// One edit call produces one image, and a stream relays one call.
+	if stream && n > 1 {
+		writeGrokError(w, http.StatusBadRequest, "streaming image edits support n=1 only")
 		return
 	}
 	rawResponseFormat := strings.ToLower(strings.TrimSpace(formValue("response_format")))
@@ -496,7 +502,7 @@ func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
 		}
 		defer resp.Body.Close()
 		h.syncGrokQuota(sess.acc, resp.Header)
-		h.streamImageGeneration(w, resp.Body, sess.token, prompt, responseFormat, n, publicBase)
+		h.streamImageEdit(w, resp.Body, sess.token, prompt, responseFormat, publicBase, nonNilStrings(imageEditInputAssets(rawPayload)))
 		inputs := len(inputValues)
 		if inputs == 0 {
 			inputs = len(uploads)
