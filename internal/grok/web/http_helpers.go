@@ -289,16 +289,6 @@ func requireGrokStore(w http.ResponseWriter, h *Handler) bool {
 	return true
 }
 
-// requireGrokClient writes the standard 503 response and returns false when
-// the handler has no grok client.
-func requireGrokClient(w http.ResponseWriter, h *Handler) bool {
-	if h == nil || h.webClient() == nil {
-		http.Error(w, "grok client not configured", http.StatusServiceUnavailable)
-		return false
-	}
-	return true
-}
-
 // streamResponseHeaders writes the standard SSE headers and returns the
 // response flusher (possibly nil).
 func streamResponseHeaders(w http.ResponseWriter) http.Flusher {

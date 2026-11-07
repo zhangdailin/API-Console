@@ -18,8 +18,6 @@ import (
 const (
 	defaultBaseURL          = "https://grok.com"
 	defaultAssetsBaseURL    = "https://assets.grok.com"
-	defaultAssetsListPath   = "/rest/assets"
-	defaultAssetsDeletePath = "/rest/assets-metadata"
 	defaultChatPath         = "/rest/app-chat/conversations/new"
 	defaultConversationPath = "/rest/app-chat/conversations"
 	defaultUploadFilePath   = "/rest/app-chat/upload-file"

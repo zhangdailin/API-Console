@@ -311,57 +311,6 @@
 
 .grok-tools-page .gw-pager .btn { height: 32px; min-height: 32px; }
 
-/* ---- Stats ---------------------------------------------------------------- */
-
-.grok-tools-page .gw-stat-strip {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--gw-gap);
-}
-
-.grok-tools-page .gw-stat {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  padding: 16px 18px;
-  border: 1px solid var(--gw-line);
-  border-radius: var(--gw-radius);
-  background: var(--gw-card);
-  box-shadow: var(--shadow-xs);
-}
-
-.grok-tools-page .gw-stat-label {
-  color: var(--text-muted);
-  font-size: 0.76rem;
-  font-weight: 600;
-}
-
-.grok-tools-page .gw-stat-value {
-  font-size: 1.3rem;
-  font-weight: 750;
-  letter-spacing: -0.01em;
-  font-variant-numeric: tabular-nums;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.grok-tools-page .gw-stat-sub {
-  color: var(--text-muted);
-  font-size: 0.76rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.grok-tools-page .gw-stat-sub code {
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
-  background: none;
-  padding: 0;
-}
-
 /* ---- Image gallery -------------------------------------------------------- */
 
 .grok-tools-page .gw-media-grid {
@@ -671,147 +620,6 @@
 .grok-tools-page .gw-status.is-warn { background: var(--warn-soft); color: var(--warn); }
 .grok-tools-page .gw-status.is-info { background: var(--info-soft); color: var(--info); }
 
-.grok-tools-page .gw-chip {
-  display: inline-flex;
-  align-items: center;
-  height: 22px;
-  padding: 0 8px;
-  border-radius: 6px;
-  background: var(--gw-soft);
-  color: var(--text-secondary);
-  font-size: 0.74rem;
-  font-weight: 600;
-}
-
-.grok-tools-page .gw-subline {
-  display: block;
-  margin-top: 3px;
-  color: var(--text-muted);
-  font-size: 0.72rem;
-}
-
-/* ---- Tables --------------------------------------------------------------- */
-
-.grok-tools-page .gw-table-wrap {
-  overflow-x: auto;
-  border: 1px solid var(--gw-line);
-  border-radius: var(--gw-radius-sm);
-}
-
-.grok-tools-page .gw-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.84rem;
-}
-
-.grok-tools-page .gw-table th {
-  padding: 10px 14px;
-  background: var(--gw-soft);
-  color: var(--text-muted);
-  font-size: 0.74rem;
-  font-weight: 650;
-  text-align: left;
-  white-space: nowrap;
-  border-bottom: 1px solid var(--gw-line);
-}
-
-.grok-tools-page .gw-table td {
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--gw-line);
-  vertical-align: middle;
-}
-
-.grok-tools-page .gw-table tbody tr:last-child td { border-bottom: 0; }
-.grok-tools-page .gw-table tbody tr:hover td { background: color-mix(in srgb, var(--gw-soft) 55%, transparent); }
-
-.grok-tools-page .gw-table code {
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  background: none;
-  padding: 0;
-}
-
-.grok-tools-page .gw-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.grok-tools-page .gw-muted { color: var(--text-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.grok-tools-page .gw-col-actions { width: 1%; text-align: right; white-space: nowrap; }
-.grok-tools-page .gw-col-check { width: 40px; text-align: center; }
-.grok-tools-page .gw-empty-cell { padding: 32px 16px !important; text-align: center; color: var(--text-muted); }
-
-.grok-tools-page .gw-file {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.grok-tools-page .gw-file-thumb {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: 40px;
-  height: 40px;
-  border-radius: 9px;
-  overflow: hidden;
-  background: var(--gw-soft);
-  color: var(--text-muted);
-}
-
-.grok-tools-page .gw-file-thumb img { width: 100%; height: 100%; object-fit: cover; }
-
-.grok-tools-page .gw-file-thumb svg {
-  width: 18px;
-  height: 18px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.grok-tools-page .gw-file-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.grok-tools-page .gw-file-name {
-  max-width: 420px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-mono);
-  font-size: 0.8rem;
-}
-
-.grok-tools-page .gw-file-name a { color: var(--text-main); text-decoration: none; }
-.grok-tools-page .gw-file-name a:hover { color: var(--accent); }
-.grok-tools-page .gw-file-type { color: var(--text-muted); font-size: 0.72rem; }
-
-.grok-tools-page .gw-batch {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  margin-bottom: var(--space-3);
-}
-
-.grok-tools-page .gw-progress {
-  flex: 1;
-  max-width: 280px;
-  height: 6px;
-  border: 0;
-  border-radius: 999px;
-  overflow: hidden;
-  background: var(--track-bg);
-  appearance: none;
-}
-
-.grok-tools-page .gw-progress::-webkit-progress-bar { background: var(--track-bg); border-radius: 999px; }
-.grok-tools-page .gw-progress::-webkit-progress-value { background: var(--accent); border-radius: 999px; }
-.grok-tools-page .gw-progress::-moz-progress-bar { background: var(--accent); border-radius: 999px; }
-.grok-tools-page .gw-batch-text { color: var(--text-muted); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
-
 /* ---- Image generation feed -------------------------------------------------- */
 
 /* The generated batches used to sit outside the card, flush with the page
@@ -841,10 +649,6 @@
 
 /* ---- Narrow screens ------------------------------------------------------- */
 
-@media (max-width: 1100px) {
-  .grok-tools-page .gw-stat-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-
 @media (max-width: 720px) {
   .grok-tools-page .gw-header { align-items: stretch; }
   .grok-tools-page .gw-header-actions { width: 100%; }
@@ -857,8 +661,6 @@
   .grok-tools-page .gw-toolbar .gw-search { flex: 1 1 100%; min-width: 0; }
   .grok-tools-page .gw-toolbar .form-input { min-width: 84px; }
   .grok-tools-page .gw-toolbar .btn { flex: 0 0 auto; }
-  .grok-tools-page .gw-stat { padding: 12px 14px; }
-  .grok-tools-page .gw-stat-value { font-size: 1.1rem; }
   .grok-tools-page .gw-identity {
     flex: 1 1 100%;
     flex-wrap: nowrap;
@@ -867,14 +669,11 @@
   }
   .grok-tools-page .gw-identity .form-input { flex: 1; min-height: 38px; height: 38px; border-radius: 8px; }
   .grok-tools-page .gw-account-link { flex: 1; justify-content: center; }
-  .grok-tools-page .gw-table .gw-col-time, .grok-tools-page .gw-table td.gw-muted { display: none; }
   .grok-tools-page .gw-media-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
   .grok-tools-page .gw-video-grid { grid-template-columns: minmax(0, 1fr); }
-  .grok-tools-page .gw-file-name { max-width: 180px; }
   .grok-tools-page #grokImagineSection .imagine-masonry-feed { padding: 0 var(--space-3) var(--space-3); }
   .grok-tools-page .imagine-masonry-batch { padding: var(--space-3); }
 }
-
 
 /* ---- Feature cards -------------------------------------------------------- */
 
@@ -1669,3 +1468,136 @@
 
 .grok-tools-page .gw-card-head > .gw-card-title { flex: 1; min-width: 0; white-space: nowrap; }
 .grok-tools-page .gw-card-head > .gw-toolbar { display: flex; flex-shrink: 0; gap: 8px; }
+
+/* The settings button sits at the left of the composer, so the panel opens
+   rightwards from it; anchoring it to the right edge pushed it under the
+   session column. */
+.grok-tools-page #grokChatSection .chat-settings-panel { left: 0; right: auto; }
+@media (max-width: 900px) {
+  .grok-tools-page #grokChatSection .chat-settings-panel { left: max(14px, env(safe-area-inset-left, 0px)); right: max(14px, env(safe-area-inset-right, 0px)); }
+}
+
+/* Chat settings panel */
+.grok-tools-page #grokChatSection .chat-settings-panel {
+  width: min(520px, calc(100vw - 32px));
+  padding: 18px;
+  border: 1px solid var(--gw-line);
+  border-radius: 18px;
+  background: var(--gw-card);
+  box-shadow: var(--shadow-lg, var(--shadow-md));
+}
+
+.grok-tools-page #grokChatSection .chat-settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.grok-tools-page #grokChatSection .chat-settings-head .settings-panel-title { margin: 0; font-size: 0.98rem; font-weight: 700; }
+
+.grok-tools-page #grokChatSection .chat-settings-head .panel-close-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 0;
+  background: var(--gw-soft);
+  color: var(--text-muted);
+}
+
+.grok-tools-page #grokChatSection .chat-settings-head .panel-close-btn:hover { color: var(--text-main); }
+
+.grok-tools-page #grokChatSection .chat-settings-panel .settings-grid { display: flex; flex-direction: column; gap: 16px; }
+.grok-tools-page #grokChatSection .chat-settings-panel .chat-settings-ranges { gap: 16px; align-items: start; }
+.grok-tools-page #grokChatSection .chat-settings-panel .settings-block { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+
+.grok-tools-page #grokChatSection .chat-settings-panel .field-label {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.grok-tools-page #grokChatSection .chat-settings-panel select.form-input { height: 40px; min-height: 40px; border-radius: 10px; }
+
+.grok-tools-page #grokChatSection .chat-system-input {
+  min-height: 120px;
+  border-radius: 12px;
+  background: var(--gw-soft);
+  border-color: transparent;
+}
+
+.grok-tools-page #grokChatSection .chat-system-input:focus { background: var(--gw-card); border-color: color-mix(in srgb, var(--accent) 55%, var(--gw-line)); }
+
+.grok-tools-page .gw-switch-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--gw-line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.grok-tools-page .gw-switch {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 40px;
+  margin: 0;
+  padding: 0 12px;
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+
+.grok-tools-page .gw-switch + .gw-switch { border-top: 1px solid var(--gw-line); }
+
+.grok-tools-page .gw-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+
+.grok-tools-page .gw-switch-track {
+  position: relative;
+  flex-shrink: 0;
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--track-bg, var(--border-color));
+  transition: background var(--transition, 0.15s);
+}
+
+.grok-tools-page .gw-switch-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+  transition: transform var(--transition, 0.15s);
+}
+
+.grok-tools-page .gw-switch input:checked + .gw-switch-track { background: var(--accent); }
+.grok-tools-page .gw-switch input:checked + .gw-switch-track::after { transform: translateX(14px); }
+.grok-tools-page .gw-switch input:focus-visible + .gw-switch-track { box-shadow: 0 0 0 3px var(--accent-soft); }
+.grok-tools-page .gw-switch.is-disabled { cursor: not-allowed; }
+
+@media (max-width: 520px) {
+  .grok-tools-page #grokChatSection .chat-settings-panel .chat-settings-ranges { grid-template-columns: minmax(0, 1fr); }
+}
+
+.grok-tools-page #grokChatSection .chat-video {
+  display: block;
+  width: min(560px, 100%);
+  max-height: 420px;
+  margin: 6px 0;
+  border-radius: 14px;
+  background: #000;
+}

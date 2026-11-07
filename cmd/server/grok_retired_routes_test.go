@@ -111,3 +111,26 @@ func TestRegisterRoutes_GrokConversationSurfacesAreRetired(t *testing.T) {
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	testutil.Falsef(t, rec.Code != http.StatusFound || rec.Header().Get("Location") != "/admin/", "GET / = %d location=%q, want 302 /admin/", rec.Code, rec.Header().Get("Location"))
 }
+
+// The media library's local cache file list duplicated the image gallery, and
+// the online asset panel is gone with it. Their endpoints must stay
+// unregistered, while the media library's own routes remain behind the
+// admin session.
+func TestRegisterRoutes_GrokCacheAdminIsRetired(t *testing.T) {
+	cfg := &config.Config{AdminUser: "admin", AdminPass: "secret", AdminToken: "admintoken", AdminPath: "/admin"}
+	mux, _, _ := newRouteMux(t, "retired-grok-cache:", cfg)
+
+	for _, path := range []string{
+		"/api/grok/admin/cache", "/api/grok/admin/cache/list", "/api/grok/admin/cache/clear",
+		"/api/grok/admin/cache/item/delete", "/api/grok/admin/cache/online/clear",
+		"/api/grok/admin/cache/online/clear/async", "/api/grok/admin/cache/online/load/async",
+	} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		testutil.CheckEqual(t, rec.Code, http.StatusNotFound)
+	}
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/grok/admin/media/images", nil))
+	testutil.CheckEqual(t, rec.Code, http.StatusUnauthorized)
+}

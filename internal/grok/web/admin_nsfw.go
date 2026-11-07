@@ -51,7 +51,6 @@ type nsfwBatchTask struct {
 	status  string
 	errMsg  string
 	results map[string]any
-	result  any
 
 	cancel   context.CancelFunc
 	doneOnce sync.Once
@@ -308,15 +307,6 @@ func (t *nsfwBatchTask) finish(status string, errMsg string) {
 	t.doneOnce.Do(func() { close(t.doneCh) })
 }
 
-func (t *nsfwBatchTask) setResult(payload any) {
-	if t == nil {
-		return
-	}
-	t.mu.Lock()
-	t.result = payload
-	t.mu.Unlock()
-}
-
 func (t *nsfwBatchTask) snapshot() map[string]any {
 	if t == nil {
 		return map[string]any{}
@@ -342,9 +332,6 @@ func (t *nsfwBatchTask) snapshot() map[string]any {
 	}
 	if t.errMsg != "" {
 		out["error"] = t.errMsg
-	}
-	if t.result != nil {
-		out["result"] = t.result
 	}
 	t.mu.RUnlock()
 	return out

@@ -314,8 +314,7 @@
 .meta-label,
 .grok-kv span,
 .progress-meta,
-.ref-name,
-.cache-progress-text {
+.ref-name {
   color: var(--text-secondary);
   font-size: 0.86rem;
 }
@@ -348,9 +347,6 @@
 .chat-title-actions,
 .voice-actions,
 .preview-actions,
-.cache-batch-actions,
-.cache-batch-progress,
-.cache-inline-actions,
 .selection-toolbar,
 .voice-log-actions,
 .imagine-header-actions,
@@ -414,8 +410,7 @@
 .visualizer,
 .audio-root,
 .video-empty,
-.video-stage,
-.cache-list {
+.video-stage {
   border: 1px solid var(--border-color);
   border-radius: 10px;
   background: var(--bg-surface-hover);
@@ -1280,18 +1275,6 @@
   margin-bottom: var(--space-2);
 }
 
-/* ---- Cache table row actions ---------------------------------------------------------------------- */
-.cache-delete-btn,
-.cache-online-clear-btn {
-  height: var(--control-h-sm);
-  padding: 0 var(--space-2);
-  font-size: 0.76rem;
-}
-
-.cache-online-check {
-  accent-color: var(--accent);
-}
-
 .video-stage,
 .video-empty,
 .audio-root,
@@ -1444,14 +1427,6 @@
   100% { transform: translateX(220%); }
 }
 
-.cache-list {
-  overflow: auto;
-}
-
-.cache-list table {
-  min-width: 760px;
-}
-
 .table-empty-cell {
   text-align: center;
   color: var(--text-secondary);
@@ -1461,12 +1436,6 @@
 .table-checkbox-cell {
   width: 40px;
   text-align: center;
-}
-
-.cache-progress-bar {
-  width: 180px;
-  height: 8px;
-  accent-color: var(--accent);
 }
 
 @media (max-width: 1080px) {
@@ -1573,8 +1542,7 @@
 .video-stage,
 .audio-root,
 .visualizer,
-.voice-log,
-.cache-list {
+.voice-log {
   border-color: var(--grok-card-border);
 }
 
@@ -1640,10 +1608,6 @@
   padding: 10px;
   border: 1px solid var(--grok-card-border);
   border-radius: 12px;
-  background: var(--bg-surface);
-}
-
-.cache-list table {
   background: var(--bg-surface);
 }
 
@@ -2134,10 +2098,6 @@
   font-size: 0.78rem;
 }
 
-.cache-progress-text {
-  font-variant-numeric: tabular-nums;
-}
-
 .media-gallery-heading,
 .media-gallery-controls,
 .media-gallery-pager {
@@ -2443,26 +2403,6 @@
 .imagine-masonry-toggle-btn.is-active { background: var(--accent-solid); box-shadow: var(--shadow-btn-primary); }
 
 .imagine-masonry-ratio-icon { border: 1.5px solid var(--text-muted); background: transparent; }
-
-/* Cache overview: a compact stat grid instead of eight full-width bars. */
-.cache-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-
-.cache-stats .grok-kv {
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 2px;
-  min-height: 0;
-  padding: 10px 12px;
-}
-
-.cache-stats .grok-kv span { color: var(--text-muted); font-size: 0.74rem; }
-
-.cache-stats .grok-kv strong { font-size: 0.95rem; }
-
-@media (max-width: 900px) {
-  .cache-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
 
 /* Idle voice panels say what will appear instead of showing an empty box. */
 .voice-log:empty::before,

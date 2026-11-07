@@ -6,20 +6,6 @@ import (
 	"orchids-api/internal/store"
 )
 
-func adminTokenStatusFromAccount(acc *store.Account) string {
-	if acc == nil {
-		return "expired"
-	}
-	status := strings.TrimSpace(acc.StatusCode)
-	if status == "" {
-		return "active"
-	}
-	if status == "429" {
-		return "cooling"
-	}
-	return "expired"
-}
-
 func inferTokenPool(acc *store.Account) string {
 	if acc == nil {
 		return "ssoBasic"

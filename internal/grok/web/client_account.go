@@ -8,11 +8,9 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
-	"net/url"
 	"orchids-api/internal/grok/ratelimit"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 )
 
@@ -246,123 +244,6 @@ func (c *Client) getVoiceToken(ctx context.Context, token, voice, personality st
 		return nil, err
 	}
 	return out, nil
-}
-
-func (c *Client) listAssets(ctx context.Context, token string) ([]string, error) {
-	token = strings.TrimSpace(token)
-	if NormalizeSSOToken(token) == "" {
-		return nil, fmt.Errorf("empty token")
-	}
-
-	params := url.Values{}
-	params.Set("pageSize", "50")
-	params.Set("orderBy", "ORDER_BY_LAST_USE_TIME")
-	params.Set("source", "SOURCE_ANY")
-	params.Set("isLatest", "true")
-
-	assetIDs := make([]string, 0, 64)
-	seenPageTokens := map[string]struct{}{}
-	nextPageToken := ""
-	for page := range 500 {
-		if page > 0 {
-			if strings.TrimSpace(nextPageToken) == "" {
-				break
-			}
-			if _, exists := seenPageTokens[nextPageToken]; exists {
-				// Upstream returned a repeated page token; stop to avoid endless loop.
-				break
-			}
-			seenPageTokens[nextPageToken] = struct{}{}
-			params.Set("pageToken", nextPageToken)
-		} else {
-			params.Del("pageToken")
-		}
-
-		reqURL := c.baseURL() + defaultAssetsListPath + "?" + params.Encode()
-		headers := c.headers(token)
-		headers.Set("Origin", "https://grok.com")
-		headers.Set("Referer", "https://grok.com/files")
-		headers.Set("Content-Type", "application/json")
-
-		resp, err := c.doRequest(ctx, reqURL, http.MethodGet, nil, headers, false)
-		if err != nil {
-			return nil, err
-		}
-
-		var payload struct {
-			Assets []struct {
-				AssetID string `json:"assetId"`
-			} `json:"assets"`
-			NextPageToken string `json:"nextPageToken"`
-		}
-		decodeErr := json.NewDecoder(resp.Body).Decode(&payload)
-		resp.Body.Close()
-		if decodeErr != nil {
-			return nil, decodeErr
-		}
-
-		for _, item := range payload.Assets {
-			id := strings.TrimSpace(item.AssetID)
-			if id == "" {
-				continue
-			}
-			assetIDs = append(assetIDs, id)
-		}
-		nextPageToken = strings.TrimSpace(payload.NextPageToken)
-		if nextPageToken == "" {
-			break
-		}
-	}
-
-	return assetIDs, nil
-}
-
-func (c *Client) countAssets(ctx context.Context, token string) (int, error) {
-	ids, err := c.listAssets(ctx, token)
-	if err != nil {
-		return 0, err
-	}
-	return len(ids), nil
-}
-
-func (c *Client) deleteAsset(ctx context.Context, token string, assetID string) error {
-	token = strings.TrimSpace(token)
-	assetID = strings.TrimSpace(assetID)
-	if NormalizeSSOToken(token) == "" {
-		return fmt.Errorf("empty token")
-	}
-	if assetID == "" {
-		return fmt.Errorf("empty asset id")
-	}
-
-	reqURL := c.baseURL() + defaultAssetsDeletePath + "/" + url.PathEscape(assetID)
-	headers := c.headers(token)
-	headers.Set("Origin", "https://grok.com")
-	headers.Set("Referer", "https://grok.com/files")
-	headers.Set("Content-Type", "application/json")
-
-	resp, err := c.doRequest(ctx, reqURL, http.MethodDelete, nil, headers, false)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 2048))
-	return nil
-}
-
-func (c *Client) clearAssets(ctx context.Context, token string) (total int, success int, failed int, err error) {
-	assetIDs, err := c.listAssets(ctx, token)
-	if err != nil {
-		return 0, 0, 0, err
-	}
-	var successes atomic.Int64
-	runWorkerPool(ctx, assetIDs, 8, func(id string) {
-		if c.deleteAsset(ctx, token, id) == nil {
-			successes.Add(1)
-		}
-	}, nil)
-	total, success = len(assetIDs), int(successes.Load())
-	return total, success, total - success, nil
 }
 
 func grpcWebEncode(payload []byte) []byte {

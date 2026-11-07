@@ -165,8 +165,10 @@
                           </div>
                           <div class="settings-block">
                             <span class="field-label">联网工具</span>
-                            <label><input id="grokWebSearch" type="checkbox"> Web 搜索</label>
-                            <label><input id="grokXSearch" type="checkbox"> X 搜索</label>
+                            <div class="gw-switch-list">
+                              <label class="gw-switch"><span class="gw-switch-text">Web 搜索</span><input id="grokWebSearch" type="checkbox"><span class="gw-switch-track" aria-hidden="true"></span></label>
+                              <label class="gw-switch"><span class="gw-switch-text">X 搜索</span><input id="grokXSearch" type="checkbox"><span class="gw-switch-track" aria-hidden="true"></span></label>
+                            </div>
                           </div>
                         </div>
                         <div class="settings-block settings-block-full">
@@ -482,29 +484,6 @@
       </section>
 
       <section id="grokCacheSection" class="grok-section gw-library section-hidden">
-        <div class="gw-stat-strip">
-          <article class="gw-stat">
-            <span class="gw-stat-label">图片缓存</span>
-            <strong id="cacheImageSummary" class="gw-stat-value">0 / 0 B</strong>
-            <span class="gw-stat-sub">数量 / 占用</span>
-          </article>
-          <article class="gw-stat">
-            <span class="gw-stat-label">视频缓存</span>
-            <strong id="cacheVideoSummary" class="gw-stat-value">0 / 0 B</strong>
-            <span class="gw-stat-sub">数量 / 占用</span>
-          </article>
-          <article class="gw-stat">
-            <span class="gw-stat-label">本地合计</span>
-            <strong id="cacheTotalSummary" class="gw-stat-value">0 / 0 B</strong>
-            <span class="gw-stat-sub" title="缓存目录"><code id="cacheBaseDir">-</code></span>
-          </article>
-          <article class="gw-stat">
-            <span class="gw-stat-label">在线资产</span>
-            <strong id="cacheOnlineCount" class="gw-stat-value">0</strong>
-            <span class="gw-stat-sub"><span id="cacheOnlineStatus">未加载</span> · <span id="cacheOnlineScope">未加载</span> · 上次清理 <span id="cacheOnlineLastClear">-</span></span>
-          </article>
-        </div>
-
         <section class="gw-panel">
           <header class="gw-panel-head">
             <div class="gw-panel-title">
@@ -539,56 +518,6 @@
           </header>
           <div id="mediaVideoHistory" class="gw-video-grid"><div class="gw-empty">暂无视频任务</div></div>
           <footer class="gw-pager"><button class="btn btn-outline" id="mediaVideoPrevBtn" type="button">上一页</button><span id="mediaVideoPage">1 / 1</span><button class="btn btn-outline" id="mediaVideoNextBtn" type="button">下一页</button></footer>
-        </section>
-
-        <section class="gw-panel">
-          <header class="gw-panel-head">
-            <div class="gw-panel-title">
-              <h3>本地缓存文件</h3>
-              <span class="gw-count">网关为客户端缓存的图片与视频</span>
-            </div>
-            <div class="gw-toolbar">
-              <select id="cacheTypeFilter" class="form-input" aria-label="类型过滤">
-                <option value="">全部类型</option>
-                <option value="image">图片</option>
-                <option value="video">视频</option>
-              </select>
-              <button class="btn btn-danger-outline" id="cacheClearBtn" type="button">清空</button>
-              <button class="btn btn-outline gw-icon-btn" id="cacheRefreshBtn" type="button" title="刷新" aria-label="刷新"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg></button>
-            </div>
-          </header>
-          <div class="gw-table-wrap">
-            <table class="gw-table">
-              <thead><tr><th>文件</th><th>大小</th><th class="gw-col-time">更新时间</th><th class="gw-col-actions">操作</th></tr></thead>
-              <tbody id="cacheListBody"><tr><td colspan="4" class="gw-empty-cell">暂无数据</td></tr></tbody>
-            </table>
-          </div>
-        </section>
-
-        <section class="gw-panel">
-          <header class="gw-panel-head">
-            <div class="gw-panel-title">
-              <h3>在线资产账号</h3>
-              <span class="gw-count">按账号统计并清理 grok.com 上的在线资产</span>
-            </div>
-            <div class="gw-toolbar">
-              <button class="btn btn-outline" id="cacheOnlineLoadSelectedBtn" type="button">统计选中</button>
-              <button class="btn btn-outline" id="cacheOnlineLoadAllBtn" type="button">统计全部</button>
-              <button class="btn btn-danger-outline" id="cacheOnlineClearSelectedBtn" type="button">清理选中</button>
-            </div>
-          </header>
-          <div class="gw-batch">
-            <span class="tag" id="cacheOnlineBatchStatus">空闲</span>
-            <progress id="cacheOnlineBatchBar" class="gw-progress" value="0" max="100"></progress>
-            <span class="gw-batch-text" id="cacheOnlineBatchProgress">0/0</span>
-            <button class="btn btn-outline is-hidden" id="cacheOnlineBatchCancelBtn" type="button">取消任务</button>
-          </div>
-          <div class="gw-table-wrap">
-            <table class="gw-table">
-              <thead><tr><th class="gw-col-check"><input id="cacheOnlineSelectAll" type="checkbox" aria-label="全选" /></th><th>账号凭据</th><th>池</th><th>资产数</th><th>状态</th><th class="gw-col-time">上次清理</th><th class="gw-col-actions">操作</th></tr></thead>
-              <tbody id="cacheOnlineBody"><tr><td colspan="7" class="gw-empty-cell">暂无在线账号</td></tr></tbody>
-            </table>
-          </div>
         </section>
       </section>
     </div>
