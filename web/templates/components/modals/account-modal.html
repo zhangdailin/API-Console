@@ -20,14 +20,42 @@
         </div>
       </div>
       {{range .LoginProviders}}
-      <div class="form-group" id="{{.GroupID}}" data-login-group="{{.Key}}" hidden>
-        <label class="form-label">{{.Label}}</label>
-        <button class="btn btn-secondary" id="{{.ButtonID}}" type="button" data-login-provider="{{.Key}}">{{.ButtonText}}</button>
-        <small class="helper-text">{{.HelpText}}</small>
-        <div class="account-import-status" id="{{.StatusID}}" hidden></div>
-        <div class="account-import-status" id="{{.LinkID}}" hidden>
-          <a id="{{.LinkTextID}}" target="_blank" rel="noopener noreferrer"></a>
+      <div class="form-group oauth-flow" id="{{.GroupID}}" data-login-group="{{.Key}}" hidden>
+        <div class="oauth-head">
+          <span class="oauth-mark" aria-hidden="true">{{slice .Key 0 1}}</span>
+          <div class="oauth-head-text">
+            <div class="oauth-title">{{.Label}}</div>
+            <div class="oauth-sub">浏览器授权 · 自动保存凭据</div>
+          </div>
         </div>
+        <p class="oauth-desc">{{.HelpText}}</p>
+        <button class="btn btn-primary oauth-start" id="{{.ButtonID}}" type="button" data-login-provider="{{.Key}}">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>{{.ButtonText}}
+        </button>
+        <ol class="oauth-steps">
+          <li class="oauth-step" data-oauth-step="link">
+            <span class="oauth-step-no">1</span>
+            <div class="oauth-step-body">
+              <div class="oauth-step-title">打开授权页并完成登录</div>
+              <div class="account-import-status oauth-link" id="{{.LinkID}}" hidden>
+                <a id="{{.LinkTextID}}" target="_blank" rel="noopener noreferrer"></a>
+                <button class="oauth-icon-btn" type="button" data-oauth-copy="{{.LinkTextID}}" title="复制链接" aria-label="复制链接"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button>
+              </div>
+              <button class="btn oauth-open" type="button" data-oauth-open="{{.LinkTextID}}">打开链接<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg></button>
+            </div>
+          </li>
+          <li class="oauth-step" data-oauth-step="code">
+            <span class="oauth-step-no">2</span>
+            <div class="oauth-step-body">
+              <div class="oauth-step-title">在授权页输入设备码</div>
+              <div class="oauth-code-row">
+                <code class="oauth-code" id="{{.CodeID}}" hidden></code>
+                <button class="btn oauth-copy-code" type="button" data-oauth-copy="{{.CodeID}}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>复制设备码</button>
+              </div>
+            </div>
+          </li>
+        </ol>
+        <div class="account-import-status oauth-status" id="{{.StatusID}}" role="status" aria-live="polite" hidden></div>
       </div>
       {{end}}
       <div class="form-group grok-sso-body" id="grokSSOImportGroup" hidden>

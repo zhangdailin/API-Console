@@ -22,6 +22,9 @@ globalThis.DeviceAuthLogin = (() => {
       buttonId,
       linkId,
       linkTextId,
+      // The device code gets its own large display when the page has one;
+      // by convention it sits next to the status node (fooStatus → fooCode).
+      codeId = statusId ? String(statusId).replace(/Status$/, 'Code') : '',
       enabledId = 'enabled',
       label,
       popupWidth = 560,
@@ -74,6 +77,14 @@ globalThis.DeviceAuthLogin = (() => {
       return anchor;
     }
     const linkTextNode = () => linkTextId ? document.getElementById(linkTextId) : null;
+
+    function setCode(code) {
+      const node = codeId && codeId !== statusId ? document.getElementById(codeId) : null;
+      if (!node) return;
+      const value = String(code || '').trim();
+      node.textContent = value;
+      node.hidden = !value;
+    }
 
     function status(text, kind = 'info') {
       const node = statusNode();
@@ -149,6 +160,7 @@ globalThis.DeviceAuthLogin = (() => {
       clearStoredLogin();
       setButton(false);
       setLink('');
+      setCode('');
     }
 
     function finish(message, kind) {
@@ -317,7 +329,10 @@ globalThis.DeviceAuthLogin = (() => {
             // browser step may already be finished.
             status(authorizedStatus || `正在确认 ${label} 授权结果…`);
           }
-          if (session.user_code) status(`请在 ${label} 官方页面输入设备码：${session.user_code}`);
+          if (session.user_code) {
+            setCode(session.user_code);
+            status(`请在 ${label} 官方页面输入设备码：${session.user_code}`);
+          }
           login.timer = setInterval(() => {
             if (active !== login) return;
             if (Date.now() >= login.expiresAt) {
@@ -352,7 +367,7 @@ globalThis.DeviceAuthLogin = (() => {
       setButton(false);
     });
 
-    return { start, stop, reset: () => { status(''); setLink(''); } };
+    return { start, stop, reset: () => { status(''); setLink(''); setCode(''); } };
   }
 
   return { create };

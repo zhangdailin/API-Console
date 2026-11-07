@@ -6,7 +6,7 @@ const vm = require('./test-support.cjs');
 
 const scripts = ['device-auth.js', 'workbuddy-auth.js'];
 
-function browser({ storedSession = null, popupBlocked = false, beginError = null } = {}) {
+function browser({ storedSession = null, popupBlocked = false, beginError = null, userCode = '' } = {}) {
   const elements = new Map();
   const storage = new Map(storedSession ? [['workbuddy_login_v1', JSON.stringify(storedSession)]] : []);
   const requests = [];
@@ -49,7 +49,7 @@ function browser({ storedSession = null, popupBlocked = false, beginError = null
       requests.push({ url, options });
       if (options.method === 'POST') return beginError
         ? { ok: false, text: async () => JSON.stringify({ code: beginError }) }
-        : { ok: true, json: async () => ({ id: 'login-1', verification_uri_complete: 'https://www.workbuddy.ai/authorize' }) };
+        : { ok: true, json: async () => ({ id: 'login-1', verification_uri_complete: 'https://www.workbuddy.ai/authorize', ...(userCode ? { user_code: userCode } : {}) }) };
       if (options.method === 'DELETE') return { ok: true };
       return { ok: true, json: async () => pollResult };
     },
@@ -122,4 +122,20 @@ test('a closed popup keeps the server login alive and still completes', async ()
   ui.runInterval();
   await tick();
   assert.equal(ui.toasts.at(-1)[1], 'success');
+});
+
+// The login modal shows the device code as its own large, copyable field
+// (fooStatus → fooCode); it disappears again when the login ends.
+test('a device code is shown in its own field and cleared on stop', async () => {
+  const ui = browser({ userCode: 'CLBJ-WTBB' });
+  ui.element('workbuddyLoginCode');
+  ui.context.WorkBuddyLogin.start();
+  await tick();
+  assert.equal(ui.element('workbuddyLoginCode').textContent, 'CLBJ-WTBB');
+  assert.equal(ui.element('workbuddyLoginCode').hidden, false);
+  assert.match(ui.element('workbuddyLoginStatus').textContent, /CLBJ-WTBB/);
+  ui.context.WorkBuddyLogin.stop();
+  await tick();
+  assert.equal(ui.element('workbuddyLoginCode').hidden, true);
+  assert.equal(ui.element('workbuddyLoginCode').textContent, '');
 });

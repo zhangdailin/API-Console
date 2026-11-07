@@ -5,6 +5,66 @@ let currentPlatform = '';
 let accountHealth = {};
 let pageSize = 20;
 let currentPage = 1;
+// Status filter (the stat cards) and free-text search narrow the current
+// channel's list; neither changes which channel is selected.
+let accountStatusFilter = '';
+let accountSearchQuery = '';
+const ACCOUNT_VIEW_KEY = 'accounts_view_v1';
+let accountView = readAccountView();
+
+function readAccountView() {
+  try {
+    const stored = globalThis.localStorage?.getItem(ACCOUNT_VIEW_KEY);
+    return stored === 'table' ? 'table' : 'cards';
+  } catch (_) { return 'cards'; }
+}
+
+function setAccountView(view) {
+  accountView = view === 'table' ? 'table' : 'cards';
+  try { globalThis.localStorage?.setItem(ACCOUNT_VIEW_KEY, accountView); } catch (_) { /* per-browser convenience only */ }
+  syncAccountViewControls();
+  renderAccounts();
+}
+
+function syncAccountViewControls() {
+  document.querySelectorAll('[data-account-view]').forEach((button) => {
+    const active = button.dataset.accountView === accountView;
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+}
+
+// The categories match the stat cards: a limited account is not abnormal, and
+// an account that is neither counts as normal (computeSidebarAccountStats).
+function accountStatusCategory(acc) {
+  if (isSidebarAccountAbnormal(acc)) return 'abnormal';
+  if (isAccountCapacityLimited(acc)) return 'limited';
+  return 'normal';
+}
+
+function matchesAccountStatusFilter(acc) {
+  return !accountStatusFilter || accountStatusCategory(acc) === accountStatusFilter;
+}
+
+function matchesAccountSearch(acc) {
+  const query = accountSearchQuery.trim().toLowerCase();
+  if (!query) return true;
+  const haystack = [acc.id, acc.name, acc.email, accountIdentityPrimary(acc), acc.grok_pool,
+    ACCOUNT_TYPE_NAMES[normalizeAccountType(acc)], evaluateAccountStatus(acc).text, acc.status_message]
+    .map((value) => String(value ?? '').toLowerCase()).join('\n');
+  return haystack.includes(query);
+}
+
+function setAccountStatusFilter(filter) {
+  accountStatusFilter = ['normal', 'limited', 'abnormal'].includes(filter) ? filter : '';
+  document.querySelectorAll('[data-status-filter]').forEach((card) => {
+    const active = (card.dataset.statusFilter || '') === accountStatusFilter;
+    card.classList.toggle('is-active', active);
+    card.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  currentPage = 1;
+  renderAccounts();
+}
 
 // DOM 缓存
 const domCache = { accountsList: null, paginationInfo: null, paginationControls: null };
@@ -261,9 +321,24 @@ function renderPlatformTabs() {
     const isActive = currentPlatform === label;
     const btn = document.createElement("button");
     btn.className = `tab-item ${isActive ? 'active' : ''}`.trim();
+    btn.type = "button";
     btn.dataset.platform = encodeURIComponent(label);
-    // The key stays in dataset (it is what the filter matches); the strip shows the name.
-    btn.textContent = ACCOUNT_TYPE_NAMES[label.toLowerCase()] || label;
+    // The key stays in dataset (it is what the filter matches); the strip shows
+    // the name, a monogram in the channel's colour and its account count.
+    const name = ACCOUNT_TYPE_NAMES[label.toLowerCase()] || label;
+    const mark = document.createElement("span");
+    mark.className = "acc-tab-mark";
+    mark.dataset.theme = window.OrchidsProviderRegistry?.get(label)?.theme || "";
+    mark.textContent = name.slice(0, 1).toUpperCase();
+    const text = document.createElement("span");
+    text.className = "acc-tab-name";
+    text.textContent = name;
+    const count = document.createElement("span");
+    count.className = "acc-tab-count";
+    count.textContent = String(accounts.filter((acc) => normalizeAccountType(acc) === label).length);
+    btn.appendChild(mark);
+    btn.appendChild(text);
+    btn.appendChild(count);
     btn.addEventListener("click", () => {
       const raw = btn.dataset.platform ? decodeURIComponent(btn.dataset.platform) : "";
       filterByPlatform(raw);
@@ -404,7 +479,9 @@ function deleteAccountBatch(ids, prompt) {
 function renderAccounts() {
   globalThis.GrokSSO?.syncToolbar?.();
   const container = domCache.accountsList || document.getElementById("accountsList");
-  const filtered = accounts.filter(matchesCurrentPlatform);
+  const filtered = accounts.filter(matchesCurrentPlatform).filter(matchesAccountStatusFilter).filter(matchesAccountSearch);
+  const panel = container.closest?.(".accounts-panel");
+  if (panel) panel.classList.toggle("is-card-view", accountView === "cards");
 
   const total = filtered.length;
   const totalPages = Math.ceil(total / pageSize) || 1;
@@ -423,7 +500,9 @@ function renderAccounts() {
     icon.className = "empty-state-mark";
     icon.textContent = "EMPTY";
     const text = document.createElement("p");
-    text.textContent = currentPlatformLabel() ? `暂无 ${currentPlatformLabel()} 账号数据` : "暂无账号数据";
+    const narrowed = accountStatusFilter || accountSearchQuery.trim();
+    text.textContent = narrowed ? "没有符合筛选条件的账号"
+      : currentPlatformLabel() ? `暂无 ${currentPlatformLabel()} 账号数据` : "暂无账号数据";
     empty.appendChild(icon);
     empty.appendChild(text);
     container.appendChild(empty);
@@ -634,7 +713,7 @@ function renderAccounts() {
     edit.dataset.action = "edit";
     edit.dataset.id = encodeData(acc.id);
     edit.title = "编辑账号设置与凭据";
-    edit.textContent = "编辑";
+    setActionContent(edit, "edit", "编辑");
 
     const refresh = document.createElement("button");
     refresh.type = "button";
@@ -642,7 +721,7 @@ function renderAccounts() {
     refresh.dataset.action = "refresh";
     refresh.dataset.id = encodeData(acc.id);
     refresh.title = "立即同步状态与额度";
-    refresh.textContent = "刷新";
+    setActionContent(refresh, "refresh", "刷新");
 
     const del = document.createElement("button");
     del.type = "button";
@@ -650,7 +729,7 @@ function renderAccounts() {
     del.dataset.action = "delete";
     del.dataset.id = encodeData(acc.id);
     del.title = "删除该账号";
-    del.textContent = "删除";
+    setActionContent(del, "delete", "删除");
 
     actionWrap.appendChild(edit);
     actionWrap.appendChild(refresh);
@@ -674,6 +753,18 @@ function renderAccounts() {
   updateSelectedCount();
 
   bindAccountActions(container);
+}
+
+const ACTION_ICONS = {
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+  refresh: '<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>',
+  delete: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 14H6L5 6"/>',
+};
+
+// setActionContent gives a row action its icon and keeps the word as text, so
+// the list view and assistive technology still read 编辑 / 刷新 / 删除.
+function setActionContent(button, action, label) {
+  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${ACTION_ICONS[action]}</svg><span class="action-label">${label}</span>`;
 }
 
 // formatCredit renders meter values that the upstream reports with fractions.
@@ -1175,6 +1266,20 @@ function workBuddyIdentityLabel(acc) {
   return "-";
 }
 
+// copyOAuthValue copies the authorization link (its href) or the device code
+// (its text) shown in the login steps.
+async function copyOAuthValue(button) {
+  const source = document.getElementById(button.dataset.oauthCopy);
+  const value = String(source?.href || source?.textContent || '').trim();
+  if (!value) return;
+  try {
+    await navigator.clipboard.writeText(value);
+    showToast('已复制', 'success');
+  } catch (_) {
+    showToast('复制失败，请手动选择复制', 'error');
+  }
+}
+
 // Export accounts
 function exportAccounts() { window.location.href = "/api/export"; }
 
@@ -1185,6 +1290,30 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('accountModal')?.addEventListener('click', (event) => {
     const button = event.target.closest?.('[data-login-provider]');
     if (button) startOfficialLogin(button.dataset.loginProvider);
+    const copy = event.target.closest?.('[data-oauth-copy]');
+    if (copy) copyOAuthValue(copy);
+    const open = event.target.closest?.('[data-oauth-open]');
+    if (open) {
+      const href = document.getElementById(open.dataset.oauthOpen)?.href;
+      if (href) window.open(href, '_blank', 'noopener');
+    }
+  });
+  document.querySelectorAll('[data-status-filter]').forEach((card) => {
+    card.addEventListener('click', () => setAccountStatusFilter(card.dataset.statusFilter || ''));
+  });
+  document.querySelectorAll('[data-account-view]').forEach((button) => {
+    button.addEventListener('click', () => setAccountView(button.dataset.accountView));
+  });
+  syncAccountViewControls();
+  const search = document.getElementById('accountSearch');
+  let searchTimer = 0;
+  search?.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+      accountSearchQuery = search.value || '';
+      currentPage = 1;
+      renderAccounts();
+    }, 150);
   });
   loadAccounts();
   const typeSelect = document.getElementById("accountType");

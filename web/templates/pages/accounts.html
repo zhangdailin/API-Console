@@ -9,82 +9,70 @@
 
 
   <main class="main-content">
-    <section class="header-section" id="accountsHeader">
+    <section class="header-section acc-header" id="accountsHeader">
       <div>
         <h1 id="pageTitle">账号管理</h1>
         <p id="pageSubtitle" class="page-sub">统一维护渠道账号、状态和可用性，快速完成备份恢复、清理和批量操作。</p>
       </div>
-      <div class="page-actions">
-        <button class="btn-primary" onclick="openModal()">添加账号</button>
+      <div class="page-actions acc-header-actions">
+        <button class="btn btn-outline acc-header-btn" id="accountImportOpen" type="button" onclick="openAccountImport()">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>导入账号
+        </button>
+        <input id="accountImportFile" type="file" accept=".json,application/json" hidden onchange="readAccountImport(this)">
+        <button class="btn btn-outline acc-header-btn" type="button" onclick="exportAccounts()" title="导出的 JSON 包含账号的官方登录访问令牌和刷新令牌；请像密码一样妥善保管，切勿公开分享">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M5 21h14"/></svg>导出备份
+        </button>
+        <button class="btn-primary acc-header-btn" type="button" onclick="openModal()">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>添加账号
+        </button>
       </div>
     </section>
 
-    <section class="stats-grid accounts-stats" id="statsGrid">
-      <div class="stat-card">
-        <div class="stat-info">
-          <span class="label">总账号数</span>
-          <span class="value" id="totalAccounts">0</span>
-        </div>
-        <div class="stat-icon total" aria-hidden="true">
-          <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-        </div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-info">
-          <span class="label">未受限</span>
-          <span class="value metric-positive" id="enabledAccounts">0</span>
-        </div>
-        <div class="stat-icon normal" aria-hidden="true">
-          <svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>
-        </div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-info">
-          <span class="label">额度 / 模型受限</span>
-          <span class="value" style="color:#f59e0b" id="limitedAccounts">0</span>
-        </div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-info">
-          <span class="label">状态异常</span>
-          <span class="value metric-negative" id="disabledAccounts">0</span>
-        </div>
-        <div class="stat-icon abnormal" aria-hidden="true">
-          <svg viewBox="0 0 24 24"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
-        </div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-info">
-          <span class="label">已选中</span>
-          <span class="value metric-accent" id="selectedCount">0</span>
-        </div>
-        <div class="stat-icon selected" aria-hidden="true">
-          <svg viewBox="0 0 24 24"><path d="M9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-        </div>
-      </div>
+    <!-- The four status cards double as the status filter. -->
+    <section class="acc-stats" id="statsGrid" aria-label="账号状态筛选">
+      <button class="acc-stat is-active" type="button" data-status-filter="" aria-pressed="true">
+        <span class="acc-stat-label"><i class="acc-dot"></i>全部账号</span>
+        <span class="acc-stat-value" id="totalAccounts">0</span>
+      </button>
+      <button class="acc-stat is-ok" type="button" data-status-filter="normal" aria-pressed="false">
+        <span class="acc-stat-label"><i class="acc-dot"></i>未受限</span>
+        <span class="acc-stat-value" id="enabledAccounts">0</span>
+      </button>
+      <button class="acc-stat is-warn" type="button" data-status-filter="limited" aria-pressed="false">
+        <span class="acc-stat-label"><i class="acc-dot"></i>额度 / 模型受限</span>
+        <span class="acc-stat-value" id="limitedAccounts">0</span>
+      </button>
+      <button class="acc-stat is-bad" type="button" data-status-filter="abnormal" aria-pressed="false">
+        <span class="acc-stat-label"><i class="acc-dot"></i>状态异常</span>
+        <span class="acc-stat-value" id="disabledAccounts">0</span>
+      </button>
     </section>
 
     <div id="accountsTabContent">
-      <div class="accounts-toolbar">
-        <div class="accounts-platform-group">
-          <div class="accounts-platform-switch filter-tabs" id="platformFilters"></div>
-          <div class="filter-tabs grok-plane-switch" id="grokPlaneFilters" role="tablist" aria-label="Grok 账号类型" hidden>
-            <button class="tab-item active" type="button" data-grok-plane="">全部</button>
-            <button class="tab-item" type="button" data-grok-plane="build">Grok Build</button>
-            <button class="tab-item" type="button" data-grok-plane="web">Grok Web</button>
-          </div>
+      <div class="acc-tabbar">
+        <div class="accounts-platform-switch acc-tabs" id="platformFilters" role="tablist" aria-label="渠道"></div>
+        <div class="filter-tabs grok-plane-switch" id="grokPlaneFilters" role="tablist" aria-label="Grok 账号类型" hidden>
+          <button class="tab-item active" type="button" data-grok-plane="">全部</button>
+          <button class="tab-item" type="button" data-grok-plane="build">Grok Build</button>
+          <button class="tab-item" type="button" data-grok-plane="web">Grok Web</button>
         </div>
+      </div>
 
+      <div class="accounts-toolbar acc-toolbar">
+        <label class="acc-search">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input id="accountSearch" type="search" placeholder="搜索账号、名称、ID 或状态" autocomplete="off" aria-label="搜索账号">
+        </label>
+        <div class="acc-view-switch" role="group" aria-label="显示方式">
+          <button type="button" data-account-view="cards" title="卡片视图" aria-label="卡片视图"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></button>
+          <button type="button" data-account-view="table" title="列表视图" aria-label="列表视图"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg></button>
+        </div>
         <div class="accounts-actions">
-          <div class="accounts-action-cluster">
-            <button class="btn" onclick="exportAccounts()" title="导出的 JSON 包含账号的官方登录访问令牌和刷新令牌；请像密码一样妥善保管，切勿公开分享">导出全部（含凭据）</button>
-            <button class="btn" id="accountImportOpen" type="button" onclick="openAccountImport()">导入账号</button>
-            <input id="accountImportFile" type="file" accept=".json,application/json" hidden onchange="readAccountImport(this)">
-          </div>
           <div class="accounts-action-cluster" data-sso-toolbar>
             <button class="btn" id="grokSSORefreshBtn" type="button" title="同步勾选的（未勾选则全部）Grok SSO 账号的额度与身份">同步 SSO 额度</button>
             <button class="btn" id="grokSSONSFWBtn" type="button" title="为勾选的（未勾选则全部）Grok SSO 账号开启 NSFW">开启 NSFW</button>
           </div>
+          <span class="acc-selected" title="已选中的账号"><span id="selectedCount">0</span> 已选</span>
           <div class="accounts-action-cluster is-danger">
             <button class="btn btn-danger-outline" id="batchDeleteBtn" disabled onclick="batchDeleteAccounts()">批量删除</button>
             <button class="btn btn-danger-outline" id="clearAbnormalBtn" onclick="clearAbnormalAccounts()">清空异常</button>

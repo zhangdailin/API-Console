@@ -268,3 +268,24 @@ test('a Cline account whose tier was never read is not labelled free', () => {
   assert.notEqual(badge.text, '免费');
   assert.equal(badge.text, '未同步');
 });
+
+// The stat cards filter by status and the search box by text; both narrow the
+// selected channel only, and the categories match the stat counts.
+test('status cards and search narrow the rendered accounts', () => {
+  const { context, node } = loadUI(1440);
+  const healthy = { id: 1, account_type: 'cline', enabled: true, has_credential: true, email: 'alpha@example.com' };
+  const disabled = { id: 2, account_type: 'cline', enabled: false, has_credential: true, email: 'beta@example.com' };
+  const other = { id: 3, account_type: 'grok', enabled: false, has_credential: true, email: 'gamma@example.com' };
+  const rows = () => node('accountsList').querySelector('table')?.querySelectorAll('tbody tr') || [];
+  vm.runInContext(`accounts = ${JSON.stringify([healthy, disabled, other])}; currentPlatform = 'cline'; renderAccounts();`, context);
+  assert.equal(rows().length, 2);
+  vm.runInContext("accountStatusFilter = 'abnormal'; renderAccounts();", context);
+  assert.equal(rows().length, 1, 'only the disabled Cline account, never the Grok one');
+  vm.runInContext("accountStatusFilter = 'normal'; renderAccounts();", context);
+  assert.equal(rows().length, 1);
+  vm.runInContext("accountStatusFilter = ''; accountSearchQuery = 'BETA'; renderAccounts();", context);
+  assert.equal(rows().length, 1, 'search is case-insensitive');
+  vm.runInContext("accountSearchQuery = 'nobody'; renderAccounts();", context);
+  assert.equal(rows().length, 0);
+  assert.match(node('accountsList').children[0].children[1].textContent, /没有符合筛选条件/);
+});
