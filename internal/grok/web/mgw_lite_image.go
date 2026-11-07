@@ -17,7 +17,7 @@ import (
 var errMGWLiteUnavailable = errors.New("grok mgw lite image unavailable")
 
 // mgwLiteTimeout bounds one MGW drawing.
-const mgwLiteTimeout = 90 * time.Second
+const mgwLiteTimeout = 60 * time.Second
 
 // mgwLiteResult is what one MGW lite drawing produced.
 type mgwLiteResult struct {
@@ -69,16 +69,25 @@ func (c *Client) liteImageViaMGW(ctx context.Context, userID, token, prompt stri
 	return result, true, err
 }
 
-// readMGWLiteImage reads MGW frames until the turn ends and returns its first
-// finished, unmoderated image. A usage-limit error is reported as LimitHit.
+// readMGWLiteImage reads MGW frames until the drawing arrives and returns
+// its first finished, unmoderated image. A usage-limit error is reported as
+// LimitHit.
 //
-// The image is looked for where grok2api looks: a card_attachment output,
-// then any finished image_chunk anywhere in a frame (also inside JSON-encoded
-// strings), then a Markdown image in the assistant text.
+// grok.com answers a lite drawing with a render_generated_image placeholder
+// and ends the text turn (response.done) before the picture exists, so once
+// a placeholder was seen the reader keeps listening after response.done. The
+// conversation.live.* frames are never searched: they carry the gallery and
+// the account's earlier pictures, which are not drawings of this prompt.
 func readMGWLiteImage(body io.Reader) (result mgwLiteResult, err error) {
 	diag := newMGWLiteDiagnostics()
 	defer func() { result.Diagnostics = diag.String() }()
 	var text strings.Builder
+	renderSeen, done := false, false
+	take := func(url, source string) {
+		if result.URL == "" && grokDrawnImage(url) {
+			result.URL, result.Source = url, source
+		}
+	}
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64<<10), mgwMaxFrameBytes+1)
 	for scanner.Scan() {
@@ -90,23 +99,24 @@ func readMGWLiteImage(body io.Reader) (result mgwLiteResult, err error) {
 		}
 		event := frame.Event
 		kind, _ := event["type"].(string)
-		diag.observe(kind, event)
-		if result.URL == "" {
-			if url := firstFinishedImage(event); grokDrawnImage(url) {
-				result.URL, result.Source = url, "chunk"
-			}
-		}
+		diag.observe(kind, event, done)
+		live := strings.HasPrefix(kind, "conversation.live.")
 		switch kind {
 		case "response.grok.output":
 			output, _ := event["output"].(map[string]any)
 			if streamError, _ := output["stream_error"].(map[string]any); streamError != nil {
 				return result, mgwEventError(streamError, &result)
 			}
-			if url := mgwCardImage(output["card_attachment"]); grokDrawnImage(url) && result.URL == "" {
-				result.URL, result.Source = url, "card"
-			}
+			take(mgwCardImage(output["card_attachment"]), "card")
 		case "response.chunk":
 			chunk, _ := event["chunk"].(map[string]any)
+			for _, key := range []string{"render_generated_image", "render_start"} {
+				if render, ok := chunk[key]; ok {
+					renderSeen = true
+					diag.sample("chunk."+key, render)
+					take(firstFinishedImage(render), "render")
+				}
+			}
 			textField, _ := chunk["text"].(map[string]any)
 			delta, _ := textField["text"].(string)
 			text.WriteString(delta)
@@ -116,21 +126,24 @@ func readMGWLiteImage(body io.Reader) (result mgwLiteResult, err error) {
 		case "error":
 			return result, mgwEventError(event, &result)
 		case "response.done":
-			if url := firstMarkdownImage(text.String()); result.URL == "" && grokDrawnImage(url) {
-				result.URL, result.Source = url, "markdown"
-			}
+			done = true
 			diag.text = text.String()
+			take(firstMarkdownImage(text.String()), "markdown")
 			response, _ := event["response"].(map[string]any)
 			if status, _ := response["status"].(string); status != "" && status != "completed" && result.URL == "" {
 				return result, fmt.Errorf("grok mgw response status %s", status)
 			}
+		}
+		if done && !live && kind != "response.done" {
+			diag.sample("after_done."+kind, event)
+			take(firstFinishedImage(event), "after_done:"+kind)
+		}
+		if result.URL != "" || (done && !renderSeen) {
 			return result, nil
 		}
 	}
 	diag.text = text.String()
-	if url := firstMarkdownImage(text.String()); result.URL == "" && grokDrawnImage(url) {
-		result.URL, result.Source = url, "markdown"
-	}
+	take(firstMarkdownImage(text.String()), "markdown")
 	if scanErr := scanner.Err(); scanErr != nil && result.URL == "" {
 		return result, scanErr
 	}
@@ -212,13 +225,36 @@ type mgwLiteDiagnostics struct {
 	outputKeys map[string]struct{}
 	chunkKeys  map[string]struct{}
 	text       string
+	samples    []string
 }
+
+// mgwSampleLimit bounds the frames quoted in one turn's log line.
+const (
+	mgwSampleLimit = 6
+	mgwSampleBytes = 700
+)
 
 func newMGWLiteDiagnostics() *mgwLiteDiagnostics {
 	return &mgwLiteDiagnostics{types: map[string]int{}, outputKeys: map[string]struct{}{}, chunkKeys: map[string]struct{}{}}
 }
 
-func (d *mgwLiteDiagnostics) observe(kind string, event map[string]any) {
+// sample quotes the start of one frame part. Asset URLs and IDs may appear;
+// credentials never travel in these frames.
+func (d *mgwLiteDiagnostics) sample(label string, value any) {
+	if len(d.samples) >= mgwSampleLimit {
+		return
+	}
+	raw, _ := json.Marshal(value)
+	if len(raw) > mgwSampleBytes {
+		raw = append(raw[:mgwSampleBytes], "…"...)
+	}
+	d.samples = append(d.samples, label+"="+string(raw))
+}
+
+func (d *mgwLiteDiagnostics) observe(kind string, event map[string]any, afterDone bool) {
+	if afterDone {
+		kind = "after_done:" + kind
+	}
 	d.types[kind]++
 	if output, ok := event["output"].(map[string]any); ok {
 		for key := range output {
@@ -250,7 +286,7 @@ func (d *mgwLiteDiagnostics) String() string {
 	if r := []rune(text); len(r) > 160 {
 		text = string(r[:160]) + "…"
 	}
-	return fmt.Sprintf("events[%s] output[%s] chunk[%s] text=%q", strings.Join(types, " "), keys(d.outputKeys), keys(d.chunkKeys), text)
+	return fmt.Sprintf("events[%s] output[%s] chunk[%s] text=%q samples[%s]", strings.Join(types, " "), keys(d.outputKeys), keys(d.chunkKeys), text, strings.Join(d.samples, " | "))
 }
 
 // mgwCardImage returns the finished image of a card_attachment (an object or

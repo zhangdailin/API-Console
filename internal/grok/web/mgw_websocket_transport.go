@@ -217,7 +217,14 @@ func streamMGW(ctx context.Context, connection *websocket.Conn, writer *io.PipeW
 			created = true
 		case "conversation.attached":
 			attached = true
-		case "response.done", "error":
+		case "response.done":
+			// A drawing outlives the text turn: grok.com ends the response with
+			// a render placeholder and delivers the picture afterwards. The
+			// reader closes the body once it has what it needs.
+			if !request.ImageGeneration {
+				return
+			}
+		case "error":
 			return
 		case "session.ended":
 			_ = writer.CloseWithError(fmt.Errorf("grok mgw session ended before response completion"))

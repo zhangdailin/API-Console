@@ -160,10 +160,10 @@ func TestReadMGWLiteImageFallbacks(t *testing.T) {
 		}
 		return strings.NewReader(b.String())
 	}
-	// A finished image_chunk outside card_attachment, inside a JSON string.
+	// A finished image_chunk in the render placeholder, inside a JSON string.
 	nested, _ := json.Marshal(map[string]any{"image_chunk": map[string]any{"imageUrl": "users/u/generated/n/image.jpg", "progress": 100}})
 	result, err := readMGWLiteImage(frames(
-		map[string]any{"type": "response.chunk", "chunk": map[string]any{"card": string(nested)}},
+		map[string]any{"type": "response.chunk", "chunk": map[string]any{"render_generated_image": map[string]any{"data": string(nested)}}},
 		map[string]any{"type": "response.done", "response": map[string]any{"status": "completed"}},
 	))
 	testutil.NoError(t, err)
@@ -207,4 +207,44 @@ func TestReadMGWLiteImageIgnoresPicturesFromTheWeb(t *testing.T) {
 func TestImageURLShapeElidesIdentifiers(t *testing.T) {
 	testutil.Equal(t, imageURLShape("https://assets.grok.com/users/0f8e2c1a-1b2c-4d5e-8f90-123456789abc/generated/a1b2c3d4-5e6f-7a8b-9c0d-112233445566/image.jpg"), "assets.grok.com/users/…/generated/…/image.jpg")
 	testutil.Equal(t, imageURLShape(""), "")
+}
+
+func mgwFrames(events ...map[string]any) *strings.Reader {
+	var b strings.Builder
+	for _, e := range events {
+		raw, _ := json.Marshal(map[string]any{"event": e})
+		b.Write(raw)
+		b.WriteByte('\n')
+	}
+	return strings.NewReader(b.String())
+}
+
+func finishedChunk(path string) map[string]any {
+	return map[string]any{"image_chunk": map[string]any{"imageUrl": path, "progress": 100}}
+}
+
+// The session snapshot carries pictures that are not this drawing (the
+// gallery, the account's history); on production they were returned for
+// "一只红苹果放在桌上" as a cat, a lake and an autumn path.
+func TestReadMGWLiteImageIgnoresTheSessionSnapshot(t *testing.T) {
+	result, err := readMGWLiteImage(mgwFrames(
+		map[string]any{"type": "conversation.live.snapshot", "items": []any{finishedChunk("users/u/generated/old-cat/image.jpg")}},
+		map[string]any{"type": "conversation.live.updated", "items": []any{finishedChunk("users/u/generated/old-lake/image.jpg")}},
+		map[string]any{"type": "response.done", "response": map[string]any{"status": "completed"}},
+	))
+	testutil.NoError(t, err)
+	testutil.Equal(t, result.URL, "")
+}
+
+// The drawing arrives after the text turn ended with a render placeholder.
+func TestReadMGWLiteImageWaitsPastResponseDoneForTheDrawing(t *testing.T) {
+	result, err := readMGWLiteImage(mgwFrames(
+		map[string]any{"type": "response.chunk", "chunk": map[string]any{"render_generated_image": map[string]any{"status": "pending"}}},
+		map[string]any{"type": "response.done", "response": map[string]any{"status": "completed"}},
+		map[string]any{"type": "conversation.live.updated", "items": []any{finishedChunk("users/u/generated/old/image.jpg")}},
+		map[string]any{"type": "response.grok.output", "output": map[string]any{"card_attachment": map[string]any{"jsonData": `{"image_chunk":{"imageUrl":"users/u/generated/apple/image.jpg","progress":100}}`}}},
+	))
+	testutil.NoError(t, err)
+	testutil.Equal(t, result.URL, "https://assets.grok.com/users/u/generated/apple/image.jpg")
+	testutil.MustContain(t, result.Diagnostics, "chunk.render_generated_image")
 }
