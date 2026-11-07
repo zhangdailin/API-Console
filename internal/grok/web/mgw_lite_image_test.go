@@ -187,3 +187,24 @@ func TestReadMGWLiteImageFallbacks(t *testing.T) {
 	testutil.MustContain(t, result.Diagnostics, "response.chunk=1")
 	testutil.MustContain(t, result.Diagnostics, "I can't draw that.")
 }
+
+func TestReadMGWLiteImageIgnoresPicturesFromTheWeb(t *testing.T) {
+	var b strings.Builder
+	for _, e := range []map[string]any{
+		{"type": "response.chunk", "chunk": map[string]any{"text": map[string]any{"text": "![image](https://upload.example.org/landscape.jpg)"}}},
+		{"type": "response.done", "response": map[string]any{"status": "completed"}},
+	} {
+		raw, _ := json.Marshal(map[string]any{"event": e})
+		b.Write(raw)
+		b.WriteByte('\n')
+	}
+	result, err := readMGWLiteImage(strings.NewReader(b.String()))
+	testutil.NoError(t, err)
+	testutil.Equal(t, result.URL, "")
+	testutil.MustContain(t, result.Diagnostics, "landscape.jpg")
+}
+
+func TestImageURLShapeElidesIdentifiers(t *testing.T) {
+	testutil.Equal(t, imageURLShape("https://assets.grok.com/users/0f8e2c1a-1b2c-4d5e-8f90-123456789abc/generated/a1b2c3d4-5e6f-7a8b-9c0d-112233445566/image.jpg"), "assets.grok.com/users/…/generated/…/image.jpg")
+	testutil.Equal(t, imageURLShape(""), "")
+}

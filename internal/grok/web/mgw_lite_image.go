@@ -25,10 +25,18 @@ type mgwLiteResult struct {
 	URL string
 	// LimitHit reports grok.com refusing the turn for a usage limit.
 	LimitHit bool
-	// Diagnostics summarizes a turn that drew nothing: the event types, the
-	// output fields and the start of the assistant text. It names what the
-	// gateway sent without any credential.
+	// Source names where the image was found: card, chunk or markdown.
+	Source string
+	// Diagnostics summarizes the turn: the event types, the output and chunk
+	// fields and the start of the assistant text. It names what the gateway
+	// sent without any credential.
 	Diagnostics string
+}
+
+// grokDrawnImage reports an image grok.com itself hosts. A picture the chat
+// linked from the web (a search result) is not a drawing of the prompt.
+func grokDrawnImage(url string) bool {
+	return url != "" && isGrokHostedAssetURL(url)
 }
 
 // liteImageViaMGW draws one lite image through grok.com's MGW websocket
@@ -69,11 +77,7 @@ func (c *Client) liteImageViaMGW(ctx context.Context, userID, token, prompt stri
 // strings), then a Markdown image in the assistant text.
 func readMGWLiteImage(body io.Reader) (result mgwLiteResult, err error) {
 	diag := newMGWLiteDiagnostics()
-	defer func() {
-		if result.URL == "" {
-			result.Diagnostics = diag.String()
-		}
-	}()
+	defer func() { result.Diagnostics = diag.String() }()
 	var text strings.Builder
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64<<10), mgwMaxFrameBytes+1)
@@ -88,8 +92,8 @@ func readMGWLiteImage(body io.Reader) (result mgwLiteResult, err error) {
 		kind, _ := event["type"].(string)
 		diag.observe(kind, event)
 		if result.URL == "" {
-			if url := firstFinishedImage(event); url != "" {
-				result.URL = url
+			if url := firstFinishedImage(event); grokDrawnImage(url) {
+				result.URL, result.Source = url, "chunk"
 			}
 		}
 		switch kind {
@@ -98,8 +102,8 @@ func readMGWLiteImage(body io.Reader) (result mgwLiteResult, err error) {
 			if streamError, _ := output["stream_error"].(map[string]any); streamError != nil {
 				return result, mgwEventError(streamError, &result)
 			}
-			if url := mgwCardImage(output["card_attachment"]); url != "" && result.URL == "" {
-				result.URL = url
+			if url := mgwCardImage(output["card_attachment"]); grokDrawnImage(url) && result.URL == "" {
+				result.URL, result.Source = url, "card"
 			}
 		case "response.chunk":
 			chunk, _ := event["chunk"].(map[string]any)
@@ -112,8 +116,8 @@ func readMGWLiteImage(body io.Reader) (result mgwLiteResult, err error) {
 		case "error":
 			return result, mgwEventError(event, &result)
 		case "response.done":
-			if result.URL == "" {
-				result.URL = firstMarkdownImage(text.String())
+			if url := firstMarkdownImage(text.String()); result.URL == "" && grokDrawnImage(url) {
+				result.URL, result.Source = url, "markdown"
 			}
 			diag.text = text.String()
 			response, _ := event["response"].(map[string]any)
@@ -124,8 +128,8 @@ func readMGWLiteImage(body io.Reader) (result mgwLiteResult, err error) {
 		}
 	}
 	diag.text = text.String()
-	if result.URL == "" {
-		result.URL = firstMarkdownImage(text.String())
+	if url := firstMarkdownImage(text.String()); result.URL == "" && grokDrawnImage(url) {
+		result.URL, result.Source = url, "markdown"
 	}
 	if scanErr := scanner.Err(); scanErr != nil && result.URL == "" {
 		return result, scanErr
