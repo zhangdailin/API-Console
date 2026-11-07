@@ -75,3 +75,29 @@ test('hosted search tools are only sent to routes that support them', () => {
   chatState.model = 'grok-4.7';
   assert.deepEqual(JSON.parse(JSON.stringify(buildResponsesPayload().tools)), [{ type: 'web_search' }, { type: 'x_search' }]);
 });
+
+// The video and voice tabs were rebuilt; every element the scripts look up by
+// id must still be in the page, or the tab silently stops reacting.
+test('the rebuilt video and voice tabs keep every element their scripts use', () => {
+  const page = fs.readFileSync(path.join(__dirname, 'templates/pages/grok-tools.html'), 'utf8');
+  const ids = new Set([...page.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]));
+  const missing = new Set();
+  for (const file of ['grok-tools.js', 'grok-imagine.js']) {
+    const script = fs.readFileSync(path.join(__dirname, 'static/js', file), 'utf8');
+    for (const m of script.matchAll(/getElementById\(\s*["'`]((?:video|voice)[A-Za-z]+)["'`]\s*\)/g)) {
+      if (!ids.has(m[1])) missing.add(m[1]);
+    }
+  }
+  assert.deepEqual([...missing], []);
+});
+
+test('chat suggestion chips carry the prompt they fill in', () => {
+  const page = fs.readFileSync(path.join(__dirname, 'templates/pages/grok-tools.html'), 'utf8');
+  const empty = page.slice(page.indexOf('id="grokChatEmpty"'));
+  const chips = [...empty.matchAll(/data-chat-suggestion="([^"]*)"/g)].map((m) => m[1]);
+  assert.ok(chips.length >= 2);
+  for (const prompt of chips) assert.ok(prompt.trim().length > 0);
+  const script = fs.readFileSync(path.join(__dirname, 'static/js/grok-tools.js'), 'utf8');
+  assert.match(script, /closest\?\.\("\[data-chat-suggestion\]"\)/);
+  assert.match(script, /input\.value = suggestion\.dataset\.chatSuggestion/);
+});

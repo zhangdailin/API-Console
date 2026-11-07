@@ -2326,6 +2326,16 @@
     const webSearch = document.getElementById("grokWebSearch");
     const xSearch = document.getElementById("grokXSearch");
 
+    // The welcome screen's example prompts fill the composer; the user still
+    // reviews and sends them.
+    document.getElementById("grokChatLog")?.addEventListener("click", (event) => {
+      const suggestion = event.target?.closest?.("[data-chat-suggestion]");
+      if (!suggestion || !input) return;
+      input.value = suggestion.dataset.chatSuggestion || "";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.focus();
+    });
+
     if (newBtn) newBtn.addEventListener("click", () => {
       newChatSession();
       if (isMobileChatSidebar()) {
