@@ -117,6 +117,8 @@ type Account struct {
 	OAuthRefreshToken string    `json:"oauth_refresh_token,omitempty"`
 	OAuthExpiresAt    time.Time `json:"oauth_expires_at"`
 	TeamID            string    `json:"team_id,omitempty"`
+	// GrokRefresh is the scheduled OAuth refresh outcome (backoff, last error code).
+	GrokRefresh GrokRefreshState `json:"grok_refresh"`
 	// GrokProvider identifies the xAI product boundary: "build" (OAuth CLI) or
 	// "web" (grok.com SSO cookie, held in ClientCookie).
 	GrokProvider string `json:"grok_provider,omitempty"`

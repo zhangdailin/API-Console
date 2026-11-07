@@ -128,6 +128,11 @@ func (p accountPatch) mergeGrokCredentials() {
 	u.OAuthAccessToken = acc.OAuthAccessToken
 	u.OAuthRefreshToken = acc.OAuthRefreshToken
 	u.OAuthExpiresAt = acc.OAuthExpiresAt
+	// The refresh outcome is written by the scheduler; an unrelated partial
+	// update carries a zero or older state and must not erase a backoff.
+	if !acc.GrokRefresh.UpdatedAt.IsZero() && !acc.GrokRefresh.UpdatedAt.Before(existing.GrokRefresh.UpdatedAt) {
+		u.GrokRefresh = acc.GrokRefresh
+	}
 	if strings.TrimSpace(acc.TeamID) == "" {
 		u.TeamID = existing.TeamID
 	} else {

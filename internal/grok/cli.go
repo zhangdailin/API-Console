@@ -565,10 +565,13 @@ func classifyAccountStatusFromHTTP(status int) string {
 }
 
 // cliOAuthError is a lightweight wrapper so VerifyAccount can surface the
-// upstream status of a failed refresh.
+// upstream status of a failed refresh. code is the OAuth error code and class
+// how it was classified (see classifyCLIOAuthError).
 type cliOAuthError struct {
 	status  int
 	message string
+	code    string
+	class   string
 }
 
 func (e *cliOAuthError) Error() string {
@@ -579,6 +582,12 @@ func (e *cliOAuthError) Error() string {
 }
 func (e *cliOAuthError) Status() string {
 	if e == nil || e.status == 0 {
+		return ""
+	}
+	// Only a refused grant is a verdict on the credential. A configuration or
+	// unclassified 4xx says nothing about this account, so it reports no
+	// credential status and is handled as an ordinary failure.
+	if e.class != "" && e.class != cliOAuthPermanent && e.status >= 400 && e.status < 500 && e.status != http.StatusTooManyRequests {
 		return ""
 	}
 	return fmt.Sprintf("%d", e.status)

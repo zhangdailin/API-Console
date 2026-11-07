@@ -143,12 +143,16 @@ func refreshCLIAccount(ctx context.Context, cfg *config.Config, s *store.Store, 
 	NormalizeProvider(acc)
 	cliClient := NewCLIClient(cfg)
 	cliClient.SetAccountStore(s)
-	if strings.TrimSpace(acc.OAuthAccessToken) == "" || acc.OAuthExpiresAt.IsZero() || time.Until(acc.OAuthExpiresAt) <= 5*time.Minute {
+	if cliRefreshDue(acc, time.Now()) {
 		refreshCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		token, err := cliClient.OAuthAccessToken(refreshCtx, acc)
+		// Force: a due token is inside its jittered lead, which may be wider
+		// than the OAuth layer's own skew, so its validity shortcut must not
+		// answer for it.
+		token, err := cliClient.oauth.ForceRefresh(refreshCtx, acc)
 		cancel()
 		if err != nil {
-			if IsCLIPermanentOAuthError(err) {
+			reauth := recordCLIRefreshFailure(acc, err, time.Now())
+			if reauth {
 				acc.StatusCode = "401"
 				acc.AuthStatus = store.AccountAuthStatusReauthRequired
 				acc.StatusMessage = "上游已不接受该 OAuth 授权（refresh token 被拒绝），需要重新登录"
@@ -166,13 +170,20 @@ func refreshCLIAccount(ctx context.Context, cfg *config.Config, s *store.Store, 
 					"token_fingerprint", TokenFingerprint(acc.OAuthRefreshToken),
 					"error", err)
 			} else {
-				slog.Warn("Auto refresh grok cli token failed", "account_id", acc.ID, "error", err)
+				slog.Warn("Auto refresh grok cli token failed; backing off",
+					"account_id", acc.ID,
+					"error_class", acc.GrokRefresh.ErrorClass,
+					"error_code", acc.GrokRefresh.ErrorCode,
+					"failures", acc.GrokRefresh.Failures,
+					"retry_at", acc.GrokRefresh.RetryAt,
+					"error", err)
 			}
 			if updateErr := s.UpdateAccount(ctx, acc); updateErr != nil {
 				slog.Warn("Auto refresh grok cli: update account failed", "account_id", acc.ID, "error", updateErr)
 			}
 			return
 		}
+		recordCLIRefreshSuccess(acc, time.Now())
 		if token != "" {
 			acc.OAuthAccessToken = token
 			acc.AuthStatus = store.AccountAuthStatusActive

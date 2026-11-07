@@ -53,8 +53,10 @@ func (h *Handler) markAccountStatus(ctx context.Context, acc *store.Account, err
 	if status := upstreamStatus(err); status >= 400 && status < 500 && status != 401 && status != 402 && status != 403 && status != 429 {
 		return
 	}
-	var oauthErr *cliOAuthError
-	if errors.As(err, &oauthErr) && oauthErr.status == http.StatusUnauthorized && acc != nil {
+	// Only a refused refresh grant retires the stored credential. A 401 from a
+	// misconfigured client or an unexplained refusal used to wipe the tokens
+	// too, which turned one bad configuration into a re-login for every account.
+	if IsCLIPermanentOAuthError(err) && acc != nil {
 		acc.OAuthAccessToken = ""
 		acc.OAuthRefreshToken = ""
 		acc.OAuthExpiresAt = time.Time{}
