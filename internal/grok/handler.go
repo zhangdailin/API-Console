@@ -43,10 +43,7 @@ type Handler struct {
 	web *web.Handler
 	webDispatch
 
-	quotaOnce    sync.Once
-	quotaMu      sync.Mutex
-	quotaPending map[int64]grokQuotaSyncJob
-	quotaWake    chan struct{}
+	quota grokbase.QuotaQueue
 }
 
 type chatAccountSession struct {

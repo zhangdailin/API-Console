@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/testutil"
 	"strings"
 	"testing"
@@ -24,7 +25,7 @@ func TestUnifiedHTTPResponseLifecycle(t *testing.T) {
 			_ = writer.Close()
 			released := 0
 			resp, err := doUpstreamHTTP(req, func(*http.Request) (*http.Response, error) {
-				return &http.Response{StatusCode: status, Header: http.Header{"Content-Encoding": {"gzip"}, "Retry-After": {"7"}}, Body: &leaseResponseBody{ReadCloser: io.NopCloser(&compressed), release: func() { released++ }}}, nil
+				return &http.Response{StatusCode: status, Header: http.Header{"Content-Encoding": {"gzip"}, "Retry-After": {"7"}}, Body: &grokbase.LeaseBody{ReadCloser: io.NopCloser(&compressed), Release: func() { released++ }}}, nil
 			}, time.Second)
 			testutil.NoError(t, err)
 			body, err := io.ReadAll(resp.Body)
@@ -34,7 +35,7 @@ func TestUnifiedHTTPResponseLifecycle(t *testing.T) {
 	}
 	released := 0
 	resp, err := doUpstreamHTTP(req, func(*http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Encoding": {"gzip"}}, Body: &leaseResponseBody{ReadCloser: io.NopCloser(strings.NewReader("invalid gzip")), release: func() { released++ }}}, nil
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Encoding": {"gzip"}}, Body: &grokbase.LeaseBody{ReadCloser: io.NopCloser(strings.NewReader("invalid gzip")), Release: func() { released++ }}}, nil
 	}, 0)
 	testutil.Falsef(t, resp != nil || err == nil || released != 1, "decode failure leaked response: resp=%v err=%v released=%d", resp, err, released)
 	wantErr := errors.New("transport failure")

@@ -5,8 +5,8 @@ package grok
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"io"
+	"orchids-api/internal/grok/grokbase"
 	"strings"
 	"sync"
 	"time"
@@ -16,7 +16,7 @@ import (
 // producing generated output". It is exported so callers can classify the
 // condition with errors.Is and answer each protocol with its own dedicated
 // code instead of a generic stream read/parse error.
-var ErrGrokSemanticIdle = errors.New("upstream stream idle timeout")
+var ErrGrokSemanticIdle = grokbase.ErrStreamIdle
 
 // errGrokSemanticIdle is kept as an alias so the ported file's internals, its
 // tests and any existing string matchers keep working unchanged.

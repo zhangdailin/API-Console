@@ -19,6 +19,7 @@ import (
 	"orchids-api/internal/config"
 	"orchids-api/internal/debug"
 	"orchids-api/internal/grok/egress"
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/store"
 	"orchids-api/internal/upstream"
 	"orchids-api/internal/util"
@@ -76,15 +77,6 @@ func (c *CLIClient) baseURL() string {
 		return c.cfg.GrokCLIBaseURLOrDefault()
 	}
 	return defaultCLIBaseURL
-}
-
-// OAuthAccessToken returns a valid access token for the account, refreshing it
-// in memory when needed. Callers persist the mutated account fields.
-func (c *CLIClient) OAuthAccessToken(ctx context.Context, acc *store.Account) (string, error) {
-	if c == nil || c.oauth == nil {
-		return "", fmt.Errorf("grok cli oauth not configured")
-	}
-	return c.oauth.AccessToken(ctx, acc)
 }
 
 // cliHeaders builds the Build CLI request headers for an OAuth account.
@@ -542,7 +534,7 @@ func (c *CLIClient) doCLIRequest(ctx context.Context, acc *store.Account, req *h
 		c.egress.FeedbackOutcome(lease.NodeID, egress.OutcomeForbidden)
 	}
 	if resp != nil && resp.Body != nil {
-		resp.Body = &leaseResponseBody{ReadCloser: resp.Body, release: lease.Release}
+		resp.Body = &grokbase.LeaseBody{ReadCloser: resp.Body, Release: lease.Release}
 	} else {
 		lease.Release()
 	}

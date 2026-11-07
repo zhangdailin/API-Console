@@ -6,41 +6,23 @@ import (
 	"net/http"
 	"orchids-api/internal/accountpolicy"
 	apperrors "orchids-api/internal/errors"
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/grok/ratelimit"
-	"orchids-api/internal/loadbalancer"
 	"orchids-api/internal/store"
 	"strings"
 	"time"
 )
 
 func (h *Handler) accountCapacityAvailable(acc *store.Account) bool {
-	tracker := h.connTrackerSnapshot()
-	limit := loadbalancer.EffectiveAccountConcurrencyLimit(acc)
-	if acc == nil || limit <= 0 || tracker == nil {
-		return true
-	}
-	return tracker.GetCount(acc.ID) < limit
+	return grokbase.AccountCapacityAvailable(h.connTrackerSnapshot(), acc)
 }
 
 func (h *Handler) reserveAccount(acc *store.Account) (func(), bool) {
-	tracker := h.connTrackerSnapshot()
-	if tracker == nil || acc == nil || acc.ID == 0 {
-		if h != nil && h.base != nil {
-			return h.base.TrackAccount(acc), true
-		}
-		return func() {}, true
+	var base *grokbase.AccountTracker
+	if h != nil {
+		base = h.base
 	}
-	if limiter, ok := tracker.(loadbalancer.LimitedConnTracker); ok {
-		if !limiter.TryAcquire(acc.ID, loadbalancer.EffectiveAccountConcurrencyLimit(acc)) {
-			return func() {}, false
-		}
-	} else {
-		if !h.accountCapacityAvailable(acc) {
-			return func() {}, false
-		}
-		tracker.Acquire(acc.ID)
-	}
-	return func() { tracker.Release(acc.ID) }, true
+	return base.Reserve(h.connTrackerSnapshot(), acc)
 }
 
 func (h *Handler) markAccountStatus(ctx context.Context, acc *store.Account, err error) {

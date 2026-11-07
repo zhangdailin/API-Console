@@ -45,3 +45,33 @@ func (b *AccountTracker) MarkAccountStatus(ctx context.Context, acc *store.Accou
 func NewAccountTracker(lb *loadbalancer.LoadBalancer) *AccountTracker {
 	return &AccountTracker{LB: lb}
 }
+
+// AccountCapacityAvailable reports whether acc has a free connection slot on
+// tracker. Without a tracker or a limit every account has capacity.
+func AccountCapacityAvailable(tracker loadbalancer.ConnTracker, acc *store.Account) bool {
+	limit := loadbalancer.EffectiveAccountConcurrencyLimit(acc)
+	if acc == nil || limit <= 0 || tracker == nil {
+		return true
+	}
+	return tracker.GetCount(acc.ID) < limit
+}
+
+// Reserve takes a connection slot for acc on tracker and returns its release.
+// It reports false when the account is at its concurrency limit. Without a
+// tracker the slot is taken on the load balancer instead.
+func (b *AccountTracker) Reserve(tracker loadbalancer.ConnTracker, acc *store.Account) (func(), bool) {
+	if tracker == nil || acc == nil || acc.ID == 0 {
+		return b.TrackAccount(acc), true
+	}
+	if limiter, ok := tracker.(loadbalancer.LimitedConnTracker); ok {
+		if !limiter.TryAcquire(acc.ID, loadbalancer.EffectiveAccountConcurrencyLimit(acc)) {
+			return func() {}, false
+		}
+	} else {
+		if !AccountCapacityAvailable(tracker, acc) {
+			return func() {}, false
+		}
+		tracker.Acquire(acc.ID)
+	}
+	return func() { tracker.Release(acc.ID) }, true
+}

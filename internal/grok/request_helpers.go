@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sync"
-	"sync/atomic"
+	"orchids-api/internal/grok/grokbase"
+	"orchids-api/internal/httpclient"
 	"time"
 )
 
@@ -29,7 +29,7 @@ func doUpstreamHTTP(req *http.Request, do func(*http.Request) (*http.Response, e
 		}
 		return nil, err
 	}
-	if err := decodeHTTPResponseBody(resp); err != nil {
+	if err := httpclient.DecodeContentEncoding(resp); err != nil {
 		_ = resp.Body.Close()
 		return nil, fmt.Errorf("grok upstream decode failed: %w", err)
 	}
@@ -41,7 +41,7 @@ func doUpstreamHTTP(req *http.Request, do func(*http.Request) (*http.Response, e
 		if mode == upstreamIdleBuildSemantic {
 			resp.Body = wrapBuildSemanticIdle(resp.Body, idle)
 		} else {
-			resp.Body = wrapByteIdle(resp.Body, idle)
+			resp.Body = grokbase.WrapByteIdle(resp.Body, idle)
 		}
 	}
 	if resp.Body != nil {
@@ -61,65 +61,4 @@ func (b *deadlineCauseBody) Read(p []byte) (int, error) {
 		return n, context.DeadlineExceeded
 	}
 	return n, err
-}
-
-// byteIdleReadCloser resets its deadline for every upstream byte. Closing the
-// body unblocks HTTP transport reads without imposing a connection-wide limit.
-type byteIdleReadCloser struct {
-	inner     io.ReadCloser
-	idle      time.Duration
-	timer     *time.Timer
-	timedOut  atomic.Bool
-	closeOnce sync.Once
-	closeErr  error
-}
-
-func wrapByteIdle(body io.ReadCloser, idle time.Duration) io.ReadCloser {
-	if body == nil || idle <= 0 {
-		return body
-	}
-	r := &byteIdleReadCloser{inner: body, idle: idle}
-	r.timer = time.AfterFunc(idle, func() { r.timedOut.Store(true); _ = r.closeInner() })
-	return r
-}
-
-func (r *byteIdleReadCloser) Read(p []byte) (int, error) {
-	n, err := r.inner.Read(p)
-	if n > 0 && !r.timedOut.Load() {
-		r.timer.Reset(r.idle)
-	}
-	if err != nil && r.timedOut.Load() {
-		return n, ErrGrokSemanticIdle
-	}
-	return n, err
-}
-
-func (r *byteIdleReadCloser) Close() error {
-	if r.timer != nil {
-		r.timer.Stop()
-	}
-	return r.closeInner()
-}
-
-func (r *byteIdleReadCloser) closeInner() error {
-	r.closeOnce.Do(func() { r.closeErr = r.inner.Close() })
-	return r.closeErr
-}
-
-func (r *byteIdleReadCloser) TimedOut() bool { return r.timedOut.Load() }
-
-// leaseResponseBody wraps an upstream response body so the egress lease is
-// released when the body is closed (or discarded), on every exit path.
-type leaseResponseBody struct {
-	io.ReadCloser
-	release func()
-}
-
-func (b *leaseResponseBody) Close() error {
-	err := b.ReadCloser.Close()
-	if b.release != nil {
-		b.release()
-		b.release = nil
-	}
-	return err
 }

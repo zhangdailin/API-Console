@@ -3,19 +3,13 @@ package grok
 // Shared HTTP plumbing for Grok Build and account bookkeeping.
 
 import (
-	"compress/flate"
-	"compress/gzip"
 	"crypto/sha256"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"orchids-api/internal/httpclient"
 	"strings"
 	"time"
-
-	"github.com/andybalholm/brotli"
-	"github.com/klauspost/compress/zstd"
 
 	"orchids-api/internal/config"
 )
@@ -28,76 +22,6 @@ func newHTTPClient(cfg *config.Config, timeout time.Duration, proxyFunc func(*ht
 	}
 
 	return httpclient.GetSharedBrowserHTTPClientWithHeaderTimeout(proxyKey, timeout, 0, proxyFunc)
-}
-
-// decodeHTTPResponseBody transparently decodes a compressed upstream body and
-// leaves the response reading plaintext.
-func decodeHTTPResponseBody(resp *http.Response) error {
-	if resp == nil || resp.Body == nil {
-		return nil
-	}
-	encoding := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Encoding")))
-	if idx := strings.Index(encoding, ","); idx >= 0 {
-		encoding = strings.TrimSpace(encoding[:idx])
-	}
-	if encoding == "" || encoding == "identity" {
-		return nil
-	}
-
-	original := resp.Body
-	var (
-		reader  io.Reader
-		closers []io.Closer
-	)
-	switch encoding {
-	case "gzip":
-		gz, err := gzip.NewReader(original)
-		if err != nil {
-			return err
-		}
-		reader = gz
-		closers = append(closers, gz)
-	case "deflate":
-		fr := flate.NewReader(original)
-		reader = fr
-		closers = append(closers, fr)
-	case "br":
-		reader = brotli.NewReader(original)
-	case "zstd":
-		zr, err := zstd.NewReader(original)
-		if err != nil {
-			return err
-		}
-		reader = zr
-		closers = append(closers, closeFunc(func() error { zr.Close(); return nil }))
-	default:
-		return nil
-	}
-	closers = append(closers, original)
-	resp.Body = responseBodyCloser{Reader: reader, closers: closers}
-	resp.Header.Del("Content-Encoding")
-	resp.Header.Del("Content-Length")
-	resp.ContentLength = -1
-	return nil
-}
-
-type responseBodyCloser struct {
-	io.Reader
-	closers []io.Closer
-}
-
-type closeFunc func() error
-
-func (fn closeFunc) Close() error { return fn() }
-
-func (r responseBodyCloser) Close() error {
-	var firstErr error
-	for _, closer := range r.closers {
-		if err := closer.Close(); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	return firstErr
 }
 
 // TokenFingerprint is a short, non-reversible digest of a credential, used in

@@ -5,80 +5,40 @@ import (
 	"log/slog"
 	"net/http"
 	"orchids-api/internal/accountpolicy"
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/grok/ratelimit"
 	"orchids-api/internal/store"
 	"time"
 )
 
-type grokQuotaSyncJob struct {
-	account  store.Account
-	headers  http.Header
-	requests int64
-}
-
 func (h *Handler) syncGrokQuota(acc *store.Account, headers http.Header) {
 	if acc == nil || h == nil || h.lb == nil || h.lb.Store == nil {
 		return
 	}
-	h.quotaOnce.Do(func() {
-		h.quotaPending = make(map[int64]grokQuotaSyncJob)
-		h.quotaWake = make(chan struct{}, 1)
-		go h.runGrokQuotaSync()
-	})
-	h.quotaMu.Lock()
-	job := h.quotaPending[acc.ID]
-	job.account = *acc
-	job.headers = headers.Clone()
-	job.requests++
-	h.quotaPending[acc.ID] = job
-	h.quotaMu.Unlock()
-	select {
-	case h.quotaWake <- struct{}{}:
-	default:
-	}
+	h.quota.Enqueue(acc, headers, h.persistGrokQuotaSync)
 }
 
-func (h *Handler) runGrokQuotaSync() {
-	for range h.quotaWake {
-		for {
-			h.quotaMu.Lock()
-			var accountID int64
-			var job grokQuotaSyncJob
-			for id, pending := range h.quotaPending {
-				accountID, job = id, pending
-				delete(h.quotaPending, id)
-				break
-			}
-			h.quotaMu.Unlock()
-			if accountID == 0 {
-				break
-			}
-			h.persistGrokQuotaSync(job)
-		}
-	}
-}
-
-func (h *Handler) persistGrokQuotaSync(job grokQuotaSyncJob) {
+func (h *Handler) persistGrokQuotaSync(job grokbase.QuotaJob) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := h.lb.Store.IncrementAccountStats(ctx, job.account.ID, 0, job.requests); err != nil {
-		slog.Warn("grok usage touch failed", "account_id", job.account.ID, "error", err)
+	if err := h.lb.Store.IncrementAccountStats(ctx, job.Account.ID, 0, job.Requests); err != nil {
+		slog.Warn("grok usage touch failed", "account_id", job.Account.ID, "error", err)
 	}
 
-	headers := job.headers
+	headers := job.Headers
 	info := ratelimit.ParseHeaders(headers)
 	requests := parseBuildRateLimitWindow(headers, "requests")
 	tokens := parseBuildRateLimitWindow(headers, "tokens")
 	hasBuildHeaders := requests.HasLimit || requests.HasRemaining || !requests.ResetAt.IsZero() || tokens.HasLimit || tokens.HasRemaining || !tokens.ResetAt.IsZero()
 	if info == nil && !hasBuildHeaders {
-		if _, err := h.lb.Store.ConsumeGrokQuota(ctx, job.account.ID, ProviderBuild, float64(job.requests)); err != nil {
-			slog.Warn("grok local quota decrement failed", "account_id", job.account.ID, "error", err)
+		if _, err := h.lb.Store.ConsumeGrokQuota(ctx, job.Account.ID, ProviderBuild, float64(job.Requests)); err != nil {
+			slog.Warn("grok local quota decrement failed", "account_id", job.Account.ID, "error", err)
 		}
 		return
 	}
-	latest, err := h.lb.Store.GetAccount(ctx, job.account.ID)
+	latest, err := h.lb.Store.GetAccount(ctx, job.Account.ID)
 	if err != nil || latest == nil {
-		slog.Warn("grok quota account reload failed", "account_id", job.account.ID, "error", err)
+		slog.Warn("grok quota account reload failed", "account_id", job.Account.ID, "error", err)
 		return
 	}
 	NormalizeProvider(latest)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"orchids-api/internal/httpclient"
 	"strings"
 	"time"
 )
@@ -149,7 +150,7 @@ func (c *Client) FetchSessionIdentity(ctx context.Context, token string) (Accoun
 		defer leaseRelease()
 	}
 	defer resp.Body.Close()
-	if err := decodeHTTPResponseBody(resp); err != nil {
+	if err := httpclient.DecodeContentEncoding(resp); err != nil {
 		return AccountIdentity{}, fmt.Errorf("decode grok session response: %w", err)
 	}
 
