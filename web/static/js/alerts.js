@@ -131,7 +131,7 @@
     const preview = el('alertsPreview');
     const problem = validate(rules);
     if (note) {
-      note.textContent = problem || '规则合法，保存后立即用于下一次评估。';
+      note.textContent = problem || '';
       note.classList.toggle('is-error-text', Boolean(problem));
     }
     if (!preview) return;
@@ -147,24 +147,6 @@
     rows.forEach((line) => preview.appendChild(make('p', 'alerts-preview-line', line)));
   }
 
-  function renderHelp() {
-    const help = el('alertsHelp');
-    if (!help) return;
-    const items = [
-      ['判定依据', '每个渠道的窗口统计（真实请求数、失败数、成功率、账号池可用性）由运维聚合提供，"http" 与 "probe" 这类基础设施聚合不参与告警。'],
-      ['何时生效', '保存后写入设置并立刻交给引擎；下一次评估按新阈值判定。正在告警的条目保持原状，避免改阈值造成一次虚假的“恢复 + 再告警”。'],
-      ['恢复闭环', '触发与恢复都会写入系统日志（alert_fired / alert_recovered），因此“告警”和“恢复”在日志中心里成对出现。'],
-      ['只读部署', '没有 Redis 的部署没有告警引擎，本页会说明原因而不是显示一个空表单。'],
-    ];
-    help.replaceChildren();
-    items.forEach(([title, body]) => {
-      help.appendChild(attach(make('div', 'alerts-help-row'), [
-        make('strong', '', title),
-        make('span', '', body),
-      ]));
-    });
-  }
-
   // --- load ------------------------------------------------------------------
   async function loadRules() {
     if (ruleSave.busy) return;
@@ -177,7 +159,6 @@
       state.defaults = payload.defaults || {};
       state.editable = payload.editable !== false;
       renderFields();
-      renderHelp();
       renderPreview();
       const editable = el('alertsSave');
       if (editable) editable.disabled = !state.editable;
@@ -245,7 +226,7 @@
         return action === 'alert_fired' || action === 'alert_recovered';
       });
       if (!rows.length) {
-        eventMessage(body, '保留窗口内没有触发记录。');
+        eventMessage(body, '没有触发记录。');
         return;
       }
       rows.forEach((record) => {

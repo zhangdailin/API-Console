@@ -20,7 +20,6 @@ test('the overview page carries the filters the design calls for', () => {
   assert.match(page, /id="opsThroughput"/, 'missing trend chart container');
   assert.match(page, /id="opsMatrix"/, 'missing channel × model matrix');
   assert.match(page, /id="opsAlertTable"/, 'missing alert table');
-  assert.match(page, /id="opsCoverage"/, 'missing data-coverage note');
 });
 
 test('the overview states every KPI the operations spec lists', () => {
@@ -61,11 +60,11 @@ test('request details show every upstream attempt and operation details show the
   assert.ok(script.includes('已脱敏字段'), 'operation detail does not disclose the masked fields');
 });
 
-test('the light-weight pages do not claim a fixed retention window', () => {
-  const script = read('static/js/logs.js');
-  assert.ok(script.includes('保留窗口内'), 'the log centre must describe its real coverage');
-  const overview = read('static/js/ops.js');
-  assert.ok(overview.includes('保留窗口内'), 'the overview must describe its real coverage');
+test('the overview and log centre carry no coverage explanation text', () => {
+  for (const file of ['static/js/logs.js', 'static/js/ops.js', 'templates/pages/ops.html', 'templates/pages/logs.html']) {
+    const text = read(file);
+    assert.ok(!text.includes('保留窗口内') && !text.includes('数据覆盖与统计口径'), `${file} still explains its coverage`);
+  }
 });
 
 test('运维总览 is reachable from the sidebar and is the landing tab', () => {
@@ -89,11 +88,4 @@ test('the matrix renders per-model rows and never paints a traffic-free channel 
   // A channel with no samples must read 暂无样本 rather than a healthy 100%.
   assert.ok(script.includes("formatRate(r, samples)"), 'the success rate is rendered without its sample count');
   assert.ok(script.includes("ops-empty"), 'the no-sample cell style is missing');
-});
-test('the overview explains the aggregates it leaves out of the matrix', () => {
-  const script = read('static/js/ops.js');
-  // The http catch-all (and the legacy probe aggregates from older builds) are
-  // counted but are not channels.
-  assert.ok(script.includes('excluded_aggregates'), 'the page never reads the excluded aggregates');
-  assert.ok(script.includes("name === 'probe'"), 'the legacy probe aggregate label is missing');
 });

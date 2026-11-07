@@ -244,7 +244,6 @@
     quality_degraded: { tone: 'is-warn', label: '质量拦截' },
   };
 
-  const FILTER_HINTS = { request: '请求日志包含质量检查、拦截、重试和最终处理阶段；请求详情按时间串联质量过程。带"含诊断"的请求可以展开诊断内容。', operation: '操作日志按操作者、动作和状态筛选；渠道与模型通常为空。', system: '系统日志按动作和状态筛选；渠道用于标注探测目标。Grok 质量护栏对凭据的冷却、停用与恢复记在这里。' };
 
   // The diagnostics journal used to be a fourth tab. Its rows carry only
   // action=debug_bundle and a request id, so every line read 诊断 · 请求诊断包 with
@@ -530,11 +529,7 @@
     if (!body) return;
     body.replaceChildren();
     if (state.records.length === 0) {
-      // An empty page and a broken page look alike, so say which one this is and
-      // what the window actually covers.
-      emptyRow(body, tableColumns().length, state.kind === 'request'
-        ? '保留窗口内没有匹配的请求。带"含诊断"的行可以在详情里展开该请求的诊断内容。'
-        : '保留窗口内没有匹配的记录。');
+      emptyRow(body, tableColumns().length, state.kind === 'request' ? '没有匹配的请求。' : '没有匹配的记录。');
       return;
     }
     const rows = state.records.map((record, index) => {
@@ -1213,8 +1208,6 @@
   }
 
   function scopeNote() {
-    const hint = el('logsFilterScope');
-    if (hint) hint.textContent = FILTER_HINTS[state.kind] || '';
     renderHead();
   }
 
@@ -1281,33 +1274,6 @@
       const wrap = el('logsTableWrap');
       if (wrap) wrap.scrollTop = 0;
       renderScope();
-      const filterUsed = payload.filter_used || {};
-      const matched = payload.matched;
-      const scanned = payload.scanned;
-      const coverage = el('logsCoverage');
-      if (coverage) {
-        const info = payload.coverage || {};
-        // The counts are stated so a drill-down can be checked against the chart:
-        // "匹配 N 条 / 扫描 M 条" is what makes an empty page trustworthy.
-        const parts = [];
-        if (typeof matched === 'number') parts.push(`本次匹配 ${matched} 条`);
-        if (typeof scanned === 'number') parts.push(`扫描 ${scanned} 条`);
-        parts.push(`保留 ${info.entries || 0} 条审计记录`);
-        if (info.oldest) parts.push(`最早 ${info.oldest}`);
-        if (info.newest) parts.push(`最新 ${info.newest}`);
-        // A window that starts before the oldest retained record cannot be listed in
-        // full, and a short list would otherwise read as "there were no failures".
-        // The chart above it still has the aggregates, so the two are not comparable
-        // for that part of the window.
-        if (info.oldest && filterUsed.since) {
-          const oldest = new Date(info.oldest);
-          const from = new Date(filterUsed.since);
-          if (!Number.isNaN(oldest.getTime()) && !Number.isNaN(from.getTime()) && from < oldest) { parts.push('⚠ 起始时间早于日志留存起点：列表中缺少更早的记录，只有图表统计包含那一段'); }
-        }
-        if (filterUsed.outcome_label) parts.push(`结果口径：${filterUsed.outcome_label}`);
-        parts.push('为空的含义是"保留窗口内没有匹配"，不代表从未发生。');
-        coverage.textContent = parts.join('；');
-      }
       renderDetail(null);
     } catch (error) {
       // A failure that belongs to a superseded load must not replace the newer list

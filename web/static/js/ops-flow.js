@@ -171,11 +171,10 @@
       el(id).setAttribute('aria-selected',String(on));el(id).tabIndex=on?0:-1;
     }
   }
-  function openDetail(key,trigger,details=false){
-    selected=key;opener=trigger;tab(details?'details':detailTab);renderDetail();schedule();
+  function openDetail(key,trigger){
+    selected=key;opener=trigger;tab(detailTab);renderDetail();schedule();
     const drawer=el('flowDrawer');
     if(!drawer.open){drawer.showModal();el('flowDrawerClose').focus();}
-    if(details){const definitions=drawer.querySelector('details');if(definitions)definitions.open=true;}
   }
   function closeDetail(){el('flowDrawer').close();}
   // Band widths follow the 60-second request rate; with no rate in the window
@@ -299,7 +298,6 @@
       button.addEventListener('click',()=>tab(button.dataset.flowTab));
       button.addEventListener('keydown',event=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();tab(event.key==='Home'?'overview':event.key==='End'?'details':detailTab==='overview'?'details':'overview');el(detailTab==='overview'?'flowTabOverview':'flowTabDetails').focus();}});
     });
-    el('flowHelpOpen').addEventListener('click',()=>openDetail('gateway',el('flowHelpOpen'),true));
     el('flowMotion').addEventListener('click',()=>{motion=!motion;el('flowMotion').setAttribute('aria-pressed',String(motion));el('flowMotion').textContent=motion?'动画开启':'动画关闭';schedule();});
     el('flowFullscreen').addEventListener('click',()=>fullscreen().catch(()=>{}));
     document.addEventListener('fullscreenchange',fullscreenState);

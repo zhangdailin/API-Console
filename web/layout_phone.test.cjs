@@ -207,7 +207,7 @@ test('the phone card layouts are driven by the labels the rows actually carry', 
   const node = renderOpsPhoneRows();
   for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
   const matrix = node('opsMatrix').querySelector('tbody').children;
-  assert.equal(matrix.length, 2, `both channel and model matrix branches render: ${node('opsCoverage').textContent}`);
+  assert.equal(matrix.length, 2, `both channel and model matrix branches render: ${node('opsStatusText').textContent}`);
   const matrixCells = [
     ['ops-mx-accounts', '可用账号'], ['ops-mx-requests', '请求'], ['ops-mx-rate', '成功率'],
     ['ops-mx-ttft', '首 Token P95'], ['ops-mx-duration', '总耗时 P95'], ['ops-mx-throttled', '限流'],
