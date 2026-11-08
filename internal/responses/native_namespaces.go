@@ -138,8 +138,6 @@ func (aliases ToolNamespaces) RestoreEnvelope(envelope map[string]any) bool {
 				envelope["tool_choice"] = map[string]any{"type": toolKindCustom, "name": identity.Name}
 			case toolKindApplyPatch:
 				envelope["tool_choice"] = map[string]any{"type": toolKindApplyPatch}
-			case toolKindToolSearch:
-				envelope["tool_choice"] = map[string]any{"type": toolKindToolSearch}
 			default:
 				choice["name"], choice["namespace"] = identity.Name, identity.Namespace
 			}
@@ -164,9 +162,6 @@ func (aliases ToolNamespaces) RestoreEnvelope(envelope map[string]any) bool {
 				original = map[string]any{"type": identity.Kind}
 				if identity.Kind == toolKindCustom {
 					original["name"] = identity.Name
-				}
-				if identity.Kind == toolKindToolSearch {
-					original["execution"] = "client"
 				}
 			}
 			restored = append(restored, original)

@@ -108,13 +108,9 @@ func LowerCodexExtensionTools(payload map[string]any) (ToolNamespaces, error) {
 		case toolKindApplyPatch:
 			payload["tool_choice"] = map[string]any{"type": "function", "name": applyPatchWireName}
 		case "tool_search":
-			if identity, ok := aliases[toolSearchWireName]; ok && identity.Kind == toolKindToolSearch {
-				payload["tool_choice"] = map[string]any{"type": "function", "name": toolSearchWireName}
-			} else {
-				// The search is not a callable tool once deferred functions are
-				// loaded eagerly.
-				payload["tool_choice"] = "auto"
-			}
+			// The search is not a callable tool once deferred functions are
+			// loaded eagerly. (Codex always sends tool_choice "auto".)
+			payload["tool_choice"] = "auto"
 		}
 	}
 	return aliases, nil

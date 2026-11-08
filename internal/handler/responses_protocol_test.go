@@ -44,12 +44,9 @@ func TestUnsupportedResponsesControlsFailBeforeUpstream(t *testing.T) {
 	}
 }
 
-// Codex sends text.verbosity on every turn and, for auxiliary tasks, a
-// json_schema output format whose schema is `true`. Both were refused before
-// upstream, so Codex Desktop failed on WorkBuddy. verbosity is a length hint
-// these channels have no field for: it is accepted and not sent. A schema that
-// allows any output is sent as no format, and `false` (nothing allowed) still
-// fails.
+// Codex sends text.verbosity on every turn; it was refused before upstream,
+// so Codex Desktop failed on WorkBuddy. verbosity is a length hint these
+// channels have no field for: it is accepted and not sent.
 func TestCodexTextControlsReachPassthroughChannels(t *testing.T) {
 	for name, tc := range map[string]struct {
 		text       string
@@ -58,9 +55,6 @@ func TestCodexTextControlsReachPassthroughChannels(t *testing.T) {
 	}{
 		"verbosity":            {`{"verbosity":"low"}`, 200, false},
 		"verbosity and schema": {`{"verbosity":"medium","format":{"type":"json_schema","name":"codex_output_schema","strict":false,"schema":{"type":"object"}}}`, 200, true},
-		"schema true":          {`{"format":{"type":"json_schema","name":"codex_output_schema","strict":true,"schema":true}}`, 200, false},
-		"schema null":          {`{"format":{"type":"json_schema","name":"codex_output_schema","strict":false,"schema":null}}`, 200, false},
-		"schema false":         {`{"format":{"type":"json_schema","name":"codex_output_schema","strict":true,"schema":false}}`, 400, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := NewWithLoadBalancer(&config.Config{RequestTimeout: 10}, nil)

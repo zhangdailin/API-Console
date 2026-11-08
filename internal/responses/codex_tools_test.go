@@ -166,15 +166,13 @@ func TestClientToolSearchAliasRoundTripsThroughStorage(t *testing.T) {
 	restored := ToolNamespaces{}
 	testutil.NoError(t, restored.MergeStored(raw), "stored tool_search identity")
 	envelope := map[string]any{
-		"tools":       payload["tools"],
-		"tool_choice": map[string]any{"type": "function", "name": "tool_search"},
-		"output":      []any{map[string]any{"type": "function_call", "call_id": "s", "name": "tool_search", "arguments": `{"query":"x"}`}},
+		"tools":  payload["tools"],
+		"output": []any{map[string]any{"type": "function_call", "call_id": "s", "name": "tool_search", "arguments": `{"query":"x"}`}},
 	}
 	testutil.True(t, restored.RestoreEnvelope(envelope), "the envelope must change")
 	tool := InterfaceMaps(envelope["tools"])[0]
 	testutil.Equal[any](t, tool["type"], "tool_search")
 	testutil.Equal[any](t, tool["execution"], "client")
-	testutil.Equal[any](t, envelope["tool_choice"].(map[string]any)["type"], "tool_search")
 	testutil.Equal[any](t, InterfaceMaps(envelope["output"])[0]["type"], "tool_search_call")
 }
 
@@ -220,7 +218,6 @@ func TestClientToolSearchRoundTrip(t *testing.T) {
 			map[string]any{"type": "tool_search_call", "call_id": "s2", "execution": "client", "arguments": map[string]any{"query": "calendar"}},
 			map[string]any{"type": "tool_search_output", "call_id": "s2", "status": "completed", "execution": "client", "tools": []any{calendar}},
 		},
-		"tool_choice": map[string]any{"type": "tool_search"},
 	}
 	aliases, err := LowerCodexExtensionTools(payload)
 	testutil.NoError(t, err, "lower")
@@ -241,8 +238,6 @@ func TestClientToolSearchRoundTrip(t *testing.T) {
 	testutil.Equal(t, items[1]["arguments"], `{"limit":1,"query":"calendar"}`)
 	testutil.Equal(t, items[2]["type"], "function_call_output")
 	testutil.MustContain(t, ParseLooseStringAny(items[2]["output"]), "mcp__calendar__create")
-	choice, _ := payload["tool_choice"].(map[string]any)
-	testutil.Equal(t, choice["name"], "tool_search")
 	_ = calendar["defer_loading"].(bool) // the caller's definition is untouched
 
 	call := map[string]any{"type": "function_call", "id": "fc_1", "call_id": "s3", "name": "tool_search", "arguments": `{"query":"mail","limit":2}`, "status": "completed"}
