@@ -88,7 +88,7 @@ func LowerCodexExtensionTools(payload map[string]any) (ToolNamespaces, error) {
 			if keep {
 				lowered = append(lowered, converted)
 			}
-			if item["type"] == "tool_search_output" && isClientExecution(item) {
+			if (item["type"] == "tool_search_output" && isClientExecution(item)) || item["type"] == "additional_tools" {
 				loaded = append(loaded, InterfaceMaps(item["tools"])...)
 			}
 		}
@@ -226,6 +226,21 @@ func lowerCodexItem(item map[string]any, i int, aliases ToolNamespaces) (map[str
 			output = status
 		}
 		return map[string]any{"type": "function_call_output", "call_id": callID, "output": output}, true, nil
+	case "additional_tools":
+		// Codex declares tools part-way through a conversation with this item.
+		// The definitions are declared for the turn (LowerCodexExtensionTools);
+		// the item itself has no Chat or upstream equivalent.
+		return nil, false, nil
+	case "function_call_output":
+		// Codex also sends tool output nobody called for, such as a plugin's
+		// notifications: no call_id, identified by name and namespace. A tool
+		// result must answer a call, so it reaches the model as a user message
+		// naming its source, rather than as an invented call.
+		name := ParseLooseStringAny(item["name"])
+		if strings.TrimSpace(callID) != "" || strings.TrimSpace(name) == "" {
+			return item, true, nil
+		}
+		return unpairedToolOutputMessage(item, name), true, nil
 	case "tool_search_call", "tool_search_output":
 		if !isClientExecution(item) {
 			// Deferred functions are loaded eagerly, so a recorded server
@@ -248,6 +263,29 @@ func lowerCodexItem(item map[string]any, i int, aliases ToolNamespaces) (map[str
 		return map[string]any{"type": "function_call_output", "call_id": callID, "output": searchedToolsSummary(InterfaceMaps(item["tools"]))}, true, nil
 	}
 	return item, true, nil
+}
+
+// unpairedToolOutputMessage renders an uncalled tool output as a user message:
+// a label naming the tool, then the output text or its content parts.
+func unpairedToolOutputMessage(item map[string]any, name string) map[string]any {
+	source := name
+	if namespace := strings.TrimSpace(ParseLooseStringAny(item["namespace"])); namespace != "" {
+		source = namespace + "." + name
+	}
+	label := "Tool output from " + source + " (sent by the client, not a reply to a tool call):"
+	parts := []any{map[string]any{"type": "input_text", "text": label}}
+	switch output := item["output"].(type) {
+	case string:
+		parts[0] = map[string]any{"type": "input_text", "text": label + "\n" + output}
+	case []any:
+		parts = append(parts, output...)
+	default:
+		if output != nil {
+			encoded, _ := json.Marshal(output)
+			parts[0] = map[string]any{"type": "input_text", "text": label + "\n" + string(encoded)}
+		}
+	}
+	return map[string]any{"type": "message", "role": "user", "content": parts}
 }
 
 // toolSearchParameters is Codex's own search argument shape, used when a

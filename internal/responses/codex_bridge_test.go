@@ -142,3 +142,39 @@ func TestResponsesBridgeServesClientToolSearch(t *testing.T) {
 	arguments, _ := item["arguments"].(map[string]any)
 	testutil.Equal(t, arguments["query"], "calendar")
 }
+
+// Codex 0.167 sends tool output nobody called for (no call_id, named by
+// name/namespace) and declares tools part-way through with additional_tools.
+// The bridge refused the first with `input[4].call_id is required` and the
+// second as an unsupported item type.
+func TestResponsesBridgeAcceptsUnpairedOutputsAndAdditionalTools(t *testing.T) {
+	var seen map[string]any
+	reply := `{"id":"c","object":"chat.completion","created":1,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`
+	bridge := ResponsesBridgeHandler(chatReturning(t, &seen, reply), BridgeOptions{})
+	request := `{"model":"hy4free","tools":[{"type":"function","name":"shell","parameters":{"type":"object","properties":{}}}],"input":[
+	 {"type":"message","role":"developer","content":[{"type":"input_text","text":"be careful"}]},
+	 {"type":"message","role":"user","content":[{"type":"input_text","text":"check slack"}]},
+	 {"type":"function_call","call_id":"c1","name":"shell","arguments":"{}"},
+	 {"type":"function_call_output","call_id":"c1","output":"done"},
+	 {"type":"function_call_output","name":"notifications","namespace":"slack","output":"Alice mentioned you."},
+	 {"type":"function_call_output","name":"screenshot","output":[{"type":"input_text","text":"see image"}]},
+	 {"type":"additional_tools","role":"developer","tools":[{"type":"function","name":"slack_reply","defer_loading":true,"parameters":{"type":"object","properties":{}}}]}
+	]}`
+	rec := httptest.NewRecorder()
+	bridge(rec, httptest.NewRequest(http.MethodPost, "/workbuddy/v1/responses", strings.NewReader(request)))
+	testutil.Equal(t, rec.Code, http.StatusOK)
+
+	testutil.Equal(t, strings.Join(upstreamFunctionNames(seen), ","), "function:shell,function:slack_reply")
+	messages := InterfaceMaps(seen["messages"])
+	testutil.Equal(t, len(messages), 6)
+	raw, _ := json.Marshal(messages[4:])
+	testutil.MustContain(t, string(raw), "Tool output from slack.notifications")
+	testutil.MustContain(t, string(raw), "Alice mentioned you.")
+	testutil.MustContain(t, string(raw), "Tool output from screenshot")
+	testutil.MustContain(t, string(raw), "see image")
+	for _, message := range messages[4:] {
+		testutil.Equal(t, message["role"], "user")
+	}
+	testutil.Equal(t, messages[3]["role"], "tool")
+	testutil.Equal(t, messages[3]["tool_call_id"], "c1")
+}
