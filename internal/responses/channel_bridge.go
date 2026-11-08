@@ -127,7 +127,7 @@ func ResponsesBridgeHandler(chat http.HandlerFunc, opts BridgeOptions) http.Hand
 			WriteAPIError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 			return
 		}
-		namespaces, err := NormalizeBridgedNamespaces(&req)
+		namespaces, err := NormalizeBridgedRequest(&req)
 		if err != nil {
 			WriteAPIError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 			return

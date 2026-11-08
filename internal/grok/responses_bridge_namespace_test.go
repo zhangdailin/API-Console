@@ -34,10 +34,13 @@ func TestResponsesBridgeStillRejectsUnservableToolTypes(t *testing.T) {
 	}
 }
 
+// Codex's custom, apply_patch and tool_search are lowered for these channels
+// (internal/responses/codex_bridge_test.go); what cannot be emulated, a
+// client-run local_shell or an empty namespace, still stops before upstream.
 func TestResponsesBridgeRejectsClientToolFormatsBeforeUpstream(t *testing.T) {
 	for _, channel := range []string{"workbuddy", "cline"} {
 		bridge := responses.ResponsesBridgeHandler(func(w http.ResponseWriter, r *http.Request) { t.Fatal("unsupported tool reached upstream") }, responses.BridgeOptions{})
-		for _, kind := range []string{"namespace", "custom", "apply_patch", "local_shell", "tool_search"} {
+		for _, kind := range []string{"namespace", "local_shell"} {
 			rec := httptest.NewRecorder()
 			body := `{"model":"model","input":"hello","tools":[{"type":"` + kind + `","name":"example"}]}`
 			bridge(rec, httptest.NewRequest(http.MethodPost, "/"+channel+"/v1/responses", strings.NewReader(body)))

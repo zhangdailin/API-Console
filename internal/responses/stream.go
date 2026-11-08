@@ -23,6 +23,9 @@ type chatResponseItem struct {
 	signature string
 	closed    bool
 	wireName  string
+	// lowered is the client identity of a Codex extension tool the upstream
+	// saw as a function; its arguments are that function's envelope.
+	lowered *namespaceToolIdentity
 }
 
 // chatStreamOptions configures one chat-to-Responses translation.
@@ -250,6 +253,9 @@ func WriteStreamFromChatReader(w http.ResponseWriter, request CreateRequest, rea
 					opts.ToolNamespaces.RestoreItem(item)
 					state = add(item)
 					state.wireName = name
+					if identity, ok := opts.ToolNamespaces[name]; ok && identity.Kind != "" {
+						state.lowered = &identity
+					}
 					tools[index] = state
 				} else if (callID != "" && callID != state.value["call_id"]) || (name != "" && name != state.wireName) {
 					return fmt.Errorf("tool identity changed")
@@ -260,7 +266,9 @@ func WriteStreamFromChatReader(w http.ResponseWriter, request CreateRequest, rea
 						return fmt.Errorf("tool arguments must be a string")
 					}
 					state.text.WriteString(value)
-					if value != "" {
+					// A lowered call's arguments are the function envelope, not
+					// the client's input: it arrives whole on output_item.done.
+					if value != "" && state.lowered == nil {
 						emit("response.function_call_arguments.delta", map[string]any{"item_id": state.value["id"], "output_index": state.index, "delta": value})
 					}
 				}
@@ -289,6 +297,19 @@ func WriteStreamFromChatReader(w http.ResponseWriter, request CreateRequest, rea
 	}
 	status, details := StatusFromFinish(finish)
 	for _, item := range items {
+		if item.lowered != nil {
+			args := item.text.String()
+			if status == "completed" && !json.Valid([]byte(args)) && err == nil {
+				err = fmt.Errorf("invalid completed tool arguments")
+			}
+			raised := map[string]any{"type": "function_call", "arguments": args}
+			raiseCodexItem(raised, *item.lowered)
+			delete(raised, "type")
+			for key, value := range raised {
+				item.value[key] = value
+			}
+			continue
+		}
 		if item.value["type"] == "function_call" {
 			args := item.text.String()
 			if args == "" {

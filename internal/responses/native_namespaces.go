@@ -42,6 +42,36 @@ func NormalizeNamespacePayload(payload map[string]any) (ToolNamespaces, error) {
 	return aliases, nil
 }
 
+// NormalizeBridgedRequest is NormalizeNamespacePayload for a typed request:
+// Codex extension tools (custom, apply_patch, tool_search) are lowered to
+// functions, then namespaces are flattened and the result validated. The
+// Chat-only channels need the lowering as much as a native upstream does.
+func NormalizeBridgedRequest(req *CreateRequest) (ToolNamespaces, error) {
+	tools := make([]any, 0, len(req.Tools))
+	for _, tool := range req.Tools {
+		tools = append(tools, tool)
+	}
+	payload := map[string]any{"input": req.Input}
+	if req.Tools != nil {
+		payload["tools"] = tools
+	}
+	if req.ToolChoice != nil {
+		payload["tool_choice"] = req.ToolChoice
+	}
+	aliases, err := NormalizeNamespacePayload(payload)
+	if err != nil {
+		return nil, err
+	}
+	if _, exists := payload["tools"]; exists {
+		req.Tools = InterfaceMaps(payload["tools"])
+	}
+	req.Input = payload["input"]
+	if _, exists := payload["tool_choice"]; exists {
+		req.ToolChoice = payload["tool_choice"]
+	}
+	return aliases, nil
+}
+
 // A plain function cannot reuse a wire name from an earlier namespace: the
 // upstream's call would otherwise have two possible public identities.
 func (aliases ToolNamespaces) ValidatePlainTools(tools any) error {
