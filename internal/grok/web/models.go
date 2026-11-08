@@ -4,16 +4,6 @@ import (
 	"strings"
 )
 
-// UpstreamKind selects which Grok upstream protocol serves a model.
-type UpstreamKind int
-
-const (
-	// UpstreamAuto derives the upstream from ModelSpec fields.
-	UpstreamAuto UpstreamKind = iota
-	// UpstreamAppChat is the grok.com/rest/app-chat/... website protocol.
-	UpstreamAppChat
-)
-
 // ModelSpec defines one public Web model and how it maps to grok.com fields.
 type ModelSpec struct {
 	ID            string
@@ -26,7 +16,6 @@ type ModelSpec struct {
 	IsImage       bool
 	IsVideo       bool
 	MediaAPIOnly  bool
-	Upstream      UpstreamKind
 	// AliasReasoningEffort is kept for request-shape compatibility; Web modes
 	// have no effort aliases, so it is always empty.
 	AliasReasoningEffort string
@@ -44,10 +33,10 @@ const (
 // published to the model list only after an active Web SSO account's quota
 // read for that route succeeded (see QuotaModelFor and the model refresh).
 var SupportedModels = []ModelSpec{
-	{ID: "grok-chat-fast", Name: "Grok Chat Fast", UpstreamModel: "grok-chat-fast", ModelMode: "MODEL_MODE_FAST", ModeID: "fast", Tier: grokTierBasic, Upstream: UpstreamAppChat},
-	{ID: "grok-chat-auto", Name: "Grok Chat Auto", UpstreamModel: "grok-chat-auto", ModelMode: "MODEL_MODE_AUTO", ModeID: "auto", Tier: grokTierSuper, Upstream: UpstreamAppChat},
-	{ID: "grok-chat-expert", Name: "Grok Chat Expert", UpstreamModel: "grok-chat-expert", ModelMode: "MODEL_MODE_EXPERT", ModeID: "expert", Tier: grokTierSuper, Upstream: UpstreamAppChat},
-	{ID: "grok-chat-heavy", Name: "Grok Chat Heavy", UpstreamModel: "grok-chat-heavy", ModelMode: "MODEL_MODE_HEAVY", ModeID: "heavy", Tier: grokTierHeavy, PreferBest: true, Upstream: UpstreamAppChat},
+	{ID: "grok-chat-fast", Name: "Grok Chat Fast", UpstreamModel: "grok-chat-fast", ModelMode: "MODEL_MODE_FAST", ModeID: "fast", Tier: grokTierBasic},
+	{ID: "grok-chat-auto", Name: "Grok Chat Auto", UpstreamModel: "grok-chat-auto", ModelMode: "MODEL_MODE_AUTO", ModeID: "auto", Tier: grokTierSuper},
+	{ID: "grok-chat-expert", Name: "Grok Chat Expert", UpstreamModel: "grok-chat-expert", ModelMode: "MODEL_MODE_EXPERT", ModeID: "expert", Tier: grokTierSuper},
+	{ID: "grok-chat-heavy", Name: "Grok Chat Heavy", UpstreamModel: "grok-chat-heavy", ModelMode: "MODEL_MODE_HEAVY", ModeID: "heavy", Tier: grokTierHeavy, PreferBest: true},
 	{ID: "grok-imagine-image", Name: "Grok Imagine Image", UpstreamModel: "grok-imagine-image", ModelMode: "MODEL_MODE_AUTO", ModeID: "auto", Tier: grokTierSuper, IsImage: true},
 	{ID: "grok-imagine-image-2.0", Name: "Grok Imagine Image 2.0", UpstreamModel: "grok-imagine-image-2.0", ModelMode: "MODEL_MODE_AUTO", ModeID: "auto", Tier: grokTierSuper, IsImage: true},
 	{ID: "grok-imagine-image-edit", Name: "Grok Imagine Image Edit", UpstreamModel: "imagine-image-edit", ModelMode: "MODEL_MODE_AUTO", ModeID: "auto", Tier: grokTierSuper, IsImage: true},

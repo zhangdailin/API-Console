@@ -13,26 +13,22 @@ import (
 	"orchids-api/internal/util"
 	"strings"
 	"sync"
-	"time"
 )
 
-const grokModelValidationCacheTTL = 3 * time.Second
-
 type Handler struct {
-	base         *grokbase.AccountTracker
-	runtimeMu    sync.RWMutex
-	cfg          *config.Config
-	lb           *loadbalancer.LoadBalancer
-	cliClient    *CLIClient
-	connTracker  loadbalancer.ConnTracker
-	modelCacheMu sync.RWMutex
-	modelCache   map[string]time.Time
-	sessionMu    sync.Mutex
-	affinity     grokbase.Affinity
-	replay       map[string]reasoningReplayEntry
-	replayGen    map[string]uint64
-	instanceID   string
-	auditLogger  audit.Logger
+	base        *grokbase.AccountTracker
+	runtimeMu   sync.RWMutex
+	cfg         *config.Config
+	lb          *loadbalancer.LoadBalancer
+	cliClient   *CLIClient
+	connTracker loadbalancer.ConnTracker
+	modelCache  grokbase.ModelValidationCache
+	sessionMu   sync.Mutex
+	affinity    grokbase.Affinity
+	replay      map[string]reasoningReplayEntry
+	replayGen   map[string]uint64
+	instanceID  string
+	auditLogger audit.Logger
 	// compactionCode seals and opens gateway-owned remote-v2 compaction state.
 	// Nil (no credential key configured) means the gateway cannot own a summary
 	// and compaction requests stay a plain upstream forward.
@@ -71,7 +67,6 @@ func NewHandler(cfg *config.Config, lb *loadbalancer.LoadBalancer) *Handler {
 		lb:          lb,
 		cliClient:   cliClient,
 		connTracker: loadbalancer.NewMemoryConnTracker(),
-		modelCache:  make(map[string]time.Time),
 		replay:      make(map[string]reasoningReplayEntry),
 		replayGen:   make(map[string]uint64),
 		instanceID:  instanceID,

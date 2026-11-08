@@ -2,7 +2,6 @@ package grok
 
 import (
 	"net/http"
-	"orchids-api/internal/chatwire"
 	"orchids-api/internal/grok/ratelimit"
 	"regexp"
 	"strconv"
@@ -13,111 +12,6 @@ import (
 	"orchids-api/internal/provider"
 	"orchids-api/internal/store"
 )
-
-const (
-	basicDefaultQuota float64 = 30
-	liteDefaultQuota  float64 = 70
-	superDefaultQuota float64 = 140
-	heavyDefaultQuota float64 = 400
-)
-
-func InferQuotaLimit(acc *store.Account) float64 {
-	if acc == nil {
-		return basicDefaultQuota
-	}
-	if acc.UsageLimit > 0 {
-		return acc.UsageLimit
-	}
-	sub := strings.ToLower(strings.TrimSpace(acc.Subscription))
-	if strings.Contains(sub, "heavy") {
-		return heavyDefaultQuota
-	}
-	if strings.Contains(sub, "super") || strings.Contains(sub, "pro") {
-		return superDefaultQuota
-	}
-	if strings.Contains(sub, "lite") {
-		return liteDefaultQuota
-	}
-	return basicDefaultQuota
-}
-
-// inferSubscriptionFromRateLimitInfo classifies an account from a SINGLE quota
-// window whose mode is not known (the Build header paths). It must never
-// see a Web auto/fast projection: those windows describe the same tiers with
-// different numbers, so a mixed-mode number would pick the wrong pool. Web
-// snapshots are Build-only.
-func inferSubscriptionFromRateLimitInfo(info *chatwire.RateLimitInfo) string {
-	if info == nil || !info.HasLimit {
-		return ""
-	}
-	// Exact shapes only: an unknown number is left unclassified rather than being
-	// rounded up into a paid tier by a ">= heavy" catch-all.
-	switch info.Limit {
-	case 150:
-		return "heavy"
-	case 50, 140:
-		return "super"
-	case 25, 70, 12:
-		return "lite"
-	case 30, 20, 8, 7:
-		return "basic"
-	default:
-		return ""
-	}
-}
-
-func ApplyQuotaInfo(acc *store.Account, info *chatwire.RateLimitInfo) bool {
-	return applyQuotaInfo(acc, info, true)
-}
-
-// applyQuotaInfo persists one quota window. inferSubscription is false for the
-// Web aggregate projection, where the caller classifies from all modes itself.
-func applyQuotaInfo(acc *store.Account, info *chatwire.RateLimitInfo, inferSubscription bool) bool {
-	if acc == nil || info == nil {
-		return false
-	}
-
-	changed := false
-	if inferSubscription {
-		if sub := inferSubscriptionFromRateLimitInfo(info); sub != "" && acc.Subscription != sub {
-			acc.Subscription = sub
-			changed = true
-		}
-	}
-	if info.HasRemaining {
-		limit := InferQuotaLimit(acc)
-		if info.HasLimit && info.Limit > 0 {
-			limit = float64(info.Limit)
-		}
-		remaining := float64(info.Remaining)
-		if remaining < 0 {
-			remaining = 0
-		}
-		if limit <= 0 {
-			limit = basicDefaultQuota
-		}
-		if remaining > limit {
-			limit = remaining
-		}
-		if acc.UsageLimit != limit {
-			acc.UsageLimit = limit
-			changed = true
-		}
-		if acc.UsageCurrent != remaining {
-			acc.UsageCurrent = remaining
-			changed = true
-		}
-	} else if info.HasLimit && info.Limit > 0 && acc.UsageLimit <= 0 {
-		acc.UsageLimit = float64(info.Limit)
-		changed = true
-	}
-
-	if !info.ResetAt.IsZero() && !acc.QuotaResetAt.Equal(info.ResetAt) {
-		acc.QuotaResetAt = info.ResetAt
-		changed = true
-	}
-	return changed
-}
 
 // ApplyBuildRateLimits persists passive Build response headers separately from
 // subscription Billing. These values often describe a minute-scale request or

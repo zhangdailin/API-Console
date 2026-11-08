@@ -25,23 +25,20 @@ const maxEditImageBytes = 50 * 1024 * 1024
 
 var cacheBaseDir = filepath.Join("data", "tmp")
 
-const grokModelValidationCacheTTL = 3 * time.Second
-
 // Handler serves the Grok Web (grok.com SSO) plane: AppChat conversations,
 // Imagine images, videos, media inputs, the media cache and the SSO account
 // tools. The parent grok channel dispatches Web models here.
 type Handler struct {
-	base         *grokbase.AccountTracker
-	runtimeMu    sync.RWMutex
-	cfg          *config.Config
-	lb           *loadbalancer.LoadBalancer
-	client       *Client
-	connTracker  loadbalancer.ConnTracker
-	modelCacheMu sync.RWMutex
-	modelCache   map[string]time.Time
-	affinity     grokbase.Affinity
-	instanceID   string
-	auditLogger  audit.Logger
+	base        *grokbase.AccountTracker
+	runtimeMu   sync.RWMutex
+	cfg         *config.Config
+	lb          *loadbalancer.LoadBalancer
+	client      *Client
+	connTracker loadbalancer.ConnTracker
+	modelCache  grokbase.ModelValidationCache
+	affinity    grokbase.Affinity
+	instanceID  string
+	auditLogger audit.Logger
 
 	quota grokbase.QuotaQueue
 }
@@ -88,7 +85,6 @@ func NewHandler(cfg *config.Config, lb *loadbalancer.LoadBalancer) *Handler {
 		lb:          lb,
 		client:      New(cfg),
 		connTracker: loadbalancer.NewMemoryConnTracker(),
-		modelCache:  make(map[string]time.Time),
 		instanceID:  instanceID,
 		auditLogger: audit.NewNopLogger(),
 	}
@@ -258,39 +254,6 @@ func (h *Handler) currentClient() *Client {
 	return h.webClient()
 }
 
-func (h *Handler) isModelValidationCached(modelID string) bool {
-	if h == nil || strings.TrimSpace(modelID) == "" {
-		return false
-	}
-	h.modelCacheMu.RLock()
-	expiresAt, ok := h.modelCache[modelID]
-	h.modelCacheMu.RUnlock()
-	if !ok {
-		return false
-	}
-	if time.Now().Before(expiresAt) {
-		return true
-	}
-	h.modelCacheMu.Lock()
-	if staleAt, ok := h.modelCache[modelID]; ok && !time.Now().Before(staleAt) {
-		delete(h.modelCache, modelID)
-	}
-	h.modelCacheMu.Unlock()
-	return false
-}
-
-func (h *Handler) cacheValidatedModel(modelID string) {
-	if h == nil || strings.TrimSpace(modelID) == "" {
-		return
-	}
-	h.modelCacheMu.Lock()
-	if h.modelCache == nil {
-		h.modelCache = make(map[string]time.Time)
-	}
-	h.modelCache[modelID] = time.Now().Add(grokModelValidationCacheTTL)
-	h.modelCacheMu.Unlock()
-}
-
 // isGrokWebAccount selects only Grok Web SSO sessions. Build OAuth sessions are
 // a separate product and must never be sent to the legacy web transport.
 func isGrokWebAccount(acc *store.Account) bool {
@@ -331,7 +294,7 @@ func (h *Handler) ensureModelEnabled(ctx context.Context, modelID string) error 
 	if IsDeprecatedModelID(id) {
 		return fmt.Errorf("model not found")
 	}
-	if h.isModelValidationCached(id) {
+	if h != nil && h.modelCache.Has(id) {
 		return nil
 	}
 	if h == nil || h.lb == nil || h.lb.Store == nil {
@@ -364,7 +327,7 @@ func (h *Handler) ensureModelEnabled(ctx context.Context, modelID string) error 
 	if !strings.EqualFold(channel, "grok") {
 		return fmt.Errorf("model not found")
 	}
-	h.cacheValidatedModel(id)
+	h.modelCache.Remember(id)
 	return nil
 }
 

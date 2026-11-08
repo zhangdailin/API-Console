@@ -3,6 +3,7 @@ package grok
 import (
 	"orchids-api/internal/chatwire"
 	"orchids-api/internal/grok/ratelimit"
+	"orchids-api/internal/grok/web"
 	"testing"
 	"time"
 
@@ -30,7 +31,7 @@ func TestValidateChatMessages_AcceptsCaseInsensitiveRoleAndType(t *testing.T) {
 
 func TestApplyQuotaInfo_InfersLiteSubscription(t *testing.T) {
 	acc := &store.Account{Subscription: "basic"}
-	changed := ApplyQuotaInfo(acc, &chatwire.RateLimitInfo{
+	changed := web.ApplyQuotaInfo(acc, &chatwire.RateLimitInfo{
 		Limit:        70,
 		HasLimit:     true,
 		Remaining:    63,
@@ -45,7 +46,7 @@ func TestApplyQuotaInfo_InfersLiteSubscription(t *testing.T) {
 
 func TestApplyQuotaInfo_InfersBasicFromFreeAutoWindow(t *testing.T) {
 	acc := &store.Account{}
-	changed := ApplyQuotaInfo(acc, &chatwire.RateLimitInfo{
+	changed := web.ApplyQuotaInfo(acc, &chatwire.RateLimitInfo{
 		Limit:        7,
 		HasLimit:     true,
 		Remaining:    7,

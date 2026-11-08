@@ -18,13 +18,22 @@ func (r *Request) Validate() error {
 	if err := ValidateToolDefinitions(r.Tools); err != nil {
 		return err
 	}
-	if r.ToolChoice != nil {
-		switch v := r.ToolChoice.(type) {
+	if err := ValidateToolChoice(r.ToolChoice, r.toolChoiceNameSet); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ValidateToolChoice checks a Chat Completions tool_choice against the tools a
+// request declares; names is only called when the choice needs it.
+func ValidateToolChoice(choice any, names func() map[string]struct{}) error {
+	if choice != nil {
+		switch v := choice.(type) {
 		case string:
 			switch strings.ToLower(strings.TrimSpace(v)) {
 			case "auto", "none":
 			case "required":
-				if len(r.toolChoiceNameSet()) == 0 {
+				if len(names()) == 0 {
 					return fmt.Errorf("tool_choice required needs at least one defined tool")
 				}
 			default:
@@ -39,7 +48,7 @@ func (r *Request) Validate() error {
 			}
 			// Hosted tools (web_search / x_search) live in ResponsesTools, not
 			// in the function list, so both sets decide whether the name exists.
-			if _, found := r.toolChoiceNameSet()[name]; !found {
+			if _, found := names()[name]; !found {
 				return fmt.Errorf("tool_choice.function.name must reference a defined tool")
 			}
 		default:

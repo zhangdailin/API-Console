@@ -44,7 +44,7 @@ func TestParseResponsesResourcePath(t *testing.T) {
 		testutil.Equal(t, id, tc.wantID)
 		testutil.Equal(t, action, tc.wantAction)
 		wantAction := ""
-		if tc.wantAction == ActionCancel || tc.wantAction == ActionInputItems {
+		if tc.wantAction == responsesActionCancel || tc.wantAction == responsesActionInputItems {
 			wantAction = tc.wantAction
 		}
 		testutil.Equal(t, SubResourceAction(tc.path), wantAction)

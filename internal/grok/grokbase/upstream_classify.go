@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
+	"time"
 
+	"orchids-api/internal/grok/ratelimit"
 	"orchids-api/internal/store"
 )
 
@@ -70,4 +73,22 @@ func WithRateLimitAccount(ctx context.Context, acc *store.Account) context.Conte
 func RateLimitAccount(ctx context.Context) string {
 	identity, _ := ctx.Value(rateLimitAccountKey{}).(string)
 	return identity
+}
+
+// RetryAfterSeconds reads the backoff an upstream asked for from its response
+// headers: Retry-After, else the reset time of a rate-limit header. 0 means
+// none was given.
+func RetryAfterSeconds(header http.Header) int {
+	if header == nil {
+		return 0
+	}
+	if value := ratelimit.ParseRetryAfter(header.Get("Retry-After"), time.Now()); value > 0 {
+		return max(int(value.Round(time.Second)/time.Second), 1)
+	}
+	if info := ratelimit.ParseHeaders(header); info != nil {
+		if seconds := int(time.Until(info.ResetAt).Round(time.Second) / time.Second); seconds > 0 {
+			return seconds
+		}
+	}
+	return 0
 }

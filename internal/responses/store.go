@@ -47,10 +47,10 @@ type BridgeOptions struct {
 // process instead of one per request.
 var memoryFallbackWarned sync.Once
 
-// Store resolves the response store the bridge reads and writes. It is never
+// StoreFor resolves the response store the bridge reads and writes. It is never
 // nil: a gateway with no response backend gets the in-process fallback rather
 // than a hard failure on every stored-response request.
-func (o BridgeOptions) store() Store {
+func (o BridgeOptions) StoreFor() Store {
 	if o.Store != nil {
 		return o.Store
 	}
@@ -60,9 +60,6 @@ func (o BridgeOptions) store() Store {
 	})
 	return store.DefaultMemoryResponseStore()
 }
-
-// StoreFor is the exported form of store, for callers outside the package.
-func (o BridgeOptions) StoreFor() Store { return o.store() }
 
 // TTLOrDefault resolves the stored-response lifetime.
 func (o BridgeOptions) TTLOrDefault() time.Duration {

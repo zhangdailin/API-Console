@@ -49,10 +49,10 @@ type Plan struct {
 	Explicit bool
 }
 
-// fetchPlan reads the account's plan. A failure is returned as an error and
+// FetchPlan reads the account's plan. A failure is returned as an error and
 // never as a tier: an unreachable endpoint must not downgrade an account to
 // "free" or invent a plan name.
-func (c *Client) fetchPlan(ctx context.Context) (Plan, error) {
+func (c *Client) FetchPlan(ctx context.Context) (Plan, error) {
 	if c == nil {
 		return Plan{}, fmt.Errorf("cline client is nil")
 	}
@@ -117,6 +117,3 @@ func (c *Client) fetchPlan(ctx context.Context) (Plan, error) {
 	}
 	return Plan{}, apiError(http.MethodGet, endpoint, resp.StatusCode, raw)
 }
-
-// FetchPlan is the provider-facing alias of fetchPlan.
-func (c *Client) FetchPlan(ctx context.Context) (Plan, error) { return c.fetchPlan(ctx) }

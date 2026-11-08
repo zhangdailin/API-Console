@@ -16,7 +16,7 @@ import (
 
 	"orchids-api/internal/debug"
 	apperrors "orchids-api/internal/errors"
-	"orchids-api/internal/grok/ratelimit"
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/middleware"
 )
 
@@ -189,19 +189,10 @@ func isUpstreamFailure(err error) bool {
 // already understand both the header and the body forms.
 func upstreamRetryAfterSeconds(err error) int {
 	var typed *grokUpstreamError
-	if !errors.As(err, &typed) || typed.header == nil {
+	if !errors.As(err, &typed) {
 		return 0
 	}
-	if value := ratelimit.ParseRetryAfter(typed.header.Get("Retry-After"), time.Now()); value > 0 {
-		seconds := max(int(value.Round(time.Second)/time.Second), 1)
-		return seconds
-	}
-	if info := ratelimit.ParseHeaders(typed.header); info != nil {
-		if seconds := int(time.Until(info.ResetAt).Round(time.Second) / time.Second); seconds > 0 {
-			return seconds
-		}
-	}
-	return 0
+	return grokbase.RetryAfterSeconds(typed.header)
 }
 
 // requireMethod writes the standard 405 response and returns false when the

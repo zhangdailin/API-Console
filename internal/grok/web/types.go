@@ -231,33 +231,8 @@ func (r *ChatCompletionsRequest) Validate() error {
 	if err := validateToolDefinitions(r.Tools); err != nil {
 		return err
 	}
-	if r.ToolChoice != nil {
-		switch v := r.ToolChoice.(type) {
-		case string:
-			switch strings.ToLower(strings.TrimSpace(v)) {
-			case "auto", "none":
-			case "required":
-				if len(r.toolChoiceNameSet()) == 0 {
-					return fmt.Errorf("tool_choice required needs at least one defined tool")
-				}
-			default:
-				return fmt.Errorf("tool_choice must be auto, required, none, or a specific function object")
-			}
-		case map[string]any:
-			fn, _ := v["function"].(map[string]any)
-			name, _ := fn["name"].(string)
-			name = strings.TrimSpace(name)
-			if strings.TrimSpace(fmt.Sprint(v["type"])) != "function" || name == "" {
-				return fmt.Errorf("tool_choice object must have type=function and function.name")
-			}
-			// Hosted tools (web_search / x_search) live in ResponsesTools, not
-			// in the function list, so both sets decide whether the name exists.
-			if _, found := r.toolChoiceNameSet()[name]; !found {
-				return fmt.Errorf("tool_choice.function.name must reference a defined tool")
-			}
-		default:
-			return fmt.Errorf("tool_choice must be auto, required, none, or a specific function object")
-		}
+	if err := chatwire.ValidateToolChoice(r.ToolChoice, r.toolChoiceNameSet); err != nil {
+		return err
 	}
 	if r.ImageConfig != nil {
 		r.ImageConfig.Normalize()

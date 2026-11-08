@@ -7,6 +7,7 @@ import (
 	"orchids-api/internal/accountpolicy"
 	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/grok/ratelimit"
+	"orchids-api/internal/grok/web"
 	"orchids-api/internal/store"
 	"time"
 )
@@ -46,7 +47,7 @@ func (h *Handler) persistGrokQuotaSync(job grokbase.QuotaJob) {
 	if accountpolicy.IsGrokAccount(latest) {
 		changed = ApplyBuildRateLimits(latest, headers)
 	} else {
-		changed = info != nil && ApplyQuotaInfo(latest, info)
+		changed = info != nil && web.ApplyQuotaInfo(latest, info)
 	}
 	if changed {
 		if err := h.lb.Store.UpdateAccount(ctx, latest); err != nil {

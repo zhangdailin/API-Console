@@ -9,45 +9,11 @@ import (
 	"orchids-api/internal/store"
 	"orchids-api/internal/util"
 	"strings"
-	"time"
 )
-
-func (h *Handler) isModelValidationCached(modelID string) bool {
-	if h == nil || strings.TrimSpace(modelID) == "" {
-		return false
-	}
-	h.modelCacheMu.RLock()
-	expiresAt, ok := h.modelCache[modelID]
-	h.modelCacheMu.RUnlock()
-	if !ok {
-		return false
-	}
-	if time.Now().Before(expiresAt) {
-		return true
-	}
-	h.modelCacheMu.Lock()
-	if staleAt, ok := h.modelCache[modelID]; ok && !time.Now().Before(staleAt) {
-		delete(h.modelCache, modelID)
-	}
-	h.modelCacheMu.Unlock()
-	return false
-}
-
-func (h *Handler) cacheValidatedModel(modelID string) {
-	if h == nil || strings.TrimSpace(modelID) == "" {
-		return
-	}
-	h.modelCacheMu.Lock()
-	if h.modelCache == nil {
-		h.modelCache = make(map[string]time.Time)
-	}
-	h.modelCache[modelID] = time.Now().Add(grokModelValidationCacheTTL)
-	h.modelCacheMu.Unlock()
-}
 
 func (h *Handler) ensureModelEnabled(ctx context.Context, modelID string) error {
 	id := normalizeModelID(modelID)
-	if h.isModelValidationCached(id) {
+	if h != nil && h.modelCache.Has(id) {
 		return nil
 	}
 	if h == nil || h.lb == nil || h.lb.Store == nil {
@@ -69,7 +35,7 @@ func (h *Handler) ensureModelEnabled(ctx context.Context, modelID string) error 
 	if !strings.EqualFold(channel, "grok") {
 		return fmt.Errorf("model not found")
 	}
-	h.cacheValidatedModel(id)
+	h.modelCache.Remember(id)
 	return nil
 }
 

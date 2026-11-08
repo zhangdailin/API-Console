@@ -18,8 +18,8 @@ import (
 // id (/cancel, /input_items) never look like a response id themselves.
 func ResourceHandler(opts BridgeOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if action := subResourceAction(r.URL.Path); action != "" {
-			subResourceHandler(action, opts)(w, r)
+		if action := SubResourceAction(r.URL.Path); action != "" {
+			SubResourceHandler(action, opts)(w, r)
 			return
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodDelete {
