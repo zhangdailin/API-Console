@@ -2,6 +2,7 @@ package responses
 
 import (
 	"fmt"
+	"orchids-api/internal/chatwire"
 	"strings"
 )
 
@@ -11,7 +12,7 @@ func TerminalFinish(kind string, response map[string]any) (string, error) {
 	if kind == "response.failed" || kind == "error" || response["error"] != nil {
 		return "error", Failure(response)
 	}
-	status := ParseLooseStringAny(response["status"])
+	status := chatwire.ParseLooseStringAny(response["status"])
 	if status == "" {
 		status = "completed"
 		if kind == "response.incomplete" {

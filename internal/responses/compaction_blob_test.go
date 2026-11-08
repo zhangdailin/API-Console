@@ -23,7 +23,7 @@ func TestGatewayCompactionCodecRoundTripAndRejections(t *testing.T) {
 	codec := NewCompactionCodec(testCompactionCipher(t))
 	blob, err := codec.Encode("session-a", "Summary:\nkept text")
 	testutil.NoError(t, err, "encode: %v")
-	testutil.Falsef(t, !strings.HasPrefix(blob, gatewayCompactionPrefix), "blob=%q missing prefix", blob)
+	testutil.Falsef(t, !strings.HasPrefix(blob, CompactionPrefix), "blob=%q missing prefix", blob)
 
 	summary, owned, drifted, err := codec.Decode("session-a", blob)
 	testutil.Falsef(t, err != nil || !owned || drifted || summary != "Summary:\nkept text", "decode=%q owned=%v drifted=%v err=%v", summary, owned, drifted, err)
@@ -34,11 +34,11 @@ func TestGatewayCompactionCodecRoundTripAndRejections(t *testing.T) {
 	summary, owned, _, err = codec.Decode("session-a", "upstream-opaque-blob")
 	testutil.Falsef(t, err != nil || owned || summary != "", "foreign blob summary=%q owned=%v err=%v", summary, owned, err)
 	// A prefixed blob that cannot be opened is an error, never an empty summary.
-	_, owned, _, err = codec.Decode("session-a", gatewayCompactionPrefix+"not-base64!!")
+	_, owned, _, err = codec.Decode("session-a", CompactionPrefix+"not-base64!!")
 	testutil.Falsef(t, err == nil || !owned, "tampered blob owned=%v err=%v", owned, err)
 	// Another instance (different key) must not be able to read ours.
 	otherCodec := NewCompactionCodec(mustCipher(t, "fedcba9876543210fedcba9876543210"))
-	_, _, _, err = otherCodec.decode("session-a", blob)
+	_, _, _, err = otherCodec.Decode("session-a", blob)
 	testutil.Error(t, err)
 	// Empty summaries remain invalid; large summaries must round-trip.
 	_, err = codec.Encode("s", "")
@@ -68,7 +68,7 @@ func TestExpandGatewayCompactionHistory(t *testing.T) {
 		map[string]any{"id": "cmp_1", "type": "compaction", "encrypted_content": blob},
 		map[string]any{"id": "cmp_2", "type": "compaction", "encrypted_content": "upstream-opaque"},
 	}}
-	drifted, err := expandGatewayCompactionHistory(payload, codec, "session-a")
+	drifted, err := ExpandCompactionHistory(payload, codec, "session-a")
 	testutil.Equal(t, err, nil)
 	testutil.Equal(t, drifted, 0)
 	items := payload["input"].([]any)
@@ -84,11 +84,11 @@ func TestExpandGatewayCompactionHistory(t *testing.T) {
 
 	// An undecodable gateway blob names the item that has to be dropped.
 	bad := map[string]any{"input": []any{
-		map[string]any{"type": "compaction", "encrypted_content": gatewayCompactionPrefix + "broken"},
+		map[string]any{"type": "compaction", "encrypted_content": CompactionPrefix + "broken"},
 	}}
-	_, err = expandGatewayCompactionHistory(bad, codec, "session-a")
+	_, err = ExpandCompactionHistory(bad, codec, "session-a")
 	testutil.False(t, err == nil, "expected an error for an undecodable gateway blob")
-	var blobErr *compactionBlobError
+	var blobErr *CompactionBlobError
 	testutil.Falsef(t, !asError(err, &blobErr) || blobErr.Param() != "input[0].encrypted_content", "err=%v param=%q", err, compactionErrorParam(err))
 }
 
@@ -140,10 +140,10 @@ func TestCleanGatewayCompactionSummary(t *testing.T) {
 }
 
 func TestDegenerateGatewayCompactionSummary(t *testing.T) {
-	testutil.False(t, !isDegenerateGatewayCompactionSummary("too short"), "a short summary must count as degenerate")
+	testutil.False(t, !IsDegenerateCompactionSummary("too short"), "a short summary must count as degenerate")
 	// Tags and blank padding must not be able to fake length.
-	testutil.False(t, !isDegenerateGatewayCompactionSummary("<summary>"+strings.Repeat("\n", 600)+"short</summary>"), "padding counted towards the summary length")
-	testutil.False(t, isDegenerateGatewayCompactionSummary(compactionTestSummary), "a real summary was rejected")
+	testutil.False(t, !IsDegenerateCompactionSummary("<summary>"+strings.Repeat("\n", 600)+"short</summary>"), "padding counted towards the summary length")
+	testutil.False(t, IsDegenerateCompactionSummary(compactionTestSummary), "a real summary was rejected")
 	testutil.Falsef(t, utf8.RuneCountInString(cleanGatewayCompactionSummary(compactionTestSummary)) < minGatewayCompactionRunes, "fixture summary is too short: %d runes", utf8.RuneCountInString(compactionTestSummary))
 }
 
@@ -156,7 +156,7 @@ func TestPrepareGatewayCompactionSample(t *testing.T) {
 		"tools":       []any{map[string]any{"type": "function", "name": "weather"}},
 		"tool_choice": "none",
 	}
-	sample := prepareGatewayCompactionSample(payload)
+	sample := PrepareCompactionSample(payload)
 
 	testutil.Equal(t, sample["stream"], true)
 	testutil.Equal(t, sample["store"], false)
@@ -173,13 +173,13 @@ func TestPrepareGatewayCompactionSample(t *testing.T) {
 	}
 	items := sample["input"].([]any)
 	last := items[len(items)-1].(map[string]any)
-	testutil.EqualAny(t, last["content"], gatewayCompactionPrompt)
+	testutil.EqualAny(t, last["content"], CompactionPrompt)
 	// The caller's payload must not be mutated: it is still the request body.
 	_, present := payload["reasoning"]
-	testutil.False(t, present, "prepareGatewayCompactionSample mutated its input")
-	testutil.False(t, len(payload["input"].([]any)) != 1, "prepareGatewayCompactionSample appended to the caller's input")
+	testutil.False(t, present, "PrepareCompactionSample mutated its input")
+	testutil.False(t, len(payload["input"].([]any)) != 1, "PrepareCompactionSample appended to the caller's input")
 	// Without tools, a stale tool_choice is removed rather than forwarded.
-	noTools := prepareGatewayCompactionSample(map[string]any{"model": "grok-4.5", "input": []any{}, "tool_choice": "none"})
+	noTools := PrepareCompactionSample(map[string]any{"model": "grok-4.5", "input": []any{}, "tool_choice": "none"})
 	_, present = noTools["tool_choice"]
 	testutil.False(t, present, "tool_choice survived without tools")
 }
@@ -194,36 +194,36 @@ func TestParseGatewayCompactionStream(t *testing.T) {
 	completedJSON, _ := json.Marshal(map[string]any{"type": "response.completed", "response": completed})
 	stream := "event: response.created\ndata: {\"type\":\"response.created\"}\n\n" +
 		"event: response.completed\ndata: " + string(completedJSON) + "\n\n"
-	sample, err := parseGatewayCompactionStream([]byte(stream))
+	sample, err := ParseCompactionStream([]byte(stream))
 	testutil.NoError(t, err, "parse: %v")
 	testutil.Equal(t, sample.Summary, strings.TrimSpace(compactionTestSummary))
 	testutil.Equal(t, sample.Response["id"], "resp_1")
 
 	// No completed event at all is a retryable failure, not an empty summary.
-	_, err = parseGatewayCompactionStream([]byte("event: response.created\ndata: {\"type\":\"response.created\"}\n\n"))
+	_, err = ParseCompactionStream([]byte("event: response.created\ndata: {\"type\":\"response.created\"}\n\n"))
 	testutil.Error(t, err)
 
 	// A failed response carries the upstream reason and its retryability.
 	failed := "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"invalid_request_error\",\"message\":\"bad input\"}}}\n\n"
-	_, err = parseGatewayCompactionStream([]byte(failed))
-	testutil.Falsef(t, err == nil || gatewayCompactionErrorIsTransient(err), "err=%v transient=%v", err, gatewayCompactionErrorIsTransient(err))
+	_, err = ParseCompactionStream([]byte(failed))
+	testutil.Falsef(t, err == nil || CompactionErrorIsTransient(err), "err=%v transient=%v", err, CompactionErrorIsTransient(err))
 	transient := "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_error\",\"message\":\"try later\"}}}\n\n"
-	_, err = parseGatewayCompactionStream([]byte(transient))
-	testutil.Falsef(t, err == nil || !gatewayCompactionErrorIsTransient(err), "err=%v transient=%v", err, gatewayCompactionErrorIsTransient(err))
+	_, err = ParseCompactionStream([]byte(transient))
+	testutil.Falsef(t, err == nil || !CompactionErrorIsTransient(err), "err=%v transient=%v", err, CompactionErrorIsTransient(err))
 
 	// A summary that only arrives as streamed output items is still usable.
 	streamedOnly := "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"" +
 		strings.ReplaceAll(compactionTestSummary, "\n", "\\n") + "\"}]}}\n\n" +
 		"event: response.completed\ndata: " + string(completedJSON) + "\n\n"
-	sample, err = parseGatewayCompactionStream([]byte(streamedOnly))
+	sample, err = ParseCompactionStream([]byte(streamedOnly))
 	testutil.Falsef(t, err != nil || sample.Summary == "", "summary=%q err=%v", sample.Summary, err)
 }
 
 // asError is a tiny local helper so the test does not have to import errors
 // just for one assertion.
 func asError(err error, target any) bool {
-	blobErr, ok := err.(*compactionBlobError)
-	if typed, isTarget := target.(**compactionBlobError); isTarget {
+	blobErr, ok := err.(*CompactionBlobError)
+	if typed, isTarget := target.(**CompactionBlobError); isTarget {
 		if ok {
 			*typed = blobErr
 		}
@@ -234,7 +234,7 @@ func asError(err error, target any) bool {
 
 // compactionErrorParam exposes the input index an expansion failure points at.
 func compactionErrorParam(err error) string {
-	if blobErr, ok := errors.AsType[*compactionBlobError](err); ok {
+	if blobErr, ok := errors.AsType[*CompactionBlobError](err); ok {
 		return blobErr.Param()
 	}
 	return "input"

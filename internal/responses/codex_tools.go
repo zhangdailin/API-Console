@@ -3,6 +3,7 @@ package responses
 import (
 	"encoding/json"
 	"fmt"
+	"orchids-api/internal/chatwire"
 	"strings"
 )
 
@@ -232,7 +233,7 @@ func lowerCodexItem(item map[string]any, i int, aliases ToolNamespaces) (map[str
 		// notifications: no call_id, identified by name and namespace. A tool
 		// result must answer a call, so it reaches the model as a user message
 		// naming its source, rather than as an invented call.
-		name := ParseLooseStringAny(item["name"])
+		name := chatwire.ParseLooseStringAny(item["name"])
 		if strings.TrimSpace(callID) != "" || strings.TrimSpace(name) == "" {
 			return item, true, nil
 		}
@@ -265,7 +266,7 @@ func lowerCodexItem(item map[string]any, i int, aliases ToolNamespaces) (map[str
 // a label naming the tool, then the output text or its content parts.
 func unpairedToolOutputMessage(item map[string]any, name string) map[string]any {
 	source := name
-	if namespace := strings.TrimSpace(ParseLooseStringAny(item["namespace"])); namespace != "" {
+	if namespace := strings.TrimSpace(chatwire.ParseLooseStringAny(item["namespace"])); namespace != "" {
 		source = namespace + "." + name
 	}
 	label := "Tool output from " + source + " (sent by the client, not a reply to a tool call):"
@@ -308,10 +309,10 @@ func declareSearchedTools(payload map[string]any, loaded []map[string]any, alias
 	tools, _ := payload["tools"].([]any)
 	declared := map[string]bool{}
 	for _, tool := range InterfaceMaps(tools) {
-		declared[ParseLooseStringAny(tool["type"])+"\x00"+ParseLooseStringAny(tool["name"])] = true
+		declared[chatwire.ParseLooseStringAny(tool["type"])+"\x00"+chatwire.ParseLooseStringAny(tool["name"])] = true
 	}
 	for i, tool := range loaded {
-		key := ParseLooseStringAny(tool["type"]) + "\x00" + ParseLooseStringAny(tool["name"])
+		key := chatwire.ParseLooseStringAny(tool["type"]) + "\x00" + chatwire.ParseLooseStringAny(tool["name"])
 		if declared[key] {
 			continue
 		}
@@ -336,11 +337,11 @@ func searchedToolsSummary(tools []map[string]any) string {
 	}
 	var names []string
 	for _, tool := range tools {
-		name := ParseLooseStringAny(tool["name"])
+		name := chatwire.ParseLooseStringAny(tool["name"])
 		if tool["type"] == "namespace" {
 			var children []string
 			for _, child := range InterfaceMaps(tool["tools"]) {
-				children = append(children, ParseLooseStringAny(child["name"]))
+				children = append(children, chatwire.ParseLooseStringAny(child["name"]))
 			}
 			name += " (" + strings.Join(children, ", ") + ")"
 		}

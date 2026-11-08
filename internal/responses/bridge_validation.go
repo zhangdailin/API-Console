@@ -77,12 +77,10 @@ func ValidateToolsAndHistory(payload map[string]any) error {
 	return nil
 }
 
-// ValidateBridgedTools checks the declaration and replay contract before the
-// standard Responses-to-Chat conversion, after namespace adaptation.
+// ValidateBridgedTools refuses the tools a Chat upstream cannot serve. It runs
+// after NormalizeBridgedRequest, which already validated the declarations,
+// replay items and tool_choice; only plain functions are left to check.
 func ValidateBridgedTools(req *CreateRequest) error {
-	if err := ValidateToolsAndHistory(map[string]any{"tools": req.Tools, "tool_choice": req.ToolChoice, "input": req.Input}); err != nil {
-		return err
-	}
 	for i, tool := range req.Tools {
 		kind, _ := tool["type"].(string)
 		if kind != "function" {

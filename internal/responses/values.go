@@ -1,38 +1,6 @@
 package responses
 
-import (
-	"maps"
-	"orchids-api/internal/chatwire"
-)
-
-// ParseLooseStringAny renders an arbitrary JSON-decoded value as a trimmed
-// string. A Responses payload routinely carries a number or a bool where the
-// protocol says string, and a nil must read as "" rather than "<nil>", so the
-// loose read is the only safe one on this boundary.
-func ParseLooseStringAny(value any) string {
-	return chatwire.ParseLooseStringAny(value)
-}
-
-// ParseLooseBoolAnyForField uses the shared scalar parser and names the field
-// in validation errors.
-func ParseLooseBoolAnyForField(value any, field string) (bool, error) {
-	return chatwire.ParseLooseBoolAnyForField(value, field)
-}
-
-// ParseLooseBoolAny reads the stream field through the shared scalar parser.
-func ParseLooseBoolAny(value any) (bool, error) {
-	return chatwire.ParseLooseBoolAny(value)
-}
-
-// ParseLooseIntAny reads an integer through the shared scalar parser.
-func ParseLooseIntAny(value any) (int, error) {
-	return chatwire.ParseLooseIntAny(value)
-}
-
-// ParseLooseFloatAny reads an optional float through the shared scalar parser.
-func ParseLooseFloatAny(value any) (*float64, error) {
-	return chatwire.ParseLooseFloatAny(value)
-}
+import "maps"
 
 // InterfaceMaps reads a JSON array as a slice of maps, accepting both the
 // decoded []interface{} form and an already-typed slice.

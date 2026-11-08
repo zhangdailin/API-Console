@@ -3,6 +3,7 @@ package responses
 import (
 	"fmt"
 
+	"orchids-api/internal/chatwire"
 	"orchids-api/internal/util"
 )
 
@@ -19,7 +20,7 @@ func Failure(ev map[string]any) error {
 	// detail is a nil map when the upstream error is not an object; reading it is
 	// safe and yields the empty message.
 	detail, _ := value.(map[string]any)
-	message := util.FirstNonEmpty(ParseLooseStringAny(detail["message"]), ParseLooseStringAny(value))
+	message := util.FirstNonEmpty(chatwire.ParseLooseStringAny(detail["message"]), chatwire.ParseLooseStringAny(value))
 	if message == "" {
 		// Kept separate from FirstNonEmpty, which would trim the upstream text.
 		message = StreamString(ev["message"])

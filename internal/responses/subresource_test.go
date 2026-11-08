@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"time"
 
+	"orchids-api/internal/chatwire"
 	"orchids-api/internal/util"
 	"strings"
 	"sync"
@@ -62,7 +63,7 @@ func TestResponsesInputItemsJSONNormalizesEveryInputShape(t *testing.T) {
 	testutil.Equal(t, len(fromString), 1)
 	testutil.Equal(t, fromString[0]["type"], "message")
 	testutil.Equal(t, fromString[0]["role"], "user")
-	if !strings.HasPrefix(ParseLooseStringAny(fromString[0]["id"]), "msg_") {
+	if !strings.HasPrefix(chatwire.ParseLooseStringAny(fromString[0]["id"]), "msg_") {
 		t.Fatalf("string input item id = %#v, want a msg_ id", fromString[0]["id"])
 	}
 	testutil.Equal(t, fromString[0]["status"], "completed")
@@ -78,7 +79,7 @@ func TestResponsesInputItemsJSONNormalizesEveryInputShape(t *testing.T) {
 	testutil.Equal(t, len(fromArray), 2)
 	testutil.Equal(t, fromArray[1]["id"], "fc_known")
 	for i, item := range fromArray {
-		testutil.Falsef(t, ParseLooseStringAny(item["id"]) == "" || ParseLooseStringAny(item["status"]) == "", "item %d is missing id/status: %#v", i, item)
+		testutil.Falsef(t, chatwire.ParseLooseStringAny(item["id"]) == "" || chatwire.ParseLooseStringAny(item["status"]) == "", "item %d is missing id/status: %#v", i, item)
 	}
 
 	got := InputItemsJSON(nil)

@@ -19,7 +19,7 @@ type SSEEvent struct {
 	rawDataEnd   int
 	hasRawData   bool
 	// raw is the frame exactly as it arrived, including its line endings and the
-	// terminating blank line. writeTo prefers it so an untouched frame is
+	// terminating blank line. WriteFrame prefers it so an untouched frame is
 	// byte-identical to the upstream: the relay passes the native Responses
 	// stream through instead of re-rendering it, so the client receives exactly
 	// what the upstream wrote.
@@ -52,7 +52,18 @@ func (e SSEEvent) Data() []byte {
 
 func (e SSEEvent) HasData() bool { return e.hasRawData || len(e.data) > 0 }
 
-func (e SSEEvent) writeTo(writer io.Writer) error {
+// SetData replaces the frame's data lines and drops its raw copy, so the
+// changed payload is rendered from the parsed fields.
+func (e *SSEEvent) SetData(lines ...string) {
+	e.data = lines
+	e.raw = nil
+	e.hasRawData = false
+}
+
+// WriteFrame renders the frame. An untouched frame is written back
+// byte-for-byte from its raw copy, so a relayed stream reproduces the
+// upstream exactly.
+func (e SSEEvent) WriteFrame(writer io.Writer) error {
 	if len(e.raw) > 0 {
 		n, err := writer.Write(e.raw)
 		if err == nil && n != len(e.raw) {

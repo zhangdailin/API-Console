@@ -1,6 +1,9 @@
 package responses
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"orchids-api/internal/chatwire"
+)
 
 // CreateRequest is the OpenAI Responses create request as a client sends it.
 //
@@ -66,19 +69,19 @@ func (r *CreateRequest) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	stream, err := ParseLooseBoolAny(raw.Stream)
+	stream, err := chatwire.ParseLooseBoolAny(raw.Stream)
 	if err != nil {
 		return err
 	}
-	temp, err := ParseLooseFloatAny(raw.Temperature)
+	temp, err := chatwire.ParseLooseFloatAny(raw.Temperature)
 	if err != nil {
 		return err
 	}
-	topP, err := ParseLooseFloatAny(raw.TopP)
+	topP, err := chatwire.ParseLooseFloatAny(raw.TopP)
 	if err != nil {
 		return err
 	}
-	maxOutputTokens, err := ParseLooseIntAny(raw.MaxOutputTokens)
+	maxOutputTokens, err := chatwire.ParseLooseIntAny(raw.MaxOutputTokens)
 	if err != nil {
 		return err
 	}
@@ -87,7 +90,7 @@ func (r *CreateRequest) UnmarshalJSON(data []byte) error {
 	_, streamProvided := rawMap["stream"]
 	var parallel *bool
 	if _, ok := rawMap["parallel_tool_calls"]; ok {
-		v, err := ParseLooseBoolAnyForField(raw.ParallelToolCalls, "parallel_tool_calls")
+		v, err := chatwire.ParseLooseBoolAnyForField(raw.ParallelToolCalls, "parallel_tool_calls")
 		if err != nil {
 			return err
 		}
@@ -95,7 +98,7 @@ func (r *CreateRequest) UnmarshalJSON(data []byte) error {
 	}
 	var store *bool
 	if _, ok := rawMap["store"]; ok {
-		v, err := ParseLooseBoolAnyForField(raw.Store, "store")
+		v, err := chatwire.ParseLooseBoolAnyForField(raw.Store, "store")
 		if err != nil {
 			return err
 		}
@@ -103,7 +106,7 @@ func (r *CreateRequest) UnmarshalJSON(data []byte) error {
 	}
 	var background *bool
 	if _, ok := rawMap["background"]; ok {
-		v, err := ParseLooseBoolAnyForField(raw.Background, "background")
+		v, err := chatwire.ParseLooseBoolAnyForField(raw.Background, "background")
 		if err != nil {
 			return err
 		}
@@ -115,18 +118,18 @@ func (r *CreateRequest) UnmarshalJSON(data []byte) error {
 	}
 
 	*r = CreateRequest(raw.plainCreateRequest)
-	r.Model = ParseLooseStringAny(raw.Model)
-	r.Instructions = ParseLooseStringAny(raw.Instructions)
+	r.Model = chatwire.ParseLooseStringAny(raw.Model)
+	r.Instructions = chatwire.ParseLooseStringAny(raw.Instructions)
 	r.Stream = stream
 	r.StreamProvided = streamProvided
 	r.Temperature = temp
 	r.TopP = topP
 	r.MaxOutputTokens = maxOutput
 	r.ParallelToolCalls = parallel
-	r.PreviousResponseID = ParseLooseStringAny(raw.PreviousResponseID)
+	r.PreviousResponseID = chatwire.ParseLooseStringAny(raw.PreviousResponseID)
 	r.Store = store
-	r.Truncation = ParseLooseStringAny(raw.Truncation)
+	r.Truncation = chatwire.ParseLooseStringAny(raw.Truncation)
 	r.Background = background
-	r.PromptCacheKey = ParseLooseStringAny(raw.PromptCacheKey)
+	r.PromptCacheKey = chatwire.ParseLooseStringAny(raw.PromptCacheKey)
 	return nil
 }

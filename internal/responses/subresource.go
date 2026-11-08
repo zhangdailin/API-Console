@@ -3,6 +3,7 @@ package responses
 import (
 	"net/http"
 	"net/url"
+	"orchids-api/internal/chatwire"
 	"orchids-api/internal/util"
 	"strings"
 	"time"
@@ -149,7 +150,7 @@ func writeCancelledRecord(w http.ResponseWriter, r *http.Request, st Store, reco
 		WriteAPIError(w, http.StatusBadGateway, "invalid_stored_response", "stored response is not a JSON object")
 		return
 	}
-	if !strings.EqualFold(ParseLooseStringAny(response["status"]), "cancelled") {
+	if !strings.EqualFold(chatwire.ParseLooseStringAny(response["status"]), "cancelled") {
 		response["status"] = "cancelled"
 		markOutputItemsCancelled(response)
 		encoded, encodeErr := json.Marshal(response)
@@ -201,7 +202,7 @@ func markOutputItemsCancelled(response map[string]any) {
 		if item == nil {
 			continue
 		}
-		switch strings.ToLower(ParseLooseStringAny(item["status"])) {
+		switch strings.ToLower(chatwire.ParseLooseStringAny(item["status"])) {
 		case "", "in_progress", "queued":
 			item["status"] = "cancelled"
 		}
@@ -227,10 +228,10 @@ func writeStoredInputItems(w http.ResponseWriter, record *store.StoredResponse) 
 	}
 	if len(items) > 0 {
 		if first, ok := items[0].(map[string]any); ok {
-			payload["first_id"] = ParseLooseStringAny(first["id"])
+			payload["first_id"] = chatwire.ParseLooseStringAny(first["id"])
 		}
 		if last, ok := items[len(items)-1].(map[string]any); ok {
-			payload["last_id"] = ParseLooseStringAny(last["id"])
+			payload["last_id"] = chatwire.ParseLooseStringAny(last["id"])
 		}
 	}
 	util.WriteJSON(w, payload)
@@ -283,10 +284,10 @@ func InputItems(input any) []any {
 			if copied == nil {
 				continue
 			}
-			if ParseLooseStringAny(copied["id"]) == "" {
+			if chatwire.ParseLooseStringAny(copied["id"]) == "" {
 				copied["id"] = "item_" + util.RandomHex(12)
 			}
-			if ParseLooseStringAny(copied["status"]) == "" {
+			if chatwire.ParseLooseStringAny(copied["status"]) == "" {
 				copied["status"] = "completed"
 			}
 			out = append(out, copied)

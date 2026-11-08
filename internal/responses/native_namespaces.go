@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"orchids-api/internal/chatwire"
 )
 
 // NormalizeNamespacePayload preserves native fields outside the tool contract.
@@ -77,7 +78,7 @@ func NormalizeBridgedRequest(req *CreateRequest) (ToolNamespaces, error) {
 func (aliases ToolNamespaces) ValidatePlainTools(tools any) error {
 	for _, tool := range InterfaceMaps(tools) {
 		if tool["type"] == "function" {
-			if _, exists := aliases[ParseLooseStringAny(tool["name"])]; exists {
+			if _, exists := aliases[chatwire.ParseLooseStringAny(tool["name"])]; exists {
 				return fmt.Errorf("function name conflicts with namespace history")
 			}
 		}
@@ -132,7 +133,7 @@ func (aliases ToolNamespaces) RestoreEnvelope(envelope map[string]any) bool {
 		changed = aliases.RestoreEnvelope(response) || changed
 	}
 	if choice, ok := envelope["tool_choice"].(map[string]any); ok && choice["type"] == "function" {
-		if identity, found := aliases[ParseLooseStringAny(choice["name"])]; found {
+		if identity, found := aliases[chatwire.ParseLooseStringAny(choice["name"])]; found {
 			switch identity.Kind {
 			case toolKindCustom:
 				envelope["tool_choice"] = map[string]any{"type": toolKindCustom, "name": identity.Name}
@@ -149,7 +150,7 @@ func (aliases ToolNamespaces) RestoreEnvelope(envelope map[string]any) bool {
 	var restored []map[string]any
 	toolsChanged := false
 	for _, tool := range tools {
-		identity, found := aliases[ParseLooseStringAny(tool["name"])]
+		identity, found := aliases[chatwire.ParseLooseStringAny(tool["name"])]
 		if tool["type"] != "function" || !found {
 			restored = append(restored, tool)
 			continue

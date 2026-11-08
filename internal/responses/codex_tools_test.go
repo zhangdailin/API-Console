@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"orchids-api/internal/chatwire"
 	"orchids-api/internal/testutil"
 )
 
@@ -227,7 +228,7 @@ func TestClientToolSearchRoundTrip(t *testing.T) {
 		testutil.Equal(t, tool["type"], "function")
 		_, deferred := tool["defer_loading"]
 		testutil.False(t, deferred, "a declared search result must not stay deferred")
-		names = append(names, ParseLooseStringAny(tool["name"]))
+		names = append(names, chatwire.ParseLooseStringAny(tool["name"]))
 	}
 	testutil.Equal(t, strings.Join(names, ","), "shell,tool_search,mcp__calendar__create")
 	testutil.Equal(t, InterfaceMaps(payload["tools"])[1]["description"], "Find tools.")
@@ -237,7 +238,7 @@ func TestClientToolSearchRoundTrip(t *testing.T) {
 	testutil.Equal(t, items[1]["name"], "tool_search")
 	testutil.Equal(t, items[1]["arguments"], `{"limit":1,"query":"calendar"}`)
 	testutil.Equal(t, items[2]["type"], "function_call_output")
-	testutil.MustContain(t, ParseLooseStringAny(items[2]["output"]), "mcp__calendar__create")
+	testutil.MustContain(t, chatwire.ParseLooseStringAny(items[2]["output"]), "mcp__calendar__create")
 	_ = calendar["defer_loading"].(bool) // the caller's definition is untouched
 
 	call := map[string]any{"type": "function_call", "id": "fc_1", "call_id": "s3", "name": "tool_search", "arguments": `{"query":"mail","limit":2}`, "status": "completed"}
