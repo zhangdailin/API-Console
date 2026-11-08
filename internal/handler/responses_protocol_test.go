@@ -32,7 +32,7 @@ func TestResponsesControlsReachRealSharedHandler(t *testing.T) {
 }
 
 func TestUnsupportedResponsesControlsFailBeforeUpstream(t *testing.T) {
-	for _, extra := range []string{`"include":["reasoning.encrypted_content"]`, `"x_responses_tools":[{"type":"web_search"}]`, `"text":{"verbosity":"high"}`, `"mcp_servers":[{"name":"s","url":"https://example.test"}]`} {
+	for _, extra := range []string{`"include":["reasoning.encrypted_content"]`, `"x_responses_tools":[{"type":"web_search"}]`, `"text":{"tone":"formal"}`, `"mcp_servers":[{"name":"s","url":"https://example.test"}]`} {
 		h := NewWithLoadBalancer(&config.Config{RequestTimeout: 10}, nil)
 		client := &relayRecordingClient{}
 		h.client = client
@@ -41,5 +41,47 @@ func TestUnsupportedResponsesControlsFailBeforeUpstream(t *testing.T) {
 		if w.Code != 400 || len(client.requests) != 0 {
 			t.Fatalf("extra=%s status=%d calls=%d body=%s", extra, w.Code, len(client.requests), w.Body.String())
 		}
+	}
+}
+
+// Codex sends text.verbosity on every turn and, for auxiliary tasks, a
+// json_schema output format whose schema is `true`. Both were refused before
+// upstream, so Codex Desktop failed on WorkBuddy. verbosity is a length hint
+// these channels have no field for: it is accepted and not sent. A schema that
+// allows any output is sent as no format, and `false` (nothing allowed) still
+// fails.
+func TestCodexTextControlsReachPassthroughChannels(t *testing.T) {
+	for name, tc := range map[string]struct {
+		text       string
+		wantStatus int
+		wantFormat bool
+	}{
+		"verbosity":            {`{"verbosity":"low"}`, 200, false},
+		"verbosity and schema": {`{"verbosity":"medium","format":{"type":"json_schema","name":"codex_output_schema","strict":false,"schema":{"type":"object"}}}`, 200, true},
+		"schema true":          {`{"format":{"type":"json_schema","name":"codex_output_schema","strict":true,"schema":true}}`, 200, false},
+		"schema null":          {`{"format":{"type":"json_schema","name":"codex_output_schema","strict":false,"schema":null}}`, 200, false},
+		"schema false":         {`{"format":{"type":"json_schema","name":"codex_output_schema","strict":true,"schema":false}}`, 400, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := NewWithLoadBalancer(&config.Config{RequestTimeout: 10}, nil)
+			client := &relayRecordingClient{}
+			h.client = client
+			w := httptest.NewRecorder()
+			body := `{"model":"m","messages":[{"role":"user","content":"hi"}],"text":` + tc.text + `}`
+			h.HandleMessages(w, httptest.NewRequest(http.MethodPost, "/workbuddy/v1/chat/completions", strings.NewReader(body)))
+			if w.Code != tc.wantStatus {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+			if tc.wantStatus != 200 {
+				return
+			}
+			if len(client.requests) != 1 {
+				t.Fatalf("calls=%d", len(client.requests))
+			}
+			format := client.requests[0].ChatResponseFormat()
+			if (len(format) > 0) != tc.wantFormat {
+				t.Fatalf("response format sent = %#v, want present=%v", format, tc.wantFormat)
+			}
+		})
 	}
 }

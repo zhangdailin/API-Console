@@ -30,7 +30,9 @@
 | text.format / response_format | 转换为对应 Chat 结构；Build 按原生适配 |
 | strict:true | 共享渠道补 schema 提示并校验已支持规则；不匹配失败 |
 | prompt_cache_key | WorkBuddy / Cline 按适配传递 |
-| text.verbosity 等无等价字段 | 共享传输校验拒绝，不声称模型遵守 |
+| text.verbosity | WorkBuddy / Cline 接受但不转发（这些上游无对应字段，`text` 本就不发送）：它是回答长度提示而非契约，Codex 每轮都会携带，拒绝会使 Codex 在这些渠道不可用；不声称模型遵守 |
+| json_schema 的 schema 为 `true` / `null` / 缺失 | 视为不限制输出，WorkBuddy / Cline 不发送结构化输出格式（Codex 的 output schema 选项可能如此发送）；`false` 拒绝 |
+| text 中其他无等价字段 | 共享传输校验拒绝，不声称模型遵守 |
 | include:reasoning.encrypted_content | Chat 桥接消费该输出投影请求并返回兼容警告，不伪造密文 |
 | 其他 include | 无等价共享传输时拒绝 |
 | 桥接 web_search / preview | 删除托管搜索并提示不可用；强制搜索且无法满足时拒绝 |

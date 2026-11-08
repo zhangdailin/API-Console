@@ -23,7 +23,13 @@ func (r UpstreamRequest) ValidateProtocolControls(provider string) error {
 		return fmt.Errorf("%s does not support Responses include=%v", provider, r.Include)
 	}
 	for key := range r.ResponseText {
-		if key != "format" {
+		switch key {
+		case "format":
+		case "verbosity":
+			// A length hint, not a contract: Codex sends it on every turn.
+			// These channels have no wire field for it and never send `text`,
+			// so it is omitted like the cache hint below.
+		default:
 			return fmt.Errorf("%s does not support text.%s", provider, key)
 		}
 	}
@@ -35,6 +41,9 @@ func (r UpstreamRequest) ValidateProtocolControls(provider string) error {
 			schema, ok := format["json_schema"].(map[string]any)
 			if !ok {
 				return fmt.Errorf("response_format.json_schema must be an object")
+			}
+			if schema["schema"] == false {
+				return fmt.Errorf("response_format.json_schema.schema false accepts no output")
 			}
 			if _, ok := schema["schema"].(map[string]any); !ok {
 				return fmt.Errorf("response_format.json_schema.schema must be an object")
@@ -86,6 +95,9 @@ func (r UpstreamRequest) ChatResponseFormat() map[string]any {
 	if len(f) == 0 {
 		return nil
 	}
+	if unconstrainedJSONSchema(f) {
+		return nil
+	}
 	out := make(map[string]any, len(f))
 	maps.Copy(out, f)
 	if f["type"] == "json_schema" && f["json_schema"] == nil {
@@ -102,6 +114,24 @@ func (r UpstreamRequest) ChatResponseFormat() map[string]any {
 		}
 	}
 	return out
+}
+
+// unconstrainedJSONSchema reports a json_schema format whose schema allows
+// any output: the boolean schema `true`, or no schema at all (absent or null),
+// which Codex can send with its output-schema option. A chat upstream only
+// takes an object schema; sending no format asks for the same thing.
+func unconstrainedJSONSchema(format map[string]any) bool {
+	if strings.TrimSpace(fmt.Sprint(format["type"])) != "json_schema" {
+		return false
+	}
+	envelope := format
+	if nested, ok := format["json_schema"].(map[string]any); ok {
+		envelope = nested
+	} else if format["json_schema"] != nil {
+		return false
+	}
+	schema, exists := envelope["schema"]
+	return !exists || schema == nil || schema == true
 }
 
 // serverWebSearchTool reports a declared server-side web search tool, such as
