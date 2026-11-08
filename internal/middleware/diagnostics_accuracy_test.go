@@ -162,3 +162,53 @@ func TestCommittedTwoHundredThatFailedIsNotASuccess(t *testing.T) {
 	testutil.Equal(t, len(journal.events), 1)
 	testutil.Equal(t, journal.events[0].Status, "error")
 }
+
+// A request refused before any upstream call journalled only its status; the
+// reason Codex was given (and the log centre's 失败原因) was missing, so the
+// cause had to be inferred from the response length. The journal now carries
+// the client-visible error message of a non-streaming error response.
+func TestRequestJournalCarriesLocalErrorReason(t *testing.T) {
+	for name, tc := range map[string]struct {
+		status int
+		body   string
+		want   string
+	}{
+		"gateway envelope":   {400, `{"error":{"message":"workbuddy does not support text.verbosity","type":"invalid_request_error"},"type":"error"}`, "workbuddy does not support text.verbosity"},
+		"responses envelope": {400, `{"error":{"code":"invalid_request_error","message":"tools[6]: tool type \"custom\" is not supported","param":null,"type":"invalid_request_error"}}`, `tools[6]: tool type "custom" is not supported`},
+		"plain text":         {403, "voice relay requires the same origin\n", "voice relay requires the same origin"},
+		"success":            {200, `{"error":{"message":"not an error"}}`, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			journal := &diagnosticJournal{}
+			previous := requestJournal
+			requestJournal = journal
+			defer func() { requestJournal = previous }()
+			h := TraceMiddleware(LoggingMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				// Written in two pieces, as some writers do.
+				_, _ = w.Write([]byte(tc.body[:len(tc.body)/2]))
+				_, _ = w.Write([]byte(tc.body[len(tc.body)/2:]))
+			})))
+			h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", "/workbuddy/v1/responses", strings.NewReader("{}")))
+			testutil.Equal(t, len(journal.events), 1)
+			testutil.Equal(t, journal.events[0].Error, tc.want)
+		})
+	}
+}
+
+// Only the head of an error body is kept, and a streamed reply is never
+// buffered: the capture costs nothing on the success path.
+func TestErrorBodyCaptureIsBounded(t *testing.T) {
+	w := NewTracedResponseWriter(httptest.NewRecorder())
+	w.WriteHeader(500)
+	_, _ = w.Write([]byte(strings.Repeat("x", 5000)))
+	testutil.Equal(t, len(w.errorHead), errorHeadLimit)
+	testutil.Equal(t, len(w.ErrorBodyMessage()), 300)
+
+	sse := httptest.NewRecorder()
+	sse.Header().Set("Content-Type", "text/event-stream")
+	stream := NewTracedResponseWriter(sse)
+	stream.WriteHeader(500)
+	_, _ = stream.Write([]byte("data: {\"error\":{\"message\":\"x\"}}\n\n"))
+	testutil.Equal(t, len(stream.errorHead), 0)
+}

@@ -293,6 +293,9 @@ func finishRequestJournal(r *http.Request, w *TracedResponseWriter, duration tim
 	maps.Copy(metadata, e.Metadata)
 	metadata["http_status"], metadata["path"], metadata["method"] = w.StatusCode, r.URL.Path, r.Method
 	metadata["trace_id"] = GetTraceID(r.Context())
+	if e.Error == "" && w.StatusCode >= 400 {
+		e.Error = w.ErrorBodyMessage()
+	}
 	if !w.FirstWriteAt().IsZero() {
 		metadata["ttfb_ms"] = w.FirstWriteAt().Sub(w.startedAt).Milliseconds()
 	}

@@ -3,9 +3,11 @@ package middleware
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,6 +17,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"orchids-api/internal/channel"
 	"orchids-api/internal/debug"
@@ -122,7 +125,14 @@ type TracedResponseWriter struct {
 	flowUsage  func(input, output int64)
 	liveInput  int64
 	liveTokens int64
+	// errorHead keeps the start of a non-streaming error body. A request
+	// refused before any upstream call left only its status in the journal,
+	// so the reason had to be guessed from the response length.
+	errorHead []byte
 }
+
+// errorHeadLimit bounds the error body kept for the journal.
+const errorHeadLimit = 1024
 
 // NewTracedResponseWriter creates a new TracedResponseWriter.
 func NewTracedResponseWriter(w http.ResponseWriter) *TracedResponseWriter {
@@ -224,6 +234,9 @@ func (w *TracedResponseWriter) Write(b []byte) (int, error) {
 			}
 		} else {
 			payload = isPayloadWrite(b[:n])
+			if w.StatusCode >= 400 && len(w.errorHead) < errorHeadLimit {
+				w.errorHead = append(w.errorHead, b[:min(n, errorHeadLimit-len(w.errorHead))]...)
+			}
 		}
 		if payload && w.contentWriteAt.IsZero() {
 			w.contentWriteAt = now
@@ -523,4 +536,43 @@ func Chain(middlewares ...func(http.Handler) http.Handler) func(http.Handler) ht
 		}
 		return final
 	}
+}
+
+// ErrorBodyMessage is the client-visible reason of a non-streaming error
+// response: error.message of a JSON envelope (OpenAI, Anthropic and this
+// gateway's own), or the text of a plain-text error. It is what the client
+// was told, so it carries nothing the client did not already receive.
+func (w *TracedResponseWriter) ErrorBodyMessage() string {
+	if w == nil || len(w.errorHead) == 0 {
+		return ""
+	}
+	var envelope struct {
+		Error   json.RawMessage `json:"error"`
+		Message string          `json:"message"`
+	}
+	text := ""
+	if json.Unmarshal(w.errorHead, &envelope) == nil {
+		var nested struct {
+			Message string `json:"message"`
+		}
+		var plain string
+		switch {
+		case json.Unmarshal(envelope.Error, &nested) == nil && nested.Message != "":
+			text = nested.Message
+		case json.Unmarshal(envelope.Error, &plain) == nil && plain != "":
+			text = plain
+		default:
+			text = envelope.Message
+		}
+	} else if !bytes.HasPrefix(bytes.TrimSpace(w.errorHead), []byte("{")) {
+		text = string(w.errorHead)
+	}
+	text = strings.TrimSpace(strings.ToValidUTF8(text, ""))
+	if len(text) > 300 {
+		text = text[:300]
+		for !utf8.ValidString(text) {
+			text = text[:len(text)-1]
+		}
+	}
+	return text
 }
