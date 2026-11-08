@@ -117,3 +117,28 @@ func TestResponsesBridgeStreamRaisesLoweredCallsWhole(t *testing.T) {
 		testutil.Equal(t, operation["path"], "a.go")
 	}
 }
+
+// The Codex Desktop failure behind `client-executed tool_search is not
+// supported by this upstream`: the bridge declares the search as a function
+// and hands the call back as a tool_search_call.
+func TestResponsesBridgeServesClientToolSearch(t *testing.T) {
+	var seen map[string]any
+	reply := `{"id":"c","object":"chat.completion","created":1,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_s","type":"function","function":{"name":"tool_search","arguments":"{\"query\":\"calendar\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`
+	bridge := ResponsesBridgeHandler(chatReturning(t, &seen, reply), BridgeOptions{})
+	request := `{"model":"hy4free","input":"add a meeting","tools":[
+	 {"type":"function","name":"shell","parameters":{"type":"object","properties":{}}},
+	 {"type":"tool_search","execution":"client","description":"Find tools.","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}}]}`
+	rec := httptest.NewRecorder()
+	bridge(rec, httptest.NewRequest(http.MethodPost, "/workbuddy/v1/responses", strings.NewReader(request)))
+	testutil.Equal(t, rec.Code, http.StatusOK)
+	testutil.Equal(t, strings.Join(upstreamFunctionNames(seen), ","), "function:shell,function:tool_search")
+
+	var out map[string]any
+	testutil.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out), "response")
+	item := InterfaceMaps(out["output"])[0]
+	testutil.Equal(t, item["type"], "tool_search_call")
+	testutil.Equal(t, item["call_id"], "call_s")
+	testutil.Equal(t, item["execution"], "client")
+	arguments, _ := item["arguments"].(map[string]any)
+	testutil.Equal(t, arguments["query"], "calendar")
+}

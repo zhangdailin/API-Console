@@ -101,7 +101,7 @@ func (aliases ToolNamespaces) MergeStored(raw json.RawMessage) error {
 			if identity.Namespace == "" || identity.Name == "" || name != namespaceToolName(identity.Namespace, identity.Name) {
 				return fmt.Errorf("invalid stored namespace identity")
 			}
-		case toolKindCustom, toolKindApplyPatch:
+		case toolKindCustom, toolKindApplyPatch, toolKindToolSearch:
 			if identity.Namespace != "" || identity.Name == "" || name != codexWireName(identity) {
 				return fmt.Errorf("invalid stored tool identity")
 			}
@@ -138,6 +138,8 @@ func (aliases ToolNamespaces) RestoreEnvelope(envelope map[string]any) bool {
 				envelope["tool_choice"] = map[string]any{"type": toolKindCustom, "name": identity.Name}
 			case toolKindApplyPatch:
 				envelope["tool_choice"] = map[string]any{"type": toolKindApplyPatch}
+			case toolKindToolSearch:
+				envelope["tool_choice"] = map[string]any{"type": toolKindToolSearch}
 			default:
 				choice["name"], choice["namespace"] = identity.Name, identity.Namespace
 			}
@@ -162,6 +164,9 @@ func (aliases ToolNamespaces) RestoreEnvelope(envelope map[string]any) bool {
 				original = map[string]any{"type": identity.Kind}
 				if identity.Kind == toolKindCustom {
 					original["name"] = identity.Name
+				}
+				if identity.Kind == toolKindToolSearch {
+					original["execution"] = "client"
 				}
 			}
 			restored = append(restored, original)
