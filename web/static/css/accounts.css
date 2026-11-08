@@ -9,9 +9,7 @@
   max-width: 100%;
   padding: 2px var(--space-2);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-pill);
   background: var(--idle-soft);
-  color: var(--text-soft);
   font-size: 0.72rem;
   font-weight: 600;
   line-height: 1.4;
@@ -73,10 +71,6 @@
   gap: var(--space-2);
   min-width: 0;
 }
-
-.accounts-stats { margin-bottom: var(--space-4); }
-
-
 
 .account-cooldown-until { white-space: normal; line-height: 1.5; }
 
@@ -188,10 +182,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: var(--control-h-sm);
-  padding: 0 var(--space-2);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-secondary);
   font-family: inherit;
@@ -210,9 +201,7 @@
 
 .accounts-row-actions .action-icon.is-danger { color: var(--bad); border-color: rgba(251, 113, 133, 0.32); }
 
-.accounts-row-actions .action-icon.is-danger:hover { background: var(--bad-soft); color: #ffd6de; }
-
-.accounts-stats .stat-card { min-height: 80px; }
+.accounts-row-actions .action-icon.is-danger:hover { background: var(--bad-soft); }
 
 .accounts-panel .pagination-shell {
   border-top: 1px solid var(--border-color);
@@ -313,7 +302,7 @@
 .grok-sso-label-row .form-label { margin: 0; }
 #grokConnectMode .grok-sso-source { display: flex; width: 100%; }
 #grokConnectMode .grok-sso-source-tab { flex: 1; }
-.accounts-platform-group { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+
 .grok-plane-switch .tab-item { font-size: 0.8rem; }
 .grok-sso-detected { padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); background: var(--surface-1); color: var(--text-muted); font-size: 0.82rem; }
 .grok-sso-detected.is-ready { background: var(--ok-soft); color: var(--ok); }

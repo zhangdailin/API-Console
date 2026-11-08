@@ -282,12 +282,6 @@
     return `${value.toFixed(value >= 10 ? 1 : 2)} ${units[idx]}`;
   }
 
-  function formatDateTime(ms) {
-    const num = Number(ms || 0);
-    if (!Number.isFinite(num) || num <= 0) return "-";
-    return new Date(num).toLocaleString();
-  }
-
   function relativeTime(ms) {
     const num = Number(ms || 0);
     if (!Number.isFinite(num) || num <= 0) return "-";

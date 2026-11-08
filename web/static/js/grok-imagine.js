@@ -221,11 +221,6 @@
     return images;
   }
 
-  function authHeaders() {
-    const token = localStorage.getItem("admin_token") || sessionStorage.getItem("admin_token") || "";
-    return token ? { "X-Admin-Token": token } : {};
-  }
-
   function resizePrompt() {
     const input = $("imaginePrompt");
     if (!input) return;

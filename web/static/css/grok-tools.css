@@ -26,44 +26,6 @@
 
 /* One compact row: eyebrow, title, one-line lede and the account link. The
    workbench itself must stay above the fold. */
-.grok-page-header {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-3);
-  min-height: var(--control-h-lg);
-  padding-block: 0;
-}
-
-.grok-page-header h1 {
-  margin: 0;
-  font-size: 1.15rem;
-  line-height: 1.2;
-}
-
-.grok-page-lede,
-.grok-page-header p {
-  flex: 1 1 280px;
-  min-width: 0;
-  margin: 0;
-  overflow: hidden;
-  color: var(--text-secondary);
-  font-size: 0.82rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.grok-eyebrow {
-  color: var(--accent);
-  font-size: 0.7rem;
-  font-weight: 800;
-  letter-spacing: 0.14em;
-}
-
-.grok-account-link {
-  flex: 0 0 auto;
-  margin-left: auto;
-}
 
 .grok-tools-workspace {
   display: flex;
@@ -163,22 +125,6 @@
   font-weight: 650;
 }
 
-.grok-tools-toolbar {
-  position: sticky;
-  top: 54px;
-  z-index: 20;
-  align-items: center;
-  width: 100%;
-  max-width: 100%;
-  margin: 0;
-  padding: var(--space-1);
-  border: 1px solid var(--grok-line);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
-  box-shadow: var(--shadow-sm);
-  backdrop-filter: blur(12px);
-}
-
 .grok-tabs {
   width: 100%;
   min-width: 0;
@@ -225,7 +171,6 @@
   display: none !important;
 }
 
-.grok-panel,
 .chat-shell,
 .chat-sidebar,
 .composer-shell,
@@ -234,14 +179,6 @@
 .video-card,
 .voice-card {
   min-width: 0;
-}
-
-.grok-panel {
-  padding: 16px;
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  background: var(--bg-surface);
-  box-shadow: var(--shadow-sm);
 }
 
 /* Collapsed-by-default fold for the parameters an operator rarely touches. */
@@ -294,8 +231,6 @@
   outline-offset: 2px;
 }
 
-.grok-panel h3,
-.card-title,
 .function-title,
 .chat-title-text,
 .sidebar-title {
@@ -306,21 +241,14 @@
   letter-spacing: 0;
 }
 
-.grok-panel p,
 .function-subtitle,
 .chat-subtitle,
-.voice-hint,
-.empty-subtitle,
-.meta-label,
-.grok-kv span,
-.progress-meta,
-.ref-name {
+.empty-subtitle {
   color: var(--text-secondary);
   font-size: 0.86rem;
 }
 
-.function-stack,
-.grok-tools-grid {
+.function-stack {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -329,10 +257,7 @@
 
 .function-header-row,
 .chat-title,
-.chat-sidebar .sidebar-header,
-.status-header,
-.voice-log-header,
-.video-preview-header {
+.chat-sidebar .sidebar-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -345,10 +270,7 @@
 .composer-actions,
 .sidebar-actions,
 .chat-title-actions,
-.voice-actions,
-.preview-actions,
 .selection-toolbar,
-.voice-log-actions,
 .imagine-header-actions,
 .imagine-masonry-actions,
 .imagine-masonry-toolbar {
@@ -361,50 +283,24 @@
 .function-divider {
   height: 1px;
   width: 100%;
-  background: var(--border-color);
 }
 
-.function-top-grid,
-.video-top-grid,
-.voice-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.9fr);
-  gap: 12px;
-  align-items: start;
-  min-width: 0;
-}
 .settings-grid {
   display: grid;
   gap: 12px;
 }
 
-.function-settings-row,
-.meta-grid,
-.grok-form-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.grok-form-grid .full,
-.settings-block-full,
-.prompt-block,
-.ref-block {
+.settings-block-full {
   grid-column: 1 / -1;
 }
 
-.function-settings-block,
-.settings-block,
-.voice-primary,
-.voice-side {
+.settings-block {
   display: flex;
   flex-direction: column;
   gap: 10px;
   min-width: 0;
 }
 
-.grok-kv,
-.meta-item,
 .chat-thread,
 .voice-log,
 .visualizer,
@@ -414,26 +310,6 @@
   border: 1px solid var(--border-color);
   border-radius: 10px;
   background: var(--bg-surface-hover);
-}
-
-.grok-kv,
-.meta-item {
-  min-height: 58px;
-  padding: 12px;
-}
-
-.grok-kv {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.grok-kv strong,
-.meta-value {
-  color: var(--text-main);
-  font-weight: 700;
-  overflow-wrap: anywhere;
 }
 
 .status-text,
@@ -616,13 +492,6 @@
   background: rgba(255, 255, 255, 0.08);
 }
 
-.range-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.range-row input[type="range"],
 .range-input {
   width: 100%;
 }
@@ -925,7 +794,6 @@
 .imagine-masonry-grid,
 #imagineGrid .imagine-masonry-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: var(--space-3);
 }
 
@@ -1061,8 +929,7 @@
 }
 
 /* Basic parameters: one compact row, everything else lives in 高级设置. */
-.imagine-basic-row,
-.video-basic-row {
+.imagine-basic-row {
   display: flex;
   align-items: flex-end;
   flex-wrap: wrap;
@@ -1117,15 +984,11 @@
 
 .imagine-masonry-toggle {
   display: inline-flex;
-  gap: var(--space-1);
-  padding: var(--space-1);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  background: var(--surface-3);
 }
 
 .imagine-masonry-toggle-btn {
-  min-height: var(--control-h-sm);
   padding: 0 var(--space-3);
   border: 0;
   border-radius: var(--radius-sm);
@@ -1138,7 +1001,6 @@
 
 .imagine-masonry-toggle-btn.is-active {
   color: var(--text-on-accent);
-  background: var(--accent);
 }
 
 .imagine-masonry-ratio {
@@ -1205,9 +1067,7 @@
   flex: 0 0 auto;
   height: 16px;
   aspect-ratio: 2 / 3;
-  border: 1px solid var(--border-strong);
   border-radius: 2px;
-  background: var(--surface-3);
 }
 
 .imagine-masonry-ratio[data-ratio="1:1"] .imagine-masonry-ratio-icon { aspect-ratio: 1 / 1; }
@@ -1247,12 +1107,6 @@
   min-width: 0;
 }
 
-.video-textarea {
-  min-height: 120px;
-  line-height: 1.6;
-  resize: vertical;
-}
-
 .video-item-placeholder {
   padding: var(--space-4);
   border: 1px dashed var(--border-color);
@@ -1265,14 +1119,6 @@
 /* ---- Voice panel hooks ---------------------------------------------------------------------------- */
 .voice-speed-block {
   min-width: 0;
-}
-
-.voice-hint-spaced {
-  margin-top: var(--space-2);
-}
-
-.voice-status-header {
-  margin-bottom: var(--space-2);
 }
 
 .video-stage,
@@ -1395,12 +1241,6 @@
   width: 100%;
 }
 
-.progress-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
 .progress-bar {
   width: 100%;
   height: 10px;
@@ -1433,15 +1273,8 @@
   padding: 24px;
 }
 
-.table-checkbox-cell {
-  width: 40px;
-  text-align: center;
-}
-
 @media (max-width: 1080px) {
-  .function-top-grid,
-  .video-top-grid,
-  .voice-grid,
+  
   .chat-layout {
     grid-template-columns: 1fr;
   }
@@ -1485,24 +1318,13 @@
 }
 
 @media (max-width: 760px) {
-  .grok-tools-toolbar {
-    align-items: stretch;
-  }
+  
 
-  .function-settings-row,
-  .meta-grid,
-  .grok-form-grid {
-    grid-template-columns: 1fr;
-  }
+  
 
   .imagine-masonry-toolbar,
   .composer-input {
     align-items: stretch;
-  }
-
-  .composer-actions,
-  .imagine-masonry-actions {
-    width: 100%;
   }
 
   .imagine-masonry-grid,
@@ -1533,7 +1355,6 @@
 }
 
 .grok-section,
-.grok-panel,
 .chat-sidebar,
 .chat-thread,
 .composer-input,
@@ -1609,14 +1430,6 @@
   border: 1px solid var(--grok-card-border);
   border-radius: 12px;
   background: var(--bg-surface);
-}
-
-@media (max-width: 1080px) {
-  .grok-tools-toolbar {
-    top: 0;
-    width: 100%;
-    border-radius: 12px;
-  }
 }
 
 @media (max-width: 760px) {
@@ -1753,15 +1566,12 @@
   flex: 1 1 0;
 }
 
-.imagine-header-row,
-.video-header-row,
-.voice-header-row {
+.imagine-header-row {
   align-items: flex-start;
   margin-bottom: 0;
 }
 
-.imagine-header-title,
-.video-header-title {
+.imagine-header-title {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
@@ -1790,10 +1600,6 @@
   display: none;
 }
 
-.video-status-hint {
-  margin: 0 0 var(--space-2);
-}
-
 /* State classes set by grok-tools.js / grok-imagine.js on status pills. */
 .grok-tools-page .badge.connected,
 .grok-tools-page .status-badge.connected {
@@ -1816,95 +1622,13 @@
   background: var(--bad-soft);
 }
 
-/* ---- Video panel: basic row, advanced fold, generation action ------------------------------------ */
-.video-basic-row .settings-block {
-  flex: 1 1 150px;
-}
-
-.video-basic-row .form-input {
-  width: 100%;
-}
-
-.video-generation-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-2);
-}
-
 /* ---- Video / image settings blocks ---------------------------------------------------------------
    main.css reuses ratio-block, upload-block, clear-block, length-block,
    preset-block and ref-block for documentation code blocks, which painted these
    blocks as monospace inset boxes. Restore the settings-block look. */
-.ratio-block,
-.resolution-block,
-.preset-block,
-.length-block,
-.upload-block,
-.clear-block,
-.ref-block,
-.source-block,
-.action-block,
-.model-block {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-3);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  background: var(--surface-2);
-  color: var(--text-soft);
-  font-family: var(--font-sans);
-  font-size: 0.82rem;
-  line-height: 1.4;
-  overflow: visible;
-}
 
 .advanced-settings .advanced-body .settings-block {
   background: var(--surface-1);
-}
-
-.upload-block .btn,
-.clear-block .btn {
-  align-self: flex-start;
-}
-
-/* ---- Reference image controls ------------------------------------------------------------------- */
-.ref-controls {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-
-.ref-controls .form-input {
-  flex: 1 1 240px;
-  min-width: 0;
-}
-
-.ref-meta {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
-.ref-name {
-  display: block;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* ---- Chat composer (composer-shell / composer-input / composer-textarea /
-   composer-actions are defined with the chat layout above) ---------------------------------------- */
-.function-header-row-tight {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  margin: 0;
 }
 
 /* ---- Reasoning blocks (renderThinkContent) ------------------------------------------------------ */
@@ -2098,48 +1822,6 @@
   font-size: 0.78rem;
 }
 
-.media-gallery-heading,
-.media-gallery-controls,
-.media-gallery-pager {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-}
-.media-gallery-controls .form-input { width: auto; min-width: 180px; }
-.admin-media-gallery {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: var(--space-3);
-  margin: var(--space-4) 0;
-}
-.admin-media-card {
-  display: grid;
-  gap: var(--space-2);
-  color: var(--text-main);
-  text-decoration: none;
-  min-width: 0;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: var(--space-2);
-}
-.admin-media-card a { color: inherit; text-decoration: none; }
-.admin-media-select { display: flex; align-items: center; gap: var(--space-2); font-size: .8rem; }
-.admin-media-card img {
-  width: 100%;
-  aspect-ratio: 1;
-  object-fit: cover;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  background: var(--bg-inset);
-}
-.admin-media-card span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.media-card-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }
-.media-card-actions .btn { padding: .35rem .55rem; font-size: .78rem; }
-.admin-video-preview { width: 220px; max-width: 30vw; border-radius: var(--radius-sm); background: #000; }
-.media-gallery-pager { justify-content: center; }
-
 /* ---- Voice surfaces (visualizer / audio-root are laid out above) ---------------------------------- */
 .visualizer {
   justify-content: center;
@@ -2153,12 +1835,8 @@
   min-height: 0;
 }
 
-.preview-actions {
-  justify-content: flex-end;
-}
-
 /* ---- Range rows (temperature / top-p / voice speed) ---------------------------------------------- */
-.range-row input[type="range"],
+
 .range-input {
   accent-color: var(--accent);
 }
@@ -2169,15 +1847,9 @@
 }
 
 @media (max-width: 760px) {
-  .grok-page-header p {
-    flex: 1 1 100%;
-    overflow: visible;
-    white-space: normal;
-  }
+  
 
-  .grok-account-link {
-    margin-left: auto;
-  }
+  
 
   .capability-copy {
     flex: 1 1 100%;
@@ -2218,9 +1890,7 @@
     flex: 1 1 auto;
   }
 
-  .video-generation-actions .btn {
-    flex: 1 1 auto;
-  }
+  
 }
 
 /* -----------------------------------------------------------------------------
@@ -2237,9 +1907,7 @@
 
 /* 1920 and the 2000px-class panels. */
 @media (min-width: 1800px) {
-  .function-top-grid,
-  .video-top-grid,
-  .voice-grid { grid-template-columns: minmax(0, 1.55fr) minmax(360px, 0.9fr); }
+  
 
   .imagine-masonry-grid,
   #imagineGrid .imagine-masonry-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
@@ -2249,12 +1917,9 @@
 
 /* 2560x1440 / 2560x1600. */
 @media (min-width: 2200px) {
-  .function-top-grid,
-  .video-top-grid,
-  .voice-grid { grid-template-columns: minmax(0, 2.1fr) minmax(420px, 0.9fr); gap: 20px; }
+  
 
-  .meta-grid,
-  .grok-form-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+  
 
   .imagine-masonry-grid,
   #imagineGrid .imagine-masonry-grid { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: var(--space-4); }
@@ -2272,33 +1937,7 @@
 /* ==== Workbench refinements ============================================================
    Later rules of equal specificity win, so the page's earlier layout stays the base and
    these adjust what read poorly: the toolbar, section padding, chat messages, code
-   blocks, the image controls, the cache overview and idle panels. */
-
-/* Toolbar: tabs on the left, the request identity as a small labelled control. */
-.grok-tools-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2) var(--space-3);
-}
-
-.grok-tools-toolbar .grok-tabs { order: 1; flex: 1 1 auto; width: auto; }
-
-.grok-tools-toolbar .grok-api-mode {
-  order: 2;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-  margin-left: auto;
-  padding-right: var(--space-1);
-}
-
-.grok-api-mode-label { color: var(--text-muted); font-size: 0.76rem; font-weight: 600; white-space: nowrap; }
-
-.grok-api-mode #grokRequestMode { width: auto; min-width: 150px; }
-
-.grok-api-mode #grokClientKey { width: 260px; max-width: 100%; }
+   blocks, the image controls and idle panels. */
 
 /* Section headers sat flush against the card border. */
 .grok-section > .function-header-row { padding: var(--space-4) var(--space-5) var(--space-1); }
@@ -2418,10 +2057,6 @@
 .audio-root:empty::before { content: "会话中的音频轨会出现在这里。"; padding: 4px 2px; }
 
 @media (max-width: 760px) {
-  /* Stacked and left-aligned: wrapping put the title at the far end of the
-     eyebrow's line. */
-  .grok-tools-page .grok-page-header { flex-direction: column; align-items: flex-start; gap: var(--space-1); }
-  .grok-tools-page .grok-page-header .grok-account-link { margin-left: 0; }
   /* An older phone rule sized this wrapper for a row (flex-basis 104px); inside
      the column field that basis became a 104px height that detached the label. */
   .imagine-basic-field .imagine-masonry-ratio { flex: 0 0 auto; width: 100%; }
@@ -2429,7 +2064,7 @@
 }
 
 @media (max-width: 640px) {
-  .grok-tools-toolbar .grok-api-mode { width: 100%; margin-left: 0; }
-  .grok-api-mode #grokRequestMode { flex: 1 1 auto; }
+  
+  
   .grok-section > .function-header-row { padding: var(--space-3) var(--space-4) 0; }
 }

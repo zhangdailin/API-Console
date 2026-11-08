@@ -652,7 +652,6 @@
 @media (max-width: 720px) {
   .grok-tools-page .gw-header { align-items: stretch; }
   .grok-tools-page .gw-header-actions { width: 100%; }
-  .grok-tools-page .gw-identity { flex: 1; }
   .grok-tools-page .gw-tabs .tab-item { min-width: 72px; flex-direction: column; height: 54px; gap: 3px; font-size: 0.76rem; }
   .grok-tools-page .gw-tabs .tab-item .gw-tab-dot { position: absolute; top: 8px; right: 14px; }
   .grok-tools-page .gw-panel { padding: var(--space-4); }
@@ -683,8 +682,6 @@
   border-color: var(--gw-line);
   box-shadow: var(--shadow-xs);
 }
-
-.grok-tools-page .grok-section .grok-panel { border-radius: 12px; }
 
 /* ==== Chat ================================================================== */
 

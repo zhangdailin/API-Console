@@ -196,23 +196,17 @@
 
 @media (max-width: 900px) {
 .config-layout {
-    grid-template-columns: minmax(0, 1fr);
     gap: var(--space-4);
   }
 
 .config-nav {
     top: calc(60px + env(safe-area-inset-top));
     z-index: 4;
-    flex-direction: row;
     align-items: center;
     gap: var(--space-2);
-    max-height: none;
     padding: var(--space-2);
-    overflow-x: auto;
     overflow-y: hidden;
   }
-
-.config-nav-head { display: none; }
 
 .config-nav-link {
     display: inline-flex;
@@ -272,9 +266,6 @@
 
 .settings-card-body { padding: var(--space-5) var(--space-6) var(--space-6); gap: var(--space-6); }
 }
-
-.key-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-
 
 /* Key management uses the shared theme and responsive card system. */
 .key-toolbar-actions,.key-filters,.key-list-footer,.key-catalog-status { display:flex; align-items:center; gap:var(--space-3); flex-wrap:wrap; }
@@ -355,7 +346,7 @@ button.config-nav-link:focus-visible { outline: 2px solid var(--accent); outline
 .egress-sort[aria-sort="ascending"]::after { content: " ↑"; }
 .egress-name, .egress-proxy, .egress-probe { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .egress-name-line { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
-.egress-proxy code { font-family: var(--font-mono); font-size: 0.76rem; overflow-wrap: anywhere; }
+.egress-proxy code { font-family: var(--font-mono); font-size: 0.76rem; }
 .egress-muted { color: var(--text-muted); font-size: 0.74rem; overflow-wrap: anywhere; }
 .egress-ip { font-family: var(--font-mono); font-size: 0.76rem; }
 .egress-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--idle); }

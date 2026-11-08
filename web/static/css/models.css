@@ -5,14 +5,11 @@
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  height: var(--control-h);
-  padding: 0 var(--space-3);
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: var(--surface-2);
   color: var(--text-main);
   font-family: inherit;
-  font-size: 0.82rem;
   font-weight: 550;
   line-height: 1;
   white-space: nowrap;
@@ -40,36 +37,18 @@
 
 .models-action-btn-danger {
   background: var(--bad-soft);
-  border-color: rgba(251, 113, 133, 0.4);
-  color: var(--bad);
 }
 
 .models-action-btn-danger:hover {
-  background: rgba(251, 113, 133, 0.22);
   color: var(--bad);
 }
 
 .models-section-label {
-  display: flex;
-  align-items: center;
   gap: var(--space-2);
-  color: var(--text-soft);
-  font-size: 0.78rem;
-  font-weight: 600;
 }
 
 .models-results-card {
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
-  background: var(--surface-1);
   box-shadow: none;
-}
-
-.models-results-card { overflow: hidden; }
-
-.models-section-label {
-  font-size: 0.92rem;
-  font-weight: 650;
 }
 
 .models-table-wrap {
@@ -77,58 +56,18 @@
   overflow-x: auto;
 }
 
-.models-table {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  font-size: 0.83rem;
-}
-
-.models-table thead th {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--border-strong);
-  background: var(--surface-2);
-  color: var(--text-muted);
-  font-size: 0.74rem;
-  font-weight: 600;
-  text-align: left;
-  white-space: nowrap;
-}
-
-.models-table tbody td {
-  padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--border-color);
-  color: var(--text-soft);
-  vertical-align: middle;
-}
-
 .models-status-badge,
 .models-default-badge,
 .models-meta-pill {
-  display: inline-flex;
-  align-items: center;
   gap: var(--space-1);
-  height: 22px;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-pill);
   background: var(--idle-soft);
   color: var(--text-soft);
-  font-size: 0.72rem;
   font-weight: 600;
   line-height: 1;
   white-space: nowrap;
 }
 
 .models-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-8) var(--space-4);
   text-align: center;
 }
 
