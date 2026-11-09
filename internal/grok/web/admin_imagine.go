@@ -1,9 +1,13 @@
 package web
 
-import "net/http"
+import (
+	"net/http"
+	"orchids-api/internal/httpserver"
+	"orchids-api/internal/util"
+)
 
 func (h *Handler) HandleAdminImagineConfig(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodGet) {
+	if !httpserver.RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 	finalMinBytes := 100000
@@ -15,7 +19,7 @@ func (h *Handler) HandleAdminImagineConfig(w http.ResponseWriter, r *http.Reques
 		nsfw = h.configSnapshot().PublicImagineNSFW()
 	}
 
-	writeJSON(w, map[string]any{
+	util.WriteJSON(w, map[string]any{
 		"final_min_bytes":  finalMinBytes,
 		"medium_min_bytes": mediumMinBytes,
 		"nsfw":             nsfw,

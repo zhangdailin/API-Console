@@ -4,15 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/grok/ratelimit"
 	"orchids-api/internal/util"
 	"strings"
 	"time"
 )
-
-const maxUpstreamBodyBytes = 4096
 
 // Only this structured rejection proves that the request was refused before
 // generation. A bare 429, transport error or successful tool turn cannot prove
@@ -78,57 +76,10 @@ func (e *grokUpstreamError) RetryAfter() time.Duration {
 func newCLIUpstreamError(status int, header http.Header, body []byte) error {
 	return &grokUpstreamError{
 		status: status,
-		header: sanitizeUpstreamHeader(header),
-		body:   boundedUpstreamBody(body),
+		header: grokbase.SanitizeUpstreamHeader(header),
+		body:   grokbase.BoundedUpstreamBody(body),
 		prefix: "grok cli upstream",
 	}
-}
-
-// sanitizeUpstreamHeader drops credential-bearing and identity headers so the
-// typed error can be logged/surfaced safely while preserving classification
-// signals such as CF-Mitigated and WWW-Authenticate.
-func sanitizeUpstreamHeader(header http.Header) http.Header {
-	if header == nil {
-		return nil
-	}
-	out := make(http.Header, len(header))
-	for name, values := range header {
-		if isSensitiveUpstreamHeader(name) {
-			continue
-		}
-		out[name] = append([]string(nil), values...)
-	}
-	return out
-}
-
-func isSensitiveUpstreamHeader(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "set-cookie", "cookie", "authorization", "proxy-authorization",
-		"x-grok-team-id", "x-grok-user-id", "x-xai-token-auth":
-		return true
-	}
-	return false
-}
-
-func boundedUpstreamBody(body []byte) string {
-	if len(body) > maxUpstreamBodyBytes {
-		return string(body[:maxUpstreamBodyBytes])
-	}
-	return string(body)
-}
-
-// readBoundedResponse drains the response body up to maxUpstreamBodyBytes,
-// clones the headers (so classification still works after the body is closed),
-// and closes the body. It returns the bounded body and the header copy for
-// building a typed upstream error. Used on every non-OK response path.
-func readBoundedResponse(resp *http.Response) ([]byte, http.Header) {
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamBodyBytes+1))
-	if len(raw) > maxUpstreamBodyBytes {
-		raw = raw[:maxUpstreamBodyBytes]
-	}
-	headerCopy := resp.Header.Clone()
-	_ = resp.Body.Close()
-	return raw, headerCopy
 }
 
 // upstreamStatus reads HTTP evidence from typed failures, including OAuth

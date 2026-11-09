@@ -147,7 +147,7 @@ func (c *CLIClient) doResponsesUncheckedAt(ctx context.Context, acc *store.Accou
 			buildModelsETags.observe(acc.ID, resp.Header)
 			return resp, nil
 		}
-		raw, headerCopy := readBoundedResponse(resp)
+		raw, headerCopy := grokbase.ReadBoundedResponse(resp)
 		if resp.StatusCode == http.StatusUnauthorized && !authRetried && upstream.RemainingAttempts(ctx) != 0 && c.oauth != nil && strings.TrimSpace(acc.OAuthRefreshToken) != "" {
 			authRetried = true
 			if _, refreshErr := c.oauth.ForceRefresh(ctx, acc); refreshErr == nil {
@@ -382,7 +382,7 @@ func (c *CLIClient) VerifyAccount(ctx context.Context, acc *store.Account) (stri
 		_ = resp.Body.Close()
 		return "", nil
 	}
-	raw, headerCopy := readBoundedResponse(resp)
+	raw, headerCopy := grokbase.ReadBoundedResponse(resp)
 
 	return classifyAccountStatusFromHTTP(resp.StatusCode), newCLIUpstreamError(resp.StatusCode, headerCopy, raw)
 }

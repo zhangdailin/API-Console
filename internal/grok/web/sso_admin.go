@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"orchids-api/internal/grok/grokbase"
+	"orchids-api/internal/httpserver"
 	"orchids-api/internal/store"
 	"orchids-api/internal/util"
 )
@@ -138,26 +139,26 @@ func subscriptionForPool(pool string) string {
 // HandleSSOImport creates Web SSO accounts from pasted or uploaded cookies.
 // POST /api/grok/sso/import
 func (h *Handler) HandleSSOImport(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
+	if !httpserver.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 	if h == nil || h.lb == nil || h.lb.Store == nil {
-		writeGrokError(w, http.StatusServiceUnavailable, "store not configured")
+		httpserver.WriteError(w, http.StatusServiceUnavailable, "store not configured")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxSSOImportBodySize)
 	var req ssoImportRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeGrokError(w, http.StatusBadRequest, "invalid json")
+		httpserver.WriteError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
 	tokens := parseSSOImportTokens(req.Text, req.Tokens)
 	if len(tokens) == 0 {
-		writeGrokError(w, http.StatusBadRequest, "no sso token found")
+		httpserver.WriteError(w, http.StatusBadRequest, "no sso token found")
 		return
 	}
 	if len(tokens) > maxSSOImportTokens {
-		writeGrokError(w, http.StatusBadRequest, fmt.Sprintf("at most %d tokens per import", maxSSOImportTokens))
+		httpserver.WriteError(w, http.StatusBadRequest, fmt.Sprintf("at most %d tokens per import", maxSSOImportTokens))
 		return
 	}
 	ctx := r.Context()
@@ -214,7 +215,7 @@ func (h *Handler) HandleSSOImport(w http.ResponseWriter, r *http.Request) {
 		enableNSFW := req.EnableNSFW
 		go h.postImportMaintenance(context.WithoutCancel(ctx), accounts, refresh, enableNSFW)
 	}
-	writeJSON(w, map[string]any{
+	util.WriteJSON(w, map[string]any{
 		"status":     "success",
 		"total":      len(tokens),
 		"created":    counts["created"],
@@ -348,16 +349,16 @@ func redactSSOError(err error, acc *store.Account) string {
 // HandleSSORefresh re-reads identity and quota for the named Web accounts.
 // POST /api/grok/sso/refresh {"account_ids":[...]}
 func (h *Handler) HandleSSORefresh(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
+	if !httpserver.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 	if h == nil || h.lb == nil || h.lb.Store == nil {
-		writeGrokError(w, http.StatusServiceUnavailable, "store not configured")
+		httpserver.WriteError(w, http.StatusServiceUnavailable, "store not configured")
 		return
 	}
 	accounts, err := h.resolveSSOAccounts(r)
 	if err != nil {
-		writeGrokError(w, http.StatusBadRequest, err.Error())
+		httpserver.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Minute)
@@ -369,7 +370,7 @@ func (h *Handler) HandleSSORefresh(w http.ResponseWriter, r *http.Request) {
 			ok++
 		}
 	}
-	writeJSON(w, map[string]any{"status": "success", "total": len(results), "ok": ok, "failed": len(results) - ok, "results": results})
+	util.WriteJSON(w, map[string]any{"status": "success", "total": len(results), "ok": ok, "failed": len(results) - ok, "results": results})
 }
 
 // enableNSFWForAccount switches the grok.com NSFW preference on for one
@@ -397,16 +398,16 @@ func (h *Handler) enableNSFWForAccount(ctx context.Context, acc *store.Account) 
 // HandleSSONSFW enables NSFW on the named Web accounts.
 // POST /api/grok/sso/nsfw {"account_ids":[...]}
 func (h *Handler) HandleSSONSFW(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
+	if !httpserver.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 	if h == nil || h.lb == nil || h.lb.Store == nil {
-		writeGrokError(w, http.StatusServiceUnavailable, "store not configured")
+		httpserver.WriteError(w, http.StatusServiceUnavailable, "store not configured")
 		return
 	}
 	accounts, err := h.resolveSSOAccounts(r)
 	if err != nil {
-		writeGrokError(w, http.StatusBadRequest, err.Error())
+		httpserver.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Minute)
@@ -434,14 +435,14 @@ func (h *Handler) HandleSSONSFW(w http.ResponseWriter, r *http.Request) {
 			ok++
 		}
 	}
-	writeJSON(w, map[string]any{"status": "success", "total": len(results), "ok": ok, "failed": len(results) - ok, "results": results})
+	util.WriteJSON(w, map[string]any{"status": "success", "total": len(results), "ok": ok, "failed": len(results) - ok, "results": results})
 }
 
 // HandleAvailability reports how many usable accounts each Grok plane has, so
 // the tools page can tell which of its features can run.
 // GET /api/grok/availability
 func (h *Handler) HandleAvailability(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodGet) {
+	if !httpserver.RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 	counts := map[string]int{ProviderBuild: 0, ProviderWeb: 0}
@@ -455,7 +456,7 @@ func (h *Handler) HandleAvailability(w http.ResponseWriter, r *http.Request) {
 	if h != nil && h.lb != nil && h.lb.Store != nil {
 		accounts, err := h.lb.Store.ListAccounts(r.Context())
 		if err != nil {
-			writeGrokError(w, http.StatusInternalServerError, "failed to list accounts")
+			httpserver.WriteError(w, http.StatusInternalServerError, "failed to list accounts")
 			return
 		}
 		for _, acc := range accounts {
@@ -478,5 +479,5 @@ func (h *Handler) HandleAvailability(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, map[string]any{"counts": counts, "web_synced": webSynced, "web_sync_error": webError, "web_plans": plans, "media": media})
+	util.WriteJSON(w, map[string]any{"counts": counts, "web_synced": webSynced, "web_sync_error": webError, "web_plans": plans, "media": media})
 }

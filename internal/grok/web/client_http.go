@@ -216,7 +216,7 @@ func (c *Client) doRequestWithHTTPClient(ctx context.Context, httpClient *http.C
 		}
 
 		lastStatus = resp.StatusCode
-		raw, headerCopy := readBoundedResponse(resp)
+		raw, headerCopy := grokbase.ReadBoundedResponse(resp)
 		lastBody = string(raw)
 
 		if lastStatus == http.StatusTooManyRequests {

@@ -12,6 +12,8 @@ import (
 	"encoding/json"
 
 	"orchids-api/internal/debug"
+	"orchids-api/internal/httpserver"
+	"orchids-api/internal/util"
 )
 
 type videoSegmentResult struct {
@@ -212,7 +214,7 @@ func (h *Handler) streamVideoChatCompletion(
 	sess *chatAccountSession,
 	logger *debug.Logger,
 ) {
-	flusher := streamResponseHeaders(w)
+	flusher := httpserver.StreamResponseHeaders(w)
 	id := "chatcmpl_" + randomHex(8)
 	chunkScratch := make([]byte, 0, 256)
 	emit := func(content string, finish string, hasFinish bool, usage map[string]any) {
@@ -222,7 +224,7 @@ func (h *Handler) streamVideoChatCompletion(
 	}
 	role := appendChatCompletionChunkWithUsage(chunkScratch[:0], id, time.Now().Unix(), req.Model, "", "assistant", "", "", false, nil)
 	chunkScratch = role[:0]
-	writeSSEBytes(w, "", role)
+	httpserver.WriteSSEBytes(w, "", role)
 	lastProgress := -1
 	artifact, err := h.runVideoSegments(ctx, sess, spec, prompt, attachments, req.VideoConfig, logger, func(progress int) {
 		progress = clampProgress(progress)
@@ -298,5 +300,5 @@ func (h *Handler) collectVideoChatCompletion(
 		message := choice["message"].(map[string]any)
 		message["reasoning_content"] = strings.Join(reasoning, "\n")
 	}
-	writeJSON(w, resp)
+	util.WriteJSON(w, resp)
 }

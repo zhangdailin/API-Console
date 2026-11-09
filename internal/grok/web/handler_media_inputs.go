@@ -17,7 +17,10 @@ import (
 	"sync"
 	"time"
 
+	"orchids-api/internal/httpserver"
+	"orchids-api/internal/responses"
 	"orchids-api/internal/store"
+	"orchids-api/internal/util"
 )
 
 const (
@@ -40,63 +43,63 @@ var (
 const maxAdminMediaImportURLBytes = 8192
 
 func (h *Handler) HandleMediaInputs(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
+	if !httpserver.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 	if h == nil || h.lb == nil || h.lb.Store == nil {
-		writeResponsesAPIError(w, http.StatusServiceUnavailable, "service_unavailable", "media input store is not configured")
+		responses.WriteAPIError(w, http.StatusServiceUnavailable, "service_unavailable", "media input store is not configured")
 		return
 	}
 	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type"))), "multipart/form-data") {
-		writeResponsesAPIError(w, http.StatusUnsupportedMediaType, "invalid_request", "media input upload requires multipart/form-data")
+		responses.WriteAPIError(w, http.StatusUnsupportedMediaType, "invalid_request", "media input upload requires multipart/form-data")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxMediaInputRequestBytes)
 	if err := r.ParseMultipartForm(maxMediaInputRequestBytes); err != nil {
 		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-			writeResponsesAPIError(w, http.StatusRequestEntityTooLarge, "media_too_large", "media input exceeds 20 MiB")
+			responses.WriteAPIError(w, http.StatusRequestEntityTooLarge, "media_too_large", "media input exceeds 20 MiB")
 			return
 		}
-		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request", "invalid media input upload")
+		responses.WriteAPIError(w, http.StatusBadRequest, "invalid_request", "invalid media input upload")
 		return
 	}
 	defer r.MultipartForm.RemoveAll()
 	files := r.MultipartForm.File["file"]
 	if len(files) != 1 {
-		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request", "exactly one file is required")
+		responses.WriteAPIError(w, http.StatusBadRequest, "invalid_request", "exactly one file is required")
 		return
 	}
 	fileHeader := files[0]
 	if fileHeader.Size <= 0 {
-		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_media", "media input cannot be empty")
+		responses.WriteAPIError(w, http.StatusBadRequest, "invalid_media", "media input cannot be empty")
 		return
 	}
 	if fileHeader.Size > maxMediaInputBytes {
-		writeResponsesAPIError(w, http.StatusRequestEntityTooLarge, "media_too_large", "media input exceeds 20 MiB")
+		responses.WriteAPIError(w, http.StatusRequestEntityTooLarge, "media_too_large", "media input exceeds 20 MiB")
 		return
 	}
 	file, err := fileHeader.Open()
 	if err != nil {
-		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_media", "failed to read media input")
+		responses.WriteAPIError(w, http.StatusBadRequest, "invalid_media", "failed to read media input")
 		return
 	}
 	defer file.Close()
 	data, err := io.ReadAll(io.LimitReader(file, maxMediaInputBytes+1))
 	if err != nil {
-		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_media", "failed to read media input")
+		responses.WriteAPIError(w, http.StatusBadRequest, "invalid_media", "failed to read media input")
 		return
 	}
 	if len(data) > maxMediaInputBytes {
-		writeResponsesAPIError(w, http.StatusRequestEntityTooLarge, "media_too_large", "media input exceeds 20 MiB")
+		responses.WriteAPIError(w, http.StatusRequestEntityTooLarge, "media_too_large", "media input exceeds 20 MiB")
 		return
 	}
 	kind, mimeType, err := detectMediaInput(data, fileHeader.Header.Get("Content-Type"))
 	if err != nil {
-		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_media", err.Error())
+		responses.WriteAPIError(w, http.StatusBadRequest, "invalid_media", err.Error())
 		return
 	}
 	if !reserveMediaInputBytes(int64(len(data))) {
-		writeResponsesAPIError(w, http.StatusInsufficientStorage, "media_storage_full",
+		responses.WriteAPIError(w, http.StatusInsufficientStorage, "media_storage_full",
 			"media input storage is full; retry after the expired inputs are reclaimed")
 		return
 	}
@@ -108,12 +111,12 @@ func (h *Handler) HandleMediaInputs(w http.ResponseWriter, r *http.Request) {
 	}()
 	id, err := newMediaInputID()
 	if err != nil {
-		writeResponsesAPIError(w, http.StatusInternalServerError, "internal_error", "failed to allocate media input")
+		responses.WriteAPIError(w, http.StatusInternalServerError, "internal_error", "failed to allocate media input")
 		return
 	}
 	name, err := h.cacheMediaInputBytes(id, kind, data, mimeType)
 	if err != nil {
-		writeResponsesAPIError(w, http.StatusInternalServerError, "internal_error", "failed to cache media input")
+		responses.WriteAPIError(w, http.StatusInternalServerError, "internal_error", "failed to cache media input")
 		return
 	}
 	contentPath := filepath.Join(cacheBaseDir, kind, name)
@@ -124,11 +127,11 @@ func (h *Handler) HandleMediaInputs(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.lb.Store.SaveStoredMediaInput(r.Context(), input, mediaInputTTL); err != nil {
 		_ = os.Remove(contentPath)
-		writeResponsesAPIError(w, http.StatusServiceUnavailable, "service_unavailable", "failed to persist media input")
+		responses.WriteAPIError(w, http.StatusServiceUnavailable, "service_unavailable", "failed to persist media input")
 		return
 	}
 	reserved = false
-	writeJSONStatus(w, http.StatusCreated, map[string]any{
+	util.WriteJSONStatus(w, http.StatusCreated, map[string]any{
 		"file_id": id, "object": "file", "kind": kind, "mime_type": mimeType,
 		"bytes": len(data), "created_at": now.Unix(), "expires_at": now.Add(mediaInputTTL).Format(time.RFC3339),
 	})
@@ -230,37 +233,37 @@ func (h *Handler) cacheMediaInputBytes(id, kind string, data []byte, mimeType st
 
 func (h *Handler) HandleMediaInputResource(w http.ResponseWriter, r *http.Request) {
 	if h == nil || h.lb == nil || h.lb.Store == nil {
-		writeResponsesAPIError(w, http.StatusServiceUnavailable, "service_unavailable", "media input store is not configured")
+		responses.WriteAPIError(w, http.StatusServiceUnavailable, "service_unavailable", "media input store is not configured")
 		return
 	}
 	id := mediaInputIDFromPath(r.URL.Path)
 	if !validMediaInputID(id) {
-		writeGrokError(w, http.StatusNotFound, "media input not found")
+		httpserver.WriteError(w, http.StatusNotFound, "media input not found")
 		return
 	}
 	owner := videoRequestOwner(r)
 	input, err := h.loadMediaInput(r.Context(), id, owner)
 	if err != nil {
-		writeGrokError(w, http.StatusNotFound, "media input not found")
+		httpserver.WriteError(w, http.StatusNotFound, "media input not found")
 		return
 	}
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, map[string]any{
+		util.WriteJSON(w, map[string]any{
 			"file_id": input.ID, "object": "file", "kind": input.Kind, "mime_type": input.MIMEType,
 			"bytes": input.SizeBytes, "created_at": input.CreatedAt.Unix(), "expires_at": input.ExpiresAt.Format(time.RFC3339),
 		})
 	case http.MethodDelete:
 		if err := h.lb.Store.DeleteStoredMediaInput(r.Context(), id, owner); err != nil {
-			writeGrokError(w, http.StatusNotFound, "media input not found")
+			httpserver.WriteError(w, http.StatusNotFound, "media input not found")
 			return
 		}
 		if validCachedMediaContentPath(input.ContentPath, input.Kind) {
 			_ = os.Remove(input.ContentPath)
 		}
-		writeJSON(w, map[string]any{"id": id, "object": "file", "deleted": true})
+		util.WriteJSON(w, map[string]any{"id": id, "object": "file", "deleted": true})
 	default:
-		writeGrokError(w, http.StatusMethodNotAllowed, "method not allowed")
+		httpserver.WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 

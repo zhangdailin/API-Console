@@ -14,6 +14,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"orchids-api/internal/httpserver"
+	"orchids-api/internal/util"
 	"os"
 	"path"
 	"path/filepath"
@@ -271,7 +273,7 @@ func (h *Handler) writeImageResults(w http.ResponseWriter, ctx context.Context, 
 		}
 		if field == "url" {
 			if publicBase == "" {
-				writeGrokErrorCode(w, http.StatusInternalServerError, "image_url_base_missing", "image URL base is not configured")
+				httpserver.WriteErrorCode(w, http.StatusInternalServerError, "image_url_base_missing", "image URL base is not configured")
 				return
 			}
 			if strings.HasPrefix(val, "/") {
@@ -287,7 +289,7 @@ func (h *Handler) writeImageResults(w http.ResponseWriter, ctx context.Context, 
 			"mime_type":      imageMimeTypeForValue(field, val),
 		})
 	}
-	writeJSON(w, map[string]any{
+	util.WriteJSON(w, map[string]any{
 		"created": time.Now().Unix(),
 		"data":    data,
 		"usage":   buildImageUsagePayload(prompt, len(data)),
@@ -337,7 +339,7 @@ func (h *Handler) collectImageChatURLs(ctx context.Context, w http.ResponseWrite
 				excluded = append(excluded, sess.acc.ID)
 			}
 			if switches >= 3 || rebuildPayload == nil {
-				writeGrokErrorCode(w, http.StatusTooManyRequests, "media_quota_exhausted", h.mediaUnavailableMessage(ctx, mediaImageEdit))
+				httpserver.WriteErrorCode(w, http.StatusTooManyRequests, "media_quota_exhausted", h.mediaUnavailableMessage(ctx, mediaImageEdit))
 				return nil, false
 			}
 			sess.Close()
@@ -362,7 +364,7 @@ func (h *Handler) collectImageChatURLs(ctx context.Context, w http.ResponseWrite
 	}
 	urls = normalizeGeneratedImageURLs(urls, n)
 	if len(urls) == 0 {
-		writeGrokError(w, http.StatusBadGateway, "no image generated")
+		httpserver.WriteError(w, http.StatusBadGateway, "no image generated")
 		return nil, false
 	}
 	return urls, true

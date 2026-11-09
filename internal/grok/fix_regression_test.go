@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/responses"
 	"strings"
 	"testing"
@@ -108,8 +109,8 @@ func TestWriteGrokUpstreamErrorSanitizesInternalDetail(t *testing.T) {
 	// client, and the response must not echo it when it is attached.
 	upstream := &grokUpstreamError{
 		status: http.StatusUnauthorized,
-		header: sanitizeUpstreamHeader(http.Header{"Retry-After": {"7"}}),
-		body:   boundedUpstreamBody([]byte(`{"error":{"message":"account team=acme quota exhausted; upgrade at x.ai/pricing"}}`)),
+		header: grokbase.SanitizeUpstreamHeader(http.Header{"Retry-After": {"7"}}),
+		body:   grokbase.BoundedUpstreamBody([]byte(`{"error":{"message":"account team=acme quota exhausted; upgrade at x.ai/pricing"}}`)),
 	}
 	// The internal text must carry every detail the leak check below looks for,
 	// otherwise that check proves nothing.

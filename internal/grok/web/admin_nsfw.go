@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"orchids-api/internal/httpserver"
 	"orchids-api/internal/store"
 	"orchids-api/internal/util"
 )
@@ -233,7 +234,7 @@ func newNSFWBatchTask(total int, cancel context.CancelFunc) *nsfwBatchTask {
 }
 
 func writeAsyncTaskStarted(w http.ResponseWriter, task *nsfwBatchTask) {
-	writeJSON(w, map[string]any{
+	util.WriteJSON(w, map[string]any{
 		"status":  "success",
 		"task_id": task.ID,
 		"total":   task.Total,
@@ -366,7 +367,7 @@ func parseBatchTaskPath(rawPath string) (taskID string, action string, ok bool) 
 }
 
 func (h *Handler) HandleAdminNSFWEnable(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
+	if !httpserver.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 	if !requireGrokStore(w, h) {
@@ -388,11 +389,11 @@ func (h *Handler) HandleAdminNSFWEnable(w http.ResponseWriter, r *http.Request) 
 		},
 		"results": results,
 	}
-	writeJSON(w, out)
+	util.WriteJSON(w, out)
 }
 
 func (h *Handler) HandleAdminNSFWEnableAsync(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
+	if !httpserver.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 	if !requireGrokStore(w, h) {
@@ -425,35 +426,35 @@ func (h *Handler) HandleAdminNSFWEnableAsync(w http.ResponseWriter, r *http.Requ
 func (h *Handler) HandleAdminBatchTask(w http.ResponseWriter, r *http.Request) {
 	taskID, action, ok := parseBatchTaskPath(r.URL.Path)
 	if !ok {
-		writeGrokError(w, http.StatusNotFound, "task not found")
+		httpserver.WriteError(w, http.StatusNotFound, "task not found")
 		return
 	}
 	task, exists := getNSFWBatchTask(taskID)
 	if !exists {
-		writeGrokError(w, http.StatusNotFound, "task not found")
+		httpserver.WriteError(w, http.StatusNotFound, "task not found")
 		return
 	}
 
 	switch action {
 	case "cancel":
-		if !requireMethod(w, r, http.MethodPost) {
+		if !httpserver.RequireMethod(w, r, http.MethodPost) {
 			return
 		}
 		task.requestCancel()
 		out := map[string]any{
 			"status": "success",
 		}
-		writeJSON(w, out)
+		util.WriteJSON(w, out)
 		return
 	case "stream":
-		if !requireMethod(w, r, http.MethodGet) {
+		if !httpserver.RequireMethod(w, r, http.MethodGet) {
 			return
 		}
-		flusher := streamResponseHeaders(w)
+		flusher := httpserver.StreamResponseHeaders(w)
 
 		var lastPayload []byte
 		send := func(payload map[string]any) bool {
-			raw := encodeJSONBytes(payload)
+			raw := util.EncodeJSONBytes(payload)
 			if bytes.Equal(raw, lastPayload) {
 				return true
 			}
@@ -494,7 +495,7 @@ func (h *Handler) HandleAdminBatchTask(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	default:
-		writeGrokError(w, http.StatusNotFound, "task not found")
+		httpserver.WriteError(w, http.StatusNotFound, "task not found")
 		return
 	}
 }

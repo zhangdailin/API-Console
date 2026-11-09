@@ -14,9 +14,11 @@ import (
 	"unicode/utf8"
 
 	apperrors "orchids-api/internal/errors"
+	"orchids-api/internal/httpserver"
 	"orchids-api/internal/middleware"
 	"orchids-api/internal/pricing"
 	"orchids-api/internal/store"
+	"orchids-api/internal/util"
 )
 
 // videoJobTTL is how long a video job (and the one-shot upload ticket that
@@ -287,7 +289,7 @@ func (h *Handler) lookupVideoJob(ctx context.Context, id, owner string) (*videoJ
 }
 
 func (h *Handler) HandleVideosCreate(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
+	if !httpserver.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 128<<20)
@@ -304,33 +306,33 @@ func (h *Handler) HandleVideosCreate(w http.ResponseWriter, r *http.Request) {
 		if unknown, ok := errors.AsType[*unknownVideoFieldError](err); ok {
 			message = unknown.Error()
 		}
-		writeGrokError(w, http.StatusBadRequest, message)
+		httpserver.WriteError(w, http.StatusBadRequest, message)
 		return
 	}
 	if req.Seconds == 0 {
 		req.Seconds = 8
 	}
 	req.Model = normalizeModelID(firstNonEmpty(req.Model, "grok-imagine-video"))
-	if !requireAPIKeyModel(w, r, req.Model) {
+	if !httpserver.RequireAPIKeyModel(w, r, req.Model) {
 		return
 	}
 	req.Prompt = strings.TrimSpace(req.Prompt)
 	if req.Prompt == "" {
-		writeGrokError(w, http.StatusBadRequest, "prompt cannot be empty")
+		httpserver.WriteError(w, http.StatusBadRequest, "prompt cannot be empty")
 		return
 	}
 	spec, ok := ResolveModel(req.Model)
 	if !ok || !spec.IsVideo {
-		writeGrokError(w, http.StatusBadRequest, fmt.Sprintf("Model %q is not a video model", req.Model))
+		httpserver.WriteError(w, http.StatusBadRequest, fmt.Sprintf("Model %q is not a video model", req.Model))
 		return
 	}
 	spec = h.applyPersistedRoute(r.Context(), spec)
 	if err := h.ensureModelCapability(r.Context(), req.Model, store.CapabilityVideo); err != nil {
-		writeGrokError(w, http.StatusBadRequest, modelValidationMessage(req.Model, err))
+		httpserver.WriteError(w, http.StatusBadRequest, modelValidationMessage(req.Model, err))
 		return
 	}
 	if len(req.InputReferences) > 0 {
-		writeGrokError(w, http.StatusBadRequest, "web video generation currently supports text-to-video only")
+		httpserver.WriteError(w, http.StatusBadRequest, "web video generation currently supports text-to-video only")
 		return
 	}
 	h.startVideoJob(w, r, req, spec)
@@ -353,7 +355,7 @@ func (h *Handler) startVideoJob(w http.ResponseWriter, r *http.Request, req Vide
 	}
 	maxReferences := 7
 	if len(req.InputReferences) > maxReferences {
-		writeGrokError(w, http.StatusBadRequest, fmt.Sprintf("input_references supports at most %d images for this model", maxReferences))
+		httpserver.WriteError(w, http.StatusBadRequest, fmt.Sprintf("input_references supports at most %d images for this model", maxReferences))
 		return
 	}
 	job := &videoJob{
@@ -383,7 +385,7 @@ func (h *Handler) startVideoJob(w http.ResponseWriter, r *http.Request, req Vide
 		})
 	}
 	go h.runVideoCreateJob(context.Background(), job, spec, cfg)
-	writeJSON(w, response)
+	util.WriteJSON(w, response)
 }
 
 // webFreeVideoDurationLimit is the longest video a free/basic Web credential may

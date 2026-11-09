@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"orchids-api/internal/grok/grokbase"
 	"strings"
 	"unicode/utf8"
 )
@@ -336,7 +337,7 @@ func forEachImageCandidateFromValue(value any, includeStructured bool, includeAs
 func debugHeaderMap(headers http.Header) map[string]string {
 	out := make(map[string]string, len(headers))
 	for k, values := range headers {
-		if isSensitiveUpstreamHeader(k) {
+		if grokbase.IsSensitiveUpstreamHeader(k) {
 			out[k] = "[redacted]"
 			continue
 		}

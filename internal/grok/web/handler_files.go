@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"mime"
 	"net/http"
+	"orchids-api/internal/httpserver"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -58,19 +59,19 @@ func (h *Handler) HandleFiles(w http.ResponseWriter, r *http.Request) {
 	// check a cached asset exists before downloading it; refusing it forces a
 	// full transfer for every existence check.
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		writeGrokError(w, http.StatusMethodNotAllowed, "method not allowed")
+		httpserver.WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	mediaType, fileName, ok := parseFilesPath(r.URL.Path)
 	if !ok {
-		writeGrokError(w, http.StatusNotFound, "file not found")
+		httpserver.WriteError(w, http.StatusNotFound, "file not found")
 		return
 	}
 
 	fullPath := filepath.Join(cacheBaseDir, mediaType, fileName)
 	info, err := os.Stat(fullPath)
 	if err != nil || !info.Mode().IsRegular() {
-		writeGrokError(w, http.StatusNotFound, "file not found")
+		httpserver.WriteError(w, http.StatusNotFound, "file not found")
 		return
 	}
 

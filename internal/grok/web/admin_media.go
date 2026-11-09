@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"encoding/json"
+	"orchids-api/internal/httpserver"
 	"orchids-api/internal/store"
+	"orchids-api/internal/util"
 )
 
 const defaultAdminMediaPageSize = 24
@@ -103,12 +105,12 @@ func sortAdminImages(entries []cacheEntry, key string, desc bool) {
 }
 
 func (h *Handler) HandleAdminMediaImages(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodGet) {
+	if !httpserver.RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 	entries, _, err := listCachedEntries("image")
 	if err != nil {
-		writeGrokError(w, http.StatusInternalServerError, "failed to list images")
+		httpserver.WriteError(w, http.StatusInternalServerError, "failed to list images")
 		return
 	}
 	query := strings.ToLower(strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("search"), r.URL.Query().Get("q"))))
@@ -125,7 +127,7 @@ func (h *Handler) HandleAdminMediaImages(w http.ResponseWriter, r *http.Request)
 	sortAdminImages(entries, r.URL.Query().Get("sort"), adminMediaDescending(r))
 	page, pageSize := parseAdminMediaPagination(r)
 	items, total := paginateAdminImages(entries, page, pageSize)
-	writeJSON(w, map[string]any{"status": "success", "items": items, "total": total, "page": page, "page_size": pageSize})
+	util.WriteJSON(w, map[string]any{"status": "success", "items": items, "total": total, "page": page, "page_size": pageSize})
 }
 
 func adminImageNameFromPath(path string) string {
@@ -143,24 +145,24 @@ func adminImageNameFromPath(path string) string {
 }
 
 func (h *Handler) HandleAdminMediaImageContent(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodGet) {
+	if !httpserver.RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 	name := adminImageNameFromPath(r.URL.Path)
 	if name == "" {
-		writeGrokError(w, http.StatusNotFound, "image not found")
+		httpserver.WriteError(w, http.StatusNotFound, "image not found")
 		return
 	}
 	path := filepath.Join(cacheBaseDir, "image", name)
 	file, err := os.Open(path)
 	if err != nil {
-		writeGrokError(w, http.StatusNotFound, "image not found")
+		httpserver.WriteError(w, http.StatusNotFound, "image not found")
 		return
 	}
 	defer file.Close()
 	info, err := file.Stat()
 	if err != nil || !info.Mode().IsRegular() {
-		writeGrokError(w, http.StatusNotFound, "image not found")
+		httpserver.WriteError(w, http.StatusNotFound, "image not found")
 		return
 	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -171,12 +173,12 @@ func (h *Handler) HandleAdminMediaImageContent(w http.ResponseWriter, r *http.Re
 }
 
 func (h *Handler) HandleAdminMediaImagesDelete(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
+	if !httpserver.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req adminImageDeleteRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
-		writeGrokError(w, http.StatusBadRequest, "invalid delete request")
+		httpserver.WriteError(w, http.StatusBadRequest, "invalid delete request")
 		return
 	}
 	names := append([]string(nil), req.Names...)
@@ -194,27 +196,27 @@ func (h *Handler) HandleAdminMediaImagesDelete(w http.ResponseWriter, r *http.Re
 		if err := os.Remove(filepath.Join(cacheBaseDir, "image", name)); err == nil {
 			removed++
 		} else if !os.IsNotExist(err) {
-			writeGrokError(w, http.StatusInternalServerError, "failed to delete image")
+			httpserver.WriteError(w, http.StatusInternalServerError, "failed to delete image")
 			return
 		}
 	}
 	if len(seen) == 0 {
-		writeGrokError(w, http.StatusBadRequest, "no valid image names")
+		httpserver.WriteError(w, http.StatusBadRequest, "no valid image names")
 		return
 	}
-	writeJSON(w, map[string]any{"status": "success", "removed_count": removed})
+	util.WriteJSON(w, map[string]any{"status": "success", "removed_count": removed})
 }
 
 func (h *Handler) HandleAdminMediaImageStats(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodGet) {
+	if !httpserver.RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 	entries, size, err := listCachedEntries("image")
 	if err != nil {
-		writeGrokError(w, http.StatusInternalServerError, "failed to read image stats")
+		httpserver.WriteError(w, http.StatusInternalServerError, "failed to read image stats")
 		return
 	}
-	writeJSON(w, map[string]any{"status": "success", "count": len(entries), "bytes": size, "size_bytes": size, "size_mb": bytesToMB(size)})
+	util.WriteJSON(w, map[string]any{"status": "success", "count": len(entries), "bytes": size, "size_bytes": size, "size_mb": bytesToMB(size)})
 }
 
 func storedJobForAdmin(job *store.StoredVideoJob) adminVideoJob {
@@ -301,28 +303,28 @@ func adminVideoIDFromPath(path string) string {
 	return id
 }
 func (h *Handler) HandleAdminMediaVideoContent(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodGet) {
+	if !httpserver.RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 	if h == nil || h.lb == nil || h.lb.Store == nil {
-		writeGrokError(w, http.StatusServiceUnavailable, "store not configured")
+		httpserver.WriteError(w, http.StatusServiceUnavailable, "store not configured")
 		return
 	}
 	id := adminVideoIDFromPath(r.URL.Path)
 	job, err := h.findAdminVideoJob(r, id)
 	if err != nil || job.Status != "completed" || !validPersistedVideoContentPath(job.ContentPath) || strings.TrimSpace(job.ContentPath) == "" {
-		writeGrokError(w, http.StatusNotFound, "video content not found")
+		httpserver.WriteError(w, http.StatusNotFound, "video content not found")
 		return
 	}
 	file, err := os.Open(job.ContentPath)
 	if err != nil {
-		writeGrokError(w, http.StatusNotFound, "video content not found")
+		httpserver.WriteError(w, http.StatusNotFound, "video content not found")
 		return
 	}
 	defer file.Close()
 	info, err := file.Stat()
 	if err != nil || !info.Mode().IsRegular() {
-		writeGrokError(w, http.StatusNotFound, "video content not found")
+		httpserver.WriteError(w, http.StatusNotFound, "video content not found")
 		return
 	}
 	w.Header().Set("Content-Type", "video/mp4")
@@ -343,69 +345,69 @@ func terminalVideoStatus(status string) bool {
 	return false
 }
 func (h *Handler) HandleAdminMediaVideoDelete(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
+	if !httpserver.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 	if h == nil || h.lb == nil || h.lb.Store == nil {
-		writeGrokError(w, http.StatusServiceUnavailable, "store not configured")
+		httpserver.WriteError(w, http.StatusServiceUnavailable, "store not configured")
 		return
 	}
 	var req adminVideoDeleteRequest
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&req) != nil || strings.TrimSpace(req.ID) == "" {
-		writeGrokError(w, http.StatusBadRequest, "video id is required")
+		httpserver.WriteError(w, http.StatusBadRequest, "video id is required")
 		return
 	}
 	job, err := h.findAdminVideoJob(r, strings.TrimSpace(req.ID))
 	if errors.Is(err, store.ErrNoRows) {
-		writeGrokError(w, http.StatusNotFound, "video job not found")
+		httpserver.WriteError(w, http.StatusNotFound, "video job not found")
 		return
 	}
 	if err != nil {
-		writeGrokError(w, http.StatusInternalServerError, "failed to read video job")
+		httpserver.WriteError(w, http.StatusInternalServerError, "failed to read video job")
 		return
 	}
 	if !terminalVideoStatus(job.Status) {
-		writeGrokError(w, http.StatusConflict, "only terminal video jobs can be deleted")
+		httpserver.WriteError(w, http.StatusConflict, "only terminal video jobs can be deleted")
 		return
 	}
 	if err = h.lb.Store.DeleteStoredVideoJob(r.Context(), job.ID, job.OwnerHash); err != nil {
-		writeGrokError(w, http.StatusInternalServerError, "failed to delete video job")
+		httpserver.WriteError(w, http.StatusInternalServerError, "failed to delete video job")
 		return
 	}
 	if strings.TrimSpace(job.ContentPath) != "" && validPersistedVideoContentPath(job.ContentPath) {
 		_ = os.Remove(job.ContentPath)
 	}
-	writeJSON(w, map[string]any{"status": "success", "deleted": job.ID})
+	util.WriteJSON(w, map[string]any{"status": "success", "deleted": job.ID})
 }
 
 func (h *Handler) HandleAdminMediaVideos(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodGet) {
+	if !httpserver.RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 	if h == nil || h.lb == nil || h.lb.Store == nil {
-		writeGrokError(w, http.StatusServiceUnavailable, "store not configured")
+		httpserver.WriteError(w, http.StatusServiceUnavailable, "store not configured")
 		return
 	}
 	jobs, err := h.listAdminVideoJobs(r)
 	if err != nil {
-		writeGrokError(w, http.StatusInternalServerError, "failed to list video jobs")
+		httpserver.WriteError(w, http.StatusInternalServerError, "failed to list video jobs")
 		return
 	}
 	page, pageSize := parseAdminMediaPagination(r)
 	items, total := paginateAdminVideos(jobs, page, pageSize)
-	writeJSON(w, map[string]any{"status": "success", "items": items, "total": total, "page": page, "page_size": pageSize})
+	util.WriteJSON(w, map[string]any{"status": "success", "items": items, "total": total, "page": page, "page_size": pageSize})
 }
 func (h *Handler) HandleAdminMediaVideoStats(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodGet) {
+	if !httpserver.RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 	if h == nil || h.lb == nil || h.lb.Store == nil {
-		writeGrokError(w, http.StatusServiceUnavailable, "store not configured")
+		httpserver.WriteError(w, http.StatusServiceUnavailable, "store not configured")
 		return
 	}
 	jobs, err := h.lb.Store.ListStoredVideoJobs(r.Context())
 	if err != nil {
-		writeGrokError(w, http.StatusInternalServerError, "failed to read video stats")
+		httpserver.WriteError(w, http.StatusInternalServerError, "failed to read video stats")
 		return
 	}
 	statuses := map[string]int{}
@@ -419,5 +421,5 @@ func (h *Handler) HandleAdminMediaVideoStats(w http.ResponseWriter, r *http.Requ
 		}
 		statuses[status]++
 	}
-	writeJSON(w, map[string]any{"status": "success", "total": len(jobs), "statuses": statuses})
+	util.WriteJSON(w, map[string]any{"status": "success", "total": len(jobs), "statuses": statuses})
 }

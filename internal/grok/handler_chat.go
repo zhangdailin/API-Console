@@ -104,7 +104,7 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 func debugHeaderMap(headers http.Header) map[string]string {
 	out := make(map[string]string, len(headers))
 	for k, values := range headers {
-		if isSensitiveUpstreamHeader(k) {
+		if grokbase.IsSensitiveUpstreamHeader(k) {
 			out[k] = "[redacted]"
 			continue
 		}

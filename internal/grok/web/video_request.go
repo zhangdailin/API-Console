@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/httpserver"
+	"orchids-api/internal/util"
 	"os"
 	"sort"
 	"strings"
@@ -199,7 +201,7 @@ func uploadFileHeaderToDataURI(fh *multipart.FileHeader) (string, error) {
 }
 
 func (h *Handler) HandleVideosRetrieve(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodGet) {
+	if !httpserver.RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 	videoID := videoIDFromPath(r.URL.Path)
@@ -208,35 +210,35 @@ func (h *Handler) HandleVideosRetrieve(w http.ResponseWriter, r *http.Request) {
 	}
 	job, ok := h.lookupVideoJob(r.Context(), videoID, videoRequestOwner(r))
 	if !ok {
-		writeGrokError(w, http.StatusNotFound, "video not found")
+		httpserver.WriteError(w, http.StatusNotFound, "video not found")
 		return
 	}
-	writeJSON(w, job.toMap())
+	util.WriteJSON(w, job.toMap())
 }
 
 func (h *Handler) HandleVideosContent(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodGet) {
+	if !httpserver.RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 	videoID := videoIDFromPath(r.URL.Path)
 	job, ok := h.lookupVideoJob(r.Context(), videoID, videoRequestOwner(r))
 	if !ok {
-		writeGrokError(w, http.StatusNotFound, "video not found")
+		httpserver.WriteError(w, http.StatusNotFound, "video not found")
 		return
 	}
 	if job.Status != "completed" || strings.TrimSpace(job.ContentPath) == "" {
-		writeGrokError(w, http.StatusConflict, "video content is not ready yet")
+		httpserver.WriteError(w, http.StatusConflict, "video content is not ready yet")
 		return
 	}
 	file, err := os.Open(job.ContentPath)
 	if err != nil {
-		writeGrokError(w, http.StatusNotFound, "video content not found")
+		httpserver.WriteError(w, http.StatusNotFound, "video content not found")
 		return
 	}
 	defer file.Close()
 	info, err := file.Stat()
 	if err != nil || !info.Mode().IsRegular() {
-		writeGrokError(w, http.StatusNotFound, "video content not found")
+		httpserver.WriteError(w, http.StatusNotFound, "video content not found")
 		return
 	}
 	// Stream the file instead of reading it whole: a finished video can be

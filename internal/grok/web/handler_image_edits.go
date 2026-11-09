@@ -12,6 +12,7 @@ import (
 
 	"encoding/json"
 
+	"orchids-api/internal/httpserver"
 	"orchids-api/internal/pricing"
 	"orchids-api/internal/store"
 )
@@ -100,7 +101,7 @@ func (h *Handler) handleChatImageEdit(
 	publicBase string,
 ) {
 	if len(imageURLs) == 0 {
-		writeGrokError(w, http.StatusBadRequest, "image_url is required for image edits")
+		httpserver.WriteError(w, http.StatusBadRequest, "image_url is required for image edits")
 		return
 	}
 	if len(imageURLs) > 7 {
@@ -114,12 +115,12 @@ func (h *Handler) handleChatImageEdit(
 	imageCfg.Normalize()
 	n := max(imageCfg.N, 1)
 	if n > 2 {
-		writeGrokError(w, http.StatusBadRequest, "image_config.n must be between 1 and 2 for image edit")
+		httpserver.WriteError(w, http.StatusBadRequest, "image_config.n must be between 1 and 2 for image edit")
 		return
 	}
 	// One edit call produces one image, and a stream relays one call.
 	if req.Stream && n > 1 {
-		writeGrokError(w, http.StatusBadRequest, "streaming image edits support image_config.n=1 only")
+		httpserver.WriteError(w, http.StatusBadRequest, "streaming image edits support image_config.n=1 only")
 		return
 	}
 	responseFormat := normalizeImageResponseFormat(imageCfg.ResponseFormat)
@@ -133,11 +134,11 @@ func (h *Handler) handleChatImageEdit(
 	// Transport-layer validation, as grok2api performs it before the provider
 	// maps a size to a ratio.
 	if edgeAspect := strings.TrimSpace(imageCfg.AspectRatio); edgeAspect != "" && !validImageAspectRatio(edgeAspect) {
-		writeGrokErrorCode(w, http.StatusBadRequest, "invalid_parameter", "aspect_ratio is not supported")
+		httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_parameter", "aspect_ratio is not supported")
 		return
 	}
 	if _, err := normalizeImageResolution(imageCfg.Resolution); err != nil {
-		writeGrokErrorCode(w, http.StatusBadRequest, "invalid_parameter", err.Error())
+		httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_parameter", err.Error())
 		return
 	}
 	ratio, _ := normalizeImageAspectRatio(imageCfg.AspectRatio, imageCfg.Size)
@@ -220,12 +221,12 @@ func decodeImageEditJSON(w http.ResponseWriter, r *http.Request) (*imageEditJSON
 	decoder := json.NewDecoder(r.Body)
 	var request imageEditJSONRequest
 	if err := decoder.Decode(&request); err != nil {
-		writeGrokError(w, http.StatusBadRequest, "invalid image edit JSON request")
+		httpserver.WriteError(w, http.StatusBadRequest, "invalid image edit JSON request")
 		return nil, false
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
-		writeGrokError(w, http.StatusBadRequest, "image edit request must contain one JSON object")
+		httpserver.WriteError(w, http.StatusBadRequest, "image edit request must contain one JSON object")
 		return nil, false
 	}
 	return &request, true
@@ -276,7 +277,7 @@ func (h *Handler) resolveImageEditJSONInputs(ctx context.Context, inputs []image
 }
 
 func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
+	if !httpserver.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 	mediaType, _, _ := mime.ParseMediaType(strings.TrimSpace(r.Header.Get("Content-Type")))
@@ -288,7 +289,7 @@ func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else if err := r.ParseMultipartForm(80 << 20); err != nil {
-		writeGrokError(w, http.StatusBadRequest, "invalid multipart form")
+		httpserver.WriteError(w, http.StatusBadRequest, "invalid multipart form")
 		return
 	}
 	formValue := func(name string) string {
@@ -316,7 +317,7 @@ func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
 
 	prompt := strings.TrimSpace(formValue("prompt"))
 	if prompt == "" {
-		writeGrokError(w, http.StatusBadRequest, "prompt is required")
+		httpserver.WriteError(w, http.StatusBadRequest, "prompt is required")
 		return
 	}
 	model := strings.TrimSpace(formValue("model"))
@@ -324,7 +325,7 @@ func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
 		model = "grok-imagine-image-edit"
 	}
 	model = normalizeModelID(model)
-	if !requireAPIKeyModel(w, r, model) {
+	if !httpserver.RequireAPIKeyModel(w, r, model) {
 		return
 	}
 	// Grok Web edits through one route. A client that names a generation
@@ -335,11 +336,11 @@ func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
 	}
 	spec, ok := ResolveModel(model)
 	if !isImageEditModel(model) {
-		writeGrokError(w, http.StatusBadRequest, "image edit model must be grok-imagine-image-edit")
+		httpserver.WriteError(w, http.StatusBadRequest, "image edit model must be grok-imagine-image-edit")
 		return
 	}
 	if jsonRequest == nil && r.MultipartForm != nil && len(r.MultipartForm.File["mask"]) > 0 {
-		writeGrokError(w, http.StatusBadRequest, "mask is not supported yet")
+		httpserver.WriteError(w, http.StatusBadRequest, "mask is not supported yet")
 		return
 	}
 	n := parseIntLoose(formValue("n"), 1)
@@ -348,15 +349,15 @@ func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
 	}
 	maxN := 2
 	if n < 1 || n > maxN {
-		writeGrokError(w, http.StatusBadRequest, fmt.Sprintf("n must be between 1 and %d for image edit", maxN))
+		httpserver.WriteError(w, http.StatusBadRequest, fmt.Sprintf("n must be between 1 and %d for image edit", maxN))
 		return
 	}
 	if edgeAspect := strings.TrimSpace(formValue("aspect_ratio")); edgeAspect != "" && !validImageAspectRatio(edgeAspect) {
-		writeGrokErrorCode(w, http.StatusBadRequest, "invalid_parameter", "aspect_ratio is not supported")
+		httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_parameter", "aspect_ratio is not supported")
 		return
 	}
 	if _, err := normalizeImageResolution(formValue("resolution")); err != nil {
-		writeGrokErrorCode(w, http.StatusBadRequest, "invalid_parameter", err.Error())
+		httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_parameter", err.Error())
 		return
 	}
 	if _, err := normalizeImageEditSize(r.FormValue("size")); err != nil {
@@ -373,24 +374,24 @@ func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
 	}
 	// One edit call produces one image, and a stream relays one call.
 	if stream && n > 1 {
-		writeGrokError(w, http.StatusBadRequest, "streaming image edits support n=1 only")
+		httpserver.WriteError(w, http.StatusBadRequest, "streaming image edits support n=1 only")
 		return
 	}
 	rawResponseFormat := strings.ToLower(strings.TrimSpace(formValue("response_format")))
 	if rawResponseFormat != "" && rawResponseFormat != "url" && rawResponseFormat != "b64_json" && rawResponseFormat != "base64" {
-		writeGrokError(w, http.StatusBadRequest, "response_format must be url or b64_json")
+		httpserver.WriteError(w, http.StatusBadRequest, "response_format must be url or b64_json")
 		return
 	}
 	responseFormat := normalizeImageResponseFormat(rawResponseFormat)
 	publicBase := detectPublicBaseURL(r)
 
 	if !ok || !spec.IsImage || !isImageEditModel(spec.ID) {
-		writeGrokError(w, http.StatusBadRequest, "image edit model is not supported")
+		httpserver.WriteError(w, http.StatusBadRequest, "image edit model is not supported")
 		return
 	}
 	spec = h.applyPersistedRoute(r.Context(), spec)
 	if err := h.ensureModelCapability(r.Context(), model, store.CapabilityImageEdit); err != nil {
-		writeGrokError(w, http.StatusBadRequest, modelValidationMessage(model, err))
+		httpserver.WriteError(w, http.StatusBadRequest, modelValidationMessage(model, err))
 		return
 	}
 
@@ -399,11 +400,11 @@ func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
 	if jsonRequest != nil {
 		jsonInputs, err := imageEditJSONInputs(jsonRequest)
 		if err != nil {
-			writeGrokError(w, http.StatusBadRequest, err.Error())
+			httpserver.WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		if len(jsonInputs) == 0 {
-			writeGrokError(w, http.StatusBadRequest, "image is required")
+			httpserver.WriteError(w, http.StatusBadRequest, "image is required")
 			return
 		}
 		if len(jsonInputs) > 7 {
@@ -411,7 +412,7 @@ func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
 		}
 		inputValues, err = h.resolveImageEditJSONInputs(r.Context(), jsonInputs, videoRequestOwner(r))
 		if err != nil {
-			writeGrokError(w, http.StatusBadRequest, err.Error())
+			httpserver.WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	} else {
@@ -420,7 +421,7 @@ func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
 			files = r.MultipartForm.File["image[]"]
 		}
 		if len(files) == 0 {
-			writeGrokError(w, http.StatusBadRequest, "image is required")
+			httpserver.WriteError(w, http.StatusBadRequest, "image is required")
 			return
 		}
 		if len(files) > 7 {
@@ -431,21 +432,21 @@ func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
 		for _, fh := range files {
 			file, err := fh.Open()
 			if err != nil {
-				writeGrokError(w, http.StatusBadRequest, "failed to read image file")
+				httpserver.WriteError(w, http.StatusBadRequest, "failed to read image file")
 				return
 			}
 			data, err := io.ReadAll(io.LimitReader(file, maxEditImageBytes+1))
 			file.Close()
 			if err != nil {
-				writeGrokError(w, http.StatusBadRequest, "failed to read image file")
+				httpserver.WriteError(w, http.StatusBadRequest, "failed to read image file")
 				return
 			}
 			if len(data) == 0 {
-				writeGrokError(w, http.StatusBadRequest, "file content is empty")
+				httpserver.WriteError(w, http.StatusBadRequest, "file content is empty")
 				return
 			}
 			if len(data) > maxEditImageBytes {
-				writeGrokError(w, http.StatusBadRequest, "image file too large. maximum is 50MB")
+				httpserver.WriteError(w, http.StatusBadRequest, "image file too large. maximum is 50MB")
 				return
 			}
 			mimeType := strings.ToLower(strings.TrimSpace(fh.Header.Get("Content-Type")))
@@ -459,7 +460,7 @@ func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if !isAllowedEditImageMime(mimeType) {
-				writeGrokError(w, http.StatusBadRequest, "unsupported image type. supported: png, jpg, webp")
+				httpserver.WriteError(w, http.StatusBadRequest, "unsupported image type. supported: png, jpg, webp")
 				return
 			}
 			uploads = append(uploads, imageEditUploadInput{mime: mimeType, data: data})

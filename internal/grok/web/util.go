@@ -1,7 +1,6 @@
 package web
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -24,7 +23,6 @@ import (
 )
 
 var (
-	grokJSONEmptyObjectBytes  = []byte("{}")
 	reToolUsageCardBlock      = regexp.MustCompile(`(?is)<?xai:tool_usage_card[^>]*>.*?</xai:tool_usage_card>`)
 	reToolUsageCardIncomplete = regexp.MustCompile(`(?is)<?xai:tool_usage_card.*?(?:</xai:tool_usage_card>|\z)`)
 	reGrokRenderBlock         = regexp.MustCompile(`(?is)<?grok:render.*?</grok:render>`)
@@ -330,20 +328,6 @@ func NormalizeSSOToken(raw string) string {
 		return strings.TrimSpace(token[len("sso="):])
 	}
 	return strings.TrimSpace(token)
-}
-
-func encodeJSONBytes(v any) []byte {
-	buf := bytes.Buffer{}
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(v); err != nil {
-		return grokJSONEmptyObjectBytes
-	}
-	raw := buf.Bytes()
-	if n := len(raw); n > 0 && raw[n-1] == '\n' {
-		return raw[:n-1]
-	}
-	return raw
 }
 
 func dataURIFromBytes(mime string, data []byte) string {

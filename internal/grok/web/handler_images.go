@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"orchids-api/internal/httpserver"
 	"orchids-api/internal/store"
+	"orchids-api/internal/util"
 )
 
 // streamImageEdit streams one edit call. editInputs are the uploaded input
@@ -22,7 +24,7 @@ func (h *Handler) streamImageEdit(w http.ResponseWriter, body io.Reader, token, 
 // non-nil editInputs marks an edit stream, whose previews and echoed inputs
 // are dropped from the results.
 func (h *Handler) streamImageResults(w http.ResponseWriter, body io.Reader, token, prompt, format string, n int, publicBase string, editInputs []string) {
-	flusher := streamResponseHeaders(w)
+	flusher := httpserver.StreamResponseHeaders(w)
 
 	field := imageResponseField(format)
 	var urls []string
@@ -46,7 +48,7 @@ func (h *Handler) streamImageResults(w http.ResponseWriter, body io.Reader, toke
 				"index":    outIndex,
 				"progress": progress,
 			}
-			writeSSE(w, flusher, "image_generation.partial_image", encodeJSONBytes(data))
+			writeSSE(w, flusher, "image_generation.partial_image", util.EncodeJSONBytes(data))
 		}
 		if editInputs != nil {
 			urls = appendImageEditResultURLs(urls, resp)
@@ -55,7 +57,7 @@ func (h *Handler) streamImageResults(w http.ResponseWriter, body io.Reader, toke
 		}
 		return nil
 	}); err != nil {
-		writeSSEStreamError(w, flusher, nil, "stream parse error: "+err.Error())
+		httpserver.WriteSSEStreamError(w, flusher, nil, "stream parse error: "+err.Error())
 		return
 	}
 
@@ -94,17 +96,17 @@ func (h *Handler) streamImageResults(w http.ResponseWriter, body io.Reader, toke
 			"mime_type":      imageMimeTypeForValue(field, val),
 			"usage":          buildImageUsagePayload(prompt, len(urls)),
 		}
-		writeSSE(w, flusher, "image_generation.completed", encodeJSONBytes(data))
+		writeSSE(w, flusher, "image_generation.completed", util.EncodeJSONBytes(data))
 	}
 	writeSSE(w, flusher, "", []byte("[DONE]"))
 }
 
 func (h *Handler) HandleImagesGenerations(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
+	if !httpserver.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req ImagesGenerationsRequest
-	if !decodeJSONBody(w, r, &req) {
+	if !httpserver.DecodeJSONBodyLimit(w, r, &req, maxGrokJSONBodyBytes) {
 		return
 	}
 	req.Model = normalizeModelID(req.Model)
@@ -113,37 +115,37 @@ func (h *Handler) HandleImagesGenerations(w http.ResponseWriter, r *http.Request
 	// used to generate an image (and spend image quota) on a request that named no
 	// model at all.
 	if req.Model == "" {
-		writeGrokErrorCode(w, http.StatusBadRequest, "invalid_request_error", "model is required")
+		httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_request_error", "model is required")
 		return
 	}
-	if !requireAPIKeyModel(w, r, req.Model) {
+	if !httpserver.RequireAPIKeyModel(w, r, req.Model) {
 		return
 	}
 	// Transport-layer validation, exactly as the reference performs it: a ratio is
 	// a ratio, a size is one of the four accepted edit sizes, and a resolution is
 	// 1k or 2k.
 	if strings.TrimSpace(req.AspectRatio) != "" && !validImageAspectRatio(req.AspectRatio) {
-		writeGrokErrorCode(w, http.StatusBadRequest, "invalid_parameter", "aspect_ratio is not supported")
+		httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_parameter", "aspect_ratio is not supported")
 		return
 	}
 	if strings.TrimSpace(req.Size) != "" && !validImageEditSize(req.Size) {
-		writeGrokErrorCode(w, http.StatusBadRequest, "invalid_parameter", "size must be auto, 1024x1024, 1024x1536 or 1536x1024")
+		httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_parameter", "size must be auto, 1024x1024, 1024x1536 or 1536x1024")
 		return
 	}
 	resolution, resolutionErr := normalizeImageResolution(req.Resolution)
 	if resolutionErr != nil {
-		writeGrokErrorCode(w, http.StatusBadRequest, "invalid_parameter", resolutionErr.Error())
+		httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_parameter", resolutionErr.Error())
 		return
 	}
 	req.Resolution = resolution
 	rawResponseFormat := strings.ToLower(strings.TrimSpace(req.ResponseFormat))
 	if rawResponseFormat != "" && rawResponseFormat != "url" && rawResponseFormat != "b64_json" && rawResponseFormat != "base64" {
-		writeGrokError(w, http.StatusBadRequest, "response_format must be url or b64_json")
+		httpserver.WriteError(w, http.StatusBadRequest, "response_format must be url or b64_json")
 		return
 	}
 	req.ResponseFormat = normalizeImageResponseFormat(req.ResponseFormat)
 	if !isImageGenerationModel(req.Model) {
-		writeGrokError(w, http.StatusBadRequest, "image generation model must be one of [grok-imagine-image, grok-imagine-image-2.0]")
+		httpserver.WriteError(w, http.StatusBadRequest, "image generation model must be one of [grok-imagine-image, grok-imagine-image-2.0]")
 		return
 	}
 	ratio, ratioErr := normalizeImageAspectRatio(req.AspectRatio, req.Size)
@@ -155,35 +157,35 @@ func (h *Handler) HandleImagesGenerations(w http.ResponseWriter, r *http.Request
 	req.Size = strings.ToLower(strings.TrimSpace(req.Size))
 	req.Prompt = strings.TrimSpace(req.Prompt)
 	if req.Prompt == "" {
-		writeGrokError(w, http.StatusBadRequest, "prompt is required")
+		httpserver.WriteError(w, http.StatusBadRequest, "prompt is required")
 		return
 	}
 	if req.N < 1 || req.N > 10 {
-		writeGrokError(w, http.StatusBadRequest, "n must be between 1 and 10")
+		httpserver.WriteError(w, http.StatusBadRequest, "n must be between 1 and 10")
 		return
 	}
 	if req.Stream && req.N != 1 {
-		writeGrokError(w, http.StatusBadRequest, "Streaming is only supported with n=1.")
+		httpserver.WriteError(w, http.StatusBadRequest, "Streaming is only supported with n=1.")
 		return
 	}
 	if req.PartialImages != nil {
 		if *req.PartialImages < 0 || *req.PartialImages > 3 {
-			writeGrokError(w, http.StatusBadRequest, "partial_images must be between 0 and 3")
+			httpserver.WriteError(w, http.StatusBadRequest, "partial_images must be between 0 and 3")
 			return
 		}
 		if *req.PartialImages > 0 && !req.Stream {
-			writeGrokError(w, http.StatusBadRequest, "partial_images requires stream=true")
+			httpserver.WriteError(w, http.StatusBadRequest, "partial_images requires stream=true")
 			return
 		}
 	}
 	quality := strings.ToLower(strings.TrimSpace(req.Quality))
 	if quality != "" && quality != "low" && quality != "medium" {
-		writeGrokError(w, http.StatusBadRequest, "quality must be low or medium")
+		httpserver.WriteError(w, http.StatusBadRequest, "quality must be low or medium")
 		return
 	}
 	req.Quality = quality
 	if raw := strings.TrimSpace(string(req.StorageOptions)); raw != "" && raw != "null" {
-		writeGrokError(w, http.StatusBadRequest, "storage_options is not supported")
+		httpserver.WriteError(w, http.StatusBadRequest, "storage_options is not supported")
 		return
 	}
 	h.serveImagesGenerations(r.Context(), w, req, detectPublicBaseURL(r))
@@ -191,13 +193,13 @@ func (h *Handler) HandleImagesGenerations(w http.ResponseWriter, r *http.Request
 
 func (h *Handler) serveImagesGenerations(ctx context.Context, w http.ResponseWriter, req ImagesGenerationsRequest, publicBase string) {
 	if err := h.ensureModelCapability(ctx, req.Model, store.CapabilityImage); err != nil {
-		writeGrokError(w, http.StatusBadRequest, modelValidationMessage(req.Model, err))
+		httpserver.WriteError(w, http.StatusBadRequest, modelValidationMessage(req.Model, err))
 		return
 	}
 
 	spec, ok := ResolveModel(req.Model)
 	if !ok || !spec.IsImage || !isImageGenerationModel(spec.ID) {
-		writeGrokError(w, http.StatusBadRequest, fmt.Sprintf("The model `%s` is not supported for image generation. Supported: [grok-imagine-image, grok-imagine-image-2.0]", req.Model))
+		httpserver.WriteError(w, http.StatusBadRequest, fmt.Sprintf("The model `%s` is not supported for image generation. Supported: [grok-imagine-image, grok-imagine-image-2.0]", req.Model))
 		return
 	}
 	spec = h.applyPersistedRoute(ctx, spec)
@@ -253,7 +255,7 @@ func (h *Handler) imagineNSFWAllowed(requested *bool) bool {
 func (h *Handler) streamImagineWSGeneration(ctx context.Context, w http.ResponseWriter, sess *chatAccountSession, spec ModelSpec, req ImagesGenerationsRequest) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	flusher := streamResponseHeaders(w)
+	flusher := httpserver.StreamResponseHeaders(w)
 	nsfw := h.imagineNSFWAllowed(req.NSFW)
 	events, errs := h.streamImagineWSImages(ctx, sess, req.Prompt, req.AspectRatio, req.N, nsfw, imagineWSProModel(spec.ID))
 	partialLimit := imagePartialCount(req)
@@ -264,7 +266,7 @@ func (h *Handler) streamImagineWSGeneration(ctx context.Context, w http.Response
 			value, err := h.imagineImageOutputValue(ctx, sess.token, ev, "b64_json")
 			if err == nil && strings.TrimSpace(value) != "" {
 				outputFormat := imageOutputFormatFromBase64(value)
-				writeSSE(w, flusher, "image_generation.partial_image", encodeJSONBytes(map[string]any{
+				writeSSE(w, flusher, "image_generation.partial_image", util.EncodeJSONBytes(map[string]any{
 					"type": "image_generation.partial_image", "b64_json": value,
 					"created_at": time.Now().Unix(), "size": imageEventSize("b64_json", value), "quality": "auto",
 					"background": "auto", "output_format": outputFormat, "partial_image_index": partialIndex,
@@ -277,11 +279,11 @@ func (h *Handler) streamImagineWSGeneration(ctx context.Context, w http.Response
 		}
 		value, err := h.imagineImageOutputValue(ctx, sess.token, ev, "b64_json")
 		if err != nil {
-			writeSSEStreamError(w, flusher, nil, "image download failed: "+err.Error())
+			httpserver.WriteSSEStreamError(w, flusher, nil, "image download failed: "+err.Error())
 			return
 		}
 		outputFormat := imageOutputFormatFromBase64(value)
-		writeSSE(w, flusher, "image_generation.completed", encodeJSONBytes(map[string]any{
+		writeSSE(w, flusher, "image_generation.completed", util.EncodeJSONBytes(map[string]any{
 			"type": "image_generation.completed", "b64_json": value,
 			"created_at": time.Now().Unix(), "size": imageEventSize("b64_json", value), "quality": "auto",
 			"background": "auto", "output_format": outputFormat,
@@ -289,7 +291,7 @@ func (h *Handler) streamImagineWSGeneration(ctx context.Context, w http.Response
 		completed++
 	}
 	if err := <-errs; err != nil {
-		writeSSEStreamError(w, flusher, nil, err.Error())
+		httpserver.WriteSSEStreamError(w, flusher, nil, err.Error())
 		return
 	}
 	if completed == 0 {
@@ -317,7 +319,7 @@ func (h *Handler) collectImagineWSGeneration(ctx context.Context, w http.Respons
 		}
 		if field == "url" {
 			if publicBase == "" {
-				writeGrokErrorCode(w, http.StatusInternalServerError, "image_url_base_missing", "image URL base is not configured")
+				httpserver.WriteErrorCode(w, http.StatusInternalServerError, "image_url_base_missing", "image URL base is not configured")
 				return
 			}
 			if strings.HasPrefix(value, "/") {
@@ -335,10 +337,10 @@ func (h *Handler) collectImagineWSGeneration(ctx context.Context, w http.Respons
 		return
 	}
 	if len(data) == 0 {
-		writeGrokError(w, http.StatusBadGateway, "no image generated")
+		httpserver.WriteError(w, http.StatusBadGateway, "no image generated")
 		return
 	}
-	writeJSON(w, map[string]any{
+	util.WriteJSON(w, map[string]any{
 		"created": time.Now().Unix(), "data": data,
 		"usage": buildImageUsagePayload(req.Prompt, len(data)),
 	})

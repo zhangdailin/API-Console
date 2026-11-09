@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"orchids-api/internal/httpserver"
+	"orchids-api/internal/util"
 	"strings"
 )
 
 func (h *Handler) HandleAdminVoiceToken(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
+	if !httpserver.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -23,7 +25,7 @@ func (h *Handler) HandleAdminVoiceToken(w http.ResponseWriter, r *http.Request) 
 		raw, _ := io.ReadAll(io.LimitReader(r.Body, 64*1024))
 		if len(strings.TrimSpace(string(raw))) > 0 {
 			if err := json.Unmarshal(raw, &body); err != nil {
-				writeGrokError(w, http.StatusBadRequest, "invalid voice token request")
+				httpserver.WriteError(w, http.StatusBadRequest, "invalid voice token request")
 				return
 			}
 		}
@@ -51,7 +53,7 @@ func (h *Handler) HandleAdminVoiceToken(w http.ResponseWriter, r *http.Request) 
 
 	client := h.currentClient()
 	if client == nil {
-		writeGrokError(w, http.StatusServiceUnavailable, "grok client not configured")
+		httpserver.WriteError(w, http.StatusServiceUnavailable, "grok client not configured")
 		return
 	}
 	data, err := client.getVoiceToken(r.Context(), token, voice, personality, speed, instruction)
@@ -63,7 +65,7 @@ func (h *Handler) HandleAdminVoiceToken(w http.ResponseWriter, r *http.Request) 
 	respToken, _ := data["token"].(string)
 	respToken = strings.TrimSpace(respToken)
 	if respToken == "" {
-		writeGrokError(w, http.StatusBadGateway, "upstream returned no voice token")
+		httpserver.WriteError(w, http.StatusBadGateway, "upstream returned no voice token")
 		return
 	}
 
@@ -76,7 +78,7 @@ func (h *Handler) HandleAdminVoiceToken(w http.ResponseWriter, r *http.Request) 
 	if strings.TrimSpace(out["url"].(string)) == "" {
 		out["url"] = "wss://livekit.grok.com"
 	}
-	writeJSON(w, out)
+	util.WriteJSON(w, out)
 }
 
 func firstVoiceString(data map[string]any, keys ...string) string {

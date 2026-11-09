@@ -27,7 +27,7 @@ func (h *Handler) auditAttemptDiagnostic(ctx context.Context, acc *store.Account
 		Stage: stage, Response: resp, Body: body, Result: result,
 		Upstream:     upstreamFailure,
 		IsUpstream:   func(err error) bool { _, ok := errors.AsType[*grokUpstreamError](err); return ok },
-		MaxBodyBytes: maxUpstreamBodyBytes,
+		MaxBodyBytes: grokbase.MaxUpstreamBodyBytes,
 	}))
 }
 

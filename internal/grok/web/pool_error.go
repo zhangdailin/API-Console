@@ -7,6 +7,7 @@ import (
 
 	apperrors "orchids-api/internal/errors"
 	"orchids-api/internal/grok/grokbase"
+	"orchids-api/internal/httpserver"
 )
 
 // The fallbacks a client gets when the Grok account pool cannot take a request
@@ -39,7 +40,7 @@ func writeGrokNoAccountError(w http.ResponseWriter, err error) {
 		return
 	}
 	answer := classifyGrokPoolFailure(err, "upstream_unavailable", grokModelAccountUnavailableMessage)
-	writeGrokErrorCode(w, answer.Status, answer.Code, answer.Message)
+	httpserver.WriteErrorCode(w, answer.Status, answer.Code, answer.Message)
 }
 
 // writeMediaUnavailable answers a media request no account has allowance for
@@ -49,7 +50,7 @@ func writeMediaUnavailable(w http.ResponseWriter, err error) bool {
 	if !errors.As(err, &media) {
 		return false
 	}
-	writeGrokErrorCode(w, http.StatusTooManyRequests, "media_quota_exhausted", media.message)
+	httpserver.WriteErrorCode(w, http.StatusTooManyRequests, "media_quota_exhausted", media.message)
 	return true
 }
 

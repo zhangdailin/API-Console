@@ -9,6 +9,7 @@ import (
 	"orchids-api/internal/audit"
 	"orchids-api/internal/debug"
 	"orchids-api/internal/grok/grokbase"
+	"orchids-api/internal/util"
 	"strings"
 	"time"
 )
@@ -260,6 +261,6 @@ func (h *Handler) collectChat(w http.ResponseWriter, req *ChatCompletionsRequest
 		}
 		choice["finish_reason"] = "tool_calls"
 	}
-	writeJSON(w, resp)
+	util.WriteJSON(w, resp)
 	h.auditChatOutcome(context.Background(), req.account, req, chatOutcome{Finish: "stop", Usage: usage, UsageSource: audit.UsageSourceEstimated})
 }

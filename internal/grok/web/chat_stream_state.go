@@ -14,6 +14,7 @@ import (
 	"orchids-api/internal/audit"
 	"orchids-api/internal/debug"
 	"orchids-api/internal/grok/grokbase"
+	"orchids-api/internal/httpserver"
 )
 
 // webChatStream is the state of one streamed Chat Completions answer relayed
@@ -68,7 +69,7 @@ type webChatStream struct {
 
 func newWebChatStream(h *Handler, w http.ResponseWriter, req *ChatCompletionsRequest, model string, spec ModelSpec, token, publicBase string, hasAttachments bool, tools []ToolDef, toolChoice any, logger *debug.Logger) *webChatStream {
 	s := &webChatStream{
-		h: h, w: w, flusher: streamResponseHeaders(w), req: req, model: model, spec: spec,
+		h: h, w: w, flusher: httpserver.StreamResponseHeaders(w), req: req, model: model, spec: spec,
 		token: token, publicBase: publicBase, logger: logger,
 		id:                    "chatcmpl_" + randomHex(8),
 		enableMediaExtraction: hasAttachments || spec.IsVideo,

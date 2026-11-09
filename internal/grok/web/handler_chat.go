@@ -10,6 +10,7 @@ import (
 	"orchids-api/internal/config"
 	"orchids-api/internal/debug"
 	"orchids-api/internal/grok/grokbase"
+	"orchids-api/internal/httpserver"
 	"orchids-api/internal/logutil"
 	"orchids-api/internal/middleware"
 	"orchids-api/internal/store"
@@ -205,11 +206,11 @@ func (h *Handler) applyDefaultChatStream(req *ChatCompletionsRequest) {
 }
 
 func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodPost) {
+	if !httpserver.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req ChatCompletionsRequest
-	if !decodeJSONBody(w, r, &req) {
+	if !httpserver.DecodeJSONBodyLimit(w, r, &req, maxGrokJSONBodyBytes) {
 		return
 	}
 	req.startedAt = time.Now()
@@ -236,7 +237,7 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 		req.Model = "grok-imagine-image"
 		slog.Info("Auto mapped image_config request to image model", "from", originalModel, "to", req.Model)
 	}
-	if !requireAPIKeyModel(w, r, req.Model) {
+	if !httpserver.RequireAPIKeyModel(w, r, req.Model) {
 		return
 	}
 	session := grokbase.SessionFromContext(r.Context())
@@ -250,7 +251,7 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 	}
 	spec, ok := h.resolveConversationModel(r.Context(), req.Model)
 	if !ok {
-		writeGrokErrorCode(w, http.StatusNotFound, "model_not_found", modelNotFoundMessage(req.Model))
+		httpserver.WriteErrorCode(w, http.StatusNotFound, "model_not_found", modelNotFoundMessage(req.Model))
 		return
 	}
 	if spec.AliasReasoningEffort != "" {
@@ -259,14 +260,14 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 	}
 	if err := h.ensureResolvedModelCapability(r.Context(), spec.ID, spec, store.CapabilityChat); err != nil {
 		if strings.EqualFold(strings.TrimSpace(err.Error()), "model not found") {
-			writeGrokErrorCode(w, http.StatusNotFound, "model_not_found", modelNotFoundMessage(req.Model))
+			httpserver.WriteErrorCode(w, http.StatusNotFound, "model_not_found", modelNotFoundMessage(req.Model))
 			return
 		}
-		writeGrokError(w, http.StatusBadRequest, modelValidationMessage(req.Model, err))
+		httpserver.WriteError(w, http.StatusBadRequest, modelValidationMessage(req.Model, err))
 		return
 	}
 	if !spec.SupportsConversation() {
-		writeGrokError(w, http.StatusBadRequest, fmt.Sprintf("model %s does not support chat completions", req.Model))
+		httpserver.WriteError(w, http.StatusBadRequest, fmt.Sprintf("model %s does not support chat completions", req.Model))
 		return
 	}
 
@@ -275,7 +276,7 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 		prompt, imageURLs := extractPromptAndImageURLs(req.Messages)
 		prompt = strings.TrimSpace(prompt)
 		if prompt == "" {
-			writeGrokError(w, http.StatusBadRequest, "prompt is required")
+			httpserver.WriteError(w, http.StatusBadRequest, "prompt is required")
 			return
 		}
 		imageCfg := req.ImageConfig
@@ -284,25 +285,25 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 			imageCfg.Normalize()
 		}
 		if imageCfg.N < 1 || imageCfg.N > 10 {
-			writeGrokError(w, http.StatusBadRequest, "image_config.n must be between 1 and 10")
+			httpserver.WriteError(w, http.StatusBadRequest, "image_config.n must be between 1 and 10")
 			return
 		}
 		// The same transport-layer rules the image endpoints apply: a ratio is a
 		// ratio, and a resolution tier is 1k or 2k.
 		if edgeAspect := strings.TrimSpace(imageCfg.AspectRatio); edgeAspect != "" && !validImageAspectRatio(edgeAspect) {
-			writeGrokErrorCode(w, http.StatusBadRequest, "invalid_parameter", "aspect_ratio is not supported")
+			httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_parameter", "aspect_ratio is not supported")
 			return
 		}
 		if _, err := normalizeImageResolution(imageCfg.Resolution); err != nil {
-			writeGrokErrorCode(w, http.StatusBadRequest, "invalid_parameter", err.Error())
+			httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_parameter", err.Error())
 			return
 		}
 		if isImageEditModel(req.Model) && imageCfg.N > 2 {
-			writeGrokError(w, http.StatusBadRequest, "image_config.n must be between 1 and 2 for image edit")
+			httpserver.WriteError(w, http.StatusBadRequest, "image_config.n must be between 1 and 2 for image edit")
 			return
 		}
 		if req.Stream && imageCfg.N > 2 {
-			writeGrokError(w, http.StatusBadRequest, "streaming is only supported when image_config.n=1 or n=2")
+			httpserver.WriteError(w, http.StatusBadRequest, "streaming is only supported when image_config.n=1 or n=2")
 			return
 		}
 		imageCfg.ResponseFormat = normalizeImageResponseFormat(imageCfg.ResponseFormat)
@@ -327,7 +328,7 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 
 		if isImageEditModel(spec.ID) {
 			if len(imageURLs) == 0 {
-				writeGrokError(w, http.StatusBadRequest, "image_url is required for image edits")
+				httpserver.WriteError(w, http.StatusBadRequest, "image_url is required for image edits")
 				return
 			}
 			editInputs := imageURLs
@@ -373,7 +374,7 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 	// size; the same ceiling keeps a single caller from monopolising the egress
 	// and the memory budget.
 	if len(attachments) > maxChatAttachments {
-		writeGrokError(w, http.StatusBadRequest,
+		httpserver.WriteError(w, http.StatusBadRequest,
 			fmt.Sprintf("at most %d attachments are supported per request", maxChatAttachments))
 		return
 	}
@@ -389,7 +390,7 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 		"stream", req.Stream,
 	)
 	if strings.TrimSpace(text) == "" && len(attachments) == 0 {
-		writeGrokError(w, http.StatusBadRequest, "empty message")
+		httpserver.WriteError(w, http.StatusBadRequest, "empty message")
 		return
 	}
 
