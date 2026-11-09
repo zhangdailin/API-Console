@@ -85,112 +85,22 @@ func (c *ImageConfig) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// UnmarshalJSON decodes the shared fields through chatwire.Request (whose
+// UnmarshalJSON would otherwise be promoted and drop the Web-only fields), then
+// the Web media options.
 func (r *ChatCompletionsRequest) UnmarshalJSON(data []byte) error {
-	type rawChatRequest struct {
-		Model               string           `json:"model"`
-		Messages            []ChatMessage    `json:"messages"`
-		Stream              any              `json:"stream"`
-		Thinking            *string          `json:"thinking,omitempty"`
-		ReasoningEffort     *string          `json:"reasoning_effort,omitempty"`
-		ReasoningSummary    *string          `json:"reasoning_summary,omitempty"`
-		Temperature         any              `json:"temperature,omitempty"`
-		TopP                any              `json:"top_p,omitempty"`
-		MaxTokens           any              `json:"max_tokens,omitempty"`
-		MaxCompletionTokens any              `json:"max_completion_tokens,omitempty"`
-		ResponseFormat      map[string]any   `json:"response_format,omitempty"`
-		User                any              `json:"user,omitempty"`
-		SafetyIdentifier    any              `json:"safety_identifier,omitempty"`
-		ResponseText        map[string]any   `json:"text,omitempty"`
-		ResponsesTools      []map[string]any `json:"x_responses_tools,omitempty"`
-		Include             []string         `json:"include,omitempty"`
-		VideoConfig         *VideoConfig     `json:"video_config,omitempty"`
-		ImageConfig         *ImageConfig     `json:"image_config,omitempty"`
-		Tools               []ToolDef        `json:"tools,omitempty"`
-		ToolChoice          any              `json:"tool_choice,omitempty"`
-		ParallelToolCalls   any              `json:"parallel_tool_calls,omitempty"`
-		Stop                any              `json:"stop,omitempty"`
-		PromptCacheKey      string           `json:"prompt_cache_key,omitempty"`
-		MCPServers          []map[string]any `json:"mcp_servers,omitempty"`
-		OutputConfig        map[string]any   `json:"output_config,omitempty"`
-		ThinkingConfig      map[string]any   `json:"thinking_config,omitempty"`
-	}
-
-	var raw rawChatRequest
-	if err := json.Unmarshal(data, &raw); err != nil {
+	if err := r.Request.UnmarshalJSON(data); err != nil {
 		return err
 	}
-	var rawMap map[string]json.RawMessage
-	_ = json.Unmarshal(data, &rawMap)
-	streamRaw, streamProvided := rawMap["stream"]
-	if streamProvided {
-		s := strings.TrimSpace(string(streamRaw))
-		if s == "" || strings.EqualFold(s, "null") {
-			streamProvided = false
-		}
+	var media struct {
+		VideoConfig *VideoConfig `json:"video_config,omitempty"`
+		ImageConfig *ImageConfig `json:"image_config,omitempty"`
 	}
-	stream, err := chatwire.ParseLooseBoolAny(raw.Stream)
-	if err != nil {
+	if err := json.Unmarshal(data, &media); err != nil {
 		return err
 	}
-	temp, err := chatwire.ParseLooseFloatAny(raw.Temperature)
-	if err != nil {
-		return err
-	}
-	topP, err := chatwire.ParseLooseFloatAny(raw.TopP)
-	if err != nil {
-		return err
-	}
-	maxTokens, err := chatwire.ParseLooseIntAny(raw.MaxTokens)
-	if err != nil {
-		return err
-	}
-	maxCompletionTokens, err := chatwire.ParseLooseIntAny(raw.MaxCompletionTokens)
-	if err != nil {
-		return err
-	}
-	parallelToolCalls, err := chatwire.ParseLooseBoolAnyForField(raw.ParallelToolCalls, "parallel_tool_calls")
-	if err != nil {
-		return err
-	}
-
-	r.Model = raw.Model
-	r.Messages = raw.Messages
-	r.Stream = stream
-	r.StreamProvided = streamProvided
-	r.Thinking = raw.Thinking
-	r.ReasoningEffort = raw.ReasoningEffort
-	r.ReasoningSummary = raw.ReasoningSummary
-	r.Temperature = temp
-	r.TopP = topP
-	if _, ok := rawMap["max_tokens"]; ok {
-		r.MaxTokens = &maxTokens
-	}
-	if _, ok := rawMap["max_completion_tokens"]; ok {
-		r.MaxCompletionTokens = &maxCompletionTokens
-		// max_tokens is deprecated in favour of max_completion_tokens, so when a
-		// caller sends both the newer field decides the output budget.
-		r.MaxTokens = &maxCompletionTokens
-	}
-	r.ResponseFormat = raw.ResponseFormat
-	r.SafetyIdentifier = firstNonEmpty(chatwire.ParseLooseStringAny(raw.SafetyIdentifier), chatwire.ParseLooseStringAny(raw.User))
-	r.ResponseText = raw.ResponseText
-	r.ResponsesTools = append([]map[string]any(nil), raw.ResponsesTools...)
-	r.Include = append([]string(nil), raw.Include...)
-	r.VideoConfig = raw.VideoConfig
-	r.ImageConfig = raw.ImageConfig
-	r.Tools = raw.Tools
-	r.ToolChoice = raw.ToolChoice
-	if _, ok := rawMap["parallel_tool_calls"]; ok {
-		r.ParallelToolCalls = &parallelToolCalls
-	}
-	r.Stop, err = chatwire.ParseStringList(raw.Stop, "stop")
-	if err != nil {
-		return err
-	}
-	r.PromptCacheKey = strings.TrimSpace(raw.PromptCacheKey)
-	r.MCPServers = raw.MCPServers
-	r.OutputConfig = raw.OutputConfig
-	r.ThinkingConfig = raw.ThinkingConfig
+	r.VideoConfig = media.VideoConfig
+	r.ImageConfig = media.ImageConfig
 	return nil
 }
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"orchids-api/internal/chatwire"
 	"orchids-api/internal/testutil"
 )
 
@@ -88,7 +89,7 @@ func runStream(t *testing.T, tools []ToolDef, body *strings.Reader) streamedChat
 	t.Helper()
 	recorder := httptest.NewRecorder()
 	h := &Handler{}
-	req := &ChatCompletionsRequest{Model: "grok-4", Stream: true, Tools: tools}
+	req := &ChatCompletionsRequest{Request: chatwire.Request{Model: "grok-4", Stream: true, Tools: tools}}
 	h.streamChat(recorder, req, "grok-4", ModelSpec{ID: "grok-4"}, "token", "", false, tools, nil, body, nil)
 	return readStream(t, recorder.Body.String())
 }
@@ -97,7 +98,7 @@ func runCollect(t *testing.T, tools []ToolDef, body *strings.Reader) map[string]
 	t.Helper()
 	recorder := httptest.NewRecorder()
 	h := &Handler{}
-	req := &ChatCompletionsRequest{Model: "grok-4", Tools: tools}
+	req := &ChatCompletionsRequest{Request: chatwire.Request{Model: "grok-4", Tools: tools}}
 	h.collectChat(recorder, req, "grok-4", ModelSpec{ID: "grok-4"}, "token", "", false, tools, nil, body, nil)
 	var out map[string]any
 	testutil.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &out), "response is not JSON: "+recorder.Body.String())
@@ -225,7 +226,7 @@ func TestWebCollectChatToolCall(t *testing.T) {
 func TestWebCollectChatUpstreamError(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	h := &Handler{}
-	h.collectChat(recorder, &ChatCompletionsRequest{Model: "grok-4"}, "grok-4", ModelSpec{ID: "grok-4"}, "token", "", false, nil, nil,
+	h.collectChat(recorder, &ChatCompletionsRequest{Request: chatwire.Request{Model: "grok-4"}}, "grok-4", ModelSpec{ID: "grok-4"}, "token", "", false, nil, nil,
 		upstreamLines(`{"error":{"message":"denied"}}`), nil)
 	testutil.True(t, recorder.Code >= 400, "an upstream error is not a success")
 	testutil.MustNotContain(t, recorder.Body.String(), "denied")
@@ -267,7 +268,7 @@ func TestStreamMarkupFilterHoldsBackOnlyAPossibleMarker(t *testing.T) {
 // the chat showed a line per update above the video link.
 func TestWebStreamChatVideoProgressIsReasoning(t *testing.T) {
 	recorder := httptest.NewRecorder()
-	req := &ChatCompletionsRequest{Model: "grok-imagine-video", Stream: true}
+	req := &ChatCompletionsRequest{Request: chatwire.Request{Model: "grok-imagine-video", Stream: true}}
 	(&Handler{}).streamChat(recorder, req, "grok-imagine-video", ModelSpec{ID: "grok-imagine-video", IsVideo: true}, "token", "", false, nil, nil, upstreamLines(
 		line(map[string]any{"streamingVideoGenerationResponse": map[string]any{"progress": 50}}),
 	), nil)

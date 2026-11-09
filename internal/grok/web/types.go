@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 
 	"orchids-api/internal/chatwire"
 	"orchids-api/internal/store"
@@ -13,43 +12,15 @@ import (
 
 type chatSourceOperationKey struct{}
 
+// ChatCompletionsRequest is the shared Chat Completions request plus the
+// media options only the Web plane accepts. Field decoding (loose JSON, the
+// max_completion_tokens precedence, stream presence) is chatwire's, so a fix
+// there reaches this plane too.
 type ChatCompletionsRequest struct {
-	Model               string           `json:"model"`
-	Messages            []ChatMessage    `json:"messages"`
-	Stream              bool             `json:"stream"`
-	StreamProvided      bool             `json:"-"`
-	Thinking            *string          `json:"thinking,omitempty"`
-	ReasoningEffort     *string          `json:"reasoning_effort,omitempty"`
-	ReasoningSummary    *string          `json:"reasoning_summary,omitempty"`
-	Temperature         *float64         `json:"temperature,omitempty"`
-	TopP                *float64         `json:"top_p,omitempty"`
-	MaxTokens           *int             `json:"max_tokens,omitempty"`
-	MaxCompletionTokens *int             `json:"max_completion_tokens,omitempty"`
-	ResponseFormat      map[string]any   `json:"response_format,omitempty"`
-	SafetyIdentifier    string           `json:"safety_identifier,omitempty"`
-	ResponseText        map[string]any   `json:"text,omitempty"`
-	ResponsesTools      []map[string]any `json:"x_responses_tools,omitempty"`
-	ResponsesInput      []any            `json:"x_responses_input,omitempty"`
-	Include             []string         `json:"include,omitempty"`
-	VideoConfig         *VideoConfig     `json:"video_config,omitempty"`
-	ImageConfig         *ImageConfig     `json:"image_config,omitempty"`
-	Tools               []ToolDef        `json:"tools,omitempty"`
-	ToolChoice          any              `json:"tool_choice,omitempty"`
-	// WebSearchOptions is the OpenAI-style switch for the hosted search tool.
-	// It is lowered to a native web_search tool on the Responses planes.
-	WebSearchOptions  map[string]any   `json:"web_search_options,omitempty"`
-	ParallelToolCalls *bool            `json:"parallel_tool_calls,omitempty"`
-	Stop              []string         `json:"stop,omitempty"`
-	PromptCacheKey    string           `json:"prompt_cache_key,omitempty"`
-	MCPServers        []map[string]any `json:"mcp_servers,omitempty"`
-	Metadata          map[string]any   `json:"metadata,omitempty"`
-	ServiceTier       string           `json:"service_tier,omitempty"`
-	OutputConfig      map[string]any   `json:"output_config,omitempty"`
-	ThinkingConfig    map[string]any   `json:"thinking_config,omitempty"`
-	ReasoningReplay   bool             `json:"-"`
-	startedAt         time.Time
-	sourceOperation   string
-	account           *store.Account
+	chatwire.Request
+	VideoConfig *VideoConfig `json:"video_config,omitempty"`
+	ImageConfig *ImageConfig `json:"image_config,omitempty"`
+	account     *store.Account
 }
 
 // The message and tool shapes are the shared Chat Completions wire types.

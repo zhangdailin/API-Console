@@ -213,8 +213,8 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 	if !httpserver.DecodeJSONBodyLimit(w, r, &req, maxGrokJSONBodyBytes) {
 		return
 	}
-	req.startedAt = time.Now()
-	req.sourceOperation, _ = r.Context().Value(chatSourceOperationKey{}).(string)
+	req.StartedAt = time.Now()
+	req.SourceOperation, _ = r.Context().Value(chatSourceOperationKey{}).(string)
 	verboseDiagnostics := logutil.VerboseDiagnosticsEnabled()
 	debugLogSSE := h != nil && h.configSnapshot() != nil && h.configSnapshot().DebugLogSSE
 	logger := debug.NewForContext(r.Context(), verboseDiagnostics, verboseDiagnostics && debugLogSSE)

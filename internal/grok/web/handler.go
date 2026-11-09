@@ -190,10 +190,10 @@ func (h *Handler) auditChatOutcome(ctx context.Context, acc *store.Account, req 
 	metadata := map[string]any{"finish_reason": result.Finish}
 	grokbase.AddReasoningDiagnostics(ctx, metadata)
 	duration := int64(0)
-	if !req.startedAt.IsZero() {
-		duration = time.Since(req.startedAt).Milliseconds()
+	if !req.StartedAt.IsZero() {
+		duration = time.Since(req.StartedAt).Milliseconds()
 		if !result.FirstToken.IsZero() {
-			metadata["first_token_ms"] = result.FirstToken.Sub(req.startedAt).Milliseconds()
+			metadata["first_token_ms"] = result.FirstToken.Sub(req.StartedAt).Milliseconds()
 		}
 	}
 	accountID := int64(0)

@@ -445,27 +445,33 @@ func withoutInputAssets(urls, inputs []string) []string {
 }
 
 func (h *Handler) cacheMediaBytes(rawURL, mediaType string, data []byte, mimeType string) (string, error) {
-	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+	return writeMediaCacheFile(mediaType, data, func(mediaType string) string {
+		sum := sha1.Sum([]byte(strings.TrimSpace(rawURL)))
+		return hex.EncodeToString(sum[:]) + mediaExtFromMime(mediaType, mimeType, rawURL)
+	})
+}
+
+// writeMediaCacheFile stores data in the media cache under the name nameFor
+// derives from the normalized media type ("image" or "video"). The name is
+// content-addressed by the caller, so an existing non-empty file is reused,
+// and the temp-file rename keeps a partially written file from being served.
+func writeMediaCacheFile(kind string, data []byte, nameFor func(mediaType string) string) (string, error) {
+	mediaType := strings.ToLower(strings.TrimSpace(kind))
 	if mediaType != "video" {
 		mediaType = "image"
 	}
 	if len(data) == 0 {
 		return "", fmt.Errorf("empty media data")
 	}
-
 	dir := filepath.Join(cacheBaseDir, mediaType)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-
-	sum := sha1.Sum([]byte(strings.TrimSpace(rawURL)))
-	name := hex.EncodeToString(sum[:]) + mediaExtFromMime(mediaType, mimeType, rawURL)
+	name := nameFor(mediaType)
 	fullPath := filepath.Join(dir, name)
-
 	if info, statErr := os.Stat(fullPath); statErr == nil && info.Mode().IsRegular() && info.Size() > 0 {
 		return name, nil
 	}
-
 	tmp := fullPath + ".tmp-" + randomHex(4)
 	if writeErr := os.WriteFile(tmp, data, 0o644); writeErr != nil {
 		_ = os.Remove(tmp)

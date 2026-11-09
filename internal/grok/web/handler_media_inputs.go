@@ -202,33 +202,10 @@ func mediaInputUsageBytes() (int64, error) {
 // The content hash keeps the write idempotent, and the atomic rename keeps a
 // partially written file from ever being served.
 func (h *Handler) cacheMediaInputBytes(id, kind string, data []byte, mimeType string) (string, error) {
-	mediaType := strings.ToLower(strings.TrimSpace(kind))
-	if mediaType != "video" {
-		mediaType = "image"
-	}
-	if len(data) == 0 {
-		return "", fmt.Errorf("empty media data")
-	}
-	dir := filepath.Join(cacheBaseDir, mediaType)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	sum := sha1.Sum([]byte("input:" + strings.TrimSpace(id)))
-	name := mediaInputFilePrefix + hex.EncodeToString(sum[:]) + mediaExtFromMime(mediaType, mimeType, "")
-	fullPath := filepath.Join(dir, name)
-	if info, statErr := os.Stat(fullPath); statErr == nil && info.Mode().IsRegular() && info.Size() > 0 {
-		return name, nil
-	}
-	tmp := fullPath + ".tmp-" + randomHex(4)
-	if writeErr := os.WriteFile(tmp, data, 0o644); writeErr != nil {
-		_ = os.Remove(tmp)
-		return "", writeErr
-	}
-	if renameErr := os.Rename(tmp, fullPath); renameErr != nil {
-		_ = os.Remove(tmp)
-		return "", renameErr
-	}
-	return name, nil
+	return writeMediaCacheFile(kind, data, func(mediaType string) string {
+		sum := sha1.Sum([]byte("input:" + strings.TrimSpace(id)))
+		return mediaInputFilePrefix + hex.EncodeToString(sum[:]) + mediaExtFromMime(mediaType, mimeType, "")
+	})
 }
 
 func (h *Handler) HandleMediaInputResource(w http.ResponseWriter, r *http.Request) {
