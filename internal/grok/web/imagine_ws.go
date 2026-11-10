@@ -210,13 +210,14 @@ func (h *Handler) runImagineWSImages(ctx context.Context, sess *chatAccountSessi
 			slog.Warn("Grok Imagine socket refused the request", "account_id", accountID, "plan", plan,
 				"code", wsErr.code, "message", wsErr.message, "pro", pro, "switches", switches, "collected", collected)
 		}
-		if err != nil && isImagineRateLimit(err) {
+		if err != nil && isImagineAllowanceRefusal(err) {
 			// This account's image allowance is spent; the account itself is
 			// fine for everything else, so it is not cooled. Park the product
 			// and try another account while no image has been delivered.
 			h.noteMediaExhausted(ctx, sess.acc, product)
 			if collected > 0 || switches >= imagineWSMaxAccountSwitches {
-				return err
+				// Answered like the selection fence: 429 with the reason.
+				return &mediaUnavailableError{message: h.mediaUnavailableMessage(ctx, product), cause: err}
 			}
 			if sess.acc != nil && sess.acc.ID != 0 {
 				excluded = append(excluded, sess.acc.ID)
@@ -376,14 +377,21 @@ func (e *imagineWSError) Error() string {
 	return "grok imagine upstream error: " + e.code + ": " + e.message
 }
 
-// isImagineRateLimit reports the socket's refusal of this account's image
-// allowance ("rate_limit_exceeded: Image rate limit exceeded").
-func isImagineRateLimit(err error) bool {
+// isImagineAllowanceRefusal reports the socket's refusal of this account's
+// image allowance. grok.com answered both shapes on 2026-11-10, each to a
+// different paid account: "rate_limit_exceeded: Image rate limit exceeded"
+// and "usage_pool_exhausted: Usage limit exceeded".
+func isImagineAllowanceRefusal(err error) bool {
 	wsErr, ok := errors.AsType[*imagineWSError](err)
 	if !ok {
 		return false
 	}
-	return strings.EqualFold(wsErr.code, "rate_limit_exceeded") || strings.Contains(strings.ToLower(wsErr.message), "rate limit")
+	switch strings.ToLower(strings.TrimSpace(wsErr.code)) {
+	case "rate_limit_exceeded", "usage_pool_exhausted":
+		return true
+	}
+	message := strings.ToLower(wsErr.message)
+	return strings.Contains(message, "rate limit") || strings.Contains(message, "usage limit")
 }
 
 func sendImagineEvent(ctx context.Context, events chan<- imagineWSEvent, ev imagineWSEvent) bool {

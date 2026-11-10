@@ -45,7 +45,7 @@ func TestImagineRateLimitFrameIsATypedUpstreamFailure(t *testing.T) {
 	finals, err := runImagineWSRound(ctx, conn, "a red apple", "16:9", false, false, 1, events)
 	testutil.Equal(t, finals, 0)
 	testutil.Error(t, err)
-	testutil.True(t, isImagineRateLimit(err), "the rate-limit frame must trigger an account switch")
+	testutil.True(t, isImagineAllowanceRefusal(err), "the rate-limit frame must trigger an account switch")
 	testutil.True(t, isUpstreamFailure(err), "an Imagine error frame is an upstream failure, not a caller error")
 
 	// It used to answer 400 invalid_request; it is a rate limit.
@@ -61,6 +61,22 @@ func TestImagineOtherErrorFramesDoNotSwitch(t *testing.T) {
 	defer cancel()
 	_, err := runImagineWSRound(ctx, conn, "x", "1:1", false, false, 1, make(chan imagineWSEvent, 8))
 	testutil.Error(t, err)
-	testutil.False(t, isImagineRateLimit(err))
+	testutil.False(t, isImagineAllowanceRefusal(err))
 	testutil.True(t, isUpstreamFailure(err))
+}
+
+// account 116 (paid, weekly chat pool 85% left) was refused with this frame;
+// it must park the account and switch, like the rate-limit frame.
+func TestImagineUsagePoolExhaustedIsAnAllowanceRefusal(t *testing.T) {
+	conn := imagineErrorSocket(t, `{"type":"error","err_code":"usage_pool_exhausted","err_msg":"Usage limit exceeded"}`)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := runImagineWSRound(ctx, conn, "a red apple", "16:9", false, false, 1, make(chan imagineWSEvent, 8))
+	testutil.True(t, isImagineAllowanceRefusal(err))
+
+	// When no account is left, the answer is the media fence's 429, not 502 unknown.
+	rec := httptest.NewRecorder()
+	writeGrokUpstreamError(rec, &mediaUnavailableError{message: (&Handler{}).mediaUnavailableMessage(ctx, mediaImage), cause: err})
+	testutil.Equal(t, rec.Code, http.StatusTooManyRequests)
+	testutil.MustContain(t, rec.Body.String(), "media_quota_exhausted")
 }
