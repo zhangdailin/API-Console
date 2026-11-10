@@ -360,7 +360,7 @@ func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_parameter", err.Error())
 		return
 	}
-	if _, err := normalizeImageEditSize(r.FormValue("size")); err != nil {
+	if _, err := normalizeImageEditSize(formValue("size")); err != nil {
 		writeGrokUpstreamError(w, err)
 		return
 	}

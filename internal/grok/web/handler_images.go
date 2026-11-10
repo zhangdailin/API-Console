@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -290,12 +291,22 @@ func (h *Handler) streamImagineWSGeneration(ctx context.Context, w http.Response
 		}))
 		completed++
 	}
-	if err := <-errs; err != nil {
+	err := <-errs
+	if _, ok := errors.AsType[*imagineIncompleteError](err); ok {
+		err = nil
+	}
+	if err != nil {
 		httpserver.WriteSSEStreamError(w, flusher, nil, err.Error())
 		return
 	}
 	if completed == 0 {
 		writeSSECodedError(w, flusher, "no image generated", "no_image_generated")
+		return
+	}
+	if completed < req.N {
+		// The delivered images stay delivered; the stream still has to say
+		// that the request was not fulfilled.
+		writeSSECodedError(w, flusher, (&imagineIncompleteError{got: completed, want: req.N}).Error(), "image_generation_incomplete")
 		return
 	}
 	writeSSE(w, flusher, "", []byte("[DONE]"))
@@ -332,12 +343,20 @@ func (h *Handler) collectImagineWSGeneration(ctx context.Context, w http.Respons
 			"mime_type":      imageMimeTypeForValue(field, value),
 		})
 	}
-	if err := <-errs; err != nil {
+	err := <-errs
+	if _, ok := errors.AsType[*imagineIncompleteError](err); ok {
+		err = nil
+	}
+	if err != nil {
 		writeGrokUpstreamError(w, err)
 		return
 	}
 	if len(data) == 0 {
 		httpserver.WriteError(w, http.StatusBadGateway, "no image generated")
+		return
+	}
+	if len(data) < req.N {
+		httpserver.WriteErrorCode(w, http.StatusBadGateway, "image_generation_incomplete", (&imagineIncompleteError{got: len(data), want: req.N}).Error())
 		return
 	}
 	util.WriteJSON(w, map[string]any{
