@@ -257,7 +257,7 @@ func (h *Handler) streamImagineWSGeneration(ctx context.Context, w http.Response
 	defer cancel()
 	flusher := httpserver.StreamResponseHeaders(w)
 	nsfw := h.imagineNSFWAllowed(req.NSFW)
-	events, errs := h.streamImagineWSImages(ctx, sess, req.Prompt, req.AspectRatio, req.N, nsfw, imagineWSProModel(spec.ID))
+	events, errs := h.streamImagineWSImages(ctx, sess, spec, req.Prompt, req.AspectRatio, req.N, nsfw)
 	partialLimit := imagePartialCount(req)
 	partialIndex := 0
 	completed := 0
@@ -305,7 +305,7 @@ func (h *Handler) collectImagineWSGeneration(ctx context.Context, w http.Respons
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	nsfw := h.imagineNSFWAllowed(req.NSFW)
-	events, errs := h.streamImagineWSImages(ctx, sess, req.Prompt, req.AspectRatio, req.N, nsfw, imagineWSProModel(spec.ID))
+	events, errs := h.streamImagineWSImages(ctx, sess, spec, req.Prompt, req.AspectRatio, req.N, nsfw)
 	field := imageResponseField(req.ResponseFormat)
 	data := make([]map[string]any, 0, req.N)
 	for ev := range events {

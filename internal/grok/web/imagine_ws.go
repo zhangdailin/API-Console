@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -149,18 +150,22 @@ func imagineFinalEvent(slot *imagineWSSlot) imagineWSEvent {
 	}
 }
 
-func (h *Handler) streamImagineWSImages(ctx context.Context, sess *chatAccountSession, prompt, aspectRatio string, n int, nsfw bool, pro bool) (<-chan imagineWSEvent, <-chan error) {
+func (h *Handler) streamImagineWSImages(ctx context.Context, sess *chatAccountSession, spec ModelSpec, prompt, aspectRatio string, n int, nsfw bool) (<-chan imagineWSEvent, <-chan error) {
 	events := make(chan imagineWSEvent)
 	errs := make(chan error, 1)
 	go func() {
 		defer close(events)
 		defer close(errs)
-		errs <- h.runImagineWSImages(ctx, sess, prompt, aspectRatio, n, nsfw, pro, events)
+		errs <- h.runImagineWSImages(ctx, sess, spec, prompt, aspectRatio, n, nsfw, events)
 	}()
 	return events, errs
 }
 
-func (h *Handler) runImagineWSImages(ctx context.Context, sess *chatAccountSession, prompt, aspectRatio string, n int, nsfw bool, pro bool, events chan<- imagineWSEvent) error {
+// imagineWSMaxAccountSwitches bounds how many accounts one image request tries
+// after an account's image allowance is refused (the edit path uses 3 too).
+const imagineWSMaxAccountSwitches = 3
+
+func (h *Handler) runImagineWSImages(ctx context.Context, sess *chatAccountSession, spec ModelSpec, prompt, aspectRatio string, n int, nsfw bool, events chan<- imagineWSEvent) error {
 	if n < 1 {
 		n = 1
 	}
@@ -168,7 +173,10 @@ func (h *Handler) runImagineWSImages(ctx context.Context, sess *chatAccountSessi
 	if client == nil {
 		return fmt.Errorf("grok client not configured")
 	}
-	collected := 0
+	pro := imagineWSProModel(spec.ID)
+	product := mediaProductFor(spec, "")
+	collected, switches := 0, 0
+	var excluded []int64
 	maxRounds := max(n*3, 3)
 	for round := 0; round < maxRounds && collected < n; round++ {
 		if err := ctx.Err(); err != nil {
@@ -189,11 +197,32 @@ func (h *Handler) runImagineWSImages(ctx context.Context, sess *chatAccountSessi
 		roundFinals, err := runImagineWSRound(roundCtx, conn, prompt, aspectRatio, nsfw, pro, n-collected, events)
 		_ = conn.Close()
 		cancel()
+		collected += roundFinals
+		if err != nil && isImagineRateLimit(err) {
+			// This account's image allowance is spent; the account itself is
+			// fine for everything else, so it is not cooled. Park the product
+			// and try another account while no image has been delivered.
+			h.noteMediaExhausted(ctx, sess.acc, product)
+			if collected > 0 || switches >= imagineWSMaxAccountSwitches {
+				return err
+			}
+			if sess.acc != nil && sess.acc.ID != 0 {
+				excluded = append(excluded, sess.acc.ID)
+			}
+			next, switchErr := h.openChatAccountSessionForModelExcluding(ctx, excluded, spec)
+			if switchErr != nil {
+				return switchErr
+			}
+			sess.Close()
+			sess.acc, sess.token, sess.poolCandidates, sess.release = next.acc, next.token, next.poolCandidates, next.release
+			switches++
+			round--
+			continue
+		}
 		if err != nil {
 			h.markAccountStatus(ctx, sess.acc, err)
 			return err
 		}
-		collected += roundFinals
 		if collected >= n {
 			return nil
 		}
@@ -314,13 +343,35 @@ func runImagineWSRound(ctx context.Context, conn *websocket.Conn, prompt, aspect
 			if text == "" {
 				text = string(raw)
 			}
-			if code != "" {
-				text = code + ": " + text
-			}
-			return finals, fmt.Errorf("imagine websocket error: %s", text)
+			return finals, &imagineWSError{code: code, message: text}
 		}
 	}
 	return finals, nil
+}
+
+// imagineWSError is an error frame grok.com sent on the Imagine socket. It is
+// an upstream failure: its text carries the "upstream" marker so the shared
+// writer classifies and logs it instead of answering 400 invalid_request.
+type imagineWSError struct {
+	code    string
+	message string
+}
+
+func (e *imagineWSError) Error() string {
+	if e.code == "" {
+		return "grok imagine upstream error: " + e.message
+	}
+	return "grok imagine upstream error: " + e.code + ": " + e.message
+}
+
+// isImagineRateLimit reports the socket's refusal of this account's image
+// allowance ("rate_limit_exceeded: Image rate limit exceeded").
+func isImagineRateLimit(err error) bool {
+	wsErr, ok := errors.AsType[*imagineWSError](err)
+	if !ok {
+		return false
+	}
+	return strings.EqualFold(wsErr.code, "rate_limit_exceeded") || strings.Contains(strings.ToLower(wsErr.message), "rate limit")
 }
 
 func sendImagineEvent(ctx context.Context, events chan<- imagineWSEvent, ev imagineWSEvent) bool {
