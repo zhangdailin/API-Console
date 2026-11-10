@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -198,6 +199,17 @@ func (h *Handler) runImagineWSImages(ctx context.Context, sess *chatAccountSessi
 		_ = conn.Close()
 		cancel()
 		collected += roundFinals
+		if wsErr, ok := errors.AsType[*imagineWSError](err); ok {
+			// Which account and plan grok.com refused tells an account
+			// allowance apart from a limit on the shared egress.
+			var accountID int64
+			var plan string
+			if sess.acc != nil {
+				accountID, plan = sess.acc.ID, sess.acc.Subscription
+			}
+			slog.Warn("Grok Imagine socket refused the request", "account_id", accountID, "plan", plan,
+				"code", wsErr.code, "message", wsErr.message, "pro", pro, "switches", switches, "collected", collected)
+		}
 		if err != nil && isImagineRateLimit(err) {
 			// This account's image allowance is spent; the account itself is
 			// fine for everything else, so it is not cooled. Park the product

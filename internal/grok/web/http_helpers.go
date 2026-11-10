@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -48,6 +49,10 @@ func writeGrokUpstreamError(w http.ResponseWriter, err error) {
 		// The caller's own key is fine; the account pool needs operator action.
 		status = http.StatusServiceUnavailable
 	}
+	// The client only gets the category sentence, so the cause has to be in
+	// the log (the Build plane logs the same line). Upstream errors carry
+	// sanitized headers and a bounded body, never a credential.
+	slog.Warn("Reporting an upstream failure to the client", "error", err, "status", status, "category", category)
 	if retryAfter := upstreamRetryAfterSeconds(err); retryAfter > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
 	}
