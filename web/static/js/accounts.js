@@ -210,6 +210,7 @@ const grokDeviceLogin = globalThis.DeviceAuthLogin.create({
 const ACCOUNT_LOGIN_DRIVERS = {
   workbuddy: () => globalThis.WorkBuddyLogin,
   cline: () => globalThis.ClineLogin,
+	  doubao: () => globalThis.DoubaoLogin,
   grok: () => grokDeviceLogin,
 };
 function startOfficialLogin(provider) {
@@ -1143,6 +1144,7 @@ function openModal(account = null) {
   if (accountSave.busy) return;
   stopWorkBuddyLogin();
   stopClineLogin();
+	globalThis.DoubaoLogin?.reset?.();
   const title = document.getElementById("modalTitle");
   const form = document.getElementById("accountForm");
   const typeEl = document.getElementById("accountType");
@@ -1187,6 +1189,7 @@ function stopOfficialLogin(provider, statusId, linkId = "") {
 
 function stopWorkBuddyLogin() { stopOfficialLogin("WorkBuddyLogin", "workbuddyLoginStatus"); }
 function stopClineLogin() { stopOfficialLogin("ClineLogin", "clineLoginStatus", "clineLoginLink"); }
+function stopDoubaoLogin() { globalThis.DoubaoLogin?.stop?.(); }
 
 // Close modal
 function closeModal() {
@@ -1194,6 +1197,7 @@ function closeModal() {
   resetGrokDeviceLoginStatus();
   stopWorkBuddyLogin();
   stopClineLogin();
+	stopDoubaoLogin();
   ConsoleUI.modal("accountModal", false);
 }
 

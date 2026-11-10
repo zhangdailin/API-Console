@@ -25,6 +25,7 @@ type deviceLogin struct {
 	verifyFull string
 	expiresAt  time.Time
 	interval   time.Duration
+	qrCode     string
 	cancel     context.CancelFunc
 	done       chan struct{}
 	// configSnapshot pins provider endpoints for the whole transaction. A
@@ -48,6 +49,7 @@ type deviceLoginResponse struct {
 	VerificationURI         string `json:"verification_uri,omitempty"`
 	VerificationURIComplete string `json:"verification_uri_complete,omitempty"`
 	ExpiresAt               string `json:"expires_at,omitempty"`
+	QRCode                  string `json:"qr_code,omitempty"`
 	AccountID               int64  `json:"account_id,omitempty"`
 	Message                 string `json:"message,omitempty"`
 }
@@ -81,6 +83,7 @@ func newDeviceLoginResponse(id string, login *deviceLogin) deviceLoginResponse {
 		response.VerificationURI = login.verifyURI
 		response.VerificationURIComplete = login.verifyFull
 		response.ExpiresAt = login.expiresAt.UTC().Format(time.RFC3339)
+		response.QRCode = login.qrCode
 	}
 	return response
 }

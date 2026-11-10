@@ -78,6 +78,12 @@ type Config struct {
 	ClineWorkOSAuthorizeURL string `json:"cline_workos_authorize_url,omitempty"`
 	ClineWorkOSTokenURL     string `json:"cline_workos_token_url,omitempty"`
 
+	// ── Doubao Web (doubao.com) browser channel ──
+	DoubaoBaseURL      string `json:"doubao_base_url,omitempty"`
+	DoubaoAccountsURL  string `json:"doubao_accounts_url,omitempty"`
+	DoubaoUserAgent    string `json:"doubao_user_agent,omitempty"`
+	DoubaoRequestGapMS int    `json:"doubao_request_gap_ms,omitempty"`
+
 	// ── Grok Build CLI (cli-chat-proxy.grok.com) OAuth upstream ──
 	// These fields are configurable via config.json / Redis and are deliberately
 	// NOT written into ApplyHardcoded, so they survive a persistConfig round trip.

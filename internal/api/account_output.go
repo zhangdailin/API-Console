@@ -49,7 +49,7 @@ func (o accountOutput) MarshalJSON() ([]byte, error) {
 	// Credentials are write-only. The account API exposes only their presence,
 	// including for create, update and refresh responses.
 	merged["has_credential"] = o.SessionFingerprint != ""
-	for _, field := range []string{"token", "client_cookie", "refresh_token", "oauth_access_token", "oauth_refresh_token", "workbuddy_access_token", "workbuddy_refresh_token", "cline_access_token", "cline_refresh_token", "session_fingerprint"} {
+	for _, field := range []string{"token", "client_cookie", "refresh_token", "oauth_access_token", "oauth_refresh_token", "workbuddy_access_token", "workbuddy_refresh_token", "cline_access_token", "cline_refresh_token", "doubao_device_id", "doubao_web_id", "doubao_tea_uuid", "session_fingerprint"} {
 		delete(merged, field)
 	}
 	if o.Account != nil {

@@ -11,6 +11,7 @@ const (
 	WorkBuddy ID = "workbuddy"
 	Cline     ID = "cline"
 	Grok      ID = "grok"
+	Doubao    ID = "doubao"
 )
 
 type Definition struct {
@@ -27,6 +28,7 @@ var definitions = [...]Definition{
 	{ID: WorkBuddy, Label: "WorkBuddy", APIPrefix: "/workbuddy/v1", Generic: true, Default: true, Theme: "orange", AccountCreate: "browser"},
 	{ID: Cline, Label: "Cline", APIPrefix: "/cline/v1", Generic: true, Theme: "blue", AccountCreate: "browser"},
 	{ID: Grok, Label: "Grok", APIPrefix: "/grok/v1", Theme: "red", AccountCreate: "browser"},
+	{ID: Doubao, Label: "Doubao", APIPrefix: "/doubao/v1", Generic: true, Theme: "green", AccountCreate: "browser"},
 }
 
 func All() []Definition { return append([]Definition(nil), definitions[:]...) }

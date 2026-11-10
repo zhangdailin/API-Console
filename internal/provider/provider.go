@@ -81,6 +81,10 @@ type Spec struct {
 	// allowance, each on the channel's own cadence. It is called on every
 	// scheduler tick and decides for itself whether anything is due.
 	Maintain func(ctx context.Context, env Env, acc *store.Account)
+
+	// PublishModels reconciles routes backed by verified account state for a
+	// channel that has no upstream model-list endpoint.
+	PublishModels func(ctx context.Context, env Env) error
 }
 
 // specs is written only by Register during package initialization and read

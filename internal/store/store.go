@@ -223,6 +223,15 @@ type Account struct {
 	// model.
 	ClineModelIDs       []string  `json:"cline_model_ids,omitempty"`
 	ClineModelsSyncedAt time.Time `json:"cline_models_synced_at"`
+
+	// ── Doubao Web (doubao.com) browser channel ──
+	// ClientCookie stores the encrypted serialized Cookie jar. Device values are
+	// persisted with it because changing browser identity after QR login triggers
+	// upstream risk controls.
+	DoubaoDeviceID   string    `json:"doubao_device_id,omitempty"`
+	DoubaoWebID      string    `json:"doubao_web_id,omitempty"`
+	DoubaoTeaUUID    string    `json:"doubao_tea_uuid,omitempty"`
+	DoubaoVerifiedAt time.Time `json:"doubao_verified_at,omitempty"`
 }
 
 // WorkBuddy quota exhaustion is a capability downgrade when, and only when, the
@@ -632,5 +641,8 @@ func (a *Account) Secrets() []string {
 		a.WorkBuddyRefreshToken,
 		a.ClineAccessToken,
 		a.ClineRefreshToken,
+		a.DoubaoDeviceID,
+		a.DoubaoWebID,
+		a.DoubaoTeaUUID,
 	}
 }

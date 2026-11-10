@@ -123,6 +123,7 @@ type LoginChallenge struct {
 	VerifyFull string
 	ExpiresAt  time.Time
 	Interval   time.Duration
+	QRCode     string
 	// Private carries the channel's own server-side material (a verifier, a
 	// nonce). Nothing outside the channel reads it.
 	Private any
@@ -131,6 +132,12 @@ type LoginChallenge struct {
 // LoginGrant is the credential a completed authorization produced. It is opaque
 // outside the channel that issued it.
 type LoginGrant any
+
+// LoginPayloadUpdater lets a pending transaction refresh browser-safe login
+// material (currently the Doubao QR image) without exposing private state.
+type LoginPayloadUpdater interface {
+	LoginPayload() (qrCode, verificationURL string, expiresAt time.Time)
+}
 
 // PreserveBlank keeps the stored value when an edit left the field blank. It
 // normalizes neither the stored credential nor a whitespace-only inbound value

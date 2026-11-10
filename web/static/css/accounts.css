@@ -933,6 +933,8 @@
 
 .oauth-flow .oauth-status.is-active { border-color: var(--border-color); background: var(--surface-2); }
 .oauth-flow .oauth-status.is-active::before { background: var(--accent); animation: oauth-pulse 1.4s ease-in-out infinite; }
+.doubao-qr-wrap { display:flex; justify-content:center; margin:16px 0; }
+.doubao-qr-wrap img { display:block; border-radius:10px; background:#fff; padding:8px; border:1px solid var(--border-color); }
 .oauth-flow .oauth-status.is-error { border-color: color-mix(in srgb, var(--bad) 45%, var(--border-color)); background: var(--bad-soft); color: var(--bad); }
 .oauth-flow .oauth-status.is-error::before { background: var(--bad); }
 

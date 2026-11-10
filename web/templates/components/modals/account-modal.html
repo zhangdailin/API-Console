@@ -56,6 +56,9 @@
           </li>
         </ol>
         <div class="account-import-status oauth-status" id="{{.StatusID}}" role="status" aria-live="polite" hidden></div>
+		{{if eq .Key "doubao"}}
+		<div class="doubao-qr-wrap"><img id="doubaoLoginQR" alt="豆包扫码登录二维码" width="240" height="240"></div>
+		{{end}}
       </div>
       {{end}}
       <div class="form-group grok-sso-body" id="grokSSOImportGroup" hidden>

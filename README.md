@@ -2,7 +2,7 @@
 
 # API Console
 
-**One gateway for WorkBuddy, Cline, and Grok Build.**
+**One gateway for WorkBuddy, Cline, Grok Build, and Doubao Web.**
 
 [![Go](https://img.shields.io/badge/Go-1.26.10%2B-00ADD8?logo=go&logoColor=white)](go.mod)
 [![Redis](https://img.shields.io/badge/Redis-required-DC382D?logo=redis&logoColor=white)](config.example.json)
@@ -25,7 +25,7 @@ Applications can use Claude Messages, OpenAI Chat Completions, or Responses endp
 
 ## Features
 
-- **Three Upstream Channels** — WorkBuddy, Cline, and Grok Build OAuth, with official authorization flows in the console.
+- **Four Upstream Channels** — WorkBuddy, Cline, Grok Build OAuth, and Doubao Web QR login, with browser-safe authorization flows in the console.
 - **Compatible API Interfaces** — Messages, Chat Completions, and Responses, including streaming, reasoning, and tool calls where supported by the upstream model.
 - **Account Pool Scheduling** — Weighted selection, concurrency limits, credential refresh, cooldowns, and retry policies.
 - **Model Discovery** — Refresh catalogs from authorized accounts and manage model visibility and routing.
@@ -41,6 +41,7 @@ Applications can use Claude Messages, OpenAI Chat Completions, or Responses endp
 |---------|---------------|------------|
 | WorkBuddy | Official browser authorization | `/workbuddy/v1` |
 | Cline | WorkOS device authorization | `/cline/v1` |
+| Doubao | Doubao App QR login | `/doubao/v1` |
 | Grok | Build OAuth device authorization, or Web SSO cookie import | `/grok/v1` |
 
 Grok serves two planes on one prefix: the **Build OAuth CLI upstream**, and **Grok Web** (grok.com SSO cookies) for `grok-chat-*`, Imagine images and videos, with a Grok tools page in the console. Available models and capabilities depend on the authorized accounts and their upstream entitlements. Catalog refresh failures preserve previously observed models rather than substituting a built-in model list.
@@ -142,7 +143,7 @@ See [Online Upgrade](docs/online-upgrade.md) for eligibility, configuration, and
 
 ## API Usage
 
-Use `http://127.0.0.1:3002/workbuddy/v1`, or choose `/cline/v1`, or `/grok/v1`. The corresponding unversioned provider bases expose the same endpoints.
+Use `http://127.0.0.1:3002/workbuddy/v1`, or choose `/cline/v1`, `/grok/v1`, or `/doubao/v1`. The corresponding unversioned provider bases expose the same endpoints.
 
 | Method | Path relative to the API prefix | Purpose |
 |--------|---------------------------------|---------|

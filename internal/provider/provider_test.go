@@ -122,6 +122,9 @@ func TestProjectNeverLeavesADurableCredential(t *testing.T) {
 		channel.WorkBuddy: func(acc *store.Account) []string { return []string{acc.WorkBuddyRefreshToken} },
 		channel.Cline:     func(acc *store.Account) []string { return []string{acc.ClineRefreshToken} },
 		channel.Grok:      func(acc *store.Account) []string { return []string{acc.OAuthRefreshToken} },
+		channel.Doubao: func(acc *store.Account) []string {
+			return []string{acc.ClientCookie, acc.DoubaoDeviceID, acc.DoubaoWebID, acc.DoubaoTeaUUID}
+		},
 	}
 	for _, spec := range provider.All() {
 		read, listed := durable[spec.ID]
@@ -133,6 +136,9 @@ func TestProjectNeverLeavesADurableCredential(t *testing.T) {
 			OAuthRefreshToken:     "oauth-refresh",
 			WorkBuddyRefreshToken: "workbuddy-refresh",
 			ClineRefreshToken:     "cline-refresh",
+			DoubaoDeviceID:        "doubao-device",
+			DoubaoWebID:           "doubao-web",
+			DoubaoTeaUUID:         "doubao-tea",
 		}
 		out := *stored
 		spec.Admin.Project(&out)

@@ -432,6 +432,15 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request, prepare
 		apperrors.New("invalid_request_error", "MCP servers require a native Responses provider", http.StatusBadRequest).WriteResponse(w)
 		return
 	}
+	if preSelectChannel == "doubao" && len(req.Tools) > 0 {
+		if _, strict := protocolControls.StrictSchema(); !strict {
+			// A non-strict output format remains a best-effort prompt hint and is
+			// compatible with the tool JSON envelope.
+		} else {
+			apperrors.New("invalid_request_error", "doubao does not support tools with response_format", http.StatusBadRequest).WriteResponse(w)
+			return
+		}
+	}
 	if err := protocolControls.ValidateProtocolControls(preSelectChannel); err != nil {
 		apperrors.New("invalid_request_error", err.Error(), http.StatusBadRequest).WriteResponse(w)
 		return

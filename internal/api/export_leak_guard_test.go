@@ -64,13 +64,16 @@ func TestExportNeverCarriesAnotherChannelsCredential(t *testing.T) {
 		"grok":      setOf("client_cookie", "refresh_token", "token", "oauth_access_token", "oauth_refresh_token"),
 		"workbuddy": setOf("client_cookie", "refresh_token", "token", "workbuddy_access_token", "workbuddy_refresh_token"),
 		"cline":     setOf("client_cookie", "refresh_token", "token", "cline_access_token", "cline_refresh_token"),
+		"doubao":    setOf(),
 	}
 	for _, channel := range accountChannels {
 		t.Run(channel, func(t *testing.T) {
 			acc := accountWithSecrets(channel)
 			acc.ID, acc.Weight = 1, 1
 			got := exportedCredentialKeys(t, acc)
-			testutil.NotEqual(t, len(got), 0)
+			if len(allowed[channel]) > 0 {
+				testutil.NotEqual(t, len(got), 0)
+			}
 			for _, key := range got {
 				testutil.CheckFalsef(t, !allowed[channel][key], "export of a %s account carries %q, which belongs to another channel", channel, key)
 			}

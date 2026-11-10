@@ -98,6 +98,7 @@ Cline 套餐只读取官方 `/users/me/plan` 的 `success=true`、`data.plan` �
 | WorkBuddy | `workbuddy_base_url`、`workbuddy_http2_enabled` | 默认国际服务；HTTP/2 是传输设置 |
 | 非流式响应保活 | `non_stream_keepalive_disabled` | 默认开启。非流式请求静默超过 60 秒时先发出 200 响应头和空白字符，之后每 15 秒补一个换行，最终 JSON 跟在空白之后（JSON 允许前导空白），避免前置代理（Cloudflare 120 秒）以 524 断开。保活后的失败只能以 JSON 错误体返回、状态码保持 200。设为 `true` 关闭 |
 | Cline | `cline_api_base_url`、`cline_workos_client_id`、`cline_workos_authorize_url`、`cline_workos_token_url`、`cline_http2_enabled` | API 与 WorkOS 授权分别配置 |
+| Doubao | `doubao_base_url`、`doubao_accounts_url`、`doubao_user_agent`、`doubao_request_gap_ms` | 默认使用 doubao.com / accounts.doubao.com；扫码 Cookie 与设备身份加密保存，最小请求间隔默认 3 秒 |
 | Grok | `grok_cli_base_url`、`grok_cli_user_agent`、`grok_cli_client_version`、`grok_cli_client_identifier` | 默认 Build CLI 网关和 CLI 身份 |
 
 Build CLI 身份沿用仓库基线 `1.0.60`。加载配置和管理端保存配置时，可识别的旧语义版本会自动归一化；`grok-shell`、`grok-pager` UA 中的旧版本同步更新并保留平台信息。更高版本及自定义产品身份保持可配置。Redis 中的旧配置在下次正常保存时写回归一化结果，无需删除账号或凭据。上游返回 `426` 时，推理接口返回 `503 upstream_upgrade_required`，提示管理员更新 Build 身份；不会因此切换、禁用或冷却账号，也不会自动探测、下载新版本。

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"orchids-api/internal/channel"
 	"orchids-api/internal/loadbalancer"
 	"orchids-api/internal/store"
 )
@@ -48,7 +49,7 @@ func TestOpsPoolsReadOnlyScopeAndCapacity(t *testing.T) {
 		return result
 	}
 	all := read("/api/ops/pools")
-	if len(all["rows"].([]any)) != 3 {
+	if len(all["rows"].([]any)) != len(channel.All()) {
 		t.Fatal("all providers must retain stable rows")
 	}
 	scoped := read("/api/ops/pools?channel=cline")
@@ -118,7 +119,7 @@ func TestOpsPoolsFailuresAreNotIdleCapacity(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if rec.Code != 200 || len(result.Rows) != 3 {
+	if rec.Code != 200 || len(result.Rows) != len(channel.All()) {
 		t.Fatal("missing tracker must retain account counts")
 	}
 	for _, row := range result.Rows {

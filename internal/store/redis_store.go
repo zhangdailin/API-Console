@@ -245,6 +245,7 @@ func (s *redisStore) UpdateAccount(ctx context.Context, acc *Account) error {
 		p.mergeModelCooldownState()
 		p.mergeWorkBuddyCredentials()
 		p.mergeClineCredentials()
+		p.mergeDoubaoIdentity()
 		*existing = updated
 		return nil
 	})

@@ -73,6 +73,7 @@ type API struct {
 	grokLogins      *deviceLoginRegistry[deviceLogin]
 	workbuddyLogins *deviceLoginRegistry[browserLogin]
 	clineLogins     *deviceLoginRegistry[browserLogin]
+	doubaoLogins    *deviceLoginRegistry[browserLogin]
 
 	// opsAggregator and alerts back the operations overview. They are optional:
 	// a Redis-less deployment simply reports "no sample" instead of failing.
@@ -162,6 +163,7 @@ func New(s *store.Store, adminUser, adminPass string, cfg *config.Config) *API {
 		grokLogins:       newDeviceLoginRegistry(identityDeviceLogin, nil, "Grok authorization expired"),
 		workbuddyLogins:  newBrowserLoginRegistry(channel.WorkBuddy),
 		clineLogins:      newBrowserLoginRegistry(channel.Cline),
+		doubaoLogins:     newBrowserLoginRegistry(channel.Doubao),
 	}
 	if cfg != nil {
 		a.config.Store(cfg.Clone())

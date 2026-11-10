@@ -38,15 +38,15 @@ func TestRegistryInvariantsAndPathParsing(t *testing.T) {
 // retired channels were removed: WorkBuddy carries the default flag and the
 // remaining three channels keep their order, so any accidental re-addition or
 // reordering of the registry fails here.
-func TestRegistryIsWorkBuddyDefaultAfterChannelRemoval(t *testing.T) {
+func TestRegistryKeepsWorkBuddyDefault(t *testing.T) {
 	got := Default()
 	testutil.Falsef(t, got.ID != WorkBuddy, "Default() = %q, want %q", got.ID, WorkBuddy)
-	want := []ID{WorkBuddy, Cline, Grok}
+	want := []ID{WorkBuddy, Cline, Grok, Doubao}
 	all := All()
 	testutil.Equal(t, len(all), len(want))
 	for i, id := range want {
 		testutil.Equal(t, all[i].ID, id)
 	}
-	testutil.Equal(t, len(GenericPrefixes()), 4)
+	testutil.Equal(t, len(GenericPrefixes()), 6)
 	testutil.Equal(t, len(AllPrefixes()), 2*len(want))
 }

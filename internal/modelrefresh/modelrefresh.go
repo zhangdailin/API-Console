@@ -123,6 +123,7 @@ var upstreamCatalogSources = map[string]struct{}{
 	"grok_build_models":        {},
 	"workbuddy_cli_models":     {},
 	"cline_recommended_models": {},
+	"doubao_web_verified":      {},
 }
 
 // A catalog source that names the upstream read that produced it is an

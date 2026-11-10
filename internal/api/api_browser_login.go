@@ -105,6 +105,7 @@ type loginSeed struct {
 	userCode  string
 	expiresAt time.Time
 	interval  time.Duration
+	qrCode    string
 	// message is the console's "waiting" line while the browser step is pending.
 	message string
 	enabled bool
@@ -140,6 +141,7 @@ func admitBrowserLogin[T any](
 		verifyFull:     seed.verifyFull,
 		expiresAt:      seed.expiresAt,
 		interval:       seed.interval,
+		qrCode:         seed.qrCode,
 		cancel:         pollCancel,
 		done:           make(chan struct{}),
 		configSnapshot: seed.cfg,
@@ -210,6 +212,15 @@ func pollBrowserLogin[T, C any](a *API, ctx context.Context, registry *deviceLog
 		cancel()
 		if err != nil {
 			if errors.Is(err, pending) {
+				if updater, ok := any(login).(interface {
+					loginPayload() (string, string, time.Time)
+				}); ok {
+					qrCode, verifyURL, expiresAt := updater.loginPayload()
+					registry.update(id, func(stored *T) {
+						shared := registry.shared(stored)
+						shared.qrCode, shared.verifyURI, shared.verifyFull, shared.expiresAt = qrCode, verifyURL, verifyURL, expiresAt
+					})
+				}
 				continue
 			}
 			if ctx.Err() != nil {

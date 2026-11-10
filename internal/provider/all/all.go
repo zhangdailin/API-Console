@@ -8,6 +8,7 @@ package all
 
 import (
 	_ "orchids-api/internal/cline"
+	_ "orchids-api/internal/doubao"
 	_ "orchids-api/internal/grok"
 	_ "orchids-api/internal/workbuddy"
 )

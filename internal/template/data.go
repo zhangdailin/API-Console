@@ -46,4 +46,10 @@ var accountLoginProviders = []LoginProvider{
 		StatusID: "grokDeviceLoginStatus", LinkID: "grokDeviceLoginLink", LinkTextID: "grokDeviceLoginLinkText", CodeID: "grokDeviceLoginCode",
 		HelpText: "浏览器将在 xAI 官方页面完成授权；本服务只保存 OAuth access/refresh token（且不回显），不读取本地文件、Cookie 或密码，也不保存 id_token。授权完成会自动保存账号。",
 	},
+	{
+		Key: "doubao", GroupID: "doubaoLoginGroup", Label: "豆包 App 扫码登录",
+		ButtonID: "doubaoLoginButton", ButtonText: "显示豆包扫码二维码",
+		StatusID: "doubaoLoginStatus", LinkID: "doubaoLoginLink", LinkTextID: "doubaoLoginLinkText", CodeID: "doubaoLoginCode",
+		HelpText: "使用豆包 App 扫描二维码并在手机确认。二维码、Cookie 与设备身份只保存在服务端；Cookie 不会显示、导入或导出。",
+	},
 }

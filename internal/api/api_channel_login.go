@@ -32,6 +32,16 @@ type browserLogin struct {
 	flow *provider.Login
 }
 
+func (l *browserLogin) loginPayload() (string, string, time.Time) {
+	if l == nil {
+		return "", "", time.Time{}
+	}
+	if updater, ok := l.challenge.Private.(provider.LoginPayloadUpdater); ok {
+		return updater.LoginPayload()
+	}
+	return l.challenge.QRCode, l.challenge.VerifyFull, l.challenge.ExpiresAt
+}
+
 // newBrowserLoginRegistry builds the registry for one channel. Each channel
 // keeps its own, so codes and credentials can never cross authentication flows
 // and one channel's abandoned logins cannot use up another's admission limit.
@@ -52,6 +62,12 @@ func (a *API) HandleWorkBuddyLogin(w http.ResponseWriter, r *http.Request) {
 // flow. It is registered behind the administrator session middleware.
 func (a *API) HandleClineLogin(w http.ResponseWriter, r *http.Request) {
 	a.handleBrowserLogin(w, r, channel.Cline, a.clineLogins)
+}
+
+// HandleDoubaoLogin runs the Doubao App QR login. The QR target is browser-safe
+// and returned as a PNG data URL; cookies and passport state remain server-side.
+func (a *API) HandleDoubaoLogin(w http.ResponseWriter, r *http.Request) {
+	a.handleBrowserLogin(w, r, channel.Doubao, a.doubaoLogins)
 }
 
 func (a *API) handleBrowserLogin(w http.ResponseWriter, r *http.Request, id channel.ID, registry *deviceLoginRegistry[browserLogin]) {
@@ -100,6 +116,7 @@ func (a *API) startBrowserLogin(w http.ResponseWriter, r *http.Request, id chann
 		verifyFull: challenge.VerifyFull,
 		expiresAt:  challenge.ExpiresAt,
 		interval:   challenge.Interval,
+		qrCode:     challenge.QRCode,
 		message:    "Waiting for " + label + " authorization",
 		enabled:    enabled,
 		cfg:        cfg,

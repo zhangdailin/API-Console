@@ -52,7 +52,12 @@ func (a *API) HandleExport(w http.ResponseWriter, r *http.Request) {
 // upstream calls. A durable refresh credential is required for a restorable row.
 func normalizePortableAccount(acc *store.Account) string {
 	acc.AccountType = strings.ToLower(strings.TrimSpace(acc.AccountType))
-	defer func() { acc.Token = ""; acc.RefreshToken = ""; acc.ClientCookie = "" }()
+	defer func() {
+		acc.Token, acc.RefreshToken, acc.ClientCookie = "", "", ""
+		// Device identifiers are bound to the non-portable QR session and must
+		// never leave the server in an account archive.
+		acc.DoubaoDeviceID, acc.DoubaoWebID, acc.DoubaoTeaUUID = "", "", ""
+	}()
 	admin := adminFor(acc.AccountType)
 	if admin == nil || admin.PrepareImport == nil {
 		return "unsupported_channel"
@@ -93,6 +98,12 @@ func redactForeignCredentials(acc *store.Account) {
 		acc.ClineAccessToken = ""
 		acc.ClineRefreshToken = ""
 		acc.ClineExpiresAt = time.Time{}
+	}
+	if channel != "doubao" {
+		acc.DoubaoDeviceID = ""
+		acc.DoubaoWebID = ""
+		acc.DoubaoTeaUUID = ""
+		acc.DoubaoVerifiedAt = time.Time{}
 	}
 }
 

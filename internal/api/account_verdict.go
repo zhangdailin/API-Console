@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"orchids-api/internal/accountpolicy"
+	"orchids-api/internal/provider"
 	"orchids-api/internal/store"
 )
 
@@ -37,6 +38,11 @@ func (a *API) syncAccountAfterCreate(acc store.Account) {
 
 		if updateErr := a.store.UpdateAccount(context.Background(), &account); updateErr != nil {
 			slog.Warn("Failed to persist initial account sync", "account_id", account.ID, "type", account.AccountType, "error", updateErr)
+		}
+		if spec, ok := provider.Lookup(account.AccountType); ok && spec.PublishModels != nil {
+			if err := spec.PublishModels(context.Background(), provider.Env{Config: a.config.Load(), Store: a.store}); err != nil {
+				slog.Warn("Initial account model publication failed", "account_id", account.ID, "type", account.AccountType, "error", err)
+			}
 		}
 	}(acc)
 }

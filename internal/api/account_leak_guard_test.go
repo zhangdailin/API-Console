@@ -26,6 +26,9 @@ var accountSecretFields = map[string]func(*store.Account) string{
 	"workbuddy_refresh_token": func(a *store.Account) string { return a.WorkBuddyRefreshToken },
 	"cline_access_token":      func(a *store.Account) string { return a.ClineAccessToken },
 	"cline_refresh_token":     func(a *store.Account) string { return a.ClineRefreshToken },
+	"doubao_device_id":        func(a *store.Account) string { return a.DoubaoDeviceID },
+	"doubao_web_id":           func(a *store.Account) string { return a.DoubaoWebID },
+	"doubao_tea_uuid":         func(a *store.Account) string { return a.DoubaoTeaUUID },
 }
 
 // TestAccountSecretFieldsAreComplete makes every new Account field require an
@@ -45,6 +48,7 @@ func TestAccountSecretFieldsAreComplete(t *testing.T) {
 		WorkBuddyModelsSyncedAt WorkBuddyQuota WorkBuddyRestrictedUntil
 		ClineExpiresAt ClineEmail ClinePlan ReplaceClineCredentials ClineModelIDs
 		ClineModelsSyncedAt
+		DoubaoVerifiedAt
 	`) {
 		nonSecret[name] = true
 	}
@@ -91,7 +95,7 @@ func TestAccountSecretFieldsAreComplete(t *testing.T) {
 
 // accountChannels are the channels the account API serves. Every one of them goes
 // through the same projection, so the guard has to cover each.
-var accountChannels = []string{"grok", "workbuddy", "cline"}
+var accountChannels = []string{"grok", "workbuddy", "cline", "doubao"}
 
 // marker prefixes every planted secret so one substring search can find all of
 // them in the rendered JSON, whatever the field name became on the wire.
@@ -145,6 +149,9 @@ var accountSecretSetter = map[string]func(*store.Account, string){
 	},
 	"cline_access_token":  func(a *store.Account, v string) { a.ClineAccessToken = v },
 	"cline_refresh_token": func(a *store.Account, v string) { a.ClineRefreshToken = v },
+	"doubao_device_id":    func(a *store.Account, v string) { a.DoubaoDeviceID = v },
+	"doubao_web_id":       func(a *store.Account, v string) { a.DoubaoWebID = v },
+	"doubao_tea_uuid":     func(a *store.Account, v string) { a.DoubaoTeaUUID = v },
 }
 
 // TestAccountResponsesNeverCarryCredentials is the guard the account projection's

@@ -26,6 +26,7 @@
           <div class="config-nav-head">运行设置</div>
           <button type="button" class="config-nav-link active" role="tab" id="cfgTab-build" aria-controls="cfgPanel-build" aria-selected="true" data-cfg-tab="build">Grok Build</button>
           <button type="button" class="config-nav-link" role="tab" id="cfgTab-web" aria-controls="cfgPanel-web" aria-selected="false" tabindex="-1" data-cfg-tab="web">Grok Web</button>
+		  <button type="button" class="config-nav-link" role="tab" id="cfgTab-doubao" aria-controls="cfgPanel-doubao" aria-selected="false" tabindex="-1" data-cfg-tab="doubao">豆包 Web</button>
           <button type="button" class="config-nav-link" role="tab" id="cfgTab-delivery" aria-controls="cfgPanel-delivery" aria-selected="false" tabindex="-1" data-cfg-tab="delivery">投递与网络</button>
           <button type="button" class="config-nav-link" role="tab" id="cfgTab-auth" aria-controls="cfgPanel-auth" aria-selected="false" tabindex="-1" data-cfg-tab="auth">认证</button>
         </nav>
@@ -62,6 +63,16 @@
           </div>
 
           <!-- Grok Web ───────────────────────────────────────────────── -->
+		  <div class="config-panel" id="cfgPanel-doubao" role="tabpanel" aria-labelledby="cfgTab-doubao" hidden>
+			<section class="settings-card"><div class="settings-card-head"><h2 class="settings-card-title">豆包 Web</h2><span class="mini-badge">新请求生效</span></div>
+			<p class="settings-card-note">账号必须通过管理台二维码扫码登录。Cookie 与每账号浏览器设备标识加密保存在服务端。</p><div class="settings-card-body">
+			<div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_doubao_base_url">主站 Base URL</label><span class="helper-text">留空使用 https://www.doubao.com。</span></div><div class="form-row-control"><input type="url" id="cfg_doubao_base_url" class="form-input" placeholder="https://www.doubao.com" spellcheck="false"></div></div>
+			<div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_doubao_accounts_url">账号站 Base URL</label><span class="helper-text">留空使用 https://accounts.doubao.com。</span></div><div class="form-row-control"><input type="url" id="cfg_doubao_accounts_url" class="form-input" placeholder="https://accounts.doubao.com" spellcheck="false"></div></div>
+			<div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_doubao_user_agent">浏览器 User-Agent</label><span class="helper-text">留空使用内置 Chrome 标识。</span></div><div class="form-row-control"><input type="text" id="cfg_doubao_user_agent" class="form-input" placeholder="内置 Chrome UA" spellcheck="false"></div></div>
+			<div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_doubao_request_gap_ms">最小请求间隔（毫秒）</label><span class="helper-text">默认 3000；按账号串行以降低上游限流风险。</span></div><div class="form-row-control"><input type="number" id="cfg_doubao_request_gap_ms" class="form-input" min="0" max="60000" placeholder="3000"></div></div>
+			</div></section>
+		  </div>
+
           <div class="config-panel" id="cfgPanel-web" role="tabpanel" aria-labelledby="cfgTab-web" hidden>
             <section class="settings-card">
               <div class="settings-card-head"><h2 class="settings-card-title">Web 上游</h2><span class="mini-badge">新请求生效</span></div>

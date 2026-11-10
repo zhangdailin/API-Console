@@ -2,7 +2,7 @@
 
 # API Console
 
-**统一接入 WorkBuddy、Cline 与 Grok Build。**
+**统一接入 WorkBuddy、Cline、Grok Build 与豆包 Web。**
 
 [![Go](https://img.shields.io/badge/Go-1.26.10%2B-00ADD8?logo=go&logoColor=white)](go.mod)
 [![Redis](https://img.shields.io/badge/Redis-required-DC382D?logo=redis&logoColor=white)](config.example.json)
@@ -25,7 +25,7 @@ API Console 是使用 Go 编写的自托管 AI API 网关，将多个上游账�
 
 ## 功能特性
 
-- **三通道接入** — WorkBuddy、Cline 和 Grok Build OAuth，后台集成官方授权流程。
+- **四通道接入** — WorkBuddy、Cline、Grok Build OAuth 与豆包 Web 扫码登录，后台集成授权流程。
 - **兼容接口** — Messages、Chat Completions 与 Responses，按上游模型能力支持流式输出、推理内容及工具调用。
 - **账号池调度** — 加权选择、并发限制、凭据续期、冷却与重试策略。
 - **模型发现** — 从授权账号刷新真实目录，管理模型可见性和路由。
@@ -41,6 +41,7 @@ API Console 是使用 Go 编写的自托管 AI API 网关，将多个上游账�
 |------|----------|----------|
 | WorkBuddy | 官方浏览器授权 | `/workbuddy/v1` |
 | Cline | WorkOS 设备授权 | `/cline/v1` |
+| Doubao | 豆包 App 扫码登录 | `/doubao/v1` |
 | Grok | Build OAuth 设备授权，或导入 Web SSO Cookie | `/grok/v1` |
 
 Grok 在同一前缀下承载两个平面：**Build OAuth CLI 上游**，以及 **Grok Web**（grok.com SSO Cookie），提供 `grok-chat-*`、Imagine 生图与视频，后台附带 Grok 工具页。实际模型及能力取决于账号的上游权限；目录刷新失败保留既有观察结果，不以内置列表替代。
@@ -120,7 +121,7 @@ Linux 常驻服务、反向代理及后端端口保护见 [主机部署指南](d
 
 ## API 接入
 
-例如 Base URL 为 `http://127.0.0.1:3002/workbuddy/v1`，也可选择 `/cline/v1` 或 `/grok/v1`。对应的不带 `/v1` 通道地址提供相同端点。
+例如 Base URL 为 `http://127.0.0.1:3002/workbuddy/v1`，也可选择 `/cline/v1`、`/grok/v1` 或 `/doubao/v1`。对应的不带 `/v1` 通道地址提供相同端点。
 
 | 方法 | 相对于 API 前缀的路径 | 用途 |
 |------|-----------------------|------|

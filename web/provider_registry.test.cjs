@@ -14,6 +14,7 @@ const payload = {
     { key: 'workbuddy', label: 'WorkBuddy' },
     { key: 'cline', label: 'Cline' },
     { key: 'grok', label: 'Grok' },
+    { key: 'doubao', label: 'Doubao' },
   ],
 };
 

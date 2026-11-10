@@ -88,6 +88,9 @@ func accountCredentialFields(acc *Account) []*string {
 		&acc.WorkBuddyRefreshToken,
 		&acc.ClineAccessToken,
 		&acc.ClineRefreshToken,
+		&acc.DoubaoDeviceID,
+		&acc.DoubaoWebID,
+		&acc.DoubaoTeaUUID,
 	}
 }
 

@@ -235,3 +235,19 @@ func (p accountPatch) mergeClineCredentials() {
 		u.ClineModelsSyncedAt = acc.ClineModelsSyncedAt
 	}
 }
+
+func (p accountPatch) mergeDoubaoIdentity() {
+	u, acc, existing := p.updated, p.acc, p.existing
+	if !strings.EqualFold(strings.TrimSpace(acc.AccountType), "doubao") {
+		return
+	}
+	if strings.TrimSpace(acc.ClientCookie) != "" {
+		u.ClientCookie = acc.ClientCookie
+	}
+	patchString(&u.DoubaoDeviceID, acc.DoubaoDeviceID)
+	patchString(&u.DoubaoWebID, acc.DoubaoWebID)
+	patchString(&u.DoubaoTeaUUID, acc.DoubaoTeaUUID)
+	if !acc.DoubaoVerifiedAt.IsZero() && !acc.DoubaoVerifiedAt.Before(existing.DoubaoVerifiedAt) {
+		u.DoubaoVerifiedAt = acc.DoubaoVerifiedAt
+	}
+}

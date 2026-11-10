@@ -64,7 +64,8 @@ test('save sends security and proxy settings but no local cache settings',async(
  same(saved,{admin_password:'changed',proxy_url:'http://proxy.example:8080',proxy_bypass:['example.com'],grok_low_latency:false,grok_clearance_mode:'manual',grok_cf_clearance:'',grok_flaresolverr_url:'',grok_web_proxy_url:'',
   grok_clearance_timeout_seconds:0,grok_clearance_refresh_interval:0,grok_cli_base_url:'',grok_cli_client_version:'',grok_cli_client_identifier:'',grok_cli_user_agent:'',grok_build_rps:0,
   grok_web_base_url:'',grok_web_user_agent:'',grok_statsig_id:'',grok_statsig_signer_url:null,grok_web_timeout_seconds:0,grok_web_stream_idle_seconds:0,grok_web_rps:0,
-  grok_temporary:true,grok_disable_memory:false,grok_custom_instruction:'',grok_image_nsfw:true});
+  grok_temporary:true,grok_disable_memory:false,grok_custom_instruction:'',grok_image_nsfw:true,
+  doubao_base_url:'',doubao_accounts_url:'',doubao_user_agent:'',doubao_request_gap_ms:0});
  assert.equal(saved.anonymous_allow_ips,undefined);
 });
 

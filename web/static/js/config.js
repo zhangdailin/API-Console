@@ -72,6 +72,10 @@ const CONFIG_FIELDS = [
   { id: "cfg_grok_disable_memory", key: "grok_disable_memory", type: "bool", optional: true },
   { id: "cfg_grok_custom_instruction", key: "grok_custom_instruction", type: "text", optional: true },
   { id: "cfg_grok_image_nsfw", key: "grok_image_nsfw", type: "bool", default: true, optional: true },
+  { id: "cfg_doubao_base_url", key: "doubao_base_url", type: "text", optional: true },
+  { id: "cfg_doubao_accounts_url", key: "doubao_accounts_url", type: "text", optional: true },
+  { id: "cfg_doubao_user_agent", key: "doubao_user_agent", type: "text", optional: true },
+  { id: "cfg_doubao_request_gap_ms", key: "doubao_request_gap_ms", type: "int", optional: true },
 ];
 // The admin password is write-only: tracked for the save bar, sent when set.
 const CONFIG_TRACKED_FIELDS = ["cfg_admin_pass", ...CONFIG_FIELDS.map((field) => field.id)];
