@@ -37,9 +37,10 @@ func planAccount(plan string, imagine store.GrokImagineQuota) *store.Account {
 }
 
 // The quota grok.com reported for a Free account: a small daily Imagine
-// allowance and no image edits.
+// allowance, no separate standard image product (null) and no image edits.
 func freeQuota(imageProLeft int64) store.GrokImagineQuota {
 	return store.GrokImagineQuota{
+		Image:     store.GrokMediaWindow{Known: true},
 		ImagePro:  store.GrokMediaWindow{Known: true, Available: imageProLeft > 0, Metered: true, Remaining: imageProLeft, ResetAt: time.Now().Add(time.Hour)},
 		ImageEdit: store.GrokMediaWindow{Known: true},
 	}
@@ -48,15 +49,15 @@ func freeQuota(imageProLeft int64) store.GrokImagineQuota {
 func TestAvailabilityReportsPlansAndMedia(t *testing.T) {
 	out := availabilityFor(t, planAccount("basic", freeQuota(8)), planAccount("basic", freeQuota(0)))
 	sameJSON(t, out["web_plans"], any(map[string]any{"free": float64(2), "paid": float64(0), "unknown": float64(0)}))
-	sameJSON(t, out["media"], any(map[string]any{"image_pro": true, "image_edit": false}))
+	sameJSON(t, out["media"], any(map[string]any{"image": true, "image_pro": true, "image_edit": false}))
 
 	spent := availabilityFor(t, planAccount("basic", freeQuota(0)))
-	sameJSON(t, spent["media"], any(map[string]any{"image_pro": false, "image_edit": false}))
+	sameJSON(t, spent["media"], any(map[string]any{"image": false, "image_pro": false, "image_edit": false}))
 
 	paid := store.GrokImagineQuota{ImageEdit: store.GrokMediaWindow{Known: true, Available: true, Metered: true, Remaining: 10}}
 	mixed := availabilityFor(t, planAccount("basic", freeQuota(0)), planAccount("super", paid))
 	sameJSON(t, mixed["web_plans"], any(map[string]any{"free": float64(1), "paid": float64(1), "unknown": float64(0)}))
-	sameJSON(t, mixed["media"], any(map[string]any{"image_pro": true, "image_edit": true}))
+	sameJSON(t, mixed["media"], any(map[string]any{"image": true, "image_pro": true, "image_edit": true}))
 }
 
 func sameJSON(t *testing.T, got, want any) {

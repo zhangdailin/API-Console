@@ -451,7 +451,7 @@ func (h *Handler) HandleAvailability(w http.ResponseWriter, r *http.Request) {
 	// a Free-only pool. media reports whether any of them still has the
 	// allowance of each media product (the same fence account selection uses).
 	plans := map[string]int{"free": 0, "paid": 0, "unknown": 0}
-	media := map[string]bool{mediaImagePro: false, mediaImageEdit: false}
+	media := map[string]bool{mediaImage: false, mediaImagePro: false, mediaImageEdit: false}
 	now := time.Now()
 	if h != nil && h.lb != nil && h.lb.Store != nil {
 		accounts, err := h.lb.Store.ListAccounts(r.Context())

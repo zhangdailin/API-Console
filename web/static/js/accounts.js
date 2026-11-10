@@ -971,7 +971,7 @@ function grokWebMediaMarkup(imagine) {
     const n = Number(value.remaining || 0);
     return `${label} <span style="color:${n > 0 ? "#34d399" : "#fb7185"}">${n}</span>`;
   };
-  const parts = [part("出图", imagine.image_pro), part("改图", imagine.image_edit), part("视频", imagine.video), part("720p", imagine.video_720p)].filter(Boolean);
+  const parts = [part("标准", imagine.image), part("高质量", imagine.image_pro), part("改图", imagine.image_edit), part("视频", imagine.video), part("720p", imagine.video_720p)].filter(Boolean);
   return parts.length ? `<div style="color:#64748b;font-size:0.75rem">${parts.join(" · ")}</div>` : "";
 }
 

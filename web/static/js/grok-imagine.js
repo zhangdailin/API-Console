@@ -4,7 +4,7 @@
   let imageModels = [];
   // availability is what the tools page learned about the Grok Web pool:
   // webPlans counts accounts by plan, media whether any account still has
-  // the image_pro / image_edit allowance. Unknown (null) changes nothing.
+  // the image / image_pro / image_edit allowance. Unknown (null) changes nothing.
   let availability = { webPlans: null, media: null };
   const PARALLELISM = 2;
 
@@ -511,16 +511,18 @@
     return results;
   }
 
-  // applyAvailability reflects what the pool can serve: 标准/高质量 need an
-  // account with the image_pro allowance, and 编辑 one with image_edit (Free
-  // plans have none). An edit choice that is no longer offered falls back.
+  // applyAvailability reflects what the pool can serve: 标准 needs an account
+  // with the standard image allowance, 高质量 one with image_pro, and 编辑 one
+  // with image_edit (Free plans have none). An edit choice that is no longer
+  // offered falls back.
   function applyAvailability() {
     const media = availability.media || {};
-    const proAllowed = media.image_pro !== false;
+    const allowed = { basic: media.image !== false, quality: media.image_pro !== false };
     const editAllowed = media.image_edit !== false;
     document.querySelectorAll("#imagineQualityToggle [data-imagine-quality]").forEach((btn) => {
-      if (proAllowed) btn.removeAttribute("title");
-      else btn.title = "当前账号的标准/高质量出图额度已用完，等待重置后再试";
+      const quality = btn.dataset.imagineQuality === "quality" ? "quality" : "basic";
+      if (allowed[quality]) btn.removeAttribute("title");
+      else btn.title = quality === "quality" ? "当前账号的高质量出图额度已用完，等待重置后再试" : "当前账号的标准出图额度已用完，等待重置后再试";
     });
     document.querySelectorAll("#imagineOperationToggle [data-imagine-operation='edit']").forEach((btn) => {
       btn.disabled = !editAllowed;

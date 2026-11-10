@@ -50,7 +50,35 @@ func TestMediaProductForRoutes(t *testing.T) {
 	testutil.Equal(t, mediaProductFor(video, "720p"), mediaVideo720p)
 	testutil.Equal(t, mediaProductFor(video, "480p"), mediaVideo)
 	testutil.Equal(t, mediaProductFor(edit, ""), mediaImageEdit)
-	testutil.Equal(t, mediaProductFor(image, ""), mediaImagePro)
+	testutil.Equal(t, mediaProductFor(image, ""), mediaImage)
+	pro, _ := ResolveModel("grok-imagine-image-2.0")
+	testutil.Equal(t, mediaProductFor(pro, ""), mediaImagePro)
 	_, liteKnown := ResolveModel("grok-imagine-image-lite")
 	testutil.False(t, liteKnown, "the lite image model is no longer served")
+}
+
+// The standard model goes out with enable_pro=false and is metered as
+// "image". A paid plan offers it from the weekly pool even while its imagePro
+// counter is spent (the shape every paid account reported on 2026-11-10);
+// fencing it by imagePro refused every standard image locally.
+func TestStandardImageIsFencedByImageNotImagePro(t *testing.T) {
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	paid, err := parseImagineQuota([]byte(paidImagineQuota), now)
+	testutil.NoError(t, err)
+	acc := &store.Account{}
+	acc.GrokWebQuota.Imagine = paid
+	testutil.True(t, mediaAllowed(acc, mediaImage, now), "a paid account with its weekly pool must draw standard images")
+	testutil.False(t, mediaAllowed(acc, mediaImagePro, now))
+
+	// A Free plan answers image:null and counts its images against imagePro.
+	free, err := parseImagineQuota([]byte(freeImagineQuota), now.Add(-8*time.Hour))
+	testutil.NoError(t, err)
+	freeAcc := &store.Account{}
+	freeAcc.GrokWebQuota.Imagine = free
+	testutil.True(t, mediaNotOffered(free.Image))
+	testutil.False(t, mediaAllowed(freeAcc, mediaImage, time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)), "spent Free images stay fenced")
+	testutil.True(t, mediaAllowed(freeAcc, mediaImage, time.Date(2026, 11, 4, 20, 0, 0, 0, time.UTC)), "Free images reopen at nextAvailableAt")
+
+	// An account synced before the image field was stored is unknown, so allowed.
+	testutil.True(t, mediaAllowed(&store.Account{}, mediaImage, now))
 }

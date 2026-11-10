@@ -138,6 +138,10 @@ type GrokMediaWindow struct {
 
 // GrokImagineQuota is the media allowance of a Grok Web account by product.
 type GrokImagineQuota struct {
+	// Image is the standard (non-Pro) Imagine image. A paid plan draws it from
+	// the weekly pool; a Free plan reports it as not offered and counts its
+	// images against ImagePro instead.
+	Image     GrokMediaWindow `json:"image,omitempty"`
 	ImagePro  GrokMediaWindow `json:"image_pro,omitempty"`
 	ImageEdit GrokMediaWindow `json:"image_edit,omitempty"`
 	Video     GrokMediaWindow `json:"video,omitempty"`

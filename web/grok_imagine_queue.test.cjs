@@ -92,15 +92,18 @@ test('the panel offers 标准 and 高质量 only, and edits follow the pool allo
   assert.equal(context.review.syncQualityModel().quality,'basic');
   assert.equal(context.review.syncQualityModel().model,'grok-imagine-image');
 
-  context.review.setAvailability({webPlans:{free:2,paid:0,unknown:0},media:{image_pro:false,image_edit:false}});
+  context.review.setAvailability({webPlans:{free:2,paid:0,unknown:0},media:{image:false,image_pro:false,image_edit:false}});
   context.review.applyAvailability();
-  assert.match(String(quality[0].title),/额度已用完/,'a spent image_pro allowance is explained');
+  assert.match(String(quality[0].title),/标准出图额度已用完/,'a spent standard allowance is explained on 标准');
+  assert.match(String(quality[1].title),/高质量出图额度已用完/,'a spent image_pro allowance is explained on 高质量');
   assert.equal(operations[1].disabled,true,'编辑 is disabled without an edit allowance');
   assert.equal(operations[0].classList.contains('is-active'),true,'the operation falls back to 生成');
 
-  context.review.setAvailability({webPlans:{free:2,paid:0,unknown:0},media:{image_pro:true,image_edit:true}});
+  // A paid pool whose imagePro is spent still draws standard images.
+  context.review.setAvailability({webPlans:{free:0,paid:2,unknown:0},media:{image:true,image_pro:false,image_edit:true}});
   context.review.applyAvailability();
-  assert.equal(quality[0].title,undefined);
+  assert.equal(quality[0].title,undefined,'标准 stays available on the weekly pool');
+  assert.match(String(quality[1].title),/高质量出图额度已用完/);
   assert.equal(operations[1].disabled,false);
 });
 

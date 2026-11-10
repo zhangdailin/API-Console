@@ -22,7 +22,9 @@ const imagineQuotaPath = "/rest/media/imagine/quota_info"
 
 // Media products a request can consume.
 const (
-	mediaNone      = ""
+	mediaNone = ""
+	// mediaImage is a standard Imagine image (enable_pro=false).
+	mediaImage     = "image"
 	mediaImagePro  = "image_pro"
 	mediaImageEdit = "image_edit"
 	mediaVideo     = "video"
@@ -86,6 +88,7 @@ func parseImagineQuota(body []byte, now time.Time) (store.GrokImagineQuota, erro
 		return window
 	}
 	return store.GrokImagineQuota{
+		Image:     parse("image"),
 		ImagePro:  parse("imagePro"),
 		ImageEdit: parse("imageEdit"),
 		Video:     parse("video"),
@@ -105,8 +108,12 @@ func mediaProductFor(spec ModelSpec, videoResolution string) string {
 		return mediaVideo
 	case isImageEditModel(id):
 		return mediaImageEdit
-	case spec.IsImage:
+	case spec.IsImage && imagineWSProModel(id):
 		return mediaImagePro
+	case spec.IsImage:
+		// The standard model goes out with enable_pro=false: it is metered
+		// as "image", not "imagePro".
+		return mediaImage
 	}
 	return mediaNone
 }
@@ -114,8 +121,15 @@ func mediaProductFor(spec ModelSpec, videoResolution string) string {
 func mediaWindow(acc *store.Account, product string) (store.GrokMediaWindow, string) {
 	q := acc.GrokWebQuota.Imagine
 	switch product {
+	case mediaImage:
+		if mediaNotOffered(q.Image) {
+			// A Free plan has no separate standard product; its images are
+			// counted against imagePro.
+			return q.ImagePro, "标准出图"
+		}
+		return q.Image, "标准出图"
 	case mediaImagePro:
-		return q.ImagePro, "标准/高质量出图"
+		return q.ImagePro, "高质量出图"
 	case mediaImageEdit:
 		return q.ImageEdit, "改图"
 	case mediaVideo:
@@ -185,6 +199,11 @@ func (h *Handler) noteMediaExhausted(ctx context.Context, acc *store.Account, pr
 	q := &latest.GrokWebQuota.Imagine
 	var window *store.GrokMediaWindow
 	switch product {
+	case mediaImage:
+		window = &q.Image
+		if mediaNotOffered(q.Image) {
+			window = &q.ImagePro
+		}
 	case mediaImagePro:
 		window = &q.ImagePro
 	case mediaImageEdit:
@@ -210,6 +229,12 @@ func (h *Handler) noteMediaExhausted(ctx context.Context, acc *store.Account, pr
 		return
 	}
 	*acc = *latest
+}
+
+// mediaNotOffered reports a product quota_info answered with null: the plan
+// does not offer it (as opposed to offering it with nothing left).
+func mediaNotOffered(window store.GrokMediaWindow) bool {
+	return window.Known && !window.Available && !window.Metered && window.WindowSeconds == 0 && window.ResetAt.IsZero()
 }
 
 type mediaProductKey struct{}
