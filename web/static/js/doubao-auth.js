@@ -16,7 +16,7 @@ globalThis.DoubaoLogin = (() => {
     try { data = raw ? JSON.parse(raw) : {}; }
     catch (_) {
       const kind = /^\s*</.test(raw) ? 'HTML 页面' : '非 JSON 响应';
-      throw new Error(`${action}返回了${kind}（HTTP ${response.status}）。请确认网关已升级至 v1.0.179 并重启，且反向代理没有改写 /api/doubao/login。`);
+      throw new Error(`${action}返回了${kind}（HTTP ${response.status}）。请确认网关已升级至 v1.0.180 并重启，且反向代理没有改写 /api/doubao/login。`);
     }
     if (!response.ok) throw new Error(data?.error || data?.message || `${action}失败（HTTP ${response.status}）`);
     return data;

@@ -14,6 +14,6 @@ function load(fetch) {
 test('Doubao login reports an HTML gateway response instead of a JSON parser error',async()=>{
  const {context,node}=load(async()=>({ok:true,status:200,text:async()=>'<html>old gateway</html>'}));
  await context.DoubaoLogin.start();
- assert.match(node('doubaoLoginStatus').textContent,/v1\.0\.179/);
+ assert.match(node('doubaoLoginStatus').textContent,/v1\.0\.180/);
  assert.match(node('doubaoLoginStatus').textContent,/HTML/);
 });
