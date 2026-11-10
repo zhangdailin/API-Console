@@ -90,6 +90,34 @@ func TestLowerCodexExtensionToolsRejectsWhatCannotBeEmulated(t *testing.T) {
 	}
 }
 
+// Codex Desktop can declare a client custom tool inside a namespace. Lowering
+// must convert that child before namespace flattening validates it.
+func TestLowerCodexExtensionToolsLowersNamespaceCustomTools(t *testing.T) {
+	custom := map[string]any{"type": "custom", "name": "exec", "description": "Run JavaScript."}
+	payload := map[string]any{
+		"tools": []any{
+			map[string]any{"type": "namespace", "name": "functions", "tools": []any{custom,
+				map[string]any{"type": "function", "name": "wait", "defer_loading": true, "parameters": map[string]any{"type": "object"}},
+			}},
+		},
+		"input": []any{map[string]any{"type": "custom_tool_call", "call_id": "c1", "name": "exec", "input": "text(1)"}},
+	}
+	aliases, err := NormalizeNamespacePayload(payload)
+	testutil.NoError(t, err, "normalize namespace custom tool")
+	testutil.Equal(t, aliases[namespaceToolName("functions", "exec")].Kind, toolKindCustom)
+	testutil.Equal[any](t, custom["type"], "custom")
+	tools := InterfaceMaps(payload["tools"])
+	testutil.Equal(t, len(tools), 2)
+	for _, tool := range tools {
+		testutil.Equal[any](t, tool["type"], "function")
+	}
+
+	call := map[string]any{"type": "function_call", "call_id": "c2", "name": namespaceToolName("functions", "exec"), "arguments": `{"input":"text(2)"}`}
+	testutil.True(t, aliases.RestoreItem(call), "a namespaced custom call must be raised")
+	testutil.Equal[any](t, call["type"], "custom_tool_call")
+	testutil.Equal[any](t, call["input"], "text(2)")
+}
+
 // TestRaiseCodexItemsRestoresClientShapes covers completed and in-progress
 // calls: a partial argument string leaves the payload field out.
 func TestRaiseCodexItemsRestoresClientShapes(t *testing.T) {

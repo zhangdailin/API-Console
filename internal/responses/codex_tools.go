@@ -166,23 +166,34 @@ func lowerCodexTool(tool map[string]any, i int, aliases ToolNamespaces) (map[str
 	case "function":
 		return withoutDeferLoading(tool), true, nil
 	case "namespace":
-		children, ok := tool["tools"].([]any)
-		if !ok {
-			return tool, true, nil
-		}
-		lowered := CloneStringInterfaceMap(tool)
-		copied := make([]any, len(children))
-		for j, raw := range children {
-			if child, ok := raw.(map[string]any); ok {
-				copied[j] = withoutDeferLoading(child)
-			} else {
-				copied[j] = raw
-			}
-		}
-		lowered["tools"] = copied
-		return lowered, true, nil
+		return lowerCodexNamespaceTool(tool, i, aliases)
 	}
 	return tool, true, nil
+}
+
+func lowerCodexNamespaceTool(tool map[string]any, i int, aliases ToolNamespaces) (map[string]any, bool, error) {
+	children, ok := tool["tools"].([]any)
+	if !ok {
+		return tool, true, nil
+	}
+	lowered := CloneStringInterfaceMap(tool)
+	copied := make([]any, 0, len(children))
+	for j, raw := range children {
+		child, ok := raw.(map[string]any)
+		if !ok {
+			copied = append(copied, raw)
+			continue
+		}
+		converted, keep, err := lowerCodexTool(child, j, aliases)
+		if err != nil {
+			return nil, false, fmt.Errorf("tools[%d].tools[%d]: %w", i, j, err)
+		}
+		if keep {
+			copied = append(copied, converted)
+		}
+	}
+	lowered["tools"] = copied
+	return lowered, true, nil
 }
 
 func lowerCodexItem(item map[string]any, i int, aliases ToolNamespaces) (map[string]any, bool, error) {

@@ -35,6 +35,18 @@ func NormalizeNamespacePayload(payload map[string]any) (ToolNamespaces, error) {
 		return nil, err
 	}
 	maps.Copy(aliases, lowered)
+	for original, loweredIdentity := range lowered {
+		if loweredIdentity.Kind == "" {
+			continue
+		}
+		for alias, identity := range aliases {
+			if alias == original || identity.Kind != "" || identity.Name != original {
+				continue
+			}
+			loweredIdentity.Function = identity.Function
+			aliases[alias] = loweredIdentity
+		}
+	}
 	for key, value := range map[string]any{"tools": req.Tools, "input": req.Input, "tool_choice": req.ToolChoice} {
 		if _, exists := payload[key]; exists {
 			payload[key] = value
