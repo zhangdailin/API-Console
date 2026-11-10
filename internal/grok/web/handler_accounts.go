@@ -303,6 +303,12 @@ func shouldSwitchGrokAccount(err error) bool {
 	if isSharedGrokRateLimitError(err) {
 		return true
 	}
+	// A spent allowance is this account's problem; another account can serve
+	// the request. Mirrors the Build plane. No grok.com 402 has been captured
+	// yet, so this is defensive: a 402 is never the caller's fault.
+	if parseUpstreamStatus(err) == http.StatusPaymentRequired || apperrors.IsCreditExhaustion(err.Error()) {
+		return true
+	}
 	if upstreamStatus := parseUpstreamStatus(err); upstreamStatus == http.StatusBadGateway ||
 		upstreamStatus == http.StatusServiceUnavailable ||
 		upstreamStatus == http.StatusGatewayTimeout ||
