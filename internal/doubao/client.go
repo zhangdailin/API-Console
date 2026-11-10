@@ -96,9 +96,13 @@ func (c *Client) headers(jar cookieJar, passport bool) http.Header {
 	h.Set("Sec-Ch-Ua", `"Google Chrome";v="`+major+`", "Chromium";v="`+major+`", "Not_A Brand";v="24"`)
 	h.Set("Sec-Ch-Ua-Mobile", "?0")
 	h.Set("Sec-Ch-Ua-Platform", `"Windows"`)
+	h.Set("Priority", "u=1, i")
 	h.Set("X-Flow-Trace", "04-"+randomHex(12)+"-"+randomHex(8)+"-01")
 	h.Set("Agw-Js-Conv", "str, str")
-	if cookie := jar.header(!passport); cookie != "" {
+	// Passport endpoints reject requests that carry the CSRF cookie itself
+	// (2035). It is sent as the X-Tt-Passport-Csrf-Token header instead, so the
+	// cookie is filtered on every endpoint.
+	if cookie := jar.header(true); cookie != "" {
 		h.Set("Cookie", cookie)
 	}
 	if passport {
@@ -146,14 +150,37 @@ func randomUUID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", raw[:4], raw[4:6], raw[6:8], raw[8:10], raw[10:])
 }
 
+// fingerprintQuery mirrors the web client: a jar created from a browser export
+// carries s_v_web_id, and the request must present the same value as fp or the
+// gateway treats the session and the request as coming from different devices.
+func fingerprintQuery(jar cookieJar) url.Values {
+	if fp := strings.TrimSpace(jar["s_v_web_id"]); fp != "" {
+		return url.Values{"fp": {fp}}
+	}
+	return nil
+}
+
 func (c *Client) do(ctx context.Context, method, target string, body []byte, jar cookieJar, passport bool) (*http.Response, error) {
+	return c.doJSON(ctx, method, target, body, jar, passport, "application/json", "")
+}
+
+// doJSON sends a request with an explicit JSON content type.
+//
+// The IM gateway inspects the content type and rejects application/json with
+// status 712012002 "unsupported encoding type". The web client sends
+// `application/json; encoding=utf-8` for /im/* calls while /chat/completion
+// keeps plain application/json, so the value cannot be set globally.
+func (c *Client) doJSON(ctx context.Context, method, target string, body []byte, jar cookieJar, passport bool, contentType, accept string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, method, target, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	req.Header = c.headers(jar, passport)
 	if len(body) > 0 && !passport {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", contentType)
+	}
+	if accept != "" {
+		req.Header.Set("Accept", accept)
 	}
 	response, err := c.http.Do(req)
 	if err != nil || response == nil {
@@ -224,7 +251,8 @@ func (c *Client) createConversation(ctx context.Context, jar cookieJar, source s
 		body["uplink_body"].(map[string]any)["create_conv_uplink_body"].(map[string]any)["source_conversation_id"] = source
 	}
 	raw, _ := json.Marshal(body)
-	response, err := c.do(ctx, http.MethodPost, c.baseURL()+"/im/conversation/create?"+c.commonQuery(c.acc, nil), raw, jar, false)
+	query := c.commonQuery(c.acc, fingerprintQuery(jar))
+	response, err := c.doJSON(ctx, http.MethodPost, c.baseURL()+"/im/conversation/create?"+query, raw, jar, false, "application/json; encoding=utf-8", "")
 	if err != nil {
 		return "", err
 	}
@@ -244,8 +272,11 @@ func (c *Client) createConversation(ctx context.Context, jar cookieJar, source s
 			} `json:"create_conv_downlink_body"`
 		} `json:"downlink_body"`
 	}
-	if json.Unmarshal(answer, &envelope) != nil || envelope.StatusCode != 0 || envelope.Downlink.Create.Info.ID == "" {
-		return "", fmt.Errorf("doubao conversation creation failed: %s", envelope.StatusDesc)
+	if err := json.Unmarshal(answer, &envelope); err != nil {
+		return "", fmt.Errorf("doubao conversation creation returned non-JSON (status=%d): %s", response.StatusCode, compactError(string(answer)))
+	}
+	if envelope.StatusCode != 0 || envelope.Downlink.Create.Info.ID == "" {
+		return "", fmt.Errorf("doubao conversation creation failed: status_code=%d status_desc=%s", envelope.StatusCode, compactError(envelope.StatusDesc))
 	}
 	return envelope.Downlink.Create.Info.ID, nil
 }
@@ -291,7 +322,8 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	if logger != nil && !logger.Capturing() {
 		logger.LogUpstreamRequest(c.baseURL()+"/chat/completion", map[string]string{"provider": "doubao", "model": req.Model}, body)
 	}
-	response, err := c.do(ctx, http.MethodPost, c.baseURL()+"/chat/completion?"+c.commonQuery(c.acc, nil), body, jar, false)
+	query := c.commonQuery(c.acc, fingerprintQuery(jar))
+	response, err := c.doJSON(ctx, http.MethodPost, c.baseURL()+"/chat/completion?"+query, body, jar, false, "application/json", "text/event-stream")
 	if err != nil {
 		return err
 	}

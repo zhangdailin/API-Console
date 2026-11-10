@@ -24,6 +24,42 @@ func TestCookieJarRoundTripsAndFiltersPassportCSRF(t *testing.T) {
 	testutil.Equal(t, restored["passport_csrf_token"], "csrf")
 }
 
+func TestCookieHeaderFiltersEveryPassportCSRFPrefix(t *testing.T) {
+	jar := cookieJar{"sid": "one", "passport_csrf_token": "a", "passport_csrf_token_default": "b"}
+	testutil.Equal(t, jar.header(true), "sid=one")
+}
+
+// The IM gateway answers application/json with status 712012002 "unsupported
+// encoding type"; only application/json; encoding=utf-8 reaches the handler.
+func TestConversationCreateUsesIMEncodingContentTypeAndFingerprint(t *testing.T) {
+	var gotType, gotFP string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotType = r.Header.Get("Content-Type")
+		gotFP = r.URL.Query().Get("fp")
+		_, _ = io.WriteString(w, `{"status_code":0,"downlink_body":{"create_conv_downlink_body":{"conversation_info":{"conversation_id":"1234"}}}}`)
+	}))
+	defer server.Close()
+	client := NewFromAccount(&store.Account{ClientCookie: `{"sid":"x"}`}, &config.Config{DoubaoBaseURL: server.URL})
+	id, err := client.createConversation(context.Background(), cookieJar{"sid": "x", "s_v_web_id": "fp-1"}, "")
+	testutil.NoError(t, err)
+	testutil.Equal(t, id, "1234")
+	testutil.Equal(t, gotType, "application/json; encoding=utf-8")
+	testutil.Equal(t, gotFP, "fp-1")
+}
+
+func TestConversationCreateReportsUpstreamRefusal(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"status_code":712012002,"status_desc":"不支持编码类型"}`)
+	}))
+	defer server.Close()
+	client := NewFromAccount(&store.Account{ClientCookie: `{"sid":"x"}`}, &config.Config{DoubaoBaseURL: server.URL})
+	_, err := client.createConversation(context.Background(), client.jar(), "")
+	testutil.Error(t, err)
+	if !strings.Contains(err.Error(), "712012002") || !strings.Contains(err.Error(), "不支持编码类型") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func TestModelsCarryTheFourStableAliases(t *testing.T) {
 	got := Models()
 	testutil.Equal(t, len(got), 4)

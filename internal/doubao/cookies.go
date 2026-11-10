@@ -19,7 +19,10 @@ func (j cookieJar) encode() string { raw, _ := json.Marshal(j); return string(ra
 func (j cookieJar) header(excludePassportCSRF bool) string {
 	parts := make([]string, 0, len(j))
 	for key, value := range j {
-		if excludePassportCSRF && strings.EqualFold(key, "passport_csrf_token") {
+		// The passport SDK also sets passport_csrf_token_default. Both names are
+		// rejected with 2035 when they reach the non-passport endpoints, so the
+		// whole prefix is filtered instead of only the exact cookie name.
+		if excludePassportCSRF && strings.HasPrefix(strings.ToLower(key), "passport_csrf_token") {
 			continue
 		}
 		if strings.TrimSpace(key) != "" {
