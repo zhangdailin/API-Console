@@ -2,6 +2,7 @@ package doubao
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"io"
 	"net/http"
@@ -106,6 +107,20 @@ func TestFetchQRReportsBothUpstreamFailures(t *testing.T) {
 	if !strings.Contains(err.Error(), "http=403") || !strings.Contains(err.Error(), "2035") {
 		t.Fatalf("error=%v", err)
 	}
+}
+
+func TestFetchQRDecodesCompressedPassportJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Encoding", "gzip")
+		writer := gzip.NewWriter(w)
+		_, _ = writer.Write([]byte(`{"data":{"error_code":0,"token":"token","qrcode_index_url":"https://www.doubao.com/flow-account/scan-login?x=1","expire_time_in":120}}`))
+		_ = writer.Close()
+	}))
+	defer server.Close()
+	client := NewFromAccount(nil, &config.Config{DoubaoBaseURL: server.URL, DoubaoAccountsURL: server.URL})
+	qr, err := fetchQR(context.Background(), client, cookieJar{})
+	testutil.NoError(t, err)
+	testutil.Equal(t, qr.token, "token")
 }
 
 func TestChatBodyUsesConfiguredModel(t *testing.T) {

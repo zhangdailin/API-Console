@@ -155,7 +155,18 @@ func (c *Client) do(ctx context.Context, method, target string, body []byte, jar
 	if len(body) > 0 && !passport {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	return c.http.Do(req)
+	response, err := c.http.Do(req)
+	if err != nil || response == nil {
+		return response, err
+	}
+	// The browser-like transport deliberately exposes compressed bytes when a
+	// caller supplied Accept-Encoding. Doubao commonly returns passport JSON as
+	// Brotli, so decode it before any endpoint attempts JSON parsing.
+	if err := httpclient.DecodeContentEncoding(response); err != nil {
+		_ = response.Body.Close()
+		return nil, fmt.Errorf("decode doubao response: %w", err)
+	}
+	return response, nil
 }
 
 type AccountInfo struct{ UserID, Name, Avatar string }
