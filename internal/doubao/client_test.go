@@ -82,6 +82,32 @@ func TestAccountInfoAndQRRequestUseConfiguredHosts(t *testing.T) {
 	}
 }
 
+func TestPassportHeadersAndQRFailuresKeepUsefulSafeDetail(t *testing.T) {
+	client := NewFromAccount(nil, &config.Config{})
+	headers := client.headers(cookieJar{"passport_csrf_token": "csrf"}, true)
+	testutil.Equal(t, headers.Get("Sec-Fetch-Site"), "same-site")
+	testutil.Equal(t, headers.Get("X-Tt-Passport-Csrf-Token"), "csrf")
+	payload, detail := decodeQRResponse([]byte(`{"data":{"error_code":2035,"description":"invalid request"}}`))
+	testutil.Equal(t, payload.ErrorCode, 2035)
+	if !strings.Contains(detail, "2035") || !strings.Contains(detail, "invalid request") {
+		t.Fatalf("detail=%q", detail)
+	}
+}
+
+func TestFetchQRReportsBothUpstreamFailures(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = io.WriteString(w, `{"data":{"error_code":2035,"description":"invalid request"}}`)
+	}))
+	defer server.Close()
+	client := NewFromAccount(nil, &config.Config{DoubaoBaseURL: server.URL, DoubaoAccountsURL: server.URL})
+	_, err := fetchQR(context.Background(), client, cookieJar{})
+	testutil.Error(t, err)
+	if !strings.Contains(err.Error(), "http=403") || !strings.Contains(err.Error(), "2035") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func TestChatBodyUsesConfiguredModel(t *testing.T) {
 	raw, err := chatBody("conversation", "hello", "doubao-pro")
 	testutil.NoError(t, err)

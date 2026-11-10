@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -81,39 +82,82 @@ type qrResponse struct {
 }
 
 func fetchQR(ctx context.Context, client *Client, jar cookieJar) (qrResponse, error) {
+	failures := make([]string, 0, 2)
 	for _, base := range []string{client.accountsURL(), client.baseURL()} {
 		query := passportQuery("")
 		response, err := client.do(ctx, http.MethodGet, base+"/passport/web/get_qrcode/?"+query.Encode(), nil, jar, true)
 		if err != nil {
+			failures = append(failures, base+": "+compactError(err.Error()))
 			continue
 		}
 		jar.absorb(response)
-		var payload struct {
-			Data struct {
-				ErrorCode  int    `json:"error_code"`
-				Token      string `json:"token"`
-				IndexURL   string `json:"qrcode_index_url"`
-				ExpireTime int64  `json:"expire_time"`
-				ExpireIn   int64  `json:"expire_time_in"`
-			} `json:"data"`
-		}
-		_ = json.NewDecoder(response.Body).Decode(&payload)
+		raw, readErr := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 		response.Body.Close()
-		if payload.Data.ErrorCode == 0 && payload.Data.Token != "" && payload.Data.IndexURL != "" {
-			expiry := time.Unix(payload.Data.ExpireTime, 0)
-			if payload.Data.ExpireTime < 1_000_000_000 {
-				expiry = time.Now().Add(time.Duration(payload.Data.ExpireTime) * time.Second)
+		payload, detail := decodeQRResponse(raw)
+		if readErr != nil {
+			failures = append(failures, base+": read response: "+compactError(readErr.Error()))
+			continue
+		}
+		if response.StatusCode == http.StatusOK && payload.ErrorCode == 0 && payload.Token != "" && payload.IndexURL != "" {
+			expiry := time.Unix(payload.ExpireTime, 0)
+			if payload.ExpireTime < 1_000_000_000 {
+				expiry = time.Now().Add(time.Duration(payload.ExpireTime) * time.Second)
 			}
-			if payload.Data.ExpireIn > 0 {
-				expiry = time.Now().Add(time.Duration(payload.Data.ExpireIn) * time.Second)
+			if payload.ExpireIn > 0 {
+				expiry = time.Now().Add(time.Duration(payload.ExpireIn) * time.Second)
 			}
 			if expiry.Before(time.Now()) {
 				expiry = time.Now().Add(2 * time.Minute)
 			}
-			return qrResponse{base: base, token: payload.Data.Token, target: payload.Data.IndexURL, expires: expiry}, nil
+			return qrResponse{base: base, token: payload.Token, target: payload.IndexURL, expires: expiry}, nil
 		}
+		failures = append(failures, fmt.Sprintf("%s: http=%d %s", base, response.StatusCode, detail))
 	}
-	return qrResponse{}, errors.New("no QR code returned")
+	return qrResponse{}, fmt.Errorf("Doubao QR request failed: %s", strings.Join(failures, "; "))
+}
+
+type qrPayload struct {
+	ErrorCode   int    `json:"error_code"`
+	Token       string `json:"token"`
+	IndexURL    string `json:"qrcode_index_url"`
+	ExpireTime  int64  `json:"expire_time"`
+	ExpireIn    int64  `json:"expire_time_in"`
+	Description string `json:"description"`
+	Message     string `json:"message"`
+}
+
+func decodeQRResponse(raw []byte) (qrPayload, string) {
+	var envelope struct {
+		Data        json.RawMessage `json:"data"`
+		ErrorCode   int             `json:"error_code"`
+		Description string          `json:"description"`
+		Message     string          `json:"message"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return qrPayload{}, "non-JSON response"
+	}
+	payload := qrPayload{ErrorCode: envelope.ErrorCode, Description: envelope.Description, Message: envelope.Message}
+	if len(envelope.Data) > 0 {
+		_ = json.Unmarshal(envelope.Data, &payload)
+	} else {
+		_ = json.Unmarshal(raw, &payload)
+	}
+	detail := fmt.Sprintf("error_code=%d", payload.ErrorCode)
+	if message := first(payload.Description, payload.Message); message != "" {
+		detail += " description=" + compactError(message)
+	}
+	if payload.Token == "" || payload.IndexURL == "" {
+		detail += " missing_qr_fields"
+	}
+	return payload, detail
+}
+
+func compactError(value string) string {
+	value = strings.Join(strings.Fields(strings.ReplaceAll(value, "\x00", "")), " ")
+	if len(value) > 200 {
+		return value[:200]
+	}
+	return value
 }
 
 func passportQuery(token string) url.Values {

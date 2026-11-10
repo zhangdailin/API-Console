@@ -102,6 +102,11 @@ func (c *Client) headers(jar cookieJar, passport bool) http.Header {
 		h.Set("Cookie", cookie)
 	}
 	if passport {
+		// Passport is hosted at accounts.doubao.com while the page itself is on
+		// www.doubao.com. They share a site, but not an origin; claiming
+		// same-origin is a browser-fingerprint mismatch and can be rejected.
+		h.Set("Referer", c.baseURL()+"/")
+		h.Set("Sec-Fetch-Site", "same-site")
 		h.Set("Accept", "application/json, text/plain, */*")
 		h.Set("Content-Type", "application/json")
 		if csrf := jar["passport_csrf_token"]; csrf != "" {
