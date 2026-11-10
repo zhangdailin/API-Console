@@ -4,7 +4,7 @@ go 1.26.10
 
 require (
 	github.com/alicebob/miniredis/v2 v2.40.0
-	github.com/andybalholm/brotli v1.2.7
+	github.com/andybalholm/brotli v1.2.8
 	github.com/gorilla/websocket v1.5.3
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51
 	github.com/klauspost/compress v1.20.3
