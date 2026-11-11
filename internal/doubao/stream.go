@@ -356,7 +356,7 @@ func upstreamStreamError(value map[string]any) error {
 			// browser session. Replaying it here cannot succeed and only deepens
 			// the risk window, so this error must stop retries and park the
 			// account instead of entering the generic rate-limit path.
-			return fmt.Errorf("status=403: doubao account requires human verification: open doubao.com with this account and complete the challenge (%s %s)", code, decision.summary())
+			return &verificationRequired{code: code, decision: decision}
 		}
 	}
 	if code == "710022002" || code == "710022004" {
@@ -378,39 +378,4 @@ func errorCodeString(value any) string {
 		return strings.TrimSpace(typed)
 	}
 	return strings.TrimSpace(fmt.Sprint(value))
-}
-
-type sharkAdminDecision struct {
-	Type    string `json:"type"`
-	Subtype string `json:"subtype"`
-	From    string `json:"from"`
-	Detail  string `json:"detail"`
-}
-
-func sharkDecision(value map[string]any) sharkAdminDecision {
-	extra, _ := value["extra"].(map[string]any)
-	raw, _ := extra["decision"].(string)
-	if strings.TrimSpace(raw) == "" {
-		return sharkAdminDecision{}
-	}
-	var decision sharkAdminDecision
-	_ = json.Unmarshal([]byte(raw), &decision)
-	return decision
-}
-
-func (d sharkAdminDecision) needsVerification() bool {
-	return strings.EqualFold(d.From, "shark_admin") && strings.EqualFold(d.Type, "verify")
-}
-
-func (d sharkAdminDecision) summary() string {
-	parts := make([]string, 0, 3)
-	for _, part := range []string{d.From, d.Type, d.Subtype} {
-		if strings.TrimSpace(part) != "" {
-			parts = append(parts, part)
-		}
-	}
-	if len(parts) == 0 {
-		return "shark_admin"
-	}
-	return strings.Join(parts, "/")
 }

@@ -187,8 +187,13 @@ func (a *API) HandleAccountByID(w http.ResponseWriter, r *http.Request) {
 
 	isCheck := len(parts) > 1 && parts[1] == "check"
 	isUsage := len(parts) > 1 && parts[1] == "usage"
-	if len(parts) > 2 || (len(parts) > 1 && !(isCheck || isUsage)) {
+	isVerification := len(parts) > 1 && parts[1] == "verification"
+	if len(parts) > 2 || (len(parts) > 1 && !(isCheck || isUsage || isVerification)) {
 		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+	if isVerification {
+		a.handleAccountVerification(w, r, account)
 		return
 	}
 
@@ -371,4 +376,27 @@ func (a *API) HandleAccountByID(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeMethodNotAllowed(w)
 	}
+}
+
+// handleAccountVerification answers GET /api/accounts/{id}/verification with
+// the upstream's own page for a challenge only a person can answer. The page
+// address is bound to the account's device identity, so it is returned on this
+// explicit, session-authenticated request and never as part of an account row.
+func (a *API) handleAccountVerification(w http.ResponseWriter, r *http.Request, account *store.Account) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+	admin := adminFor(account.AccountType)
+	if admin == nil || admin.Verification == nil {
+		util.WriteJSONStatus(w, http.StatusNotFound, map[string]string{"error": "this channel has no verification challenge"})
+		return
+	}
+	challenge, ok := admin.Verification(account)
+	if !ok {
+		util.WriteJSONStatus(w, http.StatusNotFound, map[string]string{"error": "no recent verification challenge is recorded for this account; send one request through it and try again"})
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	util.WriteJSON(w, challenge)
 }

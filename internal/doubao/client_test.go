@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -552,4 +553,62 @@ func TestEmitToolOrTextKeepsProseWithBraces(t *testing.T) {
 	testutil.False(t, called, "prose was reported as a tool call")
 	testutil.Equal(t, len(got), 1)
 	testutil.Equal(t, got[0].Event["delta"], any("use {city} as the key"))
+}
+
+// A verify challenge is recorded for the account and offered as the upstream's
+// own page, bound to the stored device identity; nothing else may trigger it.
+func TestVerificationLinkForARecordedChallenge(t *testing.T) {
+	decision := `{\"from\":\"shark_admin\",\"type\":\"verify\",\"subtype\":\"semantic_reasoning\",\"detail\":\"tok en+/=\",\"log_id\":\"log-1\",\"verify_scene\":\"chat\"}`
+	var asString, asObject map[string]any
+	testutil.NoError(t, json.Unmarshal([]byte(`{"error_code":710022004,"extra":{"decision":"`+decision+`"}}`), &asString))
+	testutil.NoError(t, json.Unmarshal([]byte(`{"error_code":710022004,"extra":{"decision":{"from":"shark_admin","type":"verify","detail":"d"}}}`), &asObject))
+	testutil.True(t, sharkDecision(asObject).needsVerification(), "an object decision was not read")
+
+	acc := &store.Account{ID: 9101, DoubaoDeviceID: "7500000000000000001"}
+	_, ok := verification(acc)
+	testutil.False(t, ok, "a link was offered with no challenge recorded")
+
+	noteChallenge(acc.ID, fmt.Errorf("status=429: doubao upstream rate limited"))
+	_, ok = verification(acc)
+	testutil.False(t, ok, "a rate limit was recorded as a challenge")
+
+	err := upstreamStreamError(asString)
+	testutil.MustContain(t, err.Error(), "requires human verification")
+	noteChallenge(acc.ID, fmt.Errorf("wrapped: %w", err))
+	link, ok := verification(acc)
+	testutil.True(t, ok, "the recorded challenge was not offered")
+	testutil.Equal(t, link.Kind, "shark_admin/verify/semantic_reasoning")
+	parsed, parseErr := url.Parse(link.URL)
+	testutil.NoError(t, parseErr)
+	testutil.Equal(t, parsed.Scheme+"://"+parsed.Host+parsed.Path, "https://verify.zijieapi.com/verifycenter/captcha/v2")
+	query := parsed.Query()
+	testutil.Equal(t, query.Get("did"), acc.DoubaoDeviceID)
+	testutil.Equal(t, query.Get("aid"), "497858")
+	testutil.Equal(t, query.Get("verify_data"), `{"subtype":"semantic_reasoning","detail":"tok en+/=","log_id":"log-1","verify_scene":"chat","login_status":1}`)
+	// The SDK encodes with encodeURIComponent: a space is %20, never "+".
+	testutil.False(t, strings.Contains(link.URL, "+"), "query used form encoding: "+link.URL)
+
+	// No stored identity means no page to bind the challenge to.
+	_, ok = verification(&store.Account{ID: acc.ID})
+	testutil.False(t, ok, "a link was offered without a device identity")
+
+	// A stale decision is not offered, and an answered turn clears it.
+	challenges.Lock()
+	challenges.byAccount[acc.ID] = recordedChallenge{decision: sharkDecision(asString), at: time.Now().Add(-challengeTTL - time.Minute)}
+	challenges.Unlock()
+	_, ok = verification(acc)
+	testutil.False(t, ok, "an expired challenge was offered")
+	noteChallenge(acc.ID, err)
+	clearChallenge(acc.ID)
+	_, ok = verification(acc)
+	testutil.False(t, ok, "a cleared challenge was offered")
+}
+
+// A challenge refused before the stream opens arrives as an error body; it
+// must park the account like the in-stream one instead of being retried.
+func TestStatusErrorRecognisesAChallengeBody(t *testing.T) {
+	body := `{"code":710022004,"data":{"extra":{"decision":"{\"from\":\"shark_admin\",\"type\":\"verify\",\"subtype\":\"slide\",\"detail\":\"d\"}"}}}`
+	err := statusError(http.StatusForbidden, []byte(body))
+	testutil.MustContain(t, err.Error(), "requires human verification")
+	testutil.MustContain(t, statusError(http.StatusTooManyRequests, []byte(`{"code":710022004}`)).Error(), "status=429")
 }
