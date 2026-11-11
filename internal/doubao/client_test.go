@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -393,8 +394,15 @@ func TestPublishedModelsAdvertiseChatOnly(t *testing.T) {
 		t.Fatalf("rows=%d", len(rows))
 	}
 	for _, row := range rows {
-		if len(row.Capabilities) != 1 || row.Capabilities[0] != store.CapabilityChat {
-			t.Fatalf("%s advertises %v", row.ModelID, row.Capabilities)
+		// Chat is the only wire protocol; images are a chat content capability.
+		// /messages and /responses are not routed, so they must not be claimed.
+		if !slices.Contains(row.Capabilities, store.CapabilityChat) {
+			t.Fatalf("%s does not advertise chat: %v", row.ModelID, row.Capabilities)
+		}
+		for _, forbidden := range []string{store.CapabilityMessages, store.CapabilityResponses} {
+			if slices.Contains(row.Capabilities, forbidden) {
+				t.Fatalf("%s must not advertise %s: %v", row.ModelID, forbidden, row.Capabilities)
+			}
 		}
 	}
 	stale := publishedModels([]*store.Account{{
@@ -454,7 +462,7 @@ func TestAttachmentMessagesCarryTheUploadedURI(t *testing.T) {
 func TestImageAttachmentUsesTheImageShape(t *testing.T) {
 	messages := attachmentMessages([]storeURI{{URI: "tos-cn-i-x/a.png", Name: "a.png", Size: 9, Image: true}})
 	raw, _ := json.Marshal(messages[0])
-	for _, want := range []string{`"type":2`, `"key":"tos-cn-i-x/a.png"`, `"image":{`} {
+	for _, want := range []string{`"type":1`, `"uri":"tos-cn-i-x/a.png"`, `"image_ori":{`, `"parse_state":0`} {
 		if !strings.Contains(string(raw), want) {
 			t.Fatalf("image attachment missing %s: %s", want, raw)
 		}

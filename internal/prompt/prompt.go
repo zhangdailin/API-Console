@@ -34,11 +34,6 @@ type ContentBlock struct {
 	// providers ignore them.
 	FileData string `json:"file_data,omitempty"`
 	FileName string `json:"filename,omitempty"`
-	// ImageURL and File are the nested Chat Completions spellings of an image
-	// and a file part. They exist only while decoding: liftChatMedia moves them
-	// onto URL, FileData and FileName and clears them.
-	ImageURL json.RawMessage `json:"image_url,omitempty"`
-	File     *chatFilePart   `json:"file,omitempty"`
 
 	// tool_use fields
 	ID        string `json:"id,omitempty"`
@@ -54,45 +49,81 @@ type ContentBlock struct {
 	CacheControl *CacheControl `json:"cache_control,omitempty"`
 }
 
-type chatFilePart struct {
-	FileData string `json:"file_data"`
-	FileName string `json:"filename"`
-}
-
-// liftChatMedia moves the nested Chat Completions media fields onto the flat
-// ones every channel reads: {"type":"image_url","image_url":{"url":...}} (or the
-// bare string of input_image) becomes URL, and {"type":"file","file":{...}}
-// becomes FileData and FileName. Without it an image or file sent in the
-// standard chat shape decodes to an empty block, and a channel that uploads
-// attachments silently drops it. A flat value already present wins.
-func (b *ContentBlock) liftChatMedia() {
-	if len(b.ImageURL) > 0 {
-		var ref struct {
-			URL string `json:"url"`
-		}
-		if json.Unmarshal(b.ImageURL, &ref.URL) != nil {
-			_ = json.Unmarshal(b.ImageURL, &ref)
-		}
-		if b.URL == "" {
-			b.URL = ref.URL
-		}
-		b.ImageURL = nil
-	}
-	if b.File != nil {
-		if b.FileData == "" {
-			b.FileData = b.File.FileData
-		}
-		if b.FileName == "" {
-			b.FileName = b.File.FileName
-		}
-		b.File = nil
-	}
-}
-
 // MessageContent is a union: either a string or a []ContentBlock.
 type MessageContent struct {
 	Text   string
 	Blocks []ContentBlock
+}
+
+// UnmarshalJSON flattens the nested shapes Chat Completions uses for media.
+//
+// The OpenAI wire format puts an image URL under image_url.url and a file
+// payload under file.file_data, while this struct keeps them flat. Without this
+// decoder the nested values were silently dropped, so a standard
+// {"type":"image_url","image_url":{"url":...}} part reached a provider as an
+// empty block and the image was never uploaded.
+func (b *ContentBlock) UnmarshalJSON(data []byte) error {
+	type flat ContentBlock
+	var raw struct {
+		flat
+		ImageURL json.RawMessage `json:"image_url,omitempty"`
+		File     json.RawMessage `json:"file,omitempty"`
+		Filename string          `json:"filename,omitempty"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*b = ContentBlock(raw.flat)
+	if b.URL == "" {
+		b.URL = nestedURL(raw.ImageURL)
+	}
+	if raw.File != nil {
+		var file struct {
+			FileData string `json:"file_data,omitempty"`
+			Filename string `json:"filename,omitempty"`
+			URL      string `json:"url,omitempty"`
+		}
+		if err := json.Unmarshal(raw.File, &file); err == nil {
+			if b.FileData == "" {
+				b.FileData = firstNonEmpty(file.FileData, file.URL)
+			}
+			if b.FileName == "" {
+				b.FileName = file.Filename
+			}
+		}
+	}
+	if b.FileName == "" {
+		b.FileName = raw.Filename
+	}
+	return nil
+}
+
+// nestedURL accepts both the object form {"url": "..."} and a bare string,
+// which some clients send for image_url.
+func nestedURL(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var object struct {
+		URL string `json:"url,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &object); err == nil && object.URL != "" {
+		return object.URL
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return text
+	}
+	return ""
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (mc *MessageContent) UnmarshalJSON(data []byte) error {
@@ -130,9 +161,6 @@ func (mc *MessageContent) UnmarshalJSON(data []byte) error {
 	case '[':
 		var blocks []ContentBlock
 		if err := json.Unmarshal(trimmed, &blocks); err == nil {
-			for index := range blocks {
-				blocks[index].liftChatMedia()
-			}
 			mc.Text = ""
 			mc.Blocks = blocks
 			return nil

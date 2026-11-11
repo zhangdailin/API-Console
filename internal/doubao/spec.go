@@ -77,4 +77,8 @@ func maintain(ctx context.Context, env provider.Env, acc *store.Account) {
 	}
 	info.apply(acc, now)
 	_ = env.Store.UpdateAccount(ctx, acc)
+	// Refresh the published routes too. Capabilities live on the model rows, so
+	// a change to what the channel can do would otherwise stay invisible until
+	// the next account verdict, which for a healthy account may never happen.
+	_ = publishModels(ctx, env)
 }

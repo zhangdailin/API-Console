@@ -10,7 +10,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/crc32"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"path"
@@ -27,9 +32,14 @@ import (
 // user file attachment: tenant 5, scene 131 (MOA_USER_SKILLS).
 const (
 	uploadTenant = "5"
-	uploadScene  = "131"
-	uploadRegion = "cn-north-1"
-	uploadSvc    = "imagex"
+	// File attachments use the user-skill scene; images use the bot-chat scene.
+	// The two scenes resolve to different object-store services, and an image
+	// stored through the file scene is accepted by the IM gateway but never
+	// reaches the vision path, which is why such a turn produced no answer.
+	uploadFileScene  = "131"
+	uploadImageScene = "5"
+	uploadRegion     = "cn-north-1"
+	uploadSvc        = "imagex"
 )
 
 // uploadTicket is one prepared object: where to PUT it and the pre-signed token
@@ -47,11 +57,11 @@ type uploadTicket struct {
 // The page first calls /alice/resource/prepare_upload, which returns a
 // short-lived STS triple, and that makes the signature reproducible without a
 // browser capture.
-func (c *Client) prepareUpload(ctx context.Context, jar cookieJar) (http.Header, []byte, error) {
+func (c *Client) prepareUpload(ctx context.Context, jar cookieJar, scene string, resourceType int) (http.Header, []byte, error) {
 	body, _ := json.Marshal(map[string]any{
 		"tenant_id":     uploadTenant,
-		"scene_id":      uploadScene,
-		"resource_type": 1,
+		"scene_id":      scene,
+		"resource_type": resourceType,
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL()+"/alice/resource/prepare_upload", bytes.NewReader(body))
 	if err != nil {
@@ -91,8 +101,8 @@ type uploadCredentials struct {
 	SessionToken string
 }
 
-func (c *Client) uploadCredentials(ctx context.Context, jar cookieJar) (uploadCredentials, error) {
-	_, raw, err := c.prepareUpload(ctx, jar)
+func (c *Client) uploadCredentials(ctx context.Context, jar cookieJar, scene string, resourceType int) (uploadCredentials, error) {
+	_, raw, err := c.prepareUpload(ctx, jar, scene, resourceType)
 	if err != nil {
 		return uploadCredentials{}, err
 	}
@@ -130,17 +140,24 @@ func (c *Client) uploadCredentials(ctx context.Context, jar cookieJar) (uploadCr
 
 // uploadAttachment stores data in Doubao's object store and returns the
 // StoreUri the chat attachment block references.
-func (c *Client) uploadAttachment(ctx context.Context, jar cookieJar, name string, data []byte) (string, error) {
+func (c *Client) uploadAttachment(ctx context.Context, jar cookieJar, name string, data []byte, image bool) (string, error) {
 	if len(data) == 0 {
 		return "", fmt.Errorf("doubao attachment is empty")
 	}
-	creds, err := c.uploadCredentials(ctx, jar)
+	scene, resourceType := uploadFileScene, 1
+	if image {
+		scene, resourceType = uploadImageScene, 2
+	}
+	creds, err := c.uploadCredentials(ctx, jar, scene, resourceType)
 	if err != nil {
 		return "", err
 	}
 	ext := strings.ToLower(path.Ext(name))
 	if ext == "" {
 		ext = ".bin"
+	}
+	if image && ext == ".jpeg" {
+		ext = ".jpg"
 	}
 	ticket, err := c.applyUpload(ctx, creds, len(data), ext)
 	if err != nil {
@@ -215,7 +232,7 @@ func (c *Client) applyUpload(ctx context.Context, creds uploadCredentials, size 
 // putObject writes the bytes. The store requires Content-CRC32 in lowercase
 // hex; a decimal value is accepted syntactically but fails the checksum.
 func (c *Client) putObject(ctx context.Context, ticket uploadTicket, data []byte, contentType string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, "https://"+ticket.Host+"/"+ticket.StoreURI, bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, objectURL(ticket), bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
@@ -246,6 +263,18 @@ func (c *Client) putObject(ctx context.Context, ticket uploadTicket, data []byte
 		return fmt.Errorf("doubao upload failed: code=%d", envelope.Error.Code)
 	}
 	return nil
+}
+
+// objectURL selects the write path the upload host expects. The two object
+// stores the gateway can be handed use different routes: the image service
+// (tos-hl-x.snssdk.com) exposes /upload/v1/<uri>, while the file host used for
+// chat documents accepts /<uri>.
+func objectURL(ticket uploadTicket) string {
+	prefix := "/"
+	if strings.Contains(ticket.Host, "snssdk.com") {
+		prefix = "/upload/v1/"
+	}
+	return "https://" + ticket.Host + prefix + ticket.StoreURI
 }
 
 // sigV4Authorization reproduces the signature layout observed from the web
@@ -371,6 +400,8 @@ type storeURI struct {
 	// Width and Height describe images. The web client sends them with the
 	// attachment, and the renderer uses them for the placeholder box.
 	Width, Height int
+	// Format is the image format without a dot, as the attachment reports it.
+	Format string
 }
 
 // uploadRequestAttachments uploads every image/file block in the request and
@@ -407,13 +438,32 @@ func (c *Client) uploadRequestAttachments(ctx context.Context, jar cookieJar, re
 	}
 	out := make([]storeURI, 0, len(blocks))
 	for _, block := range blocks {
-		uri, err := c.uploadAttachment(ctx, jar, block.name, block.data)
+		uri, err := c.uploadAttachment(ctx, jar, block.name, block.data, block.image)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, storeURI{URI: uri, Name: block.name, Size: len(block.data), Image: block.image})
+		slog.Debug("doubao attachment uploaded", "name", block.name, "bytes", len(block.data), "image", block.image, "uri", uri)
+		entry := storeURI{URI: uri, Name: block.name, Size: len(block.data), Image: block.image}
+		if block.image {
+			entry.Width, entry.Height, entry.Format = imageDimensions(block.data)
+			if entry.Format == "" {
+				entry.Format = strings.TrimPrefix(strings.ToLower(path.Ext(block.name)), ".")
+			}
+		}
+		out = append(out, entry)
 	}
 	return out, nil
+}
+
+// imageDimensions reads the original size the attachment block reports. The
+// vision path uses it to lay out the image; an unknown format falls back to the
+// filename extension and zero dimensions.
+func imageDimensions(data []byte) (int, int, string) {
+	config, format, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return 0, 0, ""
+	}
+	return config.Width, config.Height, format
 }
 
 type promptBlock struct {
@@ -519,18 +569,30 @@ func attachmentMessages(attachments []storeURI) []any {
 		entry := map[string]any{
 			"identifier":    randomUUID(),
 			"review_state":  1,
-			"parse_state":   1,
 			"progress":      100,
 			"upload_status": 1,
 		}
 		if attachment.Image {
-			entry["type"] = 2
+			// The captured image attachment uses type 1 and carries the original
+			// dimensions under image_ori. It is also left at parse_state 0: an
+			// image is not text-parsed, and claiming a finished parse made the
+			// IM gateway accept the block while the vision path never ran.
+			entry["type"] = 1
+			entry["parse_state"] = 0
 			entry["image"] = map[string]any{
-				"key": attachment.URI, "uri": attachment.URI, "name": attachment.Name,
-				"width": attachment.Width, "height": attachment.Height,
+				"name": attachment.Name,
+				"uri":  attachment.URI,
+				"image_ori": map[string]any{
+					"url":         "",
+					"width":       attachment.Width,
+					"height":      attachment.Height,
+					"format":      attachment.Format,
+					"url_formats": map[string]any{},
+				},
 			}
 			entry["src"] = ""
 		} else {
+			entry["parse_state"] = 1
 			entry["type"] = 3
 			entry["file"] = map[string]any{"name": attachment.Name, "uri": attachment.URI, "size": attachment.Size}
 		}
