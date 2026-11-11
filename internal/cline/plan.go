@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"orchids-api/internal/httpclient"
 	"strings"
 	"time"
 
@@ -62,19 +61,9 @@ func (c *Client) FetchPlan(ctx context.Context) (Plan, error) {
 	}
 	endpoint := c.apiBase + "/users/me/plan"
 
-	reqCtx, cancel := context.WithTimeout(ctx, planRequestTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
+	status, raw, err := c.getAuthorized(ctx, endpoint, creds, "", planRequestTimeout, controlBodyLimit)
 	if err != nil {
-		return Plan{}, fmt.Errorf("build cline plan request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+creds.Bearer())
-	req.Header.Set("Accept", "application/json")
-	applyClientHeaders(req.Header)
-
-	resp, raw, err := httpclient.DoReadBody(c.control, req, 64<<10)
-	if err != nil {
-		return Plan{}, fmt.Errorf("%w: %v", ErrAuthUnavailable, err)
+		return Plan{}, err
 	}
 
 	var payload struct {
@@ -93,7 +82,7 @@ func (c *Client) FetchPlan(ctx context.Context) (Plan, error) {
 	}
 
 	// A subscriber: the endpoint returns a row and no error sentence.
-	if resp.StatusCode == http.StatusOK {
+	if status == http.StatusOK {
 		if !payload.Success || payload.Data == nil || payload.Data.Plan == nil {
 			return Plan{}, fmt.Errorf("cline plan response carried no current subscription")
 		}
@@ -109,11 +98,11 @@ func (c *Client) FetchPlan(ctx context.Context) (Plan, error) {
 		return Plan{Name: name, Explicit: true}, nil
 	}
 
-	if resp.StatusCode == http.StatusNotFound && strings.Contains(strings.ToLower(payload.Error), PlanNoHistory) {
+	if status == http.StatusNotFound && strings.Contains(strings.ToLower(payload.Error), PlanNoHistory) {
 		return Plan{Name: freePlanName, Explicit: true}, nil
 	}
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return Plan{}, fmt.Errorf("%w: %v", ErrCredentialMissing, apiError(http.MethodGet, endpoint, resp.StatusCode, raw))
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		return Plan{}, fmt.Errorf("%w: %v", ErrCredentialMissing, apiError(http.MethodGet, endpoint, status, raw))
 	}
-	return Plan{}, apiError(http.MethodGet, endpoint, resp.StatusCode, raw)
+	return Plan{}, apiError(http.MethodGet, endpoint, status, raw)
 }

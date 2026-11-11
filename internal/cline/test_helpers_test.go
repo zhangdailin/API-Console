@@ -13,5 +13,5 @@ func buildChatBody(req upstream.UpstreamRequest, model string) ([]byte, error) {
 
 // consumeStream parses the SSE body and forwards deltas to the caller.
 func consumeStream(body io.Reader, toolsEnabled bool, onMessage func(upstream.SSEMessage), streamToolDeltas ...bool) (streamResult, error) {
-	return consumeStreamWithToolNames(body, toolsEnabled, nil, onMessage, streamToolDeltas...)
+	return consumeStreamWithToolNames(body, toolsEnabled, nil, onMessage, len(streamToolDeltas) > 0 && streamToolDeltas[0])
 }

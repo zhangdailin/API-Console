@@ -62,10 +62,8 @@ type streamChunk struct {
 	Object                string          `json:"object"`
 	Model                 string          `json:"model"`
 	Choices               []struct {
-		Index        int    `json:"index"`
 		FinishReason string `json:"finish_reason"`
 		Delta        struct {
-			Role             string `json:"role"`
 			Content          string `json:"content"`
 			ReasoningContent string `json:"reasoning_content"`
 			// GLM-compatible gateways have emitted the same channel under
@@ -76,7 +74,6 @@ type streamChunk struct {
 			ToolCalls []struct {
 				Index    int    `json:"index"`
 				ID       string `json:"id"`
-				Type     string `json:"type"`
 				Function struct {
 					Name      string `json:"name"`
 					Arguments string `json:"arguments"`
@@ -134,7 +131,7 @@ func (s *clineThinkingSplitter) feed(content string, final bool, emitReasoning, 
 
 // consumeStreamWithToolNames parses SSE and restores the request's shortened
 // tool names (upstream name -> client name) on every tool call.
-func consumeStreamWithToolNames(body io.Reader, toolsEnabled bool, toolNames map[string]string, onMessage func(upstream.SSEMessage), streamToolDeltas ...bool) (streamResult, error) {
+func consumeStreamWithToolNames(body io.Reader, toolsEnabled bool, toolNames map[string]string, onMessage func(upstream.SSEMessage), streamToolDeltas bool) (streamResult, error) {
 	scanner := bufio.NewScanner(body)
 	buffer := util.AcquireStreamBuffer()
 	defer util.ReleaseStreamBuffer(buffer)
@@ -221,10 +218,10 @@ func consumeStreamWithToolNames(body io.Reader, toolsEnabled bool, toolNames map
 		if !chunk.decoded() && len(chunk.Data) > 0 {
 			inner := chunk.Data
 			chunk = streamChunk{}
-			if err := json.Unmarshal(inner, &chunk); err != nil || (!chunk.decoded() && !chunkLooksDecoded(string(inner))) {
+			if err := json.Unmarshal(inner, &chunk); err != nil || (!chunk.decoded() && !chunkLooksDecoded(inner)) {
 				return result, fmt.Errorf("cline stream protocol error: invalid wrapped chunk")
 			}
-		} else if !chunk.decoded() && !chunkLooksDecoded(string(payload)) {
+		} else if !chunk.decoded() && !chunkLooksDecoded(payload) {
 			return result, fmt.Errorf("cline stream protocol error: invalid chunk")
 		}
 
@@ -265,7 +262,7 @@ func consumeStreamWithToolNames(body io.Reader, toolsEnabled bool, toolNames map
 			if toolsEnabled {
 				controlRecovery.observe(state)
 			}
-			if len(streamToolDeltas) > 0 && streamToolDeltas[0] {
+			if streamToolDeltas {
 				upstream.EmitToolDelta(onMessage, state)
 			}
 		}
@@ -299,9 +296,9 @@ func consumeStreamWithToolNames(body io.Reader, toolsEnabled bool, toolNames map
 // chunkLooksDecoded reports whether a payload decoded as a chunk rather than
 // merely as JSON. An envelope also decodes into streamChunk — every field is
 // missing — so an object carrying only `data` has to be recognized and unwrapped.
-func chunkLooksDecoded(payload string) bool {
+func chunkLooksDecoded(payload []byte) bool {
 	var probe map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(payload), &probe); err != nil {
+	if err := json.Unmarshal(payload, &probe); err != nil {
 		return false
 	}
 	for _, key := range []string{"choices", "usage", "id", "object", "model"} {

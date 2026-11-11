@@ -220,48 +220,14 @@ func mergeAssistantToolTurns(messages []ChatMessage) []ChatMessage {
 	return out
 }
 
-// convertBlockMessage maps user/system blocks, splitting tool_result blocks
-// into standalone `tool` messages so the assistant/tool pairing stays intact.
+// convertBlockMessage is the shared block conversion with the client markers
+// dropped from system text.
 func convertBlockMessage(role string, msg prompt.Message, pendingToolCalls map[string]bool) []ChatMessage {
-	blocks := msg.Content.GetBlocks()
-	out := make([]ChatMessage, 0, len(blocks))
-	pending := make([]string, 0, len(blocks))
-	flush := func() {
-		if len(pending) == 0 {
-			return
-		}
-		out = append(out, ChatMessage{Role: role, Content: strings.Join(pending, "\n")})
-		pending = pending[:0]
+	var filter func(string) string
+	if role == "system" {
+		filter = filterClientSystemText
 	}
-	for _, block := range blocks {
-		switch block.Type {
-		case "text":
-			text := block.Text
-			if role == "system" {
-				text = filterClientSystemText(text)
-			}
-			if strings.TrimSpace(text) != "" {
-				pending = append(pending, text)
-			}
-		case "tool_result":
-			flush()
-			toolID := strings.TrimSpace(block.ToolUseID)
-			if toolID == "" {
-				continue
-			}
-			if !pendingToolCalls[toolID] {
-				continue
-			}
-			delete(pendingToolCalls, toolID)
-			out = append(out, ChatMessage{
-				Role:       "tool",
-				ToolCallID: toolID,
-				Content:    prompt.StringifyToolResult(block.Content),
-			})
-		}
-	}
-	flush()
-	return out
+	return upstream.ConvertBlockMessage(role, msg, pendingToolCalls, filter)
 }
 
 // normalizeToolChoice converts both OpenAI and Anthropic selection forms to
@@ -292,5 +258,5 @@ func normalizeToolChoice(choice any) string {
 // declarations the gateway forwards. It is the shared implementation in
 // internal/util: WorkBuddy and Cline both need the same envelope.
 func normalizeToolDefinitions(tools []any) []any {
-	return util.NormalizeToolDefinitions(tools)
+	return util.NormalizeToolDefinitions(tools, true)
 }

@@ -88,7 +88,11 @@ var (
 	ErrAuthUnavailable = errors.New("cline authorization endpoint is unreachable")
 	// ErrAuthRejected means the endpoint answered but refused the transaction.
 	ErrAuthRejected = errors.New("cline authorization was rejected")
-	// ErrCredentialMissing means the account carries no Cline credential.
+	// ErrCredentialMissing means no usable access token could be obtained at
+	// request time: it expired with nothing to renew it, or the upstream
+	// refused it. Its "sign in again" text is what classifies the account as
+	// needing a new login, so it is not interchangeable with
+	// ErrMissingCredential.
 	ErrCredentialMissing = errors.New("cline account is missing an OAuth credential; sign in again")
 	// ErrReLoginRequired means the durable credential is gone or expired. Only a
 	// new browser authorization can recover it.
@@ -136,12 +140,12 @@ func (c Credentials) AccessValid(now time.Time) bool {
 // value the upstream expects, not a scheme this client adds.
 func (c Credentials) Bearer() string { return "workos:" + strings.TrimSpace(c.AccessToken) }
 
-// Fields returns the normalized credential fields.
-func (c Credentials) Fields() (accessToken, refreshToken string, expiresAt time.Time, email string) {
-	return strings.TrimSpace(c.AccessToken),
-		strings.TrimSpace(c.RefreshToken),
-		c.ExpiresAt,
-		strings.TrimSpace(c.Email)
+// trimmed returns the credential with surrounding whitespace removed.
+func (c Credentials) trimmed() Credentials {
+	c.AccessToken = strings.TrimSpace(c.AccessToken)
+	c.RefreshToken = strings.TrimSpace(c.RefreshToken)
+	c.Email = strings.TrimSpace(c.Email)
+	return c
 }
 
 // ResolveCredentials reads the channel's credential off an account.
@@ -150,11 +154,11 @@ func ResolveCredentials(acc *store.Account) Credentials {
 		return Credentials{}
 	}
 	return Credentials{
-		AccessToken:  strings.TrimSpace(acc.ClineAccessToken),
-		RefreshToken: strings.TrimSpace(acc.ClineRefreshToken),
+		AccessToken:  acc.ClineAccessToken,
+		RefreshToken: acc.ClineRefreshToken,
 		ExpiresAt:    acc.ClineExpiresAt,
-		Email:        strings.TrimSpace(acc.ClineEmail),
-	}
+		Email:        acc.ClineEmail,
+	}.trimmed()
 }
 
 // ParseExpiry reads the upstream expiry, which reaches this client as a number,

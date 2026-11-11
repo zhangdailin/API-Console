@@ -14,7 +14,7 @@ func TestConsumeStreamRecordsTheServedModel(t *testing.T) {
 		`data: {"id":"c1","model":"anthropic/claude-sonnet-4.6","choices":[{"delta":{},"finish_reason":"stop"}]}`,
 		`data: [DONE]`,
 	}, "\n") + "\n"
-	result, err := consumeStreamWithToolNames(strings.NewReader(body), false, nil, nil)
+	result, err := consumeStreamWithToolNames(strings.NewReader(body), false, nil, nil, false)
 	testutil.NoError(t, err, "consume: %v")
 	testutil.Equal(t, result.Model, "anthropic/claude-sonnet-4.6")
 }
@@ -25,7 +25,7 @@ func TestConsumeStreamRecordsTheGatewayProvider(t *testing.T) {
 		`data: {"id":"c1","model":"deepseek-v4.1-flash","choices":[{"delta":{},"finish_reason":"stop"}],"provider_metadata":{"gateway":{"routing":{"originalModelId":"deepseek-v4.1-flash","resolvedProvider":"deepseek","finalProvider":"alibaba","totalProviderAttemptCount":2,"candidates":["deepseek","alibaba"]}}}}`,
 		`data: [DONE]`,
 	}, "\n") + "\n"
-	result, err := consumeStreamWithToolNames(strings.NewReader(body), false, nil, nil)
+	result, err := consumeStreamWithToolNames(strings.NewReader(body), false, nil, nil, false)
 	testutil.NoError(t, err, "consume: %v")
 	testutil.Equal(t, result.Provider, "alibaba")
 	testutil.Equal(t, result.ProviderAttempts, 2)
@@ -54,7 +54,7 @@ func TestOddRoutingTypesDoNotBreakTheStream(t *testing.T) {
 		`data: {"id":"c1","choices":[{"delta":{},"finish_reason":"stop"}],"provider_metadata":{"gateway":[]}}`,
 		`data: [DONE]`,
 	}, "\n") + "\n"
-	result, err := consumeStreamWithToolNames(strings.NewReader(body), false, nil, nil)
+	result, err := consumeStreamWithToolNames(strings.NewReader(body), false, nil, nil, false)
 	testutil.NoError(t, err, "consume: %v")
 	testutil.Equal(t, result.Provider, "")
 	testutil.True(t, result.SawMeaningfulEvent, "the text before the odd block was lost")

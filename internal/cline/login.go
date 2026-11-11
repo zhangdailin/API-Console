@@ -11,15 +11,10 @@ import (
 	"orchids-api/internal/store"
 )
 
-const (
-	// loginInterval is the poll cadence. WorkOS states its own; this is the
-	// ceiling when it does not, and it is deliberately slower than the CLI's
-	// single-second poll so a stalled transaction cannot hammer the endpoint
-	// for fifteen minutes.
-	loginInterval = 2 * time.Second
-	// loginTTL bounds one transaction on this side.
-	loginTTL = 15 * time.Minute
-)
+// loginInterval is the poll cadence. It is deliberately slower than the CLI's
+// single-second poll so a stalled transaction cannot hammer the endpoint for
+// fifteen minutes.
+const loginInterval = 2 * time.Second
 
 // loginPort is the official Cline device authorization flow.
 //
@@ -40,16 +35,12 @@ func loginPort() *provider.Login {
 			if err != nil {
 				return provider.LoginChallenge{}, err
 			}
-			expiresAt := transaction.ExpiresAt
-			if expiresAt.IsZero() || expiresAt.After(time.Now().Add(loginTTL)) {
-				expiresAt = time.Now().Add(loginTTL)
-			}
 			return provider.LoginChallenge{
 				DeviceCode: transaction.DeviceCode,
 				UserCode:   transaction.UserCode,
 				VerifyURI:  transaction.VerifyURL,
 				VerifyFull: transaction.VerifyFull,
-				ExpiresAt:  expiresAt,
+				ExpiresAt:  transaction.ExpiresAt,
 				Interval:   loginInterval,
 			}, nil
 		},
@@ -77,7 +68,7 @@ func loginPort() *provider.Login {
 // feed read is enrichment, not a credential check, so a feed that does not
 // answer must not cost the operator a valid credential.
 func BuildLoginAccount(ctx context.Context, cfg *config.Config, loginID string, creds Credentials) (*store.Account, error) {
-	normalized := normalizeLoginResult(creds)
+	normalized := creds.trimmed()
 	acc := &store.Account{
 		Name:              "cline-login",
 		AccountType:       "cline",
@@ -96,7 +87,7 @@ func BuildLoginAccount(ctx context.Context, cfg *config.Config, loginID string, 
 	client := NewFromAccount(acc, cfg)
 	defer client.Close()
 
-	observeAccount(ctx, client, acc, "login_id", loginID,
+	_ = observeAccount(ctx, client, acc, "login_id", loginID,
 		"Cline upstream catalog read failed at login; leaving the snapshot empty",
 		"Cline plan read failed at login; leaving the tier unset")
 
@@ -106,15 +97,4 @@ func BuildLoginAccount(ctx context.Context, cfg *config.Config, loginID string, 
 		return nil, errors.New("cline login returned no refresh token")
 	}
 	return acc, nil
-}
-
-// normalizeLoginResult trims the credential a completed login produced.
-func normalizeLoginResult(creds Credentials) Credentials {
-	accessToken, refreshToken, expiresAt, email := creds.Fields()
-	return Credentials{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		ExpiresAt:    expiresAt,
-		Email:        email,
-	}
 }

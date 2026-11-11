@@ -72,3 +72,47 @@ func ConvertAssistantMessage(msg prompt.Message, pendingToolCalls map[string]boo
 	message.Content = strings.Join(text, "\n")
 	return message, message.Content != "" || len(message.ToolCalls) > 0 || message.ReasoningContent != ""
 }
+
+// ConvertBlockMessage maps user/system blocks, splitting tool_result blocks
+// into standalone `tool` messages so the assistant/tool pairing stays intact.
+// filterText, when set, rewrites each text block before it is kept.
+func ConvertBlockMessage(role string, msg prompt.Message, pendingToolCalls map[string]bool, filterText func(string) string) []ChatMessage {
+	blocks := msg.Content.GetBlocks()
+	out := make([]ChatMessage, 0, len(blocks))
+	pending := make([]string, 0, len(blocks))
+	flush := func() {
+		if len(pending) == 0 {
+			return
+		}
+		out = append(out, ChatMessage{Role: role, Content: strings.Join(pending, "\n")})
+		pending = pending[:0]
+	}
+	for _, block := range blocks {
+		switch block.Type {
+		case "text":
+			text := block.Text
+			if filterText != nil {
+				text = filterText(text)
+			}
+			if strings.TrimSpace(text) != "" {
+				pending = append(pending, text)
+			}
+		case "tool_result":
+			flush()
+			toolID := strings.TrimSpace(block.ToolUseID)
+			if toolID == "" || !pendingToolCalls[toolID] {
+				// A tool_result with no matching call in this history would be
+				// rejected as an orphan; dropping it is the only safe answer.
+				continue
+			}
+			delete(pendingToolCalls, toolID)
+			out = append(out, ChatMessage{
+				Role:       "tool",
+				ToolCallID: toolID,
+				Content:    prompt.StringifyToolResult(block.Content),
+			})
+		}
+	}
+	flush()
+	return out
+}

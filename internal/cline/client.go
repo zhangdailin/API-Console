@@ -5,15 +5,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"orchids-api/internal/httpclient"
 	"strings"
 	"sync"
 	"time"
 
-	"encoding/json"
-
 	"orchids-api/internal/config"
 	"orchids-api/internal/debug"
+	"orchids-api/internal/httpclient"
 	"orchids-api/internal/refreshqueue"
 	"orchids-api/internal/store"
 	"orchids-api/internal/upstream"
@@ -168,17 +166,9 @@ func (c *Client) ensureAccessToken(ctx context.Context) (Credentials, error) {
 	if c == nil {
 		return Credentials{}, fmt.Errorf("cline client is nil")
 	}
-	creds, dirty, expectedRefresh := c.currentCredentialState()
-	if dirty {
-		if err := c.persistPatch(ctx, store.ClineCredentialPatch{
-			ExpectedRefreshToken: expectedRefresh,
-			AccessToken:          creds.AccessToken,
-			RefreshToken:         creds.RefreshToken,
-			ExpiresAt:            creds.ExpiresAt,
-		}); err != nil {
-			return Credentials{}, err
-		}
-		c.markCredentialsClean(creds)
+	creds, err := c.flushDirty(ctx)
+	if err != nil {
+		return Credentials{}, err
 	}
 	if creds.AccessValid(time.Now()) {
 		return creds, nil
@@ -203,13 +193,7 @@ func (c *Client) forceRefresh(ctx context.Context, rejected Credentials) error {
 func (c *Client) refresh(ctx context.Context, previous Credentials) (Credentials, error) {
 	c.refreshMu.Lock()
 	defer c.refreshMu.Unlock()
-	c.stateMu.RLock()
-	owner := c.accountStore
-	id := int64(0)
-	if c.account != nil {
-		id = c.account.ID
-	}
-	c.stateMu.RUnlock()
+	owner, id := c.storeAndID()
 	release, err := refreshqueue.AcquireCredential(ctx, "cline", owner, id)
 	if err != nil {
 		return Credentials{}, err
@@ -217,17 +201,9 @@ func (c *Client) refresh(ctx context.Context, previous Credentials) (Credentials
 	defer release()
 
 	// Another goroutine may have refreshed while this one waited.
-	current, dirty, expectedRefresh := c.currentCredentialState()
-	if dirty {
-		if err := c.persistPatch(ctx, store.ClineCredentialPatch{
-			ExpectedRefreshToken: expectedRefresh,
-			AccessToken:          current.AccessToken,
-			RefreshToken:         current.RefreshToken,
-			ExpiresAt:            current.ExpiresAt,
-		}); err != nil {
-			return Credentials{}, err
-		}
-		c.markCredentialsClean(current)
+	current, err := c.flushDirty(ctx)
+	if err != nil {
+		return Credentials{}, err
 	}
 	if latest, err := refreshqueue.LatestAccount(ctx, owner, id); err != nil {
 		return Credentials{}, err
@@ -256,35 +232,50 @@ func (c *Client) refresh(ctx context.Context, previous Credentials) (Credentials
 		merged.ExpiresAt = previous.ExpiresAt
 	}
 	c.storeCredentials(merged, true, previous.RefreshToken)
-	if err := c.persistPatch(ctx, store.ClineCredentialPatch{
-		ExpectedRefreshToken: previous.RefreshToken,
-		AccessToken:          merged.AccessToken,
-		RefreshToken:         merged.RefreshToken,
-		ExpiresAt:            merged.ExpiresAt,
-	}); err != nil {
+	if err := c.persist(ctx, merged, previous.RefreshToken); err != nil {
 		return Credentials{}, err
 	}
-	c.markCredentialsClean(merged)
 	return merged, nil
 }
 
-// persistPatch uses the store's atomic provider patch, preserving concurrent edits.
-func (c *Client) persistPatch(ctx context.Context, patch store.ClineCredentialPatch) error {
+// storeAndID returns where, and under which id, a rotation is persisted.
+func (c *Client) storeAndID() (AccountUpdater, int64) {
 	c.stateMu.RLock()
-	accountStore := c.accountStore
-	var id int64
-	if c.account != nil {
-		id = c.account.ID
+	defer c.stateMu.RUnlock()
+	if c.account == nil {
+		return c.accountStore, 0
 	}
-	c.stateMu.RUnlock()
-	if accountStore == nil || id == 0 {
-		return nil
+	return c.accountStore, c.account.ID
+}
+
+// flushDirty returns the live credential, first writing a rotation that an
+// earlier call stored in memory but could not persist.
+func (c *Client) flushDirty(ctx context.Context) (Credentials, error) {
+	creds, dirty, expectedRefresh := c.currentCredentialState()
+	if dirty {
+		if err := c.persist(ctx, creds, expectedRefresh); err != nil {
+			return Credentials{}, err
+		}
 	}
-	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-	defer cancel()
-	if err := accountStore.UpdateClineCredentials(writeCtx, id, patch); err != nil {
-		return fmt.Errorf("persist cline account state: %w", err)
+	return creds, nil
+}
+
+// persist writes a rotated credential with the store's atomic provider patch,
+// preserving concurrent edits, and clears the dirty mark once it is durable.
+func (c *Client) persist(ctx context.Context, creds Credentials, expectedRefresh string) error {
+	if accountStore, id := c.storeAndID(); accountStore != nil && id != 0 {
+		writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		if err := accountStore.UpdateClineCredentials(writeCtx, id, store.ClineCredentialPatch{
+			ExpectedRefreshToken: expectedRefresh,
+			AccessToken:          creds.AccessToken,
+			RefreshToken:         creds.RefreshToken,
+			ExpiresAt:            creds.ExpiresAt,
+		}); err != nil {
+			return fmt.Errorf("persist cline account state: %w", err)
+		}
 	}
+	c.markCredentialsClean(creds)
 	return nil
 }
 
@@ -310,7 +301,7 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	if logger != nil && !logger.Capturing() {
 		logger.LogUpstreamRequest(url, map[string]string{"provider": "cline", "model": model}, payload.body)
 	}
-	return c.runChat(upstream.WithToolDeltas(ctx, req.StreamToolDeltas), url, payload, logicalTaskID(req.RequestID), creds, onMessage)
+	return c.runChat(upstream.WithToolDeltas(ctx, req.StreamToolDeltas), url, payload, creds, onMessage)
 }
 
 // runChat performs one upstream call. Two failures get exactly one local replay
@@ -319,7 +310,7 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 // (see repairKind). All other retry budgeting belongs to the shared handler so an
 // account switch and a provider-local replay cannot both consume capacity for
 // the same logical attempt.
-func (c *Client) runChat(ctx context.Context, url string, payload chatPayload, taskID string, creds Credentials, onMessage func(upstream.SSEMessage)) error {
+func (c *Client) runChat(ctx context.Context, url string, payload chatPayload, creds Credentials, onMessage func(upstream.SSEMessage)) error {
 	emitted := false
 	emit := func(msg upstream.SSEMessage) {
 		emitted = true
@@ -334,7 +325,7 @@ func (c *Client) runChat(ctx context.Context, url string, payload chatPayload, t
 		if current := c.currentCredentials(); current.HasCredential() {
 			attemptCredentials = current
 		}
-		result, err := c.attemptChat(ctx, url, payload, taskID, attemptCredentials, emit)
+		result, err := c.attemptChat(ctx, url, payload, attemptCredentials, emit)
 		upstream.NoteServedModel(ctx, result.Model)
 		upstream.NoteServedProvider(ctx, result.Provider, result.ProviderAttempts)
 		if err == nil {
@@ -377,7 +368,7 @@ func (c *Client) runChat(ctx context.Context, url string, payload chatPayload, t
 }
 
 // attemptChat performs one upstream attempt and consumes its stream.
-func (c *Client) attemptChat(ctx context.Context, url string, payload chatPayload, taskID string, creds Credentials, emit func(upstream.SSEMessage)) (result streamResult, attemptErr error) {
+func (c *Client) attemptChat(ctx context.Context, url string, payload chatPayload, creds Credentials, emit func(upstream.SSEMessage)) (result streamResult, attemptErr error) {
 	body := payload.body
 	reqCtx, cancel := util.WithAttemptTimeout(ctx, c.requestTimeout)
 	defer cancel()
@@ -389,7 +380,7 @@ func (c *Client) attemptChat(ctx context.Context, url string, payload chatPayloa
 	req.Header.Set("Authorization", "Bearer "+creds.Bearer())
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("X-Task-ID", taskID)
+	req.Header.Set("X-Task-ID", payload.sessionID)
 	applyClientHeaders(req.Header)
 
 	attempt := debug.BeginUpstream(ctx, req.Method, req.URL.String(), req.Header, body)
@@ -422,21 +413,12 @@ func (c *Client) attemptChat(ctx context.Context, url string, payload chatPayloa
 
 	monitored, progress := httpclient.MonitorProgressIdle(resp.Body, c.streamIdle, cancel, "cline")
 	resp.Body = monitored
-	return consumeStreamWithToolNames(resp.Body, requestCarriesTools(body), payload.toolNames, func(m upstream.SSEMessage) {
+	return consumeStreamWithToolNames(resp.Body, payload.hasTools, payload.toolNames, func(m upstream.SSEMessage) {
 		progress()
 		if emit != nil {
 			emit(m)
 		}
 	}, upstream.ToolDeltasEnabled(ctx))
-}
-
-// requestCarriesTools keeps fallback parsing disabled for plain-text requests:
-// without declared tools, literal <tool_call> text is user-visible content.
-func requestCarriesTools(body []byte) bool {
-	var payload struct {
-		Tools []json.RawMessage `json:"tools"`
-	}
-	return json.Unmarshal(body, &payload) == nil && len(payload.Tools) > 0
 }
 
 // ProbeReachability verifies that this process can actually reach the Cline API.
@@ -489,23 +471,12 @@ func (c *Client) FetchUpstreamModels(ctx context.Context) ([]Model, error) {
 	}
 	endpoint := c.apiBase + "/ai/cline/recommended-models"
 
-	reqCtx, cancel := context.WithTimeout(ctx, authRequestTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
+	status, raw, err := c.getAuthorized(ctx, endpoint, creds, newTaskID(time.Now()), authRequestTimeout, 1<<20)
 	if err != nil {
-		return nil, fmt.Errorf("build cline catalog request: %w", err)
+		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+creds.Bearer())
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("X-Task-ID", newTaskID(time.Now()))
-	applyClientHeaders(req.Header)
-
-	resp, raw, err := httpclient.DoReadBody(c.control, req, 1<<20)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrAuthUnavailable, err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, apiError(http.MethodGet, endpoint, resp.StatusCode, raw)
+	if status != http.StatusOK {
+		return nil, apiError(http.MethodGet, endpoint, status, raw)
 	}
 	c.stateMu.RLock()
 	paid := c.account != nil && hasPaidPlan(c.account.ClinePlan)
@@ -519,9 +490,6 @@ func (c *Client) FetchUpstreamModels(ctx context.Context) ([]Model, error) {
 	}
 	return models, nil
 }
-
-// FetchModels is the provider-facing alias of FetchUpstreamModels.
-func (c *Client) FetchModels(ctx context.Context) ([]Model, error) { return c.FetchUpstreamModels(ctx) }
 
 // resolveModel maps the client's model name onto the account's observed catalog.
 //
@@ -572,8 +540,8 @@ func logicalTaskID(requestID string) string {
 	if requestID == "" {
 		return newTaskID(time.Now())
 	}
-	if strings.HasPrefix(requestID, "sess_") {
+	if strings.HasPrefix(requestID, taskIDPrefix) {
 		return requestID
 	}
-	return "sess_" + requestID
+	return taskIDPrefix + requestID
 }

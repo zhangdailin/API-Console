@@ -76,8 +76,9 @@ func prepareUpdate(acc, existing *store.Account) error {
 	return nil
 }
 
-// ErrMissingCredential is returned when an account carries no Cline
-// credential.
+// ErrMissingCredential is the verification verdict for a record that holds no
+// Cline credential at all. The management API answers it with 400 and leaves
+// the account status alone, unlike the runtime ErrCredentialMissing.
 var ErrMissingCredential = errors.New("cline account is missing an OAuth credential")
 
 // The Cline channel is OAuth-only: an account is created by the WorkOS device
@@ -145,16 +146,13 @@ func NormalizeCredentials(acc *store.Account) bool {
 	if !creds.HasCredential() {
 		return false
 	}
-	accessToken, refreshToken, expiresAt, email := creds.Fields()
-	acc.ClineAccessToken = accessToken
-	if refreshToken != "" {
-		acc.ClineRefreshToken = refreshToken
+	// Only the trimmed forms are written back; the expiry is already in place.
+	acc.ClineAccessToken = creds.AccessToken
+	if creds.RefreshToken != "" {
+		acc.ClineRefreshToken = creds.RefreshToken
 	}
-	if !expiresAt.IsZero() {
-		acc.ClineExpiresAt = expiresAt
-	}
-	if email != "" {
-		acc.ClineEmail = email
+	if creds.Email != "" {
+		acc.ClineEmail = creds.Email
 	}
 	acc.Token = ""
 	acc.RefreshToken = ""
@@ -184,34 +182,37 @@ func VerifyAccount(ctx context.Context, acc *store.Account, cfg *config.Config, 
 		client.SetAccountStore(accountStore)
 	}
 
-	observeAccount(ctx, client, acc, "account_id", acc.ID,
+	// The authenticated catalog read is the proof the credential still works:
+	// it renews an expired token first, and a rejection there means the account
+	// has to be authorized again.
+	if err := observeAccount(ctx, client, acc, "account_id", acc.ID,
 		"Cline catalog read failed; leaving the observed snapshot unchanged",
-		"Cline plan read failed; leaving the recorded tier unchanged")
-
-	// Renewing is the proof the credential still works: the refresh endpoint is
-	// the only control-plane call that answers for a rotated token, and a
-	// rejection there means the account has to be authorized again.
-	if _, err := client.FetchModels(ctx); err != nil {
+		"Cline plan read failed; leaving the recorded tier unchanged"); err != nil {
 		return "", 502, err
 	}
 	return "", 0, nil
 }
 
-// Optional account decoration is shared by login and verification; verification
-// still performs its separate renewal proof after this best-effort observation.
-func observeAccount(ctx context.Context, client *Client, acc *store.Account, key string, id any, catalogMessage, planMessage string) {
+// observeAccount reads the plan and the catalog onto the account. Both reads
+// are best effort for the record; the catalog error is returned for the caller
+// that treats the read as a liveness proof.
+func observeAccount(ctx context.Context, client *Client, acc *store.Account, key string, id any, catalogMessage, planMessage string) error {
 	if plan, err := client.FetchPlan(ctx); err != nil {
 		slog.Warn(planMessage, key, id, "error", err)
 	} else if plan.Explicit {
 		acc.ClinePlan = plan.Name
 		client.setPlan(plan.Name)
 	}
-	if models, err := client.FetchUpstreamModels(ctx); err != nil {
+	models, err := client.FetchUpstreamModels(ctx)
+	if err != nil {
 		slog.Warn(catalogMessage, key, id, "error", err)
-	} else if ids := CatalogSnapshot(models); len(ids) > 0 {
+		return err
+	}
+	if ids := CatalogSnapshot(models); len(ids) > 0 {
 		acc.ClineModelIDs = ids
 		acc.ClineModelsSyncedAt = time.Now()
 	}
+	return nil
 }
 
 // Cline publishes no numeric allowance: the free feed is a list, the inference

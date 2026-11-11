@@ -30,9 +30,60 @@ import (
 // authRequestTimeout bounds a single control-plane request.
 const authRequestTimeout = 30 * time.Second
 
-// LoginTTL bounds one authorization transaction. WorkOS states its own expiry;
-// this is the ceiling when it does not.
-const LoginTTL = 15 * time.Minute
+// loginTTL bounds one authorization transaction. WorkOS states its own expiry;
+// this is the ceiling when it does not, or when it states a longer one.
+const loginTTL = 15 * time.Minute
+
+// controlBodyLimit bounds an auth or plan response body.
+const controlBodyLimit = 64 << 10
+
+// controlCall performs one control-plane request and returns its status and
+// bounded body. A request that got no usable answer is ErrAuthUnavailable.
+// creds, when set, adds the bearer credential and the product identity headers.
+func (c *Client) controlCall(ctx context.Context, method, endpoint, contentType string, body []byte, creds *Credentials, taskID string, timeout time.Duration, limit int64) (int, []byte, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, method, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return 0, nil, fmt.Errorf("build cline request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	if taskID != "" {
+		req.Header.Set("X-Task-ID", taskID)
+	}
+	if creds != nil {
+		req.Header.Set("Authorization", "Bearer "+creds.Bearer())
+		applyClientHeaders(req.Header)
+	}
+	resp, raw, err := httpclient.DoReadBody(c.control, req, limit)
+	if err != nil {
+		return 0, nil, fmt.Errorf("%w: %v", ErrAuthUnavailable, err)
+	}
+	return resp.StatusCode, raw, nil
+}
+
+// postForm sends one urlencoded request to a WorkOS endpoint.
+func (c *Client) postForm(ctx context.Context, endpoint string, form url.Values) (int, []byte, error) {
+	return c.controlCall(ctx, http.MethodPost, endpoint, "application/x-www-form-urlencoded",
+		[]byte(form.Encode()), nil, "", authRequestTimeout, controlBodyLimit)
+}
+
+// postJSON sends one JSON request to a Cline auth endpoint.
+func (c *Client) postJSON(ctx context.Context, endpoint string, fields map[string]string) (int, []byte, error) {
+	body, err := json.Marshal(fields)
+	if err != nil {
+		return 0, nil, fmt.Errorf("marshal cline request: %w", err)
+	}
+	return c.controlCall(ctx, http.MethodPost, endpoint, "application/json", body, nil, "", authRequestTimeout, controlBodyLimit)
+}
+
+// getAuthorized reads one account-scoped resource with the product identity.
+func (c *Client) getAuthorized(ctx context.Context, endpoint string, creds Credentials, taskID string, timeout time.Duration, limit int64) (int, []byte, error) {
+	return c.controlCall(ctx, http.MethodGet, endpoint, "", nil, &creds, taskID, timeout, limit)
+}
 
 // LoginTransaction is one in-flight device authorization.
 type LoginTransaction struct {
@@ -46,8 +97,6 @@ type LoginTransaction struct {
 	// code embedded.
 	VerifyURL  string
 	VerifyFull string
-	// Interval is the upstream's poll cadence.
-	Interval time.Duration
 	// ExpiresAt bounds polling.
 	ExpiresAt time.Time
 }
@@ -57,25 +106,12 @@ func (c *Client) StartLogin(ctx context.Context) (*LoginTransaction, error) {
 	if c == nil {
 		return nil, fmt.Errorf("cline client is nil")
 	}
-	form := url.Values{}
-	form.Set("client_id", c.workOSClientID)
-
-	reqCtx, cancel := context.WithTimeout(ctx, authRequestTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, c.workOSAuthorizeURL,
-		strings.NewReader(form.Encode()))
+	status, raw, err := c.postForm(ctx, c.workOSAuthorizeURL, url.Values{"client_id": {c.workOSClientID}})
 	if err != nil {
-		return nil, fmt.Errorf("build device authorize request: %w", err)
+		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-
-	resp, raw, err := httpclient.DoReadBody(c.control, req, 64<<10)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrAuthUnavailable, err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%w: %s", ErrAuthRejected, apiError(http.MethodPost, c.workOSAuthorizeURL, resp.StatusCode, raw))
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("%w: %s", ErrAuthRejected, apiError(http.MethodPost, c.workOSAuthorizeURL, status, raw))
 	}
 
 	var payload struct {
@@ -83,7 +119,6 @@ func (c *Client) StartLogin(ctx context.Context) (*LoginTransaction, error) {
 		UserCode      string `json:"user_code"`
 		VerifyURI     string `json:"verification_uri"`
 		VerifyURIComp string `json:"verification_uri_complete"`
-		Interval      int    `json:"interval"`
 		ExpiresIn     int    `json:"expires_in"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
@@ -100,13 +135,9 @@ func (c *Client) StartLogin(ctx context.Context) (*LoginTransaction, error) {
 		return nil, fmt.Errorf("%w: authorization host %q is not an allowed Cline host", ErrAuthRejected, host)
 	}
 
-	interval := time.Duration(payload.Interval) * time.Second
-	if interval < time.Second {
-		interval = 5 * time.Second
-	}
 	expiresIn := time.Duration(payload.ExpiresIn) * time.Second
-	if expiresIn <= 0 || expiresIn > LoginTTL {
-		expiresIn = LoginTTL
+	if expiresIn <= 0 || expiresIn > loginTTL {
+		expiresIn = loginTTL
 	}
 
 	return &LoginTransaction{
@@ -114,7 +145,6 @@ func (c *Client) StartLogin(ctx context.Context) (*LoginTransaction, error) {
 		UserCode:   strings.TrimSpace(payload.UserCode),
 		VerifyURL:  strings.TrimSpace(payload.VerifyURI),
 		VerifyFull: strings.TrimSpace(payload.VerifyURIComp),
-		Interval:   interval,
 		ExpiresAt:  time.Now().Add(expiresIn),
 	}, nil
 }
@@ -133,24 +163,13 @@ func (c *Client) PollLogin(ctx context.Context, tx *LoginTransaction) (Credentia
 		return Credentials{}, fmt.Errorf("cline login transaction is missing")
 	}
 
-	form := url.Values{}
-	form.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
-	form.Set("device_code", tx.DeviceCode)
-	form.Set("client_id", c.workOSClientID)
-
-	reqCtx, cancel := context.WithTimeout(ctx, authRequestTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, c.workOSTokenURL,
-		strings.NewReader(form.Encode()))
+	status, raw, err := c.postForm(ctx, c.workOSTokenURL, url.Values{
+		"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
+		"device_code": {tx.DeviceCode},
+		"client_id":   {c.workOSClientID},
+	})
 	if err != nil {
-		return Credentials{}, fmt.Errorf("build device authenticate request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-
-	resp, raw, err := httpclient.DoReadBody(c.control, req, 64<<10)
-	if err != nil {
-		return Credentials{}, fmt.Errorf("%w: %v", ErrAuthUnavailable, err)
+		return Credentials{}, err
 	}
 
 	// A pending authorization is not an error. The body names it, and it is read
@@ -164,12 +183,11 @@ func (c *Client) PollLogin(ctx context.Context, tx *LoginTransaction) (Credentia
 	case "authorization_pending", "slow_down":
 		return Credentials{}, ErrAuthPending
 	}
-	if resp.StatusCode != http.StatusOK {
-		if strings.Contains(strings.ToLower(string(raw)), "authorization_pending") ||
-			strings.Contains(strings.ToLower(string(raw)), "slow_down") {
+	if status != http.StatusOK {
+		if text := strings.ToLower(string(raw)); strings.Contains(text, "authorization_pending") || strings.Contains(text, "slow_down") {
 			return Credentials{}, ErrAuthPending
 		}
-		return Credentials{}, apiError(http.MethodPost, c.workOSTokenURL, resp.StatusCode, raw)
+		return Credentials{}, apiError(http.MethodPost, c.workOSTokenURL, status, raw)
 	}
 
 	var granted struct {
@@ -194,30 +212,16 @@ func (c *Client) Register(ctx context.Context, workosAccess, workosRefresh strin
 	if workosAccess == "" {
 		return Credentials{}, ErrCredentialMissing
 	}
-	body, err := json.Marshal(map[string]string{
+	endpoint := c.apiBase + "/auth/register"
+	status, raw, err := c.postJSON(ctx, endpoint, map[string]string{
 		"accessToken":  workosAccess,
 		"refreshToken": strings.TrimSpace(workosRefresh),
 	})
 	if err != nil {
-		return Credentials{}, fmt.Errorf("marshal register request: %w", err)
+		return Credentials{}, err
 	}
-	endpoint := c.apiBase + "/auth/register"
-
-	reqCtx, cancel := context.WithTimeout(ctx, authRequestTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return Credentials{}, fmt.Errorf("build register request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
-	resp, raw, err := httpclient.DoReadBody(c.control, req, 64<<10)
-	if err != nil {
-		return Credentials{}, fmt.Errorf("%w: %v", ErrAuthUnavailable, err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return Credentials{}, apiError(http.MethodPost, endpoint, resp.StatusCode, raw)
+	if status != http.StatusOK {
+		return Credentials{}, apiError(http.MethodPost, endpoint, status, raw)
 	}
 
 	var payload struct {
@@ -256,31 +260,18 @@ func (c *Client) Refresh(ctx context.Context, refreshToken string) (Credentials,
 	if refreshToken == "" {
 		return Credentials{}, ErrCredentialMissing
 	}
-	body, err := json.Marshal(map[string]string{
+	endpoint := c.apiBase + "/auth/refresh"
+	status, raw, err := c.postJSON(ctx, endpoint, map[string]string{
 		"refreshToken": refreshToken,
 		"grantType":    "refresh_token",
 	})
 	if err != nil {
-		return Credentials{}, fmt.Errorf("marshal refresh request: %w", err)
+		return Credentials{}, err
 	}
-	endpoint := c.apiBase + "/auth/refresh"
-
-	reqCtx, cancel := context.WithTimeout(ctx, authRequestTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return Credentials{}, fmt.Errorf("build refresh request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
-	resp, raw, err := httpclient.DoReadBody(c.control, req, 64<<10)
-	if err != nil {
-		return Credentials{}, fmt.Errorf("%w: %v", ErrAuthUnavailable, err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		err := apiError(http.MethodPost, endpoint, resp.StatusCode, raw)
-		if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+	if status != http.StatusOK {
+		err := apiError(http.MethodPost, endpoint, status, raw)
+		refused := status == http.StatusUnauthorized || status == http.StatusForbidden
+		if refused || status == http.StatusBadRequest {
 			// The Cline refresh token is the WorkOS refresh token that
 			// /auth/register wrapped, so WorkOS can still renew it when the
 			// Cline endpoint refuses. That saves a browser login; only when
@@ -289,7 +280,7 @@ func (c *Client) Refresh(ctx context.Context, refreshToken string) (Credentials,
 				return renewed, nil
 			}
 		}
-		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		if refused {
 			// The refresh grant itself was refused: no local retry can recover
 			// it, and the operator has to authorize again.
 			return Credentials{}, fmt.Errorf("%w: %v", ErrReLoginRequired, err)
@@ -321,23 +312,12 @@ func (c *Client) Refresh(ctx context.Context, refreshToken string) (Credentials,
 // It reports false on any failure: the caller keeps the Cline endpoint's own
 // verdict, which is the one the operator is shown.
 func (c *Client) refreshViaWorkOS(ctx context.Context, refreshToken string) (Credentials, bool) {
-	form := url.Values{}
-	form.Set("grant_type", "refresh_token")
-	form.Set("client_id", c.workOSClientID)
-	form.Set("refresh_token", refreshToken)
-
-	reqCtx, cancel := context.WithTimeout(ctx, authRequestTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, c.workOSTokenURL,
-		strings.NewReader(form.Encode()))
-	if err != nil {
-		return Credentials{}, false
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-
-	resp, raw, err := httpclient.DoReadBody(c.control, req, 64<<10)
-	if err != nil || resp.StatusCode != http.StatusOK {
+	status, raw, err := c.postForm(ctx, c.workOSTokenURL, url.Values{
+		"grant_type":    {"refresh_token"},
+		"client_id":     {c.workOSClientID},
+		"refresh_token": {refreshToken},
+	})
+	if err != nil || status != http.StatusOK {
 		return Credentials{}, false
 	}
 	var granted struct {

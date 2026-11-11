@@ -109,26 +109,14 @@ func catalogPort() *provider.Catalog {
 				return nil
 			}
 			rows := catalogRowsForPlan(acc.ClineModelIDs, acc.ClinePlan)
-			out := make([]provider.Model, 0, len(rows))
+			models := make([]Model, 0, len(rows))
 			for _, raw := range rows {
 				var row catalogSnapshotRow
-				if json.Unmarshal([]byte(raw), &row) != nil {
-					continue
+				if json.Unmarshal([]byte(raw), &row) == nil {
+					models = append(models, Model{ID: row.ID, Name: row.Name, Provider: row.Provider, BillingTier: row.BillingTier})
 				}
-				id := strings.TrimSpace(row.ID)
-				if id == "" {
-					continue
-				}
-				out = append(out, provider.Model{
-					ID:            id,
-					Name:          util.FirstNonEmpty(strings.TrimSpace(row.Name), id),
-					Provider:      strings.TrimSpace(row.Provider),
-					UpstreamModel: id,
-					BillingTier:   row.BillingTier,
-					BillingSource: "cline_recommended_models",
-				})
 			}
-			return out
+			return CatalogModels(models)
 		},
 		SetSnapshot: setCatalogSnapshot,
 	}
@@ -194,7 +182,7 @@ func refreshCatalog(ctx context.Context, env provider.Env, acc *store.Account) {
 		client := newClientWithStore(acc, env.Config, env.Store)
 		defer client.Close()
 		catalogCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		observeAccount(catalogCtx, client, acc, "account_id", acc.ID,
+		_ = observeAccount(catalogCtx, client, acc, "account_id", acc.ID,
 			"Auto refresh cline catalog failed; keeping the last snapshot",
 			"Auto refresh cline plan failed; keeping the recorded tier")
 		cancel()

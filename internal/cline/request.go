@@ -12,7 +12,6 @@ import (
 
 	"encoding/json"
 
-	"orchids-api/internal/prompt"
 	"orchids-api/internal/upstream"
 	"orchids-api/internal/util"
 )
@@ -52,6 +51,11 @@ type chatPayload struct {
 	// defaultMaxTokens reports that max_tokens is this package's default rather
 	// than the client's own value, so a repair may lower it.
 	defaultMaxTokens bool
+	// sessionID is the body's session_id, repeated as the X-Task-ID header.
+	sessionID string
+	// hasTools keeps fallback tool parsing off for plain-text requests: without
+	// declared tools, literal <tool_call> text is user-visible content.
+	hasTools bool
 }
 
 // buildChatPayload renders one chat request and records the rewrites the
@@ -87,7 +91,9 @@ func buildChatPayload(req upstream.UpstreamRequest, model string) (chatPayload, 
 		body.Stop = &req.Stop
 	}
 	if !req.NoTools {
-		body.Tools = normalizeToolDefinitions(req)
+		// Declarations are shared with the request; shortenToolNames copies
+		// the ones it rewrites.
+		body.Tools = util.NormalizeToolDefinitions(req.Tools, false)
 		body.ToolChoice = normalizeToolChoice(req.ToolChoice)
 	}
 	toolNames := shortenToolNames(&body)
@@ -95,7 +101,8 @@ func buildChatPayload(req upstream.UpstreamRequest, model string) (chatPayload, 
 	if err != nil {
 		return chatPayload{}, err
 	}
-	return chatPayload{body: raw, toolNames: toolNames, defaultMaxTokens: defaultMaxTokens}, nil
+	return chatPayload{body: raw, toolNames: toolNames, defaultMaxTokens: defaultMaxTokens,
+		sessionID: sessionID, hasTools: len(body.Tools) > 0}, nil
 }
 
 // maxToolNameLength is the upstream's ceiling on a function name. A longer
@@ -309,7 +316,7 @@ func buildMessages(req upstream.UpstreamRequest) []chatMessage {
 				out = append(out, converted)
 			}
 		default:
-			out = append(out, convertBlockMessage(role, msg, pendingToolCalls)...)
+			out = append(out, upstream.ConvertBlockMessage(role, msg, pendingToolCalls, nil)...)
 		}
 	}
 
@@ -319,103 +326,6 @@ func buildMessages(req upstream.UpstreamRequest) []chatMessage {
 			text = "hello"
 		}
 		out = append(out, chatMessage{Role: "user", Content: text})
-	}
-	return out
-}
-
-// convertBlockMessage maps user/system blocks, splitting tool_result blocks
-// into standalone `tool` messages so the assistant/tool pairing stays intact.
-func convertBlockMessage(role string, msg prompt.Message, pendingToolCalls map[string]bool) []chatMessage {
-	blocks := msg.Content.GetBlocks()
-	out := make([]chatMessage, 0, len(blocks))
-	pending := make([]string, 0, len(blocks))
-	flush := func() {
-		if len(pending) == 0 {
-			return
-		}
-		out = append(out, chatMessage{Role: role, Content: strings.Join(pending, "\n")})
-		pending = pending[:0]
-	}
-	for _, block := range blocks {
-		switch block.Type {
-		case "text":
-			if strings.TrimSpace(block.Text) != "" {
-				pending = append(pending, block.Text)
-			}
-		case "tool_result":
-			flush()
-			toolID := strings.TrimSpace(block.ToolUseID)
-			if toolID == "" || !pendingToolCalls[toolID] {
-				// A tool_result with no matching call in this history would be
-				// rejected as an orphan; dropping it is the only safe answer.
-				continue
-			}
-			delete(pendingToolCalls, toolID)
-			out = append(out, chatMessage{
-				Role:       "tool",
-				ToolCallID: toolID,
-				Content:    toolResultText(block.Content),
-			})
-		}
-	}
-	flush()
-	return out
-}
-
-// toolResultText renders a tool_result payload as text. The upstream's `tool`
-// message carries a string, and a structured result is JSON.
-func toolResultText(content any) string {
-	switch typed := content.(type) {
-	case nil:
-		return ""
-	case string:
-		return typed
-	default:
-		raw, err := json.Marshal(typed)
-		if err != nil {
-			return util.StringValue(typed)
-		}
-		return string(raw)
-	}
-}
-
-// normalizeToolDefinitions converts Anthropic declarations into the OpenAI
-// function envelope required by Cline. OpenAI declarations are retained as-is.
-func normalizeToolDefinitions(req upstream.UpstreamRequest) []any {
-	if len(req.Tools) == 0 {
-		return nil
-	}
-	out := make([]any, 0, len(req.Tools))
-	for _, raw := range req.Tools {
-		tool, ok := raw.(map[string]any)
-		if !ok || tool == nil {
-			continue
-		}
-		if strings.EqualFold(strings.TrimSpace(util.StringValue(tool["type"])), "function") {
-			if function, ok := tool["function"].(map[string]any); ok && strings.TrimSpace(util.StringValue(function["name"])) != "" {
-				out = append(out, tool)
-			}
-			continue
-		}
-		name := strings.TrimSpace(util.StringValue(tool["name"]))
-		if name == "" {
-			continue
-		}
-		parameters := tool["input_schema"]
-		if parameters == nil {
-			parameters = map[string]any{"type": "object", "properties": map[string]any{}}
-		}
-		function := map[string]any{
-			"name":       name,
-			"parameters": parameters,
-		}
-		if description := strings.TrimSpace(util.StringValue(tool["description"])); description != "" {
-			function["description"] = description
-		}
-		out = append(out, map[string]any{"type": "function", "function": function})
-	}
-	if len(out) == 0 {
-		return nil
 	}
 	return out
 }
