@@ -340,6 +340,34 @@ func TestChatBodyKeepsTheWebClientEnvelope(t *testing.T) {
 	}
 }
 
+// The page sends a fixed option envelope. Dropping the no-op fields made an
+// attachment turn look hand-built: the model reported no image until every
+// field the reference project documented was present.
+func TestChatBodyKeepsTheFullOptionEnvelope(t *testing.T) {
+	raw, err := chatBody("conv-1", "hello", "doubao")
+	testutil.NoError(t, err)
+	var body struct {
+		Option map[string]json.RawMessage `json:"option"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{
+		"send_message_scene", "collect_id", "is_audio", "answer_with_suggest", "tts_switch",
+		"need_deep_think", "click_clear_context", "from_suggest", "is_regen", "is_replace",
+		"is_from_click_option", "is_from_click_softlink", "disable_sse_cache",
+		"select_text_action", "is_select_text", "resend_for_regen", "scene_type",
+		"unique_key", "start_seq", "regen_query_id", "edit_query_id", "regen_instruction",
+		"no_replace_for_regen", "message_from", "shared_app_name", "shared_app_id",
+		"is_ai_playground", "is_old_user", "recovery_option", "message_storage_type",
+		"related_deleted_message_ids", "connector_info_list",
+	} {
+		if _, ok := body.Option[key]; !ok {
+			t.Errorf("option is missing %s", key)
+		}
+	}
+}
+
 // A chat-only channel must not advertise Messages or Responses: clients use the
 // capability list to choose a wire format, and those routes are unregistered.
 func TestPublishedModelsAdvertiseChatOnly(t *testing.T) {
