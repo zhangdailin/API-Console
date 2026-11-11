@@ -112,6 +112,27 @@ func TestMainConversationIsReusedPerAccount(t *testing.T) {
 	testutil.Equal(t, created, 1)
 }
 
+func TestConversationTurnReusesTheMainConversation(t *testing.T) {
+	var bodies []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		bodies = append(bodies, body)
+		_, _ = io.WriteString(w, `{"status_code":0,"downlink_body":{"create_conv_downlink_body":{"conversation_info":{"conversation_id":"root-2"}}}}`)
+	}))
+	defer server.Close()
+	client := NewFromAccount(&store.Account{ID: 9002, ClientCookie: `{"sid":"x"}`}, &config.Config{DoubaoBaseURL: server.URL})
+	first, err := client.newConversation(context.Background(), client.jar())
+	testutil.NoError(t, err)
+	second, err := client.newConversation(context.Background(), client.jar())
+	testutil.NoError(t, err)
+	testutil.Equal(t, first, "root-2")
+	testutil.Equal(t, second, "root-2")
+	if len(bodies) != 1 {
+		t.Fatalf("a turn must not create a second conversation, got %d creations", len(bodies))
+	}
+}
+
 func TestModelsCarryTheFourStableAliases(t *testing.T) {
 	got := Models()
 	testutil.Equal(t, len(got), 4)

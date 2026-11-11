@@ -282,11 +282,11 @@ func (c *Client) createConversation(ctx context.Context, jar cookieJar, source s
 }
 
 func (c *Client) newConversation(ctx context.Context, jar cookieJar) (string, error) {
-	root, err := c.mainConversation(ctx, jar)
-	if err != nil {
-		return "", err
-	}
-	return c.createConversation(ctx, jar, root)
+	// Every turn continues the account's main conversation. Minting a fresh
+	// root plus sub-conversation per request doubled the IM gateway calls and
+	// kept creating new server-side sessions, which is exactly the traffic
+	// pattern the upstream risk controller scores.
+	return c.mainConversation(ctx, jar)
 }
 
 // mainConversation reuses the account's root conversation across requests.
