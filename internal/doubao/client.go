@@ -27,7 +27,7 @@ import (
 const (
 	defaultBaseURL     = "https://www.doubao.com"
 	defaultAccountsURL = "https://accounts.doubao.com"
-	defaultUserAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+	defaultUserAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36"
 	// botID is the assistant the web client addresses; it is fixed for the
 	// public Doubao bot and appears in both the conversation and chat bodies.
 	botID = "7338286299411103781"
@@ -78,7 +78,20 @@ func (c *Client) jar() cookieJar {
 	if c == nil || c.acc == nil {
 		return cookieJar{}
 	}
-	return decodeCookies(c.acc.ClientCookie)
+	jar := decodeCookies(c.acc.ClientCookie)
+	// The web client always carries its UI preferences; a QR session has them
+	// only if it visited the page with JavaScript enabled. Seeding the static
+	// ones keeps the cookie set from looking like a headless client.
+	for name, value := range map[string]string{
+		"i18next":           "zh",
+		"dbx-web-theme":     "light",
+		"flow_user_country": "CN",
+	} {
+		if _, ok := jar[name]; !ok {
+			jar[name] = value
+		}
+	}
+	return jar
 }
 
 func (c *Client) headers(jar cookieJar, passport bool) http.Header {
@@ -86,26 +99,27 @@ func (c *Client) headers(jar cookieJar, passport bool) http.Header {
 	h.Set("User-Agent", c.userAgent())
 	h.Set("Accept", "*/*")
 	h.Set("Accept-Language", "zh-CN,zh;q=0.9")
-	h.Set("Accept-Encoding", "gzip, deflate, br")
+	// The current web client advertises zstd as well. Omitting it is a cheap
+	// fingerprint difference, so match the capture.
+	h.Set("Accept-Encoding", "gzip, deflate, br, zstd")
 	h.Set("Referer", c.baseURL()+"/chat/")
 	h.Set("Origin", c.baseURL())
 	h.Set("Sec-Fetch-Dest", "empty")
 	h.Set("Sec-Fetch-Mode", "cors")
 	h.Set("Sec-Fetch-Site", "same-origin")
-	major := "131"
+	major := "157"
 	if match := chromeVersion.FindStringSubmatch(c.userAgent()); len(match) == 2 {
 		major = match[1]
 	}
-	h.Set("Sec-Ch-Ua", `"Google Chrome";v="`+major+`", "Chromium";v="`+major+`", "Not_A Brand";v="24"`)
+	// Brand order and the GREASE brand match the captured request.
+	h.Set("Sec-Ch-Ua", `"Not-A.Brand";v="99", "Google Chrome";v="`+major+`", "Chromium";v="`+major+`"`)
 	h.Set("Sec-Ch-Ua-Mobile", "?0")
 	h.Set("Sec-Ch-Ua-Platform", `"Windows"`)
-	h.Set("Priority", "u=1, i")
-	h.Set("X-Flow-Trace", "04-"+randomHex(12)+"-"+randomHex(8)+"-01")
+	h.Set("X-Flow-Trace", "04-"+randomHex(16)+"-"+randomHex(8)+"-01")
 	h.Set("Agw-Js-Conv", "str, str")
-	// Passport endpoints reject requests that carry the CSRF cookie itself
-	// (2035). It is sent as the X-Tt-Passport-Csrf-Token header instead, so the
-	// cookie is filtered on every endpoint.
-	if cookie := jar.header(true); cookie != "" {
+	// Only passport endpoints reject the CSRF cookie (2035). The captured chat
+	// request carries it, so send the full jar everywhere else.
+	if cookie := jar.header(passport); cookie != "" {
 		h.Set("Cookie", cookie)
 	}
 	if passport {
@@ -135,7 +149,7 @@ func (c *Client) commonQuery(acc *store.Account, extra url.Values) string {
 	q := url.Values{
 		"version_code": {"20800"}, "language": {"zh"}, "device_platform": {"web"}, "doubao_device_platform": {"web"},
 		"aid": {"497858"}, "real_aid": {"497858"}, "pkg_type": {"release_version"}, "device_id": {deviceID},
-		"pc_version": {"3.44.7"}, "doubao_pc_version": {"3.44.7"}, "web_id": {webID}, "tea_uuid": {teaUUID},
+		"pc_version": {"3.45.1"}, "doubao_pc_version": {"3.45.1"}, "web_id": {webID}, "tea_uuid": {teaUUID},
 		"region": {"CN"}, "sys_region": {"CN"}, "samantha_web": {"1"}, "web_platform": {"browser"},
 		"use-olympus-account": {"1"}, "web_tab_id": {randomUUID()}, "tz_name": {"Asia/Shanghai"},
 	}
@@ -174,16 +188,29 @@ func (c *Client) do(ctx context.Context, method, target string, body []byte, jar
 // `application/json; encoding=utf-8` for /im/* calls while /chat/completion
 // keeps plain application/json, so the value cannot be set globally.
 func (c *Client) doJSON(ctx context.Context, method, target string, body []byte, jar cookieJar, passport bool, contentType, accept string) (*http.Response, error) {
+	return c.doJSONWithReferer(ctx, method, target, body, jar, passport, contentType, accept, "")
+}
+
+// doJSONWithReferer lets the streaming call point Referer at the local
+// conversation the body declares, which is what the web client does.
+func (c *Client) doJSONWithReferer(ctx context.Context, method, target string, body []byte, jar cookieJar, passport bool, contentType, accept, referer string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, method, target, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	req.Header = c.headers(jar, passport)
+	// Passport endpoints reject the CSRF cookie with 2035 wherever they are
+	// called from, so decide by target as well as by the caller's profile.
+	req.Header = c.headers(jar, passport || strings.Contains(target, "/passport/"))
 	if len(body) > 0 && !passport {
 		req.Header.Set("Content-Type", contentType)
 	}
 	if accept != "" {
 		req.Header.Set("Accept", accept)
+	}
+	if referer != "" {
+		req.Header.Set("Referer", referer)
+		// The web client's EventSource helper sends this literal on chat streams.
+		req.Header.Set("Last-Event-ID", "undefined")
 	}
 	response, err := c.http.Do(req)
 	if err != nil || response == nil {
@@ -409,7 +436,8 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	if err != nil {
 		return err
 	}
-	body, err := chatBodyWithAttachments(conversationID, promptText, req.Model, attachments)
+	localID := fmt.Sprintf("local_%d", time.Now().UnixMilli())
+	body, err := chatBodyWithAttachments(conversationID, localID, promptText, req.Model, attachments)
 	if err != nil {
 		return err
 	}
@@ -417,7 +445,7 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 		logger.LogUpstreamRequest(c.baseURL()+"/chat/completion", map[string]string{"provider": "doubao", "model": req.Model}, body)
 	}
 	query := c.commonQuery(c.acc, fingerprintQuery(jar))
-	response, err := c.doJSON(ctx, http.MethodPost, c.baseURL()+"/chat/completion?"+query, body, jar, false, "application/json", "text/event-stream")
+	response, err := c.doJSONWithReferer(ctx, http.MethodPost, c.baseURL()+"/chat/completion?"+query, body, jar, false, "application/json", "text/event-stream", c.baseURL()+"/chat/"+localID)
 	if err != nil {
 		return err
 	}
@@ -468,12 +496,12 @@ func validateTextOnly(req upstream.UpstreamRequest) error {
 }
 
 func chatBody(conversationID, text, modelID string) ([]byte, error) {
-	return chatBodyWithAttachments(conversationID, text, modelID, nil)
+	return chatBodyWithAttachments(conversationID, fmt.Sprintf("local_%d", time.Now().UnixMilli()), text, modelID, nil)
 }
 
 // chatBodyWithAttachments is chatBody plus the attachment messages that must
 // precede the text block in the same request.
-func chatBodyWithAttachments(conversationID, text, modelID string, attachments []storeURI) ([]byte, error) {
+func chatBodyWithAttachments(conversationID, localID, text, modelID string, attachments []storeURI) ([]byte, error) {
 	model, ok := FindModel(modelID)
 	if !ok {
 		return nil, fmt.Errorf("unknown doubao model")
@@ -482,7 +510,7 @@ func chatBodyWithAttachments(conversationID, text, modelID string, attachments [
 	effort, agent := strconv.Itoa(model.ReasoningEffort), strconv.Itoa(model.AgentMode)
 	body := map[string]any{
 		"client_meta": map[string]any{
-			"local_conversation_id": fmt.Sprintf("local_%d", now), "conversation_id": conversationID,
+			"local_conversation_id": localID, "conversation_id": conversationID,
 			"bot_id": botID, "last_section_id": "", "last_message_index": nil,
 			"local_permissions": []map[string]any{
 				{"permission_name": "ACCESS_COARSE_LOCATION", "status": 3},
