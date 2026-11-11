@@ -33,9 +33,10 @@ func id19() (string, error) {
 	return n.String(), nil
 }
 
-func identityFor(acc *store.Account) (string, string, string, error) {
+func identityFor(acc *store.Account) (string, string, string) {
 	if acc != nil && acc.DoubaoDeviceID != "" && acc.DoubaoWebID != "" {
-		return acc.DoubaoDeviceID, acc.DoubaoWebID, acc.DoubaoTeaUUID, nil
+		return acc.DoubaoDeviceID, acc.DoubaoWebID, acc.DoubaoTeaUUID
 	}
-	return NewIdentity()
+	deviceID, webID, teaUUID, _ := NewIdentity()
+	return deviceID, webID, teaUUID
 }

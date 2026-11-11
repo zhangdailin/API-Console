@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"orchids-api/internal/config"
 	"orchids-api/internal/store"
@@ -122,9 +123,9 @@ func TestConversationTurnReusesTheMainConversation(t *testing.T) {
 	}))
 	defer server.Close()
 	client := NewFromAccount(&store.Account{ID: 9002, ClientCookie: `{"sid":"x"}`}, &config.Config{DoubaoBaseURL: server.URL})
-	first, err := client.newConversation(context.Background(), client.jar())
+	first, err := client.mainConversation(context.Background(), client.jar())
 	testutil.NoError(t, err)
-	second, err := client.newConversation(context.Background(), client.jar())
+	second, err := client.mainConversation(context.Background(), client.jar())
 	testutil.NoError(t, err)
 	testutil.Equal(t, first, "root-2")
 	testutil.Equal(t, second, "root-2")
@@ -237,5 +238,59 @@ func TestChatBodyUsesConfiguredModel(t *testing.T) {
 	testutil.NoError(t, err)
 	if !bytes.Contains(raw, []byte(`"model_item_key":"5"`)) || !bytes.Contains(raw, []byte(`"mode_id":"3"`)) {
 		t.Fatalf("body missing pro route: %s", raw)
+	}
+}
+
+// The builder split must keep every field the web client depends on, including
+// the duplicated values that live in both option and ext.
+func TestChatBodyKeepsTheWebClientEnvelope(t *testing.T) {
+	raw, err := chatBody("conv-1", "hello", "doubao-work")
+	testutil.NoError(t, err)
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	meta, _ := body["client_meta"].(map[string]any)
+	if meta["conversation_id"] != "conv-1" || meta["bot_id"] != botID {
+		t.Fatalf("client_meta=%v", meta)
+	}
+	option, _ := body["option"].(map[string]any)
+	for _, key := range []string{"conversation_init_option", "conversation_init_ext", "model_config", "aggregate_params"} {
+		if option[key] == nil {
+			t.Fatalf("option missing %s: %v", key, option)
+		}
+	}
+	if option["agent_mode"] != float64(1) || option["conversation_mode"] != float64(2) {
+		t.Fatalf("work route lost its agent/conversation mode: %v", option)
+	}
+	ext, _ := body["ext"].(map[string]any)
+	if ext["agent_mode"] != "1" || ext["general_task_param"] != `{"server_do_compare":true}` {
+		t.Fatalf("ext=%v", ext)
+	}
+	msgs, _ := body["messages"].([]any)
+	if len(msgs) != 1 {
+		t.Fatalf("messages=%v", body["messages"])
+	}
+}
+
+// A chat-only channel must not advertise Messages or Responses: clients use the
+// capability list to choose a wire format, and those routes are unregistered.
+func TestPublishedModelsAdvertiseChatOnly(t *testing.T) {
+	rows := publishedModels([]*store.Account{{
+		AccountType: "doubao", ClientCookie: `{"sid":"x"}`, DoubaoVerifiedAt: time.Now(),
+	}}, time.Now())
+	if len(rows) != len(models) {
+		t.Fatalf("rows=%d", len(rows))
+	}
+	for _, row := range rows {
+		if len(row.Capabilities) != 1 || row.Capabilities[0] != store.CapabilityChat {
+			t.Fatalf("%s advertises %v", row.ModelID, row.Capabilities)
+		}
+	}
+	stale := publishedModels([]*store.Account{{
+		AccountType: "doubao", ClientCookie: `{"sid":"x"}`, DoubaoVerifiedAt: time.Now().Add(-48 * time.Hour),
+	}}, time.Now())
+	if len(stale) != 0 {
+		t.Fatalf("a stale observation published %d routes", len(stale))
 	}
 }

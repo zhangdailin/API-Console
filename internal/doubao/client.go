@@ -28,6 +28,9 @@ const (
 	defaultBaseURL     = "https://www.doubao.com"
 	defaultAccountsURL = "https://accounts.doubao.com"
 	defaultUserAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+	// botID is the assistant the web client addresses; it is fixed for the
+	// public Doubao bot and appears in both the conversation and chat bodies.
+	botID = "7338286299411103781"
 )
 
 var chromeVersion = regexp.MustCompile(`Chrome/(\d+)`)
@@ -128,7 +131,7 @@ func randomHex(size int) string {
 }
 
 func (c *Client) commonQuery(acc *store.Account, extra url.Values) string {
-	deviceID, webID, teaUUID, _ := identityFor(acc)
+	deviceID, webID, teaUUID := identityFor(acc)
 	q := url.Values{
 		"version_code": {"20800"}, "language": {"zh"}, "device_platform": {"web"}, "doubao_device_platform": {"web"},
 		"aid": {"497858"}, "real_aid": {"497858"}, "pkg_type": {"release_version"}, "device_id": {deviceID},
@@ -196,7 +199,23 @@ func (c *Client) doJSON(ctx context.Context, method, target string, body []byte,
 	return response, nil
 }
 
-type AccountInfo struct{ UserID, Name, Avatar string }
+type AccountInfo struct{ UserID, Name string }
+
+// apply writes the observed identity onto an account and stamps the
+// verification time. Every caller that refreshes an account needs exactly this,
+// so the rule for "when is an account considered verified" lives in one place.
+func (info AccountInfo) apply(target *store.Account, now time.Time) bool {
+	if target == nil {
+		return false
+	}
+	target.UserID = info.UserID
+	if info.Name != "" {
+		target.Name = info.Name
+	}
+	target.DoubaoVerifiedAt = now
+	target.VerifiedAt = now
+	return true
+}
 
 func (c *Client) AccountInfo(ctx context.Context, jar cookieJar) (AccountInfo, error) {
 	q := "aid=497858&account_sdk_source=web&sdk_version=2.2.11-doubao.0&device_platform=web&language=zh"
@@ -211,13 +230,10 @@ func (c *Client) AccountInfo(ctx context.Context, jar cookieJar) (AccountInfo, e
 	}
 	var envelope struct {
 		Data struct {
-			UserID      json.RawMessage `json:"user_id"`
-			UserIDStr   string          `json:"user_id_str"`
-			Name        string          `json:"name"`
-			ScreenName  string          `json:"screen_name"`
-			Avatar      string          `json:"avatar_url"`
-			ErrorCode   any             `json:"error_code"`
-			Description string          `json:"description"`
+			UserID     json.RawMessage `json:"user_id"`
+			UserIDStr  string          `json:"user_id_str"`
+			Name       string          `json:"name"`
+			ScreenName string          `json:"screen_name"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &envelope); err != nil {
@@ -233,7 +249,7 @@ func (c *Client) AccountInfo(ctx context.Context, jar cookieJar) (AccountInfo, e
 	if id == "" {
 		return AccountInfo{}, fmt.Errorf("status=401: doubao cookie was rejected")
 	}
-	return AccountInfo{UserID: id, Name: first(envelope.Data.Name, envelope.Data.ScreenName), Avatar: envelope.Data.Avatar}, nil
+	return AccountInfo{UserID: id, Name: first(envelope.Data.Name, envelope.Data.ScreenName)}, nil
 }
 
 func first(values ...string) string {
@@ -246,7 +262,7 @@ func first(values ...string) string {
 }
 
 func (c *Client) createConversation(ctx context.Context, jar cookieJar, source string) (string, error) {
-	body := map[string]any{"cmd": 1100, "uplink_body": map[string]any{"create_conv_uplink_body": map[string]any{"conversation_type": 3, "participant_list": []map[string]any{{"user_id": "7338286299411103781", "user_type": 2}}}}, "sequence_id": strconv.FormatInt(time.Now().UnixMilli(), 10), "channel": 2, "version": "1"}
+	body := map[string]any{"cmd": 1100, "uplink_body": map[string]any{"create_conv_uplink_body": map[string]any{"conversation_type": 3, "participant_list": []map[string]any{{"user_id": botID, "user_type": 2}}}}, "sequence_id": strconv.FormatInt(time.Now().UnixMilli(), 10), "channel": 2, "version": "1"}
 	if source != "" {
 		body["uplink_body"].(map[string]any)["create_conv_uplink_body"].(map[string]any)["source_conversation_id"] = source
 	}
@@ -281,21 +297,9 @@ func (c *Client) createConversation(ctx context.Context, jar cookieJar, source s
 	return envelope.Downlink.Create.Info.ID, nil
 }
 
-func (c *Client) newConversation(ctx context.Context, jar cookieJar) (string, error) {
-	// Every turn continues the account's main conversation. Minting a fresh
-	// root plus sub-conversation per request doubled the IM gateway calls and
-	// kept creating new server-side sessions, which is exactly the traffic
-	// pattern the upstream risk controller scores.
-	return c.mainConversation(ctx, jar)
-}
-
-// mainConversation reuses the account's root conversation across requests.
-//
-// Creating a fresh root on every turn doubled the IM gateway calls per answer
-// (root plus sub-conversation) and kept minting new server-side sessions, which
-// is exactly the traffic pattern the upstream risk controller scores. The root
-// id is stable for an account, so caching it is both cheaper and less
-// suspicious.
+// mainConversation returns the account's root conversation, creating it once.
+// Reusing it keeps a turn to one IM call and avoids minting a new server-side
+// session per answer, which is the traffic pattern the risk controller scores.
 func (c *Client) mainConversation(ctx context.Context, jar cookieJar) (string, error) {
 	key := c.acc.ID
 	if key != 0 {
@@ -335,7 +339,7 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	if len(jar) == 0 {
 		return fmt.Errorf("status=401: doubao account is missing a cookie")
 	}
-	conversationID, err := c.newConversation(ctx, jar)
+	conversationID, err := c.mainConversation(ctx, jar)
 	if err != nil {
 		return err
 	}
@@ -419,10 +423,48 @@ func chatBody(conversationID, text, modelID string) ([]byte, error) {
 		return nil, fmt.Errorf("unknown doubao model")
 	}
 	now := time.Now().UnixMilli()
-	task := map[string]bool{"server_do_compare": true}
-	ack := map[string]bool{"need_ack_conversation": true}
-	body := map[string]any{"client_meta": map[string]any{"local_conversation_id": fmt.Sprintf("local_%d", now), "conversation_id": conversationID, "bot_id": "7338286299411103781", "last_section_id": "", "last_message_index": nil, "local_permissions": []map[string]any{{"permission_name": "ACCESS_COARSE_LOCATION", "status": 3}, {"permission_name": "ACCESS_FINE_LOCATION", "status": 3}, {"permission_name": "ACCESS_BACKGROUND_LOCATION", "status": 3}}}, "messages": []any{map[string]any{"local_message_id": randomUUID(), "content_block": []any{map[string]any{"block_type": 10000, "content": map[string]any{"text_block": map[string]any{"text": text, "icon_url": "", "icon_url_dark": "", "summary": ""}, "pc_event_block": ""}, "block_id": randomUUID(), "parent_id": "", "meta_info": []any{}, "extra_info": map[string]any{}, "append_fields": []any{}}}, "message_status": 0}}, "option": map[string]any{"create_time_ms": now, "agent_mode": model.AgentMode, "need_create_conversation": false, "conversation_init_option": ack, "conversation_init_ext": map[string]any{"model_item_key": model.ModelItemKey, "reasoning_effort": strconv.Itoa(model.ReasoningEffort), "mode_id": model.ModeID}, "sse_recv_event_options": map[string]bool{"support_chunk_delta": true}, "support_lazy_fetch_stream": true, "general_task_param": task, "model_config": map[string]any{"model_item_key": model.ModelItemKey, "model_extra_params": map[string]any{}, "reasoning_effort": model.ReasoningEffort}, "aggregate_params": map[string]string{"conversation_mode": model.ConversationMode, "mode_id": model.ModeID, "model_item_key": model.ModelItemKey, "agent_mode": strconv.Itoa(model.AgentMode), "reasoning_effort": strconv.Itoa(model.ReasoningEffort)}, "conversation_mode": atoi(model.ConversationMode)}, "user_context": []any{}, "ext": map[string]string{"agent_mode": strconv.Itoa(model.AgentMode), "use_deep_think": "0", "sub_conv_firstmet_type": "1", "general_task_param": `{"server_do_compare":true}`, "collection_id": "", "is_finish": "1", "conversation_init_option": `{"need_ack_conversation":true}`, "commerce_credit_config_enable": "0"}}
+	effort, agent := strconv.Itoa(model.ReasoningEffort), strconv.Itoa(model.AgentMode)
+	body := map[string]any{
+		"client_meta": map[string]any{
+			"local_conversation_id": fmt.Sprintf("local_%d", now), "conversation_id": conversationID,
+			"bot_id": botID, "last_section_id": "", "last_message_index": nil,
+			"local_permissions": []map[string]any{
+				{"permission_name": "ACCESS_COARSE_LOCATION", "status": 3},
+				{"permission_name": "ACCESS_FINE_LOCATION", "status": 3},
+				{"permission_name": "ACCESS_BACKGROUND_LOCATION", "status": 3},
+			},
+		},
+		"messages": []any{textMessage(text)},
+		"option": map[string]any{
+			"create_time_ms": now, "agent_mode": model.AgentMode, "need_create_conversation": false,
+			"conversation_init_option":  map[string]bool{"need_ack_conversation": true},
+			"conversation_init_ext":     map[string]any{"model_item_key": model.ModelItemKey, "reasoning_effort": effort, "mode_id": model.ModeID},
+			"sse_recv_event_options":    map[string]bool{"support_chunk_delta": true},
+			"support_lazy_fetch_stream": true,
+			"general_task_param":        map[string]bool{"server_do_compare": true},
+			"model_config":              map[string]any{"model_item_key": model.ModelItemKey, "model_extra_params": map[string]any{}, "reasoning_effort": model.ReasoningEffort},
+			"aggregate_params":          map[string]string{"conversation_mode": model.ConversationMode, "mode_id": model.ModeID, "model_item_key": model.ModelItemKey, "agent_mode": agent, "reasoning_effort": effort},
+			"conversation_mode":         atoi(model.ConversationMode),
+		},
+		"user_context": []any{},
+		"ext": map[string]string{
+			"agent_mode": agent, "use_deep_think": "0", "sub_conv_firstmet_type": "1",
+			"general_task_param": `{"server_do_compare":true}`, "collection_id": "", "is_finish": "1",
+			"conversation_init_option": `{"need_ack_conversation":true}`, "commerce_credit_config_enable": "0",
+		},
+	}
 	return json.Marshal(body)
+}
+
+func textMessage(text string) map[string]any {
+	return map[string]any{
+		"local_message_id": randomUUID(), "message_status": 0,
+		"content_block": []any{map[string]any{
+			"block_type": 10000, "block_id": randomUUID(), "parent_id": "",
+			"meta_info": []any{}, "extra_info": map[string]any{}, "append_fields": []any{},
+			"content": map[string]any{"pc_event_block": "", "text_block": map[string]any{"text": text, "icon_url": "", "icon_url_dark": "", "summary": ""}},
+		}},
+	}
 }
 
 func atoi(value string) int { parsed, _ := strconv.Atoi(value); return parsed }
@@ -500,7 +542,6 @@ func consumeStream(body io.Reader, emit func(string)) (string, error) {
 }
 
 func snapshotText(value map[string]any) string {
-	raw, _ := json.Marshal(value)
 	var walk func(any) string
 	walk = func(node any) string {
 		switch typed := node.(type) {
@@ -524,9 +565,7 @@ func snapshotText(value map[string]any) string {
 		}
 		return ""
 	}
-	var decoded any
-	_ = json.Unmarshal(raw, &decoded)
-	return walk(decoded)
+	return walk(value)
 }
 
 func upstreamStreamError(value map[string]any) error {
@@ -552,21 +591,14 @@ func upstreamStreamError(value map[string]any) error {
 // 7.10022004e+08, which silently disabled the rate-limit classification.
 func errorCodeString(value any) string {
 	switch typed := value.(type) {
-	case nil:
-		return ""
-	case string:
-		return strings.TrimSpace(typed)
 	case float64:
 		return strconv.FormatInt(int64(typed), 10)
 	case json.Number:
 		return typed.String()
-	case int:
-		return strconv.Itoa(typed)
-	case int64:
-		return strconv.FormatInt(typed, 10)
-	default:
-		return strings.TrimSpace(fmt.Sprint(value))
+	case string:
+		return strings.TrimSpace(typed)
 	}
+	return strings.TrimSpace(fmt.Sprint(value))
 }
 
 type sharkAdminDecision struct {
