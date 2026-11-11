@@ -462,7 +462,7 @@ func TestAttachmentMessagesCarryTheUploadedURI(t *testing.T) {
 func TestImageAttachmentUsesTheImageShape(t *testing.T) {
 	messages := attachmentMessages([]storeURI{{URI: "tos-cn-i-x/a.png", Name: "a.png", Size: 9, Image: true}})
 	raw, _ := json.Marshal(messages[0])
-	for _, want := range []string{`"type":2`, `"key":"tos-cn-i-x/a.png"`, `"image":{`} {
+	for _, want := range []string{`"type":1`, `"uri":"tos-cn-i-x/a.png"`, `"image_ori":{`, `"parse_state":0`} {
 		if !strings.Contains(string(raw), want) {
 			t.Fatalf("image attachment missing %s: %s", want, raw)
 		}
