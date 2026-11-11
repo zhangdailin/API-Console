@@ -1,11 +1,13 @@
 package doubao
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -54,8 +56,9 @@ func (e *verificationRequired) Error() string {
 
 var challenges = struct {
 	sync.Mutex
-	byAccount map[int64]recordedChallenge
-}{byAccount: map[int64]recordedChallenge{}}
+	byAccount    map[int64]recordedChallenge
+	fingerprints map[int64]string
+}{byAccount: map[int64]recordedChallenge{}, fingerprints: map[int64]string{}}
 
 type recordedChallenge struct {
 	decision sharkAdminDecision
@@ -95,10 +98,54 @@ func verification(acc *store.Account) (provider.Verification, bool) {
 		return provider.Verification{}, false
 	}
 	return provider.Verification{
-		URL:        verificationURL(acc.DoubaoDeviceID, decodeCookies(acc.ClientCookie)["s_v_web_id"], recorded.decision),
+		URL:        verificationURL(acc.DoubaoDeviceID, verifyFingerprint(acc), recorded.decision),
 		Kind:       recorded.decision.summary(),
 		ObservedAt: recorded.at,
 	}, true
+}
+
+// verifyFingerprint returns the fp the verification page is opened with. The
+// captcha service refuses a challenge without one ("参数错误[5005]"). A session
+// exported from a browser carries it as the s_v_web_id cookie; a QR-login
+// session has none, so one is minted the way the SDK mints it for a first
+// visit and kept for the life of the process, so every link for the account
+// names the same browser.
+func verifyFingerprint(acc *store.Account) string {
+	if fp := strings.TrimSpace(decodeCookies(acc.ClientCookie)["s_v_web_id"]); fp != "" {
+		return fp
+	}
+	challenges.Lock()
+	defer challenges.Unlock()
+	if fp := challenges.fingerprints[acc.ID]; fp != "" {
+		return fp
+	}
+	fp := newVerifyFingerprint(time.Now())
+	challenges.fingerprints[acc.ID] = fp
+	return fp
+}
+
+// newVerifyFingerprint mints an fp in the SDK's format: "verify_", the
+// millisecond clock in base 36, and a 36-character UUID-shaped random part
+// drawn from [0-9A-Za-z] with "_" separators.
+func newVerifyFingerprint(now time.Time) string {
+	const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+	var seed [36]byte
+	_, _ = rand.Read(seed[:])
+	part := make([]byte, 36)
+	for index := range part {
+		pick := int(seed[index]) % len(alphabet)
+		switch index {
+		case 8, 13, 18, 23:
+			part[index] = '_'
+		case 14:
+			part[index] = '4'
+		case 19:
+			part[index] = alphabet[pick&3|8]
+		default:
+			part[index] = alphabet[pick]
+		}
+	}
+	return "verify_" + strconv.FormatInt(now.UnixMilli(), 36) + "_" + string(part)
 }
 
 // verificationURL renders the page the web client's SDK opens for a decision.

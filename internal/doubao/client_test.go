@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -591,6 +592,17 @@ func TestVerificationLinkForARecordedChallenge(t *testing.T) {
 	testutil.Equal(t, query.Get("verify_data"), `{"subtype":"semantic_reasoning","detail":"tok en+/=","log_id":"log-1","verify_scene":"chat","login_status":1}`)
 	// The SDK encodes with encodeURIComponent: a space is %20, never "+".
 	testutil.False(t, strings.Contains(link.URL, "+"), "query used form encoding: "+link.URL)
+
+	// A QR-login session has no s_v_web_id. The captcha service refuses a
+	// challenge without an fp, so one is minted in the SDK's format and kept.
+	bare := &store.Account{ID: acc.ID, DoubaoDeviceID: acc.DoubaoDeviceID, ClientCookie: `{"sessionid":"x"}`}
+	minted, ok := verification(bare)
+	testutil.True(t, ok, "no link for a session without s_v_web_id")
+	mintedURL, _ := url.Parse(minted.URL)
+	fp := mintedURL.Query().Get("fp")
+	testutil.True(t, regexp.MustCompile(`^verify_[0-9a-z]+_[0-9A-Za-z]{8}_[0-9A-Za-z]{4}_4[0-9A-Za-z]{3}_[89AB][0-9A-Za-z]{3}_[0-9A-Za-z]{12}$`).MatchString(fp), "minted fp = "+fp)
+	again, _ := verification(bare)
+	testutil.Equal(t, again.URL, minted.URL)
 
 	// No stored identity means no page to bind the challenge to.
 	_, ok = verification(&store.Account{ID: acc.ID})
