@@ -68,19 +68,6 @@ type Admin struct {
 	// Login is the channel's browser authorization flow, or nil when the
 	// channel is not added that way.
 	Login *Login
-
-	// Verification returns the official page on which the operator can answer
-	// a challenge the upstream put in front of the account, or false when
-	// there is none to offer. Nil means the channel has no such challenge.
-	Verification func(acc *store.Account) (Verification, bool)
-}
-
-// Verification is an upstream challenge only a person can answer. URL is the
-// upstream's own page; the gateway opens nothing and solves nothing.
-type Verification struct {
-	URL        string    `json:"url"`
-	Kind       string    `json:"kind"`
-	ObservedAt time.Time `json:"observed_at"`
 }
 
 // Login is a browser or device authorization flow: open an official page, poll

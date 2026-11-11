@@ -124,7 +124,6 @@ Chat 桥接写递增 sequence_number，便于客户端识别顺序；当前没�
 | `/api/providers` | GET 当前提供者注册表 |
 | `/api/accounts` | GET 列表、POST 创建；各通道创建限制以授权路径为准 |
 | `/api/accounts/{id}` | GET / PUT / DELETE；账号编辑及刷新分支以处理器为准 |
-| `/api/accounts/{id}/verification` | GET；账号被上游要求人机验证时，返回上游官方验证页地址（`url`、`kind`、`observed_at`），由操作员在浏览器中手动完成。目前仅 Doubao 提供；没有记录到 30 分钟内的挑战时返回 404。挑战只保存在进程内存中，重启后需重新触发 |
 | `/api/keys` | GET 列表、POST 创建 |
 | `/api/keys/{id}` | PATCH 策略、DELETE 删除 |
 | `/api/keys/{id}/secret` | GET 管理员按需读取完整秘密，禁止缓存；内容不可用返回 503 |

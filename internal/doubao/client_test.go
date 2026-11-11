@@ -10,8 +10,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -556,68 +554,20 @@ func TestEmitToolOrTextKeepsProseWithBraces(t *testing.T) {
 	testutil.Equal(t, got[0].Event["delta"], any("use {city} as the key"))
 }
 
-// A verify challenge is recorded for the account and offered as the upstream's
-// own page, bound to the stored device identity; nothing else may trigger it.
-func TestVerificationLinkForARecordedChallenge(t *testing.T) {
-	decision := `{\"from\":\"shark_admin\",\"type\":\"verify\",\"subtype\":\"semantic_reasoning\",\"detail\":\"tok en+/=\",\"log_id\":\"log-1\",\"verify_scene\":\"chat\"}`
+// A verify challenge is recognised in both shapes the upstream sends its
+// decision in, and worded so the account policy parks the account.
+func TestStreamErrorRecognisesAVerifyChallenge(t *testing.T) {
+	decision := `{\"from\":\"shark_admin\",\"type\":\"verify\",\"subtype\":\"semantic_reasoning\",\"detail\":\"d\"}`
 	var asString, asObject map[string]any
 	testutil.NoError(t, json.Unmarshal([]byte(`{"error_code":710022004,"extra":{"decision":"`+decision+`"}}`), &asString))
 	testutil.NoError(t, json.Unmarshal([]byte(`{"error_code":710022004,"extra":{"decision":{"from":"shark_admin","type":"verify","detail":"d"}}}`), &asObject))
 	testutil.True(t, sharkDecision(asObject).needsVerification(), "an object decision was not read")
 
-	acc := &store.Account{ID: 9101, DoubaoDeviceID: "7500000000000000001", ClientCookie: `{"sessionid":"x","s_v_web_id":"verify_fp_1"}`}
-	_, ok := verification(acc)
-	testutil.False(t, ok, "a link was offered with no challenge recorded")
-
-	noteChallenge(acc.ID, fmt.Errorf("status=429: doubao upstream rate limited"))
-	_, ok = verification(acc)
-	testutil.False(t, ok, "a rate limit was recorded as a challenge")
-
 	err := upstreamStreamError(asString)
 	testutil.MustContain(t, err.Error(), "requires human verification")
-	noteChallenge(acc.ID, fmt.Errorf("wrapped: %w", err))
-	link, ok := verification(acc)
-	testutil.True(t, ok, "the recorded challenge was not offered")
-	testutil.Equal(t, link.Kind, "shark_admin/verify/semantic_reasoning")
-	parsed, parseErr := url.Parse(link.URL)
-	testutil.NoError(t, parseErr)
-	// The page lives on the SDK's iframe host; the verify service is only the
-	// `host` parameter, and answers 404 when opened as a page.
-	testutil.Equal(t, parsed.Scheme+"://"+parsed.Host+parsed.Path, "https://rmc.bytedance.com/verifycenter/captcha/v2")
-	query := parsed.Query()
-	testutil.Equal(t, query.Get("host"), "https://verify.zijieapi.com")
-	testutil.Equal(t, query.Get("fp"), "verify_fp_1")
-	testutil.Equal(t, query.Get("did"), acc.DoubaoDeviceID)
-	testutil.Equal(t, query.Get("aid"), "497858")
-	testutil.Equal(t, query.Get("verify_data"), `{"subtype":"semantic_reasoning","detail":"tok en+/=","log_id":"log-1","verify_scene":"chat","login_status":1}`)
-	// The SDK encodes with encodeURIComponent: a space is %20, never "+".
-	testutil.False(t, strings.Contains(link.URL, "+"), "query used form encoding: "+link.URL)
-
-	// A QR-login session has no s_v_web_id. The captcha service refuses a
-	// challenge without an fp, so one is minted in the SDK's format and kept.
-	bare := &store.Account{ID: acc.ID, DoubaoDeviceID: acc.DoubaoDeviceID, ClientCookie: `{"sessionid":"x"}`}
-	minted, ok := verification(bare)
-	testutil.True(t, ok, "no link for a session without s_v_web_id")
-	mintedURL, _ := url.Parse(minted.URL)
-	fp := mintedURL.Query().Get("fp")
-	testutil.True(t, regexp.MustCompile(`^verify_[0-9a-z]+_[0-9A-Za-z]{8}_[0-9A-Za-z]{4}_4[0-9A-Za-z]{3}_[89AB][0-9A-Za-z]{3}_[0-9A-Za-z]{12}$`).MatchString(fp), "minted fp = "+fp)
-	again, _ := verification(bare)
-	testutil.Equal(t, again.URL, minted.URL)
-
-	// No stored identity means no page to bind the challenge to.
-	_, ok = verification(&store.Account{ID: acc.ID})
-	testutil.False(t, ok, "a link was offered without a device identity")
-
-	// A stale decision is not offered, and an answered turn clears it.
-	challenges.Lock()
-	challenges.byAccount[acc.ID] = recordedChallenge{decision: sharkDecision(asString), at: time.Now().Add(-challengeTTL - time.Minute)}
-	challenges.Unlock()
-	_, ok = verification(acc)
-	testutil.False(t, ok, "an expired challenge was offered")
-	noteChallenge(acc.ID, err)
-	clearChallenge(acc.ID)
-	_, ok = verification(acc)
-	testutil.False(t, ok, "a cleared challenge was offered")
+	testutil.MustContain(t, err.Error(), "shark_admin/verify/semantic_reasoning")
+	// The gateway offers no verification page, so the refusal must not point at one.
+	testutil.False(t, strings.Contains(err.Error(), "account list"), "refusal names a verification page: "+err.Error())
 }
 
 // A challenge refused before the stream opens arrives as an error body; it

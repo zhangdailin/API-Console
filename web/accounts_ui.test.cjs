@@ -911,14 +911,3 @@ test('account and configuration management omit retired check-in controls and re
     assert.doesNotMatch(source, /签到|autoCheckin|checkin_supported|checkinAccount|\/checkin/);
   }
 });
-
-test('a parked account offers the official verification page', () => {
-  const source = fs.readFileSync(path.join(__dirname, 'static/js/accounts.js'), 'utf8');
-  // The button exists only for the server's human-verification verdict …
-  assert.match(source, /includes\("requires human verification"\)/);
-  assert.match(source, /if \(needsHumanVerification\(acc\)\) \{[\s\S]*?dataset\.action = "verify"/);
-  // … asks the server for the page instead of building it in the browser …
-  assert.match(source, /ConsoleAPI\.json\(`\/api\/accounts\/\$\{id\}\/verification`\)/);
-  // … and never hands the opened page a reference back to the console.
-  assert.match(source, /tab\.opener = null/);
-});

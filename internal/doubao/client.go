@@ -424,9 +424,7 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	defer response.Body.Close()
 	if response.StatusCode >= 400 {
 		raw, _ := io.ReadAll(io.LimitReader(response.Body, 8192))
-		err := statusError(response.StatusCode, raw)
-		noteChallenge(c.acc.ID, err)
-		return err
+		return statusError(response.StatusCode, raw)
 	}
 	text, err := consumeStream(response.Body, func(delta string) {
 		if !toolMode && onMessage != nil {
@@ -434,11 +432,7 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 		}
 	})
 	if err != nil {
-		noteChallenge(c.acc.ID, err)
 		return err
-	}
-	if text != "" {
-		clearChallenge(c.acc.ID)
 	}
 	if text == "" {
 		slog.Warn("doubao answer was empty", "account_id", c.acc.ID, "model", req.Model, "attachments", len(attachments))

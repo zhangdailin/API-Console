@@ -735,16 +735,6 @@ function renderAccounts() {
     setActionContent(del, "delete", "删除");
 
     actionWrap.appendChild(edit);
-    if (needsHumanVerification(acc)) {
-      const verify = document.createElement("button");
-      verify.type = "button";
-      verify.className = "action-icon";
-      verify.dataset.action = "verify";
-      verify.dataset.id = encodeData(acc.id);
-      verify.title = "打开官方页面完成人机验证";
-      setActionContent(verify, "verify", "验证");
-      actionWrap.appendChild(verify);
-    }
     actionWrap.appendChild(refresh);
     actionWrap.appendChild(del);
     tdActions.appendChild(actionWrap);
@@ -772,31 +762,7 @@ const ACTION_ICONS = {
   edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
   refresh: '<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>',
   delete: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 14H6L5 6"/>',
-  verify: '<path d="M12 3 4 6v6c0 5 3.4 8 8 9 4.6-1 8-4 8-9V6Z"/><path d="m9 12 2 2 4-4"/>',
 };
-
-// needsHumanVerification reports an account the upstream parked behind a
-// challenge only a person can answer. The server words the reason this way.
-function needsHumanVerification(acc) {
-  return String(acc && acc.status_message || "").includes("requires human verification");
-}
-
-// openVerification opens the upstream's own verification page for the account.
-// The tab is opened before the request so the browser treats it as a click,
-// and is closed again when there is no page to show.
-async function openVerification(id) {
-  const tab = window.open("about:blank", "_blank");
-  if (tab) tab.opener = null;
-  try {
-    const challenge = await ConsoleAPI.json(`/api/accounts/${id}/verification`);
-    if (!challenge || !challenge.url) throw new Error("没有可用的验证页面");
-    if (tab) tab.location.href = challenge.url; else window.location.href = challenge.url;
-    showToast("已打开官方验证页面，完成后点击「刷新」并重新发起一次请求", "info");
-  } catch (err) {
-    if (tab) tab.close();
-    showToast("无法获取验证页面：" + (err.message || err) + "。请先通过该账号发起一次请求，再重试", "error");
-  }
-}
 
 // setActionContent gives a row action its icon and keeps the word as text, so
 // the list view and assistive technology still read 编辑 / 刷新 / 删除.
@@ -1087,7 +1053,6 @@ function bindAccountActions(container) {
     const id = parseDataId(actionEl.dataset.id || "");
     if (actionEl.dataset.action === "edit") editAccount(id);
     if (actionEl.dataset.action === "refresh") refreshToken(id);
-    if (actionEl.dataset.action === "verify") openVerification(id);
     if (actionEl.dataset.action === "delete") deleteAccount(id);
   };
   container.onchange = (e) => {

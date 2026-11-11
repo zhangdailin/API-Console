@@ -66,6 +66,5 @@ func adminPort() *provider.Admin {
 			return "", 200, nil
 		},
 		ErrMissingCredential: ErrMissingCookie, Login: loginPort(),
-		Verification: verification,
 	}
 }
