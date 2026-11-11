@@ -43,7 +43,7 @@ func (q *qrLogin) LoginPayload() (string, string, time.Time) {
 	if err != nil {
 		return "", q.target, q.expires
 	}
-	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(png), q.target, q.expires
+	return pngDataURL(png), q.target, q.expires
 }
 
 func loginPort() *provider.Login {
@@ -73,7 +73,11 @@ func startLogin(ctx context.Context, cfg *config.Config) (provider.LoginChalleng
 		return provider.LoginChallenge{}, err
 	}
 	state := &qrLogin{client: client, jar: jar, token: qr.token, base: qr.base, target: qr.target, expires: qr.expires, deviceID: deviceID, webID: webID, teaUUID: teaUUID}
-	return provider.LoginChallenge{DeviceCode: qr.token, VerifyURI: qr.target, VerifyFull: qr.target, QRCode: "data:image/png;base64," + base64.StdEncoding.EncodeToString(png), ExpiresAt: qr.expires, Interval: 1300 * time.Millisecond, Private: state}, nil
+	return provider.LoginChallenge{DeviceCode: qr.token, VerifyURI: qr.target, VerifyFull: qr.target, QRCode: pngDataURL(png), ExpiresAt: qr.expires, Interval: 1300 * time.Millisecond, Private: state}, nil
+}
+
+func pngDataURL(png []byte) string {
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)
 }
 
 type qrResponse struct {

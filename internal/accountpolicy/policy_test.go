@@ -15,6 +15,21 @@ func grokBuildAccount() *store.Account {
 	return &store.Account{ID: 1, AccountType: "grok", CredentialType: "oauth", GrokProvider: "build", OAuthAccessToken: "token"}
 }
 
+// A browser verification challenge cannot be cleared by replaying the call, so
+// the request fails fast and the account is parked instead of being hammered.
+func TestClassify_HumanVerificationFailsFastAndParksTheAccount(t *testing.T) {
+	acc := &store.Account{ID: 451, AccountType: "doubao"}
+	v := Classify(acc, errors.New("status=403: doubao account requires human verification: open doubao.com with this account and complete the challenge (710022004 shark_admin/verify/semantic_reasoning)"), "doubao")
+
+	testutil.False(t, v.Retryable)
+	testutil.False(t, v.SwitchAccount)
+	testutil.Equal(t, v.Scope, ScopeAccount)
+	testutil.Equal(t, v.Cooldown, CooldownVerification)
+	v.Apply(acc)
+	testutil.Equal(t, acc.StatusCode, "429")
+	testutil.True(t, acc.QuotaResetAt.After(time.Now()), "the account must be held until the challenge window expires")
+}
+
 // TestClassify_RefusedCredentialNeedsLogin pins the verdict for a OAuth credential the
 // upstream refused: the account is held, the operator is told to re-login, and
 // the reason is persisted together with the status.

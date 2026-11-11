@@ -17,6 +17,7 @@ import (
 
 	"orchids-api/internal/alerting"
 	"orchids-api/internal/audit"
+	channelpkg "orchids-api/internal/channel"
 	"orchids-api/internal/opsagg"
 	"orchids-api/internal/pricing"
 )
@@ -47,7 +48,15 @@ func IsProviderChannel(channel string) bool {
 	if name == "" {
 		return false
 	}
-	return !nonProviderChannels[name]
+	if nonProviderChannels[name] {
+		return false
+	}
+	// Channels excluded from the live traffic screen are not offered as
+	// provider columns there either, so one dashboard keeps one channel set.
+	if id, ok := channelpkg.Parse(name); ok {
+		return channelpkg.FlowVisible(id)
+	}
+	return true
 }
 
 // alertingSuccessTargetSource names where the target comes from. The page shows

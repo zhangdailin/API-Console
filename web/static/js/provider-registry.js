@@ -2,10 +2,10 @@
 (() => {
   "use strict";
   const providers = Object.freeze([
-    Object.freeze({"key":"workbuddy","label":"WorkBuddy","apiPrefix":"/workbuddy/v1","generic":true,"default":true,"theme":"orange","accountCreate":"browser"}),
-    Object.freeze({"key":"cline","label":"Cline","apiPrefix":"/cline/v1","generic":true,"theme":"blue","accountCreate":"browser"}),
-    Object.freeze({"key":"grok","label":"Grok","apiPrefix":"/grok/v1","generic":false,"theme":"red","accountCreate":"browser"}),
-    Object.freeze({"key":"doubao","label":"Doubao","apiPrefix":"/doubao/v1","generic":true,"theme":"green","accountCreate":"browser"}),
+    Object.freeze({"key":"workbuddy","label":"WorkBuddy","apiPrefix":"/workbuddy/v1","generic":true,"default":true,"theme":"orange","accountCreate":"browser","flowVisible":true}),
+    Object.freeze({"key":"cline","label":"Cline","apiPrefix":"/cline/v1","generic":true,"theme":"blue","accountCreate":"browser","flowVisible":true}),
+    Object.freeze({"key":"grok","label":"Grok","apiPrefix":"/grok/v1","generic":false,"theme":"red","accountCreate":"browser","flowVisible":true}),
+    Object.freeze({"key":"doubao","label":"Doubao","apiPrefix":"/doubao/v1","generic":true,"theme":"green","accountCreate":"browser","chatOnly":true,"flowVisible":false}),
   ]);
   const byKey = Object.freeze(Object.fromEntries(providers.map((item) => [item.key, item])));
   window.OrchidsProviderRegistry = Object.freeze({

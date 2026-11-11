@@ -14,6 +14,13 @@ func TestClassifyUpstreamError(t *testing.T) {
 		wantSwitch   bool
 	}{
 		{
+			name:         "human verification is an account challenge that is not retryable",
+			errStr:       "status=403: doubao account requires human verification: open doubao.com with this account and complete the challenge",
+			wantCategory: "verification_required",
+			wantRetry:    false,
+			wantSwitch:   false,
+		},
+		{
 			name:         "model not found is client error",
 			errStr:       "workbuddy API error: message=Model not found, please try another model",
 			wantCategory: "client",

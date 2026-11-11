@@ -44,6 +44,10 @@ const (
 	CooldownBlocked    = 24 * time.Hour
 	CooldownBlockedGro = 10 * time.Minute
 	CooldownTransient  = 5 * time.Minute
+	// CooldownVerification covers an interactive browser challenge. It is short
+	// enough that finishing the challenge restores service promptly and long
+	// enough that automated retries stop deepening the risk window.
+	CooldownVerification = 5 * time.Minute
 
 	// CredentialReverify is how long a credential the upstream refused is kept
 	// out of the refresh rotation before it is re-asked once, in case the
@@ -174,6 +178,14 @@ func Classify(acc *store.Account, err error, model string) Verdict {
 	message := strings.TrimSpace(err.Error())
 	lower := strings.ToLower(message)
 	now := time.Now()
+	// A browser challenge is an account fact that no replay can clear. Park the
+	// account for a short window so the pool stops hammering the risk controller
+	// and the operator gets a 403 that names the required action, while a
+	// completed challenge becomes usable again without an admin reset.
+	if strings.Contains(lower, "requires human verification") {
+		return Verdict{Status: "429", Message: message, Scope: ScopeAccount,
+			Retryable: false, SwitchAccount: false, Cooldown: CooldownVerification, At: now}
+	}
 	if strings.EqualFold(accountType(acc), "workbuddy") && apperrors.IsWorkBuddyRestricted(message) {
 		return Verdict{Status: "403", Message: message, Scope: ScopeAccount,
 			Retryable: true, SwitchAccount: true, Cooldown: store.WorkBuddyRestrictionCooldown, At: now}

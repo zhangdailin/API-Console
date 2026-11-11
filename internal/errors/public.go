@@ -24,12 +24,13 @@ func CategoryMessage(category string) string { return messageForCategory(categor
 // it stops), 401 for a credential it must replace, 400 for a request the upstream
 // rejected on its merits, and 5xx for the gateway's or the upstream's own fault.
 var publicStatusForCategory = map[string]int{
-	"quota_exhausted":    http.StatusTooManyRequests,
-	"rate_limit":         http.StatusTooManyRequests,
-	"auth":               http.StatusUnauthorized,
-	"auth_blocked":       http.StatusUnauthorized,
-	"account_restricted": http.StatusForbidden,
-	"client":             http.StatusBadRequest,
+	"quota_exhausted":       http.StatusTooManyRequests,
+	"rate_limit":            http.StatusTooManyRequests,
+	"auth":                  http.StatusUnauthorized,
+	"auth_blocked":          http.StatusUnauthorized,
+	"account_restricted":    http.StatusForbidden,
+	"verification_required": http.StatusForbidden,
+	"client":                http.StatusBadRequest,
 	// The caller closed the connection before an answer existed. 499 is the
 	// conventional (nginx) status for it; nobody receives the body.
 	"client_closed":             499,
@@ -65,6 +66,7 @@ var messageForCategoryTable = map[string]string{
 	"auth":                      "The upstream account session has expired. Re-authenticate the account and retry.",
 	"auth_blocked":              "The upstream account is not allowed to use this feature. Check its plan and permissions.",
 	"account_restricted":        "The upstream account is restricted due to unusual activity. Requests are skipped during its restriction window; check the account in the official client or submit an appeal.",
+	"verification_required":     "The upstream account needs human verification. Open the provider's web app with this account, complete the challenge, then retry.",
 	"quota_exhausted":           "The available upstream accounts have exhausted their quota. Retry after the quota resets or add capacity.",
 	"rate_limit":                "The available upstream accounts are rate-limited. Retry after the cooldown.",
 	"model_unavailable":         "The requested model is unavailable for the selected upstream accounts.",

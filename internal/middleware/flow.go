@@ -79,7 +79,7 @@ type FlowSnapshot struct {
 
 func NewFlowTracker() *FlowTracker {
 	t := &FlowTracker{startedAt: time.Now(), routes: make(map[string]*flowRouteState), subscribers: make(map[chan struct{}]struct{})}
-	for _, def := range channel.All() {
+	for _, def := range channel.FlowDefinitions() {
 		for _, protocol := range []string{"chat", "responses", "messages"} {
 			key := string(def.ID) + ":" + protocol
 			t.routes[key] = &flowRouteState{FlowRoute: FlowRoute{Channel: string(def.ID), Protocol: protocol}, activeRequests: make(map[*flowRequest]struct{})}
@@ -115,6 +115,13 @@ func (t *FlowTracker) Track(next http.HandlerFunc) http.HandlerFunc {
 		request := &flowRequest{started: time.Now()}
 		t.mu.Lock()
 		route := t.routes[key]
+		if route == nil {
+			// A channel kept out of the live traffic screen is not tracked at
+			// all, so its requests pass through without counters.
+			t.mu.Unlock()
+			next(w, r)
+			return
+		}
 		route.activeRequests[request] = struct{}{}
 		route.Active++
 		route.Started++
@@ -237,7 +244,7 @@ func (t *FlowTracker) Snapshot(scope string) FlowSnapshot {
 	snapshot.SampleLimit = flowSampleLimit
 	snapshot.Nodes = make(map[string]FlowMetrics)
 	nodes := make(map[string]*flowMetricBuilder)
-	for _, def := range channel.All() {
+	for _, def := range channel.FlowDefinitions() {
 		if scope != "" && scope != string(def.ID) {
 			continue
 		}

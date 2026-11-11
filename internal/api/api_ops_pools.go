@@ -59,6 +59,11 @@ func (a *API) HandleOpsPools(w http.ResponseWriter, r *http.Request) {
 		if scope != "" && scope != name {
 			continue
 		}
+		// The live traffic screen owns a fixed channel set; a channel it does not
+		// render has no capacity row here either.
+		if scope == "" && !def.FlowVisible {
+			continue
+		}
 		pool := poolstate.Counts(accounts, name, now, poolstate.NeedingLoginRefused)
 		row := map[string]any{"channel": name, "accounts_enabled": pool.Enabled, "accounts_available": pool.Available, "accounts_needing_login": pool.NeedingLogin, "model_cooldowns": pool.ModelCooldowns, "capacity_available": false, "concurrency_available": checked}
 		if checked {

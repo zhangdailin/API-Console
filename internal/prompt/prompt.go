@@ -29,6 +29,11 @@ type ContentBlock struct {
 	Text      string       `json:"text,omitempty"`
 	Source    *ImageSource `json:"source,omitempty"`
 	URL       string       `json:"url,omitempty"`
+	// FileData is the inline payload an input_file/file part carries, and Name
+	// is its filename. Providers that upload attachments read these; text-only
+	// providers ignore them.
+	FileData string `json:"file_data,omitempty"`
+	FileName string `json:"filename,omitempty"`
 
 	// tool_use fields
 	ID        string `json:"id,omitempty"`

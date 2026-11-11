@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
-	"orchids-api/internal/config"
 	"orchids-api/internal/provider"
 	"orchids-api/internal/store"
 	"orchids-api/internal/util"
@@ -62,15 +62,9 @@ func adminPort() *provider.Admin {
 				}
 				return "", 502, err
 			}
-			acc.UserID = info.UserID
-			if info.Name != "" {
-				acc.Name = info.Name
-			}
+			info.apply(acc, time.Now())
 			return "", 200, nil
 		},
 		ErrMissingCredential: ErrMissingCookie, Login: loginPort(),
 	}
 }
-
-var _ = context.Background
-var _ = config.Config{}

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -28,6 +29,9 @@ const (
 	defaultBaseURL     = "https://www.doubao.com"
 	defaultAccountsURL = "https://accounts.doubao.com"
 	defaultUserAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+	// botID is the assistant the web client addresses; it is fixed for the
+	// public Doubao bot and appears in both the conversation and chat bodies.
+	botID = "7338286299411103781"
 )
 
 var chromeVersion = regexp.MustCompile(`Chrome/(\d+)`)
@@ -96,9 +100,13 @@ func (c *Client) headers(jar cookieJar, passport bool) http.Header {
 	h.Set("Sec-Ch-Ua", `"Google Chrome";v="`+major+`", "Chromium";v="`+major+`", "Not_A Brand";v="24"`)
 	h.Set("Sec-Ch-Ua-Mobile", "?0")
 	h.Set("Sec-Ch-Ua-Platform", `"Windows"`)
+	h.Set("Priority", "u=1, i")
 	h.Set("X-Flow-Trace", "04-"+randomHex(12)+"-"+randomHex(8)+"-01")
 	h.Set("Agw-Js-Conv", "str, str")
-	if cookie := jar.header(!passport); cookie != "" {
+	// Passport endpoints reject requests that carry the CSRF cookie itself
+	// (2035). It is sent as the X-Tt-Passport-Csrf-Token header instead, so the
+	// cookie is filtered on every endpoint.
+	if cookie := jar.header(true); cookie != "" {
 		h.Set("Cookie", cookie)
 	}
 	if passport {
@@ -124,7 +132,7 @@ func randomHex(size int) string {
 }
 
 func (c *Client) commonQuery(acc *store.Account, extra url.Values) string {
-	deviceID, webID, teaUUID, _ := identityFor(acc)
+	deviceID, webID, teaUUID := identityFor(acc)
 	q := url.Values{
 		"version_code": {"20800"}, "language": {"zh"}, "device_platform": {"web"}, "doubao_device_platform": {"web"},
 		"aid": {"497858"}, "real_aid": {"497858"}, "pkg_type": {"release_version"}, "device_id": {deviceID},
@@ -146,14 +154,37 @@ func randomUUID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", raw[:4], raw[4:6], raw[6:8], raw[8:10], raw[10:])
 }
 
+// fingerprintQuery mirrors the web client: a jar created from a browser export
+// carries s_v_web_id, and the request must present the same value as fp or the
+// gateway treats the session and the request as coming from different devices.
+func fingerprintQuery(jar cookieJar) url.Values {
+	if fp := strings.TrimSpace(jar["s_v_web_id"]); fp != "" {
+		return url.Values{"fp": {fp}}
+	}
+	return nil
+}
+
 func (c *Client) do(ctx context.Context, method, target string, body []byte, jar cookieJar, passport bool) (*http.Response, error) {
+	return c.doJSON(ctx, method, target, body, jar, passport, "application/json", "")
+}
+
+// doJSON sends a request with an explicit JSON content type.
+//
+// The IM gateway inspects the content type and rejects application/json with
+// status 712012002 "unsupported encoding type". The web client sends
+// `application/json; encoding=utf-8` for /im/* calls while /chat/completion
+// keeps plain application/json, so the value cannot be set globally.
+func (c *Client) doJSON(ctx context.Context, method, target string, body []byte, jar cookieJar, passport bool, contentType, accept string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, method, target, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	req.Header = c.headers(jar, passport)
 	if len(body) > 0 && !passport {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", contentType)
+	}
+	if accept != "" {
+		req.Header.Set("Accept", accept)
 	}
 	response, err := c.http.Do(req)
 	if err != nil || response == nil {
@@ -169,7 +200,23 @@ func (c *Client) do(ctx context.Context, method, target string, body []byte, jar
 	return response, nil
 }
 
-type AccountInfo struct{ UserID, Name, Avatar string }
+type AccountInfo struct{ UserID, Name string }
+
+// apply writes the observed identity onto an account and stamps the
+// verification time. Every caller that refreshes an account needs exactly this,
+// so the rule for "when is an account considered verified" lives in one place.
+func (info AccountInfo) apply(target *store.Account, now time.Time) bool {
+	if target == nil {
+		return false
+	}
+	target.UserID = info.UserID
+	if info.Name != "" {
+		target.Name = info.Name
+	}
+	target.DoubaoVerifiedAt = now
+	target.VerifiedAt = now
+	return true
+}
 
 func (c *Client) AccountInfo(ctx context.Context, jar cookieJar) (AccountInfo, error) {
 	q := "aid=497858&account_sdk_source=web&sdk_version=2.2.11-doubao.0&device_platform=web&language=zh"
@@ -184,13 +231,10 @@ func (c *Client) AccountInfo(ctx context.Context, jar cookieJar) (AccountInfo, e
 	}
 	var envelope struct {
 		Data struct {
-			UserID      json.RawMessage `json:"user_id"`
-			UserIDStr   string          `json:"user_id_str"`
-			Name        string          `json:"name"`
-			ScreenName  string          `json:"screen_name"`
-			Avatar      string          `json:"avatar_url"`
-			ErrorCode   any             `json:"error_code"`
-			Description string          `json:"description"`
+			UserID     json.RawMessage `json:"user_id"`
+			UserIDStr  string          `json:"user_id_str"`
+			Name       string          `json:"name"`
+			ScreenName string          `json:"screen_name"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &envelope); err != nil {
@@ -206,7 +250,7 @@ func (c *Client) AccountInfo(ctx context.Context, jar cookieJar) (AccountInfo, e
 	if id == "" {
 		return AccountInfo{}, fmt.Errorf("status=401: doubao cookie was rejected")
 	}
-	return AccountInfo{UserID: id, Name: first(envelope.Data.Name, envelope.Data.ScreenName), Avatar: envelope.Data.Avatar}, nil
+	return AccountInfo{UserID: id, Name: first(envelope.Data.Name, envelope.Data.ScreenName)}, nil
 }
 
 func first(values ...string) string {
@@ -219,12 +263,13 @@ func first(values ...string) string {
 }
 
 func (c *Client) createConversation(ctx context.Context, jar cookieJar, source string) (string, error) {
-	body := map[string]any{"cmd": 1100, "uplink_body": map[string]any{"create_conv_uplink_body": map[string]any{"conversation_type": 3, "participant_list": []map[string]any{{"user_id": "7338286299411103781", "user_type": 2}}}}, "sequence_id": strconv.FormatInt(time.Now().UnixMilli(), 10), "channel": 2, "version": "1"}
+	body := map[string]any{"cmd": 1100, "uplink_body": map[string]any{"create_conv_uplink_body": map[string]any{"conversation_type": 3, "participant_list": []map[string]any{{"user_id": botID, "user_type": 2}}}}, "sequence_id": strconv.FormatInt(time.Now().UnixMilli(), 10), "channel": 2, "version": "1"}
 	if source != "" {
 		body["uplink_body"].(map[string]any)["create_conv_uplink_body"].(map[string]any)["source_conversation_id"] = source
 	}
 	raw, _ := json.Marshal(body)
-	response, err := c.do(ctx, http.MethodPost, c.baseURL()+"/im/conversation/create?"+c.commonQuery(c.acc, nil), raw, jar, false)
+	query := c.commonQuery(c.acc, fingerprintQuery(jar))
+	response, err := c.doJSON(ctx, http.MethodPost, c.baseURL()+"/im/conversation/create?"+query, raw, jar, false, "application/json; encoding=utf-8", "")
 	if err != nil {
 		return "", err
 	}
@@ -244,18 +289,89 @@ func (c *Client) createConversation(ctx context.Context, jar cookieJar, source s
 			} `json:"create_conv_downlink_body"`
 		} `json:"downlink_body"`
 	}
-	if json.Unmarshal(answer, &envelope) != nil || envelope.StatusCode != 0 || envelope.Downlink.Create.Info.ID == "" {
-		return "", fmt.Errorf("doubao conversation creation failed: %s", envelope.StatusDesc)
+	if err := json.Unmarshal(answer, &envelope); err != nil {
+		return "", fmt.Errorf("doubao conversation creation returned non-JSON (status=%d): %s", response.StatusCode, compactError(string(answer)))
+	}
+	if envelope.StatusCode != 0 || envelope.Downlink.Create.Info.ID == "" {
+		return "", fmt.Errorf("doubao conversation creation failed: status_code=%d status_desc=%s", envelope.StatusCode, compactError(envelope.StatusDesc))
 	}
 	return envelope.Downlink.Create.Info.ID, nil
 }
 
-func (c *Client) newConversation(ctx context.Context, jar cookieJar) (string, error) {
+// conversationFor returns the upstream conversation that carries one downstream
+// conversation, creating it on first use.
+//
+// Isolation is keyed by the caller's conversation id rather than the account.
+// Sharing one upstream conversation per account let one client's history leak
+// into another client's answer and grew a single conversation without bound.
+// Requests without a conversation id fall back to a per-account conversation, so
+// a client that sends no id still reuses one instead of minting a new session
+// per turn.
+func (c *Client) conversationFor(ctx context.Context, jar cookieJar, downstreamID string) (string, error) {
+	account := c.acc.ID
+	root, err := c.mainConversation(ctx, jar)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(downstreamID) == "" {
+		// Without a downstream id there is nothing to isolate: keep using the
+		// account's root so a turn does not mint a new upstream session.
+		return root, nil
+	}
+	key := cacheKey(account, downstreamID)
+	if key != "" {
+		conversations.Lock()
+		cached := conversations.byConversation[key]
+		conversations.Unlock()
+		if cached != "" {
+			return cached, nil
+		}
+	}
+	// Creating with a source id opens a *child* conversation. Creating without
+	// one returns the account's root and is idempotent, so it can never isolate
+	// two downstream conversations.
+	id, err := c.createConversation(ctx, jar, root)
+	if err != nil {
+		return "", err
+	}
+	slog.Debug("doubao conversation selected", "account_id", account, "downstream", downstreamID, "root", root, "conversation", id)
+	if key != "" {
+		conversations.Lock()
+		conversations.byConversation[key] = id
+		conversations.Unlock()
+	}
+	return id, nil
+}
+
+// mainConversation returns the account's root conversation, creating it once.
+func (c *Client) mainConversation(ctx context.Context, jar cookieJar) (string, error) {
+	if c.acc.ID != 0 {
+		conversations.Lock()
+		root := conversations.main[c.acc.ID]
+		conversations.Unlock()
+		if root != "" {
+			return root, nil
+		}
+	}
 	root, err := c.createConversation(ctx, jar, "")
 	if err != nil {
 		return "", err
 	}
-	return c.createConversation(ctx, jar, root)
+	if c.acc.ID != 0 {
+		conversations.Lock()
+		conversations.main[c.acc.ID] = root
+		conversations.Unlock()
+	}
+	return root, nil
+}
+
+// cacheKey scopes a conversation to an account and a downstream conversation.
+// An unknown account disables caching rather than sharing one bucket.
+func cacheKey(account int64, downstreamID string) string {
+	if account == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d|%s", account, strings.TrimSpace(downstreamID))
 }
 
 func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.UpstreamRequest, onMessage func(upstream.SSEMessage), logger *debug.Logger) error {
@@ -275,23 +391,32 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	if len(jar) == 0 {
 		return fmt.Errorf("status=401: doubao account is missing a cookie")
 	}
-	conversationID, err := c.newConversation(ctx, jar)
+	conversationID, err := c.conversationFor(ctx, jar, req.ConversationID)
 	if err != nil {
 		return err
 	}
 	promptText := renderPrompt(req)
+	promptText, err = c.expandPromptURLs(ctx, promptText)
+	if err != nil {
+		return err
+	}
 	toolMode := len(req.Tools) > 0 && !req.NoTools
 	if toolMode {
 		promptText += toolInstruction(req.Tools)
 	}
-	body, err := chatBody(conversationID, promptText, req.Model)
+	attachments, err := c.uploadRequestAttachments(ctx, jar, req)
+	if err != nil {
+		return err
+	}
+	body, err := chatBodyWithAttachments(conversationID, promptText, req.Model, attachments)
 	if err != nil {
 		return err
 	}
 	if logger != nil && !logger.Capturing() {
 		logger.LogUpstreamRequest(c.baseURL()+"/chat/completion", map[string]string{"provider": "doubao", "model": req.Model}, body)
 	}
-	response, err := c.do(ctx, http.MethodPost, c.baseURL()+"/chat/completion?"+c.commonQuery(c.acc, nil), body, jar, false)
+	query := c.commonQuery(c.acc, fingerprintQuery(jar))
+	response, err := c.doJSON(ctx, http.MethodPost, c.baseURL()+"/chat/completion?"+query, body, jar, false, "application/json", "text/event-stream")
 	if err != nil {
 		return err
 	}
@@ -320,8 +445,12 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 func validateTextOnly(req upstream.UpstreamRequest) error {
 	for _, message := range req.Messages {
 		for _, block := range message.Content.GetBlocks() {
-			if block.Type != "" && block.Type != "text" && block.Type != "tool_result" && block.Type != "tool_use" {
-				return fmt.Errorf("doubao currently supports text-only inputs")
+			switch block.Type {
+			case "", "text", "tool_result", "tool_use":
+			case "image", "image_url", "input_image", "file", "input_file":
+				// Uploaded as attachments below.
+			default:
+				return fmt.Errorf("doubao does not accept %q content", block.Type)
 			}
 		}
 	}
@@ -353,15 +482,82 @@ func renderPrompt(req upstream.UpstreamRequest) string {
 }
 
 func chatBody(conversationID, text, modelID string) ([]byte, error) {
+	return chatBodyWithAttachments(conversationID, text, modelID, nil)
+}
+
+// chatBodyWithAttachments is chatBody plus the attachment messages that must
+// precede the text block in the same request.
+func chatBodyWithAttachments(conversationID, text, modelID string, attachments []storeURI) ([]byte, error) {
 	model, ok := FindModel(modelID)
 	if !ok {
 		return nil, fmt.Errorf("unknown doubao model")
 	}
 	now := time.Now().UnixMilli()
-	task := map[string]bool{"server_do_compare": true}
-	ack := map[string]bool{"need_ack_conversation": true}
-	body := map[string]any{"client_meta": map[string]any{"local_conversation_id": fmt.Sprintf("local_%d", now), "conversation_id": conversationID, "bot_id": "7338286299411103781", "last_section_id": "", "last_message_index": nil, "local_permissions": []map[string]any{{"permission_name": "ACCESS_COARSE_LOCATION", "status": 3}, {"permission_name": "ACCESS_FINE_LOCATION", "status": 3}, {"permission_name": "ACCESS_BACKGROUND_LOCATION", "status": 3}}}, "messages": []any{map[string]any{"local_message_id": randomUUID(), "content_block": []any{map[string]any{"block_type": 10000, "content": map[string]any{"text_block": map[string]any{"text": text, "icon_url": "", "icon_url_dark": "", "summary": ""}, "pc_event_block": ""}, "block_id": randomUUID(), "parent_id": "", "meta_info": []any{}, "extra_info": map[string]any{}, "append_fields": []any{}}}, "message_status": 0}}, "option": map[string]any{"create_time_ms": now, "agent_mode": model.AgentMode, "need_create_conversation": false, "conversation_init_option": ack, "conversation_init_ext": map[string]any{"model_item_key": model.ModelItemKey, "reasoning_effort": strconv.Itoa(model.ReasoningEffort), "mode_id": model.ModeID}, "sse_recv_event_options": map[string]bool{"support_chunk_delta": true}, "support_lazy_fetch_stream": true, "general_task_param": task, "model_config": map[string]any{"model_item_key": model.ModelItemKey, "model_extra_params": map[string]any{}, "reasoning_effort": model.ReasoningEffort}, "aggregate_params": map[string]string{"conversation_mode": model.ConversationMode, "mode_id": model.ModeID, "model_item_key": model.ModelItemKey, "agent_mode": strconv.Itoa(model.AgentMode), "reasoning_effort": strconv.Itoa(model.ReasoningEffort)}, "conversation_mode": atoi(model.ConversationMode)}, "user_context": []any{}, "ext": map[string]string{"agent_mode": strconv.Itoa(model.AgentMode), "use_deep_think": "0", "sub_conv_firstmet_type": "1", "general_task_param": `{"server_do_compare":true}`, "collection_id": "", "is_finish": "1", "conversation_init_option": `{"need_ack_conversation":true}`, "commerce_credit_config_enable": "0"}}
+	effort, agent := strconv.Itoa(model.ReasoningEffort), strconv.Itoa(model.AgentMode)
+	body := map[string]any{
+		"client_meta": map[string]any{
+			"local_conversation_id": fmt.Sprintf("local_%d", now), "conversation_id": conversationID,
+			"bot_id": botID, "last_section_id": "", "last_message_index": nil,
+			"local_permissions": []map[string]any{
+				{"permission_name": "ACCESS_COARSE_LOCATION", "status": 3},
+				{"permission_name": "ACCESS_FINE_LOCATION", "status": 3},
+				{"permission_name": "ACCESS_BACKGROUND_LOCATION", "status": 3},
+			},
+		},
+		"messages": append(attachmentMessages(attachments), textMessage(text)),
+		"option": map[string]any{
+			// The web client sends a fixed envelope; omitting the no-op fields
+			// makes the request look hand-built. Attachment turns are the most
+			// sensitive: the parser only reads an image when the surrounding
+			// option block matches what the page sends.
+			"send_message_scene": "", "create_time_ms": now, "collect_id": "",
+			"is_audio": false, "answer_with_suggest": false, "agent_mode": model.AgentMode,
+			"tts_switch": false, "need_deep_think": 0, "click_clear_context": false,
+			"from_suggest": false, "is_regen": false, "is_replace": false,
+			"is_from_click_option": false, "is_from_click_softlink": false,
+			"disable_sse_cache": false, "select_text_action": "", "is_select_text": false,
+			"resend_for_regen": false, "scene_type": 0, "unique_key": randomUUID(), "start_seq": 0,
+			"need_create_conversation": false,
+			"conversation_init_option": map[string]bool{"need_ack_conversation": true},
+			"conversation_init_ext":    map[string]any{"model_item_key": model.ModelItemKey, "reasoning_effort": effort, "mode_id": model.ModeID},
+			"regen_query_id":           []any{}, "edit_query_id": []any{}, "regen_instruction": "",
+			"no_replace_for_regen": false, "message_from": 0,
+			"shared_app_name": "", "shared_app_id": "",
+			"sse_recv_event_options":    map[string]bool{"support_chunk_delta": true},
+			"support_lazy_fetch_stream": true,
+			"is_ai_playground":          false, "is_old_user": true,
+			"general_task_param":   map[string]bool{"server_do_compare": true},
+			"recovery_option":      map[string]any{"is_recovery": false, "req_create_time_sec": now / 1000, "append_sse_event_scene": 0},
+			"message_storage_type": 0, "related_deleted_message_ids": map[string]any{},
+			"connector_info_list": []any{},
+			"model_config":        map[string]any{"model_item_key": model.ModelItemKey, "model_extra_params": map[string]any{}, "reasoning_effort": model.ReasoningEffort},
+			"aggregate_params": map[string]string{
+				"mention_skill_list": "[]", "mention_plugin_list": "[]", "mention_ext": "[{}]",
+				"conversation_mode": model.ConversationMode, "mode_id": model.ModeID,
+				"model_item_key": model.ModelItemKey, "agent_mode": agent,
+				"reasoning_effort": effort, "provider_id": "",
+			},
+			"conversation_mode": atoi(model.ConversationMode),
+		},
+		"user_context": []any{},
+		"ext": map[string]string{
+			"agent_mode": agent, "use_deep_think": "0", "sub_conv_firstmet_type": "1",
+			"general_task_param": `{"server_do_compare":true}`, "collection_id": "", "is_finish": "1",
+			"conversation_init_option": `{"need_ack_conversation":true}`, "commerce_credit_config_enable": "0",
+		},
+	}
 	return json.Marshal(body)
+}
+
+func textMessage(text string) map[string]any {
+	return map[string]any{
+		"local_message_id": randomUUID(), "message_status": 0,
+		"content_block": []any{map[string]any{
+			"block_type": 10000, "block_id": randomUUID(), "parent_id": "",
+			"meta_info": []any{}, "extra_info": map[string]any{}, "append_fields": []any{},
+			"content": map[string]any{"pc_event_block": "", "text_block": map[string]any{"text": text, "icon_url": "", "icon_url_dark": "", "summary": ""}},
+		}},
+	}
 }
 
 func atoi(value string) int { parsed, _ := strconv.Atoi(value); return parsed }
@@ -371,6 +567,21 @@ func consumeStream(body io.Reader, emit func(string)) (string, error) {
 	scanner.Buffer(make([]byte, 4096), 8<<20)
 	var event, data, userMessageID string
 	var text, snapshot string
+	// emitted tracks how much of the answer has reached the client. A snapshot
+	// can arrive before the first delta (the opening words of an answer are
+	// often delivered whole), and later deltas continue from there; emitting the
+	// snapshot's unseen suffix keeps the two sources from dropping or repeating
+	// text.
+	emitted := 0
+	emitUnseen := func(full string) {
+		if len(full) <= emitted {
+			return
+		}
+		emit(full[emitted:])
+		emitted = len(full)
+	}
+	var images []creationImage
+	seenImages := map[string]bool{}
 	flush := func() error {
 		if event == "" {
 			data = ""
@@ -387,6 +598,7 @@ func consumeStream(body io.Reader, emit func(string)) (string, error) {
 				if delta, _ := value["text"].(string); delta != "" {
 					text += delta
 					emit(delta)
+					emitted = len(text)
 				}
 			case "STREAM_ERROR":
 				return upstreamStreamError(value)
@@ -400,8 +612,29 @@ func consumeStream(body io.Reader, emit func(string)) (string, error) {
 				if messageID != "" && messageID == userMessageID {
 					break
 				}
-				if candidate := snapshotText(value); len(candidate) > len(snapshot) {
-					snapshot = candidate
+				fragment, full := partitionText(value)
+				if fragment != "" {
+					// patch_type 1 appends a fragment; several can precede the
+					// first CHUNK_DELTA, so both sources feed the same buffer.
+					text += fragment
+					emit(fragment)
+					emitted = len(text)
+				}
+				if len(full) > len(snapshot) {
+					snapshot = full
+					if len(snapshot) > len(text) {
+						emitUnseen(snapshot)
+						text = snapshot
+					}
+				}
+				// Image answers arrive as creation blocks with no text at all;
+				// they have to be collected separately or the turn looks empty.
+				for _, image := range creationImages(value) {
+					if seenImages[image.url] {
+						continue
+					}
+					seenImages[image.url] = true
+					images = append(images, image)
 				}
 			}
 		}
@@ -431,49 +664,248 @@ func consumeStream(body io.Reader, emit func(string)) (string, error) {
 	}
 	if text == "" {
 		text = snapshot
-		if text != "" {
-			emit(text)
-		}
+		emit(text)
+	}
+	if markdown := imageMarkdown(images); markdown != "" {
+		text += markdown
+		emit(markdown)
 	}
 	return text, nil
 }
 
+type creationImage struct{ id, url string }
+
+// creationImages extracts generated images from a creation block. The same
+// block is repeated in later snapshots, so callers de-duplicate by URL.
+func creationImages(value map[string]any) []creationImage {
+	var out []creationImage
+	var walk func(any)
+	walk = func(node any) {
+		switch typed := node.(type) {
+		case map[string]any:
+			if block, ok := typed["creation_block"].(map[string]any); ok {
+				if creations, ok := block["creations"].([]any); ok {
+					for _, raw := range creations {
+						entry, _ := raw.(map[string]any)
+						image, _ := entry["image"].(map[string]any)
+						if image == nil {
+							continue
+						}
+						if url := creationImageURL(image); url != "" {
+							id, _ := entry["id"].(string)
+							out = append(out, creationImage{id: id, url: url})
+						}
+					}
+				}
+			}
+			for _, child := range typed {
+				walk(child)
+			}
+		case []any:
+			for _, child := range typed {
+				walk(child)
+			}
+		}
+	}
+	walk(value)
+	return out
+}
+
+// creationImageURL prefers the unwatermarked original, then the watermarked
+// original, then the preview and thumbnail variants.
+func creationImageURL(image map[string]any) string {
+	for _, key := range []string{"image_ori_raw", "image_ori", "image_preview", "image_thumb"} {
+		variant, _ := image[key].(map[string]any)
+		if variant == nil {
+			continue
+		}
+		if url, _ := variant["url"].(string); strings.HasPrefix(url, "https://") {
+			return url
+		}
+	}
+	return ""
+}
+
+func imageMarkdown(images []creationImage) string {
+	if len(images) == 0 {
+		return ""
+	}
+	var out strings.Builder
+	for index, image := range images {
+		fmt.Fprintf(&out, "\n\n![generated image %d](%s)\n", index+1, image.url)
+	}
+	return out.String()
+}
+
 func snapshotText(value map[string]any) string {
-	raw, _ := json.Marshal(value)
+	return collectText(value, false)
+}
+
+// partitionText splits one frame into appended fragments (patch_type 1) and the
+// longest whole-answer snapshot (any other patch type). The web client uses
+// both: an answer can open with fragments and continue with CHUNK_DELTA events.
+func partitionText(value map[string]any) (fragment, snapshot string) {
+	var fragments strings.Builder
+	var walk func(any)
+	walk = func(node any) {
+		switch typed := node.(type) {
+		case map[string]any:
+			if blocks, ok := typed["content_block"].([]any); ok {
+				for _, raw := range blocks {
+					block, _ := raw.(map[string]any)
+					content, _ := block["content"].(map[string]any)
+					textBlock, _ := content["text_block"].(map[string]any)
+					text, _ := textBlock["text"].(string)
+					if text == "" {
+						continue
+					}
+					if patchType(block["patch_type"]) == 1 {
+						fragments.WriteString(text)
+					} else if len(text) > len(snapshot) {
+						snapshot = text
+					}
+				}
+			}
+			for _, child := range typed {
+				walk(child)
+			}
+		case []any:
+			for _, child := range typed {
+				walk(child)
+			}
+		}
+	}
+	walk(value)
+	return fragments.String(), snapshot
+}
+
+func patchType(value any) int {
+	switch typed := value.(type) {
+	case float64:
+		return int(typed)
+	case int:
+		return typed
+	case string:
+		parsed, _ := strconv.Atoi(typed)
+		return parsed
+	}
+	return 0
+}
+
+// deltaText returns text that a patch appends rather than replaces.
+func deltaText(value map[string]any) string {
+	return collectText(value, true)
+}
+
+// collectText walks a content tree for text blocks. patch_type 1 marks an
+// appended fragment, so several blocks in one frame are concatenated; other
+// patches carry the whole text so far and only the longest one counts.
+func collectText(value map[string]any, appendOnly bool) string {
+	var out strings.Builder
 	var walk func(any) string
 	walk = func(node any) string {
 		switch typed := node.(type) {
 		case map[string]any:
 			if block, ok := typed["text_block"].(map[string]any); ok {
 				if text, _ := block["text"].(string); text != "" {
-					return text
+					if appendOnly {
+						out.WriteString(text)
+					} else {
+						return text
+					}
 				}
 			}
 			for _, child := range typed {
 				if found := walk(child); found != "" {
-					return found
+					if !appendOnly {
+						return found
+					}
 				}
 			}
 		case []any:
 			for _, child := range typed {
 				if found := walk(child); found != "" {
-					return found
+					if !appendOnly {
+						return found
+					}
 				}
 			}
 		}
 		return ""
 	}
-	var decoded any
-	_ = json.Unmarshal(raw, &decoded)
-	return walk(decoded)
+	found := walk(value)
+	if appendOnly {
+		return out.String()
+	}
+	return found
 }
 
 func upstreamStreamError(value map[string]any) error {
-	code := fmt.Sprint(value["error_code"])
+	code := errorCodeString(value["error_code"])
+	if code == "710022004" {
+		decision := sharkDecision(value)
+		if decision.needsVerification() {
+			// shark_admin's verify challenge can only be answered in a real
+			// browser session. Replaying it here cannot succeed and only deepens
+			// the risk window, so this error must stop retries and park the
+			// account instead of entering the generic rate-limit path.
+			return fmt.Errorf("status=403: doubao account requires human verification: open doubao.com with this account and complete the challenge (%s %s)", code, decision.summary())
+		}
+	}
 	if code == "710022002" || code == "710022004" {
 		return fmt.Errorf("status=429: doubao upstream rate limited (%s)", code)
 	}
 	return fmt.Errorf("doubao stream error: %s", code)
+}
+
+// errorCodeString renders a decoded JSON number as its integer decimal form.
+// fmt.Sprint on the float64 produced by encoding/json prints 710022004 as
+// 7.10022004e+08, which silently disabled the rate-limit classification.
+func errorCodeString(value any) string {
+	switch typed := value.(type) {
+	case float64:
+		return strconv.FormatInt(int64(typed), 10)
+	case json.Number:
+		return typed.String()
+	case string:
+		return strings.TrimSpace(typed)
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
+}
+
+type sharkAdminDecision struct {
+	Type    string `json:"type"`
+	Subtype string `json:"subtype"`
+	From    string `json:"from"`
+	Detail  string `json:"detail"`
+}
+
+func sharkDecision(value map[string]any) sharkAdminDecision {
+	extra, _ := value["extra"].(map[string]any)
+	raw, _ := extra["decision"].(string)
+	if strings.TrimSpace(raw) == "" {
+		return sharkAdminDecision{}
+	}
+	var decision sharkAdminDecision
+	_ = json.Unmarshal([]byte(raw), &decision)
+	return decision
+}
+
+func (d sharkAdminDecision) needsVerification() bool {
+	return strings.EqualFold(d.From, "shark_admin") && strings.EqualFold(d.Type, "verify")
+}
+
+func (d sharkAdminDecision) summary() string {
+	parts := make([]string, 0, 3)
+	for _, part := range []string{d.From, d.Type, d.Subtype} {
+		if strings.TrimSpace(part) != "" {
+			parts = append(parts, part)
+		}
+	}
+	if len(parts) == 0 {
+		return "shark_admin"
+	}
+	return strings.Join(parts, "/")
 }
 
 func statusError(status int, raw []byte) error {
@@ -491,6 +923,12 @@ var turns = struct {
 	sync.Mutex
 	last map[int64]time.Time
 }{last: map[int64]time.Time{}}
+
+var conversations = struct {
+	sync.Mutex
+	main           map[int64]string
+	byConversation map[string]string
+}{main: map[int64]string{}, byConversation: map[string]string{}}
 
 func waitTurn(ctx context.Context, accountID int64, cfg *config.Config) error {
 	gap := 3 * time.Second

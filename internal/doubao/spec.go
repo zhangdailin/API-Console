@@ -20,7 +20,6 @@ func spec() provider.Spec {
 			return NewFromAccount(acc, cfg)
 		},
 		Capabilities: capabilities{},
-		Probe:        &provider.Probe{Subject: "Doubao Web", Endpoint: defaultBaseURL, Run: func(context.Context, *config.Config) error { return nil }},
 		Catalog:      catalogPort(), Admin: adminPort(), Maintain: maintain, PublishModels: publishModels,
 	}
 }
@@ -42,16 +41,7 @@ func catalogPort() *provider.Catalog {
 				return provider.Observation{}, err
 			}
 			return provider.Observation{Record: func(target *store.Account, now time.Time) bool {
-				if target == nil {
-					return false
-				}
-				target.UserID = info.UserID
-				if info.Name != "" {
-					target.Name = info.Name
-				}
-				target.DoubaoVerifiedAt = now
-				target.VerifiedAt = now
-				return true
+				return info.apply(target, now)
 			}}, nil
 		},
 		LastKnown: func(acc *store.Account) []provider.Model {
@@ -85,9 +75,6 @@ func maintain(ctx context.Context, env provider.Env, acc *store.Account) {
 		}
 		return
 	}
-	acc.UserID, acc.DoubaoVerifiedAt, acc.VerifiedAt = info.UserID, now, now
-	if info.Name != "" {
-		acc.Name = info.Name
-	}
+	info.apply(acc, now)
 	_ = env.Store.UpdateAccount(ctx, acc)
 }

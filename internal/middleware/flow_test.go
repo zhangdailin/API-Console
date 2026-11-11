@@ -47,6 +47,26 @@ func TestFlowTrackerTracksAdmittedStreamAndCompletion(t *testing.T) {
 	}
 }
 
+// The traffic screen validates a fixed channel set. A hidden channel must not
+// add route rows, and its requests must pass through without counters, or the
+// whole snapshot is rejected as invalid.
+func TestFlowSnapshotExcludesHiddenChannels(t *testing.T) {
+	tracker := NewFlowTracker()
+	reached := false
+	handler := tracker.Track(func(w http.ResponseWriter, r *http.Request) { reached = true })
+	handler(httptest.NewRecorder(), httptest.NewRequest("POST", "/doubao/v1/chat/completions", nil))
+	testutil.True(t, reached, "a hidden channel's request must still be served")
+	snapshot := tracker.Snapshot("")
+	for _, route := range snapshot.Routes {
+		if route.Channel == "doubao" {
+			t.Fatalf("hidden channel leaked into the traffic snapshot: %+v", route)
+		}
+	}
+	if _, found := snapshot.Nodes["doubao"]; found {
+		t.Fatal("hidden channel leaked into the traffic nodes")
+	}
+}
+
 func TestFlowTrackerIgnoresResourcesAndReleasesAfterPanic(t *testing.T) {
 	tracker := NewFlowTracker()
 	for _, target := range []string{"/grok/v1/models", "/grok/v1/messages/count_tokens", "/grok/v1/responses/id/cancel"} {

@@ -29,39 +29,44 @@ func TestRegisterRoutes_ResponsesSubResources(t *testing.T) {
 	// A managed key, because /v1 requires one unconditionally.
 	e := newChannelE2E(t, "responses-routes:", "sk-responses-subresource", cfg)
 
-	for _, prefix := range channel.AllPrefixes() {
-		t.Run(prefix, func(t *testing.T) {
-			for _, probe := range []struct {
-				method string
-				path   string
-				body   string
-			}{
-				{http.MethodPost, prefix + "/responses/resp_absent/cancel", "{}"},
-				{http.MethodPost, prefix + "/responses/resp_absent/cancel", ""},
-				{http.MethodGet, prefix + "/responses/resp_absent/input_items", ""},
-			} {
+	for _, definition := range channel.All() {
+		if definition.ChatOnly {
+			continue
+		}
+		for _, prefix := range channel.PrefixesFor(definition.ID) {
+			t.Run(prefix, func(t *testing.T) {
+				for _, probe := range []struct {
+					method string
+					path   string
+					body   string
+				}{
+					{http.MethodPost, prefix + "/responses/resp_absent/cancel", "{}"},
+					{http.MethodPost, prefix + "/responses/resp_absent/cancel", ""},
+					{http.MethodGet, prefix + "/responses/resp_absent/input_items", ""},
+				} {
+					rec := httptest.NewRecorder()
+					req := httptest.NewRequest(probe.method, probe.path, strings.NewReader(probe.body))
+					req.Header.Set("Authorization", "Bearer "+e.managedKey)
+					e.mux.ServeHTTP(rec, req)
+
+					testutil.NotEqual(t, rec.Code, http.StatusMethodNotAllowed)
+					testutil.MustNotContain(t, rec.Body.String(), "404 page not found")
+					testutil.Equal(t, rec.Code, http.StatusNotFound)
+					testutil.MustContain(t, rec.Body.String(), "response_not_found")
+				}
+
+				// A wrong method must still be answered by the handler (405 with an
+				// Allow header), which is the difference between "this endpoint
+				// rejects GET" and "this endpoint does not exist".
 				rec := httptest.NewRecorder()
-				req := httptest.NewRequest(probe.method, probe.path, strings.NewReader(probe.body))
-				req.Header.Set("Authorization", "Bearer "+e.managedKey)
-				e.mux.ServeHTTP(rec, req)
-
-				testutil.NotEqual(t, rec.Code, http.StatusMethodNotAllowed)
-				testutil.MustNotContain(t, rec.Body.String(), "404 page not found")
-				testutil.Equal(t, rec.Code, http.StatusNotFound)
-				testutil.MustContain(t, rec.Body.String(), "response_not_found")
-			}
-
-			// A wrong method must still be answered by the handler (405 with an
-			// Allow header), which is the difference between "this endpoint
-			// rejects GET" and "this endpoint does not exist".
-			rec := httptest.NewRecorder()
-			wrongMethod := httptest.NewRequest(http.MethodGet, prefix+"/responses/resp_absent/cancel", nil)
-			wrongMethod.Header.Set("Authorization", "Bearer "+e.managedKey)
-			e.mux.ServeHTTP(rec, wrongMethod)
-			testutil.Equal(t, rec.Code, http.StatusMethodNotAllowed)
-			allow := rec.Header().Get("Allow")
-			testutil.Falsef(t, !strings.Contains(allow, http.MethodPost), "Allow = %q, want POST", allow)
-		})
+				wrongMethod := httptest.NewRequest(http.MethodGet, prefix+"/responses/resp_absent/cancel", nil)
+				wrongMethod.Header.Set("Authorization", "Bearer "+e.managedKey)
+				e.mux.ServeHTTP(rec, wrongMethod)
+				testutil.Equal(t, rec.Code, http.StatusMethodNotAllowed)
+				allow := rec.Header().Get("Allow")
+				testutil.Falsef(t, !strings.Contains(allow, http.MethodPost), "Allow = %q, want POST", allow)
+			})
+		}
 	}
 
 	// The response id itself must keep working on the provider prefix: the
