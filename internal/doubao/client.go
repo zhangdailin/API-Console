@@ -348,7 +348,11 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	if toolMode {
 		promptText += toolInstruction(req.Tools)
 	}
-	body, err := chatBody(conversationID, promptText, req.Model)
+	attachments, err := c.uploadRequestAttachments(ctx, jar, req)
+	if err != nil {
+		return err
+	}
+	body, err := chatBodyWithAttachments(conversationID, promptText, req.Model, attachments)
 	if err != nil {
 		return err
 	}
@@ -385,8 +389,12 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 func validateTextOnly(req upstream.UpstreamRequest) error {
 	for _, message := range req.Messages {
 		for _, block := range message.Content.GetBlocks() {
-			if block.Type != "" && block.Type != "text" && block.Type != "tool_result" && block.Type != "tool_use" {
-				return fmt.Errorf("doubao currently supports text-only inputs")
+			switch block.Type {
+			case "", "text", "tool_result", "tool_use":
+			case "image", "image_url", "input_image", "file", "input_file":
+				// Uploaded as attachments below.
+			default:
+				return fmt.Errorf("doubao does not accept %q content", block.Type)
 			}
 		}
 	}
@@ -418,6 +426,12 @@ func renderPrompt(req upstream.UpstreamRequest) string {
 }
 
 func chatBody(conversationID, text, modelID string) ([]byte, error) {
+	return chatBodyWithAttachments(conversationID, text, modelID, nil)
+}
+
+// chatBodyWithAttachments is chatBody plus the attachment messages that must
+// precede the text block in the same request.
+func chatBodyWithAttachments(conversationID, text, modelID string, attachments []storeURI) ([]byte, error) {
 	model, ok := FindModel(modelID)
 	if !ok {
 		return nil, fmt.Errorf("unknown doubao model")
@@ -434,7 +448,7 @@ func chatBody(conversationID, text, modelID string) ([]byte, error) {
 				{"permission_name": "ACCESS_BACKGROUND_LOCATION", "status": 3},
 			},
 		},
-		"messages": []any{textMessage(text)},
+		"messages": append(attachmentMessages(attachments), textMessage(text)),
 		"option": map[string]any{
 			"create_time_ms": now, "agent_mode": model.AgentMode, "need_create_conversation": false,
 			"conversation_init_option":  map[string]bool{"need_ack_conversation": true},
@@ -474,6 +488,19 @@ func consumeStream(body io.Reader, emit func(string)) (string, error) {
 	scanner.Buffer(make([]byte, 4096), 8<<20)
 	var event, data, userMessageID string
 	var text, snapshot string
+	// emitted tracks how much of the answer has reached the client. A snapshot
+	// can arrive before the first delta (the opening words of an answer are
+	// often delivered whole), and later deltas continue from there; emitting the
+	// snapshot's unseen suffix keeps the two sources from dropping or repeating
+	// text.
+	emitted := 0
+	emitUnseen := func(full string) {
+		if len(full) <= emitted {
+			return
+		}
+		emit(full[emitted:])
+		emitted = len(full)
+	}
 	var images []creationImage
 	seenImages := map[string]bool{}
 	flush := func() error {
@@ -492,6 +519,7 @@ func consumeStream(body io.Reader, emit func(string)) (string, error) {
 				if delta, _ := value["text"].(string); delta != "" {
 					text += delta
 					emit(delta)
+					emitted = len(text)
 				}
 			case "STREAM_ERROR":
 				return upstreamStreamError(value)
@@ -505,8 +533,20 @@ func consumeStream(body io.Reader, emit func(string)) (string, error) {
 				if messageID != "" && messageID == userMessageID {
 					break
 				}
-				if candidate := snapshotText(value); len(candidate) > len(snapshot) {
-					snapshot = candidate
+				fragment, full := partitionText(value)
+				if fragment != "" {
+					// patch_type 1 appends a fragment; several can precede the
+					// first CHUNK_DELTA, so both sources feed the same buffer.
+					text += fragment
+					emit(fragment)
+					emitted = len(text)
+				}
+				if len(full) > len(snapshot) {
+					snapshot = full
+					if len(snapshot) > len(text) {
+						emitUnseen(snapshot)
+						text = snapshot
+					}
 				}
 				// Image answers arrive as creation blocks with no text at all;
 				// they have to be collected separately or the turn looks empty.
@@ -619,30 +659,106 @@ func imageMarkdown(images []creationImage) string {
 }
 
 func snapshotText(value map[string]any) string {
+	return collectText(value, false)
+}
+
+// partitionText splits one frame into appended fragments (patch_type 1) and the
+// longest whole-answer snapshot (any other patch type). The web client uses
+// both: an answer can open with fragments and continue with CHUNK_DELTA events.
+func partitionText(value map[string]any) (fragment, snapshot string) {
+	var fragments strings.Builder
+	var walk func(any)
+	walk = func(node any) {
+		switch typed := node.(type) {
+		case map[string]any:
+			if blocks, ok := typed["content_block"].([]any); ok {
+				for _, raw := range blocks {
+					block, _ := raw.(map[string]any)
+					content, _ := block["content"].(map[string]any)
+					textBlock, _ := content["text_block"].(map[string]any)
+					text, _ := textBlock["text"].(string)
+					if text == "" {
+						continue
+					}
+					if patchType(block["patch_type"]) == 1 {
+						fragments.WriteString(text)
+					} else if len(text) > len(snapshot) {
+						snapshot = text
+					}
+				}
+			}
+			for _, child := range typed {
+				walk(child)
+			}
+		case []any:
+			for _, child := range typed {
+				walk(child)
+			}
+		}
+	}
+	walk(value)
+	return fragments.String(), snapshot
+}
+
+func patchType(value any) int {
+	switch typed := value.(type) {
+	case float64:
+		return int(typed)
+	case int:
+		return typed
+	case string:
+		parsed, _ := strconv.Atoi(typed)
+		return parsed
+	}
+	return 0
+}
+
+// deltaText returns text that a patch appends rather than replaces.
+func deltaText(value map[string]any) string {
+	return collectText(value, true)
+}
+
+// collectText walks a content tree for text blocks. patch_type 1 marks an
+// appended fragment, so several blocks in one frame are concatenated; other
+// patches carry the whole text so far and only the longest one counts.
+func collectText(value map[string]any, appendOnly bool) string {
+	var out strings.Builder
 	var walk func(any) string
 	walk = func(node any) string {
 		switch typed := node.(type) {
 		case map[string]any:
 			if block, ok := typed["text_block"].(map[string]any); ok {
 				if text, _ := block["text"].(string); text != "" {
-					return text
+					if appendOnly {
+						out.WriteString(text)
+					} else {
+						return text
+					}
 				}
 			}
 			for _, child := range typed {
 				if found := walk(child); found != "" {
-					return found
+					if !appendOnly {
+						return found
+					}
 				}
 			}
 		case []any:
 			for _, child := range typed {
 				if found := walk(child); found != "" {
-					return found
+					if !appendOnly {
+						return found
+					}
 				}
 			}
 		}
 		return ""
 	}
-	return walk(value)
+	found := walk(value)
+	if appendOnly {
+		return out.String()
+	}
+	return found
 }
 
 func upstreamStreamError(value map[string]any) error {

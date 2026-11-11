@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"orchids-api/internal/config"
+	"orchids-api/internal/prompt"
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
 	"orchids-api/internal/upstream"
@@ -191,6 +193,41 @@ data: {"message":{"message_id":"bot"},"content":{"content_block":[{"block_type":
 	}
 }
 
+// A chat answer can open with patch_type 1 fragments and continue with
+// CHUNK_DELTA events. Both are incremental, so dropping either truncates the
+// answer (observed: "PROBE-9f2c71" arrived as PRO, BE, then -9f2c71).
+func TestConsumeStreamJoinsPatchFragmentsAndDeltas(t *testing.T) {
+	stream := `event: STREAM_CHUNK
+data: {"message_id":"bot","patch_op":[{"patch_object":1,"patch_value":{"content_block":[{"block_type":10000,"content":{"text_block":{"text":"PRO"}},"patch_type":1}]}}]}
+
+event: STREAM_CHUNK
+data: {"message_id":"bot","patch_op":[{"patch_object":1,"patch_value":{"content_block":[{"block_type":10000,"content":{"text_block":{"text":"BE"}},"patch_type":1}]}}]}
+
+event: CHUNK_DELTA
+data: {"text":"-9f2c71"}
+
+`
+	var emitted []string
+	text, err := consumeStream(strings.NewReader(stream), func(v string) { emitted = append(emitted, v) })
+	testutil.NoError(t, err)
+	testutil.Equal(t, text, "PROBE-9f2c71")
+	testutil.Equal(t, strings.Join(emitted, ""), "PROBE-9f2c71")
+}
+
+// A non-1 patch type carries the whole answer so far and must not be appended.
+func TestConsumeStreamTreatsOtherPatchTypesAsSnapshots(t *testing.T) {
+	stream := `event: STREAM_MSG_NOTIFY
+data: {"content":{"content_block":[{"block_type":10000,"content":{"text_block":{"text":"hello"}},"patch_type":2}]}}
+
+event: STREAM_MSG_NOTIFY
+data: {"content":{"content_block":[{"block_type":10000,"content":{"text_block":{"text":"hello world"}},"patch_type":2}]}}
+
+`
+	text, err := consumeStream(strings.NewReader(stream), func(string) {})
+	testutil.NoError(t, err)
+	testutil.Equal(t, text, "hello world")
+}
+
 func TestToolEnvelopeOnlyEmitsDeclaredObjectArguments(t *testing.T) {
 	var messages []upstream.SSEMessage
 	emitToolOrText(`{"tool_calls":[{"name":"read","arguments":{"path":"a"}},{"name":"other","arguments":{}}]}`, []any{map[string]any{"type": "function", "function": map[string]any{"name": "read"}}}, func(message upstream.SSEMessage) { messages = append(messages, message) })
@@ -323,4 +360,77 @@ func TestPublishedModelsAdvertiseChatOnly(t *testing.T) {
 	if len(stale) != 0 {
 		t.Fatalf("a stale observation published %d routes", len(stale))
 	}
+}
+
+// The upload signature has to stay byte-for-byte stable: the gateway rejects a
+// mismatch with InvalidAuthorization, and the only way to notice is a live call.
+func TestSigV4AuthorizationShape(t *testing.T) {
+	creds := uploadCredentials{
+		AccessKey:    "AKTEST",
+		SecretKey:    "secret",
+		SessionToken: "token",
+	}
+	got := sigV4Authorization(creds, "20261111T010203Z", http.MethodGet, "/", "Action=ApplyImageUpload&Version=2018-08-01")
+	for _, want := range []string{
+		"AWS4-HMAC-SHA256 Credential=AKTEST/20261111/cn-north-1/imagex/aws4_request",
+		"SignedHeaders=x-amz-date;x-amz-security-token",
+		"Signature=",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("authorization missing %q: %s", want, got)
+		}
+	}
+	if got != sigV4Authorization(creds, "20261111T010203Z", http.MethodGet, "/", "Action=ApplyImageUpload&Version=2018-08-01") {
+		t.Fatal("signature is not deterministic")
+	}
+}
+
+// Signed query pairs must be encoded and sorted, or the signature differs from
+// the one the object store recomputes.
+func TestCanonicalQueryEncodesAndSorts(t *testing.T) {
+	testutil.Equal(t, canonicalQuery("b=2&a=1&a=0"), "a=0&a=1&b=2")
+	testutil.Equal(t, canonicalQuery("FileExtension=.txt"), "FileExtension=.txt")
+}
+
+// Attachment blocks must precede the text block and reference the uploaded uri.
+func TestAttachmentMessagesCarryTheUploadedURI(t *testing.T) {
+	messages := attachmentMessages([]storeURI{{URI: "tos-cn-i-x/a.txt", Name: "a.txt", Size: 3}})
+	if len(messages) != 1 {
+		t.Fatalf("messages=%v", messages)
+	}
+	raw, _ := json.Marshal(messages[0])
+	for _, want := range []string{`"block_type":10052`, `"uri":"tos-cn-i-x/a.txt"`, `"name":"a.txt"`, `"upload_status":1`} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("attachment missing %s: %s", want, raw)
+		}
+	}
+}
+
+// Images and files use different attachment shapes; the model ignores an image
+// sent with the file shape.
+func TestImageAttachmentUsesTheImageShape(t *testing.T) {
+	messages := attachmentMessages([]storeURI{{URI: "tos-cn-i-x/a.png", Name: "a.png", Size: 9, Image: true}})
+	raw, _ := json.Marshal(messages[0])
+	for _, want := range []string{`"type":2`, `"key":"tos-cn-i-x/a.png"`, `"image":{`} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("image attachment missing %s: %s", want, raw)
+		}
+	}
+	if strings.Contains(string(raw), `"file":`) {
+		t.Fatalf("an image must not use the file shape: %s", raw)
+	}
+}
+
+func TestAttachmentDataDecodesInlineFiles(t *testing.T) {
+	data, name, ok := attachmentData(prompt.ContentBlock{
+		Type:     "input_file",
+		FileName: "probe.txt",
+		FileData: "data:text/plain;base64," + base64.StdEncoding.EncodeToString([]byte("hello")),
+	})
+	testutil.True(t, ok)
+	testutil.Equal(t, name, "probe.txt")
+	testutil.Equal(t, string(data), "hello")
+
+	_, _, remote := attachmentData(prompt.ContentBlock{Type: "input_file", URL: "https://example.com/a.txt"})
+	testutil.False(t, remote, "a remote URL must not trigger a server-side fetch")
 }
