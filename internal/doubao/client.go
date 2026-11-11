@@ -474,6 +474,8 @@ func consumeStream(body io.Reader, emit func(string)) (string, error) {
 	scanner.Buffer(make([]byte, 4096), 8<<20)
 	var event, data, userMessageID string
 	var text, snapshot string
+	var images []creationImage
+	seenImages := map[string]bool{}
 	flush := func() error {
 		if event == "" {
 			data = ""
@@ -506,6 +508,15 @@ func consumeStream(body io.Reader, emit func(string)) (string, error) {
 				if candidate := snapshotText(value); len(candidate) > len(snapshot) {
 					snapshot = candidate
 				}
+				// Image answers arrive as creation blocks with no text at all;
+				// they have to be collected separately or the turn looks empty.
+				for _, image := range creationImages(value) {
+					if seenImages[image.url] {
+						continue
+					}
+					seenImages[image.url] = true
+					images = append(images, image)
+				}
 			}
 		}
 		event, data = "", ""
@@ -534,11 +545,77 @@ func consumeStream(body io.Reader, emit func(string)) (string, error) {
 	}
 	if text == "" {
 		text = snapshot
-		if text != "" {
-			emit(text)
-		}
+		emit(text)
+	}
+	if markdown := imageMarkdown(images); markdown != "" {
+		text += markdown
+		emit(markdown)
 	}
 	return text, nil
+}
+
+type creationImage struct{ id, url string }
+
+// creationImages extracts generated images from a creation block. The same
+// block is repeated in later snapshots, so callers de-duplicate by URL.
+func creationImages(value map[string]any) []creationImage {
+	var out []creationImage
+	var walk func(any)
+	walk = func(node any) {
+		switch typed := node.(type) {
+		case map[string]any:
+			if block, ok := typed["creation_block"].(map[string]any); ok {
+				if creations, ok := block["creations"].([]any); ok {
+					for _, raw := range creations {
+						entry, _ := raw.(map[string]any)
+						image, _ := entry["image"].(map[string]any)
+						if image == nil {
+							continue
+						}
+						if url := creationImageURL(image); url != "" {
+							id, _ := entry["id"].(string)
+							out = append(out, creationImage{id: id, url: url})
+						}
+					}
+				}
+			}
+			for _, child := range typed {
+				walk(child)
+			}
+		case []any:
+			for _, child := range typed {
+				walk(child)
+			}
+		}
+	}
+	walk(value)
+	return out
+}
+
+// creationImageURL prefers the unwatermarked original, then the watermarked
+// original, then the preview and thumbnail variants.
+func creationImageURL(image map[string]any) string {
+	for _, key := range []string{"image_ori_raw", "image_ori", "image_preview", "image_thumb"} {
+		variant, _ := image[key].(map[string]any)
+		if variant == nil {
+			continue
+		}
+		if url, _ := variant["url"].(string); strings.HasPrefix(url, "https://") {
+			return url
+		}
+	}
+	return ""
+}
+
+func imageMarkdown(images []creationImage) string {
+	if len(images) == 0 {
+		return ""
+	}
+	var out strings.Builder
+	for index, image := range images {
+		fmt.Fprintf(&out, "\n\n![generated image %d](%s)\n", index+1, image.url)
+	}
+	return out.String()
 }
 
 func snapshotText(value map[string]any) string {

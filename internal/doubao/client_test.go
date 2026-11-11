@@ -161,6 +161,36 @@ func TestConsumeStreamNeverFallsBackToUserEcho(t *testing.T) {
 	testutil.Equal(t, text, "")
 }
 
+// An image answer carries no text at all: the only content is a creation block
+// whose later snapshots repeat the same image. The turn must still produce
+// output, once per image.
+func TestConsumeStreamEmitsGeneratedImagesOnce(t *testing.T) {
+	placeholder := `event: STREAM_CHUNK
+data: {"message_id":"bot","patch_op":[{"patch_object":1,"patch_value":{"content_block":[{"block_type":2074,"content":{"creation_block":{"creations":[{"id":"c1","image":{"status":1,"placeholder":{"width":2048,"height":2048}}}]}}}]}}]}
+
+`
+	final := `event: STREAM_CHUNK
+data: {"message_id":"bot","patch_op":[{"patch_object":1,"patch_value":{"content_block":[{"block_type":2074,"content":{"creation_block":{"creations":[{"id":"c1","image":{"image_thumb":{"url":"https://cdn.example/thumb.png"},"image_ori_raw":{"url":"https://cdn.example/original.png"}}}]}}}]}}]}
+
+`
+	repeat := `event: STREAM_MSG_NOTIFY
+data: {"message":{"message_id":"bot"},"content":{"content_block":[{"block_type":2074,"content":{"creation_block":{"creations":[{"id":"c1","image":{"image_ori":{"url":"https://cdn.example/original.png"}}}]}}}]}}
+
+`
+	var emitted []string
+	text, err := consumeStream(strings.NewReader(placeholder+final+repeat), func(value string) { emitted = append(emitted, value) })
+	testutil.NoError(t, err)
+	if strings.Count(text, "https://cdn.example/original.png") != 1 {
+		t.Fatalf("text=%q", text)
+	}
+	if strings.Contains(text, "thumb.png") {
+		t.Fatalf("the original should win over the thumbnail: %q", text)
+	}
+	if !strings.Contains(strings.Join(emitted, ""), "![generated image 1](https://cdn.example/original.png)") {
+		t.Fatalf("emitted=%q", emitted)
+	}
+}
+
 func TestToolEnvelopeOnlyEmitsDeclaredObjectArguments(t *testing.T) {
 	var messages []upstream.SSEMessage
 	emitToolOrText(`{"tool_calls":[{"name":"read","arguments":{"path":"a"}},{"name":"other","arguments":{}}]}`, []any{map[string]any{"type": "function", "function": map[string]any{"name": "read"}}}, func(message upstream.SSEMessage) { messages = append(messages, message) })
