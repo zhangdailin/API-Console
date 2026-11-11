@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -58,6 +59,57 @@ func TestConversationCreateReportsUpstreamRefusal(t *testing.T) {
 	if !strings.Contains(err.Error(), "712012002") || !strings.Contains(err.Error(), "不支持编码类型") {
 		t.Fatalf("error=%v", err)
 	}
+}
+
+// encoding/json decodes JSON numbers into float64, and fmt.Sprint renders
+// 710022004 as 7.10022004e+08. That silently turned a rate-limit refusal into an
+// unclassified error, so the gateway retried a risk-control verdict 21 times.
+func TestStreamErrorKeepsTheIntegerErrorCode(t *testing.T) {
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(`{"error_code":710022002,"error_msg":"busy"}`), &payload); err != nil {
+		t.Fatal(err)
+	}
+	err := upstreamStreamError(payload)
+	if !strings.HasPrefix(err.Error(), "status=429:") || !strings.Contains(err.Error(), "710022002") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+// A shark_admin verify challenge cannot be answered by replaying the request,
+// so it must not be classified as a plain rate limit that is retried.
+func TestStreamErrorSurfacesTheHumanVerificationChallenge(t *testing.T) {
+	decision := `{\"code\":\"10000\",\"from\":\"shark_admin\",\"type\":\"verify\",\"subtype\":\"semantic_reasoning\",\"detail\":\"token\"}`
+	raw := `{"error_code":710022004,"error_msg":"rate limited","extra":{"ack":"1","decision":"` + decision + `"}}`
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatal(err)
+	}
+	err := upstreamStreamError(payload)
+	if !strings.Contains(err.Error(), "requires human verification") || !strings.Contains(err.Error(), "shark_admin/verify/semantic_reasoning") {
+		t.Fatalf("error=%v", err)
+	}
+	if strings.HasPrefix(err.Error(), "status=429") {
+		t.Fatalf("a verification challenge must not look retryable: %v", err)
+	}
+}
+
+// The root conversation is stable for an account; recreating it every turn
+// doubled IM gateway traffic, which is what the risk controller scores.
+func TestMainConversationIsReusedPerAccount(t *testing.T) {
+	created := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		created++
+		_, _ = io.WriteString(w, `{"status_code":0,"downlink_body":{"create_conv_downlink_body":{"conversation_info":{"conversation_id":"root-1"}}}}`)
+	}))
+	defer server.Close()
+	client := NewFromAccount(&store.Account{ID: 9001, ClientCookie: `{"sid":"x"}`}, &config.Config{DoubaoBaseURL: server.URL})
+	first, err := client.mainConversation(context.Background(), client.jar())
+	testutil.NoError(t, err)
+	second, err := client.mainConversation(context.Background(), client.jar())
+	testutil.NoError(t, err)
+	testutil.Equal(t, first, "root-1")
+	testutil.Equal(t, second, "root-1")
+	testutil.Equal(t, created, 1)
 }
 
 func TestModelsCarryTheFourStableAliases(t *testing.T) {

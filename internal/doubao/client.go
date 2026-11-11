@@ -282,11 +282,40 @@ func (c *Client) createConversation(ctx context.Context, jar cookieJar, source s
 }
 
 func (c *Client) newConversation(ctx context.Context, jar cookieJar) (string, error) {
-	root, err := c.createConversation(ctx, jar, "")
+	root, err := c.mainConversation(ctx, jar)
 	if err != nil {
 		return "", err
 	}
 	return c.createConversation(ctx, jar, root)
+}
+
+// mainConversation reuses the account's root conversation across requests.
+//
+// Creating a fresh root on every turn doubled the IM gateway calls per answer
+// (root plus sub-conversation) and kept minting new server-side sessions, which
+// is exactly the traffic pattern the upstream risk controller scores. The root
+// id is stable for an account, so caching it is both cheaper and less
+// suspicious.
+func (c *Client) mainConversation(ctx context.Context, jar cookieJar) (string, error) {
+	key := c.acc.ID
+	if key != 0 {
+		conversations.Lock()
+		cached := conversations.main[key]
+		conversations.Unlock()
+		if cached != "" {
+			return cached, nil
+		}
+	}
+	root, err := c.createConversation(ctx, jar, "")
+	if err != nil {
+		return "", err
+	}
+	if key != 0 {
+		conversations.Lock()
+		conversations.main[key] = root
+		conversations.Unlock()
+	}
+	return root, nil
 }
 
 func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.UpstreamRequest, onMessage func(upstream.SSEMessage), logger *debug.Logger) error {
@@ -501,11 +530,78 @@ func snapshotText(value map[string]any) string {
 }
 
 func upstreamStreamError(value map[string]any) error {
-	code := fmt.Sprint(value["error_code"])
+	code := errorCodeString(value["error_code"])
+	if code == "710022004" {
+		decision := sharkDecision(value)
+		if decision.needsVerification() {
+			// shark_admin's verify challenge can only be answered in a real
+			// browser session. Replaying it here cannot succeed and only deepens
+			// the risk window, so this error must stop retries and park the
+			// account instead of entering the generic rate-limit path.
+			return fmt.Errorf("status=403: doubao account requires human verification: open doubao.com with this account and complete the challenge (%s %s)", code, decision.summary())
+		}
+	}
 	if code == "710022002" || code == "710022004" {
 		return fmt.Errorf("status=429: doubao upstream rate limited (%s)", code)
 	}
 	return fmt.Errorf("doubao stream error: %s", code)
+}
+
+// errorCodeString renders a decoded JSON number as its integer decimal form.
+// fmt.Sprint on the float64 produced by encoding/json prints 710022004 as
+// 7.10022004e+08, which silently disabled the rate-limit classification.
+func errorCodeString(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(typed)
+	case float64:
+		return strconv.FormatInt(int64(typed), 10)
+	case json.Number:
+		return typed.String()
+	case int:
+		return strconv.Itoa(typed)
+	case int64:
+		return strconv.FormatInt(typed, 10)
+	default:
+		return strings.TrimSpace(fmt.Sprint(value))
+	}
+}
+
+type sharkAdminDecision struct {
+	Type    string `json:"type"`
+	Subtype string `json:"subtype"`
+	From    string `json:"from"`
+	Detail  string `json:"detail"`
+}
+
+func sharkDecision(value map[string]any) sharkAdminDecision {
+	extra, _ := value["extra"].(map[string]any)
+	raw, _ := extra["decision"].(string)
+	if strings.TrimSpace(raw) == "" {
+		return sharkAdminDecision{}
+	}
+	var decision sharkAdminDecision
+	_ = json.Unmarshal([]byte(raw), &decision)
+	return decision
+}
+
+func (d sharkAdminDecision) needsVerification() bool {
+	return strings.EqualFold(d.From, "shark_admin") && strings.EqualFold(d.Type, "verify")
+}
+
+func (d sharkAdminDecision) summary() string {
+	parts := make([]string, 0, 3)
+	for _, part := range []string{d.From, d.Type, d.Subtype} {
+		if strings.TrimSpace(part) != "" {
+			parts = append(parts, part)
+		}
+	}
+	if len(parts) == 0 {
+		return "shark_admin"
+	}
+	return strings.Join(parts, "/")
 }
 
 func statusError(status int, raw []byte) error {
@@ -523,6 +619,11 @@ var turns = struct {
 	sync.Mutex
 	last map[int64]time.Time
 }{last: map[int64]time.Time{}}
+
+var conversations = struct {
+	sync.Mutex
+	main map[int64]string
+}{main: map[int64]string{}}
 
 func waitTurn(ctx context.Context, accountID int64, cfg *config.Config) error {
 	gap := 3 * time.Second

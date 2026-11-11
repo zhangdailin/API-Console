@@ -187,6 +187,10 @@ func ClassifyUpstreamError(errStr string) UpstreamErrorClass {
 	// A request the upstream rejected on its own merits: a replay is identical.
 	case strings.Contains(lower, "rejected the request parameters"):
 		return UpstreamErrorClass{Category: "client"}
+	// An interactive challenge is a fact about the account, not the request.
+	// Nothing about replaying the call clears it, and retrying walks the pool.
+	case strings.Contains(lower, "requires human verification"):
+		return UpstreamErrorClass{Category: "verification_required"}
 	case strings.Contains(lower, "protocol error") || strings.Contains(lower, "no usable stream events"):
 		return UpstreamErrorClass{Category: "protocol"}
 	case strings.Contains(lower, "pacing registry capacity reached"):
