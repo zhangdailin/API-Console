@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -29,13 +31,20 @@ func consumeStream(body io.Reader, emit func(string)) (string, error) {
 	}
 	var images []creationImage
 	seenImages := map[string]bool{}
+	// shapes counts the event names and block layouts of the stream, never
+	// their content, so an answer this parser could not read can be diagnosed.
+	shapes := map[string]int{}
 	flush := func() error {
 		if event == "" {
 			data = ""
 			return nil
 		}
+		shapes[event]++
 		var value map[string]any
 		if data != "" && json.Unmarshal([]byte(data), &value) == nil {
+			if event != "FULL_MSG_NOTIFY" && event != "CHUNK_DELTA" {
+				blockShapes(value, event, shapes)
+			}
 			switch event {
 			case "FULL_MSG_NOTIFY":
 				if message, ok := value["message"].(map[string]any); ok {
@@ -117,7 +126,58 @@ func consumeStream(body io.Reader, emit func(string)) (string, error) {
 		text += markdown
 		emit(markdown)
 	}
+	if text == "" {
+		slog.Warn("doubao stream carried no readable answer", "shapes", shapeSummary(shapes))
+	}
 	return text, nil
+}
+
+// blockShapes records, for every content block in one frame, its block type,
+// patch type and the names of its content fields.
+func blockShapes(node any, event string, shapes map[string]int) {
+	switch typed := node.(type) {
+	case map[string]any:
+		if blocks, ok := typed["content_block"].([]any); ok {
+			for _, raw := range blocks {
+				block, _ := raw.(map[string]any)
+				content, _ := block["content"].(map[string]any)
+				fields := make([]string, 0, len(content))
+				for name, value := range content {
+					// An empty placeholder field says nothing about the layout.
+					if text, isText := value.(string); !isText || text != "" {
+						fields = append(fields, name)
+					}
+				}
+				sort.Strings(fields)
+				shapes[fmt.Sprintf("%s/block_type=%v/patch_type=%v/%s", event, block["block_type"], block["patch_type"], strings.Join(fields, "+"))]++
+			}
+		}
+		for _, child := range typed {
+			blockShapes(child, event, shapes)
+		}
+	case []any:
+		for _, child := range typed {
+			blockShapes(child, event, shapes)
+		}
+	}
+}
+
+// shapeSummary renders the counted shapes in a stable order, bounded in size.
+func shapeSummary(shapes map[string]int) string {
+	names := make([]string, 0, len(shapes))
+	for name := range shapes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var out strings.Builder
+	for _, name := range names {
+		if out.Len() > 1500 {
+			out.WriteString(" ...")
+			break
+		}
+		fmt.Fprintf(&out, "%s x%d; ", name, shapes[name])
+	}
+	return strings.TrimSpace(out.String())
 }
 
 type creationImage struct{ id, url string }

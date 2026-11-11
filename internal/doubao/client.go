@@ -432,6 +432,9 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	if err != nil {
 		return err
 	}
+	if text == "" {
+		slog.Warn("doubao answer was empty", "account_id", c.acc.ID, "model", req.Model, "attachments", len(attachments))
+	}
 	if toolMode {
 		emitToolOrText(text, req.Tools, onMessage)
 	}

@@ -514,3 +514,15 @@ func TestURLReadingRejectsInternalAddresses(t *testing.T) {
 		}
 	}
 }
+
+// The diagnostic for an unreadable answer names event and block layouts only;
+// the text of a frame must never reach the log.
+func TestShapeSummaryCarriesNoContent(t *testing.T) {
+	var frame map[string]any
+	testutil.NoError(t, json.Unmarshal([]byte(`{"message":{"content_block":[{"block_type":10040,"patch_type":2,"content":{"task_block":{"title":"secret plan"},"pc_event_block":""}}]}}`), &frame))
+	shapes := map[string]int{"STREAM_MSG_NOTIFY": 1}
+	blockShapes(frame, "STREAM_MSG_NOTIFY", shapes)
+	summary := shapeSummary(shapes)
+	testutil.MustContain(t, summary, "STREAM_MSG_NOTIFY/block_type=10040/patch_type=2/task_block x1")
+	testutil.False(t, strings.Contains(summary, "secret"), "summary leaked frame content: "+summary)
+}
