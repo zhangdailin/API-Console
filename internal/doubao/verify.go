@@ -18,14 +18,21 @@ import (
 // decision: a challenge a person has to solve. The web client hands that
 // decision to its verification SDK, which opens
 //
-//	https://verify.zijieapi.com/verifycenter/captcha/v2?...&verify_data=<decision>
+//	https://rmc.bytedance.com/verifycenter/captcha/v2?...&verify_data=<decision>
+//
+// in an iframe. That page is self-contained: it reads its query, initialises
+// the captcha and renders the decision, whether or not it has a parent.
 //
 // The gateway cannot solve it and does not try. It keeps the last decision per
 // account so the console can offer the same official page for the operator to
 // open, bound to the device identity the gateway sends.
 
 const (
-	verifyHost = "https://verify.zijieapi.com"
+	// verifyPageHost serves the page; it is the SDK's default iframe host.
+	// verifyAPIHost is the service the page talks to, handed to it as the
+	// `host` parameter. Opening the page on the API host answers 404.
+	verifyPageHost = "https://rmc.bytedance.com"
+	verifyAPIHost  = "https://verify.zijieapi.com"
 	// webAppID is the Doubao web application id, the `aid` of every request.
 	webAppID = "497858"
 	// challengeTTL bounds how long a recorded decision is offered. Its token
@@ -88,16 +95,17 @@ func verification(acc *store.Account) (provider.Verification, bool) {
 		return provider.Verification{}, false
 	}
 	return provider.Verification{
-		URL:        verificationURL(acc.DoubaoDeviceID, recorded.decision),
+		URL:        verificationURL(acc.DoubaoDeviceID, decodeCookies(acc.ClientCookie)["s_v_web_id"], recorded.decision),
 		Kind:       recorded.decision.summary(),
 		ObservedAt: recorded.at,
 	}, true
 }
 
 // verificationURL renders the page the web client's SDK opens for a decision.
-// The parameter order and the percent-encoding follow the SDK, which builds the
-// query with encodeURIComponent.
-func verificationURL(deviceID string, decision sharkAdminDecision) string {
+// The parameters and the percent-encoding follow the SDK, which builds the
+// query with encodeURIComponent and adds the browser fingerprint (the
+// s_v_web_id cookie) as fp.
+func verificationURL(deviceID, fingerprint string, decision sharkAdminDecision) string {
 	data, _ := json.Marshal(struct {
 		Subtype     string `json:"subtype"`
 		Detail      string `json:"detail"`
@@ -106,20 +114,24 @@ func verificationURL(deviceID string, decision sharkAdminDecision) string {
 		LoginStatus int    `json:"login_status"`
 	}{decision.Subtype, decision.Detail, decision.LogID, decision.VerifyScene, 1})
 	params := [][2]string{
+		{"from", "iframe"}, {"fp", fingerprint},
 		{"aid", webAppID}, {"did", deviceID}, {"scene_level", "p2"}, {"app_name", "doubao"},
-		{"host", verifyHost}, {"lang", "zh"}, {"viewport", "1280x800"}, {"baseEM", "16"},
+		{"host", verifyAPIHost}, {"lang", "zh"}, {"viewport", "1280x800"}, {"baseEM", "16"},
 		{"verify_data", string(data)},
 	}
 	var query strings.Builder
-	for index, param := range params {
-		if index > 0 {
+	for _, param := range params {
+		if param[1] == "" {
+			continue
+		}
+		if query.Len() > 0 {
 			query.WriteByte('&')
 		}
 		query.WriteString(param[0])
 		query.WriteByte('=')
 		query.WriteString(strings.ReplaceAll(url.QueryEscape(param[1]), "+", "%20"))
 	}
-	return verifyHost + "/verifycenter/captcha/v2?" + query.String()
+	return verifyPageHost + "/verifycenter/captcha/v2?" + query.String()
 }
 
 type sharkAdminDecision struct {

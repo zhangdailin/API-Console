@@ -564,7 +564,7 @@ func TestVerificationLinkForARecordedChallenge(t *testing.T) {
 	testutil.NoError(t, json.Unmarshal([]byte(`{"error_code":710022004,"extra":{"decision":{"from":"shark_admin","type":"verify","detail":"d"}}}`), &asObject))
 	testutil.True(t, sharkDecision(asObject).needsVerification(), "an object decision was not read")
 
-	acc := &store.Account{ID: 9101, DoubaoDeviceID: "7500000000000000001"}
+	acc := &store.Account{ID: 9101, DoubaoDeviceID: "7500000000000000001", ClientCookie: `{"sessionid":"x","s_v_web_id":"verify_fp_1"}`}
 	_, ok := verification(acc)
 	testutil.False(t, ok, "a link was offered with no challenge recorded")
 
@@ -580,8 +580,12 @@ func TestVerificationLinkForARecordedChallenge(t *testing.T) {
 	testutil.Equal(t, link.Kind, "shark_admin/verify/semantic_reasoning")
 	parsed, parseErr := url.Parse(link.URL)
 	testutil.NoError(t, parseErr)
-	testutil.Equal(t, parsed.Scheme+"://"+parsed.Host+parsed.Path, "https://verify.zijieapi.com/verifycenter/captcha/v2")
+	// The page lives on the SDK's iframe host; the verify service is only the
+	// `host` parameter, and answers 404 when opened as a page.
+	testutil.Equal(t, parsed.Scheme+"://"+parsed.Host+parsed.Path, "https://rmc.bytedance.com/verifycenter/captcha/v2")
 	query := parsed.Query()
+	testutil.Equal(t, query.Get("host"), "https://verify.zijieapi.com")
+	testutil.Equal(t, query.Get("fp"), "verify_fp_1")
 	testutil.Equal(t, query.Get("did"), acc.DoubaoDeviceID)
 	testutil.Equal(t, query.Get("aid"), "497858")
 	testutil.Equal(t, query.Get("verify_data"), `{"subtype":"semantic_reasoning","detail":"tok en+/=","log_id":"log-1","verify_scene":"chat","login_status":1}`)
