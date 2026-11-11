@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"orchids-api/internal/grok/grokbase"
-	"orchids-api/internal/grok/web/egress"
 	"orchids-api/internal/httpclient"
 )
 
@@ -26,24 +25,6 @@ func doUpstreamHTTP(req *http.Request, do func(*http.Request) (*http.Response, e
 		resp.Body = grokbase.WrapByteIdle(resp.Body, idle)
 	}
 	return resp, nil
-}
-
-// egressOutcomeForKind maps a classified upstream error kind to the coarser
-// node-health outcome. Persistent challenges degrade the node (it cannot serve
-// this request); rate limits and account issues do not.
-func egressOutcomeForKind(kind UpstreamErrorKind) egress.FeedbackOutcome {
-	switch kind {
-	case UpstreamErrorCloudflareChallenge, UpstreamErrorDPoPChallenge:
-		return egress.OutcomeChallenge
-	case UpstreamErrorRateLimited:
-		return egress.OutcomeRateLimited
-	case UpstreamErrorAccountBlock:
-		return egress.OutcomeAccountBlock
-	case UpstreamErrorGenericForbidden:
-		return egress.OutcomeForbidden
-	default:
-		return egress.OutcomeTransportError
-	}
 }
 
 // ErrGrokSemanticIdle reports that the upstream stopped producing output.

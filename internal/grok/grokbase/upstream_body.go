@@ -56,19 +56,3 @@ func (r *byteIdleReadCloser) closeInner() error {
 	r.closeOnce.Do(func() { r.closeErr = r.inner.Close() })
 	return r.closeErr
 }
-
-// LeaseBody releases an egress lease when the upstream body is closed, on
-// every exit path. Release runs once.
-type LeaseBody struct {
-	io.ReadCloser
-	Release func()
-}
-
-func (b *LeaseBody) Close() error {
-	err := b.ReadCloser.Close()
-	if b.Release != nil {
-		b.Release()
-		b.Release = nil
-	}
-	return err
-}

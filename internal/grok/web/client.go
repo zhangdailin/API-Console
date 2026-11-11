@@ -10,7 +10,6 @@ import (
 
 	"orchids-api/internal/chatwire"
 	"orchids-api/internal/config"
-	"orchids-api/internal/grok/web/egress"
 	"orchids-api/internal/httpclient"
 	"orchids-api/internal/upstream"
 )
@@ -36,12 +35,6 @@ type Client struct {
 	cfg         *config.Config
 	httpClient  *http.Client
 	assetClient *http.Client
-	egress      *egress.Manager
-	// appChatTransport is deliberately kept behind a small boundary.  The
-	// historical REST request shape and the newer MGW websocket request shape
-	// are not wire-compatible, so callers must never silently reinterpret an
-	// app-chat payload as an MGW event stream.
-	appChatTransport appChatTransport
 }
 
 type NSFWEnableResult struct {
@@ -56,18 +49,11 @@ func New(cfg *config.Config) *Client {
 	cfg = cfg.GrokWebTransport()
 	timeout := cfg.GrokWebRequestTimeout()
 	baseClient := newHTTPClient(cfg, timeout, httpclient.ProxyFuncFromConfig(cfg))
-	client := &Client{
+	return &Client{
 		cfg:         cfg,
 		httpClient:  baseClient,
 		assetClient: baseClient,
-		egress:      egress.Shared(cfg),
 	}
-	// MGW is available through the explicit request API in
-	// mgw_websocket_transport.go.  Legacy callers only provide a REST payload,
-	// therefore the adapter records that MGW is not applicable and safely falls
-	// back to the established REST transport.
-	client.appChatTransport = newAppChatFallbackTransport(client)
-	return client
 }
 
 func (c *Client) baseURL() string {
@@ -220,21 +206,11 @@ func (c *Client) clientForAppChat() *http.Client {
 	return http.DefaultClient
 }
 
+// doChat sends one REST app-chat request.
 func (c *Client) doChat(ctx context.Context, token string, payload map[string]any) (*http.Response, error) {
 	if c == nil {
 		return nil, fmt.Errorf("grok client not configured")
 	}
-	transport := c.appChatTransport
-	if transport == nil {
-		transport = restAppChatTransport{}
-	}
-	return transport.Chat(ctx, c, token, payload)
-}
-
-// doRESTChat preserves the proven REST app-chat transport.  It is intentionally
-// separate from doChat so the transport selector can fall back without
-// recursively calling itself.
-func (c *Client) doRESTChat(ctx context.Context, token string, payload map[string]any) (*http.Response, error) {
 	if err := waitScopedRateLimit(ctx, ProviderWeb, token, chatwire.ParseLooseStringAny(payload["modelName"]), c.cfg.GrokWebRequestsPerSecond()); err != nil {
 		return nil, err
 	}

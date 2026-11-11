@@ -18,7 +18,6 @@ import (
 	"orchids-api/internal/accountpolicy"
 	"orchids-api/internal/config"
 	"orchids-api/internal/debug"
-	"orchids-api/internal/grok/egress"
 	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/store"
 	"orchids-api/internal/upstream"
@@ -44,7 +43,6 @@ type CLIClient struct {
 	cfg                   *config.Config
 	httpClient            *http.Client
 	oauth                 *CLIOAuth
-	egress                *egress.Manager
 	responseHeaderTimeout time.Duration
 }
 
@@ -58,7 +56,6 @@ func NewCLIClient(cfg *config.Config) *CLIClient {
 	// upstream tolerates browser-like TLS even though headers are CLI identity.
 	client.httpClient = httpclient.GetSharedBrowserHTTPClientWithLimits("cli|"+httpclient.GenerateProxyKeyFromConfig(cfg), cfg.UpstreamRequestTimeout(), 0, httpclient.ProxyFuncFromConfig(cfg), cfg)
 	client.oauth = NewCLIOAuth(cfg, client.httpClient)
-	client.egress = egress.Shared(cfg)
 	return client
 }
 
@@ -437,7 +434,7 @@ func (c *CLIClient) request(ctx context.Context, acc *store.Account, method, end
 		if err != nil {
 			return nil, err
 		}
-		response, err := c.doCLIRequest(requestCtx, acc, req)
+		response, err := c.httpClient.Do(req)
 		attemptErr := err
 		if err == nil && response.StatusCode >= 400 {
 			attemptErr = fmt.Errorf("upstream HTTP status %d", response.StatusCode)
@@ -488,57 +485,6 @@ func (b *cancelOnCloseBody) Close() error {
 		b.cancel = nil
 	}
 	return err
-}
-
-func cliEgressAffinity(acc *store.Account) string {
-	if acc == nil {
-		return "build_unknown"
-	}
-	identity := util.FirstNonEmpty(acc.UserID, acc.Email, acc.OAuthRefreshToken, acc.OAuthAccessToken, fmt.Sprintf("id:%d", acc.ID))
-	return credentialAffinity(identity)
-}
-
-// doCLIRequest is the fail-closed egress adapter. A successful response owns
-// its lease until the shared response lifecycle closes the body.
-func (c *CLIClient) doCLIRequest(ctx context.Context, acc *store.Account, req *http.Request) (*http.Response, error) {
-	if c.egress == nil || !c.egress.Routes("cli") {
-		return c.httpClient.Do(req)
-	}
-	lease, err := c.egress.Acquire(ctx, "cli", cliEgressAffinity(acc))
-	if err != nil {
-		recordEgressAcquireError()
-		return nil, fmt.Errorf("grok cli egress unavailable: %w", err)
-	}
-	if lease.Direct {
-		return c.httpClient.Do(req)
-	}
-	// Build is a CLI identity. Its egress lease intentionally carries no
-	resp, err := lease.Do(req)
-	if err != nil {
-		c.egress.FeedbackOutcome(lease.NodeID, egress.OutcomeTransportError)
-		lease.Release()
-		return nil, err
-	}
-	switch {
-	case resp.StatusCode >= 200 && resp.StatusCode < 300:
-		c.egress.FeedbackOutcome(lease.NodeID, egress.OutcomeSuccess)
-	case resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnauthorized:
-		// Request validation and credential failures say nothing about the egress
-		// node's health.
-		c.egress.FeedbackOutcome(lease.NodeID, egress.OutcomeAccountBlock)
-	case resp.StatusCode == http.StatusTooManyRequests:
-		c.egress.FeedbackOutcome(lease.NodeID, egress.OutcomeRateLimited)
-	case resp.StatusCode >= 500:
-		c.egress.FeedbackOutcome(lease.NodeID, egress.OutcomeServerError)
-	default:
-		c.egress.FeedbackOutcome(lease.NodeID, egress.OutcomeForbidden)
-	}
-	if resp != nil && resp.Body != nil {
-		resp.Body = &grokbase.LeaseBody{ReadCloser: resp.Body, Release: lease.Release}
-	} else {
-		lease.Release()
-	}
-	return resp, nil
 }
 
 func classifyAccountStatusFromHTTP(status int) string {

@@ -291,9 +291,6 @@ func (h *Handler) selectAccount(ctx context.Context) (*store.Account, string, er
 
 func (h *Handler) ensureModelEnabled(ctx context.Context, modelID string) error {
 	id := normalizeModelID(modelID)
-	if IsDeprecatedModelID(id) {
-		return fmt.Errorf("model not found")
-	}
 	if h != nil && h.modelCache.Has(id) {
 		return nil
 	}

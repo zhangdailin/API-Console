@@ -3,9 +3,7 @@ package web
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"math/rand"
 	"net/http"
@@ -15,7 +13,6 @@ import (
 	"orchids-api/internal/debug"
 	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/grok/ratelimit"
-	"orchids-api/internal/grok/web/egress"
 	"orchids-api/internal/httpclient"
 	"orchids-api/internal/util"
 	"strconv"
@@ -139,7 +136,6 @@ func (c *Client) doRequestWithHTTPClient(ctx context.Context, httpClient *http.C
 	var lastStatus int
 	var lastBody string
 	lastDelay := baseDelay
-	challengeRetried := false
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if err := ctx.Err(); err != nil {
@@ -153,47 +149,10 @@ func (c *Client) doRequestWithHTTPClient(ctx context.Context, httpClient *http.C
 		reqHeaders.Set("x-xai-request-id", randomUUID())
 		req.Header = reqHeaders
 
-		// Egress: route through the proxy pool with a bound UA + clearance. When
-		// egress is explicitly enabled the manager is fail-closed: an acquire
-		// failure is returned, never silently downgraded to the direct client.
-		var resp *http.Response
-		var lease *egress.Lease
-		leaseNodeID := ""
-		releaseLease := func() {}
-		if scope := c.egressScopeForURL(reqURL); c.egress != nil && c.egress.Routes(scope) {
-			affinity := requestCredentialAffinity(req.Header, reqURL)
-			lease, err = c.egress.Acquire(ctx, scope, affinity)
-			if err != nil {
-				recordEgressAcquireError()
-				return nil, fmt.Errorf("grok egress unavailable: %w", err)
-			}
-			if lease.Direct {
-				// The scope fell back to the general proxy.
-				lease = nil
-			}
-		}
-		if lease != nil {
-			leaseNodeID = lease.NodeID
-			req.Header.Set("User-Agent", lease.UserAgent)
-			applyChromiumClientHints(req.Header, lease.UserAgent)
-			if lease.CFCookies != "" {
-				mergeCFCookies(req.Header, lease.CFCookies)
-			}
-			releaseLease = lease.Release
-		}
-
-		do := httpClient.Do
-		if lease != nil {
-			do = lease.Do
-		}
 		diagnosticAttempt := debug.BeginUpstream(ctx, method, reqURL, req.Header, body)
-		resp, err = doUpstreamHTTP(req, do, c.cfg.GrokWebStreamIdleTimeout())
+		resp, err := doUpstreamHTTP(req, httpClient.Do, c.cfg.GrokWebStreamIdleTimeout())
 		diagnosticAttempt.Response(resp, err)
 		if err != nil {
-			if c.egress != nil && leaseNodeID != "" {
-				c.egress.FeedbackOutcome(leaseNodeID, egress.OutcomeTransportError)
-			}
-			releaseLease()
 			if attempt >= maxRetries {
 				return nil, err
 			}
@@ -206,12 +165,6 @@ func (c *Client) doRequestWithHTTPClient(ctx context.Context, httpClient *http.C
 		}
 		resp.Body = diagnosticAttempt.CaptureBody(resp.Body)
 		if resp.StatusCode == okStatus {
-			if c.egress != nil && leaseNodeID != "" {
-				c.egress.FeedbackOutcome(leaseNodeID, egress.OutcomeSuccess)
-			}
-			if lease != nil {
-				resp.Body = &grokbase.LeaseBody{ReadCloser: resp.Body, Release: releaseLease}
-			}
 			return resp, nil
 		}
 
@@ -230,10 +183,6 @@ func (c *Client) doRequestWithHTTPClient(ctx context.Context, httpClient *http.C
 					lastBody = lastBody + " " + desc
 				}
 			}
-			if c.egress != nil && leaseNodeID != "" {
-				c.egress.FeedbackOutcome(leaseNodeID, egress.OutcomeRateLimited)
-			}
-			releaseLease()
 			if retry429 && attempt < maxRetries {
 				slog.Debug("doRequest retry triggered", "status", lastStatus, "attempt", attempt, "body", lastBody)
 				retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
@@ -244,82 +193,22 @@ func (c *Client) doRequestWithHTTPClient(ctx context.Context, httpClient *http.C
 				}
 				continue
 			}
-			return nil, newUpstreamError(lastStatus, headerCopy, []byte(lastBody), leaseNodeID)
+			return nil, newUpstreamError(lastStatus, headerCopy, []byte(lastBody))
 		}
 
 		// Response-aware classification: Cloudflare/DPoP challenges are egress
 		// problems, never account problems.
-		kind := ClassifyUpstreamResponse(lastStatus, resp.Header, raw)
-		if kind == UpstreamErrorCloudflareChallenge {
+		switch ClassifyUpstreamResponse(lastStatus, resp.Header, raw) {
+		case UpstreamErrorCloudflareChallenge:
 			recordUpstreamChallenge("cloudflare")
-			if lease != nil && !challengeRetried {
-				// Invalidate this exact clearance and re-acquire once. The retry
-				// does not consume the attempt budget (decrement before continue).
-				challengeRetried = true
-				if lease != nil {
-					lease.InvalidateClearance()
-				}
-				releaseLease()
-				attempt--
-				continue
-			}
-		} else if kind == UpstreamErrorDPoPChallenge {
+		case UpstreamErrorDPoPChallenge:
 			recordUpstreamChallenge("dpop")
-		} else if kind == UpstreamErrorGenericForbidden {
+		case UpstreamErrorGenericForbidden:
 			recordGenericForbidden()
-			if lease != nil {
-				lease.InvalidateClearance()
-			}
 		}
-
-		if c.egress != nil && leaseNodeID != "" {
-			c.egress.FeedbackOutcome(leaseNodeID, egressOutcomeForKind(kind))
-		}
-		releaseLease()
-		return nil, newUpstreamError(lastStatus, headerCopy, raw, leaseNodeID)
+		return nil, newUpstreamError(lastStatus, headerCopy, raw)
 	}
 
 	// Loop always returns; this trailing return satisfies the compiler.
-	return nil, newUpstreamError(lastStatus, nil, []byte(lastBody), "")
-}
-
-// egressScopeForURL maps an upstream URL to an egress node scope.
-func (c *Client) egressScopeForURL(reqURL string) string {
-	host := strings.ToLower(strings.TrimSpace(reqURL))
-	switch {
-	case strings.Contains(host, "cli-chat-proxy.grok.com"):
-		return "cli"
-	case strings.Contains(host, "assets.grok.com"):
-		return "asset"
-	default:
-		return "app_chat"
-	}
-}
-
-// requestCredentialAffinity derives account affinity from the SSO cookie
-// already attached to a request. It never exposes the credential in manager
-// state or cache keys. Non-authenticated requests retain a URL-specific key.
-func requestCredentialAffinity(header http.Header, reqURL string) string {
-	for _, item := range grokCookieItems(header.Get("Cookie")) {
-		if item.name == "sso" || item.name == "sso-rw" {
-			return credentialAffinity(item.value)
-		}
-	}
-	sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(reqURL))))
-	return fmt.Sprintf("url_%x", sum[:12])
-}
-
-// mergeCFCookies injects Cloudflare clearance cookies into an existing Cookie
-// header without clobbering the SSO cookies already set.
-func mergeCFCookies(header http.Header, cfCookies string) {
-	if strings.TrimSpace(cfCookies) == "" {
-		return
-	}
-	existing := strings.TrimSpace(header.Get("Cookie"))
-	switch {
-	case existing == "":
-		header.Set("Cookie", cfCookies)
-	default:
-		header.Set("Cookie", existing+"; "+cfCookies)
-	}
+	return nil, newUpstreamError(lastStatus, nil, []byte(lastBody))
 }

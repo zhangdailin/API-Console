@@ -21,18 +21,15 @@ func TestConfigDefaults(t *testing.T) {
 
 func TestCloneDeepCopiesReferenceFields(t *testing.T) {
 	original := &Config{
-		TrustedProxies:  []string{"10.0.0.1"},
-		GrokEgressNodes: []EgressNodeConfig{{Name: "primary", URL: "http://proxy"}},
-		ProxyBypass:     []string{"localhost"},
+		TrustedProxies: []string{"10.0.0.1"},
+		ProxyBypass:    []string{"localhost"},
 	}
 
 	clone := original.Clone()
 	clone.TrustedProxies[0] = "10.0.0.2"
-	clone.GrokEgressNodes[0].Name = "changed"
 	clone.ProxyBypass[0] = "example.com"
 
-	if original.TrustedProxies[0] != "10.0.0.1" || original.GrokEgressNodes[0].Name != "primary" ||
-		original.ProxyBypass[0] != "localhost" {
+	if original.TrustedProxies[0] != "10.0.0.1" || original.ProxyBypass[0] != "localhost" {
 		t.Fatalf("Clone shares mutable fields with original: %#v", original)
 	}
 }

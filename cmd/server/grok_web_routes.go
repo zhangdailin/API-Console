@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"orchids-api/internal/grok"
-	"orchids-api/internal/grok/egressnodes"
 	"orchids-api/internal/grok/web"
 	"orchids-api/internal/handler"
 	"orchids-api/internal/middleware"
@@ -104,11 +103,6 @@ func registerGrokWebAdminRoutes(mux *http.ServeMux, sessionAuth func(http.Handle
 		{"/voice/livekit/", webHandler.HandleAdminVoiceRelay},
 		{"/imagine/config", webHandler.HandleAdminImagineConfig},
 	}
-	// Egress nodes, proxy profiles, subscriptions and automation for the
-	// configuration page. Credentials are write-only; see egressnodes/admin.go.
-	mux.Handle("/api/grok/admin/egress/", sessionAuth(func(w http.ResponseWriter, r *http.Request) {
-		egressnodes.Default().ServeHTTP(w, r)
-	}))
 	for _, route := range adminRoutes {
 		handler := sessionAuth(withAdminToolsOwner(withToolsLinks(route.handler)))
 		if route.path == "/media/inputs/upload" {

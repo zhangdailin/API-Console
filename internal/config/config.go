@@ -105,28 +105,20 @@ type Config struct {
 	// GrokWebProxyURL routes only grok.com (Web SSO) traffic through a proxy,
 	// for a host whose own address Cloudflare challenges. Empty uses the
 	// general proxy settings.
-	GrokWebProxyURL            string  `json:"grok_web_proxy_url,omitempty"`
-	GrokStatsigSignerURL       *string `json:"grok_statsig_signer_url,omitempty"`
-	GrokStatsigID              string  `json:"grok_statsig_id,omitempty"`
-	GrokConfigCFClearance      string  `json:"grok_cf_clearance,omitempty"`
-	GrokConfigCFBM             string  `json:"grok_cf_bm,omitempty"`
-	GrokTemporary              *bool   `json:"grok_temporary,omitempty"`
-	GrokDisableMemory          *bool   `json:"grok_disable_memory,omitempty"`
-	GrokCustomInstruction      string  `json:"grok_custom_instruction,omitempty"`
-	GrokWebRPS                 float64 `json:"grok_web_rps,omitempty"`
-	GrokWebTimeout             int     `json:"grok_web_timeout_seconds,omitempty"`
-	GrokWebStreamIdleSeconds   int     `json:"grok_web_stream_idle_seconds,omitempty"`
-	GrokFlareSolverrURL        string  `json:"grok_flaresolverr_url,omitempty"`
-	GrokClearanceMode          string  `json:"grok_clearance_mode,omitempty"`             // "manual"|"flaresolverr"|"on_demand"
-	GrokClearanceRefreshInterv int     `json:"grok_clearance_refresh_interval,omitempty"` // seconds
-	GrokClearanceTimeout       int     `json:"grok_clearance_timeout_seconds,omitempty"`  // seconds
-	GrokImageNSFW              *bool   `json:"grok_image_nsfw,omitempty"`
-	GrokImageFinalMinBytes     int     `json:"grok_image_final_min_bytes,omitempty"`
-	GrokImageMediumMinBytes    int     `json:"grok_image_medium_min_bytes,omitempty"`
-
-	// ── Grok Build egress proxy pool ──
-	GrokEgressEnabled bool               `json:"grok_egress_enabled,omitempty"`
-	GrokEgressNodes   []EgressNodeConfig `json:"grok_egress_nodes,omitempty"`
+	GrokWebProxyURL          string  `json:"grok_web_proxy_url,omitempty"`
+	GrokStatsigSignerURL     *string `json:"grok_statsig_signer_url,omitempty"`
+	GrokStatsigID            string  `json:"grok_statsig_id,omitempty"`
+	GrokConfigCFClearance    string  `json:"grok_cf_clearance,omitempty"`
+	GrokConfigCFBM           string  `json:"grok_cf_bm,omitempty"`
+	GrokTemporary            *bool   `json:"grok_temporary,omitempty"`
+	GrokDisableMemory        *bool   `json:"grok_disable_memory,omitempty"`
+	GrokCustomInstruction    string  `json:"grok_custom_instruction,omitempty"`
+	GrokWebRPS               float64 `json:"grok_web_rps,omitempty"`
+	GrokWebTimeout           int     `json:"grok_web_timeout_seconds,omitempty"`
+	GrokWebStreamIdleSeconds int     `json:"grok_web_stream_idle_seconds,omitempty"`
+	GrokImageNSFW            *bool   `json:"grok_image_nsfw,omitempty"`
+	GrokImageFinalMinBytes   int     `json:"grok_image_final_min_bytes,omitempty"`
+	GrokImageMediumMinBytes  int     `json:"grok_image_medium_min_bytes,omitempty"`
 
 	// Internal operation policy, initialized by ApplyHardcoded. JSON cannot
 	// override these values. Catalog reads and tests may use shorter limits.
@@ -143,16 +135,6 @@ type Config struct {
 	ProxyBypass        []string `json:"proxy_bypass"`
 }
 
-// EgressNodeConfig describes one egress exit node for the Grok proxy pool.
-// Defined in the config package (not grok/egress) to avoid an import cycle.
-type EgressNodeConfig struct {
-	Name    string `json:"name"`
-	URL     string `json:"url"`    // proxy address http/socks5; empty = direct
-	Weight  int    `json:"weight"` // weight for weighted round-robin; <=0 = 1
-	Scope   string `json:"scope"`  // "cli"|"all"
-	Proxied bool   `json:"proxied"`
-}
-
 // Clone returns a deep copy suitable for publishing as an immutable runtime
 // snapshot. Config contains slice and map fields, so a plain struct copy
 // would still let a later request mutate data observed by concurrent readers.
@@ -163,7 +145,6 @@ func (c *Config) Clone() *Config {
 
 	clone := *c
 	clone.TrustedProxies = append([]string(nil), c.TrustedProxies...)
-	clone.GrokEgressNodes = append([]EgressNodeConfig(nil), c.GrokEgressNodes...)
 	clone.ProxyBypass = append([]string(nil), c.ProxyBypass...)
 	clone.GrokStatsigSignerURL = cloneOptional(c.GrokStatsigSignerURL)
 	clone.GrokTemporary = cloneOptional(c.GrokTemporary)

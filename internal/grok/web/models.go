@@ -55,10 +55,6 @@ var modelByID = func() map[string]ModelSpec {
 	return out
 }()
 
-// IsDeprecatedModelID is kept for call-site compatibility: the Web table holds
-// no retired identifiers.
-func IsDeprecatedModelID(string) bool { return false }
-
 func normalizeModelID(modelID string) string {
 	return strings.ToLower(strings.TrimSpace(modelID))
 }

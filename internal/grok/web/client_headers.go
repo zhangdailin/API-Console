@@ -8,7 +8,6 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
-	"orchids-api/internal/store"
 	"strconv"
 	"strings"
 	"sync"
@@ -456,7 +455,3 @@ func (c *Client) assetDownloadHeaders(token, link string) http.Header {
 	}
 	return headers
 }
-
-// EgressAffinity is the affinity key the Web egress manager uses for an
-// account, so account bindings can be computed outside a request.
-func EgressAffinity(acc *store.Account) string { return credentialAffinity(SSOToken(acc)) }

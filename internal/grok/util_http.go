@@ -35,8 +35,8 @@ func TokenFingerprint(token string) string {
 	return fmt.Sprintf("%x", sum[:8])
 }
 
-// credentialAffinity derives a stable, non-reversible egress affinity key from
-// an account identity so one credential keeps hitting the same egress node.
+// credentialAffinity derives a stable, non-reversible key from an account
+// identity, so per-credential state never holds the credential itself.
 func credentialAffinity(identity string) string {
 	normalized := strings.TrimSpace(identity)
 	if normalized == "" {

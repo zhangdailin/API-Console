@@ -55,32 +55,6 @@ func (c *Config) GrokChatCustomInstruction() string {
 	return strings.TrimSpace(c.GrokCustomInstruction)
 }
 
-func (c *Config) GrokClearanceRefreshIntervalOrDefault() int {
-	if c != nil && c.GrokClearanceRefreshInterv > 0 {
-		return c.GrokClearanceRefreshInterv
-	}
-	return 600
-}
-
-func (c *Config) GrokClearanceModeOrDefault() string {
-	if c != nil {
-		switch mode := strings.ToLower(strings.TrimSpace(c.GrokClearanceMode)); mode {
-		case "flaresolverr", "on_demand":
-			return mode
-		}
-	}
-	return "manual"
-}
-
-// GrokClearanceTimeoutOrDefault bounds one FlareSolverr solve (10s–300s).
-func (c *Config) GrokClearanceTimeoutOrDefault() time.Duration {
-	seconds := 60
-	if c != nil && c.GrokClearanceTimeout > 0 {
-		seconds = min(max(c.GrokClearanceTimeout, 10), 300)
-	}
-	return time.Duration(seconds) * time.Second
-}
-
 func (c *Config) PublicImagineNSFW() bool {
 	return c == nil || c.GrokImageNSFW == nil || *c.GrokImageNSFW
 }

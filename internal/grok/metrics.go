@@ -26,13 +26,6 @@ var (
 	// Response classification metrics. Labels carry only the challenge kind or
 	// status class — never credentials, tokens, cookies, UA, affinity or node.
 
-	grokEgressAcquireErrors = promauto.NewCounter(prometheus.CounterOpts{
-		Namespace: "grok",
-		Subsystem: "egress",
-		Name:      "acquire_errors_total",
-		Help:      "Times the egress manager failed to acquire a lease.",
-	})
-
 	grokGenericForbidden = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "grok",
 		Subsystem: "upstream",
@@ -55,7 +48,5 @@ func recordCLIUpstreamStatus(status int) {
 }
 
 func recordCLIOAuthRefresh() { grokCLIOAuthRefreshes.Inc() }
-
-func recordEgressAcquireError() { grokEgressAcquireErrors.Inc() }
 
 func recordGenericForbidden() { grokGenericForbidden.Inc() }

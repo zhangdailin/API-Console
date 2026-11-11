@@ -49,12 +49,8 @@ const CONFIG_FIELDS = [
   { id: "cfg_proxy_url", key: "proxy_url", type: "text" },
   { id: "cfg_proxy_bypass", key: "proxy_bypass", type: "lines" },
   { id: "cfg_grok_low_latency", key: "grok_low_latency", type: "bool" },
-  { id: "cfg_grok_clearance_mode", key: "grok_clearance_mode", type: "radio", options: ["flaresolverr", "on_demand", "manual"], radio: "cfg_clearance_mode_", fallback: "manual" },
   { id: "cfg_grok_cf_clearance", key: "grok_cf_clearance", type: "text" },
-  { id: "cfg_grok_flaresolverr_url", key: "grok_flaresolverr_url", type: "text" },
   { id: "cfg_grok_web_proxy_url", key: "grok_web_proxy_url", type: "text" },
-  { id: "cfg_grok_clearance_timeout_seconds", key: "grok_clearance_timeout_seconds", type: "secs", optional: true },
-  { id: "cfg_grok_clearance_refresh_interval", key: "grok_clearance_refresh_interval", type: "secs", optional: true },
   { id: "cfg_grok_cli_base_url", key: "grok_cli_base_url", type: "text", optional: true },
   { id: "cfg_grok_cli_client_version", key: "grok_cli_client_version", type: "text", optional: true },
   { id: "cfg_grok_cli_client_identifier", key: "grok_cli_client_identifier", type: "text", optional: true },
@@ -263,7 +259,6 @@ function showConfigPanel(name) {
     if (panel) panel.hidden = !active;
   });
   try { localStorage.setItem("configPanel", name); } catch (_) { /* per-viewer convenience only */ }
-  if (name === "delivery" && globalThis.EgressNodes) EgressNodes.activate();
 }
 
 function bindConfigNav() {
@@ -292,19 +287,6 @@ function syncConditionalRows() {
   if (!document.querySelectorAll) return;
   const statsig = radioValue(configField("cfg_statsig_mode"));
   document.querySelectorAll("[data-statsig]").forEach((row) => { row.hidden = row.getAttribute("data-statsig") !== statsig; });
-  const clearance = radioValue(configField("cfg_grok_clearance_mode"));
-  document.querySelectorAll("[data-clearance]").forEach((row) => {
-    const want = row.getAttribute("data-clearance");
-    row.hidden = !(want === clearance || (want === "solver" && clearance !== "manual"));
-  });
-  const help = document.getElementById("cfgClearanceHelp");
-  if (help) {
-    help.textContent = {
-      flaresolverr: "按刷新周期主动为每个出口重新求解过期的 Clearance。",
-      on_demand: "保留最后一次成功的 Clearance，只在上游明确拒绝后重新求解；首个请求可能不带 Clearance。",
-      manual: "从不调用 FlareSolverr；使用节点上的 Cookie 或下方全局 cf_clearance。",
-    }[clearance] || "";
-  }
 }
 
 function parseProxyBypass(raw) {

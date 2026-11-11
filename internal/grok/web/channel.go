@@ -39,7 +39,7 @@ func webTransportKey(cfg *config.Config) string {
 		return ""
 	}
 	return strings.Join([]string{cfg.ProxyURL, cfg.ProxyHTTP, cfg.ProxyHTTPS, cfg.ProxyUser, cfg.ProxyPass, cfg.GrokWebProxyURL,
-		cfg.GrokConfigCFClearance, cfg.GrokConfigCFBM, cfg.GrokClearanceMode, cfg.GrokFlareSolverrURL, cfg.GrokWebBaseURL, cfg.GrokWebUserAgent}, "\x00")
+		cfg.GrokConfigCFClearance, cfg.GrokConfigCFBM, cfg.GrokWebBaseURL, cfg.GrokWebUserAgent}, "\x00")
 }
 
 // webObservationTTL bounds how old a successful quota read may be and still

@@ -16,13 +16,6 @@ var (
 		Help:      "Upstream challenges classified by kind (cloudflare|dpop).",
 	}, []string{"kind"})
 
-	grokEgressAcquireErrors = promauto.NewCounter(prometheus.CounterOpts{
-		Namespace: "grok_web",
-		Subsystem: "egress",
-		Name:      "acquire_errors_total",
-		Help:      "Times the egress manager failed to acquire a lease.",
-	})
-
 	grokGenericForbidden = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "grok_web",
 		Subsystem: "upstream",
@@ -36,10 +29,6 @@ func recordUpstreamChallenge(kind string) {
 		kind = "unknown"
 	}
 	grokUpstreamChallenges.WithLabelValues(kind).Inc()
-}
-
-func recordEgressAcquireError() {
-	grokEgressAcquireErrors.Inc()
 }
 
 func recordGenericForbidden() {

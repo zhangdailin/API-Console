@@ -11,7 +11,7 @@
     <section class="header-section" id="configHeader">
       <div>
         <h1>配置管理</h1>
-        <p>Grok Build / Web 上游、Clearance、出口节点与代理网络；表单改动后底部保存栏显示未保存数量，出口节点的操作即时生效。</p>
+        <p>Grok Build / Web 上游、Clearance 与代理网络；表单改动后底部保存栏显示未保存数量。</p>
       </div>
     </section>
 
@@ -127,30 +127,16 @@
           <div class="config-panel" id="cfgPanel-delivery" role="tabpanel" aria-labelledby="cfgTab-delivery" hidden>
             <section class="settings-card">
               <div class="settings-card-head"><h2 class="settings-card-title">Clearance</h2><span class="mini-badge">新请求生效</span></div>
-              <p class="settings-card-note">grok.com 位于 Cloudflare 之后。FlareSolverr 只接受 http / socks5 代理地址，隧道分享链接无法自动刷新。</p>
+              <p class="settings-card-note">grok.com 位于 Cloudflare 之后。cf_clearance 须在同一出网 IP、同一 UA 的浏览器中获取。</p>
               <div class="settings-card-body">
-                <div class="form-row"><div class="form-row-label"><span class="form-label">模式</span><span class="helper-text" id="cfgClearanceHelp"></span></div>
-                  <div class="form-row-control">
-                    <div class="segmented" role="radiogroup" aria-label="Clearance 模式">
-                      <label><input type="radio" name="cfg_clearance_mode" id="cfg_clearance_mode_flaresolverr" value="flaresolverr"><span>FlareSolverr</span></label>
-                      <label><input type="radio" name="cfg_clearance_mode" id="cfg_clearance_mode_on_demand" value="on_demand"><span>按需刷新</span></label>
-                      <label><input type="radio" name="cfg_clearance_mode" id="cfg_clearance_mode_manual" value="manual"><span>手动维护</span></label>
-                    </div>
-                  </div></div>
-                <div class="form-row" data-clearance="solver"><div class="form-row-label"><label class="form-label" for="cfg_grok_flaresolverr_url">FlareSolverr URL</label><span class="helper-text">例如 http://flaresolverr:8191。</span></div>
-                  <div class="form-row-control"><input type="url" id="cfg_grok_flaresolverr_url" class="form-input" placeholder="http://flaresolverr:8191" spellcheck="false"></div></div>
-                <div class="form-row" data-clearance="solver"><div class="form-row-label"><label class="form-label" for="cfg_grok_clearance_timeout_seconds">求解超时</label><span class="helper-text">单次求解上限，10 秒至 300 秒，默认 60 秒。</span></div>
-                  <div class="form-row-control"><div class="duration-input"><input type="number" id="cfg_grok_clearance_timeout_seconds" class="form-input" min="0" step="1" placeholder="60"><select id="cfg_grok_clearance_timeout_seconds_unit" class="form-input" aria-label="单位"><option value="1">秒</option><option value="60">分</option></select></div></div></div>
-                <div class="form-row" data-clearance="flaresolverr"><div class="form-row-label"><label class="form-label" for="cfg_grok_clearance_refresh_interval">刷新周期</label><span class="helper-text">超过该时长的 Clearance 在下次请求前重新求解，默认 10 分钟。</span></div>
-                  <div class="form-row-control"><div class="duration-input"><input type="number" id="cfg_grok_clearance_refresh_interval" class="form-input" min="0" step="1" placeholder="600"><select id="cfg_grok_clearance_refresh_interval_unit" class="form-input" aria-label="单位"><option value="1">秒</option><option value="60">分</option><option value="3600">时</option></select></div></div></div>
-                <div class="form-row" data-clearance="manual"><div class="form-row-label"><label class="form-label" for="cfg_grok_cf_clearance">全局 cf_clearance <span class="secret-badge">密钥</span></label><span class="helper-text">未走出口节点、或节点未单独设置 Cookie 时使用；须与出网 IP 和 UA 匹配。</span></div>
+                <div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_grok_cf_clearance">全局 cf_clearance <span class="secret-badge">密钥</span></label><span class="helper-text">须与出网 IP 和 UA 匹配。</span></div>
                   <div class="form-row-control"><input type="text" id="cfg_grok_cf_clearance" class="form-input secret-field" autocomplete="off" spellcheck="false"></div></div>
               </div>
             </section>
 
             <section class="settings-card">
               <div class="settings-card-head"><h2 class="settings-card-title">通用代理</h2><span class="mini-badge">出网</span></div>
-              <p class="settings-card-note">没有出口节点、且兜底为“通用代理”的请求走这里；留空表示直连。</p>
+              <p class="settings-card-note">所有上游请求走这里；留空表示直连。</p>
               <div class="settings-card-body">
                 <div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_proxy_url">代理 URL <span class="secret-badge">密钥</span></label><span class="helper-text">支持 http://、https://、socks5://。</span></div>
                   <div class="form-row-control"><input type="text" id="cfg_proxy_url" class="form-input secret-field" placeholder="http://user:pass@host:port/ 或 socks5://user:pass@host:port/"></div></div>
@@ -160,8 +146,6 @@
                   <div class="form-row-control"><textarea id="cfg_proxy_bypass" class="form-input" rows="3" placeholder="example.com&#10;10.0.0.0/8"></textarea></div></div>
               </div>
             </section>
-
-            {{template "egress-panel.html" .}}
           </div>
 
           <!-- Authentication ─────────────────────────────────────────── -->
@@ -204,13 +188,11 @@
   </main>
 
   {{template "key-modals.html" .}}
-  {{template "egress-modals.html" .}}
   <div class="toast-container" id="toastContainer"></div>
 
   {{template "page-scripts.html" .}}
   <script src="{{.AdminPath}}/js/provider-registry.js?v={{.AssetVersion}}"></script>
   <script src="{{.AdminPath}}/js/config.js?v={{.AssetVersion}}"></script>
-  <script src="{{.AdminPath}}/js/egress-nodes.js?v={{.AssetVersion}}"></script>
   <script src="{{.AdminPath}}/js/api-keys.js?v={{.AssetVersion}}"></script>
   <script src="{{.AdminPath}}/js/api-key-import.js?v={{.AssetVersion}}"></script>
 </body>
