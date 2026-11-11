@@ -109,13 +109,18 @@ func registerRoutes(
 	}
 	// All inference routes bind a provider by path, with or without /v1.
 	channelPrefixes := channel.GenericPrefixes()
+	// Chat-only channels serve POST /chat/completions and model discovery only.
+	// Their /messages and Responses routes stay unregistered so those wire
+	// formats fail at routing instead of being bridged onto an upstream that
+	// cannot honour them.
+	protocolPrefixes := channel.GenericPrefixesExcept(channel.ChatOnlyIDs()...)
 	allPrefixes := channel.AllPrefixes()
 
 	// --- Channel-specific message routes ---
 	// Every channel answers the same two endpoints; the path only tells the
 	// handler which channel's token profile and account pool to use.
-	registerWithPrefixes(mux, channelPrefixes, "/messages", inferenceAuth(h.HandleMessages))
-	registerWithPrefixes(mux, channelPrefixes, "/messages/count_tokens", inferenceAuth(h.HandleCountTokens))
+	registerWithPrefixes(mux, protocolPrefixes, "/messages", inferenceAuth(h.HandleMessages))
+	registerWithPrefixes(mux, protocolPrefixes, "/messages/count_tokens", inferenceAuth(h.HandleCountTokens))
 
 	// --- Model routes (channel prefixes → same handlers) ---
 	registerWithPrefixes(mux, allPrefixes, "/models", inferenceAuth(h.HandleModels))
@@ -139,12 +144,12 @@ func registerRoutes(
 	bridgeOptions := responses.BridgeOptions{Store: s, TTL: responseStoreTTL, ExecuteChat: h.HandleChatRequest}
 	channelResponses := responses.ResponsesBridgeHandler(h.HandleMessages, bridgeOptions)
 	channelResponsesSub := responses.ResponsesChannelSubpath(h.HandleMessages, bridgeOptions)
-	registerWithPrefixes(mux, channelPrefixes, "/responses", inferenceAuth(channelResponses))
-	registerWithPrefixes(mux, channelPrefixes, "/responses/", inferenceAuth(channelResponsesSub))
+	registerWithPrefixes(mux, protocolPrefixes, "/responses", inferenceAuth(channelResponses))
+	registerWithPrefixes(mux, protocolPrefixes, "/responses/", inferenceAuth(channelResponsesSub))
 	// Resource actions share the same ownership-checked store on both bases.
-	registerWithPrefixes(mux, allPrefixes, "/responses/{response_id}/cancel",
+	registerWithPrefixes(mux, protocolPrefixes, "/responses/{response_id}/cancel",
 		inferenceAuth(responses.CancelHandler(bridgeOptions)))
-	registerWithPrefixes(mux, allPrefixes, "/responses/{response_id}/input_items",
+	registerWithPrefixes(mux, protocolPrefixes, "/responses/{response_id}/input_items",
 		inferenceAuth(responses.InputItemsHandler(bridgeOptions)))
 
 	grokPrefixes := channel.PrefixesFor(channel.Grok)

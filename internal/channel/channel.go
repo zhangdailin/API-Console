@@ -22,13 +22,19 @@ type Definition struct {
 	Default       bool   `json:"default,omitempty"`
 	Theme         string `json:"theme"`
 	AccountCreate string `json:"accountCreate"`
+	// ChatOnly restricts the channel to POST /chat/completions. Channels whose
+	// upstream speaks only the OpenAI-compatible chat wire format leave
+	// /messages and the Responses bridge unregistered.
+	ChatOnly bool `json:"chatOnly,omitempty"`
+	// FlowVisible controls whether the live traffic screen lists the channel.
+	FlowVisible bool `json:"flowVisible"`
 }
 
 var definitions = [...]Definition{
-	{ID: WorkBuddy, Label: "WorkBuddy", APIPrefix: "/workbuddy/v1", Generic: true, Default: true, Theme: "orange", AccountCreate: "browser"},
-	{ID: Cline, Label: "Cline", APIPrefix: "/cline/v1", Generic: true, Theme: "blue", AccountCreate: "browser"},
-	{ID: Grok, Label: "Grok", APIPrefix: "/grok/v1", Theme: "red", AccountCreate: "browser"},
-	{ID: Doubao, Label: "Doubao", APIPrefix: "/doubao/v1", Generic: true, Theme: "green", AccountCreate: "browser"},
+	{ID: WorkBuddy, Label: "WorkBuddy", APIPrefix: "/workbuddy/v1", Generic: true, Default: true, Theme: "orange", AccountCreate: "browser", FlowVisible: true},
+	{ID: Cline, Label: "Cline", APIPrefix: "/cline/v1", Generic: true, Theme: "blue", AccountCreate: "browser", FlowVisible: true},
+	{ID: Grok, Label: "Grok", APIPrefix: "/grok/v1", Theme: "red", AccountCreate: "browser", FlowVisible: true},
+	{ID: Doubao, Label: "Doubao", APIPrefix: "/doubao/v1", Generic: true, Theme: "green", AccountCreate: "browser", ChatOnly: true, FlowVisible: false},
 }
 
 func All() []Definition { return append([]Definition(nil), definitions[:]...) }
@@ -79,6 +85,64 @@ func AllPrefixes() []string {
 		out = append(out, PrefixesFor(definition.ID)...)
 	}
 	return out
+}
+
+// ChatOnlyIDs returns the channels limited to POST /chat/completions.
+func ChatOnlyIDs() []ID {
+	out := make([]ID, 0, len(definitions))
+	for _, definition := range definitions {
+		if definition.ChatOnly {
+			out = append(out, definition.ID)
+		}
+	}
+	return out
+}
+
+// ChatOnlyPrefixes returns the inference bases of the chat-only channels, so
+// route assembly can keep their extra endpoints unregistered.
+func ChatOnlyPrefixes() []string {
+	out := []string{}
+	for _, id := range ChatOnlyIDs() {
+		out = append(out, PrefixesFor(id)...)
+	}
+	return out
+}
+
+// GenericPrefixesExcept returns the generic bases without the excluded channels.
+func GenericPrefixesExcept(excluded ...ID) []string {
+	skip := make(map[ID]struct{}, len(excluded))
+	for _, id := range excluded {
+		skip[id] = struct{}{}
+	}
+	out := []string{}
+	for _, definition := range definitions {
+		if !definition.Generic {
+			continue
+		}
+		if _, found := skip[definition.ID]; found {
+			continue
+		}
+		out = append(out, PrefixesFor(definition.ID)...)
+	}
+	return out
+}
+
+// FlowDefinitions returns the channels the live traffic screen renders.
+func FlowDefinitions() []Definition {
+	out := make([]Definition, 0, len(definitions))
+	for _, definition := range definitions {
+		if definition.FlowVisible {
+			out = append(out, definition)
+		}
+	}
+	return out
+}
+
+// FlowVisible reports whether the live traffic screen renders this channel.
+// Unknown names are not flow channels.
+func FlowVisible(value ID) bool {
+	definition, ok := DefinitionFor(value)
+	return ok && definition.FlowVisible
 }
 
 // PrefixesFor returns the versioned and unversioned inference base paths.

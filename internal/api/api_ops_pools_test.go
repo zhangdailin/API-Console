@@ -49,8 +49,10 @@ func TestOpsPoolsReadOnlyScopeAndCapacity(t *testing.T) {
 		return result
 	}
 	all := read("/api/ops/pools")
-	if len(all["rows"].([]any)) != len(channel.All()) {
-		t.Fatal("all providers must retain stable rows")
+	// The live traffic screen renders a fixed channel set; channels it hides
+	// must not add a row here, or the screen's pool totals stop matching.
+	if len(all["rows"].([]any)) != len(channel.FlowDefinitions()) {
+		t.Fatal("the pool must retain one stable row per flow channel")
 	}
 	scoped := read("/api/ops/pools?channel=cline")
 	rows := scoped["rows"].([]any)
@@ -119,7 +121,7 @@ func TestOpsPoolsFailuresAreNotIdleCapacity(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if rec.Code != 200 || len(result.Rows) != len(channel.All()) {
+	if rec.Code != 200 || len(result.Rows) != len(channel.FlowDefinitions()) {
 		t.Fatal("missing tracker must retain account counts")
 	}
 	for _, row := range result.Rows {

@@ -43,7 +43,13 @@ func TestProviderRoutesBothBasesAndRetiredUnifiedRoutes(t *testing.T) {
 					mux.ServeHTTP(w, r)
 					return w
 				}
-				for _, endpoint := range []string{"/models", "/models/shared-model", "/messages", "/messages/count_tokens", "/chat/completions", "/responses", "/responses/compact", "/responses/missing", "/responses/missing/cancel", "/responses/missing/input_items"} {
+				endpoints := []string{"/models", "/models/shared-model", "/chat/completions"}
+				// A chat-only channel serves chat completions and model
+				// discovery; its other wire formats must stay unrouted.
+				if !d.ChatOnly {
+					endpoints = append(endpoints, "/messages", "/messages/count_tokens", "/responses", "/responses/compact", "/responses/missing", "/responses/missing/cancel", "/responses/missing/input_items")
+				}
+				for _, endpoint := range endpoints {
 					if w := call(http.MethodPost, base+endpoint, "{}", ""); w.Code != http.StatusUnauthorized {
 						t.Fatalf("%s missing key = %d %s", endpoint, w.Code, w.Body.String())
 					}
@@ -68,6 +74,9 @@ func TestProviderRoutesBothBasesAndRetiredUnifiedRoutes(t *testing.T) {
 						t.Fatalf("cross-provider catalog: %s", w.Body.String())
 					}
 				}
+				if d.ChatOnly {
+					return
+				}
 				w := call(http.MethodPost, base+"/messages/count_tokens", `{"model":"shared-model","messages":[{"role":"user","content":"hello"}]}`, managedKey)
 				if w.Code != 200 || !strings.Contains(w.Body.String(), `"prompt_profile":"`+string(d.ID)+`"`) {
 					t.Fatalf("token profile lost: %d %s", w.Code, w.Body.String())
@@ -89,5 +98,37 @@ func TestProviderRoutesBothBasesAndRetiredUnifiedRoutes(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// A chat-only channel must fail unregistered wire formats at routing. Bridging
+// them onto chat would silently change the contract those clients rely on.
+func TestChatOnlyChannelServesOnlyChatCompletions(t *testing.T) {
+	cfg := &config.Config{AdminUser: "admin", AdminPass: "secret", AdminToken: "admintoken", AdminPath: "/admin"}
+	mux, s, _ := newRouteMux(t, "chat-only:", cfg)
+	managedKey := "sk-chat-only"
+	digest := sha256.Sum256([]byte(managedKey))
+	if err := s.CreateApiKey(context.Background(), &store.ApiKey{Name: "test", KeyHash: hex.EncodeToString(digest[:]), Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, base := range channel.PrefixesFor(channel.Doubao) {
+		t.Run(base, func(t *testing.T) {
+			call := func(method, endpoint string) *httptest.ResponseRecorder {
+				r := httptest.NewRequest(method, base+endpoint, strings.NewReader("{}"))
+				r.Header.Set("Authorization", "Bearer "+managedKey)
+				w := httptest.NewRecorder()
+				mux.ServeHTTP(w, r)
+				return w
+			}
+			for _, endpoint := range []string{"/messages", "/messages/count_tokens", "/responses", "/responses/", "/responses/compact"} {
+				if w := call(http.MethodPost, endpoint); w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "404 page not found") {
+					t.Fatalf("%s must be unrouted for a chat-only channel: %d %s", endpoint, w.Code, w.Body.String())
+				}
+			}
+			// The chat endpoint keeps its method guard, which proves it is registered.
+			if w := call(http.MethodGet, "/chat/completions"); w.Code != http.StatusMethodNotAllowed {
+				t.Fatalf("chat endpoint method guard = %d", w.Code)
+			}
+		})
 	}
 }
