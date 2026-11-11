@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -297,29 +298,80 @@ func (c *Client) createConversation(ctx context.Context, jar cookieJar, source s
 	return envelope.Downlink.Create.Info.ID, nil
 }
 
-// mainConversation returns the account's root conversation, creating it once.
-// Reusing it keeps a turn to one IM call and avoids minting a new server-side
-// session per answer, which is the traffic pattern the risk controller scores.
-func (c *Client) mainConversation(ctx context.Context, jar cookieJar) (string, error) {
-	key := c.acc.ID
-	if key != 0 {
+// conversationFor returns the upstream conversation that carries one downstream
+// conversation, creating it on first use.
+//
+// Isolation is keyed by the caller's conversation id rather than the account.
+// Sharing one upstream conversation per account let one client's history leak
+// into another client's answer and grew a single conversation without bound.
+// Requests without a conversation id fall back to a per-account conversation, so
+// a client that sends no id still reuses one instead of minting a new session
+// per turn.
+func (c *Client) conversationFor(ctx context.Context, jar cookieJar, downstreamID string) (string, error) {
+	account := c.acc.ID
+	root, err := c.mainConversation(ctx, jar)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(downstreamID) == "" {
+		// Without a downstream id there is nothing to isolate: keep using the
+		// account's root so a turn does not mint a new upstream session.
+		return root, nil
+	}
+	key := cacheKey(account, downstreamID)
+	if key != "" {
 		conversations.Lock()
-		cached := conversations.main[key]
+		cached := conversations.byConversation[key]
 		conversations.Unlock()
 		if cached != "" {
 			return cached, nil
+		}
+	}
+	// Creating with a source id opens a *child* conversation. Creating without
+	// one returns the account's root and is idempotent, so it can never isolate
+	// two downstream conversations.
+	id, err := c.createConversation(ctx, jar, root)
+	if err != nil {
+		return "", err
+	}
+	slog.Debug("doubao conversation selected", "account_id", account, "downstream", downstreamID, "root", root, "conversation", id)
+	if key != "" {
+		conversations.Lock()
+		conversations.byConversation[key] = id
+		conversations.Unlock()
+	}
+	return id, nil
+}
+
+// mainConversation returns the account's root conversation, creating it once.
+func (c *Client) mainConversation(ctx context.Context, jar cookieJar) (string, error) {
+	if c.acc.ID != 0 {
+		conversations.Lock()
+		root := conversations.main[c.acc.ID]
+		conversations.Unlock()
+		if root != "" {
+			return root, nil
 		}
 	}
 	root, err := c.createConversation(ctx, jar, "")
 	if err != nil {
 		return "", err
 	}
-	if key != 0 {
+	if c.acc.ID != 0 {
 		conversations.Lock()
-		conversations.main[key] = root
+		conversations.main[c.acc.ID] = root
 		conversations.Unlock()
 	}
 	return root, nil
+}
+
+// cacheKey scopes a conversation to an account and a downstream conversation.
+// An unknown account disables caching rather than sharing one bucket.
+func cacheKey(account int64, downstreamID string) string {
+	if account == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d|%s", account, strings.TrimSpace(downstreamID))
 }
 
 func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.UpstreamRequest, onMessage func(upstream.SSEMessage), logger *debug.Logger) error {
@@ -339,11 +391,15 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	if len(jar) == 0 {
 		return fmt.Errorf("status=401: doubao account is missing a cookie")
 	}
-	conversationID, err := c.mainConversation(ctx, jar)
+	conversationID, err := c.conversationFor(ctx, jar, req.ConversationID)
 	if err != nil {
 		return err
 	}
 	promptText := renderPrompt(req)
+	promptText, err = c.expandPromptURLs(ctx, promptText)
+	if err != nil {
+		return err
+	}
 	toolMode := len(req.Tools) > 0 && !req.NoTools
 	if toolMode {
 		promptText += toolInstruction(req.Tools)
@@ -870,8 +926,9 @@ var turns = struct {
 
 var conversations = struct {
 	sync.Mutex
-	main map[int64]string
-}{main: map[int64]string{}}
+	main           map[int64]string
+	byConversation map[string]string
+}{main: map[int64]string{}, byConversation: map[string]string{}}
 
 func waitTurn(ctx context.Context, accountID int64, cfg *config.Config) error {
 	gap := 3 * time.Second

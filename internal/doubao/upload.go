@@ -386,6 +386,18 @@ func (c *Client) uploadRequestAttachments(ctx context.Context, jar cookieJar, re
 		for _, block := range message.Content.GetBlocks() {
 			if data, name, ok := attachmentData(block); ok {
 				blocks = append(blocks, promptBlock{data: data, name: name, image: isImageBlock(block)})
+				continue
+			}
+			// A file block that only carries a URL is fetched here rather than
+			// handed to the model as a bare link: the model's browsing path may
+			// answer from the title alone, and a fetch makes the content
+			// deterministic.
+			if remote := remoteFileURL(block); remote != "" {
+				text, err := c.fetchURLText(ctx, remote)
+				if err != nil {
+					return nil, fmt.Errorf("doubao could not read the attached url: %w", err)
+				}
+				blocks = append(blocks, promptBlock{data: []byte(text), name: fileNameFromURL(remote)})
 			}
 		}
 		break
@@ -452,6 +464,38 @@ func attachmentData(block prompt.ContentBlock) ([]byte, string, bool) {
 		}
 	}
 	return nil, "", false
+}
+
+// remoteFileURL reports the URL an attachment block points at, when it points
+// at an http(s) resource instead of carrying inline bytes. The caller fetches it
+// through the outbound guard and uploads the result, so a URL attachment behaves
+// like an inline one.
+func remoteFileURL(block prompt.ContentBlock) string {
+	switch block.Type {
+	case "file", "input_file":
+		for _, candidate := range []string{block.URL, block.FileData} {
+			if isHTTPURL(candidate) {
+				return strings.TrimSpace(candidate)
+			}
+		}
+	}
+	return ""
+}
+
+func isHTTPURL(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
+}
+
+// fileNameFromURL derives a filename from a URL path so the attachment keeps a
+// useful extension for the upstream parser.
+func fileNameFromURL(rawURL string) string {
+	if parsed, err := url.Parse(strings.TrimSpace(rawURL)); err == nil {
+		if base := path.Base(parsed.Path); base != "" && base != "." && base != "/" {
+			return base
+		}
+	}
+	return "attachment.txt"
 }
 
 func imageName(mediaType string) string {

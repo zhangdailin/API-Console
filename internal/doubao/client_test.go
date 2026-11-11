@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"orchids-api/internal/config"
+	"orchids-api/internal/httpclient"
 	"orchids-api/internal/prompt"
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
@@ -97,43 +99,56 @@ func TestStreamErrorSurfacesTheHumanVerificationChallenge(t *testing.T) {
 }
 
 // The root conversation is stable for an account; recreating it every turn
-// doubled IM gateway traffic, which is what the risk controller scores.
-func TestMainConversationIsReusedPerAccount(t *testing.T) {
+// A downstream conversation id selects its own child conversation under the
+// account root. Creating without a source id is idempotent and always returns
+// the root, so isolation requires the child call.
+func TestConversationIsIsolatedPerDownstreamID(t *testing.T) {
 	created := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		created++
-		_, _ = io.WriteString(w, `{"status_code":0,"downlink_body":{"create_conv_downlink_body":{"conversation_info":{"conversation_id":"root-1"}}}}`)
+		_, _ = io.WriteString(w, fmt.Sprintf(`{"status_code":0,"downlink_body":{"create_conv_downlink_body":{"conversation_info":{"conversation_id":"conv-%d"}}}}`, created))
 	}))
 	defer server.Close()
 	client := NewFromAccount(&store.Account{ID: 9001, ClientCookie: `{"sid":"x"}`}, &config.Config{DoubaoBaseURL: server.URL})
-	first, err := client.mainConversation(context.Background(), client.jar())
+	alpha, err := client.conversationFor(context.Background(), client.jar(), "alpha")
 	testutil.NoError(t, err)
-	second, err := client.mainConversation(context.Background(), client.jar())
+	alphaAgain, err := client.conversationFor(context.Background(), client.jar(), "alpha")
 	testutil.NoError(t, err)
-	testutil.Equal(t, first, "root-1")
-	testutil.Equal(t, second, "root-1")
-	testutil.Equal(t, created, 1)
+	beta, err := client.conversationFor(context.Background(), client.jar(), "beta")
+	testutil.NoError(t, err)
+
+	// root, alpha child, beta child.
+	testutil.Equal(t, created, 3)
+	testutil.Equal(t, alphaAgain, alpha)
+	if alpha == beta {
+		t.Fatalf("two downstream conversations shared one upstream conversation: %q", alpha)
+	}
 }
 
-func TestConversationTurnReusesTheMainConversation(t *testing.T) {
-	var bodies []map[string]any
+// Without a downstream id the turn uses the account root directly: no child is
+// created, so repeated turns stay at one IM call.
+func TestConversationWithoutIDUsesTheRoot(t *testing.T) {
+	created := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		bodies = append(bodies, body)
-		_, _ = io.WriteString(w, `{"status_code":0,"downlink_body":{"create_conv_downlink_body":{"conversation_info":{"conversation_id":"root-2"}}}}`)
+		created++
+		_, _ = io.WriteString(w, fmt.Sprintf(`{"status_code":0,"downlink_body":{"create_conv_downlink_body":{"conversation_info":{"conversation_id":"conv-%d"}}}}`, created))
 	}))
 	defer server.Close()
 	client := NewFromAccount(&store.Account{ID: 9002, ClientCookie: `{"sid":"x"}`}, &config.Config{DoubaoBaseURL: server.URL})
-	first, err := client.mainConversation(context.Background(), client.jar())
+	first, err := client.conversationFor(context.Background(), client.jar(), "")
 	testutil.NoError(t, err)
-	second, err := client.mainConversation(context.Background(), client.jar())
+	second, err := client.conversationFor(context.Background(), client.jar(), "")
 	testutil.NoError(t, err)
-	testutil.Equal(t, first, "root-2")
-	testutil.Equal(t, second, "root-2")
-	if len(bodies) != 1 {
-		t.Fatalf("a turn must not create a second conversation, got %d creations", len(bodies))
-	}
+	testutil.Equal(t, first, "conv-1")
+	testutil.Equal(t, second, "conv-1")
+	testutil.Equal(t, created, 1)
+}
+
+// An account without an id cannot be isolated, so it must not share a cache
+// bucket with every other unsaved account.
+func TestConversationCacheKeyRequiresAnAccount(t *testing.T) {
+	testutil.Equal(t, cacheKey(0, "alpha"), "")
+	testutil.Equal(t, cacheKey(7, " alpha "), "7|alpha")
 }
 
 func TestModelsCarryTheFourStableAliases(t *testing.T) {
@@ -461,4 +476,41 @@ func TestAttachmentDataDecodesInlineFiles(t *testing.T) {
 
 	_, _, remote := attachmentData(prompt.ContentBlock{Type: "input_file", URL: "https://example.com/a.txt"})
 	testutil.False(t, remote, "a remote URL must not trigger a server-side fetch")
+}
+
+// URLs in the prompt are expanded, deduplicated, and capped so one turn cannot
+// turn into an unbounded fan-out of outbound requests.
+func TestPromptURLsAreExtractedInOrderAndCapped(t *testing.T) {
+	got := promptURLs("see https://a.example/one.txt and https://b.example/two, again https://a.example/one.txt plus https://c.example/three and https://d.example/four", 3)
+	if len(got) != 3 {
+		t.Fatalf("got %v", got)
+	}
+	testutil.Equal(t, got[0], "https://a.example/one.txt")
+	testutil.Equal(t, got[1], "https://b.example/two")
+	testutil.Equal(t, got[2], "https://c.example/three")
+}
+
+func TestPromptURLsIgnoreNonHTTPSchemes(t *testing.T) {
+	got := promptURLs("file:///etc/passwd ftp://x/y data:text/plain,hi https://ok.example/a", 3)
+	if len(got) != 1 || got[0] != "https://ok.example/a" {
+		t.Fatalf("got %v", got)
+	}
+}
+
+// The shared outbound guard must reject the addresses that turn this into an
+// SSRF primitive. These are the classic targets.
+func TestURLReadingRejectsInternalAddresses(t *testing.T) {
+	blocked := []string{
+		"http://127.0.0.1/admin",
+		"http://localhost:3002/api/keys",
+		"http://169.254.169.254/latest/meta-data/",
+		"http://10.0.0.1/internal",
+		"http://192.168.1.1/",
+		"http://[::1]/",
+	}
+	for _, raw := range blocked {
+		if _, err := httpclient.CheckRemoteFetchTarget(context.Background(), raw, false); err == nil {
+			t.Errorf("%s must be rejected", raw)
+		}
+	}
 }
