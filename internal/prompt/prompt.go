@@ -55,6 +55,77 @@ type MessageContent struct {
 	Blocks []ContentBlock
 }
 
+// UnmarshalJSON flattens the nested shapes Chat Completions uses for media.
+//
+// The OpenAI wire format puts an image URL under image_url.url and a file
+// payload under file.file_data, while this struct keeps them flat. Without this
+// decoder the nested values were silently dropped, so a standard
+// {"type":"image_url","image_url":{"url":...}} part reached a provider as an
+// empty block and the image was never uploaded.
+func (b *ContentBlock) UnmarshalJSON(data []byte) error {
+	type flat ContentBlock
+	var raw struct {
+		flat
+		ImageURL json.RawMessage `json:"image_url,omitempty"`
+		File     json.RawMessage `json:"file,omitempty"`
+		Filename string          `json:"filename,omitempty"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*b = ContentBlock(raw.flat)
+	if b.URL == "" {
+		b.URL = nestedURL(raw.ImageURL)
+	}
+	if raw.File != nil {
+		var file struct {
+			FileData string `json:"file_data,omitempty"`
+			Filename string `json:"filename,omitempty"`
+			URL      string `json:"url,omitempty"`
+		}
+		if err := json.Unmarshal(raw.File, &file); err == nil {
+			if b.FileData == "" {
+				b.FileData = firstNonEmpty(file.FileData, file.URL)
+			}
+			if b.FileName == "" {
+				b.FileName = file.Filename
+			}
+		}
+	}
+	if b.FileName == "" {
+		b.FileName = raw.Filename
+	}
+	return nil
+}
+
+// nestedURL accepts both the object form {"url": "..."} and a bare string,
+// which some clients send for image_url.
+func nestedURL(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var object struct {
+		URL string `json:"url,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &object); err == nil && object.URL != "" {
+		return object.URL
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return text
+	}
+	return ""
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func (mc *MessageContent) UnmarshalJSON(data []byte) error {
 	if len(data) == 0 {
 		mc.Text = ""

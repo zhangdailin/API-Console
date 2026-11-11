@@ -44,7 +44,11 @@ func publishedModels(accounts []*store.Account, now time.Time) []*store.Model {
 	}
 	rows := make([]*store.Model, 0, len(models))
 	for index, model := range Models() {
-		rows = append(rows, &store.Model{Channel: "doubao", ModelID: model.ID, Name: model.Name, Status: store.ModelStatusAvailable, Verified: true, SortOrder: index, Provider: "doubao-web", UpstreamModel: model.ModelItemKey, Capabilities: []string{store.CapabilityChat}})
+		// Chat is the only wire protocol this channel routes, but the model
+		// itself accepts images and files and can answer with generated images.
+		// Those are chat-content capabilities, not extra endpoints, so clients
+		// discover them here instead of probing /responses or /messages.
+		rows = append(rows, &store.Model{Channel: "doubao", ModelID: model.ID, Name: model.Name, Status: store.ModelStatusAvailable, Verified: true, SortOrder: index, Provider: "doubao-web", UpstreamModel: model.ModelItemKey, Capabilities: []string{store.CapabilityChat, store.CapabilityImage}})
 	}
 	return rows
 }

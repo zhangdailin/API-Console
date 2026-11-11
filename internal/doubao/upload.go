@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"path"
@@ -411,6 +412,7 @@ func (c *Client) uploadRequestAttachments(ctx context.Context, jar cookieJar, re
 		if err != nil {
 			return nil, err
 		}
+		slog.Debug("doubao attachment uploaded", "name", block.name, "bytes", len(block.data), "image", block.image, "uri", uri)
 		out = append(out, storeURI{URI: uri, Name: block.name, Size: len(block.data), Image: block.image})
 	}
 	return out, nil

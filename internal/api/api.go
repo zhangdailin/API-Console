@@ -28,6 +28,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -168,7 +169,28 @@ func New(s *store.Store, adminUser, adminPass string, cfg *config.Config) *API {
 	if cfg != nil {
 		a.config.Store(cfg.Clone())
 	}
+	a.publishStartupModels()
 	return a
+}
+
+// publishStartupModels reconciles each channel's published routes once at
+// startup. Capabilities live on the model rows, so a channel whose capability
+// set changed would otherwise keep advertising the old set until some account
+// verdict happened to run its publisher. That never happens for a healthy
+// account, which is how the routes kept reporting no capabilities at all.
+func (a *API) publishStartupModels() {
+	if a == nil || a.store == nil {
+		return
+	}
+	env := provider.Env{Config: a.config.Load(), Store: a.store}
+	for _, spec := range provider.All() {
+		if spec.PublishModels == nil {
+			continue
+		}
+		if err := spec.PublishModels(context.Background(), env); err != nil {
+			slog.Warn("Startup model publication failed", "channel", spec.ID, "error", err)
+		}
+	}
 }
 
 // SetConfigChangeHook registers the runtime components that must adopt a newly
