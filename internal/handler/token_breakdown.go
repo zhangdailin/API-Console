@@ -65,7 +65,7 @@ func estimateMessageContentTokens(content prompt.MessageContent) int {
 	total := 0
 	for _, block := range content.GetBlocks() {
 		switch block.Type {
-		case "image", "image_url":
+		case "image", "image_url", "input_image":
 			total += 1024
 		case "text":
 			total += tiktoken.EstimateTextTokens(block.Text)

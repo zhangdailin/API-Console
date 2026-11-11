@@ -84,7 +84,12 @@ func newRouteMux(t *testing.T, redisPrefix string, cfg *config.Config) (*http.Se
 func newChannelE2E(t *testing.T, redisPrefix, managedKey string, cfg *config.Config) *channelE2E {
 	t.Helper()
 	mux, s, h := newRouteMux(t, redisPrefix, cfg)
+	return newChannelE2EWith(t, mux, s, h, managedKey)
+}
 
+// newChannelE2EWith is newChannelE2E for a caller that also needs the store.
+func newChannelE2EWith(t *testing.T, mux *http.ServeMux, s *store.Store, h *handler.Handler, managedKey string) *channelE2E {
+	t.Helper()
 	digest := sha256.Sum256([]byte(managedKey))
 	if err := s.CreateApiKey(context.Background(), &store.ApiKey{
 		Name: managedKey, KeyHash: hex.EncodeToString(digest[:]), KeyPrefix: "sk-", KeySuffix: "-e2e", Enabled: true,

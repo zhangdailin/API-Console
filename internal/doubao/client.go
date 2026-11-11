@@ -399,9 +399,11 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	if err != nil {
 		return err
 	}
-	toolMode := len(req.Tools) > 0 && !req.NoTools
+	toolMode := usesTools(req)
 	if toolMode {
-		promptText += toolInstruction(req.Tools)
+		promptText += toolInstruction(req.Tools, req.ToolChoice)
+	} else {
+		promptText += formatInstruction(req)
 	}
 	attachments, err := c.uploadRequestAttachments(ctx, jar, req)
 	if err != nil {
@@ -435,11 +437,14 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	if text == "" {
 		slog.Warn("doubao answer was empty", "account_id", c.acc.ID, "model", req.Model, "attachments", len(attachments))
 	}
-	if toolMode {
-		emitToolOrText(text, req.Tools, onMessage)
+	finishReason := "stop"
+	if toolMode && emitToolOrText(text, req.Tools, onMessage) {
+		// A turn that ends in a call must say so: a client loops on the finish
+		// reason, not on the presence of tool_calls.
+		finishReason = "tool_use"
 	}
 	if onMessage != nil {
-		onMessage(upstream.SSEMessage{Type: "model.finish", Event: map[string]any{"finishReason": "stop"}})
+		onMessage(upstream.SSEMessage{Type: "model.finish", Event: map[string]any{"finishReason": finishReason}})
 	}
 	return nil
 }
@@ -460,27 +465,6 @@ func validateTextOnly(req upstream.UpstreamRequest) error {
 		return fmt.Errorf("doubao does not support tools with response_format")
 	}
 	return req.ValidateProtocolControls("doubao")
-}
-
-func renderPrompt(req upstream.UpstreamRequest) string {
-	var out strings.Builder
-	for _, item := range req.System {
-		if text := strings.TrimSpace(item.Text); text != "" {
-			fmt.Fprintf(&out, "[system]\n%s\n\n", text)
-		}
-	}
-	for _, message := range req.Messages {
-		text := strings.TrimSpace(message.ExtractText())
-		if text == "" {
-			continue
-		}
-		role := strings.TrimSpace(message.Role)
-		if role == "developer" {
-			role = "system"
-		}
-		fmt.Fprintf(&out, "[%s]\n%s\n\n", role, text)
-	}
-	return strings.TrimSpace(out.String())
 }
 
 func chatBody(conversationID, text, modelID string) ([]byte, error) {
@@ -609,48 +593,4 @@ func waitTurn(ctx context.Context, accountID int64, cfg *config.Config) error {
 		}
 	}
 	return nil
-}
-
-func toolInstruction(tools []any) string {
-	raw, _ := json.Marshal(tools)
-	return "\n\nYou must answer using exactly one JSON object. For a normal answer return {\"content\":\"your answer\"}. To call a function return {\"tool_calls\":[{\"name\":\"declared function name\",\"arguments\":{}}]}. Do not use markdown. Declared functions:\n" + string(raw)
-}
-
-func emitToolOrText(text string, tools []any, emit func(upstream.SSEMessage)) {
-	if emit == nil {
-		return
-	}
-	var envelope struct {
-		Content   string `json:"content"`
-		ToolCalls []struct {
-			Name      string          `json:"name"`
-			Arguments json.RawMessage `json:"arguments"`
-		} `json:"tool_calls"`
-	}
-	if json.Unmarshal([]byte(text), &envelope) == nil && len(envelope.ToolCalls) > 0 {
-		allowed := map[string]bool{}
-		for _, tool := range tools {
-			row, _ := tool.(map[string]any)
-			function, _ := row["function"].(map[string]any)
-			if name, _ := function["name"].(string); name != "" {
-				allowed[name] = true
-			}
-		}
-		emitted := false
-		for _, call := range envelope.ToolCalls {
-			var args map[string]any
-			if !allowed[call.Name] || json.Unmarshal(call.Arguments, &args) != nil || args == nil {
-				continue
-			}
-			emit(upstream.SSEMessage{Type: "model.tool-call", Event: map[string]any{"toolCallId": "call_" + randomHex(8), "toolName": call.Name, "input": string(call.Arguments)}})
-			emitted = true
-		}
-		if emitted {
-			return
-		}
-	}
-	if envelope.Content != "" {
-		text = envelope.Content
-	}
-	emit(upstream.SSEMessage{Type: "model.text-delta", Event: map[string]any{"delta": text}})
 }

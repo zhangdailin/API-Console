@@ -34,6 +34,11 @@ type ContentBlock struct {
 	// providers ignore them.
 	FileData string `json:"file_data,omitempty"`
 	FileName string `json:"filename,omitempty"`
+	// ImageURL and File are the nested Chat Completions spellings of an image
+	// and a file part. They exist only while decoding: liftChatMedia moves them
+	// onto URL, FileData and FileName and clears them.
+	ImageURL json.RawMessage `json:"image_url,omitempty"`
+	File     *chatFilePart   `json:"file,omitempty"`
 
 	// tool_use fields
 	ID        string `json:"id,omitempty"`
@@ -47,6 +52,41 @@ type ContentBlock struct {
 	Content      any           `json:"content,omitempty"`
 	IsError      bool          `json:"is_error,omitempty"`
 	CacheControl *CacheControl `json:"cache_control,omitempty"`
+}
+
+type chatFilePart struct {
+	FileData string `json:"file_data"`
+	FileName string `json:"filename"`
+}
+
+// liftChatMedia moves the nested Chat Completions media fields onto the flat
+// ones every channel reads: {"type":"image_url","image_url":{"url":...}} (or the
+// bare string of input_image) becomes URL, and {"type":"file","file":{...}}
+// becomes FileData and FileName. Without it an image or file sent in the
+// standard chat shape decodes to an empty block, and a channel that uploads
+// attachments silently drops it. A flat value already present wins.
+func (b *ContentBlock) liftChatMedia() {
+	if len(b.ImageURL) > 0 {
+		var ref struct {
+			URL string `json:"url"`
+		}
+		if json.Unmarshal(b.ImageURL, &ref.URL) != nil {
+			_ = json.Unmarshal(b.ImageURL, &ref)
+		}
+		if b.URL == "" {
+			b.URL = ref.URL
+		}
+		b.ImageURL = nil
+	}
+	if b.File != nil {
+		if b.FileData == "" {
+			b.FileData = b.File.FileData
+		}
+		if b.FileName == "" {
+			b.FileName = b.File.FileName
+		}
+		b.File = nil
+	}
 }
 
 // MessageContent is a union: either a string or a []ContentBlock.
@@ -90,6 +130,9 @@ func (mc *MessageContent) UnmarshalJSON(data []byte) error {
 	case '[':
 		var blocks []ContentBlock
 		if err := json.Unmarshal(trimmed, &blocks); err == nil {
+			for index := range blocks {
+				blocks[index].liftChatMedia()
+			}
 			mc.Text = ""
 			mc.Blocks = blocks
 			return nil

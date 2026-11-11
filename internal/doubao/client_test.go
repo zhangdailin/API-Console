@@ -526,3 +526,22 @@ func TestShapeSummaryCarriesNoContent(t *testing.T) {
 	testutil.MustContain(t, summary, "STREAM_MSG_NOTIFY/block_type=10040/patch_type=2/task_block x1")
 	testutil.False(t, strings.Contains(summary, "secret"), "summary leaked frame content: "+summary)
 }
+
+// tool_choice has no upstream field, so a forced call is stated in the prompt.
+func TestToolInstructionStatesAForcedChoice(t *testing.T) {
+	tools := []any{map[string]any{"type": "function", "function": map[string]any{"name": "get_weather"}}}
+	testutil.False(t, strings.Contains(toolInstruction(tools, "auto"), "You must call"), "auto must not force a call")
+	testutil.MustContain(t, toolInstruction(tools, "required"), "You must call one of the declared functions")
+	named := map[string]any{"type": "function", "function": map[string]any{"name": "get_weather"}}
+	testutil.MustContain(t, toolInstruction(tools, named), `You must call the function "get_weather"`)
+}
+
+// Prose that merely contains braces is an answer, not a malformed envelope.
+func TestEmitToolOrTextKeepsProseWithBraces(t *testing.T) {
+	tools := []any{map[string]any{"type": "function", "function": map[string]any{"name": "get_weather"}}}
+	var got []upstream.SSEMessage
+	called := emitToolOrText("use {city} as the key", tools, func(m upstream.SSEMessage) { got = append(got, m) })
+	testutil.False(t, called, "prose was reported as a tool call")
+	testutil.Equal(t, len(got), 1)
+	testutil.Equal(t, got[0].Event["delta"], any("use {city} as the key"))
+}
