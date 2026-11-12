@@ -85,8 +85,9 @@ The root admin redirect, management APIs and health/metrics routes remain.
 
 The grok channel serves two planes behind one prefix: Build (OAuth CLI) and
 Web (grok.com SSO cookies, `internal/grok/web`). Requests are dispatched on the
-model identifier (`web.IsWebModelID`); Web models answer `/chat/completions`
-and `/responses` (via the chat→Responses bridge), images, videos and media
+model identifier (`web.IsWebModelID`); Web conversation models answer
+`/chat/completions`, `/messages` (translated to chat) and `/responses` (via the
+chat→Responses bridge); Web media models answer images, videos and media
 inputs, but not `/messages`. Web accounts carry `grok_provider=web`,
 `credential_type=sso` and the cookie in `client_cookie`; every Build path must
 keep excluding them.

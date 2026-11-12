@@ -55,6 +55,7 @@ const CONFIG_FIELDS = [
   { id: "cfg_grok_cli_client_identifier", key: "grok_cli_client_identifier", type: "text", optional: true },
   { id: "cfg_grok_cli_user_agent", key: "grok_cli_user_agent", type: "text", optional: true },
   { id: "cfg_grok_build_rps", key: "grok_build_rps", type: "float", optional: true },
+  { id: "cfg_grok_auto_clean_reauth_hours", key: "grok_auto_clean_reauth_hours", type: "int", optional: true },
   { id: "cfg_grok_web_base_url", key: "grok_web_base_url", type: "text", optional: true },
   { id: "cfg_grok_web_user_agent", key: "grok_web_user_agent", type: "text", optional: true },
   { id: "cfg_grok_statsig_id", key: "grok_statsig_id", type: "text", optional: true },

@@ -29,6 +29,9 @@ const (
 	mediaImageEdit = "image_edit"
 	mediaVideo     = "video"
 	mediaVideo720p = "video_720p"
+	// mediaLite is a lite image: a fast chat, metered by the fast quota on a
+	// Free plan and by the weekly pool on a paid one.
+	mediaLite = "lite"
 )
 
 // GetImagineQuota reads the per-product media allowance of an SSO account.
@@ -98,6 +101,7 @@ func parseImagineQuota(body []byte, now time.Time) (store.GrokImagineQuota, erro
 }
 
 // mediaProductFor names the media allowance a request for spec consumes.
+// Lite images are a fast chat and draw from the fast quota instead.
 func mediaProductFor(spec ModelSpec, videoResolution string) string {
 	id := normalizeModelID(spec.ID)
 	switch {
@@ -108,6 +112,8 @@ func mediaProductFor(spec ModelSpec, videoResolution string) string {
 		return mediaVideo
 	case isImageEditModel(id):
 		return mediaImageEdit
+	case id == "grok-imagine-image-lite":
+		return mediaLite
 	case spec.IsImage && imagineWSProModel(id):
 		return mediaImagePro
 	case spec.IsImage:
@@ -151,6 +157,9 @@ func mediaAllowed(acc *store.Account, product string, now time.Time) bool {
 	// reports its own counter (an exhausted pool refuses them all).
 	if weekly := acc.GrokWebQuota.Weekly; weekly.HasLimit && weekly.Remaining <= 0 && (weekly.ResetAt.IsZero() || now.Before(weekly.ResetAt)) {
 		return false
+	}
+	if product == mediaLite {
+		return true // the fast quota is the chat's, fenced by the pool itself
 	}
 	window, _ := mediaWindow(acc, product)
 	if !window.Known {
@@ -196,6 +205,18 @@ func (h *Handler) noteMediaExhausted(ctx context.Context, acc *store.Account, pr
 		return
 	}
 	now := time.Now().UTC()
+	if product == mediaLite {
+		// A paid plan's lite images draw from its weekly pool; a spent pool
+		// refuses every media product until it resets.
+		if weekly := &latest.GrokWebQuota.Weekly; weekly.HasLimit {
+			weekly.Remaining, weekly.UsagePercent, weekly.HasUsage = 0, 100, true
+			latest.GrokWebQuota.SyncedAt = now
+			if err := h.lb.Store.UpdateAccount(writeCtx, latest); err == nil {
+				*acc = *latest
+			}
+		}
+		return
+	}
 	q := &latest.GrokWebQuota.Imagine
 	var window *store.GrokMediaWindow
 	switch product {

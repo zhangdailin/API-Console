@@ -28,6 +28,61 @@ func officialImage20OutputTicks(resolution, quality string) (int64, bool) {
 	}
 }
 
+// EstimateImageCost prices a text-to-image request from the produced count.
+func EstimateImageCost(model, resolution, quality string, count int) (Result, bool) {
+	if count <= 0 {
+		return Result{}, false
+	}
+	model = normalizePricingModel(model)
+	quality = strings.ToLower(strings.TrimSpace(quality))
+	switch model {
+	case "grok-imagine-image":
+		if quality != "" {
+			return Result{}, false
+		}
+		return Result{Model: "grok-imagine-image", CostInUSDTicks: int64(count) * 200_000_000}, true
+	case "grok-imagine-image-2.0":
+		resolution = strings.ToLower(strings.TrimSpace(resolution))
+		if resolution == "" {
+			resolution = "1k"
+		}
+		if quality == "" {
+			quality = "medium"
+		}
+		outputTicks, ok := officialImage20OutputTicks(resolution, quality)
+		if !ok {
+			return Result{}, false
+		}
+		return Result{
+			Model:          "grok-imagine-image-2.0-" + quality + "-" + resolution,
+			CostInUSDTicks: int64(count) * outputTicks,
+		}, true
+	case "grok-imagine-image-quality":
+		if quality != "" {
+			return Result{}, false
+		}
+		resolution = strings.ToLower(strings.TrimSpace(resolution))
+		if resolution == "" {
+			resolution = "1k"
+		}
+		var ticksPerImage int64
+		switch resolution {
+		case "1k":
+			ticksPerImage = 500_000_000
+		case "2k":
+			ticksPerImage = 700_000_000
+		default:
+			return Result{}, false
+		}
+		return Result{
+			Model:          "grok-imagine-image-quality-" + resolution,
+			CostInUSDTicks: int64(count) * ticksPerImage,
+		}, true
+	default:
+		return Result{}, false
+	}
+}
+
 // EstimateImageEditCost prices an edit: every output image plus every input image
 // the model had to process.
 func EstimateImageEditCost(model, resolution, quality string, outputCount, inputCount int) (Result, bool) {

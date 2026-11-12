@@ -111,9 +111,8 @@ func TestPublishRoutesIsScopedToTheWebPlane(t *testing.T) {
 	testutil.True(t, row.Verified)
 	testutil.True(t, row.SupportsCapability(store.CapabilityChat))
 	testutil.True(t, row.SupportsCapability(store.CapabilityResponses))
-	// The grok channel refuses /messages for Web models, so the row must not
-	// advertise it.
-	testutil.False(t, row.SupportsCapability(store.CapabilityMessages))
+	// The grok channel translates /messages to chat for Web conversations.
+	testutil.True(t, row.SupportsCapability(store.CapabilityMessages))
 	image, err := st.GetModelByChannelAndModelID(ctx, "grok", "grok-imagine-image")
 	testutil.NoError(t, err)
 	testutil.True(t, image.SupportsCapability(store.CapabilityImage))

@@ -7,13 +7,20 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"slices"
 	"strings"
 	"time"
 
 	"orchids-api/internal/httpserver"
+	"orchids-api/internal/pricing"
 	"orchids-api/internal/store"
 	"orchids-api/internal/util"
 )
+
+func (h *Handler) streamImageGeneration(w http.ResponseWriter, body io.Reader, token, prompt, format string, n int, publicBase string) {
+	h.streamImageResults(w, body, token, prompt, format, n, publicBase, nil)
+}
 
 // streamImageEdit streams one edit call. editInputs are the uploaded input
 // asset IDs, which the edit stream echoes back and which are not results.
@@ -146,7 +153,7 @@ func (h *Handler) HandleImagesGenerations(w http.ResponseWriter, r *http.Request
 	}
 	req.ResponseFormat = normalizeImageResponseFormat(req.ResponseFormat)
 	if !isImageGenerationModel(req.Model) {
-		httpserver.WriteError(w, http.StatusBadRequest, "image generation model must be one of [grok-imagine-image, grok-imagine-image-2.0]")
+		httpserver.WriteError(w, http.StatusBadRequest, "image generation model must be one of [grok-imagine-image-lite, grok-imagine-image, grok-imagine-image-2.0]")
 		return
 	}
 	ratio, ratioErr := normalizeImageAspectRatio(req.AspectRatio, req.Size)
@@ -167,6 +174,10 @@ func (h *Handler) HandleImagesGenerations(w http.ResponseWriter, r *http.Request
 	}
 	if req.Stream && req.N != 1 {
 		httpserver.WriteError(w, http.StatusBadRequest, "Streaming is only supported with n=1.")
+		return
+	}
+	if req.Stream && normalizeModelID(req.Model) == "grok-imagine-image-lite" {
+		httpserver.WriteError(w, http.StatusBadRequest, "grok-imagine-image-lite does not support stream")
 		return
 	}
 	if req.PartialImages != nil {
@@ -200,7 +211,7 @@ func (h *Handler) serveImagesGenerations(ctx context.Context, w http.ResponseWri
 
 	spec, ok := ResolveModel(req.Model)
 	if !ok || !spec.IsImage || !isImageGenerationModel(spec.ID) {
-		httpserver.WriteError(w, http.StatusBadRequest, fmt.Sprintf("The model `%s` is not supported for image generation. Supported: [grok-imagine-image, grok-imagine-image-2.0]", req.Model))
+		httpserver.WriteError(w, http.StatusBadRequest, fmt.Sprintf("The model `%s` is not supported for image generation. Supported: [grok-imagine-image-lite, grok-imagine-image, grok-imagine-image-2.0]", req.Model))
 		return
 	}
 	spec = h.applyPersistedRoute(ctx, spec)
@@ -217,10 +228,33 @@ func (h *Handler) serveImagesGenerations(ctx context.Context, w http.ResponseWri
 	}()
 
 	if req.Stream {
+		if normalizeModelID(spec.ID) == "grok-imagine-image-lite" {
+			h.streamAppChatImagesGeneration(ctx, w, sess, spec, req, publicBase)
+			return
+		}
 		h.streamImagineWSGeneration(ctx, w, sess, spec, req)
 		return
 	}
-	h.collectImagineWSGeneration(ctx, w, sess, spec, req, publicBase)
+	if normalizeModelID(spec.ID) != "grok-imagine-image-lite" {
+		h.collectImagineWSGeneration(ctx, w, sess, spec, req, publicBase)
+		return
+	}
+	urls, err := h.collectAppChatImageURLs(ctx, sess, spec, req, true)
+	if err != nil {
+		writeGrokUpstreamError(w, err)
+		return
+	}
+	if len(urls) == 0 {
+		httpserver.WriteError(w, http.StatusBadGateway, "no image generated")
+		return
+	}
+
+	h.writeImageResults(w, ctx, sess.token, req.Prompt, urls, req.ResponseFormat, publicBase, true)
+	if cost, priced := pricing.EstimateImageCost(spec.UpstreamModel, req.Resolution, req.Quality, len(urls)); priced {
+		h.settleMediaBilling(ctx, req.Model, cost, map[string]any{
+			"plane": "web", "images": len(urls), "resolution": req.Resolution,
+		})
+	}
 }
 
 func imagineWSProModel(modelID string) bool {
@@ -363,4 +397,172 @@ func (h *Handler) collectImagineWSGeneration(ctx context.Context, w http.Respons
 		"created": time.Now().Unix(), "data": data,
 		"usage": buildImageUsagePayload(req.Prompt, len(data)),
 	})
+}
+
+func (h *Handler) streamAppChatImagesGeneration(ctx context.Context, w http.ResponseWriter, sess *chatAccountSession, spec ModelSpec, req ImagesGenerationsRequest, publicBase string) {
+	onePayload := h.webClient().appChatImagePayload(spec, req.Prompt, req.Size, req.N)
+	ensureImageNSFW(onePayload)
+	resp, err := h.doAppChatImageRequest(ctx, sess, spec, &onePayload, true)
+	if err != nil {
+		slog.Warn("grok app-chat image stream upstream failed",
+			"model", req.Model,
+			"status", parseUpstreamStatus(err),
+			"error", err,
+		)
+		writeGrokUpstreamError(w, err)
+		return
+	}
+	defer resp.Body.Close()
+	h.syncGrokQuota(sess.acc, resp.Header)
+	h.streamImageGeneration(w, resp.Body, sess.token, req.Prompt, req.ResponseFormat, req.N, publicBase)
+	if cost, priced := pricing.EstimateImageCost(spec.UpstreamModel, req.Resolution, req.Quality, req.N); priced {
+		h.settleMediaBilling(ctx, req.Model, cost, map[string]any{
+			"plane": "web", "stream": true, "images": req.N,
+		})
+	}
+}
+
+func (h *Handler) collectAppChatImageURLs(ctx context.Context, sess *chatAccountSession, spec ModelSpec, req ImagesGenerationsRequest, allowSwitch bool) ([]string, error) {
+	var urls []string
+	var debugShapes []string
+	var debugNoImage []string
+
+	// A lite call is a fast chat that always draws two pictures, and only the
+	// first is the drawing of the prompt: the second is often unrelated to it.
+	// grok2api keeps the first and repeats the call for each image ("Lite 上游固定
+	// 生成两张……按旧协议取首张并为 n 重复查询"); so does this collector. Each call
+	// costs one fast query either way.
+	maxAttempts := max(req.N*2, 4)
+	deadline := time.Now().Add(max(60*time.Second, time.Duration(req.N)*40*time.Second))
+	excludedAccountIDs := make([]int64, 0, maxAttempts)
+	for i := range maxAttempts {
+		if len(urls) >= req.N {
+			break
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		imageLimitHit := false
+		var callURLs []string
+		payload := h.webClient().appChatImagePayload(spec, req.Prompt, req.Size, 1)
+		ensureImageNSFW(payload)
+		resp, err := h.doAppChatImageRequest(ctx, sess, spec, &payload, allowSwitch)
+		if err != nil {
+			slog.Warn("grok app-chat image upstream failed",
+				"model", req.Model,
+				"status", parseUpstreamStatus(err),
+				"error", err,
+			)
+			return nil, err
+		}
+		h.syncGrokQuota(sess.acc, resp.Header)
+		err = parseUpstreamLines(resp.Body, func(line map[string]any) error {
+			if len(debugShapes) < 20 {
+				debugShapes = append(debugShapes, imageDebugShape(line))
+			}
+			if len(debugNoImage) < 20 {
+				debugNoImage = append(debugNoImage, appChatImageNoImageDiagnostics(line)...)
+			}
+			if isAppChatImageLimitResponse(line) {
+				imageLimitHit = true
+			}
+			callURLs = append(callURLs, extractAppChatImageURLs(line)...)
+			return nil
+		})
+		resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("stream parse error: %w", err)
+		}
+		if first := firstLiteImage(callURLs, urls); first != "" {
+			urls = append(urls, first)
+		}
+		if len(urls) == 0 && imageLimitHit {
+			err := fmt.Errorf("grok upstream status=429 body=image generation limit reached")
+			if sess.acc != nil && sess.acc.GrokWebQuota.Weekly.HasLimit {
+				// Paid: the weekly pool is spent; the account still chats.
+				h.noteMediaExhausted(ctx, sess.acc, mediaLite)
+			} else {
+				h.markAccountStatus(ctx, sess.acc, err)
+			}
+			if !allowSwitch || sess == nil || i == maxAttempts-1 {
+				return nil, err
+			}
+			if sess.acc != nil && sess.acc.ID != 0 {
+				if !slices.Contains(excludedAccountIDs, sess.acc.ID) {
+					excludedAccountIDs = append(excludedAccountIDs, sess.acc.ID)
+				}
+				sess.Close()
+				next, switchErr := h.openChatAccountSessionForModelExcluding(ctx, excludedAccountIDs, spec)
+				if switchErr != nil {
+					// The switch failed, so the upgrade-limit error above is the one
+					// the client acts on — but the pool's reason must not vanish: it is
+					// the only record of why another account could not be found.
+					slog.Warn("No image account to switch to after the generation limit",
+						"error", switchErr, "account_id", sess.acc.ID)
+					return nil, err
+				}
+				sess.acc = next.acc
+				sess.token = next.token
+				sess.poolCandidates = next.poolCandidates
+				sess.release = next.release
+			}
+		}
+	}
+	urls = normalizeGeneratedImageURLs(urls, req.N)
+	if len(urls) == 0 {
+		slog.Warn("grok image generation returned no images",
+			"model", req.Model,
+			"attempts", maxAttempts,
+			"event_shapes", uniqueStrings(debugShapes),
+			"diagnostics", uniqueStrings(debugNoImage),
+		)
+		return nil, fmt.Errorf("no image generated")
+	}
+	return urls, nil
+}
+
+func (h *Handler) doAppChatImageRequest(ctx context.Context, sess *chatAccountSession, spec ModelSpec, payload *map[string]any, allowSwitch bool) (*http.Response, error) {
+	if payload == nil {
+		return nil, fmt.Errorf("empty payload")
+	}
+	if normalizeModelID(spec.ID) == "grok-imagine-image-lite" {
+		if allowSwitch {
+			return h.doAutoSwitchRequest(ctx, sess, payload, nil, (*Client).doChat)
+		}
+		return h.doSingleAccountRequest(ctx, sess, *payload, markAllGrokAccountStatuses, (*Client).doChat)
+	}
+	if allowSwitch {
+		return h.doAutoSwitchRequest(ctx, sess, payload, nil, (*Client).doAppChatCreateAndRespond)
+	}
+	return h.doSingleAccountRequest(ctx, sess, *payload, markAllGrokAccountStatuses, (*Client).doAppChatCreateAndRespond)
+}
+
+// firstLiteImage returns the first finished image of one lite call, in the
+// order the stream delivered it, skipping one already taken by an earlier call.
+func firstLiteImage(callURLs, taken []string) string {
+	for _, candidate := range callURLs {
+		candidate = strings.TrimSpace(candidate)
+		if imageURLScore(candidate) < 0 || slices.Contains(taken, candidate) {
+			continue
+		}
+		return candidate
+	}
+	return ""
+}
+
+// imageURLShape describes an image URL for the log without its identifiers:
+// the host and the path, with every segment that looks like an ID elided, so
+// "users/…/generated/…/image.jpg" still tells a drawing from anything else.
+func imageURLShape(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || raw == "" {
+		return ""
+	}
+	segments := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	for i, segment := range segments {
+		if len(segment) >= 16 || (len(segment) >= 8 && strings.ContainsAny(segment, "0123456789")) {
+			segments[i] = "…"
+		}
+	}
+	return parsed.Host + "/" + strings.Join(segments, "/")
 }

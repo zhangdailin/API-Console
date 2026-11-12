@@ -298,6 +298,10 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 			httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_parameter", err.Error())
 			return
 		}
+		if isImageGenerationModel(req.Model) && normalizeModelID(req.Model) == "grok-imagine-image-lite" && imageCfg.N > 4 {
+			httpserver.WriteError(w, http.StatusBadRequest, "image_config.n must be between 1 and 4 for grok-imagine-image-lite")
+			return
+		}
 		if isImageEditModel(req.Model) && imageCfg.N > 2 {
 			httpserver.WriteError(w, http.StatusBadRequest, "image_config.n must be between 1 and 2 for image edit")
 			return

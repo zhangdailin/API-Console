@@ -436,9 +436,9 @@ func applyGrokWebRouteDefaults(model *Model) {
 		// Generation only: edits are served by the image-edit route.
 		model.Capabilities = []string{CapabilityImage, CapabilityChat}
 	default:
-		// Web conversations answer Chat Completions and Responses; the grok
-		// channel refuses /messages for them.
-		model.Capabilities = []string{CapabilityChat, CapabilityResponses}
+		// Web conversations answer Chat Completions, Messages (translated to
+		// chat by the grok channel) and Responses (through the chat bridge).
+		model.Capabilities = []string{CapabilityChat, CapabilityMessages, CapabilityResponses}
 	}
 	model.NormalizeRoute()
 }

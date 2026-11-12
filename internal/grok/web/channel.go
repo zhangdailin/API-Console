@@ -281,19 +281,27 @@ func Maintain(ctx context.Context, cfg *config.Config, st *store.Store, acc *sto
 	if acc == nil || st == nil || !IsWebAccount(acc) || !acc.Enabled || !store.AccountAuthActive(acc) {
 		return
 	}
-	if !acc.GrokWebQuota.SyncedAt.IsZero() && time.Since(acc.GrokWebQuota.SyncedAt) < webMaintenanceInterval {
-		return
-	}
-	// A failing probe (an egress challenge, an upstream outage) leaves the
-	// snapshot unsynced; without a floor the scheduler would retry it on every
-	// tick.
-	if last, ok := maintenanceAttempts.Load(acc.ID); ok && time.Since(last.(time.Time)) < webMaintenanceRetry {
-		return
+	// A spent allowance is re-read on the recovery queue's schedule (the stated
+	// reset, or bounded backoff) instead of waiting out the regular cadence.
+	recovering := claimWebQuotaRecovery(acc, time.Now())
+	if !recovering {
+		if !acc.GrokWebQuota.SyncedAt.IsZero() && time.Since(acc.GrokWebQuota.SyncedAt) < webMaintenanceInterval {
+			return
+		}
+		// A failing probe (an egress challenge, an upstream outage) leaves the
+		// snapshot unsynced; without a floor the scheduler would retry it on every
+		// tick.
+		if last, ok := maintenanceAttempts.Load(acc.ID); ok && time.Since(last.(time.Time)) < webMaintenanceRetry {
+			return
+		}
 	}
 	maintenanceAttempts.Store(acc.ID, time.Now())
 	before := observedRouteSet([]*store.Account{acc})
 	status, err := VerifyAccount(ctx, cfg, acc)
 	now := time.Now()
+	if recovering {
+		settleWebQuotaRecovery(acc, status, err, now)
+	}
 	switch {
 	case status == "401":
 		acc.StatusCode = "401"

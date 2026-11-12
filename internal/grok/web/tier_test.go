@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"testing"
 
 	"orchids-api/internal/testutil"
@@ -39,4 +40,45 @@ func TestWeeklyCreditsDistinguishesPaidFromFree(t *testing.T) {
 	testutil.NoError(t, err)
 	testutil.False(t, credits.Paid)
 	testutil.False(t, weeklyWindow(credits).HasLimit)
+}
+
+func TestLiteImagePayloadIsAPlainFastChat(t *testing.T) {
+	lite, ok := ResolveModel("grok-imagine-image-lite")
+	testutil.True(t, ok)
+	payload := New(nil).appChatImagePayload(lite, "a red boat", "", 1)
+	raw, _ := json.Marshal(payload)
+	text := string(raw)
+	// grok.com refuses image-model fields for Free accounts.
+	for _, field := range []string{`"modelName"`, `"modelTier"`, `"requestModelDetails"`, "grok-imagine-image-lite"} {
+		testutil.CheckNotContain(t, text, field)
+	}
+	testutil.Equal(t, payload["modeId"], "fast")
+	testutil.Equal(t, payload["enableImageGeneration"], true)
+	testutil.Equal(t, payload["message"], "Drawing: a red boat")
+	// Shared Free accounts: no memory of other callers' prompts, no searched
+	// pictures standing in for a drawing.
+	testutil.Equal(t, payload["disableMemory"], true)
+	testutil.Equal(t, payload["disableSearch"], true)
+}
+
+func TestExtractAppChatImageURLsKeepsOnlyGrokHostedImages(t *testing.T) {
+	resp := map[string]any{
+		"result": map[string]any{"response": map[string]any{
+			"cardAttachment": map[string]any{
+				"jsonData": `{"image":{"url":"https://example.com/searched/cat.jpg"},"url":"https://news.example.org/photo.png"}`,
+			},
+		}},
+	}
+	testutil.Equal(t, len(extractAppChatImageURLs(resp)), 0)
+
+	generated := map[string]any{
+		"result": map[string]any{"response": map[string]any{
+			"cardAttachment": map[string]any{
+				"jsonData": `{"image_chunk":{"imageUrl":"users/u1/generated/a1/image.jpg","progress":100}}`,
+			},
+		}},
+	}
+	got := extractAppChatImageURLs(generated)
+	testutil.Equal(t, len(got), 1)
+	testutil.Equal(t, got[0], "https://assets.grok.com/users/u1/generated/a1/image.jpg")
 }

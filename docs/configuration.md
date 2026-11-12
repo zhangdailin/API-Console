@@ -111,6 +111,7 @@ Grok 默认 base 为 `https://cli-chat-proxy.grok.com/v1`，CLI 版本当前默�
 | 字段 | 生效方式 |
 |---|---|
 | `grok_build_rps` | 非正 / 非有限关闭节奏；正值夹取 0.01–1000，按账号 / 团队范围执行 |
+| `grok_auto_clean_reauth_hours` | Grok 账号（Build / Web）处于“需要重新登录”（`reauthRequired`）达到该小时数后自动删除；`0`（默认）关闭。仍有未完成视频任务的账号不会被删除 |
 
 ### 8.1 Grok Web（grok.com SSO）
 
@@ -127,7 +128,7 @@ Grok 渠道同时承载 Build（OAuth CLI）与 Web（grok.com 网页 SSO Cookie
 | `grok_web_rps`、`grok_web_timeout_seconds`、`grok_web_stream_idle_seconds` | 每账号节奏、单请求期限（默认推理期限）、流空闲（默认 90 秒，30–600） |
 | `grok_image_nsfw`、`grok_image_final_min_bytes`、`grok_image_medium_min_bytes` | Imagine 工具页的 NSFW 与图片质量阈值 |
 
-Web 模型路由表（`grok-chat-fast/auto/expert/heavy`、`grok-imagine-image(-lite/-2.0/-edit)`、`grok-imagine-video`）只在存在启用、认证有效且 24 小时内成功读取过对应模式额度窗口的 Web 账号时发布；`grok-chat-heavy` 还要求 Heavy 账号。没有这样的账号时 Web 行被清理，不发布内置列表。Web 模型支持 `/chat/completions`、`/responses`（经 Chat 桥接）、`/images/*`、`/videos`、`/media/inputs`，不支持 `/messages`。
+Web 模型路由表（`grok-chat-fast/auto/expert/heavy`、`grok-imagine-image(-lite/-2.0/-edit)`、`grok-imagine-video`）只在存在启用、认证有效且 24 小时内成功读取过对应模式额度窗口的 Web 账号时发布；`grok-chat-heavy` 还要求 Heavy 账号。没有这样的账号时 Web 行被清理，不发布内置列表。Web 对话模型支持 `/chat/completions`、`/messages`（网关转换为 Chat）、`/responses`（经 Chat 桥接）；图片与视频模型支持 `/images/*`、`/videos`、`/media/inputs`，不支持 `/messages`。`grok-imagine-image-lite` 走 fast 对话额度（Basic 账号可用），每次只取首张图，`n` 最大 4。
 
 Grok 返回上游提供的思考内容：Chat 使用 `reasoning_content`，Messages 使用 `thinking` 内容块，原生 Responses 保留 reasoning 事件与输出项。思考与正文分别传输；思考项身份、`encrypted_content` 和 `reasoning_tokens` 保留，用于续接与计费。
 

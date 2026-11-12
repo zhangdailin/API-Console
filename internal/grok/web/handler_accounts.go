@@ -187,6 +187,34 @@ func (s *chatAccountSession) Close() {
 	s.release = nil
 }
 
+// doSingleAccountRequest calls the Grok API once on a single account without retry switching.
+func (h *Handler) doSingleAccountRequest(
+	ctx context.Context,
+	sess *chatAccountSession,
+	payload map[string]any,
+	shouldMarkStatus grokAccountStatusPolicy,
+	callAPI func(*Client, context.Context, string, map[string]any) (*http.Response, error),
+) (*http.Response, error) {
+	if sess == nil || strings.TrimSpace(sess.token) == "" {
+		return nil, fmt.Errorf("empty chat session")
+	}
+	client := h.currentClient()
+	if client == nil {
+		return nil, fmt.Errorf("grok client not configured")
+	}
+	requestCtx := withRateLimitAccount(ctx, sess.acc)
+	resp, err := callAPI(client, requestCtx, sess.token, payload)
+	if err != nil {
+		if shouldMarkStatus == nil || shouldMarkStatus(err) {
+			h.markAccountStatus(ctx, sess.acc, err)
+		}
+		return nil, err
+	}
+	return resp, nil
+}
+
+type grokAccountStatusPolicy func(error) bool
+
 func markAllGrokAccountStatuses(err error) bool {
 	if err == nil {
 		return false

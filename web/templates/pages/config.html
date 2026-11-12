@@ -54,6 +54,8 @@
               <div class="settings-card-body">
                 <div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_grok_build_rps">每秒请求上限</label><span class="helper-text">发往 Build 上游的全局速率上限；0 表示使用默认值。</span></div>
                   <div class="form-row-control"><input type="number" id="cfg_grok_build_rps" class="form-input" min="0" max="1000" step="0.1" placeholder="默认"></div></div>
+                <div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_grok_auto_clean_reauth_hours">自动清理失效账号</label><span class="helper-text">Grok 账号（Build / Web）处于“需要重新登录”超过该小时数后自动删除；0 表示关闭。有未完成视频任务的账号不会被删除。</span></div>
+                  <div class="form-row-control"><input type="number" id="cfg_grok_auto_clean_reauth_hours" class="form-input" min="0" max="8760" step="1" placeholder="关闭"></div></div>
                 <div class="form-row"><div class="form-row-label"><span class="form-label">超时</span><span class="helper-text">响应头与流空闲超时由网关统一固定，保证长推理不被截断，不可在此修改。</span></div>
                   <div class="form-row-control"><span class="mini-badge">固定策略</span></div></div>
               </div>

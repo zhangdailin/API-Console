@@ -37,6 +37,7 @@ var SupportedModels = []ModelSpec{
 	{ID: "grok-chat-auto", Name: "Grok Chat Auto", UpstreamModel: "grok-chat-auto", ModelMode: "MODEL_MODE_AUTO", ModeID: "auto", Tier: grokTierSuper},
 	{ID: "grok-chat-expert", Name: "Grok Chat Expert", UpstreamModel: "grok-chat-expert", ModelMode: "MODEL_MODE_EXPERT", ModeID: "expert", Tier: grokTierSuper},
 	{ID: "grok-chat-heavy", Name: "Grok Chat Heavy", UpstreamModel: "grok-chat-heavy", ModelMode: "MODEL_MODE_HEAVY", ModeID: "heavy", Tier: grokTierHeavy, PreferBest: true},
+	{ID: "grok-imagine-image-lite", Name: "Grok Imagine Image Lite", UpstreamModel: "grok-imagine-image-lite", ModelMode: "MODEL_MODE_FAST", ModeID: "fast", Tier: grokTierBasic, IsImage: true},
 	{ID: "grok-imagine-image", Name: "Grok Imagine Image", UpstreamModel: "grok-imagine-image", ModelMode: "MODEL_MODE_AUTO", ModeID: "auto", Tier: grokTierSuper, IsImage: true},
 	{ID: "grok-imagine-image-2.0", Name: "Grok Imagine Image 2.0", UpstreamModel: "grok-imagine-image-2.0", ModelMode: "MODEL_MODE_AUTO", ModeID: "auto", Tier: grokTierSuper, IsImage: true},
 	{ID: "grok-imagine-image-edit", Name: "Grok Imagine Image Edit", UpstreamModel: "imagine-image-edit", ModelMode: "MODEL_MODE_AUTO", ModeID: "auto", Tier: grokTierSuper, IsImage: true},
@@ -89,6 +90,11 @@ func IsWebModelID(modelID string) bool {
 
 func (m ModelSpec) PoolCandidates() []string {
 	switch {
+	case m.IsImage && normalizeModelID(m.ID) == "grok-imagine-image-lite" && m.Tier == grokTierBasic:
+		// Basic is this model's minimum tier, not an exclusion: a deployment
+		// whose only credentials are free/basic Web accounts can serve it. The
+		// model's own tier is still preferred, so lite comes first.
+		return []string{"lite", "basic", "super", "heavy"}
 	case m.PreferBest && m.Tier == grokTierHeavy:
 		return []string{"heavy", "basic"}
 	case m.PreferBest:

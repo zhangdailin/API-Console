@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"orchids-api/internal/chatwire"
 	"orchids-api/internal/grok/grokbase"
+	"orchids-api/internal/grok/web"
 	"orchids-api/internal/httpserver"
 	"orchids-api/internal/util"
 	"strings"
@@ -55,12 +56,11 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	if !requirePost(w, r) {
 		return
 	}
-	if isWeb, handled := peekWebModel(w, r); handled {
-		return
-	} else if isWeb {
-		writeGrokErrorCode(w, http.StatusBadRequest, "unsupported_endpoint", "Grok Web models are served on /chat/completions and /responses")
+	isWeb, handled := peekWebModel(w, r)
+	if handled {
 		return
 	}
+	isWeb = isWeb && h.web != nil
 	var req anthropicMessagesRequest
 	if !decodeJSONBody(w, r, &req) {
 		return
@@ -78,18 +78,28 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		writeAnthropicError(w, http.StatusBadRequest, "max_tokens must be greater than zero")
 		return
 	}
-	spec, ok := h.resolveConversationModel(r.Context(), req.Model)
-	if !ok {
-		writeAnthropicModelNotFound(w, req.Model)
-		return
-	}
-	if err := h.ensureResolvedModelCapability(r.Context(), spec.ID, spec, store.CapabilityMessages); err != nil {
-		if strings.EqualFold(strings.TrimSpace(err.Error()), "model not found") {
+	if isWeb {
+		// Web conversations are translated to Chat Completions and served by the
+		// Web plane, which validates the route and picks the account itself.
+		// Media routes have no Messages shape.
+		if webSpec, ok := web.ResolveModel(req.Model); !ok || webSpec.IsImage || webSpec.IsVideo || !webSpec.SupportsConversation() {
+			writeAnthropicError(w, http.StatusBadRequest, "model "+req.Model+" does not support messages")
+			return
+		}
+	} else {
+		spec, ok := h.resolveConversationModel(r.Context(), req.Model)
+		if !ok {
 			writeAnthropicModelNotFound(w, req.Model)
 			return
 		}
-		writeAnthropicError(w, http.StatusBadRequest, modelValidationMessage(req.Model, err))
-		return
+		if err := h.ensureResolvedModelCapability(r.Context(), spec.ID, spec, store.CapabilityMessages); err != nil {
+			if strings.EqualFold(strings.TrimSpace(err.Error()), "model not found") {
+				writeAnthropicModelNotFound(w, req.Model)
+				return
+			}
+			writeAnthropicError(w, http.StatusBadRequest, modelValidationMessage(req.Model, err))
+			return
+		}
 	}
 	chat, err := anthropicRequestToChat(req)
 	if err != nil {

@@ -14,6 +14,44 @@ import (
 	"time"
 )
 
+func extractAppChatCanvasID(v any) string {
+	return extractIDFromValue(v, []string{"canvasId", "canvas_id", "documentId", "document_id", "id"}, []string{"document", "canvas", "result", "data"})
+}
+
+func extractAppChatConversationID(v any) string {
+	return extractIDFromValue(v, []string{"conversationId", "conversation_id"}, []string{"conversation", "result", "data"})
+}
+
+// extractIDFromValue walks nested maps and slices, returning the first
+// non-empty string found under any of the idKeys (leaf identifiers), then any
+// of the containerKeys whose values may themselves hold the identifier.
+func extractIDFromValue(v any, idKeys []string, containerKeys []string) string {
+	switch x := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(x)
+	case map[string]any:
+		for _, key := range idKeys {
+			if id := extractIDFromValue(x[key], idKeys, containerKeys); id != "" {
+				return id
+			}
+		}
+		for _, key := range containerKeys {
+			if id := extractIDFromValue(x[key], idKeys, containerKeys); id != "" {
+				return id
+			}
+		}
+	case []any:
+		for _, item := range x {
+			if id := extractIDFromValue(item, idKeys, containerKeys); id != "" {
+				return id
+			}
+		}
+	}
+	return ""
+}
+
 // GetWebQuota reads the Web SSO quota products using the upstream's stable
 // mode names. Web rate-limits are keyed by "auto" and "fast", not by the
 // public model ID (for example, grok-4.5). A partial result is returned when

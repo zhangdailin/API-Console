@@ -95,6 +95,10 @@ type Config struct {
 	GrokCLIOAuthDeviceURL   string  `json:"grok_cli_oauth_device_url,omitempty"`
 	GrokCLIOAuthTokenURL    string  `json:"grok_cli_oauth_token_url,omitempty"`
 	GrokBuildRPS            float64 `json:"grok_build_rps,omitempty"`
+	// GrokAutoCleanReauthHours deletes a Grok account (Build or Web) that has
+	// needed a new login for at least this many hours. Zero (the default)
+	// disables the cleanup.
+	GrokAutoCleanReauthHours int `json:"grok_auto_clean_reauth_hours,omitempty"`
 
 	// ── Grok Web (grok.com SSO) upstream ──
 	// Configurable via config.json / Redis. Empty values select the defaults in

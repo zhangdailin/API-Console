@@ -117,6 +117,9 @@ func lastKnownCatalog(acc *store.Account) []provider.Model {
 // refresh cycles and writing the same warning every interval until an operator
 // logs in again (which restores the active state).
 func maintain(ctx context.Context, env provider.Env, acc *store.Account) {
+	if autoCleanReauthAccount(ctx, env, acc, time.Now()) {
+		return
+	}
 	if web.IsWebAccount(acc) {
 		web.Maintain(ctx, env.Config, env.Store, acc)
 		return
@@ -198,8 +201,9 @@ func refreshCLIAccount(ctx context.Context, cfg *config.Config, s *store.Store, 
 	}
 
 	now := time.Now()
+	recovering := claimBuildQuotaRecovery(acc, now)
 	result := RefreshBuildAccount(ctx, cliClient, acc, BuildRefreshOptions{
-		Billing: cliBillingNeedsSync(acc, now), BillingTimeout: 20 * time.Second,
+		Billing: recovering || cliBillingNeedsSync(acc, now), BillingTimeout: 20 * time.Second,
 		Models: CLIModelsNeedSync(acc, now), ModelsTimeout: 15 * time.Second,
 		Now: now,
 	})
@@ -208,6 +212,9 @@ func refreshCLIAccount(ctx context.Context, cfg *config.Config, s *store.Store, 
 	}
 	if result.ModelsErr != nil {
 		slog.Warn("Auto sync grok cli model catalog failed; keeping last catalog", "account_id", acc.ID, "error", result.ModelsErr)
+	}
+	if recovering {
+		settleBuildQuotaRecovery(acc, result.BillingErr, now)
 	}
 	if updateErr := s.UpdateAccount(ctx, acc); updateErr != nil {
 		slog.Warn("Auto refresh grok cli: update account failed", "account_id", acc.ID, "error", updateErr)

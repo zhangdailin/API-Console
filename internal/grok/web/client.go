@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"encoding/json"
@@ -15,17 +16,20 @@ import (
 )
 
 const (
-	defaultBaseURL        = "https://grok.com"
-	defaultAssetsBaseURL  = "https://assets.grok.com"
-	defaultChatPath       = "/rest/app-chat/conversations/new"
-	defaultUploadFilePath = "/rest/app-chat/upload-file"
-	defaultLivekitPath    = "/rest/livekit/tokens"
-	defaultRateLimitsPath = "/rest/rate-limits"
-	defaultAcceptTOSURL   = "https://accounts.x.ai/auth_mgmt.AuthManagement/SetTosAcceptedVersion"
-	defaultSetBirthPath   = "/rest/auth/set-birth-date"
-	defaultNSFWMgmtPath   = "/auth_mgmt.AuthManagement/UpdateUserFeatureControls"
-	defaultUA             = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
-	defaultAppChatSecCHUA = `"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"`
+	defaultBaseURL          = "https://grok.com"
+	defaultAssetsBaseURL    = "https://assets.grok.com"
+	defaultChatPath         = "/rest/app-chat/conversations/new"
+	defaultUploadFilePath   = "/rest/app-chat/upload-file"
+	defaultConversationPath = "/rest/app-chat/conversations"
+	defaultCanvasCreatePath = "/rest/media/canvas/create"
+	defaultMediaConvoPath   = "/rest/media/conversation/create"
+	defaultLivekitPath      = "/rest/livekit/tokens"
+	defaultRateLimitsPath   = "/rest/rate-limits"
+	defaultAcceptTOSURL     = "https://accounts.x.ai/auth_mgmt.AuthManagement/SetTosAcceptedVersion"
+	defaultSetBirthPath     = "/rest/auth/set-birth-date"
+	defaultNSFWMgmtPath     = "/auth_mgmt.AuthManagement/UpdateUserFeatureControls"
+	defaultUA               = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+	defaultAppChatSecCHUA   = `"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"`
 )
 
 type Client struct {
@@ -141,6 +145,30 @@ func (c *Client) chatPayload(spec ModelSpec, text string, noMemory bool, imageCo
 	return payload
 }
 
+func (c *Client) appChatImagePayload(spec ModelSpec, prompt, _ string, _ int) map[string]any {
+	message := strings.TrimSpace(prompt)
+	if message != "" && !strings.HasPrefix(strings.ToLower(message), "drawing:") {
+		message = "Drawing: " + message
+	}
+	// grok.com refuses image-model fields (modelName grok-imagine-image-lite,
+	// modelTier, requestModelDetails) for Free accounts with "Grok is under
+	// heavy usage"; a plain fast-mode chat with image generation enabled is
+	// what the web app sends, and it draws from the fast quota every plan has.
+	_ = spec
+	chat := ModelSpec{ID: "grok-chat-fast", UpstreamModel: "grok-chat-fast", ModelMode: "MODEL_MODE_FAST", ModeID: "fast", Tier: grokTierBasic}
+	payload := c.chatPayload(chat, message, false, 2)
+	payload["modeId"] = "fast"
+	payload["enableImageGeneration"] = true
+	payload["imageGenerationCount"] = 2
+	// Free accounts are shared by every caller: account memory would steer the
+	// drawing toward earlier prompts, and web search lets the chat model answer
+	// with searched pictures instead of drawing. Neither belongs in an image
+	// request, whatever the chat settings say.
+	payload["disableMemory"] = true
+	payload["disableSearch"] = true
+	return payload
+}
+
 func appChatModeID(spec ModelSpec) string {
 	return resolveModeID(spec, strings.TrimSpace(spec.ID))
 }
@@ -229,4 +257,125 @@ func (c *Client) doChat(ctx context.Context, token string, payload map[string]an
 	}
 	upstream.NoteUpstreamCall(ctx, reqURL, sent)
 	return c.doAppChatRequest(ctx, reqURL, body, headers)
+}
+
+func (c *Client) doAppChatCreateAndRespond(ctx context.Context, token string, payload map[string]any) (*http.Response, error) {
+	canvasID, err := c.createAppChatCanvas(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+	referer := c.appChatImagineReferer(canvasID)
+	conversationID, err := c.createAppChatConversation(ctx, token, referer)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.linkAppChatConversationToCanvas(ctx, token, conversationID, canvasID); err != nil {
+		return nil, err
+	}
+	return c.doAppChatAddResponse(ctx, token, conversationID, canvasID, payload)
+}
+
+func (c *Client) appChatImagineReferer(canvasID string) string {
+	id := strings.TrimSpace(canvasID)
+	if id == "" {
+		return c.baseURL() + "/imagine/agent"
+	}
+	return c.baseURL() + "/imagine/agent/" + url.PathEscape(id)
+}
+
+func (c *Client) createAppChatCanvas(ctx context.Context, token string) (string, error) {
+	body, err := json.Marshal(map[string]any{
+		"name": "",
+	})
+	if err != nil {
+		return "", err
+	}
+	reqURL := c.baseURL() + defaultCanvasCreatePath
+	headers := c.appChatHeadersWithReferer(token, c.appChatImagineReferer(""))
+	if statsig := c.statsigIDForRequest(ctx, token, http.MethodPost, reqURL); statsig != "" {
+		headers.Set("x-statsig-id", statsig)
+	}
+	resp, err := c.doAppChatRequest(ctx, reqURL, body, headers)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return "", fmt.Errorf("grok app-chat create canvas decode failed: %w", err)
+	}
+	canvasID := extractAppChatCanvasID(payload)
+	if canvasID == "" {
+		return "", fmt.Errorf("grok app-chat create canvas returned no canvas id")
+	}
+	return canvasID, nil
+}
+
+func (c *Client) createAppChatConversation(ctx context.Context, token, referer string) (string, error) {
+	body, err := json.Marshal(map[string]any{
+		"systemPromptName": "",
+		"temporary":        false,
+	})
+	if err != nil {
+		return "", err
+	}
+	reqURL := c.baseURL() + defaultConversationPath
+	headers := c.appChatHeadersWithReferer(token, referer)
+	if statsig := c.statsigIDForRequest(ctx, token, http.MethodPost, reqURL); statsig != "" {
+		headers.Set("x-statsig-id", statsig)
+	}
+	resp, err := c.doAppChatRequest(ctx, reqURL, body, headers)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return "", fmt.Errorf("grok app-chat create conversation decode failed: %w", err)
+	}
+	conversationID := extractAppChatConversationID(payload)
+	if conversationID == "" {
+		return "", fmt.Errorf("grok app-chat create conversation returned no conversation id")
+	}
+	return conversationID, nil
+}
+
+func (c *Client) linkAppChatConversationToCanvas(ctx context.Context, token, conversationID, canvasID string) error {
+	conversationID = strings.TrimSpace(conversationID)
+	canvasID = strings.TrimSpace(canvasID)
+	if conversationID == "" {
+		return fmt.Errorf("empty app-chat conversation id")
+	}
+	if canvasID == "" {
+		return fmt.Errorf("empty app-chat canvas id")
+	}
+	body, err := json.Marshal(map[string]any{
+		"conversationId": conversationID,
+		"canvasId":       canvasID,
+	})
+	if err != nil {
+		return err
+	}
+	reqURL := c.baseURL() + defaultMediaConvoPath
+	resp, err := c.doAppChatRequest(ctx, reqURL, body, c.appChatHeadersWithReferer(token, c.appChatImagineReferer(canvasID)))
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	return nil
+}
+
+func (c *Client) doAppChatAddResponse(ctx context.Context, token, conversationID, canvasID string, payload map[string]any) (*http.Response, error) {
+	id := strings.TrimSpace(conversationID)
+	if id == "" {
+		return nil, fmt.Errorf("empty app-chat conversation id")
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	reqURL := c.baseURL() + defaultConversationPath + "/" + url.PathEscape(id) + "/responses"
+	return c.doAppChatRequest(ctx, reqURL, body, c.appChatHeadersWithReferer(token, c.appChatImagineReferer(canvasID)))
 }

@@ -211,6 +211,9 @@ func (r *ChatCompletionsRequest) Validate() error {
 			return fmt.Errorf("image_config.n must be between 1 and 10")
 		}
 		modelID := normalizeModelID(r.Model)
+		if modelID == "grok-imagine-image-lite" && r.ImageConfig.N > 4 {
+			return fmt.Errorf("image_config.n must be between 1 and 4 for grok-imagine-image-lite")
+		}
 		if modelID == "grok-imagine-image-edit" && r.ImageConfig.N > 2 {
 			return fmt.Errorf("image_config.n must be between 1 and 2 for image edit")
 		}
