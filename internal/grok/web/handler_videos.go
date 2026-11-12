@@ -321,6 +321,10 @@ func (h *Handler) HandleVideosCreate(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteError(w, http.StatusBadRequest, "prompt cannot be empty")
 		return
 	}
+	if upstreamModel, ok := h.backendVideoModel(r.Context(), req.Model); ok {
+		h.startBackendVideoJob(w, r, req, upstreamModel)
+		return
+	}
 	spec, ok := ResolveModel(req.Model)
 	if !ok || !spec.IsVideo {
 		httpserver.WriteError(w, http.StatusBadRequest, fmt.Sprintf("Model %q is not a video model", req.Model))

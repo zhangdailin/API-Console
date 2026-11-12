@@ -41,6 +41,9 @@ type Handler struct {
 	auditLogger audit.Logger
 
 	quota grokbase.QuotaQueue
+
+	// videoBackend serves video routes of another plane; see video_backend.go.
+	videoBackend VideoBackend
 }
 
 // chatOutcome is what one Web turn produced, for the audit journal.

@@ -40,7 +40,7 @@
 | POST | `/messages/count_tokens` | 三通道均支持本地 Token 估算 |
 | POST | `/responses/compact` | 网关摘要 / Build 压缩路径；三通道两种前缀均支持 |
 | POST | `/images/generations`、`/images/edits` | 仅 Grok：Web Imagine 生图 / 改图 |
-| POST / GET | `/videos`、`/videos/{id}`、`/videos/{id}/content` | 仅 Grok：Web 视频任务创建、查询与下载 |
+| POST / GET | `/videos`、`/videos/{id}`、`/videos/{id}/content` | 仅 Grok：视频任务创建、查询与下载。Web 模型（`grok-imagine-video`）仅文生视频；Build 视频模型（如 `grok-imagine-video-1.5`，仅当某个 Build 账号的上游目录列出该模型时才有路由）走 CLI 代理的 `/videos/generations`，支持最多 8 张 `input_references`（https URL 或 `data:image/`，带参考图时最高 720p）。Build 任务不跨进程重启续跑 |
 | GET | `/files/{image|video}/{name}` | 仅 Grok：本地媒体缓存文件 |
 | POST / GET / DELETE | `/media/inputs`、`/media/inputs/import`、`/media/inputs/{id}` | 仅 Grok：临时媒体输入（file_id） |
 

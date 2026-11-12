@@ -72,6 +72,7 @@ func NewHandler(cfg *config.Config, lb *loadbalancer.LoadBalancer) *Handler {
 		auditLogger: audit.NewNopLogger(),
 		web:         web.NewHandler(cfg, lb),
 	}
+	h.web.SetVideoBackend(buildVideoBackend{h: h})
 	return h
 }
 
