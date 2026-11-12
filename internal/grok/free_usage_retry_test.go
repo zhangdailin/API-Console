@@ -52,7 +52,7 @@ func TestHostedToolFreeUsageRejectionSwitchesWithinBudget(t *testing.T) {
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					authorizations = append(authorizations, r.Header.Get("Authorization"))
 					if mode == "recover" && len(authorizations) == 2 {
-						response := nativeQualityFixture(true)
+						response := nativeResponseFixture(true)
 						response["output"] = response["output"].([]any)[:2]
 						w.Header().Set("Content-Type", "application/json")
 						_ = json.NewEncoder(w).Encode(response)

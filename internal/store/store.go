@@ -79,17 +79,6 @@ type Account struct {
 	// RateLimitFailures counts consecutive account-scoped 429 failures. It drives
 	// the bounded exponential routing cooldown and is reset on recovery.
 	RateLimitFailures int `json:"rate_limit_failures,omitempty"`
-	// QualityFailures counts consecutive responses this credential returned
-	// without the reasoning the request asked for (an upstream quality dump).
-	// The first offence parks the credential for a cooldown; a repeat disables
-	// it, mirroring the Grok quality guard.
-	QualityFailures int `json:"quality_failures,omitempty"`
-	// QualityRevision protects a newer failure from a stale healthy result.
-	QualityRevision uint64 `json:"quality_revision,omitempty"`
-	// QualityCooldownUntil parks a credential whose responses are degraded.
-	QualityCooldownUntil time.Time `json:"quality_cooldown_until"`
-	// QualityReason belongs to the quality verdict, not the HTTP status message.
-	QualityReason string `json:"quality_reason,omitempty"`
 	// StatusMessage explains StatusCode in operator terms. A bare "401" cannot
 	// distinguish "the upstream retired this grant, re-login required" from
 	// "our record lost the credential", and those need different actions.
@@ -311,8 +300,6 @@ type ClineCredentialPatch struct {
 type accountStore interface {
 	CreateAccount(ctx context.Context, acc *Account) error
 	UpdateAccount(ctx context.Context, acc *Account) error
-	UpdateAccountQuality(ctx context.Context, id int64, failures int, cooldownUntil time.Time, reason string) error
-	ApplyAccountQuality(ctx context.Context, id int64, update AccountQualityUpdate) (AccountQualityResult, error)
 	UpdateWorkBuddyCredentials(ctx context.Context, id int64, patch WorkBuddyCredentialPatch) error
 	UpdateClineCredentials(ctx context.Context, id int64, patch ClineCredentialPatch) error
 	UpdateGrokCredentials(ctx context.Context, id int64, patch GrokCredentialPatch) error
@@ -493,15 +480,6 @@ func (s *Store) CreateAccount(ctx context.Context, acc *Account) error {
 		return s.accounts.CreateAccount(ctx, acc)
 	}
 	return fmt.Errorf("store not configured")
-}
-
-// UpdateAccountQuality records a quality verdict (failures + park window) for one
-// account without rewriting the rest of it.
-func (s *Store) UpdateAccountQuality(ctx context.Context, id int64, failures int, cooldownUntil time.Time, reason string) error {
-	if s == nil || s.accounts == nil {
-		return fmt.Errorf("account store not configured")
-	}
-	return s.accounts.UpdateAccountQuality(ctx, id, failures, cooldownUntil, reason)
 }
 
 func (s *Store) UpdateAccount(ctx context.Context, acc *Account) error {

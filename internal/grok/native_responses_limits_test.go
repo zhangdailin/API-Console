@@ -11,7 +11,22 @@ import (
 	"time"
 )
 
-func TestNativeRecoveryAndQualitySharePhysicalBudget(t *testing.T) {
+// nativeResponseFixture is a completed Build response with a message and a
+// function call; healthy adds an encrypted reasoning item.
+func nativeResponseFixture(healthy bool) map[string]any {
+	output := []any{}
+	if healthy {
+		output = append(output, map[string]any{"type": "reasoning", "id": "rs1", "summary": []any{map[string]any{"type": "summary_text", "text": "consider the request"}}, "encrypted_content": "opaque-proof"})
+	}
+	text := "PUBLIC_ANSWER"
+	if !healthy {
+		text = strings.Repeat("PRIVATE_ANALYSIS ", 12)
+	}
+	output = append(output, map[string]any{"id": "msg1", "type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": text}}}, map[string]any{"id": "fc1", "type": "function_call", "call_id": "call1", "name": "lookup", "arguments": `{"value":1}`})
+	return map[string]any{"id": "resp-result", "object": "response", "status": "completed", "output": output, "usage": map[string]any{"input_tokens": 10, "output_tokens": 80, "total_tokens": 90, "output_tokens_details": map[string]any{"reasoning_tokens": 0}}}
+}
+
+func TestNativeReasoningRecoverySpendsOnePhysicalCall(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -26,7 +41,7 @@ func TestNativeRecoveryAndQualitySharePhysicalBudget(t *testing.T) {
 		if item["content"] != "Prior model reasoning summary:\nold plan" {
 			t.Error("recovery sent an unlabelled plan")
 		}
-		response := nativeQualityFixture(false)
+		response := nativeResponseFixture(false)
 		response["output"] = response["output"].([]any)[:1]
 		_ = json.NewEncoder(w).Encode(response)
 	}))
@@ -52,23 +67,7 @@ func TestNativeRecoveryAndQualitySharePhysicalBudget(t *testing.T) {
 	payload := map[string]any{"reasoning": map[string]any{"effort": "high"}, "input": []any{map[string]any{"type": "reasoning", "encrypted_content": "bad-proof", "summary": []any{map[string]any{"text": "old plan"}}}}}
 	rec := httptest.NewRecorder()
 	_, _, result := h.serveNativeResponses(rec, httptest.NewRequest("POST", "/grok/v1/responses", nil), sess, false, ModelSpec{ID: "grok-4.7", UpstreamModel: "grok-4.7"}, payload, "/responses", nil)
-	if result.Err == nil || calls.Load() != 2 || strings.Contains(rec.Body.String(), "PRIVATE_ANALYSIS") {
-		t.Fatalf("budget or hold failed: calls=%d result=%+v", calls.Load(), result)
-	}
-}
-
-func TestNativeQualityBufferAndDownstreamFailure(t *testing.T) {
-	rec := httptest.NewRecorder()
-	q := newNativeResponseQuality(rec, qualityHoldPolicy{})
-	_, err := q.hold.writer.Write(make([]byte, 9<<20))
-	if err != nil || rec.Body.Len() != 0 || q.hold.writer.Committed() {
-		t.Fatal("large unverified buffer failed")
-	}
-	q = newNativeResponseQuality(compatShortWriter{httptest.NewRecorder()}, qualityHoldPolicy{})
-	response := nativeQualityFixture(true)
-	raw, _ := json.Marshal(response)
-	_, _, result := copyNativeResponseWithQuality(q.hold.writer, strings.NewReader(string(raw)), "application/json", "grok-4.7", nil, q)
-	if result.Err == nil {
-		t.Fatal("short write was reported as a successful response")
+	if result.Err != nil || calls.Load() != 2 {
+		t.Fatalf("recovery did not complete in one extra call: calls=%d result=%+v", calls.Load(), result)
 	}
 }

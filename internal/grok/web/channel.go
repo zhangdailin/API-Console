@@ -130,10 +130,6 @@ func PrepareUpdate(acc, existing *store.Account) error {
 	acc.UsageCurrent = existing.UsageCurrent
 	acc.UsageTotal = existing.UsageTotal
 	acc.UsageLimit = existing.UsageLimit
-	acc.QualityRevision = existing.QualityRevision
-	acc.QualityFailures = existing.QualityFailures
-	acc.QualityCooldownUntil = existing.QualityCooldownUntil
-	acc.QualityReason = existing.QualityReason
 	if strings.TrimSpace(acc.Subscription) == "" {
 		acc.Subscription = existing.Subscription
 	}

@@ -2,7 +2,6 @@ package web
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -312,15 +311,6 @@ func applyChromiumClientHints(header http.Header, userAgent string) {
 	header.Set("Sec-Ch-Ua", fmt.Sprintf(`"%s";v="%s", "Chromium";v="%s", "Not(A:Brand";v="24"`, brand, version, version))
 	header.Set("Sec-Ch-Ua-Mobile", "?0")
 	header.Set("Sec-Ch-Ua-Platform", strconv.Quote(platform))
-}
-
-func credentialAffinity(token string) string {
-	normalized := NormalizeSSOToken(token)
-	if normalized == "" {
-		normalized = strings.TrimSpace(token)
-	}
-	sum := sha256.Sum256([]byte(normalized))
-	return fmt.Sprintf("sso_%x", sum[:16])
 }
 
 // headersFor is headers with the statsig id resolved for one request. The plain

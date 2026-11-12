@@ -169,17 +169,13 @@ func journalMaxID(r *http.Request, filter auditQueryFilter) string {
 // lists the requests the chart counted as rate limited. An operation has no HTTP class:
 // it either happened or it did not.
 func auditOutcomeClass(event audit.Event) string {
-	if isRequestQualityEvent(event) {
-		return ""
-	}
 	status := strings.ToLower(strings.TrimSpace(event.Status))
 	if event.Kind != audit.KindRequest {
 		switch status {
 		case "":
 			return ""
 		case "ok", "success", "recovered", "cleared":
-			// A recovery is good news: an alert that stopped firing, or a
-			// credential a healthy turn released from its quality cooldown.
+			// A recovery is good news: an alert that stopped firing.
 			return "success"
 		default:
 			return "failed"

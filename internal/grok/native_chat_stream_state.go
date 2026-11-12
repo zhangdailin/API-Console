@@ -18,23 +18,19 @@ import (
 )
 
 // buildChatStream is the state of one Build Responses stream relayed as Chat
-// Completions chunks, optionally behind a quality hold.
+// Completions chunks.
 type buildChatStream struct {
 	h       *Handler
 	req     *chatwire.Request
-	hold    *buildQualityHold
 	outcome *chatOutcome
-	started time.Time
 
 	output     io.Writer
 	respWriter http.ResponseWriter
 	stream     *httpserver.CheckedStreamWriter
 	flusher    http.Flusher
 
-	id      string
-	created int64
-	// withheld aborts the read loop as soon as the classifier refuses the turn.
-	withheld bool
+	id       string
+	created  int64
 	terminal bool
 	finishAs string
 
@@ -55,9 +51,9 @@ type buildChatStream struct {
 	searchDone      map[string]bool
 }
 
-func newBuildChatStream(h *Handler, w http.ResponseWriter, req *chatwire.Request, hold *buildQualityHold, outcome *chatOutcome) *buildChatStream {
+func newBuildChatStream(h *Handler, w http.ResponseWriter, req *chatwire.Request, outcome *chatOutcome) *buildChatStream {
 	s := &buildChatStream{
-		h: h, req: req, hold: hold, outcome: outcome, started: time.Now(),
+		h: h, req: req, outcome: outcome,
 		id: "chatcmpl_" + util.RandomHex(8), created: time.Now().Unix(),
 		finishAs:        "stop",
 		filter:          stopFilter{sequences: req.Stop},
@@ -68,55 +64,13 @@ func newBuildChatStream(h *Handler, w http.ResponseWriter, req *chatwire.Request
 		activeReasoning: "anonymous",
 		searchDone:      map[string]bool{},
 	}
-	if hold != nil {
-		// The hold reads this stream's own accounting, so point it at the outcome
-		// being built. It never writes to it.
-		hold.outcome = outcome
-		hold.started = s.started
-	}
-	var output io.Writer = deadlineResponseWriter{ResponseWriter: w}
 	s.respWriter = w
-	if hold != nil {
-		output, s.respWriter = hold.writer, hold.writer
-	} else {
-		streamResponseHeaders(w)
-		w.WriteHeader(http.StatusOK)
-	}
-	s.stream = &httpserver.CheckedStreamWriter{Target: output}
+	streamResponseHeaders(w)
+	w.WriteHeader(http.StatusOK)
+	s.stream = &httpserver.CheckedStreamWriter{Target: deadlineResponseWriter{ResponseWriter: w}}
 	s.output = s.stream
 	s.flusher = s.stream
 	return s
-}
-
-// settleQuality fills in what the quality guard reads once the stream is over.
-func (s *buildChatStream) settleQuality() {
-	outcome := s.outcome
-	outcome.Quality.ExpectReasoning = qualityExpectsReasoning(s.req, false)
-	outcome.Quality.Terminal = outcome.Err == nil
-	if outcome.Usage != nil {
-		if details, _ := outcome.Usage["completion_tokens_details"].(map[string]any); details != nil {
-			outcome.Quality.ReasoningTokens = int64(responses.InterfaceToInt(details["reasoning_tokens"]))
-		}
-	}
-	if s.hold != nil {
-		s.hold.recordTiming(outcome)
-	}
-}
-
-// checkHold asks the quality hold for a verdict after an event.
-func (s *buildChatStream) checkHold(terminalEvent bool) error {
-	if s.hold == nil {
-		return nil
-	}
-	verdict, waiting := s.hold.step(terminalEvent)
-	if waiting {
-		return nil
-	}
-	if verdict == qualityWithhold {
-		s.withheld = true
-		return errQualityWithheld
-	}
-	return s.hold.writer.Commit()
 }
 
 // --- emitters ---------------------------------------------------------------
@@ -141,23 +95,12 @@ func (s *buildChatStream) emit(delta map[string]any, done string, usage map[stri
 		return err
 	}
 	s.flusher.Flush()
-	if s.stream.Err != nil {
-		return s.stream.Err
-	}
-	return s.checkHold(false)
+	return s.stream.Err
 }
 
 func (s *buildChatStream) fail(err error) {
 	s.outcome.Err = err
 	s.outcome.Finish = "error"
-	if s.hold != nil {
-		// An upstream error is not a quality dump: it belongs to
-		// retryWithAccountSwitch, which retries before any body exists. Release
-		// whatever was held so the caller sees a real error instead of silence.
-		if commitErr := s.hold.writer.Commit(); commitErr != nil {
-			return
-		}
-	}
 	writeSSEStreamError(s.respWriter, s.flusher, nil, err.Error())
 }
 
@@ -166,9 +109,7 @@ func (s *buildChatStream) emitText(value string) error {
 		return nil
 	}
 	s.text.WriteString(value)
-	s.outcome.Quality.VisibleChars += int64(len(value))
 	s.outcome.SawText = true
-	s.outcome.Quality.observeVisible(time.Since(s.started).Milliseconds())
 	return s.emit(map[string]any{"content": value}, "", nil)
 }
 
@@ -205,7 +146,6 @@ func (s *buildChatStream) toolItem(item, ev map[string]any) error {
 	}
 	tc := s.tools[itemID]
 	if tc == nil {
-		s.outcome.Quality.ToolCalls++
 		if s.byCall[callID] != nil {
 			return fmt.Errorf("duplicate upstream call_id %q", callID)
 		}
@@ -249,9 +189,6 @@ func (s *buildChatStream) thought(key string) *responseReasoningState {
 // emitThought streams reasoning text. One reasoning item keeps the first
 // source it was seen from (raw text, summary or final snapshot).
 func (s *buildChatStream) emitThought(key, source, value string) error {
-	if s.hold != nil {
-		s.hold.markReasoningStarted()
-	}
 	state := s.thought(key)
 	if state.source == "" {
 		state.source = source
@@ -261,8 +198,6 @@ func (s *buildChatStream) emitThought(key, source, value string) error {
 	}
 	state.text.WriteString(value)
 	s.reasoning.WriteString(value)
-	s.outcome.Quality.SawReasoning = true
-	s.outcome.Quality.ReasoningChars += int64(len(value))
 	return s.emit(map[string]any{"reasoning_content": value, "reasoning_item_id": state.key}, "", nil)
 }
 
@@ -279,9 +214,6 @@ func (s *buildChatStream) emitSignature(state *responseReasoningState, signature
 
 // onEvent handles one upstream Responses SSE event.
 func (s *buildChatStream) onEvent(event, data string) error {
-	if s.withheld {
-		return errQualityWithheld
-	}
 	if data == "[DONE]" {
 		if !s.terminal {
 			return fmt.Errorf("upstream stream ended without a response terminal event")
@@ -365,9 +297,6 @@ func (s *buildChatStream) onOutputItem(kind string, item, ev map[string]any) err
 		s.searchDone[searchIdentity(item)] = done
 		return s.emit(map[string]any{"x_grok_search": item, "x_grok_search_done": done}, "", nil)
 	case "reasoning":
-		if s.hold != nil {
-			s.hold.markReasoningStarted()
-		}
 		key := chatwire.ParseLooseStringAny(item["id"])
 		if stopped {
 			return nil
@@ -386,7 +315,6 @@ func (s *buildChatStream) onOutputItem(kind string, item, ev map[string]any) err
 			}
 		}
 		if signature := responses.StreamString(item["encrypted_content"]); signature != "" && signature != state.signature {
-			s.outcome.Quality.EncryptedChars = int64(len(signature))
 			s.lastSignature = signature
 			if err := s.emitSignature(state, signature); err != nil {
 				return err
@@ -422,8 +350,8 @@ func (s *buildChatStream) onFunctionArguments(kind string, ev map[string]any) er
 	return nil
 }
 
-// onTerminal takes the final response: it fills in anything only the final
-// output carries, then lets the quality hold judge the complete turn.
+// onTerminal takes the final response and fills in anything only the final
+// output carries.
 func (s *buildChatStream) onTerminal(kind string, ev map[string]any) error {
 	response, _ := ev["response"].(map[string]any)
 	terminalFinish, err := responses.TerminalFinish(kind, response)
@@ -456,11 +384,6 @@ func (s *buildChatStream) onTerminal(kind string, ev map[string]any) error {
 		}
 	}
 	s.terminal = true
-	// The turn is over: the classifier can now judge what arrived and
-	// release a healthy answer instead of holding it to the timeout.
-	if holdErr := s.checkHold(true); holdErr != nil {
-		return holdErr
-	}
 	return io.EOF
 }
 

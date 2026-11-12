@@ -34,7 +34,7 @@ API-Console 是 Go 服务与内嵌管理网页组成的多通道网关。Redis �
 
 共享推理辅助逻辑按职责分在 `model_resolution.go`（模型与档位校验）、`account_selection.go`（选择与并发槽）、`account_stats.go`（幂等用量写入）和 `refusal_wait.go`（拒绝等待预算）。Grok 的 `handler.go` 保留依赖装配，模型、账号策略、审计和额度写入分别在 `handler_models.go`、`handler_account_policy.go`、`handler_audit.go` 和 `handler_quota.go`。
 
-质量暂存分为 `quality_hold_policy.go` 的判定与重放策略、`quality_hold_buffer.go` 的提交缓冲和 `quality_hold.go` 的每轮状态编排。仅用于跨协议回归的 Grok Chat→Responses 适配器位于 `*_test.go`；生产 Responses 仍走原生 Build 响应路径。
+仅用于跨协议回归的 Grok Chat→Responses 适配器位于 `*_test.go`；生产 Responses 仍走原生 Build 响应路径。
 
 ## 3. 启动与配置链
 
@@ -76,7 +76,7 @@ flowchart TD
 
 模型拒绝不应把整个账号当作失效；队列闸门不应引发无意义切号；内容拒绝不应损害账号；只有确定的 OAuth 永久拒绝需要重新授权。Grok 模型冷却、团队节奏、出口健康分别维护，普通 403 不足以证明封号。
 
-共享 Handler 一旦交付输出就不重新生成。Grok 质量暂存只在尚未交付、请求可安全重放且预算允许时重试。有副作用工具请求受到额外保护。
+共享 Handler 一旦交付输出就不重新生成。Grok 只在尚未交付、请求可安全重放且预算允许时换号重试；有副作用工具请求受到额外保护。
 
 当前重复用户内容允许透传，Grok 文本与推理重复增量也不再按计数终止。真实超时、stop、协议失败及质量策略仍然存在。
 

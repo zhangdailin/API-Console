@@ -94,7 +94,6 @@ type Config struct {
 	GrokCLIOAuthClientID    string  `json:"grok_cli_oauth_client_id,omitempty"`
 	GrokCLIOAuthDeviceURL   string  `json:"grok_cli_oauth_device_url,omitempty"`
 	GrokCLIOAuthTokenURL    string  `json:"grok_cli_oauth_token_url,omitempty"`
-	GrokLowLatency          bool    `json:"grok_low_latency,omitempty"`
 	GrokBuildRPS            float64 `json:"grok_build_rps,omitempty"`
 
 	// ── Grok Web (grok.com SSO) upstream ──

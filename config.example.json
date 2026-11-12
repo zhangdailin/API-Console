@@ -21,7 +21,6 @@
   "grok_cli_oauth_device_url": "https://auth.x.ai/oauth2/device/code",
   "grok_cli_oauth_token_url": "https://auth.x.ai/oauth2/token",
   "grok_build_rps": 0,
-  "grok_low_latency": false,
   "grok_cf_clearance": "",
   "doubao_comment": "Doubao Web accounts are added only by scanning the management-console QR code with the Doubao App. Cookies and device identity are encrypted and never exported.",
   "doubao_base_url": "https://www.doubao.com",

@@ -161,18 +161,6 @@ test('the recovery line appears only for an account that is actually held', () =
   assert.match(strip(markup), /3 小时后/);
 });
 
-test('the recovery deadline is the one that still holds the account', () => {
-  const { context } = loadUI();
-  const acc = {
-    id: 2, account_type: 'grok', enabled: true, has_credential: true, status_code: '429',
-    quota_reset_at: new Date(Date.now() + 3600000).toISOString(),
-    quality_cooldown_until: new Date(Date.now() + 5 * 3600000).toISOString(),
-  };
-  // The nearer deadline has already passed relative to the further one, so
-  // quoting it would understate the wait.
-  assert.match(strip(context.buildCooldownMarkup(acc)), /5 小时后/);
-});
-
 test('an expired cooldown says it is due rather than promising a future time', () => {
   const { context } = loadUI();
   const acc = {

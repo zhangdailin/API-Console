@@ -16,8 +16,7 @@ import (
 	"orchids-api/internal/util"
 )
 
-func copyNativeResponseWithQuality(w http.ResponseWriter, body io.Reader, contentType, model string, namespaces responses.ToolNamespaces, quality *nativeResponseQuality) (responseID string, captured []byte, result chatOutcome) {
-	result.Quality.FirstVisibleMS = -1
+func copyNativeResponse(w http.ResponseWriter, body io.Reader, contentType, model string, namespaces responses.ToolNamespaces) (responseID string, captured []byte, result chatOutcome) {
 	// Keep the complete delivered response for replay and usage recovery.
 	fullCapture := new(bytes.Buffer)
 	defer func() {
@@ -51,16 +50,6 @@ func copyNativeResponseWithQuality(w http.ResponseWriter, body io.Reader, conten
 			result.UsageSource = audit.UsageSourceUpstream
 		}
 		result.Finish, result.Err = responses.TerminalFinish("", response)
-		if quality != nil && result.Err == nil {
-			quality.observeResponse(response, &result)
-			if err := quality.check(true); err != nil {
-				result.Err = err
-				return
-			}
-			if result.Withheld {
-				return
-			}
-		}
 		// Preserve JSON bytes unless restoring tool identities or masking errors.
 		// Partial SSE events also need strict-client supplementation below.
 		changed := responses.FilterInternalSearchCalls(response)
@@ -112,7 +101,6 @@ func copyNativeResponseWithQuality(w http.ResponseWriter, body io.Reader, conten
 			}
 
 		}
-		quality.observe(event, kind, &result)
 		if lowered.Drop(event) {
 			return nil
 		}
@@ -168,18 +156,7 @@ func copyNativeResponseWithQuality(w http.ResponseWriter, body io.Reader, conten
 			}
 			result.Finish, result.Err = responses.TerminalFinish(kind, response)
 			terminal = true
-			if result.Err == nil && quality != nil {
-				if err := quality.check(true); err != nil {
-					result.Err = err
-				}
-			}
 			return io.EOF // A logical terminal must not wait for the socket to close.
-		}
-		if quality != nil {
-			if err := quality.check(false); err != nil {
-				result.Err = err
-				return err
-			}
 		}
 		return nil
 	})

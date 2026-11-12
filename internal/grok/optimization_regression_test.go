@@ -20,30 +20,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func TestOptimizationStreamingDurationUsesFirstAndLastDelta(t *testing.T) {
-	for _, tc := range []struct {
-		name        string
-		first, last int64
-		terminal    bool
-		want        qualityVerdict
-	}{
-		{"fast first token and long stream", 500, 10000, true, qualityDeliver},
-		{"slow first token and actual dump", 10000, 10010, true, qualityWithhold},
-		{"one delta cannot establish a dump", 500, 500, false, qualityWait},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			result := chatOutcome{Quality: qualitySignals{ExpectReasoning: true, VisibleChars: 200, EncryptedChars: 512, ReasoningTokens: 100}}
-			result.Quality.observeVisible(tc.first)
-			result.Quality.observeVisible(tc.last)
-			hold := newBuildQualityHold(httptest.NewRecorder(), qualityHoldPolicy{}, &result)
-			verdict, _ := hold.step(tc.terminal)
-			if verdict != tc.want || hold.signals(tc.terminal).VisibleFlushMS != tc.last-tc.first {
-				t.Fatalf("verdict=%s want=%s duration=%d", verdict, tc.want, hold.signals(tc.terminal).VisibleFlushMS)
-			}
-		})
-	}
-}
-
 func TestOptimizationPayloadCloneSharesStringsAndIsolatesContainers(t *testing.T) {
 	text := strings.Repeat("history", 1<<17)
 	original := map[string]any{"input": []any{map[string]any{"content": text}}, "tools": []map[string]any{{"name": "lookup", "parameters": map[string]any{"type": "object"}}}, "include": []string{"reasoning.encrypted_content"}, "reasoning": map[string]any{"effort": "high"}, "large_id": uint64(9007199254740993)}
@@ -246,17 +222,5 @@ func TestOptimizationAccountSelectionUsesOneCooldownPipeline(t *testing.T) {
 	}
 	if hook.pipelines.Load() != 1 || hook.commands.Load() != 92 {
 		t.Fatal("canceled selection performed cooldown reads")
-	}
-}
-
-func TestPromptBilledSingleDeltaIsNotDegraded(t *testing.T) {
-	for _, bill := range []int64{73, 82, 120} {
-		result := chatOutcome{Quality: qualitySignals{ExpectReasoning: true, Terminal: true, VisibleChars: 20, EncryptedChars: 600, ReasoningTokens: bill}}
-		result.Quality.observeVisible(1244)
-		hold := newBuildQualityHold(httptest.NewRecorder(), qualityHoldPolicy{}, &result)
-		verdict, _ := hold.step(true)
-		if verdict != qualityDeliver || qualityDegraded(result.Quality) {
-			t.Fatalf("healthy short answer rejected: bill=%d verdict=%s", bill, verdict)
-		}
 	}
 }

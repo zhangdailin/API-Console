@@ -75,7 +75,6 @@ func TestTerminalBuildFailuresDoNotRotateOrPoisonAccounts(t *testing.T) {
 						testutil.Equal(t, acc.StatusCode, "")
 						testutil.True(t, acc.Enabled)
 						testutil.True(t, acc.QuotaResetAt.IsZero())
-						testutil.True(t, acc.QualityCooldownUntil.IsZero())
 						testutil.True(t, acc.OAuthAccessToken != "")
 					}
 				})

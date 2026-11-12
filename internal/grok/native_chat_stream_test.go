@@ -21,7 +21,7 @@ func TestStreamBuildChatSeparatesReasoningFromContent(t *testing.T) {
 		`data: {"type":"response.output_text.delta","delta":"final answer"}`,
 		"",
 	}, "\n")
-	(&Handler{}).streamBuildChatHolding(recorder, &chatwire.Request{Model: "grok-4.3"}, strings.NewReader(stream), nil)
+	(&Handler{}).streamBuildChat(recorder, &chatwire.Request{Model: "grok-4.3"}, strings.NewReader(stream))
 	raw := recorder.Body.String()
 	testutil.MustContain(t, raw, `"reasoning_content":"plan first"`)
 	testutil.MustContain(t, raw, `"content":"final answer"`)
@@ -41,7 +41,7 @@ func TestStreamBuildChatStreamsFirstReasoningSourceWithoutDuplicates(t *testing.
 		`data: {"type":"response.output_text.delta","delta":"answer"}`,
 		"",
 	}, "\n")
-	(&Handler{}).streamBuildChatHolding(recorder, &chatwire.Request{Model: "grok-4.3"}, strings.NewReader(stream), nil)
+	(&Handler{}).streamBuildChat(recorder, &chatwire.Request{Model: "grok-4.3"}, strings.NewReader(stream))
 	raw := recorder.Body.String()
 	testutil.Falsef(t, !strings.Contains(raw, `"reasoning_content":"duplicate summary"`) || strings.Contains(raw, "raw reasoning"), "first reasoning source should stream immediately without later duplication: %q", raw)
 }
@@ -73,7 +73,7 @@ func (r *failingBuildStreamReader) Read(dst []byte) (int, error) {
 
 func TestStreamBuildChatReportsMalformedSSEData(t *testing.T) {
 	recorder := httptest.NewRecorder()
-	(&Handler{}).streamBuildChatHolding(recorder, &chatwire.Request{Model: "grok-4.3"}, strings.NewReader("data: {not-json}\n"), nil)
+	(&Handler{}).streamBuildChat(recorder, &chatwire.Request{Model: "grok-4.3"}, strings.NewReader("data: {not-json}\n"))
 
 	body := recorder.Body.String()
 	testutil.MustContainAll(t, body, "event: error", "Use the request ID", "data: [DONE]")
@@ -81,7 +81,7 @@ func TestStreamBuildChatReportsMalformedSSEData(t *testing.T) {
 
 func TestStreamBuildChatReportsScannerError(t *testing.T) {
 	recorder := httptest.NewRecorder()
-	(&Handler{}).streamBuildChatHolding(recorder, &chatwire.Request{Model: "grok-4.3"}, &failingBuildStreamReader{}, nil)
+	(&Handler{}).streamBuildChat(recorder, &chatwire.Request{Model: "grok-4.3"}, &failingBuildStreamReader{})
 
 	body := recorder.Body.String()
 	testutil.Falsef(t, !strings.Contains(body, "event: error") || !strings.Contains(body, "Use the request ID") || strings.Contains(body, "upstream connection interrupted") || !strings.Contains(body, "data: [DONE]"), "stream=%q want explicit SSE read error and terminator", body)

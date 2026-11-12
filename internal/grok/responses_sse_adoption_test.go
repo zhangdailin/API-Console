@@ -30,11 +30,6 @@ func TestNativeResponsesFlushFailureAndNonStreamFailureRemainFailures(t *testing
 	if result.Err == nil || result.Finish != "error" {
 		t.Fatalf("successful JSON write hid upstream failure: %+v", result)
 	}
-	writer := newDeferredResponseWriter(compatShortWriter{httptest.NewRecorder()})
-	writer.Write([]byte("held result"))
-	if err := writer.Commit(); !errors.Is(err, io.ErrShortWrite) {
-		t.Fatalf("quality hold hid short write: %v", err)
-	}
 }
 
 func TestResponsesNativeOutcomeStatusAndEOF(t *testing.T) {

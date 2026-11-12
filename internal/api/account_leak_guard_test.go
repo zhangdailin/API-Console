@@ -39,7 +39,7 @@ func TestAccountSecretFieldsAreComplete(t *testing.T) {
 	for name := range strings.FieldsSeq(`
 		ID Name AccountType UserID AgentMode Email Weight MaxConcurrent Enabled
 		Subscription UsageCurrent UsageTotal UsageLimit TokensToday TokensDate
-		StatusCode AuthStatus RateLimitFailures QualityFailures QualityRevision QualityCooldownUntil QualityReason
+		StatusCode AuthStatus RateLimitFailures
 		StatusMessage LastAttempt VerifiedAt ClearVerifiedAt QuotaResetAt RequestCount
 		LastUsedAt CreatedAt UpdatedAt CredentialType OAuthExpiresAt TeamID GrokRefresh
 		GrokProvider GrokModels GrokModelCatalog GrokModelsSyncedAt GrokBilling
@@ -100,18 +100,6 @@ var accountChannels = []string{"grok", "workbuddy", "cline", "doubao"}
 // marker prefixes every planted secret so one substring search can find all of
 // them in the rendered JSON, whatever the field name became on the wire.
 const marker = "PLANTED-SECRET-"
-
-func TestAccountQualityReasonIsOperationalAndRedacted(t *testing.T) {
-	acc := &store.Account{AccountType: "grok", Enabled: true, QualityFailures: 1,
-		QualityReason: "no_reasoning", OAuthAccessToken: marker + "quality-reason"}
-	raw, err := json.Marshal(normalizeAccountOutput(acc))
-	testutil.NoError(t, err, "marshal account: %v")
-	testutil.MustContain(t, string(raw), `"quality_reason":"no_reasoning"`)
-	acc.QualityReason = "upstream echoed " + acc.OAuthAccessToken
-	raw, err = json.Marshal(normalizeAccountOutput(acc))
-	testutil.NoError(t, err, "marshal redacted account: %v")
-	testutil.MustNotContain(t, string(raw), marker)
-}
 
 // accountWithSecrets builds an account of one channel with a distinct value in
 // every credential field.

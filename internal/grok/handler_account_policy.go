@@ -177,12 +177,6 @@ func accountUsableForModel(ctx context.Context, acc *store.Account) bool {
 	if accountpolicy.IsGrokAccount(acc) && !acc.GrokFreeQuota.ResetAt.IsZero() && time.Now().Before(acc.GrokFreeQuota.ResetAt) {
 		return false
 	}
-	// A credential parked by the quality guard stays out of rotation until its
-	// cooldown ends: it answers 200 with degraded content, which no status code
-	// reflects.
-	if !acc.QualityCooldownUntil.IsZero() && time.Now().Before(acc.QualityCooldownUntil) {
-		return false
-	}
 	model := requestModelFromContext(ctx)
 	if model == "" {
 		return true

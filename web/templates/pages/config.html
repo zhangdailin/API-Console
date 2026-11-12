@@ -52,8 +52,6 @@
             <section class="settings-card">
               <div class="settings-card-head"><h2 class="settings-card-title">Build 交付</h2><span class="mini-badge">新请求生效</span></div>
               <div class="settings-card-body">
-                <div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_grok_low_latency">低延迟</label><span class="helper-text">直接交付上游内容，跳过输出前质量暂存与质量重试；异常结果仍会记录，但可能已被客户端收到。仅作用于 Build。</span></div>
-                  <div class="form-row-control"><label class="toggle"><input type="checkbox" id="cfg_grok_low_latency" aria-label="Build 低延迟"><span class="toggle-slider"></span></label></div></div>
                 <div class="form-row"><div class="form-row-label"><label class="form-label" for="cfg_grok_build_rps">每秒请求上限</label><span class="helper-text">发往 Build 上游的全局速率上限；0 表示使用默认值。</span></div>
                   <div class="form-row-control"><input type="number" id="cfg_grok_build_rps" class="form-input" min="0" max="1000" step="0.1" placeholder="默认"></div></div>
                 <div class="form-row"><div class="form-row-label"><span class="form-label">超时</span><span class="helper-text">响应头与流空闲超时由网关统一固定，保证长推理不被截断，不可在此修改。</span></div>

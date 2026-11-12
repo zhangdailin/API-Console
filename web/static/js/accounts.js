@@ -364,10 +364,6 @@ function evaluateAccountStatus(acc) {
   if (health && !health.ok) { return { normal: false, text: '异常', color: '#fb7185', bg: 'rgba(251, 113, 133, 0.16)', tip: health.msg || '状态同步失败' }; }
   if (!acc.enabled) { return { normal: false, text: '禁用', color: '#fb7185', bg: 'rgba(251, 113, 133, 0.16)', tip: '账号已禁用' }; }
   const statusCode = normalizeSidebarStatusCode(acc.status_code);
-  const quality = getAccountQualityStatus(acc);
-  if (quality.cooling && (!statusCode || isQuotaOnlyStatus(acc) || (statusCode === '429' && getAccountModelCooldowns(acc).length))) {
-    return { normal: false, text: '质量冷却', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.16)', tip: 'Grok 质量检查已将账号暂时移出调度' };
-  }
   // A bare "401" or "429" hides the actionable cause (retired grant vs. a
   // partial write vs. upstream throttling), so the server's reason wins.
   const statusReason = String(acc.status_message || "").trim();
@@ -669,9 +665,6 @@ function renderAccounts() {
     statusSpan.style.border = "none";
     statusSpan.textContent = badge.text;
     tdStatus.appendChild(statusSpan);
-    const quality = document.createElement("div");
-    quality.innerHTML = buildQualityMarkup(acc);
-    if (quality.innerHTML) tdStatus.appendChild(quality);
     // A cooled account without a stated recovery time reads as broken forever.
     // The scheduler always writes a deadline when it cools one, so the line
     // appears exactly when the account is held and says when to come back.
@@ -842,32 +835,10 @@ function buildTokensMarkup(acc) {
   return `<span class="account-tokens" title="${escapeHtml(title)}">${formatTokenCount(today)} / ${formatTokenCount(total)}</span>`;
 }
 
-function buildQualityMarkup(acc) {
-  const quality = getAccountQualityStatus(acc);
-  if (!quality.failures && !quality.cooling) return '';
-  const reasons = {
-    no_reasoning: '缺少推理输出',
-    burst_dump: '集中输出异常',
-    cipher_drool: '密文推理异常',
-    fake_encrypted_dump: '密文与出字时序异常',
-    fast_reasoning_ratio_dump: '推理占比与出字时序异常',
-  };
-  const reason = quality.reason ? (Object.prototype.hasOwnProperty.call(reasons, quality.reason) ? reasons[quality.reason] : '其他退化原因') : '原因未记录';
-  const count = quality.failures ? `连续退化 ${quality.failures} 次` : '质量检查冷却';
-  const state = !acc.enabled ? '已禁用，不自动恢复' : (!quality.cooling ? '冷却已结束，等待复检' : '');
-  return `<div class="account-quality-detail"><div>${escapeHtml(count)}</div><div>${escapeHtml(reason)}</div>${state ? `<div>${escapeHtml(state)}</div>` : ''}</div>`;
-}
-
-// The latest active deadline is the one that still holds the account.
+// cooldownRecoveryAt is the quota reset that still holds the account.
 function cooldownRecoveryAt(acc) {
-  const quality = getAccountQualityStatus(acc);
-  const candidates = [acc?.quota_reset_at, ...(quality.cooling ? [acc?.quality_cooldown_until] : [])];
-  let latest = 0;
-  for (const raw of candidates) {
-    const at = Date.parse(String(raw || ""));
-    if (Number.isFinite(at) && at > latest) latest = at;
-  }
-  return latest > 0 ? latest : 0;
+  const at = Date.parse(String(acc?.quota_reset_at || ""));
+  return Number.isFinite(at) && at > 0 ? at : 0;
 }
 
 // buildCooldownMarkup renders the recovery line under the status badge.
@@ -892,7 +863,7 @@ function buildCooldownMarkup(acc) {
     month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
   });
   const tail = remaining > 0 ? `（${formatRemainingCompact(remaining)}）` : "（已到期，等待下一次调度）";
-  const label = getAccountQualityStatus(acc).cooling ? `冷却至 ${when}` : `预计 ${when} 恢复`;
+  const label = `预计 ${when} 恢复`;
   return modelLines + `<div class="account-cooldown-until" style="font-size:0.68rem;color:#64748b;margin-top:2px">${escapeHtml(label)}${escapeHtml(tail)}</div>`;
 }
 

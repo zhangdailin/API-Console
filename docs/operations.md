@@ -107,31 +107,3 @@ HTTP 成功、协议完成、可见输出与预算截断是不同口径。正常
 请求日志的 `first_token_ms` 为首生成（包括推理和工具；非流式采用正文首写的 TTFB 近似），`first_visible_token_ms` 是流式文本首字。另有 `retry_wait_ms`、`upstream_attempts`、`account_switches`。普通日志也采集 `upstream_http_phase_samples` 及 `upstream_http_phases_sum` 的 DNS、TCP、TLS、取连接、响应头耗时。各阶段可能重叠，累计值不能相加当作请求总耗时；复用连接及自定义传输可能缺阶段，缺失不能解释为零。不会保存请求正文、凭据、代理地址或模型输出。
 
 这些数值测量源站内的链路。公网客户端的 DNS、TLS、CDN 等时间须另测，并按 `X-Orchids-Request-ID` 关联 Caddy 与请求日志。源站之外的额外等待不能仅凭一个样本归因模型或网关。
-
-## Grok 质量检查的日志与流水
-
-Grok 质量检查分两半：暂存（`quality_hold.go` 编排、`quality_hold_policy.go` 判定、`quality_hold_buffer.go` 缓冲）决定一轮回答能否交付，护栏（`quality_guard.go`）决定产生该回答的凭据是否停用。过程和结论写入流水，动作名均以 `grok_quality_` 开头。
-
-日志中心直接列出开始检查、通过或中断、拦截、换号重试和最终处理阶段，不需要专门的质量过滤控件。检查开始即写入记录，不必等整个请求结束；刷新日志中心即可看到已发生的阶段。打开请求或质量事件详情，按时间查看关联过程、原因、账号、字符与 token 计数。缺少结论时显示「客户端交付结果未记录」，缺少逐次记录时显示实际找到的明细数量。系统日志中的质量护栏记录仅描述凭据处理，不能据此推断客户端最终收到了什么。
-
-| 流水动作 | 类型 | 何时写入 | `status` | 关键字段 |
-|---|---|---|---|---|
-| `grok_quality_check` | request | 每轮开始检查、正常通过或异常中断 | `checking` / `passed` / `error` | `attempt`、`metadata.mode`、暂存与重试策略、计数及耗时 |
-| `grok_quality_retry` | request | 拦截后确实选中了下一账号 | `retrying` | `attempt`、`metadata.from_account_id`、`metadata.to_account_id` |
-| `grok_quality_degraded` | request | 每一轮被暂存拒绝的尝试 | `degraded` | `attempt`、`details` / `metadata.reason`（命中的检测器）、`metadata.mode`（stream / collected）、`metadata.guard`（护栏对该凭据的处理）、各项字符与 token 计数 |
-| `grok_quality_resolution` | request | 出现过被拒尝试的请求结束时，一次 | `retried` / `delivered_degraded` / `rejected` / `undeliverable` | `metadata.client_received_degraded`、`details` / `metadata.stopped`（停止重试的原因）、`metadata.withheld_attempts` |
-| `grok_quality_guard` | system | 护栏改变凭据状态时 | `parked` / `disabled` / `cleared` | `account_id`、`metadata.failures`、`metadata.cooldown_until`、`metadata.account_enabled` |
-
-被拒尝试自身的 `grok_request` 行以 `status=quality_degraded` 记录，并带 `metadata.quality_withheld` 与 `metadata.quality_reason`；`metadata.finish_reason` 保留上游原始结束原因。
-
-`reason` 取值：`burst_dump`、`cipher_drool`、`fake_encrypted_dump`、`fast_reasoning_ratio_dump`、`no_reasoning`。三种倾倒检测器（`burst_dump`、`fake_encrypted_dump`、`fast_reasoning_ratio_dump`）只判断可见回答不少于 32 个 token 的轮次：推理后一次性给出的短回答（会话标题、问候、`{"action":"proceed"}` 之类的路由判定）无法凭时序与劣化区分，不作为停用或冷却账号的依据，口径与 grok2api 的最小判定输出一致。`stopped` 取值：`attempts_exhausted`、`account_budget_exhausted`、`replay_unsafe`、`client_gone`、`no_other_account`。
-
-判断客户端是否收到了降级回答，只看 `grok_quality_resolution`：`delivered_degraded` 表示按 fail-open 交付了最后一轮被拒内容，其余三种状态客户端都没有收到降级内容。`grok_quality_degraded` 描述的是客户端从未见到的尝试。
-
-启用了质量检查的正常回答也写入开始与通过两条过程记录；未启用或不适用的请求不伪造检查过程。只在阶段变化时记录，不逐个 SSE 块记录。这些行只包含计数、耗时、策略和标识，不包含回答正文或凭据。`retried` 表示后续尝试未再被质量拦截，不保证请求最终成功，实际请求结果以请求日志的状态为准。
-
-Chat 请求省略推理强度时，质量检查采用本次选中账号实际发送的模型默认推理强度；换号后重新采用下一账号的默认值，不修改客户端原始请求。非流式响应（`metadata.mode=collected`）无法观测上游出字时序，`metadata.first_visible_ms=-1` 表示未知，不以本地 JSON 解析耗时触发极速输出检测。开始检查、尚无正文的阶段同样不伪造首字时间；非流式仍保留不依赖出字时序的质量判断，流式请求继续使用实际观测的时序。
-
-账号管理直接显示 Grok 的质量冷却、连续退化次数、原因与冷却截止时间，侧栏异常统计采用相同的冷却判断。质量原因单独保存为 `quality_reason`，不借用 HTTP 状态说明，也不因普通账号刷新清空；历史记录没有原因时显示「原因未记录」。冷却到期不再显示为正在冷却，但保留失败计数供复检；账号禁用时不承诺自动恢复。页面读取这些字段不恢复账号、不清除质量处罚。
-
-对应的服务日志：`grok quality hold: turn withheld`（WARN）、`grok quality hold: request resolved`（重试成功为 INFO，其余为 WARN）、`grok quality guard: credential parked / disabled`（WARN）、`grok quality guard: credential cleared`（INFO），均带 `request_id` 与 `account_id`。

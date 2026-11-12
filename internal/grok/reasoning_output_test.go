@@ -78,12 +78,12 @@ func TestChatAndMessagesKeepReasoningSeparateFromAnswer(t *testing.T) {
 			req := &chatwire.Request{Model: "grok-4.6", Stream: stream}
 			var result chatOutcome
 			if stream {
-				result = h.streamBuildChatHolding(w, req, strings.NewReader(reasoningOutputStream()), nil)
+				result = h.streamBuildChat(w, req, strings.NewReader(reasoningOutputStream()))
 			} else {
 				raw, _ := json.Marshal(reasoningOutputResponse())
 				result = h.collectBuildChat(w, req, bytes.NewReader(raw))
 			}
-			if result.Err != nil || !result.Quality.SawReasoning || result.Quality.ReasoningChars == 0 {
+			if result.Err != nil {
 				t.Fatalf("lost internal reasoning evidence: %+v", result)
 			}
 			var answer, thinking strings.Builder

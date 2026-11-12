@@ -164,113 +164,12 @@ test('obsolete log failures preserve current records and pagination cursor',asyn
   assert.match(allText(api.ids.logsRows),/更新配置/); assert.doesNotMatch(allText(api.ids.logsRows),/old failure/);
 });
 
-for(const [resolution,label,received] of [
-  ['retried','重试结束 · 未再触发拦截',false],
-  ['delivered_degraded','已交付降级回答',true],
-  ['rejected','已拒绝请求',false],
-  ['undeliverable','无可交付内容',false],
-]){
- test('quality results show '+resolution+' in both the list and detail',()=>{
-  const api=load();
-  const record={event:{kind:'request',action:'grok_request',channel:'grok',request_id:'quality-'+resolution,status:'success',metadata:{quality_resolution:resolution,quality_withheld_attempts:1,quality_reasons:['no_reasoning']}}};
-  api.state.records=[record]; api.renderRows(false); api.renderDetail(record);
-  assert.match(allText(api.ids.logsRows),new RegExp(label));
-  const detail=allText(api.ids.logsDetailBody);
-  assert.match(detail,/Grok 质量检查/);
-  assert.match(detail,new RegExp(label));
-  assert.match(detail,received?/客户端收到了被质量检查拦截的回答/:/客户端没有收到被拦截的回答/);
-  assert.match(detail,/要求推理但没有任何推理内容/);
-  assert.match(detail,/当前日志窗口未找到逐次拦截明细/);
- });
-}
-
-test('quality details include each detector, account penalty, counts and retry policy',()=>{
- const api=load();
- const reasons=['burst_dump','cipher_drool','fake_encrypted_dump','fast_reasoning_ratio_dump','no_reasoning'];
- const record={event:{kind:'request',action:'grok_request',channel:'grok',request_id:'quality-detail'},quality:[
-  ...reasons.map((reason,index)=>({action:'grok_quality_degraded',attempt:index+1,account_id:10+index,reasoning_tokens:80,metadata:{reason,mode:index===0?'collected':'stream',guard:index===0?'disabled':'parked',visible_chars:8,reasoning_chars:100,encrypted_chars:256,first_visible_ms:150}})),
-  {action:'grok_quality_resolution',status:'rejected',metadata:{withheld_attempts:5,stopped:'attempts_exhausted',max_attempts:6,on_exhausted:'fail_closed'}},
- ]};
- api.renderDetail(record);
- const detail=allText(api.ids.logsDetailBody);
- for(const label of ['长时间等待后一次性吐出短回答','只有密文推理、推理计费为零','密文或大额推理计费后瞬间吐出全文','推理占输出八成以上且瞬间吐出','要求推理但没有任何推理内容','账号 #10','非流式','凭据已停用','凭据已冷却','可见 8 字符','推理计费 80 token','首字 150 ms','已达质量重试次数上限','拒绝（返回 502）'])assert(detail.includes(label),label);
-});
-
-test('partial quality histories disclose missing attempts without inferring client delivery',()=>{
- const api=load();
- api.renderDetail({event:{kind:'request',action:'grok_request',metadata:{quality_withheld_attempts:3}},quality:[{action:'grok_quality_degraded',attempt:2,metadata:{reason:'future_detector'}}]});
- const detail=allText(api.ids.logsDetailBody);
- assert.match(detail,/客户端交付结果未记录/);
- assert.doesNotMatch(detail,/客户端没有收到被拦截的回答/);
- assert.match(detail,/当前显示 1 \/ 3 次拦截/);
- assert.match(detail,/future_detector/);
-});
-
-test('credential guard results do not claim a withheld answer was never delivered',()=>{
- const api=load();
- api.renderDetail({event:{kind:'system',action:'grok_quality_guard',status:'disabled',metadata:{failures:2,disable_threshold:2,account_enabled:false,withheld:true}}});
- const detail=allText(api.ids.logsDetailBody);
- assert.match(detail,/Grok 质量护栏/);
- assert.match(detail,/凭据已停用/);
- assert.match(detail,/2 \/ 2 次停用/);
- assert.match(detail,/交付前被暂存拦截/);
- assert.doesNotMatch(detail,/客户端未收到/);
- api.renderDetail({event:{kind:'system',action:'grok_quality_guard',status:'parked'}});
- assert.match(allText(api.ids.logsDetailBody),/未记录/);
-});
-
 test('quality filtering is removed without removing the diagnostic toggle',()=>{
  const html=fs.readFileSync(path.join(__dirname,'templates/pages/logs.html'),'utf8');
  assert.doesNotMatch(html,/filterQuality|logs-quality-filter/);
  assert.match(html,/logsDiagnosticsToggle/);
  const api=load();api.context.window.location.search='?quality=any';api.bind();
  assert.equal(api.filters().has('quality'),false);
-});
-
-test('quality stages render directly as rows and as a chronological request timeline',()=>{
- const api=load();
- const quality=[
-  {kind:'request',action:'grok_quality_check',status:'checking',attempt:1,account_id:10,metadata:{mode:'stream'}},
-  {kind:'request',action:'grok_quality_degraded',status:'degraded',attempt:1,account_id:10,details:'no_reasoning',metadata:{guard:'parked'}},
-  {kind:'request',action:'grok_quality_retry',status:'retrying',attempt:2,account_id:11,metadata:{from_account_id:10,to_account_id:11}},
-  {kind:'request',action:'grok_quality_check',status:'checking',attempt:2,account_id:11,metadata:{mode:'stream'}},
-  {kind:'request',action:'grok_quality_check',status:'passed',attempt:2,account_id:11,metadata:{mode:'stream',visible_chars:100,reasoning_chars:200}},
-  {kind:'request',action:'grok_quality_resolution',status:'retried',account_id:11,metadata:{withheld_attempts:1}},
- ];
- api.state.records=quality.map(event=>({event}));api.renderRows(false);
- const rows=allText(api.ids.logsRows);
- for(const label of ['开始暂存与质量检查','Grok 质量拦截','切换账号重试','质量检查通过','重试结束 · 未再触发拦截'])assert(rows.includes(label),label);
- api.renderDetail({event:{kind:'request',action:'grok_request',metadata:{quality_checked_attempts:2,quality_resolution:'retried',quality_withheld_attempts:1}},quality});
- const detail=allText(api.ids.logsDetailBody);
- const ordered=['开始暂存与质量检查','要求推理但没有任何推理内容','切换账号重试','质量检查通过'];
- let position=detail.indexOf('检查尝试');
- for(const label of ordered){const next=detail.indexOf(label,position);assert(next>position,label);position=next;}
- assert.match(detail,/账号 #10 → #11/);
- assert.match(detail,/检查尝试[\s\S]*2 次/);
-});
-
-test('a healthy quality check is shown without a fabricated interception or delivery verdict',()=>{
- const api=load();
- const record={event:{kind:'request',action:'grok_request',metadata:{quality_checked_attempts:1,quality_check_status:'passed'}},quality:[
-  {action:'grok_quality_check',status:'checking',attempt:1,account_id:8},
-  {action:'grok_quality_check',status:'passed',attempt:1,account_id:8},
- ]};
- api.state.records=[record];api.renderRows(false);api.renderDetail(record);
- assert.match(allText(api.ids.logsRows),/质量检查通过/);
- const detail=allText(api.ids.logsDetailBody);
- assert.match(detail,/本次检查通过，未触发质量拦截/);
- assert.doesNotMatch(detail,/客户端收到了被质量检查拦截的回答|当前日志窗口未找到/);
-});
-
-test('an in-progress or interrupted quality check remains visible without a parent request',()=>{
- const api=load();
- for(const [status,label] of [['checking','开始暂存与质量检查'],['error','质量检查中断']]){
-  const record={event:{kind:'request',action:'grok_quality_check',status,attempt:1,metadata:{reason:status==='error'?'upstream_error':''}}};
-  api.state.records=[record];api.renderRows(false);api.renderDetail(record);
-  assert(allText(api.ids.logsRows).includes(label));
-  assert(allText(api.ids.logsDetailBody).includes(label));
-  assert.doesNotMatch(allText(api.ids.logsDetailBody),/客户端没有收到被拦截的回答/);
- }
 });
 
 test('request rows show the upstream route, cost and latency in the list', () => {
@@ -331,7 +230,7 @@ test('output speed is never divided by the last milliseconds of a reply', () => 
   api.state.records = [
     // Non-streaming: the body arrives in one piece at the end.
     row({ first_token_kind: 'body_ttfb', first_token_ms: 117615, ttfb_ms: 117615 }),
-    // A stream held back and released at the end (Grok quality hold).
+    // A stream released all at once at the end.
     row({ first_token_ms: 117600, first_visible_token_ms: 117600 }),
     // A real stream: reasoning from 2 s, visible text from 30 s; the window
     // starts at the first generated token, reasoning included.

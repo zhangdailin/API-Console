@@ -14,7 +14,7 @@ import (
 const SSEKeepaliveInterval = 15 * time.Second
 
 // SSEKeepalive writes comments only after a successful SSE response is committed.
-// This preserves deferred quality checks and error responses. All transport
+// This preserves error responses written before the commit. All transport
 // writes/flushes are serialized, and partial SSE frames are never interrupted.
 type SSEKeepalive struct {
 	http.ResponseWriter
@@ -165,7 +165,7 @@ func (s *SSEKeepalive) run() {
 }
 
 // Close joins the heartbeat goroutine before the handler releases its writer.
-// The underlying response writer remains available for final quality delivery.
+// The underlying response writer remains available afterwards.
 func (s *SSEKeepalive) Close() error {
 	s.stopOnce.Do(func() { close(s.stop) })
 	<-s.done

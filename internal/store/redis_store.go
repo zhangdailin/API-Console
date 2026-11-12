@@ -256,30 +256,6 @@ var errAccountUnchanged = fmt.Errorf("account unchanged")
 // updateAccountAtomic applies a field mutation with optimistic locking. Every
 // account writer uses the same watched key, so a quota/stat update that lands
 // between read and write causes a retry instead of being silently overwritten.
-// UpdateAccountQuality persists the quality guard's verdict.
-//
-// UpdateAccount copies a fixed field list for safety and does not include these
-// two, so a park decided by the guard was only ever applied to the in-memory
-// account: the next load from Redis brought the credential straight back into
-// rotation. This writes exactly the verdict and nothing else.
-func (s *redisStore) UpdateAccountQuality(ctx context.Context, id int64, failures int, cooldownUntil time.Time, reason string) error {
-	if failures < 0 {
-		failures = 0
-	}
-	if failures == 0 {
-		reason = ""
-	}
-	return s.updateAccountAtomic(ctx, id, func(existing *Account) error {
-		if existing.QualityFailures != failures || !existing.QualityCooldownUntil.Equal(cooldownUntil) || existing.QualityReason != strings.TrimSpace(reason) {
-			existing.QualityRevision++
-		}
-		existing.QualityFailures = failures
-		existing.QualityCooldownUntil = cooldownUntil
-		existing.QualityReason = strings.TrimSpace(reason)
-		return nil
-	})
-}
-
 func (s *redisStore) updateAccountAtomic(ctx context.Context, id int64, mutate func(*Account) error) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis store not configured")

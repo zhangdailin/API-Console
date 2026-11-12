@@ -110,7 +110,6 @@ Grok 默认 base 为 `https://cli-chat-proxy.grok.com/v1`，CLI 版本当前默�
 
 | 字段 | 生效方式 |
 |---|---|
-| `grok_low_latency` | 默认 `false`；设为 `true` 跳过 Build 输出质量缓存和质量重试，直接交付上游内容；保留错误处理、用量统计和质量审计，代价是不再拦截疑似降质输出 |
 | `grok_build_rps` | 非正 / 非有限关闭节奏；正值夹取 0.01–1000，按账号 / 团队范围执行 |
 
 ### 8.1 Grok Web（grok.com SSO）
@@ -150,7 +149,7 @@ Grok 语义空闲按有效生成事件衡量，keepalive 不延长时钟；下�
 
 ## 固定生成策略
 
-配置页提供后台凭据、Grok 交付方式（低延迟开关）和代理控件，不开放任意生成上限。所有渠道的模型、推理、压缩和响应资源入口均要求托管 API Key，包括 loopback、IPv6 和可信代理转发的请求。`anonymous_allow_ips` 及旧 `inference_auth_enabled=false` 不能放行请求；管理令牌不能替代推理 Key。
+配置页提供后台凭据、Grok 上游参数和代理控件，不开放任意生成上限。所有渠道的模型、推理、压缩和响应资源入口均要求托管 API Key，包括 loopback、IPv6 和可信代理转发的请求。`anonymous_allow_ips` 及旧 `inference_auth_enabled=false` 不能放行请求；管理令牌不能替代推理 Key。
 
 固定值集中在 [inference_limits.go](../internal/config/inference_limits.go)：
 
@@ -165,7 +164,7 @@ Grok 语义空闲按有效生成事件衡量，keepalive 不延长时钟；下�
 
 不设跨重试首生成期限；响应头到达后由语义流空闲接管。完整正文仍受总期限约束。心跳、角色和纯用量不刷新语义空闲，父取消始终有效。内部目录读取保留更短的操作期限，不开放为用户配置。
 
-Grok 的传输切号尝试上限为 20；默认开启输出前质量暂存，质量尝试最多 6 次，30 秒是随内容事件检查的策略阈值，并非独立计时器保证的释放期限。不设固定缓冲字节上限。`grok_low_latency: true` 跳过质量暂存和质量重试，保留异常处理、用量及质量审计。Chat/Messages 沿用质量尝试耗尽后交付最后结果的策略；原生 Responses 对已判异常的输出返回 `502 quality_degraded`。Chat/Messages 和原生 Responses 的传输、认证重放、推理解码恢复和质量重试都受同一个实际 HTTP 调用预算约束，最多 21 次；OAuth 控制面刷新不计生成次数。仅尚未交付且无上游副作用的请求可重放；`previous_response_id` 续接固定原账号，托管工具请求禁止跨账号重放。质量阈值和安全限制不能被任意配置覆盖。
+Grok 的传输切号尝试上限为 20；上游输出直接交付，不在网关暂存。Chat/Messages 和原生 Responses 的传输、认证重放和推理解码恢复都受同一个实际 HTTP 调用预算约束，最多 21 次；OAuth 控制面刷新不计生成次数。仅尚未交付且无上游副作用的请求可重放；`previous_response_id` 续接固定原账号，托管工具请求禁止跨账号重放。安全限制不能被任意配置覆盖。
 
 客户端显式 `max_tokens`、`max_completion_tokens`、Responses `max_output_tokens` 及协议停止序列继续按原协议处理，未将客户端参数改成固定值。
 
@@ -187,8 +186,6 @@ WorkBuddy 请求未提供输出上限时，自动采用所选账号上游模型�
 | 账号满载累计探测睡眠上限 | 2 秒 |
 
 重试等待若无法在父请求期限内完成，直接返回已有失败。普通账号限流保留完整 Retry-After，不截短；已分类共享队列仍沿用有界探测策略。
-
-Grok 请求审计记录 `quality_delivery_mode`（`quality` / `low_latency`）。启用暂存的成功释放或拒绝尝试还会记录 `quality_hold_ms`、`quality_upstream_first_content_ms`、`quality_release_ms`、`quality_added_delay_ms`，用于区分上游首内容与网关暂存。前两种时间点及释放时间相对该次上游正文消费起点；新增等待为释放减首内容时间。未观察到内容、未释放的值为 `-1`，低延迟请求不伪造暂存指标。这些数据描述网关观察与释放，不代表客户端网络收包时间。
 
 流式输出由外层统一合并刷新，首帧和终止帧优先发送，后续文本和思考增量不再等待凑齐固定帧数。
 

@@ -14,10 +14,6 @@ import (
 	"time"
 )
 
-func (c *Client) VerifyToken(ctx context.Context, token, modelID string) (*RateLimitInfo, error) {
-	return c.GetUsage(ctx, token, modelID)
-}
-
 // GetWebQuota reads the Web SSO quota products using the upstream's stable
 // mode names. Web rate-limits are keyed by "auto" and "fast", not by the
 // public model ID (for example, grok-4.5). A partial result is returned when
@@ -57,25 +53,6 @@ func (c *Client) getUsageByMode(ctx context.Context, token, mode string) (*RateL
 		return nil, fmt.Errorf("empty quota mode")
 	}
 	return c.getUsageBySpec(ctx, token, ModelSpec{ModeID: mode})
-}
-
-func (c *Client) GetUsage(ctx context.Context, token, modelID string) (*RateLimitInfo, error) {
-	token = strings.TrimSpace(token)
-	if NormalizeSSOToken(token) == "" {
-		return nil, fmt.Errorf("empty token")
-	}
-
-	model := strings.TrimSpace(modelID)
-	spec, ok := ResolveModel(model)
-	if !ok {
-		// Fall back to a known default model when the model ID is not recognized
-		// (e.g. AgentMode="grok-3" stored on older accounts).
-		spec, ok = ResolveModel("grok-4.5")
-		if !ok {
-			return nil, fmt.Errorf("model not found")
-		}
-	}
-	return c.getUsageBySpec(ctx, token, spec)
 }
 
 func (c *Client) getUsageBySpec(ctx context.Context, token string, spec ModelSpec) (*RateLimitInfo, error) {

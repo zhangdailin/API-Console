@@ -47,31 +47,6 @@ func (h *Handler) auditChatOutcome(ctx context.Context, acc *store.Account, req 
 	prompt, _ := usage["prompt_tokens_details"].(map[string]any)
 	completion, _ := usage["completion_tokens_details"].(map[string]any)
 	metadata := map[string]any{"finish_reason": result.Finish, "visible_output": result.SawText}
-	metadata["quality_delivery_mode"] = "quality"
-	if cfg := h.configSnapshot(); cfg != nil && cfg.GrokLowLatency {
-		metadata["quality_delivery_mode"] = "low_latency"
-	}
-	addQualityTiming(metadata, result)
-	if result.QualityChecked {
-		metadata["quality_checked_attempts"] = result.QualityAttempt
-		metadata["quality_check_status"] = "passed"
-		if result.Err != nil {
-			metadata["quality_check_status"] = "error"
-		} else if result.Withheld {
-			metadata["quality_check_status"] = "degraded"
-		}
-	}
-	if result.Withheld {
-		// The attempt was held back by the quality hold. The row keeps the
-		// upstream's own finish reason in the metadata and reports the attempt
-		// itself as degraded, in both modes.
-		status = "quality_degraded"
-		metadata["quality_withheld"] = true
-		metadata["quality_reason"] = result.WithheldReason
-		// False for a turn the client never saw; true for the one that was
-		// delivered anyway when the retry budget ran out.
-		metadata["quality_delivered"] = result.DeliveredDegraded
-	}
 	grokbase.AddReasoningDiagnostics(ctx, metadata)
 	upstream.NoteServedModel(ctx, result.ServedModel)
 	duration := int64(0)
@@ -102,25 +77,13 @@ func (h *Handler) auditChatOutcome(ctx context.Context, acc *store.Account, req 
 	// Price the turn and book it against the client key's reservation. Only
 	// upstream-reported usage is billed: an estimated count is this gateway's
 	// own guess and must never turn into money owed.
-	//
-	// A withheld turn is not billed: the client did not receive it. Settlement
-	// is first-call-wins per request, so billing it would also throw away the
-	// cost of the answer that is eventually delivered. The one exception is the
-	// withheld turn that is delivered after all, which is billed then.
-	if !result.Withheld || result.DeliveredDegraded {
-		if cost, _ := middleware.SettleAPIKeyBilling(ctx, nil, req.Model, usageSource,
-			int64(event.InputTokens), int64(event.CachedInputTokens), int64(event.OutputTokens)); cost.Model != "" {
-			event.CostInUSDTicks = cost.CostInUSDTicks
-			event.PricingModel = cost.Model
-			event.PricingVersion = pricing.Version
-		}
+	if cost, _ := middleware.SettleAPIKeyBilling(ctx, nil, req.Model, usageSource,
+		int64(event.InputTokens), int64(event.CachedInputTokens), int64(event.OutputTokens)); cost.Model != "" {
+		event.CostInUSDTicks = cost.CostInUSDTicks
+		event.PricingModel = cost.Model
+		event.PricingVersion = pricing.Version
 	}
 	logger.Log(ctx, event)
-	if result.DeliveredDegraded {
-		// The account's usage was counted when this turn was first journalled as
-		// withheld; counting it again would double the account's token total.
-		return
-	}
 	// Grok owns its native request handlers, so it bypasses the generic handler's
 	// account-usage accumulator. Persist the same usage attached to the audit
 	// event here; otherwise request_count advances through syncGrokQuota while

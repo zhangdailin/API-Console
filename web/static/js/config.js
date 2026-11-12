@@ -48,7 +48,6 @@ function togglePassword(fieldId) {
 const CONFIG_FIELDS = [
   { id: "cfg_proxy_url", key: "proxy_url", type: "text" },
   { id: "cfg_proxy_bypass", key: "proxy_bypass", type: "lines" },
-  { id: "cfg_grok_low_latency", key: "grok_low_latency", type: "bool" },
   { id: "cfg_grok_cf_clearance", key: "grok_cf_clearance", type: "text" },
   { id: "cfg_grok_web_proxy_url", key: "grok_web_proxy_url", type: "text" },
   { id: "cfg_grok_cli_base_url", key: "grok_cli_base_url", type: "text", optional: true },

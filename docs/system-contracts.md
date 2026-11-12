@@ -29,7 +29,7 @@ WorkBuddy、Cline 走共享 Handler、提供者工厂和能力适配；Grok Buil
 
 1. **凭据与数据一起恢复。** 加密账号读取不能靠删除密钥修复；错误密钥、坏密文与加密模式下的明文记录须明确失败，不自动迁移。压缩状态派生域 `orchids:secureblob:v1:` 与展示名无关，不能因改品牌机械更名。
 2. **轮换凭据不能覆盖更新结果。** 专用凭据补丁核对预期 refresh token；相同新令牌允许幂等重入，陈旧身份拒绝写入。普通账号编辑和计数器各有写入职责。
-3. **已交付输出限制重放。** 共享 Handler 发生部分输出后不重新生成；Grok 质量重试先暂存输出，并检查安全重放与预算，有副作用工具请求受保护。
+3. **已交付输出限制重放。** 共享 Handler 发生部分输出后不重新生成；Grok 换号重试前检查安全重放与预算，有副作用工具请求受保护。
 4. **流的 HTTP 成功不等于协议成功。** 各提供者与桥接层有自己的终止合同；不得把 EOF、keepalive 或已发出的 200 自动解释为成功完成。
 5. **资源访问要检查所有者。** 响应 GET、DELETE、续接和子资源沿 Key 指纹查询所有权；公开资源路由必须先完成托管 Key 鉴权，内部无 Key 的测试上下文不代表匿名访问能力。默认进程内 Store 不是 Redis 故障替身；多副本需注入共享 Store。
 6. **额度、权益和凭据分开判定。** 模型拒绝、排队、内容拒绝与永久 OAuth 拒绝不能互相替代；限流头不等于余额，目录成功不等于所有模型可生成。
@@ -38,7 +38,7 @@ WorkBuddy、Cline 走共享 Handler、提供者工厂和能力适配；Grok Buil
 9. **配置先持久化再发布。** 已发布快照不可原地修改；文件、Redis 覆盖和管理保存均校验代理。无效 Redis 代理覆盖回退文件配置，而非把无效地址静默当成直连。
 10. **部署证据独立于源码。** 发行、容器与 systemd 在线升级路径分别验收；二进制回退不还原 Redis 数据。历史探针和本地 mock 都不能证明当前生产已更新。
 
-证据：[凭据密文](../internal/store/credential_cipher.go)、[凭据补丁](../internal/store/credential_patch.go)、[压缩密钥](../internal/secureblob/cipher.go)、[共享推理](../internal/handler/handler.go)、[质量暂存](../internal/grok/quality_hold.go)、[资源合同](../internal/responses/store.go)、[错误策略](../internal/accountpolicy/policy.go)、[概览](../internal/api/api_ops.go)、[配置保存](../internal/api/api_config.go)。
+证据：[凭据密文](../internal/store/credential_cipher.go)、[凭据补丁](../internal/store/credential_patch.go)、[压缩密钥](../internal/secureblob/cipher.go)、[共享推理](../internal/handler/handler.go)、[资源合同](../internal/responses/store.go)、[错误策略](../internal/accountpolicy/policy.go)、[概览](../internal/api/api_ops.go)、[配置保存](../internal/api/api_config.go)。
 
 ## 4. 首批关键测试的认知范围
 
@@ -56,7 +56,6 @@ WorkBuddy、Cline 走共享 Handler、提供者工厂和能力适配；Grok Buil
 | [账号持久通知](../internal/store/account_events_test.go) | 持久后通知、异步分发与合并 |
 | [Key 权威鉴权](../internal/store/api_key_auth_test.go) | 存储策略与限流判定的权威来源 |
 | [客户端缓存事件](../internal/handler/client_cache_events_test.go) | 轮换退役旧客户端，最后租约释放后关闭 |
-| [Grok 质量暂存](../internal/grok/quality_hold_test.go) | 暂存、重试、预算与安全重放 |
 | [共享 SSE 接入](../internal/grok/responses_sse_adoption_test.go) | SSE 原始帧与共享实现边界 |
 | [会话状态存储](../internal/store/grok_session_store_test.go) | 亲和及推理回放的隔离、TTL 与身份 |
 | [Linux 升级](../internal/selfupdate/update_linux_test.go) | 替换、幂等锁、守护验证及失败回退 |

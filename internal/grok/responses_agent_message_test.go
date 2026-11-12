@@ -33,7 +33,6 @@ func TestNativeResponsesAgentTaskUsesPortableTextWithoutChangingReasoning(t *tes
 				}))
 				defer server.Close()
 				h, acc := parityBuildHandler(t, server)
-				h.cfg.GrokLowLatency = true
 				acc.ID, acc.GrokModels, acc.GrokModelsSyncedAt = 0, []string{"grok-4.6"}, time.Now()
 				ctx := context.Background()
 				testutil.NoError(t, h.lb.Store.CreateAccount(ctx, acc))

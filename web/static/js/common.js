@@ -155,18 +155,6 @@ function isQuotaExhaustedQuota(acc, quota) {
   return Boolean(stats && stats.limit > 0 && stats.remaining <= 0);
 }
 
-function getAccountQualityStatus(acc, now = Date.now()) {
-  if (normalizeSidebarAccountType(acc) !== 'grok') return { failures: 0, cooling: false, until: 0, reason: '' };
-  const failures = Number(acc?.quality_failures);
-  const until = Date.parse(String(acc?.quality_cooldown_until || ''));
-  return {
-    failures: Number.isSafeInteger(failures) && failures > 0 ? failures : 0,
-    cooling: Number.isFinite(until) && until > now,
-    until: Number.isFinite(until) && until > 0 ? until : 0,
-    reason: String(acc?.quality_reason || '').trim(),
-  };
-}
-
 // Model holds are scoped capacity restrictions, not a retired credential.
 function getAccountModelCooldowns(acc, now = Date.now()) {
   if (normalizeSidebarAccountType(acc) !== 'grok') return [];
@@ -185,8 +173,6 @@ function isAccountCapacityLimited(acc) {
 
 function isSidebarAccountAbnormal(acc) {
   if (!acc || !acc.enabled) return true;
-
-  if (getAccountQualityStatus(acc).cooling) return true;
 
   if (isQuotaOnlyStatus(acc)) { return false; }
 

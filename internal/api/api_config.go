@@ -227,7 +227,7 @@ func buildConfigFromPatch(r *http.Request, current *config.Config) (*config.Conf
 			return nil, fmt.Errorf("%w: %s", errRetiredCacheSetting, retired)
 		}
 	}
-	for _, fixed := range []string{"inference_profile", "anonymous_allow_ips", "request_timeout", "concurrency_timeout", "first_token_timeout_seconds", "shared_stream_idle_timeout_seconds", "workbuddy_default_max_tokens", "shared_refusal_wait_budget_ms", "grok_build_timeout_seconds", "grok_stream_idle_seconds", "grok_build_stream_idle_seconds", "max_retries", "retry_delay", "account_switch_count", "retry_429_interval", "quality_hold_enabled", "quality_hold_max_attempts", "quality_hold_timeout_ms", "quality_hold_on_exhausted"} {
+	for _, fixed := range []string{"inference_profile", "anonymous_allow_ips", "request_timeout", "concurrency_timeout", "first_token_timeout_seconds", "shared_stream_idle_timeout_seconds", "workbuddy_default_max_tokens", "shared_refusal_wait_budget_ms", "grok_build_timeout_seconds", "grok_stream_idle_seconds", "grok_build_stream_idle_seconds", "max_retries", "retry_delay", "account_switch_count", "retry_429_interval", "quality_hold_enabled", "quality_hold_max_attempts", "quality_hold_timeout_ms", "quality_hold_on_exhausted", "grok_low_latency"} {
 		if _, present := patch[fixed]; present {
 			return nil, fmt.Errorf("%w: %s is no longer configurable", errFixedRuntimeSetting, fixed)
 		}
@@ -271,7 +271,7 @@ func normalizeConfigPatchValue(key string, value any) any {
 	}
 
 	switch key {
-	case "debug_enabled", "cline_http2_enabled", "workbuddy_http2_enabled", "grok_low_latency":
+	case "debug_enabled", "cline_http2_enabled", "workbuddy_http2_enabled":
 		if b, ok := parseBoolish(value); ok {
 			return b
 		}

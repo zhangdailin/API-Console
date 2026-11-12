@@ -39,7 +39,7 @@ func parityText(text string) string {
 func parityRun(t *testing.T, stream string, stop ...string) (string, chatOutcome) {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	result := (&Handler{}).streamBuildChatHolding(rec, &chatwire.Request{Model: "grok-4.6", Stream: true, Stop: stop}, strings.NewReader(stream), nil)
+	result := (&Handler{}).streamBuildChat(rec, &chatwire.Request{Model: "grok-4.6", Stream: true, Stop: stop}, strings.NewReader(stream))
 	return rec.Body.String(), result
 }
 
@@ -189,7 +189,7 @@ func TestParityToolsAreVisibleBeforeStreamCompletes(t *testing.T) {
 	w := &parityNoticeWriter{ResponseRecorder: httptest.NewRecorder(), notice: make(chan struct{})}
 	done := make(chan chatOutcome, 1)
 	go func() {
-		done <- (&Handler{}).streamBuildChatHolding(w, &chatwire.Request{Model: "grok-4.6"}, reader, nil)
+		done <- (&Handler{}).streamBuildChat(w, &chatwire.Request{Model: "grok-4.6"}, reader)
 	}()
 	_, _ = io.WriteString(writer, parityItem("response.output_item.added", "fc_a", "call_a", "Read", ""))
 	select {

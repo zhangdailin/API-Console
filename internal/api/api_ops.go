@@ -353,21 +353,14 @@ func (a *API) writeJournalList(w http.ResponseWriter, r *http.Request) {
 	//
 	// First pass: collect every upstream attempt in the window, keyed by request.
 	// Second pass: emit the matching records with their attempts already known.
-	// The quality checks of a request are collected the same way: each withheld
-	// attempt and the conclusion are rows of their own, written before the
-	// request row that owns them.
 	attempts := map[string][]audit.Event{}
-	quality := map[string][]audit.Event{}
 	for _, entry := range entries {
 		event, ok := decodeAuditEvent(entry)
 		if !ok || event.RequestID == "" {
 			continue
 		}
-		switch {
-		case event.Action == "grok_upstream_attempt":
+		if event.Action == "grok_upstream_attempt" {
 			attempts[event.RequestID] = append(attempts[event.RequestID], event)
-		case isRequestQualityEvent(event):
-			quality[event.RequestID] = append(quality[event.RequestID], event)
 		}
 	}
 
@@ -390,9 +383,6 @@ func (a *API) writeJournalList(w http.ResponseWriter, r *http.Request) {
 			"event":    event,
 			"attempts": attempts[event.RequestID],
 		})
-		if checks := quality[event.RequestID]; len(checks) > 0 && event.Kind == audit.KindRequest {
-			records[len(records)-1]["quality"] = chronological(checks)
-		}
 		if breakdown, priced := pricingBreakdownForJournal(event); priced {
 			// The row keeps the cost and the pricing model; the components behind
 			// them are reconstructed on read so an operator can see which rate
@@ -417,21 +407,13 @@ func (a *API) writeJournalList(w http.ResponseWriter, r *http.Request) {
 	// never moves the cursor, so nothing it reads is skipped by the next page.
 	if len(records) > 0 && len(entries) > 0 {
 		missing := map[string]bool{}
-		// A conclusion can be in the page while earlier withheld attempts are not.
-		missingQuality := map[string]bool{}
 		for _, record := range records {
 			event := record["event"].(audit.Event)
-			if event.RequestID == "" {
-				continue
-			}
-			if len(attempts[event.RequestID]) == 0 {
+			if event.RequestID != "" && len(attempts[event.RequestID]) == 0 {
 				missing[event.RequestID] = true
 			}
-			if event.Kind == audit.KindRequest && !isRequestQualityEvent(event) && (qualityResolutionOf(event) != "" || metadataInt(event.Metadata, "quality_checked_attempts") > 0) && qualityChecksIncomplete(event, quality[event.RequestID]) {
-				missingQuality[event.RequestID] = true
-			}
 		}
-		if len(missing) > 0 || len(missingQuality) > 0 {
+		if len(missing) > 0 {
 			older, readErr := client.XRevRangeN(r.Context(), key, "("+entries[len(entries)-1].ID, "-", journalAttemptLookback).Result()
 			if readErr == nil {
 				for _, entry := range older {
@@ -439,20 +421,14 @@ func (a *API) writeJournalList(w http.ResponseWriter, r *http.Request) {
 					if !ok {
 						continue
 					}
-					switch {
-					case event.Action == "grok_upstream_attempt" && missing[event.RequestID]:
+					if event.Action == "grok_upstream_attempt" && missing[event.RequestID] {
 						attempts[event.RequestID] = append(attempts[event.RequestID], event)
-					case isRequestQualityEvent(event) && missingQuality[event.RequestID]:
-						quality[event.RequestID] = append(quality[event.RequestID], event)
 					}
 				}
 				for _, record := range records {
 					event := record["event"].(audit.Event)
 					if list := attempts[event.RequestID]; len(list) > 0 {
 						record["attempts"] = list
-					}
-					if checks := quality[event.RequestID]; len(checks) > 0 && missingQuality[event.RequestID] {
-						record["quality"] = chronological(checks)
 					}
 				}
 			}
@@ -505,57 +481,6 @@ func (a *API) writeJournalList(w http.ResponseWriter, r *http.Request) {
 		"filter_used": filter.describe(),
 		"coverage":    a.auditCoverage(r.Context()),
 	})
-}
-
-// Quality stages remain visible as rows even before the request finishes, and
-// are also joined into its chronological timeline. Credential verdicts stay in
-// the system journal.
-func isRequestQualityEvent(event audit.Event) bool {
-	switch event.Action {
-	case "grok_quality_check", "grok_quality_retry", "grok_quality_degraded", "grok_quality_resolution":
-		return true
-	}
-	return false
-}
-
-func qualityChecksIncomplete(event audit.Event, checks []audit.Event) bool {
-	var withheld, started, finished int64
-	concluded := false
-	for _, check := range checks {
-		switch check.Action {
-		case "grok_quality_degraded":
-			withheld++
-			finished++
-		case "grok_quality_check":
-			if check.Status == "checking" {
-				started++
-			} else {
-				finished++
-			}
-		case "grok_quality_resolution":
-			concluded = true
-		}
-	}
-	expected := metadataInt(event.Metadata, "quality_checked_attempts")
-	return qualityResolutionOf(event) != "" && !concluded || withheld < metadataInt(event.Metadata, "quality_withheld_attempts") || started < expected || finished < expected
-}
-
-// qualityResolutionOf reads how a request that had a turn withheld ended, from
-// the request's own row. It is empty for a request no check ever refused.
-func qualityResolutionOf(event audit.Event) string {
-	resolution, _ := event.Metadata["quality_resolution"].(string)
-	return strings.ToLower(strings.TrimSpace(resolution))
-}
-
-// chronological returns journal rows oldest first. The scan reads the stream
-// newest first, and a detail panel tells a request's story in the order it
-// happened.
-func chronological(events []audit.Event) []audit.Event {
-	out := make([]audit.Event, len(events))
-	for i, event := range events {
-		out[len(events)-1-i] = event
-	}
-	return out
 }
 
 func decodeAuditEvent(entry redis.XMessage) (audit.Event, bool) {
