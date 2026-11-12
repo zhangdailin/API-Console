@@ -974,6 +974,14 @@ function grokWebWindowMarkup(label, quotaWindow) {
 }
 
 function buildQuotaMarkup(acc, quota = getQuotaStats(acc)) {
+  if (quota && quota.grokConsole) {
+    if (quota.unsynced) {
+      return `<span style="color:#94a3b8">未知</span> <span style="color:#64748b;font-size:0.75rem">(${escapeHtml(quota.note || "尚未读取 Console 额度")})</span>`;
+    }
+    const color = quota.pctRemaining <= 10 ? "#fb7185" : quota.pctRemaining <= 30 ? "#f59e0b" : "#34d399";
+    const reset = quota.resetAt ? ` · ${formatQuotaReset(quota.resetAt)}` : "";
+    return `<span style="color:${color}">$${quota.remaining.toFixed(2)} / $${quota.limit.toFixed(2)}</span> <span style="color:#64748b;font-size:0.75rem">(Console 周额度${reset})</span>`;
+  }
   if (quota && quota.grokWeb) {
     if (quota.unsynced) {
       const syncError = String(acc?.grok_web_sync_error || "").trim();

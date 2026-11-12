@@ -135,6 +135,9 @@ type Account struct {
 	// requests to a Console credential.
 	GrokConsoleModels         []string  `json:"grok_console_models,omitempty"`
 	GrokConsoleModelsSyncedAt time.Time `json:"grok_console_models_synced_at"`
+	// GrokConsoleQuota is the Console account's weekly included-usage pool as
+	// the grok.com dashboard last reported it.
+	GrokConsoleQuota GrokConsoleQuotaSnapshot `json:"grok_console_quota,omitempty"`
 	// GrokBilling contains only official xAI Build billing information. It is
 	// deliberately separate from GrokRateLimits, whose request/token headers
 	// are short-lived throttling windows rather than subscription allowance.

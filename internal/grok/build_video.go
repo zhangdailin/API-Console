@@ -94,6 +94,9 @@ func (b buildVideoBackend) RunVideo(ctx context.Context, job web.VideoBackendJob
 	client := h.buildClient()
 	response, err := client.doResponsesUncheckedAt(ctx, sess.acc, "/videos/generations", payload)
 	if err != nil {
+		if fallbackEligible(h.configSnapshot(), sess.acc, err) {
+			return b.runFallbackVideo(ctx, job, sess.acc)
+		}
 		h.markAccountStatus(ctx, sess.acc, err)
 		return web.VideoBackendResult{}, err
 	}

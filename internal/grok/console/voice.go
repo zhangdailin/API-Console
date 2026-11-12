@@ -19,6 +19,7 @@ import (
 
 	"orchids-api/internal/httpclient"
 	"orchids-api/internal/httpserver"
+	"orchids-api/internal/pricing"
 	"orchids-api/internal/store"
 	"orchids-api/internal/util"
 )
@@ -167,6 +168,8 @@ func (h *Handler) synthesize(w http.ResponseWriter, r *http.Request, model strin
 	}
 	w.Header().Set("Content-Type", util.FirstNonEmpty(contentType, "audio/mpeg"))
 	_, _ = w.Write(data)
+	cost, priced := pricing.EstimateTTSCost(text)
+	h.recordMedia(r.Context(), sess.Account, row, cost, priced, map[string]any{"endpoint": "tts", "characters": len([]rune(text))})
 }
 
 // HandleTTSVoices serves GET /tts/voices from any Console account that has a
@@ -294,6 +297,13 @@ func (h *Handler) transcribe(w http.ResponseWriter, r *http.Request, form *sttFo
 		httpserver.WriteErrorCode(w, http.StatusBadGateway, "upstream_error", "the Console transcription could not be read")
 		return nil, false
 	}
+	// Transcription is billed on the audio duration the upstream reports.
+	var reported struct {
+		Duration float64 `json:"duration"`
+	}
+	_ = json.Unmarshal(data, &reported)
+	cost, priced := pricing.EstimateSTTCost(reported.Duration, false)
+	h.recordMedia(r.Context(), sess.Account, row, cost, priced, map[string]any{"endpoint": "stt", "duration_seconds": reported.Duration})
 	return data, true
 }
 

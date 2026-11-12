@@ -42,6 +42,9 @@ type Handler struct {
 	webDispatch
 
 	quota grokbase.QuotaQueue
+
+	uploadsOnce  sync.Once
+	videoUploads *videoUploads
 }
 
 type chatAccountSession struct {

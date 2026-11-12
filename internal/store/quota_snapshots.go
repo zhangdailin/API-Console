@@ -149,6 +149,23 @@ type GrokImagineQuota struct {
 	SyncedAt  time.Time       `json:"synced_at,omitempty"`
 }
 
+// GrokConsoleQuotaSnapshot is a Console account's weekly included-usage pool,
+// in US cents, shared by every Console model. Used may exceed the budget: the
+// upstream records cost after a request runs. Unlinked marks an account whose
+// xAI identity was never linked to Cursor, which has no Console credits.
+type GrokConsoleQuotaSnapshot struct {
+	BudgetCents int64     `json:"budget_cents,omitempty"`
+	UsedCents   int64     `json:"used_cents,omitempty"`
+	ResetAt     time.Time `json:"reset_at"`
+	Unlinked    bool      `json:"unlinked,omitempty"`
+	SyncedAt    time.Time `json:"synced_at"`
+}
+
+// Exhausted reports a synced pool with nothing left.
+func (q GrokConsoleQuotaSnapshot) Exhausted() bool {
+	return !q.SyncedAt.IsZero() && (q.Unlinked || q.UsedCents >= q.BudgetCents)
+}
+
 // GrokFreeQuotaSnapshot is the Free allowance window the upstream CONFIRMED by
 // refusing a request ("subscription:free-usage-exhausted ... tokens (actual/limit):
 // N/M"). It is the one place a Free limit becomes a fact rather than an estimate, so

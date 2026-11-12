@@ -159,6 +159,9 @@ func (p accountPatch) mergeGrokCredentials() {
 	if !acc.GrokConsoleModelsSyncedAt.IsZero() && (!p.staleSnapshot || consoleModelsNewer) {
 		u.GrokConsoleModelsSyncedAt = acc.GrokConsoleModelsSyncedAt
 	}
+	if !acc.GrokConsoleQuota.SyncedAt.IsZero() && !acc.GrokConsoleQuota.SyncedAt.Before(existing.GrokConsoleQuota.SyncedAt) {
+		u.GrokConsoleQuota = acc.GrokConsoleQuota
+	}
 	if !acc.GrokBilling.SyncedAt.IsZero() {
 		u.GrokBilling = acc.GrokBilling
 	}

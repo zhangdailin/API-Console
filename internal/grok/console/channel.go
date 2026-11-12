@@ -130,16 +130,34 @@ func ProjectOutput(out *store.Account) {
 	out.RefreshToken, out.OAuthAccessToken, out.OAuthRefreshToken = "", "", ""
 }
 
-// ProjectQuota reports what is known about a Console account. The gateway
-// does not read a Console allowance, so no numeric quota is claimed.
+// ProjectQuota reports a Console account's weekly included-usage pool, in US
+// dollars, as the grok.com dashboard last reported it.
 func ProjectQuota(fields map[string]any, acc *store.Account) {
 	if acc == nil {
 		return
 	}
 	fields["plan_name"] = strings.TrimSpace(acc.Subscription)
-	fields["quota_unit"] = "requests"
+	fields["quota_unit"] = "usd"
 	fields["quota_mode"] = "unknown"
 	fields["quota_supported"] = false
+	quota := acc.GrokConsoleQuota
+	switch {
+	case quota.SyncedAt.IsZero():
+		fields["quota_note"] = "尚未读取 Console 额度"
+	case quota.Unlinked:
+		fields["quota_note"] = "该 Grok 账号未与 Cursor 关联，没有 Console 额度"
+		fields["quota_synced_at"] = quota.SyncedAt
+	default:
+		fields["quota_mode"] = "console_weekly"
+		fields["quota_supported"] = true
+		fields["quota_limit"] = float64(quota.BudgetCents) / 100
+		fields["quota_used"] = float64(quota.UsedCents) / 100
+		fields["quota_remaining"] = float64(max(0, quota.BudgetCents-quota.UsedCents)) / 100
+		fields["quota_synced_at"] = quota.SyncedAt
+		if !quota.ResetAt.IsZero() {
+			fields["quota_reset_at"] = quota.ResetAt
+		}
+	}
 	fields["console_models"] = len(acc.GrokConsoleModels)
 	if !acc.GrokConsoleModelsSyncedAt.IsZero() {
 		fields["console_models_synced_at"] = acc.GrokConsoleModelsSyncedAt
@@ -169,25 +187,54 @@ func verifyWith(ctx context.Context, client *Client, acc *store.Account) (string
 	acc.GrokConsoleModels = models
 	acc.GrokConsoleModelsSyncedAt = time.Now().UTC()
 	acc.AuthStatus = store.AccountAuthStatusActive
+	readAllowance(ctx, client, acc, token)
 	return "", nil
+}
+
+// readAllowance records the weekly pool. It never fails verification: the
+// dashboard is a separate surface, and its refusal says nothing about the
+// credential's inference access.
+func readAllowance(ctx context.Context, client *Client, acc *store.Account, token string) {
+	allowance, err := client.FetchAllowance(ctx, token)
+	now := time.Now()
+	switch {
+	case err == nil:
+		ApplyAllowance(acc, allowance, now)
+	case errors.Is(err, ErrUnlinked):
+		ApplyUnlinked(acc, now)
+	default:
+		slog.Warn("grok console allowance read failed", "account_id", acc.ID, "error", redact(err, acc))
+	}
 }
 
 // Maintain re-reads a Console account on its own cadence and republishes the
 // Console routes when the account's catalog changed.
 func Maintain(ctx context.Context, cfg *config.Config, st *store.Store, acc *store.Account) {
+	maintainWith(ctx, NewClient(cfg), st, acc)
+}
+
+func maintainWith(ctx context.Context, client *Client, st *store.Store, acc *store.Account) {
 	if acc == nil || st == nil || !IsConsoleAccount(acc) || !acc.Enabled || !store.AccountAuthActive(acc) {
 		return
 	}
-	if !acc.GrokConsoleModelsSyncedAt.IsZero() && time.Since(acc.GrokConsoleModelsSyncedAt) < maintenanceInterval {
-		return
-	}
-	if last, ok := maintenanceAttempts.Load(acc.ID); ok && time.Since(last.(time.Time)) < maintenanceRetry {
-		return
+	// A spent pool is re-read on the recovery queue's schedule (its reset,
+	// or bounded backoff) instead of the regular cadence.
+	recovering := claimAllowanceRecovery(acc, time.Now())
+	if !recovering {
+		if !acc.GrokConsoleModelsSyncedAt.IsZero() && time.Since(acc.GrokConsoleModelsSyncedAt) < maintenanceInterval {
+			return
+		}
+		if last, ok := maintenanceAttempts.Load(acc.ID); ok && time.Since(last.(time.Time)) < maintenanceRetry {
+			return
+		}
 	}
 	maintenanceAttempts.Store(acc.ID, time.Now())
 	before := strings.Join(acc.GrokConsoleModels, ",")
-	status, err := VerifyAccount(ctx, cfg, acc)
+	status, err := verifyWith(ctx, client, acc)
 	now := time.Now()
+	if recovering {
+		settleAllowanceRecovery(acc, now)
+	}
 	switch {
 	case status == "401":
 		acc.StatusCode = "401"

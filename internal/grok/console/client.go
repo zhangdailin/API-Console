@@ -61,6 +61,7 @@ type Client struct {
 	mu       sync.Mutex
 	sessions map[string]dpopSession
 	apiKeys  map[string]string
+	workos   map[string]workosSession
 	fetches  singleflight.Group
 }
 
@@ -76,6 +77,7 @@ func NewClient(cfg *config.Config) *Client {
 		httpClient: httpclient.GetSharedBrowserHTTPClientWithHeaderTimeout("console|"+proxyKey, defaultRequestTimeout, 0, httpclient.ProxyFuncFromConfig(transport)),
 		sessions:   map[string]dpopSession{},
 		apiKeys:    map[string]string{},
+		workos:     map[string]workosSession{},
 	}
 }
 

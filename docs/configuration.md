@@ -112,6 +112,8 @@ Grok 默认 base 为 `https://cli-chat-proxy.grok.com/v1`，CLI 版本当前默�
 |---|---|
 | `grok_build_rps` | 非正 / 非有限关闭节奏；正值夹取 0.01–1000，按账号 / 团队范围执行 |
 | `grok_auto_clean_reauth_hours` | Grok 账号（Build / Web）处于“需要重新登录”（`reauthRequired`）达到该小时数后自动删除；`0`（默认）关闭。仍有未完成视频任务的账号不会被删除 |
+| `grok_build_video_upload_base_url` | 本网关的公网 HTTPS 源（如 `https://api.example.com`）。设置后启用 Build 视频回退：付费 Build 账号在 CLI 代理上创建视频被拒（403）时，改用同一 OAuth 令牌在 xAI API 上以 `grok-imagine-video-1.5-preview` 创建，xAI 把成片 PUT 到本网关签发的一次性地址 `/grok/v1/media/uploads/<token>`。留空（默认）不启用。多实例部署时媒体目录必须共享 |
+| `grok_build_fallback_base_url` | 上述回退调用的 xAI API，留空为 `https://api.x.ai/v1` |
 
 ### 8.1 Grok Web（grok.com SSO）
 
@@ -130,7 +132,7 @@ Grok 渠道同时承载 Build（OAuth CLI）与 Web（grok.com 网页 SSO Cookie
 
 Web 模型路由表（`grok-chat-fast/auto/expert/heavy`、`grok-imagine-image(-lite/-2.0/-edit)`、`grok-imagine-video`）只在存在启用、认证有效且 24 小时内成功读取过对应模式额度窗口的 Web 账号时发布；`grok-chat-heavy` 还要求 Heavy 账号。没有这样的账号时 Web 行被清理，不发布内置列表。Web 对话模型支持 `/chat/completions`、`/messages`（网关转换为 Chat）、`/responses`（经 Chat 桥接）；图片与视频模型支持 `/images/*`、`/videos`、`/media/inputs`，不支持 `/messages`。`grok-imagine-image-lite` 走 fast 对话额度（Basic 账号可用），每次只取首张图，`n` 最大 4。
 
-Grok Console（console.x.ai）是 grok 渠道的第三个平面：账号为 `grok_provider=console` 的 SSO Cookie 账号（可由 Web 账号“转为 Console”创建），网关用 Cookie 换取 DPoP 绑定的访问令牌，并为团队读取（必要时创建）API Key ID。Console 路由一律带 `console/` 前缀（例如 `console/grok-4.5`），只在某个启用、认证有效的 Console 账号 24 小时内成功读取的 `/v1/models` 列出该模型时发布；读取失败或没有这样的账号时不发布任何 Console 行。Console 无状态：`/responses` 以 `store=false` 转发，不支持 `previous_response_id` 与 compact。Console 流量与 grok.com 共用 `grok_web_proxy_url` 与 Cloudflare Cookie，`grok_console_base_url` 可覆盖默认的 `https://console.x.ai`。网关不读取 Console 额度，账号额度显示为未知。Console 对话与 Responses 按上游返回的 usage 计价并结算 API Key 额度（流式请求取最后一个携带 usage 的事件；上游未返回 usage 时不计费），图片按返回张数计价，视频在创建任务时计价；TTS / STT 暂无官方单价，只记审计不计费。图片编辑既接受 JSON（`image` / `images` 为 URL 或 data URI），也接受 multipart 上传（`image` 或 `image[]`，1–3 张，上传文件转为 data URI）。
+Grok Console（console.x.ai）是 grok 渠道的第三个平面：账号为 `grok_provider=console` 的 SSO Cookie 账号（可由 Web 账号“转为 Console”创建），网关用 Cookie 换取 DPoP 绑定的访问令牌，并为团队读取（必要时创建）API Key ID。Console 路由一律带 `console/` 前缀（例如 `console/grok-4.5`），只在某个启用、认证有效的 Console 账号 24 小时内成功读取的 `/v1/models` 列出该模型时发布；读取失败或没有这样的账号时不发布任何 Console 行。Console 无状态：`/responses` 以 `store=false` 转发，不支持 `previous_response_id` 与 compact。Console 流量与 grok.com 共用 `grok_web_proxy_url` 与 Cloudflare Cookie，`grok_console_base_url` 可覆盖默认的 `https://console.x.ai`。网关通过 grok.com 仪表盘（WorkOS 会话，只缓存在内存中）读取 Console 每周包含额度（美元），在验证和定时维护时刷新；额度用尽的账号暂停调度，并在重置时间到达后由恢复队列重新读取；未与 Cursor 关联的账号没有 Console 额度，不参与调度。Console 对话与 Responses 按上游返回的 usage 计价并结算 API Key 额度（流式请求取最后一个携带 usage 的事件；上游未返回 usage 时不计费），图片按返回张数计价，视频在创建任务时计价；TTS 按字符计价（$15 / 100 万字符），STT 按上游返回的音频时长计价（$0.10 / 小时），Realtime 暂不计费。图片编辑既接受 JSON（`image` / `images` 为 URL 或 data URI），也接受 multipart 上传（`image` 或 `image[]`，1–3 张，上传文件转为 data URI）。
 
 Grok 返回上游提供的思考内容：Chat 使用 `reasoning_content`，Messages 使用 `thinking` 内容块，原生 Responses 保留 reasoning 事件与输出项。思考与正文分别传输；思考项身份、`encrypted_content` 和 `reasoning_tokens` 保留，用于续接与计费。
 

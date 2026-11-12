@@ -213,8 +213,9 @@
 
   function matchesPlane(acc) {
     if (!state.plane || String(acc?.account_type || "").toLowerCase() !== "grok") return true;
-    const web = isSidebarGrokWebAccount(acc);
-    return state.plane === "web" ? web : !web;
+    // The Build tab lists Build (OAuth) accounts only; Console accounts show
+    // under the unfiltered list.
+    return state.plane === "web" ? isSidebarGrokWebAccount(acc) : isSidebarGrokOAuthAccount(acc);
   }
 
   function syncToolbar() {

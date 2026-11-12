@@ -95,6 +95,15 @@ type Config struct {
 	GrokCLIOAuthDeviceURL   string  `json:"grok_cli_oauth_device_url,omitempty"`
 	GrokCLIOAuthTokenURL    string  `json:"grok_cli_oauth_token_url,omitempty"`
 	GrokBuildRPS            float64 `json:"grok_build_rps,omitempty"`
+	// GrokBuildVideoUploadBaseURL is the public https origin of this gateway
+	// (for example https://api.example.com). Setting it enables the Build video
+	// fallback: a paid account refused (403) on the CLI proxy retries on the xAI
+	// API, which uploads the finished video to a one-time URL under this
+	// origin. Empty (the default) disables the fallback.
+	GrokBuildVideoUploadBaseURL string `json:"grok_build_video_upload_base_url,omitempty"`
+	// GrokBuildFallbackBaseURL is the xAI API the fallback calls; empty
+	// selects https://api.x.ai/v1.
+	GrokBuildFallbackBaseURL string `json:"grok_build_fallback_base_url,omitempty"`
 	// GrokAutoCleanReauthHours deletes a Grok account (Build or Web) that has
 	// needed a new login for at least this many hours. Zero (the default)
 	// disables the cleanup.

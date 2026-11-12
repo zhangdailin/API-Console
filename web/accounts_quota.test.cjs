@@ -264,3 +264,28 @@ test('sidebar and account rows use the same quota even when older counters disag
     assert.equal(sidebar.isSidebarAccountAbnormal(account), page.isAccountAbnormal(account));
   }
 });
+
+test('a Grok Console account renders its weekly pool in dollars and is never a Web account', () => {
+  const context = load();
+  const consoleAccount = {
+    id: 9, account_type: 'grok', credential_type: 'sso', grok_provider: 'console', enabled: true,
+    quota_supported: true, quota_unit: 'usd', quota_mode: 'console_weekly',
+    quota_limit: 5, quota_used: 4.5, quota_remaining: 0.5, quota_reset_at: '2026-11-19T00:00:00Z',
+  };
+  assert.equal(context.isSidebarGrokWebAccount(consoleAccount), false);
+  assert.equal(context.isSidebarGrokConsoleAccount(consoleAccount), true);
+  const quota = context.getQuotaStats(consoleAccount);
+  assert.equal(quota.grokConsole, true);
+  // A sub-dollar remainder survives: no integer truncation.
+  assert.equal(quota.remaining, 0.5);
+  assert.equal(quota.pctRemaining, 10);
+  const markup = context.buildQuotaMarkup(consoleAccount, quota);
+  assert.match(markup, /\$0\.50 \/ \$5\.00/);
+
+  const unsynced = context.getQuotaStats({ ...consoleAccount, quota_supported: false, quota_note: '该 Grok 账号未与 Cursor 关联，没有 Console 额度' });
+  assert.equal(unsynced.unsynced, true);
+  assert.match(context.buildQuotaMarkup(consoleAccount, unsynced), /未与 Cursor 关联/);
+
+  // A Web account is still a Web account.
+  assert.equal(context.isSidebarGrokWebAccount({ account_type: 'grok', credential_type: 'sso', grok_provider: 'web' }), true);
+});

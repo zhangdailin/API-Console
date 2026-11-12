@@ -14,6 +14,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -47,17 +48,41 @@ type fakeConsole struct {
 	lastBody map[string]any
 	lastPath string
 	refuse   bool
+	unlinked bool
+	usage    string
 }
 
 func b64(data []byte) string { return base64.RawURLEncoding.EncodeToString(data) }
 
 func newFakeConsole(t *testing.T) *fakeConsole {
-	f := &fakeConsole{t: t, tokens: map[string]dpopJWK{}, models: []string{"grok-4.5", "grok-imagine-video", "grok-voice-latest", "grok-stt"}}
+	f := &fakeConsole{t: t, tokens: map[string]dpopJWK{}, models: []string{"grok-4.5", "grok-imagine-video", "grok-voice-latest", "grok-stt"},
+		usage: `{"weeklyIncludedUsage":{"budgetCents":"500","usedCents":120,"resetsAt":"2099-01-01T00:00:00Z"}}`}
 	upgrader := websocket.Upgrader{}
 	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/v1/dpop/token":
 			f.mint(w, r)
+		case r.URL.Path == "/dashboard/api/auth/login":
+			if !strings.Contains(r.Header.Get("Cookie"), "sso="+testCookie) {
+				t.Errorf("the WorkOS login carried no SSO cookie")
+			}
+			if f.unlinked {
+				http.Redirect(w, r, "https://authenticator.cursor.sh/sign-in", http.StatusFound)
+				return
+			}
+			for name, value := range map[string]string{"WorkosCursorSessionToken": "wt", "WorkosCursorXaiOrigin": "wo", "workos_id": "wid"} {
+				http.SetCookie(w, &http.Cookie{Name: name, Value: value, Path: "/dashboard"})
+			}
+			http.Redirect(w, r, "/dashboard/usage", http.StatusFound)
+		case r.URL.Path == "/dashboard/api/dashboard/v2/usage-status":
+			cookie := r.Header.Get("Cookie")
+			if !strings.Contains(cookie, "WorkosCursorSessionToken=wt") || !strings.Contains(cookie, "workos_id=wid") {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			_, _ = io.WriteString(w, f.usage)
+		case r.URL.Path == "/api/auth/session":
+			_, _ = io.WriteString(w, `{"session":{"cursorMerged":false}}`)
 		case r.URL.Path == "/":
 			http.Redirect(w, r, "/team/"+testTeamID, http.StatusTemporaryRedirect)
 		case r.URL.Path == "/team/"+testTeamID:
@@ -209,7 +234,7 @@ func newTestHandler(t *testing.T, f *fakeConsole) (*Handler, *store.Store, *stor
 	st, err := store.New(store.Options{RedisAddr: mini.Addr(), RedisPrefix: "console:"})
 	testutil.NoError(t, err)
 	t.Cleanup(func() { _ = st.Close() })
-	cfg := &config.Config{GrokConsoleBaseURL: f.server.URL}
+	cfg := &config.Config{GrokConsoleBaseURL: f.server.URL, GrokWebBaseURL: f.server.URL}
 	h := NewHandler(cfg, loadbalancer.NewWithCacheTTL(st, time.Millisecond))
 	h.client.httpClient = f.server.Client()
 	acc := &store.Account{Name: "c", AccountType: "grok", GrokProvider: ProviderConsole, ClientCookie: testCookie, Enabled: true}
@@ -294,6 +319,8 @@ func TestConsoleChatAndResponsesReachTheUpstreamWithTheUpstreamModel(t *testing.
 func TestConsoleAudioSpeechMapsOpenAIFields(t *testing.T) {
 	f := newFakeConsole(t)
 	h, _, _ := newTestHandler(t, f)
+	recorder := &recordingAudit{}
+	h.SetAuditLogger(recorder)
 	rec := httptest.NewRecorder()
 	h.HandleAudioSpeech(rec, httptest.NewRequest(http.MethodPost, "/grok/v1/audio/speech", strings.NewReader(`{"model":"grok-voice-latest","input":"hello","voice":"eve","response_format":"wav"}`)))
 	testutil.Equal(t, rec.Code, http.StatusOK)
@@ -305,6 +332,10 @@ func TestConsoleAudioSpeechMapsOpenAIFields(t *testing.T) {
 	testutil.Equal(t, format["codec"], any("wav"))
 	_, hasModel := f.lastBody["model"]
 	testutil.False(t, hasModel)
+	// Priced at $15 per 1M characters: "hello" is five.
+	testutil.Equal(t, len(recorder.events), 1)
+	testutil.Equal(t, recorder.events[0].PricingModel, "grok-voice-tts")
+	testutil.Equal(t, recorder.events[0].CostInUSDTicks, int64(5*150_000))
 
 	rec = httptest.NewRecorder()
 	h.HandleAudioSpeech(rec, httptest.NewRequest(http.MethodPost, "/grok/v1/audio/speech", strings.NewReader(`{"input":"x","response_format":"midi"}`)))
@@ -411,4 +442,62 @@ func TestConsoleMultipartImageEditSendsDataURIs(t *testing.T) {
 	testutil.Equal(t, f.lastBody["model"], any("grok-imagine-image"))
 	testutil.Equal(t, len(recorder.events), 1)
 	testutil.Equal(t, recorder.events[0].Action, "grok_media_request")
+}
+
+func TestConsoleAllowanceIsReadThroughTheWorkOSSession(t *testing.T) {
+	f := newFakeConsole(t)
+	_, _, acc := newTestHandler(t, f)
+	quota := acc.GrokConsoleQuota
+	testutil.Equal(t, quota.BudgetCents, int64(500))
+	testutil.Equal(t, quota.UsedCents, int64(120))
+	testutil.False(t, quota.Unlinked)
+	testutil.False(t, quota.Exhausted())
+	fields := map[string]any{}
+	ProjectQuota(fields, acc)
+	testutil.Equal(t, fields["quota_unit"], any("usd"))
+	testutil.Equal(t, fields["quota_limit"], any(5.0))
+	testutil.Equal(t, fields["quota_remaining"], any(3.8))
+}
+
+func TestConsoleUnlinkedAccountsAreWithheld(t *testing.T) {
+	f := newFakeConsole(t)
+	f.unlinked = true
+	h, _, acc := newTestHandler(t, f)
+	testutil.True(t, acc.GrokConsoleQuota.Unlinked)
+	rec := httptest.NewRecorder()
+	h.HandleChatCompletions(rec, httptest.NewRequest(http.MethodPost, "/grok/v1/chat/completions", strings.NewReader(`{"model":"console/grok-4.5","messages":[{"role":"user","content":"hi"}]}`)))
+	testutil.Equal(t, rec.Code, http.StatusServiceUnavailable)
+	// No inference reached the upstream.
+	testutil.Equal(t, f.lastPath, "/v1/models")
+}
+
+func TestConsoleSpentPoolIsRecoveredAtItsReset(t *testing.T) {
+	f := newFakeConsole(t)
+	f.usage = `{"weeklyIncludedUsage":{"budgetCents":500,"usedCents":"650","resetsAt":{"seconds":4102444800}}}`
+	h, st, acc := newTestHandler(t, f)
+	testutil.True(t, acc.GrokConsoleQuota.Exhausted(), "overspend still reads as spent")
+	testutil.Equal(t, acc.GrokConsoleQuota.ResetAt, time.Unix(4102444800, 0).UTC())
+	rec := httptest.NewRecorder()
+	h.HandleChatCompletions(rec, httptest.NewRequest(http.MethodPost, "/grok/v1/chat/completions", strings.NewReader(`{"model":"console/grok-4.5","messages":[{"role":"user","content":"hi"}]}`)))
+	testutil.Equal(t, rec.Code, http.StatusServiceUnavailable)
+
+	// The reset passed and the dashboard shows a fresh week: maintenance
+	// re-reads it on the recovery schedule, without waiting out its cadence.
+	t.Cleanup(func() { allowanceRecovery.Done(acc.ID) })
+	acc.GrokConsoleQuota.ResetAt = time.Now().Add(-time.Minute)
+	testutil.NoError(t, st.UpdateAccount(context.Background(), acc))
+	f.usage = `{"weeklyIncludedUsage":{"budgetCents":500}}`
+	maintainWith(context.Background(), h.client, st, acc)
+	testutil.False(t, acc.GrokConsoleQuota.Exhausted())
+	testutil.Equal(t, acc.GrokConsoleQuota.UsedCents, int64(0))
+	testutil.False(t, allowanceRecovery.Pending(acc.ID))
+}
+
+func TestParseUsageStatusRejectsAMissingBudget(t *testing.T) {
+	_, err := parseUsageStatus([]byte(`{"weeklyIncludedUsage":{"usedCents":1}}`))
+	testutil.True(t, err != nil)
+	_, err = parseUsageStatus([]byte(`{}`))
+	testutil.True(t, err != nil)
+	testutil.False(t, allowedWorkOSHost(&url.URL{Scheme: "https", Host: "evil.example"}, "grok.com"))
+	testutil.True(t, allowedWorkOSHost(&url.URL{Scheme: "https", Host: "authenticator.cursor.sh"}, "grok.com"))
 }

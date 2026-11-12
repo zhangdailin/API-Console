@@ -132,6 +132,13 @@ func (h *Handler) OpenSession(ctx context.Context, row *store.Model, exclude []i
 		if !IsConsoleAccount(acc) || !store.AccountAuthActive(acc) || SSOToken(acc) == "" || !row.AllowsAccount(acc.ID) {
 			return loadbalancer.ErrAccountNotEligible
 		}
+		// A spent weekly pool clears at its reset; an unlinked account never
+		// has one. A pool never read does not withhold the account.
+		if quota := acc.GrokConsoleQuota; quota.Unlinked {
+			return loadbalancer.ErrModelUnavailable
+		} else if quota.Exhausted() && (quota.ResetAt.IsZero() || time.Now().Before(quota.ResetAt)) {
+			return loadbalancer.ErrModelThrottled
+		}
 		for _, listed := range acc.GrokConsoleModels {
 			if strings.EqualFold(listed, upstream) {
 				return nil

@@ -174,6 +174,10 @@ func registerRoutes(
 	registerWithPrefixes(mux, grokPrefixes, "/audio/speech", inferenceAuth(consoleHandler.HandleAudioSpeech))
 	registerWithPrefixes(mux, grokPrefixes, "/audio/transcriptions", inferenceAuth(consoleHandler.HandleAudioTranscriptions))
 	registerWithPrefixes(mux, grokPrefixes, "/realtime", inferenceAuth(consoleHandler.HandleRealtime))
+	// xAI uploads a Build fallback video here. The one-time token in the path
+	// is the authorization, so the route takes no API key; it answers 404 for
+	// any token it did not issue.
+	registerWithPrefixes(mux, grokPrefixes, grok.VideoUploadPath, grokHandler.HandleVideoUpload)
 	registerWithPrefixes(mux, grokPrefixes, "/videos", inferenceAuth(webHandler.HandleVideosCreate))
 	registerWithPrefixes(mux, grokPrefixes, "/videos/", inferenceAuth(webVideoResource(webHandler)))
 	registerWithPrefixes(mux, grokPrefixes, "/files/", inferenceAuth(webHandler.HandleFiles))

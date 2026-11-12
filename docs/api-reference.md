@@ -44,6 +44,7 @@
 | POST | `/tts`、`/tts/voices`（GET）、`/stt` | 仅 Grok Console：console.x.ai 原生语音合成与转写。`/tts` 接受 Console 自身字段（`text`、`language`、`voice_id`、`output_format`…），`model` 只用于选路由（默认 `grok-voice-latest`）；`/stt` 为 multipart（`file` 或 `url`，默认模型 `grok-stt`） |
 | POST | `/audio/speech`、`/audio/transcriptions` | 仅 Grok Console：OpenAI 兼容的语音合成与转写。`/audio/speech` 映射 `input`→`text`、`voice`→`voice_id`、`response_format`→编码（mp3/opus/aac/flac/wav/pcm），`language` 默认 `en`；`/audio/transcriptions` 支持 `response_format` 为 `json`（默认）、`verbose_json`、`text` |
 | GET（WebSocket） | `/realtime?model=` | 仅 Grok Console：实时语音 WebSocket，双向转发到 console.x.ai 的 `/v1/realtime` |
+| PUT | `/media/uploads/{token}` | 仅 Grok：接收 xAI 上传的 Build 回退视频成片（见 `grok_build_video_upload_base_url`）。不需要 API Key，路径中的一次性令牌即授权：令牌只以哈希保存，2 小时内有效，只能使用一次，只接受视频内容，最大 512 MiB；未签发的令牌返回 404，过期 410，重复上传 409，非视频 415 |
 | GET | `/files/{image|video}/{name}` | 仅 Grok：本地媒体缓存文件 |
 | POST / GET / DELETE | `/media/inputs`、`/media/inputs/import`、`/media/inputs/{id}` | 仅 Grok：临时媒体输入（file_id） |
 
