@@ -55,12 +55,27 @@ func (b VideoBackend) RunVideo(ctx context.Context, job web.VideoBackendJob) (we
 	}
 	defer sess.Close()
 	job.Bind(sess.Account.ID, ProviderConsole, requestID)
+	return h.pollVideo(ctx, sess, requestID, job.Progress)
+}
+
+// ResumeVideo polls a Console video request created before a restart, on
+// the account that created it.
+func (b VideoBackend) ResumeVideo(ctx context.Context, job web.VideoBackendJob, accountID int64, requestID string) (web.VideoBackendResult, error) {
+	sess, err := b.H.OpenSessionByID(ctx, accountID)
+	if err != nil {
+		return web.VideoBackendResult{}, err
+	}
+	defer sess.Close()
+	return b.H.pollVideo(ctx, sess, requestID, job.Progress)
+}
+
+func (h *Handler) pollVideo(ctx context.Context, sess *Session, requestID string, progress func(int)) (web.VideoBackendResult, error) {
 	for {
 		body, err := h.DoJSON(ctx, sess, http.MethodGet, "/videos/"+url.PathEscape(requestID), nil)
 		if err != nil {
 			return web.VideoBackendResult{}, err
 		}
-		videoURL, done, err := grokbase.ParseVideoStatus(body, job.Progress)
+		videoURL, done, err := grokbase.ParseVideoStatus(body, progress)
 		if err != nil {
 			return web.VideoBackendResult{}, err
 		}

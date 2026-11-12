@@ -291,6 +291,8 @@ func run() error {
 	updater.StartBackground(ctx)
 
 	refresh.StartTokenRefreshLoop(ctx, apiHandler.ConfigSnapshot, s, lb)
+	// Take over video jobs whose process stopped (a restart, a crash).
+	grokHandler.Web().StartVideoJobRecovery(ctx)
 	modelrefresh.StartCatalogRefreshLoop(ctx, apiHandler.ConfigSnapshot, s)
 	// Alert evaluation runs beside the refresh loop: it reads the same metric
 	// buckets the overview shows, so an alert and the page never disagree.

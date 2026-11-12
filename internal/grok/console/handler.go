@@ -3,20 +3,25 @@ package console
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"orchids-api/internal/audit"
 	"orchids-api/internal/config"
 	"orchids-api/internal/httpserver"
 	"orchids-api/internal/loadbalancer"
 	"orchids-api/internal/middleware"
+	"orchids-api/internal/pricing"
 	"orchids-api/internal/store"
 	"orchids-api/internal/util"
 )
@@ -35,14 +40,15 @@ type Handler struct {
 	lb      *loadbalancer.LoadBalancer
 	tracker loadbalancer.ConnTracker
 
-	mu     sync.RWMutex
-	cfg    *config.Config
-	client *Client
+	mu          sync.RWMutex
+	cfg         *config.Config
+	client      *Client
+	auditLogger audit.Logger
 }
 
 // NewHandler builds the Console plane handler.
 func NewHandler(cfg *config.Config, lb *loadbalancer.LoadBalancer) *Handler {
-	return &Handler{lb: lb, tracker: loadbalancer.NewMemoryConnTracker(), cfg: cfg, client: NewClient(cfg)}
+	return &Handler{lb: lb, tracker: loadbalancer.NewMemoryConnTracker(), cfg: cfg, client: NewClient(cfg), auditLogger: audit.NewNopLogger()}
 }
 
 // SetConfig replaces the config and the client derived from it.
@@ -145,6 +151,22 @@ func (h *Handler) OpenSession(ctx context.Context, row *store.Model, exclude []i
 	return &Session{Account: acc, Token: SSOToken(acc), release: func() { once.Do(func() { h.tracker.Release(acc.ID) }) }}, nil
 }
 
+// OpenSessionByID reserves one specific Console account, for work that must
+// continue on the account that started it.
+func (h *Handler) OpenSessionByID(ctx context.Context, accountID int64) (*Session, error) {
+	st := h.store()
+	if st == nil {
+		return nil, errors.New("store not configured")
+	}
+	acc, err := st.GetAccount(ctx, accountID)
+	if err != nil || acc == nil || !IsConsoleAccount(acc) || !acc.Enabled || !store.AccountAuthActive(acc) || SSOToken(acc) == "" {
+		return nil, errors.New("the Grok Console account that started this job is no longer available")
+	}
+	h.tracker.Acquire(acc.ID)
+	var once sync.Once
+	return &Session{Account: acc, Token: SSOToken(acc), release: func() { once.Do(func() { h.tracker.Release(acc.ID) }) }}, nil
+}
+
 // switchable reports a failure another account may not repeat.
 func switchable(err error) bool {
 	if errors.Is(err, ErrUnauthorized) {
@@ -222,7 +244,10 @@ func writeFailure(w http.ResponseWriter, err error) {
 
 // relay copies a 2xx upstream response to the client, flushing as it goes
 // so a stream reaches the client event by event.
-func relay(w http.ResponseWriter, resp *http.Response) {
+func relay(w http.ResponseWriter, resp *http.Response) { relayTapped(w, resp, nil) }
+
+// relayTapped is relay that also hands every byte to tap.
+func relayTapped(w http.ResponseWriter, resp *http.Response, tap *usageTap) {
 	defer resp.Body.Close()
 	for _, name := range []string{"Content-Type", "Content-Disposition", "Cache-Control"} {
 		if value := resp.Header.Get(name); value != "" {
@@ -235,6 +260,9 @@ func relay(w http.ResponseWriter, resp *http.Response) {
 	for {
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
+			if tap != nil {
+				tap.Write(buf[:n])
+			}
 			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
 				return
 			}
@@ -284,24 +312,38 @@ func (h *Handler) resolveForRequest(w http.ResponseWriter, r *http.Request, mode
 	return row, true
 }
 
-// forwardJSON sends a JSON payload with the upstream model name and relays
-// the answer.
-func (h *Handler) forwardJSON(w http.ResponseWriter, r *http.Request, row *store.Model, path string, payload map[string]any, accept string) {
+// forwardJSON sends a JSON payload with the upstream model name, relays the
+// answer and returns what the relay observed. A nil tap means the call failed
+// and the error was already answered.
+func (h *Handler) forwardJSON(w http.ResponseWriter, r *http.Request, row *store.Model, path string, payload map[string]any, accept string) (*usageTap, *store.Account, error) {
 	payload["model"] = row.UpstreamModel
 	body, err := json.Marshal(payload)
 	if err != nil {
 		httpserver.WriteError(w, http.StatusBadRequest, "invalid request")
-		return
+		return nil, nil, err
 	}
 	resp, sess, err := h.Call(r.Context(), row, func(sess *Session) (*http.Response, error) {
 		return h.consoleClient().Do(r.Context(), sess.Token, http.MethodPost, path, body, "application/json", accept)
 	})
 	if err != nil {
 		writeFailure(w, err)
-		return
+		return nil, nil, err
 	}
 	defer sess.Close()
-	relay(w, resp)
+	tap := newUsageTap(resp.Header.Get("Content-Type"))
+	relayTapped(w, resp, tap)
+	return tap, sess.Account, nil
+}
+
+// forwardText forwards a chat or Responses request and books its usage.
+func (h *Handler) forwardText(w http.ResponseWriter, r *http.Request, row *store.Model, path string, payload map[string]any) {
+	started := time.Now()
+	tap, acc, err := h.forwardJSON(w, r, row, path, payload, "")
+	var usage map[string]any
+	if tap != nil {
+		usage = tap.Usage()
+	}
+	h.recordText(r.Context(), acc, row, started, usage, err)
 }
 
 // HandleChatCompletions serves POST /chat/completions for a Console route.
@@ -318,7 +360,7 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	h.forwardJSON(w, r, row, "/chat/completions", payload, "")
+	h.forwardText(w, r, row, "/chat/completions", payload)
 }
 
 // HandleResponses serves POST /responses for a Console route. Console keeps
@@ -342,7 +384,7 @@ func (h *Handler) HandleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	payload["store"] = false
-	h.forwardJSON(w, r, row, "/responses", payload, "")
+	h.forwardText(w, r, row, "/responses", payload)
 }
 
 // HandleImagesGenerations serves POST /images/generations (JSON).
@@ -350,15 +392,93 @@ func (h *Handler) HandleImagesGenerations(w http.ResponseWriter, r *http.Request
 	h.handleImages(w, r, "/images/generations", store.CapabilityImage)
 }
 
-// HandleImagesEdits serves POST /images/edits with a JSON body (the xAI
-// image shape: an image URL or data URI). Multipart uploads are not accepted
-// for Console routes.
+// HandleImagesEdits serves POST /images/edits: a JSON body in the xAI image
+// shape, or an OpenAI-style multipart upload, whose files are sent upstream
+// as data URIs.
 func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/") {
-		httpserver.WriteErrorCode(w, http.StatusUnsupportedMediaType, "invalid_request_error", "Grok Console image edits take a JSON body with the image as a URL or data URI")
+		h.handleMultipartImageEdit(w, r)
 		return
 	}
 	h.handleImages(w, r, "/images/edits", store.CapabilityImageEdit)
+}
+
+// maxEditImages is the most images one Console edit takes.
+const maxEditImages = 3
+
+// MaxImageEditUpload bounds a multipart image edit body.
+const MaxImageEditUpload = 80 << 20
+
+func (h *Handler) handleMultipartImageEdit(w http.ResponseWriter, r *http.Request) {
+	if !httpserver.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if r.MultipartForm == nil {
+		r.Body = http.MaxBytesReader(w, r.Body, MaxImageEditUpload)
+		if err := r.ParseMultipartForm(MaxImageEditUpload); err != nil {
+			httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_request_error", "the multipart body could not be read")
+			return
+		}
+	}
+	defer func() { _ = r.MultipartForm.RemoveAll() }()
+	value := func(key string) string { return strings.TrimSpace(util.FirstNonEmpty(r.MultipartForm.Value[key]...)) }
+	model := strings.ToLower(value("model"))
+	row, ok := h.resolveForRequest(w, r, model, store.CapabilityImageEdit)
+	if !ok {
+		return
+	}
+	files := append(append([]*multipart.FileHeader(nil), r.MultipartForm.File["image"]...), r.MultipartForm.File["image[]"]...)
+	if len(files) == 0 || len(files) > maxEditImages {
+		httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_request_error", "image edits take 1 to 3 images")
+		return
+	}
+	images := make([]any, 0, len(files))
+	for _, header := range files {
+		uri, err := fileDataURI(header)
+		if err != nil {
+			httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_request_error", err.Error())
+			return
+		}
+		images = append(images, map[string]any{"type": "image_url", "url": uri})
+	}
+	payload := map[string]any{"prompt": value("prompt")}
+	if len(images) == 1 {
+		payload["image"] = images[0]
+	} else {
+		payload["images"] = images
+	}
+	if n := value("n"); n != "" {
+		count, err := strconv.Atoi(n)
+		if err != nil || count < 1 || count > 10 {
+			httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_request_error", "n must be between 1 and 10")
+			return
+		}
+		payload["n"] = count
+	}
+	for _, key := range []string{"response_format", "aspect_ratio", "resolution", "quality"} {
+		if v := value(key); v != "" {
+			payload[key] = v
+		}
+	}
+	h.forwardImages(w, r, row, "/images/edits", payload)
+}
+
+// fileDataURI reads an uploaded image into a data URI.
+func fileDataURI(header *multipart.FileHeader) (string, error) {
+	file, err := header.Open()
+	if err != nil {
+		return "", errors.New("an uploaded image could not be read")
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, MaxImageEditUpload))
+	if err != nil || len(data) == 0 {
+		return "", errors.New("an uploaded image could not be read")
+	}
+	mimeType := http.DetectContentType(data)
+	if !strings.HasPrefix(mimeType, "image/") {
+		return "", errors.New("every uploaded file must be an image")
+	}
+	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data), nil
 }
 
 func (h *Handler) handleImages(w http.ResponseWriter, r *http.Request, path, capability string) {
@@ -373,7 +493,41 @@ func (h *Handler) handleImages(w http.ResponseWriter, r *http.Request, path, cap
 	if !ok {
 		return
 	}
-	h.forwardJSON(w, r, row, path, payload, "application/json")
+	h.forwardImages(w, r, row, path, payload)
+}
+
+// forwardImages forwards an image request and prices the images returned.
+func (h *Handler) forwardImages(w http.ResponseWriter, r *http.Request, row *store.Model, path string, payload map[string]any) {
+	text := func(key string) string { value, _ := payload[key].(string); return strings.TrimSpace(value) }
+	resolution, quality := text("resolution"), text("quality")
+	inputs := 0
+	if _, ok := payload["image"].(map[string]any); ok {
+		inputs = 1
+	}
+	if images, ok := payload["images"].([]any); ok {
+		inputs = len(images)
+	}
+	tap, acc, err := h.forwardJSON(w, r, row, path, payload, "application/json")
+	if err != nil || tap == nil {
+		return
+	}
+	count := 0
+	if answer := tap.JSON(); answer != nil {
+		if data, ok := answer["data"].([]any); ok {
+			count = len(data)
+		}
+	}
+	if count == 0 {
+		return
+	}
+	var result pricing.Result
+	var priced bool
+	if path == "/images/edits" {
+		result, priced = pricing.EstimateImageEditCost(row.UpstreamModel, resolution, quality, count, max(inputs, 1))
+	} else {
+		result, priced = pricing.EstimateImageCost(row.UpstreamModel, resolution, quality, count)
+	}
+	h.recordMedia(r.Context(), acc, row, result, priced, map[string]any{"endpoint": strings.TrimPrefix(path, "/"), "images": count, "input_images": inputs})
 }
 
 // DoJSON sends one JSON request on the session's account and returns the

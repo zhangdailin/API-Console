@@ -188,3 +188,64 @@ func TestBuildVideoStatusAndURLRules(t *testing.T) {
 	_, err = buildVideoPayload(web.VideoBackendJob{UpstreamModel: "m", Prompt: "p", Resolution: "1080p", InputReferences: []string{"https://e.com/a.png"}})
 	testutil.True(t, err != nil)
 }
+
+func TestInterruptedVideoJobsAreResumedOrFailedButLeasedOnesAreLeftAlone(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/videos/vid_resume":
+			_, _ = io.WriteString(w, `{"status":"done","video":{"url":"https://videos.x.ai/r.mp4"}}`)
+		case "/r.mp4":
+			w.Header().Set("Content-Type", "video/mp4")
+			_, _ = io.WriteString(w, "resumed")
+		default:
+			t.Errorf("unexpected upstream call %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	h, acc := parityBuildHandler(t, server)
+	target, _ := url.Parse(server.URL)
+	h.cliClient.httpClient = &http.Client{Transport: xaiHostRewriter{target: target, next: server.Client().Transport}}
+	ctx := context.Background()
+	st := h.lb.Store
+	acc.ID, acc.GrokModels, acc.GrokModelsSyncedAt = 0, []string{"grok-imagine-video-1.5"}, time.Now()
+	testutil.NoError(t, st.CreateAccount(ctx, acc))
+	testutil.NoError(t, st.CreateModel(ctx, &store.Model{Channel: "grok", ModelID: "grok-imagine-video-1.5", Name: "Video", Status: store.ModelStatusAvailable, Verified: true,
+		Provider: ProviderBuild, UpstreamModel: "grok-imagine-video-1.5", Capabilities: []string{store.CapabilityVideo}}))
+
+	old := time.Now().Add(-10 * time.Minute).Unix()
+	save := func(job *store.StoredVideoJob) {
+		job.OwnerHash, job.CreatedAt = "owner", old
+		testutil.NoError(t, st.SaveStoredVideoJob(ctx, job, time.Hour))
+	}
+	save(&store.StoredVideoJob{ID: "video_resume", Model: "grok-imagine-video-1.5", Provider: ProviderBuild, AccountID: acc.ID, UpstreamRequestID: "vid_resume", Status: "in_progress"})
+	save(&store.StoredVideoJob{ID: "video_web", Model: "grok-imagine-video", Provider: "web", Status: "in_progress"})
+	save(&store.StoredVideoJob{ID: "video_alive", Model: "grok-imagine-video", Provider: "web", Status: "in_progress"})
+	held, err := st.AcquireVideoJobLease(ctx, "video_alive", "owner", "another-instance", time.Minute)
+	testutil.NoError(t, err)
+	testutil.True(t, held)
+	// A fresh job is its creator's to lease, not the sweep's.
+	testutil.NoError(t, st.SaveStoredVideoJob(ctx, &store.StoredVideoJob{ID: "video_new", OwnerHash: "owner", Model: "grok-imagine-video", Status: "queued", CreatedAt: time.Now().Unix()}, time.Hour))
+
+	h.Web().RecoverVideoJobs(ctx)
+	status := func(id string) *store.StoredVideoJob {
+		job, err := st.GetStoredVideoJob(ctx, id, "owner")
+		testutil.NoError(t, err)
+		return job
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) && (status("video_resume").Status != "completed" || status("video_web").Status != "failed") {
+		time.Sleep(50 * time.Millisecond)
+	}
+	resumed := status("video_resume")
+	testutil.Equal(t, resumed.Status, "completed")
+	t.Cleanup(func() { _ = os.Remove(resumed.ContentPath) })
+	raw, err := os.ReadFile(resumed.ContentPath)
+	testutil.NoError(t, err)
+	testutil.Equal(t, string(raw), "resumed")
+	interrupted := status("video_web")
+	testutil.Equal(t, interrupted.Status, "failed")
+	testutil.Equal(t, interrupted.ErrorCode, "video_interrupted")
+	testutil.Equal(t, status("video_alive").Status, "in_progress")
+	testutil.Equal(t, status("video_new").Status, "queued")
+}

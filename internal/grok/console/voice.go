@@ -422,7 +422,18 @@ func (h *Handler) dialRealtime(ctx context.Context, row *store.Model) (*websocke
 	h.mu.RLock()
 	transport := h.cfg.GrokWebTransport()
 	h.mu.RUnlock()
-	dialer := websocket.Dialer{Proxy: httpclient.ProxyFuncFromConfig(transport), HandshakeTimeout: 30 * time.Second}
+	proxyFunc := httpclient.ProxyFuncFromConfig(transport)
+	dialer := websocket.Dialer{Proxy: proxyFunc, HandshakeTimeout: 30 * time.Second}
+	if strings.HasPrefix(target, "wss://") {
+		// The handshake presents the same Chrome TLS fingerprint as the rest of
+		// the grok.com traffic. The TLS dial goes through the proxy itself, so
+		// the dialer must not wrap it in the proxy a second time.
+		userAgent := client.userAgent()
+		dialer.Proxy = nil
+		dialer.NetDialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return httpclient.DialBrowserWebSocketTLS(ctx, network, addr, proxyFunc, userAgent)
+		}
+	}
 	var conn *websocket.Conn
 	_, sess, err := h.Call(ctx, row, func(sess *Session) (*http.Response, error) {
 		for attempt := 0; attempt < 2; attempt++ {

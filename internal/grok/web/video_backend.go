@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -133,6 +132,8 @@ func validBackendVideoReference(value string) bool {
 func (h *Handler) runBackendVideoJob(ctx context.Context, job *videoJob, upstreamModel string, cfg *VideoConfig) {
 	ctx, cancel := context.WithTimeout(ctx, videoJobTTL)
 	defer cancel()
+	release, _ := h.holdVideoLease(ctx, job)
+	defer release()
 	update := func(mutate func()) {
 		videoJobsMu.Lock()
 		mutate()
@@ -165,18 +166,5 @@ func (h *Handler) runBackendVideoJob(ctx context.Context, job *videoJob, upstrea
 		h.failVideoJob(job, err)
 		return
 	}
-	if len(result.Data) == 0 {
-		h.failVideoJob(job, fmt.Errorf("video backend returned no content"))
-		return
-	}
-	name, err := h.cacheMediaBytes(firstNonEmpty(result.URL, job.ID), "video", result.Data, firstNonEmpty(result.MimeType, "video/mp4"))
-	if err != nil {
-		h.failVideoJob(job, err)
-		return
-	}
-	update(func() {
-		job.Status, job.Progress, job.CompletedAt = "completed", 100, time.Now().Unix()
-		job.VideoURL = result.URL
-		job.ContentPath = filepath.Join(cacheBaseDir, "video", name)
-	})
+	h.completeBackendVideoJob(ctx, job, result, update)
 }

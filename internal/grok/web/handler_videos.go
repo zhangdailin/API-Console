@@ -423,6 +423,8 @@ func (h *Handler) runVideoCreateJob(ctx context.Context, job *videoJob, spec Mod
 		videoJobsMu.Unlock()
 		h.persistVideoJob(ctx, job)
 	}
+	release, _ := h.holdVideoLease(ctx, job)
+	defer release()
 	update("in_progress", 1)
 
 	// Retry opening a session with account switching — video generation

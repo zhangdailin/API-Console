@@ -1,6 +1,7 @@
 package grok
 
 import (
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -54,4 +55,20 @@ func TestConsoleModelsDispatchToTheConsolePlane(t *testing.T) {
 			testutil.MustContain(t, rec.Body.String(), tc.want)
 		})
 	}
+}
+
+func TestMultipartImageEditsDispatchOnTheFormModel(t *testing.T) {
+	h := NewHandler(nil, nil)
+	var body strings.Builder
+	writer := multipart.NewWriter(&body)
+	_ = writer.WriteField("model", "console/grok-imagine-image")
+	_ = writer.WriteField("prompt", "x")
+	_ = writer.Close()
+	req := httptest.NewRequest(http.MethodPost, "/grok/v1/images/edits", strings.NewReader(body.String()))
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+	h.HandleImagesEdits(rec, req)
+	// The Console plane answered: it resolves the console/ route itself.
+	testutil.Equal(t, rec.Code, http.StatusNotFound)
+	testutil.MustContain(t, rec.Body.String(), "console/grok-imagine-image")
 }

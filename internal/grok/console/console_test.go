@@ -1,6 +1,7 @@
 package console
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -10,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,6 +23,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gorilla/websocket"
 
+	"orchids-api/internal/audit"
 	"orchids-api/internal/config"
 	"orchids-api/internal/loadbalancer"
 	"orchids-api/internal/store"
@@ -163,8 +166,15 @@ func (f *fakeConsole) serveV1(w http.ResponseWriter, r *http.Request, upgrader *
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
 	case "/v1/chat/completions":
 		record()
+		if stream, _ := f.lastBody["stream"].(bool); !stream {
+			_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{}, "usage": map[string]any{"prompt_tokens": 1000, "completion_tokens": 500, "total_tokens": 1500, "prompt_tokens_details": map[string]any{"cached_tokens": 200}}})
+			return
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":4,\"total_tokens\":14}}\n\ndata: [DONE]\n\n")
+	case "/v1/images/edits":
+		record()
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"url": "https://imgen.x.ai/a.png"}}})
 	case "/v1/responses":
 		if r.Header.Get("x-cluster") == "" {
 			f.t.Errorf("responses without x-cluster")
@@ -330,4 +340,75 @@ func TestClassifiersKeepConsoleAccountsOutOfTheWebPlane(t *testing.T) {
 	testutil.False(t, IsConsoleModelID("grok-4.5"))
 	testutil.Equal(t, qualify("grok-stt", ""), "console/grok-stt")
 	testutil.True(t, CredentialKey(acc) != "" && !strings.HasPrefix(CredentialKey(acc), "grok:sso:"))
+}
+
+type recordingAudit struct {
+	mu     sync.Mutex
+	events []audit.Event
+}
+
+func (r *recordingAudit) Log(_ context.Context, event audit.Event) {
+	r.mu.Lock()
+	r.events = append(r.events, event)
+	r.mu.Unlock()
+}
+
+func TestConsoleUsageIsAuditedAndCountedOnTheAccount(t *testing.T) {
+	f := newFakeConsole(t)
+	h, st, acc := newTestHandler(t, f)
+	recorder := &recordingAudit{}
+	h.SetAuditLogger(recorder)
+
+	rec := httptest.NewRecorder()
+	h.HandleChatCompletions(rec, httptest.NewRequest(http.MethodPost, "/grok/v1/chat/completions", strings.NewReader(`{"model":"console/grok-4.5","messages":[{"role":"user","content":"hi"}]}`)))
+	testutil.Equal(t, rec.Code, http.StatusOK)
+	rec = httptest.NewRecorder()
+	h.HandleChatCompletions(rec, httptest.NewRequest(http.MethodPost, "/grok/v1/chat/completions", strings.NewReader(`{"model":"console/grok-4.5","stream":true,"messages":[{"role":"user","content":"hi"}]}`)))
+	testutil.Equal(t, rec.Code, http.StatusOK)
+
+	testutil.Equal(t, len(recorder.events), 2)
+	first, second := recorder.events[0], recorder.events[1]
+	testutil.Equal(t, first.Provider, ProviderConsole)
+	testutil.Equal(t, first.UsageSource, audit.UsageSourceUpstream)
+	testutil.Equal(t, first.InputTokens, 1000)
+	testutil.Equal(t, first.CachedInputTokens, 200)
+	testutil.Equal(t, first.OutputTokens, 500)
+	testutil.Equal(t, first.AccountID, acc.ID)
+	// Priced from the upstream model's official price.
+	testutil.Equal(t, first.PricingModel, "grok-4.5")
+	testutil.True(t, first.CostInUSDTicks > 0)
+	// The stream's usage comes from its last usage-bearing event.
+	testutil.Equal(t, second.InputTokens, 10)
+	testutil.Equal(t, second.OutputTokens, 4)
+
+	stored, err := st.GetAccount(context.Background(), acc.ID)
+	testutil.NoError(t, err)
+	testutil.Equal(t, stored.UsageTotal, float64(1514))
+}
+
+func TestConsoleMultipartImageEditSendsDataURIs(t *testing.T) {
+	f := newFakeConsole(t)
+	f.models = append(f.models, "grok-imagine-image")
+	h, _, _ := newTestHandler(t, f)
+	recorder := &recordingAudit{}
+	h.SetAuditLogger(recorder)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	_ = writer.WriteField("model", "console/grok-imagine-image")
+	_ = writer.WriteField("prompt", "make it blue")
+	part, _ := writer.CreateFormFile("image", "a.png")
+	_, _ = part.Write([]byte("\x89PNG\r\n\x1a\n0000000000000000"))
+	_ = writer.Close()
+	req := httptest.NewRequest(http.MethodPost, "/grok/v1/images/edits", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+	h.HandleImagesEdits(rec, req)
+	testutil.Equal(t, rec.Code, http.StatusOK)
+	image, _ := f.lastBody["image"].(map[string]any)
+	uri, _ := image["url"].(string)
+	testutil.True(t, strings.HasPrefix(uri, "data:image/png;base64,"), uri)
+	testutil.Equal(t, f.lastBody["model"], any("grok-imagine-image"))
+	testutil.Equal(t, len(recorder.events), 1)
+	testutil.Equal(t, recorder.events[0].Action, "grok_media_request")
 }

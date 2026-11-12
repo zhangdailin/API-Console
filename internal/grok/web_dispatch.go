@@ -92,16 +92,26 @@ func (h *Handler) HandleImagesGenerations(w http.ResponseWriter, r *http.Request
 	h.web.HandleImagesGenerations(w, r)
 }
 
-// HandleImagesEdits dispatches image edits. A multipart upload is always a
-// Web edit; Console edits take JSON.
+// HandleImagesEdits dispatches image edits. A multipart upload is parsed
+// once here to read its model; parsing again in either plane is a no-op.
 func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
-	if !strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/") {
-		if p, handled := peekPlane(w, r); handled {
-			return
-		} else if p == planeConsole && h.console != nil {
-			h.console.HandleImagesEdits(w, r)
-			return
+	if strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/") {
+		if r.Method == http.MethodPost && h.console != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, console.MaxImageEditUpload)
+			if err := r.ParseMultipartForm(console.MaxImageEditUpload); err != nil {
+				httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_request_error", "the multipart body could not be read")
+				return
+			}
+			if console.IsConsoleModelID(r.FormValue("model")) {
+				h.console.HandleImagesEdits(w, r)
+				return
+			}
 		}
+	} else if p, handled := peekPlane(w, r); handled {
+		return
+	} else if p == planeConsole && h.console != nil {
+		h.console.HandleImagesEdits(w, r)
+		return
 	}
 	h.web.HandleImagesEdits(w, r)
 }

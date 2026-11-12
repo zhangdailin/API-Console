@@ -119,6 +119,7 @@ func (h *Handler) SetAuditLogger(logger audit.Logger) {
 		h.auditLogger = logger
 		h.runtimeMu.Unlock()
 		h.web.SetAuditLogger(logger)
+		h.console.SetAuditLogger(logger)
 	}
 }
 

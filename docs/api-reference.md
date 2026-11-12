@@ -40,7 +40,7 @@
 | POST | `/messages/count_tokens` | 三通道均支持本地 Token 估算 |
 | POST | `/responses/compact` | 网关摘要 / Build 压缩路径；三通道两种前缀均支持 |
 | POST | `/images/generations`、`/images/edits` | 仅 Grok：Web Imagine 生图 / 改图 |
-| POST / GET | `/videos`、`/videos/{id}`、`/videos/{id}/content` | 仅 Grok：视频任务创建、查询与下载。Web 模型（`grok-imagine-video`）仅文生视频；Build 视频模型（如 `grok-imagine-video-1.5`，仅当某个 Build 账号的上游目录列出该模型时才有路由）走 CLI 代理的 `/videos/generations`，支持最多 8 张 `input_references`（https URL 或 `data:image/`，带参考图时最高 720p）。Build 任务不跨进程重启续跑 |
+| POST / GET | `/videos`、`/videos/{id}`、`/videos/{id}/content` | 仅 Grok：视频任务创建、查询与下载。Web 模型（`grok-imagine-video`）仅文生视频；Build 视频模型（如 `grok-imagine-video-1.5`，仅当某个 Build 账号的上游目录列出该模型时才有路由）走 CLI 代理的 `/videos/generations`，支持最多 8 张 `input_references`（https URL 或 `data:image/`，带参考图时最高 720p）。运行中的任务持有租约；进程重启或崩溃后，每分钟一次的恢复扫描会接管租约已失效的任务：已在上游创建的 Build / Console 任务在原账号上继续轮询，其余（包括 Web 任务）标记为失败（`error.code=video_interrupted`），不再一直停留在处理中 |
 | POST | `/tts`、`/tts/voices`（GET）、`/stt` | 仅 Grok Console：console.x.ai 原生语音合成与转写。`/tts` 接受 Console 自身字段（`text`、`language`、`voice_id`、`output_format`…），`model` 只用于选路由（默认 `grok-voice-latest`）；`/stt` 为 multipart（`file` 或 `url`，默认模型 `grok-stt`） |
 | POST | `/audio/speech`、`/audio/transcriptions` | 仅 Grok Console：OpenAI 兼容的语音合成与转写。`/audio/speech` 映射 `input`→`text`、`voice`→`voice_id`、`response_format`→编码（mp3/opus/aac/flac/wav/pcm），`language` 默认 `en`；`/audio/transcriptions` 支持 `response_format` 为 `json`（默认）、`verbose_json`、`text` |
 | GET（WebSocket） | `/realtime?model=` | 仅 Grok Console：实时语音 WebSocket，双向转发到 console.x.ai 的 `/v1/realtime` |

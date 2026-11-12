@@ -38,6 +38,13 @@ func (v videoBackends) VideoModel(ctx context.Context, modelID string) (string, 
 	return v.build.VideoModel(ctx, modelID)
 }
 
+func (v videoBackends) ResumeVideo(ctx context.Context, job web.VideoBackendJob, accountID int64, requestID string) (web.VideoBackendResult, error) {
+	if console.IsConsoleModelID(job.Model) {
+		return v.console.ResumeVideo(ctx, job, accountID, requestID)
+	}
+	return v.build.ResumeVideo(ctx, job, accountID, requestID)
+}
+
 func (v videoBackends) RunVideo(ctx context.Context, job web.VideoBackendJob) (web.VideoBackendResult, error) {
 	if console.IsConsoleModelID(job.Model) {
 		return v.console.RunVideo(ctx, job)
@@ -99,9 +106,24 @@ func (b buildVideoBackend) RunVideo(ctx context.Context, job web.VideoBackendJob
 		return web.VideoBackendResult{}, err
 	}
 	job.Bind(0, "", requestID)
+	return pollBuildVideo(ctx, client, sess.acc, requestID, job.Progress)
+}
 
+// ResumeVideo polls a Build video request created before a restart, on the
+// account that created it.
+func (b buildVideoBackend) ResumeVideo(ctx context.Context, job web.VideoBackendJob, accountID int64, requestID string) (web.VideoBackendResult, error) {
+	sess, err := b.h.openCLIAccountSessionByID(ctx, accountID, job.UpstreamModel)
+	if err != nil {
+		return web.VideoBackendResult{}, err
+	}
+	defer sess.Close()
+	return pollBuildVideo(ctx, b.h.buildClient(), sess.acc, requestID, job.Progress)
+}
+
+// pollBuildVideo polls one Build video request to completion and downloads it.
+func pollBuildVideo(ctx context.Context, client *CLIClient, acc *store.Account, requestID string, progress func(int)) (web.VideoBackendResult, error) {
 	for {
-		response, err := client.doResponseResource(ctx, sess.acc, http.MethodGet, "/videos/"+url.PathEscape(requestID), "")
+		response, err := client.doResponseResource(ctx, acc, http.MethodGet, "/videos/"+url.PathEscape(requestID), "")
 		if err != nil {
 			return web.VideoBackendResult{}, err
 		}
@@ -109,7 +131,7 @@ func (b buildVideoBackend) RunVideo(ctx context.Context, job web.VideoBackendJob
 		if err != nil {
 			return web.VideoBackendResult{}, err
 		}
-		videoURL, done, err := grokbase.ParseVideoStatus(body, job.Progress)
+		videoURL, done, err := grokbase.ParseVideoStatus(body, progress)
 		if err != nil {
 			return web.VideoBackendResult{}, err
 		}
