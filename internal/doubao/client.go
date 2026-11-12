@@ -452,7 +452,9 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	defer response.Body.Close()
 	if response.StatusCode >= 400 {
 		raw, _ := io.ReadAll(io.LimitReader(response.Body, 8192))
-		return statusError(response.StatusCode, raw)
+		err := statusError(response.StatusCode, raw)
+		noteChallenge(c.acc.ID, err)
+		return err
 	}
 	text, err := consumeStream(response.Body, func(delta string) {
 		if !toolMode && onMessage != nil {
@@ -460,7 +462,11 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 		}
 	})
 	if err != nil {
+		noteChallenge(c.acc.ID, err)
 		return err
+	}
+	if text != "" {
+		clearChallenge(c.acc.ID)
 	}
 	if text == "" {
 		slog.Warn("doubao answer was empty", "account_id", c.acc.ID, "model", req.Model, "attachments", len(attachments))
@@ -577,8 +583,8 @@ func statusError(status int, raw []byte) error {
 	// A challenge refused before the stream opened is still a challenge: it
 	// must park the account, not be retried as a rate limit.
 	if strings.Contains(text, "710022004") {
-		if decision := decisionFromText(text); decision.needsVerification() {
-			return &verificationRequired{code: "710022004", decision: decision}
+		if decision, raw := decisionFromText(text); decision.needsVerification() {
+			return &verificationRequired{code: "710022004", decision: decision, raw: raw}
 		}
 	}
 	if strings.Contains(text, "710022002") || strings.Contains(text, "710022004") || status == 429 {

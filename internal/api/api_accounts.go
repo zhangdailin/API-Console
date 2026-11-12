@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"orchids-api/internal/accountpolicy"
 	apperrors "orchids-api/internal/errors"
 	"orchids-api/internal/provider"
 	"orchids-api/internal/refreshqueue"
@@ -187,8 +188,13 @@ func (a *API) HandleAccountByID(w http.ResponseWriter, r *http.Request) {
 
 	isCheck := len(parts) > 1 && parts[1] == "check"
 	isUsage := len(parts) > 1 && parts[1] == "usage"
-	if len(parts) > 2 || (len(parts) > 1 && !(isCheck || isUsage)) {
+	isVerification := len(parts) > 1 && parts[1] == "verification"
+	if len(parts) > 2 || (len(parts) > 1 && !(isCheck || isUsage || isVerification)) {
 		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+	if isVerification {
+		a.handleAccountVerification(w, r, account)
 		return
 	}
 
@@ -371,4 +377,61 @@ func (a *API) HandleAccountByID(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeMethodNotAllowed(w)
 	}
+}
+
+// handleAccountVerification serves the challenge an upstream put in front of an
+// account. GET returns what the channel's captcha SDK needs; it carries the
+// account's device identity, so it is returned only on this explicit,
+// session-authenticated request and never as part of an account row. POST
+// records that the operator answered it: the challenge is forgotten and the
+// human-verification park is lifted, so the next request tries the account
+// again. Whether the upstream accepted the answer only that request can tell;
+// a refusal parks the account again.
+func (a *API) handleAccountVerification(w http.ResponseWriter, r *http.Request, account *store.Account) {
+	admin := adminFor(account.AccountType)
+	if admin == nil || admin.Verification == nil {
+		util.WriteJSONStatus(w, http.StatusNotFound, map[string]string{"error": "this channel has no verification challenge"})
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		challenge, ok := admin.Verification(account)
+		if !ok {
+			util.WriteJSONStatus(w, http.StatusNotFound, map[string]string{"error": "no recent verification challenge is recorded for this account; send one request through it and try again"})
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		util.WriteJSON(w, challenge)
+	case http.MethodPost:
+		if admin.VerificationSolved != nil {
+			admin.VerificationSolved(account)
+		}
+		if liftVerificationPark(account) {
+			if err := a.store.UpdateAccount(r.Context(), account); err != nil {
+				http.Error(w, "Failed to save account: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+		util.WriteJSON(w, a.normalizeAccountOutputObserved(r.Context(), account))
+	default:
+		writeMethodNotAllowed(w)
+	}
+}
+
+// liftVerificationPark undoes exactly what a human-verification verdict wrote:
+// the status, and the reset time it set. A park for any other reason stays.
+func liftVerificationPark(acc *store.Account) bool {
+	if acc == nil || !strings.Contains(strings.ToLower(acc.StatusMessage), "requires human verification") {
+		return false
+	}
+	parkedAt := acc.LastAttempt
+	if !acc.QuotaResetAt.IsZero() && !acc.QuotaResetAt.After(parkedAt.Add(accountpolicy.CooldownVerification)) {
+		acc.QuotaResetAt = time.Time{}
+	}
+	// Answering the challenge is not a check of the credential: keep the time
+	// the account was last actually verified.
+	verifiedAt := acc.VerifiedAt
+	accountpolicy.Verdict{}.Apply(acc)
+	acc.VerifiedAt = verifiedAt
+	return true
 }

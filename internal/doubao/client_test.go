@@ -561,7 +561,9 @@ func TestStreamErrorRecognisesAVerifyChallenge(t *testing.T) {
 	var asString, asObject map[string]any
 	testutil.NoError(t, json.Unmarshal([]byte(`{"error_code":710022004,"extra":{"decision":"`+decision+`"}}`), &asString))
 	testutil.NoError(t, json.Unmarshal([]byte(`{"error_code":710022004,"extra":{"decision":{"from":"shark_admin","type":"verify","detail":"d"}}}`), &asObject))
-	testutil.True(t, sharkDecision(asObject).needsVerification(), "an object decision was not read")
+	parsed, rawObject := sharkDecision(asObject)
+	testutil.True(t, parsed.needsVerification(), "an object decision was not read")
+	testutil.MustContain(t, rawObject, `"shark_admin"`)
 
 	err := upstreamStreamError(asString)
 	testutil.MustContain(t, err.Error(), "requires human verification")
@@ -577,4 +579,34 @@ func TestStatusErrorRecognisesAChallengeBody(t *testing.T) {
 	err := statusError(http.StatusForbidden, []byte(body))
 	testutil.MustContain(t, err.Error(), "requires human verification")
 	testutil.MustContain(t, statusError(http.StatusTooManyRequests, []byte(`{"code":710022004}`)).Error(), "status=429")
+}
+
+// The recorded challenge is handed to the SDK unchanged, with the device id
+// and fingerprint the refused request presented; an answered turn forgets it.
+func TestVerificationOffersTheRefusedChallenge(t *testing.T) {
+	decision := `{"from":"shark_admin","type":"verify","subtype":"semantic_reasoning","detail":"d"}`
+	var refusal map[string]any
+	encoded, _ := json.Marshal(decision)
+	testutil.NoError(t, json.Unmarshal([]byte(`{"error_code":710022004,"extra":{"decision":`+string(encoded)+`}}`), &refusal))
+	acc := &store.Account{ID: 9101, AccountType: "doubao", DoubaoDeviceID: "7500000000000000003", ClientCookie: `{"sessionid":"x","s_v_web_id":"verify_fp_1"}`}
+	t.Cleanup(func() { clearChallenge(acc.ID) })
+
+	_, ok := verification(acc)
+	testutil.False(t, ok, "a challenge was offered before any refusal")
+	noteChallenge(acc.ID, upstreamStreamError(refusal))
+	got, ok := verification(acc)
+	testutil.True(t, ok, "the refused challenge was not offered")
+	testutil.Equal(t, got.SDK, "bytedance_captcha")
+	testutil.EqualAny(t, got.Params["verify_data"], decision)
+	info := got.Params["info"].(map[string]any)
+	testutil.EqualAny(t, info["did"], acc.DoubaoDeviceID)
+	testutil.EqualAny(t, info["fp"], "verify_fp_1")
+
+	// Without a stored device id every request sends a new one: nothing to bind.
+	_, ok = verification(&store.Account{ID: acc.ID, AccountType: "doubao"})
+	testutil.False(t, ok, "a challenge was offered for an unbound identity")
+
+	clearChallenge(acc.ID)
+	_, ok = verification(acc)
+	testutil.False(t, ok, "a cleared challenge was still offered")
 }

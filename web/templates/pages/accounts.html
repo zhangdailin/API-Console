@@ -110,6 +110,17 @@
   </main>
 
   {{template "account-modal.html" .}}
+  <div class="modal" id="verificationModal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="verificationTitle" style="display:none">
+    <div class="modal-content verification-modal">
+      <div class="modal-header">
+        <h3 class="modal-title" id="verificationTitle">豆包人机验证</h3>
+        <button class="modal-close" type="button" onclick="AccountVerification.close()" aria-label="关闭验证窗口">&times;</button>
+      </div>
+      <p class="helper-text verification-status" id="verificationStatus" role="status" aria-live="polite"></p>
+      <iframe id="verificationFrame" class="verification-frame" sandbox="allow-scripts" referrerpolicy="no-referrer" title="豆包官方人机验证"></iframe>
+      <p class="helper-text">验证组件来自豆包官方，在隔离框架中运行，无法访问本后台。完成后账号恢复调度，下一次请求会确认上游是否放行。</p>
+    </div>
+  </div>
   <div class="modal" id="accountImportModal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="accountImportTitle" style="display:none">
     <div class="modal-content">
       <div class="modal-header"><h2 id="accountImportTitle">恢复账号备份</h2><button class="modal-close" type="button" onclick="closeAccountImport()" aria-label="关闭">×</button></div>
@@ -131,6 +142,7 @@
   <script src="{{.AdminPath}}/js/cline-auth.js?v={{.AssetVersion}}"></script>
 	<script src="{{.AdminPath}}/js/doubao-auth.js?v={{.AssetVersion}}"></script>
   <script src="{{.AdminPath}}/js/accounts.js?v={{.AssetVersion}}"></script>
+  <script src="{{.AdminPath}}/js/account-verification.js?v={{.AssetVersion}}"></script>
   <script src="{{.AdminPath}}/js/account-transfer.js?v={{.AssetVersion}}"></script>
   <script src="{{.AdminPath}}/js/grok-sso.js?v={{.AssetVersion}}"></script>
 </body>

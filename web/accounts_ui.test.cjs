@@ -851,3 +851,10 @@ test('account and configuration management omit retired check-in controls and re
     assert.doesNotMatch(source, /签到|autoCheckin|checkin_supported|checkinAccount|\/checkin/);
   }
 });
+
+test('only a human-verification park offers the verify action', () => {
+  const { context } = loadUI();
+  assert.equal(context.needsHumanVerification({ status_message: 'status=403: doubao account requires human verification: open doubao.com' }), true);
+  assert.equal(context.needsHumanVerification({ status_message: 'status=429: doubao upstream rate limited' }), false);
+  assert.equal(context.needsHumanVerification({}), false);
+});

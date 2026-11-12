@@ -298,13 +298,13 @@ func patchType(value any) int {
 func upstreamStreamError(value map[string]any) error {
 	code := errorCodeString(value["error_code"])
 	if code == "710022004" {
-		decision := sharkDecision(value)
+		decision, raw := sharkDecision(value)
 		if decision.needsVerification() {
 			// shark_admin's verify challenge can only be answered in a real
 			// browser session. Replaying it here cannot succeed and only deepens
 			// the risk window, so this error must stop retries and park the
 			// account instead of entering the generic rate-limit path.
-			return &verificationRequired{code: code, decision: decision}
+			return &verificationRequired{code: code, decision: decision, raw: raw}
 		}
 	}
 	if code == "710022002" || code == "710022004" {

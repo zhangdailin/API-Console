@@ -68,6 +68,22 @@ type Admin struct {
 	// Login is the channel's browser authorization flow, or nil when the
 	// channel is not added that way.
 	Login *Login
+
+	// Verification returns the challenge the upstream last put in front of the
+	// account, for the operator to answer in the console, or false when none is
+	// recorded. Nil means the channel has no such challenge. VerificationSolved
+	// forgets the recorded challenge once the operator answered it.
+	Verification       func(acc *store.Account) (Verification, bool)
+	VerificationSolved func(acc *store.Account)
+}
+
+// Verification is an upstream challenge only a person can answer. SDK names
+// the upstream's own in-browser challenge kit the console loads in an isolated
+// frame; Params are handed to it unchanged. The gateway solves nothing.
+type Verification struct {
+	SDK        string         `json:"sdk"`
+	Params     map[string]any `json:"params"`
+	RecordedAt time.Time      `json:"recorded_at"`
 }
 
 // Login is a browser or device authorization flow: open an official page, poll

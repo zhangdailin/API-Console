@@ -728,6 +728,16 @@ function renderAccounts() {
     setActionContent(del, "delete", "删除");
 
     actionWrap.appendChild(edit);
+    if (needsHumanVerification(acc)) {
+      const verify = document.createElement("button");
+      verify.type = "button";
+      verify.className = "action-icon";
+      verify.dataset.action = "verify";
+      verify.dataset.id = encodeData(acc.id);
+      verify.title = "完成豆包官方人机验证";
+      setActionContent(verify, "verify", "验证");
+      actionWrap.appendChild(verify);
+    }
     actionWrap.appendChild(refresh);
     actionWrap.appendChild(del);
     tdActions.appendChild(actionWrap);
@@ -755,7 +765,14 @@ const ACTION_ICONS = {
   edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
   refresh: '<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>',
   delete: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 14H6L5 6"/>',
+  verify: '<path d="M12 3 4 6v6c0 5 3.4 8 8 9 4.6-1 8-4 8-9V6Z"/><path d="m9 12 2 2 4-4"/>',
 };
+
+// needsHumanVerification reports an account the upstream parked behind a
+// challenge only a person can answer. The server words the reason this way.
+function needsHumanVerification(acc) {
+  return String(acc && acc.status_message || "").includes("requires human verification");
+}
 
 // setActionContent gives a row action its icon and keeps the word as text, so
 // the list view and assistive technology still read 编辑 / 刷新 / 删除.
@@ -1025,6 +1042,7 @@ function bindAccountActions(container) {
     if (actionEl.dataset.action === "edit") editAccount(id);
     if (actionEl.dataset.action === "refresh") refreshToken(id);
     if (actionEl.dataset.action === "delete") deleteAccount(id);
+    if (actionEl.dataset.action === "verify" && globalThis.AccountVerification) AccountVerification.open(id);
   };
   container.onchange = (e) => {
     const target = e.target;
