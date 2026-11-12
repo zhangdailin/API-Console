@@ -152,6 +152,13 @@ func (p accountPatch) mergeGrokCredentials() {
 	if !acc.GrokModelsSyncedAt.IsZero() && (!p.staleSnapshot || modelsNewer) {
 		u.GrokModelsSyncedAt = acc.GrokModelsSyncedAt
 	}
+	consoleModelsNewer := acc.GrokConsoleModelsSyncedAt.After(existing.GrokConsoleModelsSyncedAt)
+	if acc.GrokConsoleModels != nil && (!p.staleSnapshot || consoleModelsNewer) {
+		u.GrokConsoleModels = append([]string(nil), acc.GrokConsoleModels...)
+	}
+	if !acc.GrokConsoleModelsSyncedAt.IsZero() && (!p.staleSnapshot || consoleModelsNewer) {
+		u.GrokConsoleModelsSyncedAt = acc.GrokConsoleModelsSyncedAt
+	}
 	if !acc.GrokBilling.SyncedAt.IsZero() {
 		u.GrokBilling = acc.GrokBilling
 	}

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/grok/console"
 	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/responses"
 	"orchids-api/internal/util"
@@ -166,6 +167,10 @@ func (h *Handler) HandleResponsesCompact(w http.ResponseWriter, r *http.Request)
 	modelID := normalizeModelID(chatwire.ParseLooseStringAny(payload["model"]))
 	if modelID == "" {
 		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", "model is required")
+		return
+	}
+	if console.IsConsoleModelID(modelID) {
+		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", "Grok Console routes are stateless and do not support compaction")
 		return
 	}
 	if !requireAPIKeyModel(w, r, modelID) {

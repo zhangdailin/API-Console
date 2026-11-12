@@ -1,0 +1,333 @@
+package console
+
+import (
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math/big"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/gorilla/websocket"
+
+	"orchids-api/internal/config"
+	"orchids-api/internal/loadbalancer"
+	"orchids-api/internal/store"
+	"orchids-api/internal/testutil"
+)
+
+const (
+	testCookie   = "console-test-sso-cookie-value"
+	testAPIKeyID = "0f6c1a5e-7d1b-4f3a-9c2e-1b2a3c4d5e6f"
+	testTeamID   = "aa11bb22-cc33-4d44-8e55-ff6677889900"
+)
+
+// fakeConsole is a console.x.ai stand-in that checks every DPoP proof.
+type fakeConsole struct {
+	t        *testing.T
+	server   *httptest.Server
+	mu       sync.Mutex
+	tokens   map[string]dpopJWK // access token -> bound key
+	models   []string
+	mints    atomic.Int32
+	lastBody map[string]any
+	lastPath string
+	refuse   bool
+}
+
+func b64(data []byte) string { return base64.RawURLEncoding.EncodeToString(data) }
+
+func newFakeConsole(t *testing.T) *fakeConsole {
+	f := &fakeConsole{t: t, tokens: map[string]dpopJWK{}, models: []string{"grok-4.5", "grok-imagine-video", "grok-voice-latest", "grok-stt"}}
+	upgrader := websocket.Upgrader{}
+	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/dpop/token":
+			f.mint(w, r)
+		case r.URL.Path == "/":
+			http.Redirect(w, r, "/team/"+testTeamID, http.StatusTemporaryRedirect)
+		case r.URL.Path == "/team/"+testTeamID:
+			_, _ = fmt.Fprintf(w, `<script>self.__next_f.push([1,"{\"apiKeyId\":\"%s\",\"disabled\":false}"])</script>`, testAPIKeyID)
+		case strings.HasPrefix(r.URL.Path, "/v1/"):
+			if !f.authorized(w, r) {
+				return
+			}
+			f.serveV1(w, r, &upgrader)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(f.server.Close)
+	return f
+}
+
+func (f *fakeConsole) mint(w http.ResponseWriter, r *http.Request) {
+	f.mints.Add(1)
+	if f.refuse || !strings.Contains(r.Header.Get("Cookie"), "sso="+testCookie) {
+		http.Error(w, `{"error":"unauthenticated"}`, http.StatusUnauthorized)
+		return
+	}
+	var body struct {
+		JWK dpopJWK `json:"jwk"`
+	}
+	testutil.CheckNoError(f.t, json.NewDecoder(r.Body).Decode(&body))
+	claims, _ := json.Marshal(map[string]any{"exp": time.Now().Add(time.Hour).Unix(), "cnf": map[string]any{"jkt": dpopJWKThumbprint(body.JWK)}})
+	token := b64([]byte(`{"alg":"ES256"}`)) + "." + b64(claims) + "." + b64([]byte("sig"))
+	f.mu.Lock()
+	f.tokens[token] = body.JWK
+	f.mu.Unlock()
+	_ = json.NewEncoder(w).Encode(map[string]any{"access_token": token, "token_type": "DPoP", "expires_in": 600})
+}
+
+// authorized verifies the DPoP proof the way the server would.
+func (f *fakeConsole) authorized(w http.ResponseWriter, r *http.Request) bool {
+	token := strings.TrimPrefix(r.Header.Get("Authorization"), "DPoP ")
+	f.mu.Lock()
+	jwk, ok := f.tokens[token]
+	f.mu.Unlock()
+	fail := func(reason string) bool {
+		f.t.Errorf("DPoP check failed on %s: %s", r.URL.Path, reason)
+		http.Error(w, reason, http.StatusUnauthorized)
+		return false
+	}
+	if !ok {
+		return fail("unknown access token")
+	}
+	if r.Header.Get("x-apikey") != testAPIKeyID {
+		return fail("missing x-apikey")
+	}
+	parts := strings.Split(r.Header.Get("DPoP"), ".")
+	if len(parts) != 3 {
+		return fail("malformed proof")
+	}
+	headerRaw, _ := base64.RawURLEncoding.DecodeString(parts[0])
+	claimsRaw, _ := base64.RawURLEncoding.DecodeString(parts[1])
+	sig, _ := base64.RawURLEncoding.DecodeString(parts[2])
+	var header struct {
+		Typ string  `json:"typ"`
+		JWK dpopJWK `json:"jwk"`
+	}
+	var claims struct {
+		HTM string `json:"htm"`
+		HTU string `json:"htu"`
+		ATH string `json:"ath"`
+	}
+	_ = json.Unmarshal(headerRaw, &header)
+	_ = json.Unmarshal(claimsRaw, &claims)
+	if header.Typ != "dpop+jwt" || header.JWK != jwk {
+		return fail("proof key is not the bound key")
+	}
+	x, _ := base64.RawURLEncoding.DecodeString(jwk.X)
+	y, _ := base64.RawURLEncoding.DecodeString(jwk.Y)
+	pub := &ecdsa.PublicKey{Curve: elliptic.P256(), X: new(big.Int).SetBytes(x), Y: new(big.Int).SetBytes(y)}
+	digest := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
+	if len(sig) != 64 || !ecdsa.Verify(pub, digest[:], new(big.Int).SetBytes(sig[:32]), new(big.Int).SetBytes(sig[32:])) {
+		return fail("bad proof signature")
+	}
+	tokenDigest := sha256.Sum256([]byte(token))
+	wantHTU := "http://" + r.Host + r.URL.Path
+	if claims.HTM != r.Method || claims.HTU != wantHTU || claims.ATH != b64(tokenDigest[:]) {
+		return fail(fmt.Sprintf("claims mismatch htm=%s htu=%s", claims.HTM, claims.HTU))
+	}
+	return true
+}
+
+func (f *fakeConsole) serveV1(w http.ResponseWriter, r *http.Request, upgrader *websocket.Upgrader) {
+	f.mu.Lock()
+	f.lastPath = r.URL.Path
+	f.mu.Unlock()
+	record := func() {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		f.mu.Lock()
+		f.lastBody = body
+		f.mu.Unlock()
+	}
+	switch r.URL.Path {
+	case "/v1/models":
+		data := []map[string]string{}
+		for _, id := range f.models {
+			data = append(data, map[string]string{"id": id})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
+	case "/v1/chat/completions":
+		record()
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n")
+	case "/v1/responses":
+		if r.Header.Get("x-cluster") == "" {
+			f.t.Errorf("responses without x-cluster")
+		}
+		record()
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "resp_1", "object": "response", "status": "completed"})
+	case "/v1/tts":
+		record()
+		w.Header().Set("Content-Type", "audio/mpeg")
+		_, _ = io.WriteString(w, "mp3-audio")
+	case "/v1/realtime":
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		for {
+			kind, message, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			_ = conn.WriteMessage(kind, append([]byte("echo:"), message...))
+		}
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func newTestHandler(t *testing.T, f *fakeConsole) (*Handler, *store.Store, *store.Account) {
+	t.Helper()
+	mini := miniredis.RunT(t)
+	st, err := store.New(store.Options{RedisAddr: mini.Addr(), RedisPrefix: "console:"})
+	testutil.NoError(t, err)
+	t.Cleanup(func() { _ = st.Close() })
+	cfg := &config.Config{GrokConsoleBaseURL: f.server.URL}
+	h := NewHandler(cfg, loadbalancer.NewWithCacheTTL(st, time.Millisecond))
+	h.client.httpClient = f.server.Client()
+	acc := &store.Account{Name: "c", AccountType: "grok", GrokProvider: ProviderConsole, ClientCookie: testCookie, Enabled: true}
+	testutil.NoError(t, PrepareAccount(acc))
+	status, err := verifyWith(context.Background(), h.client, acc)
+	testutil.NoError(t, err)
+	testutil.Equal(t, status, "")
+	testutil.NoError(t, st.CreateAccount(context.Background(), acc))
+	testutil.NoError(t, PublishRoutes(context.Background(), st))
+	return h, st, acc
+}
+
+func TestConsoleVerifyPublishesQualifiedRoutesFromTheCatalogRead(t *testing.T) {
+	f := newFakeConsole(t)
+	_, st, acc := newTestHandler(t, f)
+	ctx := context.Background()
+	testutil.Equal(t, len(acc.GrokConsoleModels), 4)
+	testutil.Equal(t, len(acc.GrokModels), 0)
+
+	chat, err := st.GetModelByChannelAndModelID(ctx, "grok", "console/grok-4.5")
+	testutil.NoError(t, err)
+	testutil.Equal(t, chat.Provider, ProviderConsole)
+	testutil.Equal(t, chat.UpstreamModel, "grok-4.5")
+	testutil.True(t, chat.SupportsCapability(store.CapabilityChat))
+	testutil.True(t, chat.SupportsCapability(store.CapabilityMessages))
+	voice, err := st.GetModelByChannelAndModelID(ctx, "grok", "console/grok-voice-latest")
+	testutil.NoError(t, err)
+	testutil.True(t, voice.SupportsCapability(store.CapabilityTTS))
+	stt, err := st.GetModelByChannelAndModelID(ctx, "grok", "console/grok-stt")
+	testutil.NoError(t, err)
+	testutil.True(t, stt.SupportsCapability(store.CapabilitySTT))
+	// The bare name stays Build's: no Console row may take it.
+	_, err = st.GetModelByChannelAndModelID(ctx, "grok", "grok-4.5")
+	testutil.True(t, err != nil)
+
+	// Without an active Console account nothing is published.
+	acc.Enabled = false
+	testutil.NoError(t, st.UpdateAccount(ctx, acc))
+	testutil.NoError(t, PublishRoutes(ctx, st))
+	_, err = st.GetModelByChannelAndModelID(ctx, "grok", "console/grok-4.5")
+	testutil.True(t, err != nil, "rows are pruned without an observing account")
+}
+
+func TestConsoleVerifyReportsARefusedSession(t *testing.T) {
+	f := newFakeConsole(t)
+	f.refuse = true
+	client := NewClient(&config.Config{GrokConsoleBaseURL: f.server.URL})
+	client.httpClient = f.server.Client()
+	acc := &store.Account{AccountType: "grok", GrokProvider: ProviderConsole, ClientCookie: testCookie}
+	status, err := verifyWith(context.Background(), client, acc)
+	testutil.Equal(t, status, "401")
+	testutil.True(t, err != nil)
+}
+
+func TestConsoleChatAndResponsesReachTheUpstreamWithTheUpstreamModel(t *testing.T) {
+	f := newFakeConsole(t)
+	h, _, _ := newTestHandler(t, f)
+
+	rec := httptest.NewRecorder()
+	h.HandleChatCompletions(rec, httptest.NewRequest(http.MethodPost, "/grok/v1/chat/completions", strings.NewReader(`{"model":"console/grok-4.5","stream":true,"messages":[{"role":"user","content":"hi"}]}`)))
+	testutil.Equal(t, rec.Code, http.StatusOK)
+	testutil.MustContain(t, rec.Body.String(), `"content":"hi"`)
+	testutil.Equal(t, f.lastBody["model"], any("grok-4.5"))
+
+	rec = httptest.NewRecorder()
+	h.HandleResponses(rec, httptest.NewRequest(http.MethodPost, "/grok/v1/responses", strings.NewReader(`{"model":"console/grok-4.5","input":"hi","store":true}`)))
+	testutil.Equal(t, rec.Code, http.StatusOK)
+	testutil.Equal(t, f.lastBody["store"], any(false))
+
+	rec = httptest.NewRecorder()
+	h.HandleResponses(rec, httptest.NewRequest(http.MethodPost, "/grok/v1/responses", strings.NewReader(`{"model":"console/grok-4.5","input":"hi","previous_response_id":"resp_0"}`)))
+	testutil.Equal(t, rec.Code, http.StatusBadRequest)
+
+	rec = httptest.NewRecorder()
+	h.HandleChatCompletions(rec, httptest.NewRequest(http.MethodPost, "/grok/v1/chat/completions", strings.NewReader(`{"model":"console/grok-unknown","messages":[]}`)))
+	testutil.Equal(t, rec.Code, http.StatusNotFound)
+
+	// One DPoP session served every request.
+	testutil.Equal(t, f.mints.Load(), int32(1))
+}
+
+func TestConsoleAudioSpeechMapsOpenAIFields(t *testing.T) {
+	f := newFakeConsole(t)
+	h, _, _ := newTestHandler(t, f)
+	rec := httptest.NewRecorder()
+	h.HandleAudioSpeech(rec, httptest.NewRequest(http.MethodPost, "/grok/v1/audio/speech", strings.NewReader(`{"model":"grok-voice-latest","input":"hello","voice":"eve","response_format":"wav"}`)))
+	testutil.Equal(t, rec.Code, http.StatusOK)
+	testutil.Equal(t, rec.Body.String(), "mp3-audio")
+	testutil.Equal(t, f.lastBody["text"], any("hello"))
+	testutil.Equal(t, f.lastBody["voice_id"], any("eve"))
+	testutil.Equal(t, f.lastBody["language"], any("en"))
+	format, _ := f.lastBody["output_format"].(map[string]any)
+	testutil.Equal(t, format["codec"], any("wav"))
+	_, hasModel := f.lastBody["model"]
+	testutil.False(t, hasModel)
+
+	rec = httptest.NewRecorder()
+	h.HandleAudioSpeech(rec, httptest.NewRequest(http.MethodPost, "/grok/v1/audio/speech", strings.NewReader(`{"input":"x","response_format":"midi"}`)))
+	testutil.Equal(t, rec.Code, http.StatusBadRequest)
+}
+
+func TestConsoleRealtimeRelaysBothDirections(t *testing.T) {
+	f := newFakeConsole(t)
+	h, _, _ := newTestHandler(t, f)
+	gateway := httptest.NewServer(http.HandlerFunc(h.HandleRealtime))
+	defer gateway.Close()
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(gateway.URL, "http")+"/realtime?model=grok-voice-latest", nil)
+	testutil.NoError(t, err)
+	defer conn.Close()
+	testutil.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"session.update"}`)))
+	_, message, err := conn.ReadMessage()
+	testutil.NoError(t, err)
+	testutil.Equal(t, string(message), `echo:{"type":"session.update"}`)
+}
+
+func TestParseHomeSkipsDisabledKeys(t *testing.T) {
+	page := []byte(`{\"apiKeyId\":\"11111111-1111-4111-8111-111111111111\",\"disabled\":true},{\"apiKeyId\":\"22222222-2222-4222-8222-222222222222\",\"disabled\":false},\"teamId\":\"` + testTeamID + `\"`)
+	home := parseHome(page)
+	testutil.Equal(t, home.apiKeyID, "22222222-2222-4222-8222-222222222222")
+	testutil.Equal(t, home.teamID, testTeamID)
+}
+
+func TestClassifiersKeepConsoleAccountsOutOfTheWebPlane(t *testing.T) {
+	acc := &store.Account{AccountType: "grok", GrokProvider: ProviderConsole, CredentialType: "sso", ClientCookie: testCookie}
+	testutil.True(t, acc.IsGrokConsole())
+	testutil.False(t, acc.IsGrokWeb())
+	testutil.True(t, IsConsoleModelID("Console/grok-4.5"))
+	testutil.False(t, IsConsoleModelID("grok-4.5"))
+	testutil.Equal(t, qualify("grok-stt", ""), "console/grok-stt")
+	testutil.True(t, CredentialKey(acc) != "" && !strings.HasPrefix(CredentialKey(acc), "grok:sso:"))
+}

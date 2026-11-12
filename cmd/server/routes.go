@@ -163,8 +163,17 @@ func registerRoutes(
 	// Grok Web (grok.com SSO) media and resources. Only the grok channel serves
 	// them; the conversation routes above dispatch Web models by identifier.
 	webHandler := grokHandler.Web()
-	registerWithPrefixes(mux, grokPrefixes, "/images/generations", inferenceAuth(webHandler.HandleImagesGenerations))
-	registerWithPrefixes(mux, grokPrefixes, "/images/edits", inferenceAuth(webHandler.HandleImagesEdits))
+	registerWithPrefixes(mux, grokPrefixes, "/images/generations", inferenceAuth(grokHandler.HandleImagesGenerations))
+	registerWithPrefixes(mux, grokPrefixes, "/images/edits", inferenceAuth(grokHandler.HandleImagesEdits))
+	// Grok Console (console.x.ai SSO) voice: native and OpenAI-shaped speech
+	// and transcription, and the realtime voice WebSocket.
+	consoleHandler := grokHandler.Console()
+	registerWithPrefixes(mux, grokPrefixes, "/tts", inferenceAuth(consoleHandler.HandleTTS))
+	registerWithPrefixes(mux, grokPrefixes, "/tts/voices", inferenceAuth(consoleHandler.HandleTTSVoices))
+	registerWithPrefixes(mux, grokPrefixes, "/stt", inferenceAuth(consoleHandler.HandleSTT))
+	registerWithPrefixes(mux, grokPrefixes, "/audio/speech", inferenceAuth(consoleHandler.HandleAudioSpeech))
+	registerWithPrefixes(mux, grokPrefixes, "/audio/transcriptions", inferenceAuth(consoleHandler.HandleAudioTranscriptions))
+	registerWithPrefixes(mux, grokPrefixes, "/realtime", inferenceAuth(consoleHandler.HandleRealtime))
 	registerWithPrefixes(mux, grokPrefixes, "/videos", inferenceAuth(webHandler.HandleVideosCreate))
 	registerWithPrefixes(mux, grokPrefixes, "/videos/", inferenceAuth(webVideoResource(webHandler)))
 	registerWithPrefixes(mux, grokPrefixes, "/files/", inferenceAuth(webHandler.HandleFiles))

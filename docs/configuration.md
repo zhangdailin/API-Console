@@ -130,6 +130,8 @@ Grok 渠道同时承载 Build（OAuth CLI）与 Web（grok.com 网页 SSO Cookie
 
 Web 模型路由表（`grok-chat-fast/auto/expert/heavy`、`grok-imagine-image(-lite/-2.0/-edit)`、`grok-imagine-video`）只在存在启用、认证有效且 24 小时内成功读取过对应模式额度窗口的 Web 账号时发布；`grok-chat-heavy` 还要求 Heavy 账号。没有这样的账号时 Web 行被清理，不发布内置列表。Web 对话模型支持 `/chat/completions`、`/messages`（网关转换为 Chat）、`/responses`（经 Chat 桥接）；图片与视频模型支持 `/images/*`、`/videos`、`/media/inputs`，不支持 `/messages`。`grok-imagine-image-lite` 走 fast 对话额度（Basic 账号可用），每次只取首张图，`n` 最大 4。
 
+Grok Console（console.x.ai）是 grok 渠道的第三个平面：账号为 `grok_provider=console` 的 SSO Cookie 账号（可由 Web 账号“转为 Console”创建），网关用 Cookie 换取 DPoP 绑定的访问令牌，并为团队读取（必要时创建）API Key ID。Console 路由一律带 `console/` 前缀（例如 `console/grok-4.5`），只在某个启用、认证有效的 Console 账号 24 小时内成功读取的 `/v1/models` 列出该模型时发布；读取失败或没有这样的账号时不发布任何 Console 行。Console 无状态：`/responses` 以 `store=false` 转发，不支持 `previous_response_id` 与 compact。Console 流量与 grok.com 共用 `grok_web_proxy_url` 与 Cloudflare Cookie，`grok_console_base_url` 可覆盖默认的 `https://console.x.ai`。网关不读取 Console 额度，账号额度显示为未知。
+
 Grok 返回上游提供的思考内容：Chat 使用 `reasoning_content`，Messages 使用 `thinking` 内容块，原生 Responses 保留 reasoning 事件与输出项。思考与正文分别传输；思考项身份、`encrypted_content` 和 `reasoning_tokens` 保留，用于续接与计费。
 
 Grok 语义空闲按有效生成事件衡量，keepalive 不延长时钟；下游背压不应计成上游读取空闲。它与其他通道的字节空闲监视不同。

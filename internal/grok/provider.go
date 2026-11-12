@@ -18,7 +18,7 @@ const ProviderBuild = "build"
 const modelSnapshotTTL = 6 * time.Hour
 
 func NormalizeProvider(acc *store.Account) bool {
-	if !accountpolicy.IsGrokAccount(acc) || web.IsWebAccount(acc) {
+	if !accountpolicy.IsGrokAccount(acc) || web.IsWebAccount(acc) || acc.IsGrokConsole() {
 		return false
 	}
 	if strings.EqualFold(strings.TrimSpace(acc.GrokProvider), ProviderBuild) {
@@ -29,7 +29,9 @@ func NormalizeProvider(acc *store.Account) bool {
 }
 
 func AccountSupportsModel(acc *store.Account, modelID string) bool {
-	if acc == nil {
+	// Only Build accounts serve Build models; a Web or Console credential must
+	// never be selected for one, whatever it lists.
+	if acc == nil || web.IsWebAccount(acc) || acc.IsGrokConsole() {
 		return false
 	}
 	modelID = strings.TrimSpace(modelID)

@@ -108,8 +108,9 @@ type Account struct {
 	TeamID            string    `json:"team_id,omitempty"`
 	// GrokRefresh is the scheduled OAuth refresh outcome (backoff, last error code).
 	GrokRefresh GrokRefreshState `json:"grok_refresh"`
-	// GrokProvider identifies the xAI product boundary: "build" (OAuth CLI) or
-	// "web" (grok.com SSO cookie, held in ClientCookie).
+	// GrokProvider identifies the xAI product boundary: "build" (OAuth CLI),
+	// "web" (grok.com SSO cookie, held in ClientCookie) or "console"
+	// (console.x.ai, the same kind of SSO cookie, also in ClientCookie).
 	GrokProvider string `json:"grok_provider,omitempty"`
 	// NSFWEnabled records that the Web SSO account has had the grok.com NSFW
 	// (unhinged/spicy) preference switched on by the account tools.
@@ -128,6 +129,12 @@ type Account struct {
 	GrokModels         []string               `json:"grok_models,omitempty"`
 	GrokModelCatalog   []modelcatalog.Profile `json:"grok_model_catalog,omitempty"`
 	GrokModelsSyncedAt time.Time              `json:"grok_models_synced_at"`
+	// GrokConsoleModels is the last successful console.x.ai /v1/models read of
+	// a Console account. It is kept apart from GrokModels on purpose: Build
+	// selection reads GrokModels, and a Console catalog there would route Build
+	// requests to a Console credential.
+	GrokConsoleModels         []string  `json:"grok_console_models,omitempty"`
+	GrokConsoleModelsSyncedAt time.Time `json:"grok_console_models_synced_at"`
 	// GrokBilling contains only official xAI Build billing information. It is
 	// deliberately separate from GrokRateLimits, whose request/token headers
 	// are short-lived throttling windows rather than subscription allowance.
@@ -398,6 +405,10 @@ func applyGrokRouteDefaults(model *Model) {
 	if model == nil {
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(model.Provider), GrokProviderConsole) {
+		applyGrokConsoleRouteDefaults(model)
+		return
+	}
 	if strings.EqualFold(strings.TrimSpace(model.Provider), GrokProviderWeb) {
 		applyGrokWebRouteDefaults(model)
 		return
@@ -442,6 +453,44 @@ func applyGrokWebRouteDefaults(model *Model) {
 	}
 	model.NormalizeRoute()
 }
+
+// GrokProviderConsole is the Grok Console (console.x.ai SSO) route plane.
+const GrokProviderConsole = "console"
+
+// GrokConsoleRoutePrefix qualifies every Console route: Console serves model
+// names (grok-4.5, grok-imagine-video-1.5) that Build may serve too, and both
+// planes share the grok channel's catalog.
+const GrokConsoleRoutePrefix = "console/"
+
+// applyGrokConsoleRouteDefaults derives a Console route's capabilities from
+// its upstream model name.
+func applyGrokConsoleRouteDefaults(model *Model) {
+	id := strings.ToLower(strings.TrimSpace(model.ModelID))
+	model.Provider = GrokProviderConsole
+	if strings.TrimSpace(model.Origin) == "" || strings.EqualFold(model.Origin, "manual") {
+		model.Origin = "catalog"
+	}
+	if strings.TrimSpace(model.UpstreamModel) == "" {
+		model.UpstreamModel = strings.TrimPrefix(id, GrokConsoleRoutePrefix)
+	}
+	upstream := strings.ToLower(model.UpstreamModel)
+	switch {
+	case strings.Contains(upstream, "stt"):
+		model.Capabilities = []string{CapabilitySTT}
+	case strings.Contains(upstream, "voice"):
+		model.Capabilities = []string{CapabilityRealtime, CapabilityTTS}
+	case strings.Contains(upstream, "video"):
+		model.Capabilities = []string{CapabilityVideo}
+	case strings.Contains(upstream, "image"):
+		model.Capabilities = []string{CapabilityImage, CapabilityImageEdit}
+	default:
+		model.Capabilities = []string{CapabilityChat, CapabilityMessages, CapabilityResponses}
+	}
+	model.NormalizeRoute()
+}
+
+// ApplyGrokConsoleRouteDefaults initializes route metadata for a Console row.
+func ApplyGrokConsoleRouteDefaults(model *Model) { applyGrokConsoleRouteDefaults(model) }
 
 // ApplyGrokWebRouteDefaults initializes route metadata for a Grok Web row.
 func ApplyGrokWebRouteDefaults(model *Model) { applyGrokWebRouteDefaults(model) }
@@ -602,7 +651,18 @@ func (a *Account) IsGrokWeb() bool {
 	if a == nil || !strings.EqualFold(strings.TrimSpace(a.AccountType), "grok") || strings.EqualFold(strings.TrimSpace(a.CredentialType), "oauth") {
 		return false
 	}
+	if a.IsGrokConsole() {
+		return false
+	}
 	return strings.EqualFold(strings.TrimSpace(a.GrokProvider), GrokProviderWeb) || strings.EqualFold(strings.TrimSpace(a.CredentialType), "sso")
+}
+
+// IsGrokConsole reports whether the account is a Grok Console (console.x.ai
+// SSO) account. A Console account carries the same SSO cookie as a Web
+// account, so the provider field, not the credential, tells them apart.
+func (a *Account) IsGrokConsole() bool {
+	return a != nil && strings.EqualFold(strings.TrimSpace(a.AccountType), "grok") &&
+		strings.EqualFold(strings.TrimSpace(a.GrokProvider), GrokProviderConsole)
 }
 
 func (a *Account) Secrets() []string {

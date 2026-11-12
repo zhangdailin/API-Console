@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
+	"orchids-api/internal/grok/console"
 	"orchids-api/internal/grok/web"
 	"orchids-api/internal/httpserver"
 	"orchids-api/internal/responses"
@@ -26,25 +28,82 @@ func (h *Handler) Web() *web.Handler {
 	return h.web
 }
 
-// peekWebModel reads the request body, restores it for the next reader and
-// reports whether its model names a Grok Web route. A body that cannot be read
-// is answered here and reported as handled.
-func peekWebModel(w http.ResponseWriter, r *http.Request) (isWeb, handled bool) {
+// Console returns the Grok Console plane handler.
+func (h *Handler) Console() *console.Handler {
+	if h == nil {
+		return nil
+	}
+	return h.console
+}
+
+// plane names the route plane a request's model belongs to.
+type plane int
+
+const (
+	planeBuild plane = iota
+	planeWeb
+	planeConsole
+)
+
+// peekPlane reads a JSON request body, restores it for the next reader and
+// reports which plane its model names. A body that cannot be read is answered
+// here and reported as handled.
+func peekPlane(w http.ResponseWriter, r *http.Request) (plane, bool) {
 	if r == nil || r.Body == nil || r.Method != http.MethodPost {
-		return false, false
+		return planeBuild, false
 	}
 	body, err := httpserver.ReadBoundedJSONBody(w, r)
 	if err != nil {
-		return false, true
+		return planeBuild, true
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	var probe struct {
 		Model string `json:"model"`
 	}
 	if json.Unmarshal(body, &probe) != nil {
-		return false, false
+		return planeBuild, false
 	}
-	return web.IsWebModelID(probe.Model), false
+	switch {
+	case console.IsConsoleModelID(probe.Model):
+		return planeConsole, false
+	case web.IsWebModelID(probe.Model):
+		return planeWeb, false
+	}
+	return planeBuild, false
+}
+
+// peekWebModel reports whether a request's model names a Grok Web route.
+func peekWebModel(w http.ResponseWriter, r *http.Request) (isWeb, handled bool) {
+	p, handled := peekPlane(w, r)
+	return p == planeWeb, handled
+}
+
+// HandleImagesGenerations dispatches image generation between the Web and
+// Console planes.
+func (h *Handler) HandleImagesGenerations(w http.ResponseWriter, r *http.Request) {
+	if !strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/") {
+		if p, handled := peekPlane(w, r); handled {
+			return
+		} else if p == planeConsole && h.console != nil {
+			h.console.HandleImagesGenerations(w, r)
+			return
+		}
+	}
+	h.web.HandleImagesGenerations(w, r)
+}
+
+// HandleImagesEdits dispatches image edits. A multipart upload is always a
+// Web edit; Console edits take JSON.
+func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
+	if !strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/") {
+		if p, handled := peekPlane(w, r); handled {
+			return
+		} else if p == planeConsole && h.console != nil {
+			h.console.HandleImagesEdits(w, r)
+			return
+		}
+	}
+	h.web.HandleImagesEdits(w, r)
 }
 
 // webResponsesBridge serves /responses for Web models through the shared

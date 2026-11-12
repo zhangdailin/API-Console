@@ -11,6 +11,7 @@ import (
 
 	"orchids-api/internal/accountpolicy"
 	"orchids-api/internal/config"
+	"orchids-api/internal/grok/console"
 	"orchids-api/internal/grok/web"
 	"orchids-api/internal/modelcatalog"
 	"orchids-api/internal/provider"
@@ -29,6 +30,9 @@ func adminPort() *provider.Admin {
 			if acc == nil {
 				return ""
 			}
+			if console.IsConsoleAccount(acc) {
+				return console.CredentialKey(acc)
+			}
 			if web.IsWebAccount(acc) {
 				return web.CredentialKey(acc)
 			}
@@ -39,6 +43,9 @@ func adminPort() *provider.Admin {
 			return "grok:" + token
 		},
 		IdentityKey: func(acc *store.Account) string {
+			if console.IsConsoleAccount(acc) {
+				return console.IdentityKey(acc)
+			}
 			if web.IsWebAccount(acc) {
 				return web.IdentityKey(acc)
 			}
@@ -57,6 +64,9 @@ func adminPort() *provider.Admin {
 			if acc == nil {
 				return ""
 			}
+			if console.IsConsoleAccount(acc) {
+				return console.Fingerprint(acc)
+			}
 			if web.IsWebAccount(acc) {
 				return web.Fingerprint(acc)
 			}
@@ -66,6 +76,9 @@ func adminPort() *provider.Admin {
 			return util.Fingerprint(util.FirstNonEmpty(acc.ClientCookie, acc.RefreshToken, acc.Token))
 		},
 		PrepareCreate: func(acc *store.Account) error {
+			if console.LooksLikeConsoleAccount(acc) {
+				return console.PrepareAccount(acc)
+			}
 			if web.LooksLikeWebAccount(acc) {
 				return web.PrepareAccount(acc)
 			}
@@ -80,6 +93,10 @@ func adminPort() *provider.Admin {
 			return nil
 		},
 		PrepareUpdate: func(acc, existing *store.Account) error {
+			if console.IsConsoleAccount(existing) {
+				acc.AccountType = existing.AccountType
+				return console.PrepareUpdate(acc, existing)
+			}
 			if web.IsWebAccount(existing) {
 				acc.AccountType = existing.AccountType
 				return web.PrepareUpdate(acc, existing)
@@ -95,6 +112,12 @@ func adminPort() *provider.Admin {
 			return nil
 		},
 		PrepareImport: func(acc *store.Account) string {
+			if console.LooksLikeConsoleAccount(acc) {
+				if err := console.PrepareAccount(acc); err != nil {
+					return "missing_sso_token"
+				}
+				return ""
+			}
 			if web.LooksLikeWebAccount(acc) {
 				if err := web.PrepareAccount(acc); err != nil {
 					return "missing_sso_token"
@@ -108,6 +131,10 @@ func adminPort() *provider.Admin {
 			return ""
 		},
 		Project: func(out *store.Account) {
+			if console.IsConsoleAccount(out) {
+				console.ProjectOutput(out)
+				return
+			}
 			if web.IsWebAccount(out) {
 				web.ProjectOutput(out)
 				return
@@ -115,6 +142,10 @@ func adminPort() *provider.Admin {
 			projectOutput(out)
 		},
 		ProjectQuota: func(fields map[string]any, acc *store.Account, limit, current float64, observedTokens int64, usageObserved bool) {
+			if console.IsConsoleAccount(acc) {
+				console.ProjectQuota(fields, acc)
+				return
+			}
 			if web.IsWebAccount(acc) {
 				web.ProjectQuota(fields, acc)
 				return
@@ -123,6 +154,23 @@ func adminPort() *provider.Admin {
 		},
 		ObservedUsageWindow: FreeBuildUsageWindow,
 		Verify: func(ctx context.Context, env provider.Env, acc *store.Account) (string, int, error) {
+			if console.IsConsoleAccount(acc) {
+				status, err := console.VerifyAccount(ctx, env.Config, acc)
+				if err == nil {
+					if env.Store != nil {
+						defer func() {
+							if publishErr := console.PublishRoutes(context.WithoutCancel(ctx), env.Store); publishErr != nil {
+								slog.Warn("grok console route publication failed", "error", publishErr)
+							}
+						}()
+					}
+					return "", 0, nil
+				}
+				if status != "" {
+					return status, 0, err
+				}
+				return "", http.StatusBadGateway, err
+			}
 			if web.IsWebAccount(acc) {
 				status, err := web.VerifyAccount(ctx, env.Config, acc)
 				if err == nil {

@@ -9,6 +9,7 @@ import (
 	"orchids-api/internal/accountpolicy"
 	"orchids-api/internal/channel"
 	"orchids-api/internal/config"
+	"orchids-api/internal/grok/console"
 	"orchids-api/internal/grok/web"
 	"orchids-api/internal/modelcatalog"
 	"orchids-api/internal/provider"
@@ -122,6 +123,10 @@ func maintain(ctx context.Context, env provider.Env, acc *store.Account) {
 	}
 	if web.IsWebAccount(acc) {
 		web.Maintain(ctx, env.Config, env.Store, acc)
+		return
+	}
+	if console.IsConsoleAccount(acc) {
+		console.Maintain(ctx, env.Config, env.Store, acc)
 		return
 	}
 	if acc == nil || !strings.EqualFold(strings.TrimSpace(acc.CredentialType), "oauth") {

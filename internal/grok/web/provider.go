@@ -22,6 +22,10 @@ func ProviderForAccount(acc *store.Account) string {
 		return ProviderBuild
 	}
 	switch strings.ToLower(strings.TrimSpace(acc.GrokProvider)) {
+	case store.GrokProviderConsole:
+		// A Console account carries the same SSO cookie as a Web one; only
+		// the provider field tells them apart, so it must win over the cookie.
+		return store.GrokProviderConsole
 	case ProviderWeb:
 		return ProviderWeb
 	case ProviderBuild:

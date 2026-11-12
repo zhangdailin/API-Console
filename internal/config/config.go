@@ -108,7 +108,11 @@ type Config struct {
 	// GrokWebProxyURL routes only grok.com (Web SSO) traffic through a proxy,
 	// for a host whose own address Cloudflare challenges. Empty uses the
 	// general proxy settings.
-	GrokWebProxyURL          string  `json:"grok_web_proxy_url,omitempty"`
+	GrokWebProxyURL string `json:"grok_web_proxy_url,omitempty"`
+	// GrokConsoleBaseURL is the console.x.ai origin used by the Grok Console
+	// plane. Empty selects https://console.x.ai. Console traffic uses the same
+	// transport (and grok_web_proxy_url) as grok.com.
+	GrokConsoleBaseURL       string  `json:"grok_console_base_url,omitempty"`
 	GrokStatsigSignerURL     *string `json:"grok_statsig_signer_url,omitempty"`
 	GrokStatsigID            string  `json:"grok_statsig_id,omitempty"`
 	GrokConfigCFClearance    string  `json:"grok_cf_clearance,omitempty"`

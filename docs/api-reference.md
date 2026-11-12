@@ -41,6 +41,9 @@
 | POST | `/responses/compact` | 网关摘要 / Build 压缩路径；三通道两种前缀均支持 |
 | POST | `/images/generations`、`/images/edits` | 仅 Grok：Web Imagine 生图 / 改图 |
 | POST / GET | `/videos`、`/videos/{id}`、`/videos/{id}/content` | 仅 Grok：视频任务创建、查询与下载。Web 模型（`grok-imagine-video`）仅文生视频；Build 视频模型（如 `grok-imagine-video-1.5`，仅当某个 Build 账号的上游目录列出该模型时才有路由）走 CLI 代理的 `/videos/generations`，支持最多 8 张 `input_references`（https URL 或 `data:image/`，带参考图时最高 720p）。Build 任务不跨进程重启续跑 |
+| POST | `/tts`、`/tts/voices`（GET）、`/stt` | 仅 Grok Console：console.x.ai 原生语音合成与转写。`/tts` 接受 Console 自身字段（`text`、`language`、`voice_id`、`output_format`…），`model` 只用于选路由（默认 `grok-voice-latest`）；`/stt` 为 multipart（`file` 或 `url`，默认模型 `grok-stt`） |
+| POST | `/audio/speech`、`/audio/transcriptions` | 仅 Grok Console：OpenAI 兼容的语音合成与转写。`/audio/speech` 映射 `input`→`text`、`voice`→`voice_id`、`response_format`→编码（mp3/opus/aac/flac/wav/pcm），`language` 默认 `en`；`/audio/transcriptions` 支持 `response_format` 为 `json`（默认）、`verbose_json`、`text` |
+| GET（WebSocket） | `/realtime?model=` | 仅 Grok Console：实时语音 WebSocket，双向转发到 console.x.ai 的 `/v1/realtime` |
 | GET | `/files/{image|video}/{name}` | 仅 Grok：本地媒体缓存文件 |
 | POST / GET / DELETE | `/media/inputs`、`/media/inputs/import`、`/media/inputs/{id}` | 仅 Grok：临时媒体输入（file_id） |
 
@@ -150,6 +153,7 @@ Chat 桥接写递增 sequence_number，便于客户端识别顺序；当前没�
 | `/api/grok/sso/refresh` | POST `{"account_ids":[...]}`（空为全部 Web 账号）同步身份与额度，并重新发布 Web 模型 |
 | `/api/grok/sso/nsfw` | POST `{"account_ids":[...]}` 在 grok.com 开启 NSFW |
 | `/api/grok/sso/convert-build` | POST `{"account_ids":[...]}`（空为全部 Web 账号）用 Web 账号的 SSO 会话自动批准 Build 设备授权，生成或更新对应的 Build OAuth 账号（按 xAI 用户身份合并）；Web 账号不变。逐账号返回 `success`、`build_account_id`、`created`，失败时给出 `reason`：`browser_verification_required`（xAI 要求浏览器校验，需改用设备授权手动完成）、`sso_rejected`、`timeout`、`failed` |
+| `/api/grok/sso/convert-console` | POST `{"account_ids":[...]}`（空为全部 Web 账号）为每个 Web 账号创建使用同一 SSO Cookie 的 Console 账号（`grok_provider=console`），先在 console.x.ai 验证并读取模型目录，再发布 `console/` 路由；已有同 Cookie 的 Console 账号时返回 `already_exists`，不重复创建 |
 | `/api/grok/availability` | GET 各 Grok 平面可用账号数 |
 | `/api/grok/tools/v1/*` | Grok 工具页推理投影（models、chat/completions、responses、images、videos、files、media/inputs），以管理会话鉴权，资源归属固定为 `admin-tools` |
 | `/api/grok/admin/*` | 工具页管理接口：imagine start/stop/sse/ws/config、video start/stop/sse、voice/token（LiveKit）、voice/livekit（LiveKit 信令中转：浏览器无法直连 livekit.grok.com 时由服务端转发 `/rtc` WebSocket 与 `/rtc/validate`，上游固定、同源校验；媒体 WebRTC 不经过本服务）、media 库 |

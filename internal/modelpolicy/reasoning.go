@@ -31,6 +31,9 @@ func GrokModelProfiles(model *store.Model, accounts []*store.Account) []modelcat
 	if strings.EqualFold(strings.TrimSpace(model.Provider), store.GrokProviderWeb) {
 		return grokWebModelProfiles(model, accounts)
 	}
+	if strings.EqualFold(strings.TrimSpace(model.Provider), store.GrokProviderConsole) {
+		return grokConsoleModelProfiles(model, accounts)
+	}
 	id := strings.TrimSpace(model.UpstreamModel)
 	if id == "" {
 		id = ExternalPublicID(model.ModelID)
@@ -48,6 +51,23 @@ func GrokModelProfiles(model *store.Model, accounts []*store.Account) []modelcat
 		}
 	}
 	return modelcatalog.Aggregate(catalogs...)
+}
+
+// grokConsoleModelProfiles answers entitlement for a Console route: an enabled,
+// auth-active Console account whose own catalog read listed the model.
+func grokConsoleModelProfiles(model *store.Model, accounts []*store.Account) []modelcatalog.Profile {
+	id := strings.TrimSpace(model.UpstreamModel)
+	for _, acc := range accounts {
+		if acc == nil || !acc.Enabled || !acc.IsGrokConsole() || !store.AccountAuthActive(acc) || strings.TrimSpace(acc.StatusCode) == "401" || !model.AllowsAccount(acc.ID) {
+			continue
+		}
+		for _, listed := range acc.GrokConsoleModels {
+			if strings.EqualFold(strings.TrimSpace(listed), id) {
+				return []modelcatalog.Profile{{ModelID: id}}
+			}
+		}
+	}
+	return nil
 }
 
 // grokWebModelProfiles answers entitlement for a Grok Web route. grok.com has

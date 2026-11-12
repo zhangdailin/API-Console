@@ -61,7 +61,7 @@ func LooksLikeWebAccount(acc *store.Account) bool {
 	if acc == nil || !strings.EqualFold(strings.TrimSpace(acc.AccountType), "grok") {
 		return false
 	}
-	if strings.EqualFold(strings.TrimSpace(acc.CredentialType), "oauth") {
+	if strings.EqualFold(strings.TrimSpace(acc.CredentialType), "oauth") || acc.IsGrokConsole() {
 		return false
 	}
 	if strings.EqualFold(strings.TrimSpace(acc.GrokProvider), ProviderWeb) || strings.EqualFold(strings.TrimSpace(acc.CredentialType), "sso") {

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/grok/web"
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
@@ -170,19 +171,19 @@ func TestBuildVideoJobThroughTheVideosEndpoint(t *testing.T) {
 }
 
 func TestBuildVideoStatusAndURLRules(t *testing.T) {
-	_, done, err := parseBuildVideoStatus([]byte(`{"status":"failed","error_message":"moderated"}`), nil)
+	_, done, err := grokbase.ParseVideoStatus([]byte(`{"status":"failed","error_message":"moderated"}`), nil)
 	testutil.False(t, done)
 	testutil.MustContain(t, err.Error(), "moderated")
-	_, _, err = parseBuildVideoStatus([]byte(`{"status":"completed"}`), nil)
+	_, _, err = grokbase.ParseVideoStatus([]byte(`{"status":"completed"}`), nil)
 	testutil.True(t, err != nil, "done without a URL is a failure")
-	_, done, err = parseBuildVideoStatus([]byte(`{"status":"queued"}`), nil)
+	_, done, err = grokbase.ParseVideoStatus([]byte(`{"status":"queued"}`), nil)
 	testutil.NoError(t, err)
 	testutil.False(t, done)
 
-	testutil.True(t, trustedBuildVideoURL("https://videos.x.ai/a.mp4"))
-	testutil.True(t, trustedBuildVideoURL("https://assets.grok.com/a.mp4"))
-	testutil.False(t, trustedBuildVideoURL("http://videos.x.ai/a.mp4"))
-	testutil.False(t, trustedBuildVideoURL("https://x.ai.evil.example/a.mp4"))
+	testutil.True(t, grokbase.TrustedVideoURL("https://videos.x.ai/a.mp4"))
+	testutil.True(t, grokbase.TrustedVideoURL("https://assets.grok.com/a.mp4"))
+	testutil.False(t, grokbase.TrustedVideoURL("http://videos.x.ai/a.mp4"))
+	testutil.False(t, grokbase.TrustedVideoURL("https://x.ai.evil.example/a.mp4"))
 
 	_, err = buildVideoPayload(web.VideoBackendJob{UpstreamModel: "m", Prompt: "p", Resolution: "1080p", InputReferences: []string{"https://e.com/a.png"}})
 	testutil.True(t, err != nil)
