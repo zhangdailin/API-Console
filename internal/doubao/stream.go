@@ -128,8 +128,36 @@ func consumeStream(body io.Reader, emit func(string)) (string, error) {
 	}
 	if text == "" {
 		slog.Warn("doubao stream carried no readable answer", "shapes", shapeSummary(shapes))
+	} else if unrendered := unrenderedShapes(shapes); len(unrendered) > 0 {
+		// The answer was delivered without these blocks (an image the parser
+		// does not know, for one). Their layout, never their content, says what
+		// to parse next; the diagnostic bundle holds the stream itself.
+		slog.Info("doubao stream carried blocks the parser does not render", "shapes", shapeSummary(unrendered))
 	}
 	return text, nil
+}
+
+// renderedContentFields are the block content fields consumeStream turns into
+// output: answer text and generated images.
+var renderedContentFields = map[string]bool{"text_block": true, "creation_block": true}
+
+// unrenderedShapes keeps the counted block shapes that carry a content field
+// the parser does not render.
+func unrenderedShapes(shapes map[string]int) map[string]int {
+	out := map[string]int{}
+	for shape, count := range shapes {
+		index := strings.LastIndex(shape, "/")
+		if index < 0 || !strings.Contains(shape, "/block_type=") {
+			continue
+		}
+		for field := range strings.SplitSeq(shape[index+1:], "+") {
+			if field != "" && !renderedContentFields[field] {
+				out[shape] = count
+				break
+			}
+		}
+	}
+	return out
 }
 
 // blockShapes records, for every content block in one frame, its block type,

@@ -445,10 +445,18 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 		logger.LogUpstreamRequest(c.baseURL()+"/chat/completion", map[string]string{"provider": "doubao", "model": req.Model}, body)
 	}
 	query := c.commonQuery(c.acc, fingerprintQuery(jar))
-	response, err := c.doJSONWithReferer(ctx, http.MethodPost, c.baseURL()+"/chat/completion?"+query, body, jar, false, "application/json", "text/event-stream", c.baseURL()+"/chat/"+localID)
+	chatURL := c.baseURL() + "/chat/completion?" + query
+	// The diagnostic bundle keeps the upstream stream as received, so a block
+	// this parser drops can be read afterwards. Only the chat call is captured:
+	// the upload calls carry short-lived storage credentials. No header is
+	// passed, so neither the cookie nor the CSRF token reaches the bundle.
+	attempt := debug.BeginUpstream(ctx, http.MethodPost, chatURL, nil, body)
+	response, err := c.doJSONWithReferer(ctx, http.MethodPost, chatURL, body, jar, false, "application/json", "text/event-stream", c.baseURL()+"/chat/"+localID)
+	attempt.Response(response, err)
 	if err != nil {
 		return err
 	}
+	response.Body = attempt.CaptureBody(response.Body)
 	defer response.Body.Close()
 	if response.StatusCode >= 400 {
 		raw, _ := io.ReadAll(io.LimitReader(response.Body, 8192))

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"orchids-api/internal/config"
+	"orchids-api/internal/debug"
 	"orchids-api/internal/httpclient"
 	"orchids-api/internal/prompt"
 	"orchids-api/internal/store"
@@ -609,4 +610,56 @@ func TestVerificationOffersTheRefusedChallenge(t *testing.T) {
 	clearChallenge(acc.ID)
 	_, ok = verification(acc)
 	testutil.False(t, ok, "a cleared challenge was still offered")
+}
+
+// A block the parser does not render is reported by layout only, and a text
+// block is not.
+func TestUnrenderedShapesNamesOnlyUnknownContent(t *testing.T) {
+	shapes := map[string]int{}
+	var frame map[string]any
+	testutil.NoError(t, json.Unmarshal([]byte(`{"content":{"content_block":[
+		{"block_type":10000,"content":{"text_block":{"text":"来啦"}}},
+		{"block_type":10099,"content":{"image_card_block":{"images":[{"url":"https://img/x.png"}]}}}]}}`), &frame))
+	blockShapes(frame, "STREAM_MSG_NOTIFY", shapes)
+	summary := shapeSummary(unrenderedShapes(shapes))
+	testutil.MustContain(t, summary, "block_type=10099")
+	testutil.MustContain(t, summary, "image_card_block")
+	testutil.MustNotContain(t, summary, "text_block")
+	testutil.MustNotContain(t, summary, "img/x.png")
+}
+
+// The diagnostic bundle receives the chat stream as the upstream sent it, and
+// the recorded request carries neither the cookie nor the CSRF token.
+func TestChatStreamIsCapturedForDiagnostics(t *testing.T) {
+	stream := "event: STREAM_MSG_NOTIFY\ndata: {\"content\":{\"content_block\":[{\"block_type\":10000,\"content\":{\"text_block\":{\"text\":\"来啦\"}}},{\"block_type\":10099,\"content\":{\"image_card_block\":{\"images\":[{\"url\":\"https://img/x.png\"}]}}}]}}\n\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/chat/completion") {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, stream)
+			return
+		}
+		_, _ = io.WriteString(w, `{"status_code":0,"downlink_body":{"create_conv_downlink_body":{"conversation_info":{"conversation_id":"conv-1"}}}}`)
+	}))
+	defer server.Close()
+	acc := &store.Account{ID: 9103, AccountType: "doubao", ClientCookie: `{"sessionid":"secret-session","passport_csrf_token":"secret-csrf"}`, DoubaoDeviceID: "7500000000000000004", DoubaoWebID: "7500000000000000005"}
+	client := NewFromAccount(acc, &config.Config{DoubaoBaseURL: server.URL, DoubaoRequestGapMS: 1})
+	ctx, capture := debug.WithCapture(context.Background(), "doubao-capture-test")
+	var answer strings.Builder
+	err := client.SendRequestWithPayload(ctx, upstream.UpstreamRequest{Model: "doubao", Messages: []prompt.Message{{Role: "user", Content: prompt.MessageContent{Text: "我想看小猫猫"}}}},
+		func(m upstream.SSEMessage) {
+			if delta, ok := m.Event["delta"].(string); ok {
+				answer.WriteString(delta)
+			}
+		}, nil)
+	testutil.NoError(t, err)
+	testutil.MustContain(t, answer.String(), "来啦")
+	sections := map[string]string{}
+	for _, section := range capture.Bundle().Sections {
+		sections[section.Name] = section.Payload
+	}
+	testutil.MustContain(t, sections["upstream_001_response.txt"], "image_card_block")
+	request := sections["upstream_001_request.json"]
+	testutil.MustContain(t, request, "/chat/completion")
+	testutil.MustNotContain(t, request, "secret-session")
+	testutil.MustNotContain(t, request, "secret-csrf")
 }
