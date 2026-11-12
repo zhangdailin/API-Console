@@ -31,6 +31,9 @@ func consumeStream(body io.Reader, emit func(string)) (string, error) {
 	}
 	var images []creationImage
 	seenImages := map[string]bool{}
+	// found holds the image-search results, emitted where they arrive: the
+	// upstream sends them ahead of the text they illustrate.
+	var found strings.Builder
 	// shapes counts the event names and block layouts of the stream, never
 	// their content, so an answer this parser could not read can be diagnosed.
 	shapes := map[string]int{}
@@ -67,6 +70,15 @@ func consumeStream(body io.Reader, emit func(string)) (string, error) {
 				}
 				if messageID != "" && messageID == userMessageID {
 					break
+				}
+				for _, image := range searchImages(value) {
+					if seenImages[image.url] {
+						continue
+					}
+					seenImages[image.url] = true
+					markdown := searchImageMarkdown(image)
+					found.WriteString(markdown)
+					emit(markdown)
 				}
 				fragment, full := partitionText(value)
 				if fragment != "" {
@@ -126,6 +138,9 @@ func consumeStream(body io.Reader, emit func(string)) (string, error) {
 		text += markdown
 		emit(markdown)
 	}
+	// The returned answer keeps the stream's order: the search images came
+	// first. Tool mode reads only this value, so it must carry them too.
+	text = found.String() + text
 	if text == "" {
 		slog.Warn("doubao stream carried no readable answer", "shapes", shapeSummary(shapes))
 	} else if unrendered := unrenderedShapes(shapes); len(unrendered) > 0 {
@@ -138,8 +153,9 @@ func consumeStream(body io.Reader, emit func(string)) (string, error) {
 }
 
 // renderedContentFields are the block content fields consumeStream turns into
-// output: answer text and generated images.
-var renderedContentFields = map[string]bool{"text_block": true, "creation_block": true}
+// output (answer text and generated images) or deliberately leaves out
+// (loading_block is the "searching for images" progress line).
+var renderedContentFields = map[string]bool{"text_block": true, "creation_block": true, "loading_block": true}
 
 // unrenderedShapes keeps the counted block shapes that carry a content field
 // the parser does not render.
@@ -354,4 +370,91 @@ func errorCodeString(value any) string {
 		return strings.TrimSpace(typed)
 	}
 	return strings.TrimSpace(fmt.Sprint(value))
+}
+
+// searchImage is an image-search result Doubao attached to its answer.
+type searchImage struct{ url, caption string }
+
+// searchImages extracts image-search results. They ride on a text block's
+// meta_info (type 202 observed), whose info is a JSON string or an object
+// holding media[].image; full_size_url is a list of signed byteimg.com
+// addresses that load without the account's cookies.
+func searchImages(value map[string]any) []searchImage {
+	var out []searchImage
+	var walk func(any)
+	walk = func(node any) {
+		switch typed := node.(type) {
+		case map[string]any:
+			if metas, ok := typed["meta_info"].([]any); ok {
+				for _, raw := range metas {
+					meta, _ := raw.(map[string]any)
+					out = append(out, metaImages(meta["info"])...)
+				}
+			}
+			for key, child := range typed {
+				if key != "meta_info" {
+					walk(child)
+				}
+			}
+		case []any:
+			for _, child := range typed {
+				walk(child)
+			}
+		}
+	}
+	walk(value)
+	return out
+}
+
+func metaImages(raw any) []searchImage {
+	info, _ := raw.(map[string]any)
+	if text, ok := raw.(string); ok {
+		_ = json.Unmarshal([]byte(text), &info)
+	}
+	media, _ := info["media"].([]any)
+	var out []searchImage
+	for _, item := range media {
+		entry, _ := item.(map[string]any)
+		image, _ := entry["image"].(map[string]any)
+		if image == nil {
+			continue
+		}
+		url := firstURL(image["full_size_url"])
+		if url == "" {
+			url = firstURL(image["thumb_url"])
+		}
+		if url == "" {
+			continue
+		}
+		caption, _ := image["img_caption"].(string)
+		out = append(out, searchImage{url: url, caption: caption})
+	}
+	return out
+}
+
+// firstURL reads an address field that is either a string or a list of them.
+func firstURL(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case []any:
+		for _, item := range typed {
+			if url, ok := item.(string); ok && strings.TrimSpace(url) != "" {
+				return strings.TrimSpace(url)
+			}
+		}
+	}
+	return ""
+}
+
+// searchImageMarkdown renders one result as a Markdown image on its own line.
+// The caption is upstream text, so the characters that would end the alt text
+// are removed; the address only needs its closing parenthesis escaped.
+func searchImageMarkdown(image searchImage) string {
+	caption := strings.NewReplacer("[", "", "]", "", "\n", " ", "\r", " ").Replace(strings.TrimSpace(image.caption))
+	if caption == "" {
+		caption = "image"
+	}
+	url := strings.NewReplacer(" ", "%20", "(", "%28", ")", "%29").Replace(image.url)
+	return fmt.Sprintf("![%s](%s)\n", caption, url)
 }

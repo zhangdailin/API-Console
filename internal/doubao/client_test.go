@@ -663,3 +663,29 @@ func TestChatStreamIsCapturedForDiagnostics(t *testing.T) {
 	testutil.MustNotContain(t, request, "secret-session")
 	testutil.MustNotContain(t, request, "secret-csrf")
 }
+
+// Image-search results ride on a text block's meta_info, ahead of the text
+// they illustrate. They are emitted where they arrive, once each, and the
+// returned answer keeps that order.
+func TestSearchImagesAreEmittedAheadOfTheText(t *testing.T) {
+	info, _ := json.Marshal(map[string]any{"scene_type": 1, "media": []any{
+		map[string]any{"type": 1, "image": map[string]any{"full_size_url": []any{"https://p5-flow-imagex-sign.byteimg.com/a.image?x-expires=1"}, "thumb_url": "https://p5-flow-imagex-sign.byteimg.com/a-thumb.image", "img_caption": "软萌[奶橘]"}},
+		map[string]any{"type": 1, "image": map[string]any{"thumb_url": "https://p5-flow-imagex-sign.byteimg.com/b(1).image", "img_caption": ""}},
+	}})
+	images, _ := json.Marshal(map[string]any{"patch_op": []any{map[string]any{"patch_object": 1, "patch_type": 1, "patch_value": map[string]any{"content_block": []any{
+		map[string]any{"block_type": 10000, "block_id": "b1", "content": map[string]any{"text_block": map[string]any{}}, "meta_info": []any{map[string]any{"type": 202, "info": string(info)}}},
+	}}}}})
+	text, _ := json.Marshal(map[string]any{"patch_op": []any{map[string]any{"patch_object": 1, "patch_type": 1, "patch_value": map[string]any{"content_block": []any{
+		map[string]any{"block_type": 10000, "block_id": "b1", "patch_type": 1, "content": map[string]any{"text_block": map[string]any{"text": "\n\n奶橘来啦！"}}},
+	}}}}})
+	stream := "event: STREAM_CHUNK\ndata: " + string(images) + "\n\nevent: STREAM_CHUNK\ndata: " + string(images) + "\n\nevent: STREAM_CHUNK\ndata: " + string(text) + "\n\n"
+	var deltas []string
+	got, err := consumeStream(strings.NewReader(stream), func(delta string) { deltas = append(deltas, delta) })
+	testutil.NoError(t, err)
+	want := "![软萌奶橘](https://p5-flow-imagex-sign.byteimg.com/a.image?x-expires=1)\n" +
+		"![image](https://p5-flow-imagex-sign.byteimg.com/b%281%29.image)\n" +
+		"\n\n奶橘来啦！"
+	testutil.Equal(t, got, want)
+	testutil.Equal(t, strings.Join(deltas, ""), want)
+	testutil.Equal(t, len(deltas), 3)
+}
