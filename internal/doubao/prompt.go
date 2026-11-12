@@ -3,6 +3,7 @@ package doubao
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"orchids-api/internal/prompt"
@@ -29,7 +30,11 @@ func renderPrompt(req upstream.UpstreamRequest) string {
 			role = "system"
 		}
 		for _, part := range renderMessage(role, message, toolNames) {
-			fmt.Fprintf(&out, "[%s]\n%s\n\n", part.role, part.text)
+			text := part.text
+			if part.role == "assistant" {
+				text = describeImages(text)
+			}
+			fmt.Fprintf(&out, "[%s]\n%s\n\n", part.role, text)
 		}
 	}
 	return strings.TrimSpace(out.String())
@@ -202,4 +207,20 @@ func emitToolOrText(text string, tools []any, emit func(upstream.SSEMessage)) bo
 	}
 	emit(upstream.SSEMessage{Type: "model.text-delta", Event: map[string]any{"delta": text}})
 	return false
+}
+
+var markdownImage = regexp.MustCompile(`!\[([^\]]*)\]\(([^)\s]*)\)`)
+
+// describeImages replaces the Markdown images of an earlier answer with their
+// caption. Those images are links this gateway rendered from Doubao's image
+// results; replayed as history, the model copied their format and wrote image
+// links of its own with invented addresses, which do not load (403).
+func describeImages(text string) string {
+	return markdownImage.ReplaceAllStringFunc(text, func(match string) string {
+		caption := strings.TrimSpace(markdownImage.FindStringSubmatch(match)[1])
+		if caption == "" || caption == "image" {
+			return "[图片]"
+		}
+		return "[图片：" + caption + "]"
+	})
 }

@@ -689,3 +689,20 @@ func TestSearchImagesAreEmittedAheadOfTheText(t *testing.T) {
 	testutil.Equal(t, strings.Join(deltas, ""), want)
 	testutil.Equal(t, len(deltas), 3)
 }
+
+// An earlier answer's images reach the model as captions only: replaying their
+// links led it to write image links with invented addresses. A user's own text
+// is left as it was.
+func TestHistoryImagesAreReplayedAsCaptions(t *testing.T) {
+	answer := "来啦🥺\n![歪头奶橘](https://p5-flow-imagex-sign.byteimg.com/a.image?x-signature=s)\n![image](https://aka.doubaocdn.com/s/x)\n毛茸茸"
+	got := renderPrompt(upstream.UpstreamRequest{Messages: []prompt.Message{
+		{Role: "user", Content: prompt.MessageContent{Text: "看 ![我的猫](https://example.com/cat.png)"}},
+		{Role: "assistant", Content: prompt.MessageContent{Text: answer}},
+		{Role: "user", Content: prompt.MessageContent{Text: "可以"}},
+	}})
+	testutil.MustContain(t, got, "[图片：歪头奶橘]")
+	testutil.MustContain(t, got, "[图片]\n毛茸茸")
+	testutil.MustNotContain(t, got, "byteimg.com")
+	testutil.MustNotContain(t, got, "doubaocdn.com")
+	testutil.MustContain(t, got, "![我的猫](https://example.com/cat.png)")
+}
