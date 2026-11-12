@@ -54,28 +54,3 @@ func NormalizeProvider(acc *store.Account) bool {
 	}
 	return changed
 }
-
-// IsGrokWebSSOSource identifies an administrator-manageable Web SSO account.
-func IsGrokWebSSOSource(acc *store.Account) bool {
-	return IsWebAccount(acc)
-}
-
-// CollectWebSSOSourcesByToken returns Web SSO accounts grouped by normalized
-// credential. For accidental duplicates the lowest ID is selected so callers
-// never depend on backing-store iteration order.
-func CollectWebSSOSourcesByToken(accounts []*store.Account, enabledOnly bool) map[string]*store.Account {
-	result := make(map[string]*store.Account, len(accounts))
-	for _, acc := range accounts {
-		if !IsGrokWebSSOSource(acc) || (enabledOnly && !acc.Enabled) {
-			continue
-		}
-		token := NormalizeSSOToken(grokSSOTokenRaw(acc))
-		if token == "" {
-			continue
-		}
-		if current := result[token]; current == nil || acc.ID < current.ID {
-			result[token] = acc
-		}
-	}
-	return result
-}

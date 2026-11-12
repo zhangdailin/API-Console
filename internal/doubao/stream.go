@@ -244,10 +244,6 @@ func imageMarkdown(images []creationImage) string {
 	return out.String()
 }
 
-func snapshotText(value map[string]any) string {
-	return collectText(value, false)
-}
-
 // partitionText splits one frame into appended fragments (patch_type 1) and the
 // longest whole-answer snapshot (any other patch type). The web client uses
 // both: an answer can open with fragments and continue with CHUNK_DELTA events.
@@ -297,54 +293,6 @@ func patchType(value any) int {
 		return parsed
 	}
 	return 0
-}
-
-// deltaText returns text that a patch appends rather than replaces.
-func deltaText(value map[string]any) string {
-	return collectText(value, true)
-}
-
-// collectText walks a content tree for text blocks. patch_type 1 marks an
-// appended fragment, so several blocks in one frame are concatenated; other
-// patches carry the whole text so far and only the longest one counts.
-func collectText(value map[string]any, appendOnly bool) string {
-	var out strings.Builder
-	var walk func(any) string
-	walk = func(node any) string {
-		switch typed := node.(type) {
-		case map[string]any:
-			if block, ok := typed["text_block"].(map[string]any); ok {
-				if text, _ := block["text"].(string); text != "" {
-					if appendOnly {
-						out.WriteString(text)
-					} else {
-						return text
-					}
-				}
-			}
-			for _, child := range typed {
-				if found := walk(child); found != "" {
-					if !appendOnly {
-						return found
-					}
-				}
-			}
-		case []any:
-			for _, child := range typed {
-				if found := walk(child); found != "" {
-					if !appendOnly {
-						return found
-					}
-				}
-			}
-		}
-		return ""
-	}
-	found := walk(value)
-	if appendOnly {
-		return out.String()
-	}
-	return found
 }
 
 func upstreamStreamError(value map[string]any) error {

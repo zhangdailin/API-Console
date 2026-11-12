@@ -495,12 +495,8 @@ func validateTextOnly(req upstream.UpstreamRequest) error {
 	return req.ValidateProtocolControls("doubao")
 }
 
-func chatBody(conversationID, text, modelID string) ([]byte, error) {
-	return chatBodyWithAttachments(conversationID, fmt.Sprintf("local_%d", time.Now().UnixMilli()), text, modelID, nil)
-}
-
-// chatBodyWithAttachments is chatBody plus the attachment messages that must
-// precede the text block in the same request.
+// chatBodyWithAttachments builds the chat request, with the attachment
+// messages that must precede the text block in the same request.
 func chatBodyWithAttachments(conversationID, localID, text, modelID string, attachments []storeURI) ([]byte, error) {
 	model, ok := FindModel(modelID)
 	if !ok {

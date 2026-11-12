@@ -166,8 +166,7 @@
 }
 
 .grok-tools-page .section-hidden,
-.grok-tools-page .hidden,
-.grok-tools-page .is-hidden {
+.grok-tools-page .hidden {
   display: none !important;
 }
 
@@ -1162,64 +1161,6 @@
 .voice-instruction-input {
   min-height: 96px;
   resize: vertical;
-}
-
-.voice-transcript-meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-
-.voice-transcript {
-  min-height: 80px;
-  max-height: 320px;
-  margin: 0;
-  padding: 12px;
-  overflow: auto;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  background: var(--bg-surface-hover);
-  color: var(--text-main);
-  font: inherit;
-  line-height: 1.55;
-  white-space: pre-wrap;
-}
-
-.voice-transcript-meta {
-  color: var(--text-secondary);
-  font-size: 0.82rem;
-}
-
-.voice-word-table-wrap {
-  max-height: 320px;
-  overflow: auto;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-}
-
-.voice-word-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.8rem;
-}
-
-.voice-word-table th,
-.voice-word-table td {
-  padding: 7px 9px;
-  border-bottom: 1px solid var(--border-color);
-  text-align: left;
-  white-space: nowrap;
-}
-
-.voice-word-table th {
-  position: sticky;
-  top: 0;
-  background: var(--bg-surface);
-}
-
-#audioStatus.is-error {
-  color: var(--danger);
 }
 
 .visualizer {

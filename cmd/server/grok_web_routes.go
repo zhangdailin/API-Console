@@ -84,9 +84,6 @@ func registerGrokWebAdminRoutes(mux *http.ServeMux, sessionAuth func(http.Handle
 		path    string
 		handler http.HandlerFunc
 	}{
-		{"/tokens/nsfw/enable", webHandler.HandleAdminNSFWEnable},
-		{"/tokens/nsfw/enable/async", webHandler.HandleAdminNSFWEnableAsync},
-		{"/batch/", webHandler.HandleAdminBatchTask},
 		{"/media/images", webHandler.HandleAdminMediaImages},
 		{"/media/images/stats", webHandler.HandleAdminMediaImageStats},
 		{"/media/images/delete", webHandler.HandleAdminMediaImagesDelete},

@@ -124,20 +124,6 @@ func upstreamRetryAfterSeconds(err error) int {
 // unbounded Decode lets one client allocate arbitrary memory in the gateway.
 const maxGrokJSONBodyBytes = 32 << 20
 
-// requireGrokStore writes the standard 503 response and returns false when the
-// handler has no account store. Admin handlers use it as:
-//
-//	if !requireGrokStore(w, h) {
-//		return
-//	}
-func requireGrokStore(w http.ResponseWriter, h *Handler) bool {
-	if h == nil || h.lb == nil || h.lb.Store == nil {
-		http.Error(w, "store not configured", http.StatusServiceUnavailable)
-		return false
-	}
-	return true
-}
-
 // writeSSE sends an SSE frame and flushes when the writer supports it.
 func writeSSE(w http.ResponseWriter, flusher http.Flusher, event string, data []byte) {
 	httpserver.WriteSSEBytes(w, event, data)

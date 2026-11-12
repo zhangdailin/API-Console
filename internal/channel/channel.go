@@ -98,16 +98,6 @@ func ChatOnlyIDs() []ID {
 	return out
 }
 
-// ChatOnlyPrefixes returns the inference bases of the chat-only channels, so
-// route assembly can keep their extra endpoints unregistered.
-func ChatOnlyPrefixes() []string {
-	out := []string{}
-	for _, id := range ChatOnlyIDs() {
-		out = append(out, PrefixesFor(id)...)
-	}
-	return out
-}
-
 // GenericPrefixesExcept returns the generic bases without the excluded channels.
 func GenericPrefixesExcept(excluded ...ID) []string {
 	skip := make(map[ID]struct{}, len(excluded))

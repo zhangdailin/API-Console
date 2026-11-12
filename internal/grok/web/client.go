@@ -15,20 +15,17 @@ import (
 )
 
 const (
-	defaultBaseURL          = "https://grok.com"
-	defaultAssetsBaseURL    = "https://assets.grok.com"
-	defaultChatPath         = "/rest/app-chat/conversations/new"
-	defaultConversationPath = "/rest/app-chat/conversations"
-	defaultUploadFilePath   = "/rest/app-chat/upload-file"
-	defaultCanvasCreatePath = "/rest/media/canvas/create"
-	defaultMediaConvoPath   = "/rest/media/conversation/create"
-	defaultLivekitPath      = "/rest/livekit/tokens"
-	defaultRateLimitsPath   = "/rest/rate-limits"
-	defaultAcceptTOSURL     = "https://accounts.x.ai/auth_mgmt.AuthManagement/SetTosAcceptedVersion"
-	defaultSetBirthPath     = "/rest/auth/set-birth-date"
-	defaultNSFWMgmtPath     = "/auth_mgmt.AuthManagement/UpdateUserFeatureControls"
-	defaultUA               = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
-	defaultAppChatSecCHUA   = `"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"`
+	defaultBaseURL        = "https://grok.com"
+	defaultAssetsBaseURL  = "https://assets.grok.com"
+	defaultChatPath       = "/rest/app-chat/conversations/new"
+	defaultUploadFilePath = "/rest/app-chat/upload-file"
+	defaultLivekitPath    = "/rest/livekit/tokens"
+	defaultRateLimitsPath = "/rest/rate-limits"
+	defaultAcceptTOSURL   = "https://accounts.x.ai/auth_mgmt.AuthManagement/SetTosAcceptedVersion"
+	defaultSetBirthPath   = "/rest/auth/set-birth-date"
+	defaultNSFWMgmtPath   = "/auth_mgmt.AuthManagement/UpdateUserFeatureControls"
+	defaultUA             = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+	defaultAppChatSecCHUA = `"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"`
 )
 
 type Client struct {

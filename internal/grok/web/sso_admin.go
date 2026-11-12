@@ -481,3 +481,13 @@ func (h *Handler) HandleAvailability(w http.ResponseWriter, r *http.Request) {
 	}
 	util.WriteJSON(w, map[string]any{"counts": counts, "web_synced": webSynced, "web_sync_error": webError, "web_plans": plans, "media": media})
 }
+
+// maskToken names a credential without revealing any part of it: a short,
+// non-reversible digest that is safe in names, responses and logs.
+func maskToken(raw string) string {
+	token := strings.TrimSpace(raw)
+	if token == "" {
+		return ""
+	}
+	return "sso#" + util.Fingerprint(token)
+}

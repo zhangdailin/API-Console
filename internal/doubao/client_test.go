@@ -317,7 +317,7 @@ func TestFetchQRDecodesCompressedPassportJSON(t *testing.T) {
 }
 
 func TestChatBodyUsesConfiguredModel(t *testing.T) {
-	raw, err := chatBody("conversation", "hello", "doubao-pro")
+	raw, err := chatBodyWithAttachments("conversation", "local_test", "hello", "doubao-pro", nil)
 	testutil.NoError(t, err)
 	if !bytes.Contains(raw, []byte(`"model_item_key":"5"`)) || !bytes.Contains(raw, []byte(`"mode_id":"3"`)) {
 		t.Fatalf("body missing pro route: %s", raw)
@@ -327,7 +327,7 @@ func TestChatBodyUsesConfiguredModel(t *testing.T) {
 // The builder split must keep every field the web client depends on, including
 // the duplicated values that live in both option and ext.
 func TestChatBodyKeepsTheWebClientEnvelope(t *testing.T) {
-	raw, err := chatBody("conv-1", "hello", "doubao-work")
+	raw, err := chatBodyWithAttachments("conv-1", "local_test", "hello", "doubao-work", nil)
 	testutil.NoError(t, err)
 	var body map[string]any
 	if err := json.Unmarshal(raw, &body); err != nil {
@@ -360,7 +360,7 @@ func TestChatBodyKeepsTheWebClientEnvelope(t *testing.T) {
 // attachment turn look hand-built: the model reported no image until every
 // field the reference project documented was present.
 func TestChatBodyKeepsTheFullOptionEnvelope(t *testing.T) {
-	raw, err := chatBody("conv-1", "hello", "doubao")
+	raw, err := chatBodyWithAttachments("conv-1", "local_test", "hello", "doubao", nil)
 	testutil.NoError(t, err)
 	var body struct {
 		Option map[string]json.RawMessage `json:"option"`

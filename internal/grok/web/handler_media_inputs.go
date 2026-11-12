@@ -28,7 +28,6 @@ const (
 	maxMediaInputBytes        = 20 << 20
 	maxMediaInputRequestBytes = maxMediaInputBytes + (1 << 20)
 	maxResolvedMediaBytes     = 32 << 20
-	localMediaInputPrefix     = "orchids-media-input:"
 )
 
 var mediaInputQuotaMu sync.Mutex
