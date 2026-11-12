@@ -36,6 +36,7 @@ func registerGrokWebAdminRoutes(mux *http.ServeMux, sessionAuth func(http.Handle
 	mux.HandleFunc("/api/grok/sso/import", sessionAuth(webHandler.HandleSSOImport))
 	mux.HandleFunc("/api/grok/sso/refresh", sessionAuth(webHandler.HandleSSORefresh))
 	mux.HandleFunc("/api/grok/sso/nsfw", sessionAuth(webHandler.HandleSSONSFW))
+	mux.HandleFunc("/api/grok/sso/convert-build", sessionAuth(grokHandler.HandleSSOConvertBuild))
 	mux.HandleFunc("/api/grok/availability", sessionAuth(webHandler.HandleAvailability))
 
 	// The tools page is an authenticated management-plane projection of the

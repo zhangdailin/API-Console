@@ -149,6 +149,7 @@ Chat 桥接写递增 sequence_number，便于客户端识别顺序；当前没�
 | `/api/grok/sso/import` | POST 批量导入 Grok Web SSO：`text` 或 `tokens`、`pool`（auto / basic / super / heavy）、`name_prefix`、`weight`、`refresh`、`enable_nsfw`；返回新增 / 重复 / 无效计数，Token 只以摘要显示 |
 | `/api/grok/sso/refresh` | POST `{"account_ids":[...]}`（空为全部 Web 账号）同步身份与额度，并重新发布 Web 模型 |
 | `/api/grok/sso/nsfw` | POST `{"account_ids":[...]}` 在 grok.com 开启 NSFW |
+| `/api/grok/sso/convert-build` | POST `{"account_ids":[...]}`（空为全部 Web 账号）用 Web 账号的 SSO 会话自动批准 Build 设备授权，生成或更新对应的 Build OAuth 账号（按 xAI 用户身份合并）；Web 账号不变。逐账号返回 `success`、`build_account_id`、`created`，失败时给出 `reason`：`browser_verification_required`（xAI 要求浏览器校验，需改用设备授权手动完成）、`sso_rejected`、`timeout`、`failed` |
 | `/api/grok/availability` | GET 各 Grok 平面可用账号数 |
 | `/api/grok/tools/v1/*` | Grok 工具页推理投影（models、chat/completions、responses、images、videos、files、media/inputs），以管理会话鉴权，资源归属固定为 `admin-tools` |
 | `/api/grok/admin/*` | 工具页管理接口：imagine start/stop/sse/ws/config、video start/stop/sse、voice/token（LiveKit）、voice/livekit（LiveKit 信令中转：浏览器无法直连 livekit.grok.com 时由服务端转发 `/rtc` WebSocket 与 `/rtc/validate`，上游固定、同源校验；媒体 WebRTC 不经过本服务）、media 库 |

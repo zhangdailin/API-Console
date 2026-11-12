@@ -269,6 +269,7 @@
     $("grokSSOSubmit")?.addEventListener("click", submit);
     $("grokSSORefreshBtn")?.addEventListener("click", () => batch("/api/grok/sso/refresh", "同步额度"));
     $("grokSSONSFWBtn")?.addEventListener("click", () => batch("/api/grok/sso/nsfw", "开启 NSFW"));
+    $("grokSSOConvertBuildBtn")?.addEventListener("click", () => batch("/api/grok/sso/convert-build", "转为 Build"));
     syncToolbar();
   });
 

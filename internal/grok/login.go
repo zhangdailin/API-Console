@@ -68,19 +68,7 @@ func loginPort() *provider.Login {
 			if !ok {
 				return nil, errors.New("grok login produced an unexpected grant")
 			}
-			acc := &store.Account{
-				Name:              deviceLoginAccountName,
-				AccountType:       "grok",
-				CredentialType:    "oauth",
-				OAuthAccessToken:  tokens.accessToken,
-				OAuthRefreshToken: tokens.refreshToken,
-				OAuthExpiresAt:    tokens.expiresAt,
-				Weight:            1,
-				Enabled:           true,
-			}
-			ApplyCLIOAuthIdentity(acc)
-			ApplyCLIOAuthIdentityToken(acc, tokens.identityToken)
-			normalizeTokenInput(acc)
+			acc := accountFromDeviceGrant(tokens)
 			return acc, nil
 		},
 		SlowDown: func(err error) bool {
@@ -89,6 +77,24 @@ func loginPort() *provider.Login {
 		},
 		Merge: mergeDeviceLogin,
 	}
+}
+
+// accountFromDeviceGrant builds the Build account a device grant stands for.
+func accountFromDeviceGrant(tokens deviceGrant) *store.Account {
+	acc := &store.Account{
+		Name:              deviceLoginAccountName,
+		AccountType:       "grok",
+		CredentialType:    "oauth",
+		OAuthAccessToken:  tokens.accessToken,
+		OAuthRefreshToken: tokens.refreshToken,
+		OAuthExpiresAt:    tokens.expiresAt,
+		Weight:            1,
+		Enabled:           true,
+	}
+	ApplyCLIOAuthIdentity(acc)
+	ApplyCLIOAuthIdentityToken(acc, tokens.identityToken)
+	normalizeTokenInput(acc)
+	return acc
 }
 
 // deviceLoginAccountName is the placeholder name of an account whose identity

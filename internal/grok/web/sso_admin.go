@@ -285,6 +285,15 @@ func (h *Handler) resolveSSOAccounts(r *http.Request) ([]*store.Account, error) 
 	return out, nil
 }
 
+// ResolveSSOAccounts is resolveSSOAccounts for the grok package's SSO
+// operations that span both planes.
+func (h *Handler) ResolveSSOAccounts(r *http.Request) ([]*store.Account, error) {
+	if h == nil || h.lb == nil || h.lb.Store == nil {
+		return nil, fmt.Errorf("store not configured")
+	}
+	return h.resolveSSOAccounts(r)
+}
+
 // refreshAccounts verifies each account against grok.com, persists the
 // observation and republishes the Web routes once at the end.
 func (h *Handler) refreshAccounts(ctx context.Context, accounts []*store.Account) []ssoAccountResult {
