@@ -63,11 +63,44 @@ function quotaProvenance(acc) {
   };
 }
 
+// Warp pools are observations, never a single spendable balance. Keep nullable
+// fields and each anonymous pool intact; do not derive them from local counters.
+const WARP_INCLUDED_QUOTA_NOTE = "仅包含额度，不含额外/按量余额";
+
+function warpQuotaNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function warpQuotaDate(value) {
+  if (typeof value !== "string" || value.startsWith("0001")) return "";
+  return Number.isFinite(Date.parse(value)) ? value : "";
+}
+
+function warpQuotaStats(acc) {
+  const snapshot = acc?.warp_quota || {};
+  const status = ["ok", "partial", "error", "unknown"].includes(snapshot.status) ? snapshot.status : "unknown";
+  const windows = (Array.isArray(snapshot.windows) ? snapshot.windows : [])
+    .filter(pool => pool && ["workspace_monthly", "personal", "legacy_requests"].includes(pool.scope) &&
+      ["credits", "requests"].includes(pool.unit))
+    .map(pool => ({
+      scope: pool.scope, unit: pool.unit,
+      limit: warpQuotaNumber(pool.limit), used: warpQuotaNumber(pool.used), remaining: warpQuotaNumber(pool.remaining),
+      unlimited: pool.unlimited === true, has_unlimited: pool.has_unlimited === true,
+      reset_at: warpQuotaDate(pool.reset_at),
+    }));
+  return {
+    supported: windows.some(pool => [pool.limit, pool.used, pool.remaining].some(value => value !== null)),
+    warpPools: { status, windows, synced_at: warpQuotaDate(snapshot.synced_at), attempted_at: warpQuotaDate(snapshot.attempted_at) },
+    note: WARP_INCLUDED_QUOTA_NOTE,
+  };
+}
+
 // Sidebar health and account rows consume the same quota projection.
 function getQuotaStats(acc) {
   if (!acc) return null;
   const type = normalizeSidebarAccountType(acc);
   const empty = { supported: false, limit: 0, remaining: 0, used: 0, pctRemaining: 0 };
+  if (type === "warp") return warpQuotaStats(acc);
   // Cline is normally unmetered; preserve an explicit server quota snapshot.
   if (type === "cline" && !(acc.quota_supported === true && Number(acc.quota_limit) > 0)) {
     return { ...empty, unmetered: true, note: String(acc.quota_note || "").trim(),
@@ -167,7 +200,7 @@ function isQuotaOnlyStatus(acc, quota = getQuotaStats(acc)) {
 // a drained window, and calling it 异常 made the same account look healthy on
 // the operations pages and broken on the accounts page.
 function isQuotaExhaustedQuota(acc, quota) {
-  if (!acc) return false;
+  if (!acc || normalizeSidebarAccountType(acc) === "warp") return false;
   const stats = quota === undefined ? getQuotaStats(acc) : quota;
   if (acc.quota_exhausted === true && acc.quota_supported === true) return true;
   return Boolean(stats && stats.limit > 0 && stats.remaining <= 0);

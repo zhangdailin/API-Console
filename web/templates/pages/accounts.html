@@ -127,7 +127,7 @@
     <div class="modal-content">
       <div class="modal-header"><h2 id="accountImportTitle">恢复账号备份</h2><button class="modal-close" type="button" onclick="closeAccountImport()" aria-label="关闭">×</button></div>
       <div class="modal-body">
-        <p>请选择本项目导出的 JSON 备份。恢复四个渠道的登录凭据及账号设置；已有账号会跳过，不覆盖现有凭据。不恢复 API Key、模型管理记录或历史请求日志。</p>
+        <p>请选择本项目导出的 JSON 备份。恢复备份中的渠道登录凭据及账号设置；已有账号会跳过，不覆盖现有凭据。不恢复 API Key、模型管理记录或历史请求日志。</p>
         <p>备份包含明文登录凭据，请妥善保管。过期或已轮换的刷新令牌可能无法恢复登录，导入后请在账号列表检查状态，必要时重新授权。</p>
         <p id="accountImportSummary" role="status" aria-live="polite"></p>
         <div id="accountImportResult" role="status" aria-live="polite"></div>
@@ -142,6 +142,7 @@
   <script src="{{.AdminPath}}/js/device-auth.js?v={{.AssetVersion}}"></script>
   <script src="{{.AdminPath}}/js/workbuddy-auth.js?v={{.AssetVersion}}"></script>
   <script src="{{.AdminPath}}/js/cline-auth.js?v={{.AssetVersion}}"></script>
+  <script src="{{.AdminPath}}/js/warp-auth.js?v={{.AssetVersion}}"></script>
 	<script src="{{.AdminPath}}/js/doubao-auth.js?v={{.AssetVersion}}"></script>
   <script src="{{.AdminPath}}/js/accounts.js?v={{.AssetVersion}}"></script>
   <script src="{{.AdminPath}}/js/account-verification.js?v={{.AssetVersion}}"></script>

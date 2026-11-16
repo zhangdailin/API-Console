@@ -54,6 +54,9 @@ type messageExecution struct {
 
 func (e *messageExecution) run() {
 	maxRetries := min(max(e.cfg.MaxRetries, 0), config.GenerationMaxRetries)
+	if spec, ok := provider.Lookup(e.targetChannel); ok && spec.SingleGenerationAttempt {
+		maxRetries = 0
+	}
 	retryDelay := time.Duration(e.cfg.RetryDelay) * time.Millisecond
 	retriesRemaining := maxRetries
 	budgetCtx, attemptBudget := upstream.WithAttemptBudget(e.r.Context(), maxRetries+1)

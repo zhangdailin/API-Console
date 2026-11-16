@@ -10,6 +10,7 @@ import (
 
 	"encoding/json"
 
+	"orchids-api/internal/adapter"
 	"orchids-api/internal/httpserver"
 	"orchids-api/internal/util"
 )
@@ -62,6 +63,13 @@ func WriteStreamFromChatReader(w http.ResponseWriter, request CreateRequest, rea
 	annotationKeys := map[string]bool{}
 	activeThought := ""
 	var usage map[string]any
+	rawUsage := map[string]any{}
+	mergeUsage := func(update map[string]any) {
+		for key, value := range update {
+			rawUsage[key] = value
+		}
+		usage = UsageFromChat(rawUsage)
+	}
 	finish := ""
 	sawDone := false
 	meaningful := false
@@ -121,6 +129,34 @@ func WriteStreamFromChatReader(w http.ResponseWriter, request CreateRequest, rea
 			sawDone = true
 			return io.EOF
 		}
+		// The typed shared entry can emit its usage-bearing internal Messages
+		// dialect. Reuse the existing output projection, but collect usage
+		// before it is discarded by that projection. HTTP Chat callers still
+		// arrive as ordinary Chat chunks below.
+		if event == "message_stop" {
+			sawDone = true
+			return io.EOF
+		}
+		if strings.HasPrefix(event, "message_") || strings.HasPrefix(event, "content_block_") {
+			if event == "message_start" || event == "message_delta" {
+				var payload struct {
+					Message struct {
+						Usage map[string]any `json:"usage"`
+					} `json:"message"`
+					Usage map[string]any `json:"usage"`
+				}
+				if err := json.Unmarshal(data, &payload); err != nil {
+					return fmt.Errorf("invalid internal Messages SSE: %w", err)
+				}
+				mergeUsage(payload.Message.Usage)
+				mergeUsage(payload.Usage)
+			}
+			projected, ok := adapter.AppendOpenAIChunk(nil, id, created, event, data)
+			if !ok {
+				return nil
+			}
+			data = projected
+		}
 		var chunk *chatStreamChunk
 		if err := json.Unmarshal(data, &chunk); err != nil {
 			return fmt.Errorf("invalid chat SSE: %w", err)
@@ -137,7 +173,7 @@ func WriteStreamFromChatReader(w http.ResponseWriter, request CreateRequest, rea
 			return Failure(failure)
 		}
 		if u, ok := chunk.Usage.(map[string]any); ok {
-			usage = UsageFromChat(u)
+			mergeUsage(u)
 		}
 		for _, raw := range InterfaceSlice(chunk.Choices) {
 			choice, ok := raw.(map[string]any)
@@ -368,9 +404,6 @@ func WriteStreamFromChatReader(w http.ResponseWriter, request CreateRequest, rea
 			}
 		}
 		emit("response.output_item.done", map[string]any{"output_index": item.index, "item": item.value})
-	}
-	if usage == nil {
-		usage = UsageFromChat(nil)
 	}
 	v := response(status)
 	if details != nil {

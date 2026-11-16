@@ -1255,7 +1255,8 @@ table tbody tr:last-child td { border-bottom: 0; }
 
 .badge-grok,
 .badge-workbuddy,
-.badge-cline {
+.badge-cline,
+.badge-warp {
   font-family: var(--font-mono);
   font-size: 0.7rem;
   letter-spacing: 0.02em;
@@ -1265,7 +1266,10 @@ table tbody tr:last-child td { border-bottom: 0; }
 
 .badge-workbuddy { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 28%, transparent); background: var(--ok-soft); }
 
-.badge-cline { color: var(--accent-purple); border-color: color-mix(in srgb, var(--accent-purple) 30%, transparent); background: color-mix(in srgb, var(--accent-purple) 12%, transparent); }
+.badge-cline,
+.badge-warp { color: var(--accent-purple); border-color: color-mix(in srgb, var(--accent-purple) 30%, transparent); background: color-mix(in srgb, var(--accent-purple) 12%, transparent); }
+
+.acc-tab-mark[data-theme="purple"] { --mark: var(--accent-purple); }
 
 .modal {
   display: none;

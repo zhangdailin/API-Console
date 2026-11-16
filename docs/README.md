@@ -11,6 +11,7 @@
 | 配置 Redis、账号及代理 | [配置完整指南](configuration.md) |
 | 应用接入与管理接口 | [API 参考](api-reference.md) |
 | 判断协议与模型能力 | [协议能力与兼容边界](coding-protocol-capabilities.md) |
+| Warp 官方登录与最小文本能力 | [Warp 渠道与成本边界](warp.md) |
 | 部署、备份与多实例 | [部署运行手册](deployment.md) |
 | 发行更新与故障回退 | [在线升级手册](online-upgrade.md) |
 | 指标、日志与告警 | [运维监控](operations.md) |
@@ -19,9 +20,9 @@
 
 ## 当前产品范围
 
-API-Console 支持 WorkBuddy、Cline、Grok Build OAuth 三个通道。推理入口必须指定通道，使用 `/workbuddy/v1`、`/cline/v1`、`/grok/v1`，以及对应的不带 `/v1` 地址；统一 `/v1` 推理入口已删除。提供 Messages、Chat Completions、Responses 兼容接口和管理后台。
+API-Console 支持 WorkBuddy、Cline、Grok、Doubao 和 Warp 五个通道。推理入口必须指定通道，例如 `/workbuddy/v1`、`/cline/v1`、`/grok/v1`、`/doubao/v1`、`/warp/v1`，以及对应的不带 `/v1` 地址；统一 `/v1` 推理入口已删除。协议能力按通道区分，Doubao 仅 Chat Completions。
 
-当前不包含 Warp、Orchids 通道、Grok Web / Console、公开 Grok 对话页、图像或视频生成产品入口。源码中的旧模块名 `orchids-api`、二进制 `orchids-server`、`ORCHIDS_*` 环境变量及部分 `orchids:` 数据命名仍存在，它们不是新增通道。此次更新只刷新文档，没有执行模块、数据或服务迁移。
+Warp 已接入官方设备登录、账号目录和包含额度，提供有界文本 Chat Completions、Messages 和 Responses。真实文本场景已验收；客户端工具声明及续接有本地回归，但真实工具闭环尚未通过，详见 [Warp](warp.md)。Grok 包含 Build、Web、Console 平面。源码中的旧模块名 `orchids-api`、二进制 `orchids-server`、`ORCHIDS_*` 环境变量及部分 `orchids:` 数据命名不表示新增 Orchids 通道。
 
 ## 文档中的证据等级
 

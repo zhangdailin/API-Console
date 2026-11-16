@@ -394,12 +394,22 @@ func accountClientFingerprint(acc *store.Account, cfg *config.Config) string {
 	writeString(acc.ClineEmail)
 	writeStrings(acc.ClineModelIDs)
 	writeString(acc.ClinePlan)
+	writeString(acc.WarpAccessToken)
+	writeString(acc.WarpRefreshToken)
+	writeInt64(acc.WarpExpiresAt.UnixNano())
+	writeStrings(acc.WarpModelIDs)
+	// Warp enforces catalog freshness from the captured snapshot.
+	writeInt64(acc.WarpModelsSyncedAt.UnixNano())
 	// Do not include stats-only timestamps like UpdatedAt here.
 	// Request/usage accounting bumps UpdatedAt on every call, and using it in the
 	// fingerprint would force unnecessary client rebuilds and drop keep-alive pools.
 
 	if cfg != nil {
 		writeString(cfg.WorkBuddyBaseURL)
+		writeString(cfg.WarpBaseURL)
+		writeString(cfg.WarpFirebaseBaseURL)
+		writeString(cfg.WarpTokenBaseURL)
+		writeString(cfg.WarpFirebaseAPIKey)
 		writeString(cfg.ClineAPIBaseURL)
 		writeString(cfg.ClineWorkOSClientID)
 		writeString(cfg.ClineWorkOSAuthorizeURL)

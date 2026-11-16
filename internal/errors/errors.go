@@ -2,6 +2,7 @@
 package errors
 
 import (
+	"fmt"
 	"maps"
 	"math"
 	"net/http"
@@ -27,6 +28,15 @@ type AppError struct {
 	// envelope as before, and a client that reads them can tell a queue the
 	// caller can wait out from one it should route around.
 	Details map[string]any `json:"-"`
+}
+
+// Error lets provider clients return a fixed public error through the shared
+// pipeline without serializing untrusted upstream diagnostics.
+func (e *AppError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return fmt.Sprintf("status=%d: %s", e.HTTPStatus, e.Message)
 }
 
 // ToJSON returns the JSON representation of the error.

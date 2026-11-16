@@ -7,6 +7,7 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+	"strconv"
 
 	"orchids-api/internal/adapter"
 	"orchids-api/internal/httpserver"
@@ -319,6 +320,18 @@ func (h *streamHandler) writeSSEContentBlockStopLocked(index int, final bool) {
 
 func (h *streamHandler) writeSSEMessageDeltaLocked(stopReason string, outputTokens int, final bool) {
 	raw, err := appendSSEMessageDelta(h.ssePayloadScratch[:0], stopReason, outputTokens)
+	if err == nil && h.useUpstreamUsage {
+		// The opening input count may be an estimate. Preserve the authoritative
+		// final counters for Messages clients and the typed Responses bridge.
+		raw = raw[:len(raw)-2]
+		raw = append(raw, `,"input_tokens":`...)
+		raw = strconv.AppendInt(raw, int64(h.inputTokens), 10)
+		raw = append(raw, `,"cache_read_input_tokens":`...)
+		raw = strconv.AppendInt(raw, int64(h.cachedInputTokens), 10)
+		raw = append(raw, `,"cache_creation_input_tokens":`...)
+		raw = strconv.AppendInt(raw, int64(h.cacheWriteTokens), 10)
+		raw = append(raw, '}', '}')
+	}
 	if err != nil {
 		h.markWriteErrorLocked("message_delta", err)
 		return

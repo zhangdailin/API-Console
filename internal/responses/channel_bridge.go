@@ -162,6 +162,13 @@ func ResponsesBridgeHandler(chat http.HandlerFunc, opts BridgeOptions) http.Hand
 		if opts.ExecuteChat != nil {
 			invokeChat = func(w http.ResponseWriter, r *http.Request) { opts.ExecuteChat(w, r, chatReq, raw) }
 			subReq.Body = http.NoBody
+			if chatReq.Stream {
+				// The prepared entry accepts Chat input independently of its output
+				// format. Its Messages stream retains usage that the public Chat
+				// SSE projection drops. Keep the channel and source operation intact;
+				// only this internal stream's output dialect changes.
+				subReq.URL.Path = strings.TrimSuffix(subReq.URL.Path, "/chat/completions") + "/messages"
+			}
 		}
 		if chatReq.Stream {
 			httpserver.StreamThroughChat(subReq, invokeChat, func(status int, header http.Header, reader io.Reader) {

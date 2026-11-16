@@ -25,7 +25,7 @@ API Console 是使用 Go 编写的自托管 AI API 网关，将多个上游账�
 
 ## 功能特性
 
-- **四通道接入** — WorkBuddy、Cline、Grok Build OAuth 与豆包 Web 扫码登录，后台集成授权流程。
+- **多通道接入** — WorkBuddy、Cline、Grok Build OAuth、豆包 Web 扫码登录与 Warp 官方设备登录。Warp 支持有界文本对话及 Chat Completions、Messages、Responses；客户端工具续接仍是实验能力，未通过真实闭环验收，见 [能力与成本边界](docs/warp.md)。
 - **兼容接口** — Messages、Chat Completions 与 Responses，按上游模型能力支持流式输出、推理内容及工具调用。
 - **账号池调度** — 加权选择、并发限制、凭据续期、冷却与重试策略。
 - **模型发现** — 从授权账号刷新真实目录，管理模型可见性和路由。
@@ -43,6 +43,7 @@ API Console 是使用 Go 编写的自托管 AI API 网关，将多个上游账�
 | Cline | WorkOS 设备授权 | `/cline/v1` |
 | Doubao | 豆包 App 扫码登录 | `/doubao/v1` |
 | Grok | Build OAuth 设备授权，或导入 Web SSO Cookie | `/grok/v1` |
+| Warp | 官方设备授权；自动获取公开项目配置 | `/warp/v1`（Chat Completions、Messages、Responses；有界文本） |
 
 Grok 在同一前缀下承载两个平面：**Build OAuth CLI 上游**，以及 **Grok Web**（grok.com SSO Cookie），提供 `grok-chat-*`、Imagine 生图与视频，后台附带 Grok 工具页。实际模型及能力取决于账号的上游权限；目录刷新失败保留既有观察结果，不以内置列表替代。
 

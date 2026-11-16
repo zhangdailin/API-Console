@@ -122,6 +122,13 @@ const QUOTA_CONFIDENCE_LABELS = { confirmed: "已确认", observed: "实测", es
 // quotaTooltip explains a quota cell: what the number means, where it came from and
 // how much it is worth. An estimate must never read like a balance.
 function quotaTooltip(acc, quota) {
+  if (quota?.warpPools) {
+    const snapshot = quota.warpPools;
+    const parts = ["Warp 包含额度，各池独立，不合并", warpQuotaStatusLabel(snapshot), WARP_INCLUDED_QUOTA_NOTE];
+    if (snapshot.synced_at) parts.push("上次同步: " + new Date(snapshot.synced_at).toLocaleString());
+    if (snapshot.attempted_at) parts.push("最近尝试: " + new Date(snapshot.attempted_at).toLocaleString());
+    return parts.join(" · ");
+  }
   const provenance = quotaProvenance(acc);
   const parts = [];
   if (quota?.estimated) {
@@ -210,6 +217,7 @@ const grokDeviceLogin = globalThis.DeviceAuthLogin.create({
 const ACCOUNT_LOGIN_DRIVERS = {
   workbuddy: () => globalThis.WorkBuddyLogin,
   cline: () => globalThis.ClineLogin,
+  warp: () => globalThis.WarpLogin,
 	  doubao: () => globalThis.DoubaoLogin,
   grok: () => grokDeviceLogin,
 };
@@ -973,7 +981,42 @@ function grokWebWindowMarkup(label, quotaWindow) {
   return `<div><span style="color:#64748b;font-size:0.75rem">${label}</span> <span style="color:${color}">${amount}</span><span style="color:#64748b;font-size:0.75rem">${reset}</span></div>`;
 }
 
+// Pool status describes this observation only, never credential health or routing.
+function warpQuotaStatusLabel(snapshot) {
+  if (snapshot.status === "error") return snapshot.windows.length ? "上次记录，刷新失败" : "未知，刷新失败";
+  if (snapshot.status === "partial") return "部分同步";
+  if (snapshot.status === "ok") return "已同步";
+  return "未知，尚未同步";
+}
+
+function warpQuotaMarkup(quota) {
+  const snapshot = quota.warpPools;
+  const counters = { workspace_monthly: 0, personal: 0, legacy_requests: 0 };
+  const labels = { workspace_monthly: "工作区月度包含池", personal: "个人包含池", legacy_requests: "旧版请求池" };
+  const number = value => value === null ? "未知" : formatCredit(value);
+  const pools = snapshot.windows.map(pool => {
+    const label = `${labels[pool.scope]} ${++counters[pool.scope]}`;
+    const unlimited = pool.has_unlimited && pool.unlimited;
+    const exhausted = !unlimited && pool.remaining === 0;
+    const remaining = unlimited ? "无限" : number(pool.remaining);
+    const limit = unlimited ? "无限" : number(pool.limit);
+    const reset = pool.reset_at ? formatQuotaReset(pool.reset_at) : "重置时间未知";
+    return `<div class="warp-quota-pool" style="border:1px solid var(--border);border-radius:5px;padding:4px 6px;margin-top:4px;font-size:0.72rem;white-space:normal">
+      <div>${escapeHtml(label)} <span style="color:var(--text-muted)">(${escapeHtml(pool.unit)})</span></div>
+      <div>剩余 <span style="color:${exhausted ? "#fb7185" : "var(--text)"}">${escapeHtml(remaining)}</span> / 总额 ${escapeHtml(limit)}${exhausted ? " · 包含额度已用尽" : ""}</div>
+      <div style="color:var(--text-muted)">已用 ${escapeHtml(number(pool.used))} · ${escapeHtml(reset)}</div>
+    </div>`;
+  }).join("");
+  const status = warpQuotaStatusLabel(snapshot);
+  return `<div class="warp-quota" style="min-width:150px;white-space:normal">
+    <div style="font-size:0.75rem;color:var(--text-muted)">包含额度 · ${escapeHtml(status)}</div>
+    ${pools || '<div style="color:var(--text-muted)">未知</div>'}
+    <div style="font-size:0.68rem;color:var(--text-muted);margin-top:4px">${escapeHtml(WARP_INCLUDED_QUOTA_NOTE)}</div>
+  </div>`;
+}
+
 function buildQuotaMarkup(acc, quota = getQuotaStats(acc)) {
+  if (quota?.warpPools) return warpQuotaMarkup(quota);
   if (quota && quota.grokConsole) {
     if (quota.unsynced) {
       return `<span style="color:#94a3b8">未知</span> <span style="color:#64748b;font-size:0.75rem">(${escapeHtml(quota.note || "尚未读取 Console 额度")})</span>`;
@@ -1023,7 +1066,7 @@ function buildQuotaMarkup(acc, quota = getQuotaStats(acc)) {
     const hint = normalizeAccountType(acc) === "workbuddy"
       ? "WorkBuddy 计量接口未返回数据"
       : "该渠道暂无可用额度接口";
-    return `<span>未知</span> <span style="color:#64748b;font-size:0.75rem">(${hint})</span>`;
+    return `<span>未知</span> <span style="color:#64748b;font-size:0.75rem">(${escapeHtml(quota.note || hint)})</span>`;
   }
   if (quota && quota.workbuddy) {
     const pct = quota.pctRemaining;
@@ -1141,6 +1184,7 @@ function openModal(account = null) {
   if (accountSave.busy) return;
   stopWorkBuddyLogin();
   stopClineLogin();
+  stopWarpLogin();
 	globalThis.DoubaoLogin?.reset?.();
   const title = document.getElementById("modalTitle");
   const form = document.getElementById("accountForm");
@@ -1186,6 +1230,10 @@ function stopOfficialLogin(provider, statusId, linkId = "") {
 
 function stopWorkBuddyLogin() { stopOfficialLogin("WorkBuddyLogin", "workbuddyLoginStatus"); }
 function stopClineLogin() { stopOfficialLogin("ClineLogin", "clineLoginStatus", "clineLoginLink"); }
+function stopWarpLogin() {
+  stopOfficialLogin("WarpLogin", "warpLoginStatus", "warpLoginLink");
+  globalThis.WarpLogin?.reset?.();
+}
 function stopDoubaoLogin() { globalThis.DoubaoLogin?.stop?.(); }
 
 // Close modal
@@ -1194,6 +1242,7 @@ function closeModal() {
   resetGrokDeviceLoginStatus();
   stopWorkBuddyLogin();
   stopClineLogin();
+  stopWarpLogin();
 	stopDoubaoLogin();
   ConsoleUI.modal("accountModal", false);
 }

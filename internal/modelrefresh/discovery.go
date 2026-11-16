@@ -46,6 +46,7 @@ func toDiscovered(models []provider.Model) []discoveredModel {
 			ID: model.ID, Name: model.Name, SortOrder: i, Verified: true,
 			Provider: model.Provider, UpstreamModel: model.UpstreamModel,
 			BillingTier: model.BillingTier, BillingSource: model.BillingSource,
+			UpstreamUsage: model.UpstreamUsage.Normalize(),
 		})
 	}
 	return out
@@ -57,6 +58,9 @@ func toDiscovered(models []provider.Model) []discoveredModel {
 func persistObservation(ctx context.Context, s *store.Store, acc *store.Account, observation provider.Observation, now time.Time) error {
 	if acc == nil || acc.ID == 0 || observation.Record == nil || !observation.Record(acc, now) {
 		return nil
+	}
+	if spec, ok := provider.Lookup(acc.AccountType); ok && spec.Catalog != nil && spec.Catalog.Persist != nil {
+		return spec.Catalog.Persist(ctx, s, acc)
 	}
 	return s.UpdateAccount(ctx, acc)
 }
@@ -165,7 +169,6 @@ func discoverAccountViewModels(ctx context.Context, cfg *config.Config, s *store
 		}
 	}
 	now := time.Now().UTC()
-	seen := make(map[string]struct{})
 	for _, result := range ordered {
 		attempt := accountModelDiscoveryAttempt{Err: result.err}
 		if result.account == nil {
@@ -189,16 +192,9 @@ func discoverAccountViewModels(ctx context.Context, cfg *config.Config, s *store
 		if !recorded {
 			attempt.UsedLastKnownGood = len(attempt.Candidates) > 0
 		}
-		for _, candidate := range attempt.Candidates {
-			key := strings.ToLower(candidate.ID)
-			if _, exists := seen[key]; !exists {
-				seen[key] = struct{}{}
-				candidate.SortOrder = len(report.Candidates)
-				report.Candidates = append(report.Candidates, candidate)
-			}
-		}
 		report.Attempts = append(report.Attempts, attempt)
 	}
+	report.Candidates = unionAccountCatalogAttempts(report.Attempts)
 	succeeded, _ := report.counts()
 	if succeeded == 0 {
 		return report, fmt.Errorf("%s model discovery failed for every eligible account", label)
@@ -210,12 +206,31 @@ func discoverAccountViewModels(ctx context.Context, cfg *config.Config, s *store
 func unionAccountCatalogAttempts(attempts []accountModelDiscoveryAttempt) []discoveredModel {
 	out := make([]discoveredModel, 0)
 	seen := make(map[string]int)
+	observations := make(map[string][]*store.ModelUsageMetadata)
+	observedAccounts := make(map[string]map[int64]struct{})
 	for _, attempt := range attempts {
+		accountSeen := make(map[string]struct{})
 		for _, candidate := range attempt.Candidates {
 			key := strings.ToLower(strings.TrimSpace(candidate.ID))
 			if key == "" {
 				continue
 			}
+			if _, duplicate := accountSeen[key]; duplicate {
+				continue
+			}
+			accountSeen[key] = struct{}{}
+			// Normally discovery creates one attempt per account. Keep the count
+			// correct even if a caller accidentally supplies the same account twice.
+			if attempt.AccountID != 0 {
+				if observedAccounts[key] == nil {
+					observedAccounts[key] = make(map[int64]struct{})
+				}
+				if _, duplicate := observedAccounts[key][attempt.AccountID]; duplicate {
+					continue
+				}
+				observedAccounts[key][attempt.AccountID] = struct{}{}
+			}
+			observations[key] = append(observations[key], candidate.UpstreamUsage)
 			if index, ok := seen[key]; ok {
 				existing := &out[index]
 				if existing.Name == "" {
@@ -234,7 +249,71 @@ func unionAccountCatalogAttempts(attempts []accountModelDiscoveryAttempt) []disc
 			out = append(out, candidate)
 		}
 	}
+	for key, index := range seen {
+		out[index].UpstreamUsage = aggregateAccountUsage(observations[key])
+	}
 	return out
+}
+
+// aggregateAccountUsage combines comparable account observations. Unknown rows
+// do not become an implicit 1x and different sources never select a first winner.
+func aggregateAccountUsage(observations []*store.ModelUsageMetadata) *store.ModelUsageMetadata {
+	result := &store.ModelUsageMetadata{}
+	var creditSeen, requestSeen int
+	mixedSources := false
+	mergeBounds := func(low, high **float64, nextLow, nextHigh *float64) {
+		if nextLow == nil || nextHigh == nil {
+			return
+		}
+		if *low == nil {
+			l, h := *nextLow, *nextHigh
+			*low, *high = &l, &h
+			return
+		}
+		**low = min(**low, *nextLow)
+		**high = max(**high, *nextHigh)
+	}
+	for _, observation := range observations {
+		usage := observation.Normalize()
+		if usage == nil || usage.AccountCount == 0 {
+			result.MissingAccountCount++
+			continue
+		}
+		if result.Source == "" {
+			result.Source = usage.Source
+		} else if result.Source != usage.Source {
+			mixedSources = true
+		}
+		result.AccountCount++
+		result.Conflicting = result.Conflicting || usage.Conflicting
+		// The oldest observation conservatively dates the aggregate evidence.
+		if result.AccountCount == 1 || usage.ObservedAt.Before(result.ObservedAt) {
+			result.ObservedAt = usage.ObservedAt
+		}
+		if usage.CreditMultiplierMin != nil {
+			creditSeen++
+		}
+		if usage.RequestMultiplierMin != nil {
+			requestSeen++
+		}
+		mergeBounds(&result.CreditMultiplierMin, &result.CreditMultiplierMax, usage.CreditMultiplierMin, usage.CreditMultiplierMax)
+		mergeBounds(&result.RequestMultiplierMin, &result.RequestMultiplierMax, usage.RequestMultiplierMin, usage.RequestMultiplierMax)
+	}
+	if result.AccountCount == 0 {
+		return nil
+	}
+	// A bound is comparable only if every account with metadata observed that
+	// metric. Missing whole observations remain explicit in MissingAccountCount.
+	if creditSeen != result.AccountCount {
+		result.CreditMultiplierMin, result.CreditMultiplierMax = nil, nil
+	}
+	if requestSeen != result.AccountCount {
+		result.RequestMultiplierMin, result.RequestMultiplierMax = nil, nil
+	}
+	if mixedSources {
+		return &store.ModelUsageMetadata{MissingAccountCount: len(observations), Conflicting: true}
+	}
+	return result.Normalize()
 }
 
 // refreshModelRequestConfig returns the configuration a manual discovery read

@@ -2,7 +2,7 @@
 
 # API Console
 
-**One gateway for WorkBuddy, Cline, Grok Build, and Doubao Web.**
+**One gateway for WorkBuddy, Cline, Grok Build, Doubao Web, and minimal Warp text.**
 
 [![Go](https://img.shields.io/badge/Go-1.26.11%2B-00ADD8?logo=go&logoColor=white)](go.mod)
 [![Redis](https://img.shields.io/badge/Redis-required-DC382D?logo=redis&logoColor=white)](config.example.json)
@@ -25,7 +25,7 @@ Applications can use Claude Messages, OpenAI Chat Completions, or Responses endp
 
 ## Features
 
-- **Four Upstream Channels** — WorkBuddy, Cline, Grok Build OAuth, and Doubao Web QR login, with browser-safe authorization flows in the console.
+- **Upstream Channels** — WorkBuddy, Cline, Grok Build OAuth, Doubao Web QR login, and Warp official device login. Warp supports bounded text conversations through Chat Completions, Messages, and Responses; client-tool continuation remains experimental and has not passed live round-trip verification. See [its limitations](docs/warp.md).
 - **Compatible API Interfaces** — Messages, Chat Completions, and Responses, including streaming, reasoning, and tool calls where supported by the upstream model.
 - **Account Pool Scheduling** — Weighted selection, concurrency limits, credential refresh, cooldowns, and retry policies.
 - **Model Discovery** — Refresh catalogs from authorized accounts and manage model visibility and routing.
@@ -43,6 +43,7 @@ Applications can use Claude Messages, OpenAI Chat Completions, or Responses endp
 | Cline | WorkOS device authorization | `/cline/v1` |
 | Doubao | Doubao App QR login | `/doubao/v1` |
 | Grok | Build OAuth device authorization, or Web SSO cookie import | `/grok/v1` |
+| Warp | Official device authorization; automatic public project configuration | `/warp/v1` (Chat Completions, Messages, Responses; bounded text) |
 
 Grok serves two planes on one prefix: the **Build OAuth CLI upstream**, and **Grok Web** (grok.com SSO cookies) for `grok-chat-*`, Imagine images and videos, with a Grok tools page in the console. Available models and capabilities depend on the authorized accounts and their upstream entitlements. Catalog refresh failures preserve previously observed models rather than substituting a built-in model list.
 

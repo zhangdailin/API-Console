@@ -121,6 +121,7 @@ func TestProjectNeverLeavesADurableCredential(t *testing.T) {
 	durable := map[channel.ID]func(*store.Account) []string{
 		channel.WorkBuddy: func(acc *store.Account) []string { return []string{acc.WorkBuddyRefreshToken} },
 		channel.Cline:     func(acc *store.Account) []string { return []string{acc.ClineRefreshToken} },
+		channel.Warp:      func(acc *store.Account) []string { return []string{acc.WarpAccessToken, acc.WarpRefreshToken} },
 		channel.Grok:      func(acc *store.Account) []string { return []string{acc.OAuthRefreshToken} },
 		channel.Doubao: func(acc *store.Account) []string {
 			return []string{acc.ClientCookie, acc.DoubaoDeviceID, acc.DoubaoWebID, acc.DoubaoTeaUUID}
@@ -136,6 +137,8 @@ func TestProjectNeverLeavesADurableCredential(t *testing.T) {
 			OAuthRefreshToken:     "oauth-refresh",
 			WorkBuddyRefreshToken: "workbuddy-refresh",
 			ClineRefreshToken:     "cline-refresh",
+			WarpRefreshToken:      "warp-refresh",
+			WarpAccessToken:       "warp-access",
 			DoubaoDeviceID:        "doubao-device",
 			DoubaoWebID:           "doubao-web",
 			DoubaoTeaUUID:         "doubao-tea",

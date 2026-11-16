@@ -78,6 +78,13 @@ type Config struct {
 	ClineWorkOSAuthorizeURL string `json:"cline_workos_authorize_url,omitempty"`
 	ClineWorkOSTokenURL     string `json:"cline_workos_token_url,omitempty"`
 
+	// Warp uses official device OAuth followed by Firebase exchange. The project
+	// API key must be supplied privately; no built-in key is shipped.
+	WarpBaseURL         string `json:"warp_base_url,omitempty"`
+	WarpFirebaseAPIKey  string `json:"-"`
+	WarpFirebaseBaseURL string `json:"warp_firebase_base_url,omitempty"`
+	WarpTokenBaseURL    string `json:"warp_token_base_url,omitempty"`
+
 	// ── Doubao Web (doubao.com) browser channel ──
 	DoubaoBaseURL      string `json:"doubao_base_url,omitempty"`
 	DoubaoAccountsURL  string `json:"doubao_accounts_url,omitempty"`

@@ -22,6 +22,8 @@ type Model struct {
 	// grants routing to an account whose metered allowance is exhausted.
 	BillingTier   string
 	BillingSource string
+	// UpstreamUsage is display-only account usage evidence, never API pricing.
+	UpstreamUsage *store.ModelUsageMetadata
 }
 
 // Observation is the result of one upstream catalog read for one account.
@@ -69,6 +71,9 @@ type Catalog struct {
 	// SetSnapshot stores a raw snapshot on the account in memory. It is nil
 	// for a channel whose snapshot is not a list of opaque rows.
 	SetSnapshot func(acc *store.Account, rows []string, now time.Time)
+	// Persist optionally writes only channel-owned catalog observations, without
+	// replaying stale operator settings from the account used for the read.
+	Persist func(context.Context, *store.Store, *store.Account) error
 	// ShapeRecord fills in what the channel knows about every model row it
 	// publishes (routing defaults, capabilities). Nil leaves the row as
 	// discovery built it.

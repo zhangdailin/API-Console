@@ -26,6 +26,8 @@ var accountSecretFields = map[string]func(*store.Account) string{
 	"workbuddy_refresh_token": func(a *store.Account) string { return a.WorkBuddyRefreshToken },
 	"cline_access_token":      func(a *store.Account) string { return a.ClineAccessToken },
 	"cline_refresh_token":     func(a *store.Account) string { return a.ClineRefreshToken },
+	"warp_access_token":       func(a *store.Account) string { return a.WarpAccessToken },
+	"warp_refresh_token":      func(a *store.Account) string { return a.WarpRefreshToken },
 	"doubao_device_id":        func(a *store.Account) string { return a.DoubaoDeviceID },
 	"doubao_web_id":           func(a *store.Account) string { return a.DoubaoWebID },
 	"doubao_tea_uuid":         func(a *store.Account) string { return a.DoubaoTeaUUID },
@@ -48,6 +50,7 @@ func TestAccountSecretFieldsAreComplete(t *testing.T) {
 		WorkBuddyModelsSyncedAt WorkBuddyQuota WorkBuddyRestrictedUntil
 		ClineExpiresAt ClineEmail ClinePlan ReplaceClineCredentials ClineModelIDs
 		ClineModelsSyncedAt
+		WarpExpiresAt ReplaceWarpCredentials WarpModelIDs WarpModelsSyncedAt WarpModelWindows WarpQuota
 		DoubaoVerifiedAt
 	`) {
 		nonSecret[name] = true
@@ -137,6 +140,8 @@ var accountSecretSetter = map[string]func(*store.Account, string){
 	},
 	"cline_access_token":  func(a *store.Account, v string) { a.ClineAccessToken = v },
 	"cline_refresh_token": func(a *store.Account, v string) { a.ClineRefreshToken = v },
+	"warp_access_token":   func(a *store.Account, v string) { a.WarpAccessToken = v },
+	"warp_refresh_token":  func(a *store.Account, v string) { a.WarpRefreshToken = v },
 	"doubao_device_id":    func(a *store.Account, v string) { a.DoubaoDeviceID = v },
 	"doubao_web_id":       func(a *store.Account, v string) { a.DoubaoWebID = v },
 	"doubao_tea_uuid":     func(a *store.Account, v string) { a.DoubaoTeaUUID = v },

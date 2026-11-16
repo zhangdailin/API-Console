@@ -12,6 +12,7 @@ require (
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/refraction-networking/utls v1.8.2
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
+	github.com/warpdotdev/warp-proto-apis/apis/multi_agent v0.0.0-20261113233215-7e78c26ae5e1
 	golang.org/x/net v0.62.0
 	golang.org/x/sync v0.24.0
 	golang.org/x/sys v0.49.0

@@ -21,6 +21,7 @@ import (
 	"orchids-api/internal/config"
 	"orchids-api/internal/debug"
 	apperrors "orchids-api/internal/errors"
+	"orchids-api/internal/httpserver"
 	"orchids-api/internal/loadbalancer"
 	"orchids-api/internal/logutil"
 	"orchids-api/internal/middleware"
@@ -309,9 +310,7 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request, prepare
 
 	var req ClaudeRequest
 	var err error
-	if prepared != nil {
-		req = *prepared
-	} else {
+	if prepared == nil {
 		if maxRequestBytes > 0 {
 			r.Body = http.MaxBytesReader(w, r.Body, maxRequestBytes)
 		}
@@ -326,10 +325,26 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request, prepare
 			apperrors.New("invalid_request_error", "Invalid request body", http.StatusBadRequest).WriteResponse(w)
 			return
 		}
-		if err := json.Unmarshal(bodyBytes, &req); err != nil {
-			apperrors.New("invalid_request_error", "Invalid request body", http.StatusBadRequest).WriteResponse(w)
+	}
+	if spec, ok := provider.Lookup(forcedChannel); ok && spec.ValidateRequest != nil {
+		if err := spec.ValidateRequest(json.RawMessage(bodyBytes)); err != nil {
+			publicErr := apperrors.New("invalid_request_error", "Invalid request body", http.StatusBadRequest)
+			if appErr, ok := errors.AsType[*apperrors.AppError](err); ok {
+				publicErr = appErr
+			}
+			if adapter.DetectResponseFormat(r.URL.Path) == adapter.FormatOpenAI {
+				httpserver.WriteErrorCode(w, publicErr.HTTPStatus, publicErr.Code, publicErr.Message)
+			} else {
+				publicErr.WriteResponse(w)
+			}
 			return
 		}
+	}
+	if prepared != nil {
+		req = *prepared
+	} else if err := json.Unmarshal(bodyBytes, &req); err != nil {
+		apperrors.New("invalid_request_error", "Invalid request body", http.StatusBadRequest).WriteResponse(w)
+		return
 	}
 	if !middleware.APIKeyAllowsModel(r.Context(), req.Model) {
 		apperrors.New("permission_error", "API key is not allowed to use model "+strings.TrimSpace(req.Model), http.StatusForbidden).WriteResponse(w)
@@ -381,14 +396,19 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request, prepare
 	}
 
 	cacheStrategy := cfg.CacheStrategy
-	if cacheStrategy != "" && cacheStrategy != "none" {
+	skipCacheMarkers := false
+	if spec, ok := provider.Lookup(forcedChannel); ok {
+		skipCacheMarkers = spec.SkipSharedCacheMarkers
+	}
+	if !skipCacheMarkers && cacheStrategy != "" && cacheStrategy != "none" {
 		applyCacheStrategy(&req, cacheStrategy)
 	}
 
-	// Debug: log all headers
+	// Header values may contain managed keys or caller credentials. Diagnostics
+	// need only the header names; never echo values into application logs.
 	if verboseDiagnostics {
-		for k, v := range r.Header {
-			slog.Debug("Incoming header V2 CHECK", "key", k, "value", v)
+		for k := range r.Header {
+			slog.Debug("Incoming header", "key", k)
 		}
 	}
 
@@ -398,6 +418,11 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request, prepare
 
 	effort := requestReasoningEffort(req)
 	req.Model = h.resolveEffortModelVariant(r.Context(), req.Model, effort, forcedChannel)
+	// Any shared resolution must still satisfy the key's actual model scope.
+	if !middleware.APIKeyAllowsModel(r.Context(), req.Model) {
+		apperrors.New("permission_error", "API key is not allowed to use the resolved model", http.StatusForbidden).WriteResponse(w)
+		return
+	}
 	_, err = h.validateModelAvailability(r.Context(), req.Model, forcedChannel)
 	if err != nil {
 		apperrors.New("invalid_request_error", err.Error(), http.StatusBadRequest).WriteResponse(w)

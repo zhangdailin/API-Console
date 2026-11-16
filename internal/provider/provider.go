@@ -15,6 +15,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -65,6 +66,10 @@ type Spec struct {
 	// handler (Grok).
 	NewClient func(acc *store.Account, cfg *config.Config, s *store.Store) Client
 
+	// ValidateRequest rejects unsupported wire fields before normalization can
+	// discard them and before the shared pipeline looks up or selects accounts.
+	ValidateRequest func(json.RawMessage) error
+
 	// Capabilities answers catalog questions for the shared pipeline.
 	Capabilities Capabilities
 
@@ -81,6 +86,15 @@ type Spec struct {
 	// allowance, each on the channel's own cadence. It is called on every
 	// scheduler tick and decides for itself whether anything is due.
 	Maintain func(ctx context.Context, env Env, acc *store.Account)
+
+	// SingleGenerationAttempt forbids transparent replay/account switching for
+	// upstreams whose accepted request may already incur credits before output.
+	SingleGenerationAttempt bool
+	// ExactModelID disables shared implicit effort/alias model resolution.
+	ExactModelID bool
+	// SkipSharedCacheMarkers leaves this provider's tools and text untouched by
+	// Anthropic-specific cache_control injection from the shared cache policy.
+	SkipSharedCacheMarkers bool
 
 	// PublishModels reconciles routes backed by verified account state for a
 	// channel that has no upstream model-list endpoint.

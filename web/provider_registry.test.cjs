@@ -15,6 +15,7 @@ const payload = {
     { key: 'cline', label: 'Cline' },
     { key: 'grok', label: 'Grok' },
     { key: 'doubao', label: 'Doubao' },
+    { key: 'warp', label: 'Warp' },
   ],
 };
 

@@ -49,11 +49,24 @@ func (a *API) HandleExport(w http.ResponseWriter, r *http.Request) {
 }
 
 // normalizePortableAccount validates provider-owned restore credentials without
-// upstream calls. A durable refresh credential is required for a restorable row.
+// upstream calls. Official-login-only credentials are never portable, even when
+// the export retains a metadata-only row that cannot be restored.
 func normalizePortableAccount(acc *store.Account) string {
 	acc.AccountType = strings.ToLower(strings.TrimSpace(acc.AccountType))
+	// Scrub echoed credentials before dropping the non-portable slots. Otherwise
+	// an upstream error captured in status_message can leak them in an archive.
+	for _, secret := range []string{acc.WarpAccessToken, acc.WarpRefreshToken} {
+		if secret = strings.TrimSpace(secret); secret != "" {
+			acc.StatusMessage = strings.ReplaceAll(acc.StatusMessage, secret, "[REDACTED]")
+		}
+	}
 	defer func() {
 		acc.Token, acc.RefreshToken, acc.ClientCookie = "", "", ""
+		// Warp requires the official login flow on each instance. Never transport
+		// these credentials, including when PrepareImport rejects an own-channel row.
+		acc.WarpAccessToken, acc.WarpRefreshToken = "", ""
+		acc.WarpExpiresAt = time.Time{}
+		acc.ReplaceWarpCredentials = false
 		// Device identifiers are bound to the non-portable QR session and must
 		// never leave the server in an account archive.
 		acc.DoubaoDeviceID, acc.DoubaoWebID, acc.DoubaoTeaUUID = "", "", ""
@@ -98,6 +111,11 @@ func redactForeignCredentials(acc *store.Account) {
 		acc.ClineAccessToken = ""
 		acc.ClineRefreshToken = ""
 		acc.ClineExpiresAt = time.Time{}
+	}
+	if channel != "warp" {
+		acc.WarpAccessToken = ""
+		acc.WarpRefreshToken = ""
+		acc.WarpExpiresAt = time.Time{}
 	}
 	if channel != "doubao" {
 		acc.DoubaoDeviceID = ""

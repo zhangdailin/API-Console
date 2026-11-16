@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"orchids-api/internal/provider"
 	"orchids-api/internal/store"
 	"strings"
 )
@@ -114,6 +115,9 @@ var effortVariantOrder = []string{"medium", "high", "low", "xhigh", "max"}
 // old code would have tried "gpt-5-6-sol-low-low" and then fallen through to
 // "-medium", silently serving an effort the client never asked for.
 func (h *Handler) resolveEffortModelVariant(ctx context.Context, modelID, effort, forcedChannel string) string {
+	if spec, ok := provider.Lookup(forcedChannel); ok && spec.ExactModelID {
+		return modelID
+	}
 	modelID = normalizeRequestedModelID(modelID)
 	if modelID == "" || h == nil || h.loadBalancer == nil || h.loadBalancer.Store == nil {
 		return modelID

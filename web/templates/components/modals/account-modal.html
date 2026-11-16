@@ -61,6 +61,43 @@
 		{{end}}
       </div>
       {{end}}
+      <div class="form-group oauth-flow" id="warpLoginGroup" data-login-group="warp" hidden>
+        <div class="oauth-head">
+          <span class="oauth-mark" aria-hidden="true">W</span>
+          <div class="oauth-head-text">
+            <div class="oauth-title">Official Warp browser login</div>
+            <div class="oauth-sub">Browser authorization · Credentials saved by the server</div>
+          </div>
+        </div>
+        <p class="oauth-desc">Sign in at app.warp.dev or warp.dev. The server saves the authorized account without exposing credentials to this page. Only official browser login is supported; no manual credentials or token import. Quota remains unknown until reported by Warp.</p>
+        <button class="btn btn-primary oauth-start" id="warpLoginButton" type="button" data-login-provider="warp">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>Sign in with Warp
+        </button>
+        <ol class="oauth-steps">
+          <li class="oauth-step" data-oauth-step="link">
+            <span class="oauth-step-no">1</span>
+            <div class="oauth-step-body">
+              <div class="oauth-step-title">Open the official page and sign in</div>
+              <div class="account-import-status oauth-link" id="warpLoginLink" hidden>
+                <a id="warpLoginLinkText" target="_blank" rel="noopener noreferrer"></a>
+                <button class="oauth-icon-btn" type="button" data-oauth-copy="warpLoginLinkText" title="Copy login link" aria-label="Copy login link"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button>
+              </div>
+              <button class="btn oauth-open" type="button" data-oauth-open="warpLoginLinkText">Open login link<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg></button>
+            </div>
+          </li>
+          <li class="oauth-step" data-oauth-step="code">
+            <span class="oauth-step-no">2</span>
+            <div class="oauth-step-body">
+              <div class="oauth-step-title">Enter the device code if requested</div>
+              <div class="oauth-code-row">
+                <code class="oauth-code" id="warpLoginCode" hidden></code>
+                <button class="btn oauth-copy-code" type="button" data-oauth-copy="warpLoginCode"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy device code</button>
+              </div>
+            </div>
+          </li>
+        </ol>
+        <div class="account-import-status oauth-status" id="warpLoginStatus" role="status" aria-live="polite" hidden></div>
+      </div>
       <div class="form-group grok-sso-body" id="grokSSOImportGroup" hidden>
         <div>
           <div class="grok-sso-title">快速导入 Grok Web 账号</div>

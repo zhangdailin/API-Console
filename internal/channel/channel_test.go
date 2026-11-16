@@ -36,17 +36,41 @@ func TestRegistryInvariantsAndPathParsing(t *testing.T) {
 
 // TestRegistryIsWorkBuddyDefaultAfterChannelRemoval pins the provider set once
 // retired channels were removed: WorkBuddy carries the default flag and the
-// remaining three channels keep their order, so any accidental re-addition or
+// remaining channels keep their order, so any accidental re-addition or
 // reordering of the registry fails here.
 func TestRegistryKeepsWorkBuddyDefault(t *testing.T) {
 	got := Default()
 	testutil.Falsef(t, got.ID != WorkBuddy, "Default() = %q, want %q", got.ID, WorkBuddy)
-	want := []ID{WorkBuddy, Cline, Grok, Doubao}
+	want := []ID{WorkBuddy, Cline, Grok, Doubao, Warp}
 	all := All()
 	testutil.Equal(t, len(all), len(want))
 	for i, id := range want {
 		testutil.Equal(t, all[i].ID, id)
 	}
-	testutil.Equal(t, len(GenericPrefixes()), 6)
+	testutil.Equal(t, len(GenericPrefixes()), 8)
 	testutil.Equal(t, len(AllPrefixes()), 2*len(want))
+}
+
+// TestChatOnlySurfaceIsDoubaoOnly pins which channels stay off the shared
+// Messages/Responses bridges. Warp serves those endpoints through cmd/server
+// routes.go, so marking it ChatOnly again would silently turn them into 404s.
+func TestChatOnlySurfaceIsDoubaoOnly(t *testing.T) {
+	chatOnly := ChatOnlyIDs()
+	testutil.Equal(t, len(chatOnly), 1)
+	testutil.Equal(t, chatOnly[0], Doubao)
+
+	warp, ok := DefinitionFor(Warp)
+	testutil.Falsef(t, !ok, "Warp missing from the registry")
+	testutil.Falsef(t, warp.ChatOnly, "Warp must serve /messages and the Responses bridge")
+
+	protocolPrefixes := map[string]bool{}
+	for _, prefix := range GenericPrefixesExcept(ChatOnlyIDs()...) {
+		protocolPrefixes[prefix] = true
+	}
+	for _, prefix := range PrefixesFor(Warp) {
+		testutil.Falsef(t, !protocolPrefixes[prefix], "Warp protocol prefix %q is not bridged", prefix)
+	}
+	for _, prefix := range PrefixesFor(Doubao) {
+		testutil.Falsef(t, protocolPrefixes[prefix], "chat-only prefix %q must stay unbridged", prefix)
+	}
 }

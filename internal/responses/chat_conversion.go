@@ -427,7 +427,10 @@ func ObjectFromChat(model string, chat map[string]any) map[string]any {
 		finish = StreamString(choice["finish_reason"])
 	}
 	status, details := StatusFromFinish(finish)
-	result := map[string]any{"id": "resp_" + util.RandomHex(12), "object": "response", "created_at": time.Now().Unix(), "status": status, "model": util.FirstNonEmpty(chatwire.ParseLooseStringAny(chat["model"]), model), "output": output, "parallel_tool_calls": true, "tool_choice": "auto", "usage": UsageFromChat(chat["usage"])}
+	result := map[string]any{"id": "resp_" + util.RandomHex(12), "object": "response", "created_at": time.Now().Unix(), "status": status, "model": util.FirstNonEmpty(chatwire.ParseLooseStringAny(chat["model"]), model), "output": output, "parallel_tool_calls": true, "tool_choice": "auto"}
+	if usage := UsageFromChat(chat["usage"]); usage != nil {
+		result["usage"] = usage
+	}
 	if details != nil {
 		result["incomplete_details"] = details
 	}

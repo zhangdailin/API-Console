@@ -32,6 +32,8 @@ type Store interface {
 // Codex does by default (it resends the whole conversation every turn).
 type BridgeOptions struct {
 	// ExecuteChat optionally avoids re-reading and re-decoding the internal request.
+	// The prepared entry must select its output dialect by path: streaming calls
+	// use the same channel's /messages path to retain counters omitted by Chat SSE.
 	ExecuteChat func(http.ResponseWriter, *http.Request, chatwire.Request, []byte)
 	// Store is the shared response store. Nil falls back to the process-wide
 	// in-process store, so the bridge keeps store=true, previous_response_id and

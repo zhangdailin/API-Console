@@ -70,6 +70,11 @@ func (a *API) HandleDoubaoLogin(w http.ResponseWriter, r *http.Request) {
 	a.handleBrowserLogin(w, r, channel.Doubao, a.doubaoLogins)
 }
 
+// HandleWarpLogin uses the shared server-owned official device transaction.
+func (a *API) HandleWarpLogin(w http.ResponseWriter, r *http.Request) {
+	a.handleBrowserLogin(w, r, channel.Warp, a.warpLogins)
+}
+
 func (a *API) handleBrowserLogin(w http.ResponseWriter, r *http.Request, id channel.ID, registry *deviceLoginRegistry[browserLogin]) {
 	label := channelLabel(id)
 	routeBrowserLogin(w, r, "/api/"+string(id)+"/login",
@@ -142,5 +147,5 @@ func (a *API) pollChannelLogin(ctx context.Context, loginID, label string, regis
 		},
 		func(login *browserLogin, grant provider.LoginGrant) (*store.Account, error) {
 			return flow.Build(ctx, cfg, loginID, login.challenge, grant)
-		}, flow.MarkReplace)
+		}, flow.MarkReplace, flow.Merge)
 }

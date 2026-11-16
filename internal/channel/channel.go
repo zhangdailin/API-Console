@@ -12,6 +12,7 @@ const (
 	Cline     ID = "cline"
 	Grok      ID = "grok"
 	Doubao    ID = "doubao"
+	Warp      ID = "warp"
 )
 
 type Definition struct {
@@ -35,6 +36,7 @@ var definitions = [...]Definition{
 	{ID: Cline, Label: "Cline", APIPrefix: "/cline/v1", Generic: true, Theme: "blue", AccountCreate: "browser", FlowVisible: true},
 	{ID: Grok, Label: "Grok", APIPrefix: "/grok/v1", Theme: "red", AccountCreate: "browser", FlowVisible: true},
 	{ID: Doubao, Label: "Doubao", APIPrefix: "/doubao/v1", Generic: true, Theme: "green", AccountCreate: "browser", ChatOnly: true, FlowVisible: false},
+	{ID: Warp, Label: "Warp", APIPrefix: "/warp/v1", Generic: true, Theme: "purple", AccountCreate: "browser", FlowVisible: true},
 }
 
 func All() []Definition { return append([]Definition(nil), definitions[:]...) }

@@ -201,7 +201,7 @@ func awaitLoginPoll[T any](ctx context.Context, registry *deviceLoginRegistry[T]
 // so a failed build is reported as a failed verification rather than a failed
 // save.
 func pollBrowserLogin[T, C any](a *API, ctx context.Context, registry *deviceLoginRegistry[T], id, channel string, pending error, buildVerifies bool,
-	exchange func(context.Context, *T) (C, error), build func(*T, C) (*store.Account, error), markReplace func(*store.Account)) {
+	exchange func(context.Context, *T) (C, error), build func(*T, C) (*store.Account, error), markReplace func(*store.Account), merge ...func(existing, fresh *store.Account)) {
 	for {
 		login, ok := awaitLoginPoll(ctx, registry, id, channel)
 		if !ok {
@@ -249,7 +249,7 @@ func pollBrowserLogin[T, C any](a *API, ctx context.Context, registry *deviceLog
 		if shared.enabledKnown {
 			account.Enabled = shared.enabled
 		}
-		finishBrowserLogin(a, ctx, registry, id, channel, account, markReplace)
+		finishBrowserLogin(a, ctx, registry, id, channel, account, markReplace, merge...)
 		return
 	}
 }
@@ -263,9 +263,10 @@ func pollBrowserLogin[T, C any](a *API, ctx context.Context, registry *deviceLog
 // updated in place, and the operator is told whether the login added an account
 // or refreshed one.
 //
-// markReplace is the single thing each channel must say for itself: which field
-// tells the edit path that the credential just submitted supersedes the stored
-// one.
+// markReplace tells the edit path that the submitted credential supersedes the
+// stored one. When supplied, merge applies the fresh login onto an isolated copy
+// of the existing row, preserving operator settings and runtime state. A nil or
+// omitted merge keeps the legacy fresh-account replacement behavior.
 func finishBrowserLogin[T any](
 	a *API,
 	ctx context.Context,
@@ -273,6 +274,7 @@ func finishBrowserLogin[T any](
 	id, channel string,
 	account *store.Account,
 	markReplace func(*store.Account),
+	merge ...func(existing, fresh *store.Account),
 ) {
 	existing, err := a.saveNewAccountUnlessDuplicate(ctx, account)
 	if err != nil {
@@ -280,6 +282,11 @@ func finishBrowserLogin[T any](
 		return
 	}
 	if existing != nil {
+		if len(merge) > 0 && merge[0] != nil {
+			fresh := account
+			account = existing.Clone()
+			merge[0](account, fresh)
+		}
 		account.ID = existing.ID
 		if markReplace != nil {
 			markReplace(account)

@@ -49,7 +49,7 @@ func (o accountOutput) MarshalJSON() ([]byte, error) {
 	// Credentials are write-only. The account API exposes only their presence,
 	// including for create, update and refresh responses.
 	merged["has_credential"] = o.SessionFingerprint != ""
-	for _, field := range []string{"token", "client_cookie", "refresh_token", "oauth_access_token", "oauth_refresh_token", "workbuddy_access_token", "workbuddy_refresh_token", "cline_access_token", "cline_refresh_token", "doubao_device_id", "doubao_web_id", "doubao_tea_uuid", "session_fingerprint"} {
+	for _, field := range []string{"token", "client_cookie", "refresh_token", "oauth_access_token", "oauth_refresh_token", "workbuddy_access_token", "workbuddy_refresh_token", "cline_access_token", "cline_refresh_token", "warp_access_token", "warp_refresh_token", "doubao_device_id", "doubao_web_id", "doubao_tea_uuid", "session_fingerprint"} {
 		delete(merged, field)
 	}
 	if o.Account != nil {
@@ -99,6 +99,9 @@ func normalizeAccountOutputWithUsage(acc *store.Account, usage map[int64]int64) 
 	if admin := adminFor(out.AccountType); admin != nil && admin.Project != nil {
 		admin.Project(&out)
 	}
+	// Warp official-login credentials are non-portable, even when planted in a
+	// foreign channel's slots. Keep the projection and final marshal independent.
+	out.WarpAccessToken, out.WarpRefreshToken = "", ""
 	return &accountOutput{
 		Account:            &out,
 		SessionFingerprint: sessionFingerprint,

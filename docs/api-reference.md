@@ -9,6 +9,7 @@
 | `/workbuddy`、`/workbuddy/v1` | WorkBuddy 账号池 |
 | `/cline`、`/cline/v1` | Cline 账号池 |
 | `/grok`、`/grok/v1` | Grok Build OAuth 账号池 |
+| `/warp`、`/warp/v1` | Warp 文本账号池；Chat Completions、Messages 与 Responses（共享 Chat 桥接）和目录，限制见 [Warp 渠道](warp.md) |
 
 推理和模型接口使用管理后台创建的 Key：`Authorization: Bearer <API_KEY>` 或 `x-api-key: <API_KEY>`，同时提供时 Bearer 优先。管理接口使用管理员会话或既有管理 token，不接受推理 Key 替代管理员。
 
@@ -16,7 +17,7 @@
 
 ### 1.1 编程客户端与 CC Switch
 
-三个固定渠道都提供 OpenAI Chat Completions、Responses（Codex）及 Anthropic Messages（Claude Code）。OpenAI / Codex Base URL 使用上表含 `/v1` 的地址；Claude Code 和 Anthropic SDK 使用 `/{channel}`，由客户端追加 `/v1/messages`。其他客户端是否需要 `/v1` 取决于其追加路径方式。
+WorkBuddy、Cline、Grok 与 Warp 都提供 OpenAI Chat Completions、Responses（Codex）及 Anthropic Messages（Claude Code）；Warp 的 Messages / Responses 由共享桥接提供，限制见 [Warp 渠道](warp.md)。OpenAI / Codex Base URL 使用上表含 `/v1` 的地址；Claude Code 和 Anthropic SDK 使用 `/{channel}`，由客户端追加 `/v1/messages`。其他客户端是否需要 `/v1` 取决于其追加路径方式。
 
 管理后台「配置管理 → API Key 管理」每条密钥提供复制与 CC Switch 导入：点击该密钥的导入按钮，选择 Codex 或 Claude Code、渠道和目录模型，再点击导入。弹窗按需读取完整密钥并自动读取默认 WorkBuddy 目录；切换渠道重新读取。目录使用该 Key 请求渠道公开 `/models`，因此遵守公开可见性与 Key 模型权限，不使用管理列表代替。Key 或渠道改变后必须重新读取；没有目录结果时不能导入。
 
@@ -37,8 +38,8 @@
 | POST | `/messages` | Anthropic Messages 兼容输入输出 |
 | POST | `/chat/completions` | Chat Completions 兼容输入输出 |
 | POST | `/responses` | Responses，Grok 原生 Build，其他通道 Chat 桥接 |
-| POST | `/messages/count_tokens` | 三通道均支持本地 Token 估算 |
-| POST | `/responses/compact` | 网关摘要 / Build 压缩路径；三通道两种前缀均支持 |
+| POST | `/messages/count_tokens` | 非 Chat-only 通道均支持本地 Token 估算 |
+| POST | `/responses/compact` | 网关摘要 / Build 压缩路径；各文本通道两种前缀均支持 |
 | POST | `/images/generations`、`/images/edits` | 仅 Grok：Web Imagine 生图 / 改图 |
 | POST / GET | `/videos`、`/videos/{id}`、`/videos/{id}/content` | 仅 Grok：视频任务创建、查询与下载。Web 模型（`grok-imagine-video`）仅文生视频；Build 视频模型（如 `grok-imagine-video-1.5`，仅当某个 Build 账号的上游目录列出该模型时才有路由）走 CLI 代理的 `/videos/generations`，支持最多 8 张 `input_references`（https URL 或 `data:image/`，带参考图时最高 720p）。运行中的任务持有租约；进程重启或崩溃后，每分钟一次的恢复扫描会接管租约已失效的任务：已在上游创建的 Build / Console 任务在原账号上继续轮询，其余（包括 Web 任务）标记为失败（`error.code=video_interrupted`），不再一直停留在处理中 |
 | POST | `/tts`、`/tts/voices`（GET）、`/stt` | 仅 Grok Console：console.x.ai 原生语音合成与转写。`/tts` 接受 Console 自身字段（`text`、`language`、`voice_id`、`output_format`…），`model` 只用于选路由（默认 `grok-voice-latest`）；`/stt` 为 multipart（`file` 或 `url`，默认模型 `grok-stt`） |

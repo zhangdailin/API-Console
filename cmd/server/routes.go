@@ -207,6 +207,8 @@ func registerRoutes(
 	mux.HandleFunc("/api/cline/login/", sessionAuth(apiHandler.HandleClineLogin))
 	mux.HandleFunc("/api/doubao/login", sessionAuth(apiHandler.HandleDoubaoLogin))
 	mux.HandleFunc("/api/doubao/login/", sessionAuth(apiHandler.HandleDoubaoLogin))
+	mux.HandleFunc("/api/warp/login", sessionAuth(apiHandler.HandleWarpLogin))
+	mux.HandleFunc("/api/warp/login/", sessionAuth(apiHandler.HandleWarpLogin))
 	mux.HandleFunc("/api/grok/device-auth", sessionAuth(apiHandler.HandleGrokDeviceAuthorization))
 	mux.HandleFunc("/api/grok/device-auth/", sessionAuth(apiHandler.HandleGrokDeviceAuthorization))
 	registerGrokWebAdminRoutes(mux, sessionAuth, h, grokHandler, flowTracker)

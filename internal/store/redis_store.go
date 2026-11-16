@@ -158,6 +158,9 @@ func (s *redisStore) CreateAccount(ctx context.Context, acc *Account) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis store not configured")
 	}
+	if err := acc.WarpQuota.Validate(); err != nil {
+		return err
+	}
 
 	id, err := s.client.Incr(ctx, s.accountsNextIDKey()).Result()
 	if err != nil {
@@ -220,6 +223,9 @@ func (s *redisStore) UpdateAccount(ctx context.Context, acc *Account) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis store not configured")
 	}
+	if err := acc.WarpQuota.Validate(); err != nil {
+		return err
+	}
 	if acc.ID == 0 {
 		return nil
 	}
@@ -245,6 +251,7 @@ func (s *redisStore) UpdateAccount(ctx context.Context, acc *Account) error {
 		p.mergeModelCooldownState()
 		p.mergeWorkBuddyCredentials()
 		p.mergeClineCredentials()
+		p.mergeWarpCredentials()
 		p.mergeDoubaoIdentity()
 		*existing = updated
 		return nil

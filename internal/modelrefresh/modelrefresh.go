@@ -11,6 +11,7 @@ package modelrefresh
 import (
 	"errors"
 	"fmt"
+	"orchids-api/internal/store"
 	"orchids-api/internal/util"
 	"strconv"
 	"strings"
@@ -92,6 +93,7 @@ type discoveredModel struct {
 	// "free" grants routing to an account whose metered allowance is exhausted.
 	BillingTier   string
 	BillingSource string
+	UpstreamUsage *store.ModelUsageMetadata
 }
 
 // noActiveAccountsError reports that a channel has no account eligible for an
@@ -120,10 +122,11 @@ func isNoActiveAccounts(err error) bool {
 // observation while "grok_build_models_unavailable_cached" is not, and a prefix
 // test would accept the latter.
 var upstreamCatalogSources = map[string]struct{}{
-	"grok_build_models":        {},
-	"workbuddy_cli_models":     {},
-	"cline_recommended_models": {},
-	"doubao_web_verified":      {},
+	"grok_build_models":         {},
+	"workbuddy_cli_models":      {},
+	"cline_recommended_models":  {},
+	"doubao_web_verified":       {},
+	"warp_feature_model_choice": {},
 }
 
 // A catalog source that names the upstream read that produced it is an

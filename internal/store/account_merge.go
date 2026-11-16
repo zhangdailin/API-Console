@@ -1,6 +1,7 @@
 package store
 
 import (
+	"maps"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 //	mergeModelCooldownState     per-model cooldowns and their labels
 //	mergeWorkBuddyCredentials   WorkBuddy credentials and catalog
 //	mergeClineCredentials       Cline credentials, tier and catalog
+//	mergeWarpCredentials        Warp credentials and catalog
 //
 // UsageTotal and the daily token fields are absent from every step on purpose:
 // they are gateway-owned atomic counters mutated only by IncrementAccountStats,
@@ -238,6 +240,45 @@ func (p accountPatch) mergeClineCredentials() {
 	}
 	if !acc.ClineModelsSyncedAt.IsZero() && (existing.ClineModelsSyncedAt.IsZero() || !acc.ClineModelsSyncedAt.Before(existing.ClineModelsSyncedAt)) {
 		u.ClineModelsSyncedAt = acc.ClineModelsSyncedAt
+	}
+}
+
+func (p accountPatch) mergeWarpCredentials() {
+	u, acc, existing := p.updated, p.acc, p.existing
+	if acc.ReplaceWarpCredentials {
+		u.WarpAccessToken = strings.TrimSpace(acc.WarpAccessToken)
+		u.WarpRefreshToken = strings.TrimSpace(acc.WarpRefreshToken)
+		u.WarpExpiresAt = acc.WarpExpiresAt
+	}
+	u.ReplaceWarpCredentials = false
+	// The attempt clock, not the account update clock, owns quota freshness.
+	// This also retains the last known reading when a newer attempt failed.
+	if acc.ReplaceWarpCredentials || acc.WarpRefreshToken == existing.WarpRefreshToken {
+		u.WarpQuota = mergeWarpQuota(existing.WarpQuota, acc.WarpQuota)
+	}
+	// A stale full-account snapshot must not replace a newer catalog, either.
+	// Nil means untouched; a non-nil empty list can record an empty observation.
+	modelsNewer := acc.WarpModelsSyncedAt.After(existing.WarpModelsSyncedAt)
+	modelsCurrent := !acc.WarpModelsSyncedAt.Before(existing.WarpModelsSyncedAt)
+	generationMatches := acc.ReplaceWarpCredentials || acc.WarpRefreshToken == existing.WarpRefreshToken
+	if generationMatches && modelsCurrent && (!p.staleSnapshot || modelsNewer) {
+		if acc.WarpModelIDs != nil {
+			u.WarpModelIDs = append([]string{}, acc.WarpModelIDs...)
+		}
+		// Windows belong to the same observation as the IDs, so they follow the
+		// same generation guard. A non-nil map is evidence; a newer observation
+		// without one clears the previous generation's windows instead of
+		// letting stale budgets outlive the catalog they described. An equal
+		// observation with no map may be a partial update, so it keeps them.
+		switch {
+		case acc.WarpModelWindows != nil:
+			u.WarpModelWindows = maps.Clone(acc.WarpModelWindows)
+		case modelsNewer:
+			u.WarpModelWindows = nil
+		}
+		if !acc.WarpModelsSyncedAt.IsZero() {
+			u.WarpModelsSyncedAt = acc.WarpModelsSyncedAt
+		}
 	}
 }
 

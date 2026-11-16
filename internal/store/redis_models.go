@@ -144,7 +144,7 @@ func (s *redisStore) ReconcileDiscoveredModels(ctx context.Context, channel stri
 			return nil, fmt.Errorf("duplicate discovered model id %q", modelID)
 		}
 		seen[modelID] = struct{}{}
-		row := *input
+		row := input.Clone()
 		row.ID = ""
 		row.Channel = strings.TrimSpace(channel)
 		row.ModelID = modelID
@@ -153,7 +153,7 @@ func (s *redisStore) ReconcileDiscoveredModels(ctx context.Context, channel stri
 			row.CreatedAt = now
 		}
 		row.NormalizeRoute()
-		rows = append(rows, &row)
+		rows = append(rows, row)
 	}
 	payload, err := json.Marshal(rows)
 	if err != nil {

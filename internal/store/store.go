@@ -223,6 +223,25 @@ type Account struct {
 	ClineModelIDs       []string  `json:"cline_model_ids,omitempty"`
 	ClineModelsSyncedAt time.Time `json:"cline_models_synced_at"`
 
+	// Warp credentials come only from the official login flow. They are stored
+	// independently from generic credentials and are never portable in archives.
+	WarpAccessToken  string    `json:"warp_access_token,omitempty"`
+	WarpRefreshToken string    `json:"warp_refresh_token,omitempty"`
+	WarpExpiresAt    time.Time `json:"warp_expires_at"`
+	// Only explicit login replacement may overwrite credentials in a full update;
+	// ordinary snapshots must not rewind a concurrently rotated refresh token.
+	ReplaceWarpCredentials bool `json:"-"`
+	// WarpModelIDs is the last successful account-scoped upstream catalog read.
+	WarpModelIDs       []string  `json:"warp_model_ids,omitempty"`
+	WarpModelsSyncedAt time.Time `json:"warp_models_synced_at"`
+	// WarpModelWindows is the input context window the same catalog read
+	// reported for each model, in tokens. A model absent from the map was never
+	// observed with a window; it is not defaulted here, because a guess would be
+	// indistinguishable from evidence to the prompt budgeter.
+	WarpModelWindows map[string]int `json:"warp_model_windows,omitempty"`
+	// WarpQuota is display-only and must never drive production scheduling.
+	WarpQuota WarpQuotaSnapshot `json:"warp_quota"`
+
 	// ── Doubao Web (doubao.com) browser channel ──
 	// ClientCookie stores the encrypted serialized Cookie jar. Device values are
 	// persisted with it because changing browser identity after QR login triggers
@@ -312,6 +331,7 @@ type accountStore interface {
 	UpdateAccount(ctx context.Context, acc *Account) error
 	UpdateWorkBuddyCredentials(ctx context.Context, id int64, patch WorkBuddyCredentialPatch) error
 	UpdateClineCredentials(ctx context.Context, id int64, patch ClineCredentialPatch) error
+	UpdateWarpCredentials(ctx context.Context, id int64, patch WarpCredentialPatch) error
 	UpdateGrokCredentials(ctx context.Context, id int64, patch GrokCredentialPatch) error
 	DeleteAccount(ctx context.Context, id int64) error
 	GetAccount(ctx context.Context, id int64) (*Account, error)
@@ -636,54 +656,4 @@ func (s *Store) SetSetting(ctx context.Context, key, value string) error {
 		return s.settings.SetSetting(ctx, key, value)
 	}
 	return fmt.Errorf("settings store not configured")
-}
-
-// Secrets returns every credential-bearing value the account holds.
-//
-// It lives beside the type because the type is what grows new credential fields,
-// and it is the one list every redactor must use. There were three hand-maintained
-// copies: the account response redactor, the attempt-diagnostics scrubber and this
-// one. They had already drifted — diagnostics redacted seven of the fourteen values
-// — and each copy is a place where a newly added credential field is silently
-// published.
-//
-// Callers that redact free text should replace each returned value, quoted or not:
-// upstream errors echo credentials back in both forms.
-// IsGrokWeb reports whether the account is a Grok Web (grok.com SSO) account.
-func (a *Account) IsGrokWeb() bool {
-	if a == nil || !strings.EqualFold(strings.TrimSpace(a.AccountType), "grok") || strings.EqualFold(strings.TrimSpace(a.CredentialType), "oauth") {
-		return false
-	}
-	if a.IsGrokConsole() {
-		return false
-	}
-	return strings.EqualFold(strings.TrimSpace(a.GrokProvider), GrokProviderWeb) || strings.EqualFold(strings.TrimSpace(a.CredentialType), "sso")
-}
-
-// IsGrokConsole reports whether the account is a Grok Console (console.x.ai
-// SSO) account. A Console account carries the same SSO cookie as a Web
-// account, so the provider field, not the credential, tells them apart.
-func (a *Account) IsGrokConsole() bool {
-	return a != nil && strings.EqualFold(strings.TrimSpace(a.AccountType), "grok") &&
-		strings.EqualFold(strings.TrimSpace(a.GrokProvider), GrokProviderConsole)
-}
-
-func (a *Account) Secrets() []string {
-	if a == nil {
-		return nil
-	}
-	return []string{
-		a.Token,
-		a.ClientCookie,
-		a.RefreshToken,
-		a.OAuthAccessToken,
-		a.OAuthRefreshToken,
-		a.WorkBuddyAccessToken,
-		a.WorkBuddyRefreshToken,
-		a.ClineAccessToken,
-		a.ClineRefreshToken,
-		a.DoubaoDeviceID,
-		a.DoubaoWebID,
-		a.DoubaoTeaUUID,
-	}
 }

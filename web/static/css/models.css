@@ -238,6 +238,28 @@
 
 .models-model-id { color: var(--text-faint); font-family: var(--font-mono); font-size: 0.74rem; }
 
+.models-usage { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; min-width: 0; max-width: 34rem; }
+
+.models-usage-badges { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+
+.models-usage-badge {
+  padding: 3px var(--space-2);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.models-usage-badge.is-unknown,
+.models-usage-badge.is-legacy { border-color: var(--border-color); background: var(--surface-2); color: var(--text-muted); }
+
+.models-usage-meta,
+.models-usage-note { color: var(--text-muted); font-size: 0.7rem; line-height: 1.5; white-space: normal; overflow-wrap: anywhere; }
+
 .models-status-badge {
   display: inline-flex;
   align-items: center;

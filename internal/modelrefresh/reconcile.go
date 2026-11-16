@@ -110,7 +110,7 @@ func applyModelRefreshWithPrune(ctx context.Context, s *store.Store, channel str
 			Status: store.ModelStatusAvailable, Verified: model.Verified, IsDefault: model.ID == defaultModelID,
 			SortOrder: model.SortOrder, Provider: model.Provider, UpstreamModel: model.UpstreamModel,
 			BillingTier: strings.ToLower(strings.TrimSpace(model.BillingTier)), BillingSource: strings.ToLower(strings.TrimSpace(model.BillingSource)),
-			Origin: "discovery",
+			Origin: "discovery", UpstreamUsage: model.UpstreamUsage.Clone(),
 		}
 		if catalog != nil && catalog.ShapeRecord != nil {
 			catalog.ShapeRecord(record)

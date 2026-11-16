@@ -228,6 +228,9 @@ var (
 					if (not row.upstream_model or tostring(row.upstream_model) == "") and current_incoming.upstream_model then row.upstream_model = current_incoming.upstream_model end
 					if current_incoming.billing_tier ~= nil then row.billing_tier = current_incoming.billing_tier end
 					if current_incoming.billing_source ~= nil then row.billing_source = current_incoming.billing_source end
+					-- Usage is fresh observational evidence, never an operator field.
+					-- An absent latest observation must clear previously stored usage.
+					row.upstream_usage = current_incoming.upstream_usage
 					table.insert(protected, model_id)
 				end
 				if row.status ~= "available" and row.status ~= "maintenance" and row.status ~= "offline" then row.status = "offline" end

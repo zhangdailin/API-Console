@@ -270,6 +270,25 @@ function modelTitle(m) {
   return `<div class="models-cell-title"><strong>${escapeHtml(m.name || m.model_id || "-")}</strong>${defaultBadge}</div>`;
 }
 
+// Multipliers are catalog observations, not prices. In particular, the legacy
+// request multiplier must never stand in for a missing credit multiplier.
+function modelUsageRange(usage, prefix) {
+  const min = usage?.[`${prefix}_min`];
+  const max = usage?.[`${prefix}_max`];
+  const valid = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0;
+  if (!valid(min) || !valid(max) || min > max) return "";
+  return min === max ? `${min}×` : `${min}–${max}×`;
+}
+
+function modelUsageHtml(m) {
+  if (String(m.channel || "").trim().toLowerCase() !== "warp") return "";
+
+  const credits = modelUsageRange(m.upstream_usage, "credit_multiplier");
+  if (!credits) return "";
+
+  return `<div class="models-usage"><div class="models-usage-badges"><span class="models-usage-badge">${escapeHtml(`积分倍率 ~${credits}`)}</span></div></div>`;
+}
+
 function statusBadgeHtml(m) {
   const status = statusMeta(m.status);
   return `<span class="models-status-badge" style="background:${status.bg};color:${status.color};border-color:${status.border};">${status.label}</span>`;
@@ -336,6 +355,7 @@ function renderModels() {
           <div class="models-cell-main">
             ${modelTitle(m)}
             <span class="models-model-id">${escapeHtml(m.model_id || "-")}</span>
+            ${modelUsageHtml(m)}
           </div>
         </td>
         <td class="col-channel">${escapeHtml(m.channel || "-")}</td>
