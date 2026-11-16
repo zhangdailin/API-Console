@@ -1,5 +1,7 @@
 package template
 
+import "orchids-api/internal/channel"
+
 // PageData represents the data passed to page templates
 type PageData struct {
 	Title     string
@@ -11,6 +13,7 @@ type PageData struct {
 	// or CDN cache filled by an earlier deployment.
 	AssetVersion   string
 	LoginProviders []LoginProvider
+	FlowProviders  []channel.Definition
 }
 
 type LoginProvider struct {

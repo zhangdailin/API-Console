@@ -58,7 +58,7 @@
             <h2>实时流量态势</h2>
           </div>
           <div class="flow-controls">
-            <label class="sr-only" for="flowChannel">拓扑渠道筛选</label><select id="flowChannel" aria-label="拓扑渠道筛选"><option value="">全部渠道</option><option value="workbuddy">WorkBuddy</option><option value="cline">Cline</option><option value="grok">Grok</option></select>
+            <label class="sr-only" for="flowChannel">拓扑渠道筛选</label><select id="flowChannel" aria-label="拓扑渠道筛选"><option value="">全部渠道</option>{{range .FlowProviders}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
             <button type="button" id="flowMotion" aria-pressed="true">动画开启</button>
             <button type="button" id="flowFullscreen" aria-label="全屏查看实时拓扑"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg><span>全屏</span></button>
           </div>
@@ -66,7 +66,7 @@
         <div class="flow-layout">
           <section class="flow-main" aria-label="流量分布">
             <div class="flow-axis" aria-hidden="true"><span>调用接口（入）</span><span>统一网关</span><span>上游渠道（出）</span></div>
-            <div class="flow-board" id="flowBoard">
+            <div class="flow-board" id="flowBoard" style="--flow-channel-count:{{len .FlowProviders}}">
               <section class="flow-column flow-protocols" aria-label="调用接口">
                 <button type="button" class="flow-node flow-protocol" id="opsNode-chat" data-flow-node="chat" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
                   <span class="flow-node-head"><strong>Chat Completions</strong><code>/chat/completions</code></span>
@@ -86,11 +86,9 @@
                   <g id="opsWire-chat" class="flow-wire" data-wire="chat"><path class="flow-band"/><path class="flow-wire-in"/><path class="flow-wire-out"/></g>
                   <g id="opsWire-responses" class="flow-wire" data-wire="responses"><path class="flow-band"/><path class="flow-wire-in"/><path class="flow-wire-out"/></g>
                   <g id="opsWire-messages" class="flow-wire" data-wire="messages"><path class="flow-band"/><path class="flow-wire-in"/><path class="flow-wire-out"/></g>
-                  <g id="opsWire-workbuddy" class="flow-wire" data-wire="workbuddy"><path class="flow-band"/><path class="flow-wire-in"/><path class="flow-wire-out"/></g>
-                  <g id="opsWire-cline" class="flow-wire" data-wire="cline"><path class="flow-band"/><path class="flow-wire-in"/><path class="flow-wire-out"/></g>
-                  <g id="opsWire-grok" class="flow-wire" data-wire="grok"><path class="flow-band"/><path class="flow-wire-in"/><path class="flow-wire-out"/></g>
+                  {{range .FlowProviders}}<g id="opsWire-{{.ID}}" class="flow-wire" data-wire="{{.ID}}"><path class="flow-band"/><path class="flow-wire-in"/><path class="flow-wire-out"/></g>{{end}}
                   <rect id="flowBar-chat" class="flow-bar" data-wire="chat"/><rect id="flowBar-responses" class="flow-bar" data-wire="responses"/><rect id="flowBar-messages" class="flow-bar" data-wire="messages"/>
-                  <rect id="flowBar-workbuddy" class="flow-bar" data-wire="workbuddy"/><rect id="flowBar-cline" class="flow-bar" data-wire="cline"/><rect id="flowBar-grok" class="flow-bar" data-wire="grok"/>
+                  {{range .FlowProviders}}<rect id="flowBar-{{.ID}}" class="flow-bar" data-wire="{{.ID}}"/>{{end}}
                   <rect id="flowGatewayBar" class="flow-bar flow-gateway-bar"/>
                 </svg>
                 <button type="button" class="flow-node flow-gateway" id="opsNode-gateway" data-flow-node="gateway" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
@@ -99,21 +97,13 @@
                 </button>
               </div>
               <section class="flow-column flow-channels" aria-label="上游渠道与账号池">
-                <button type="button" class="flow-node flow-channel" id="opsNode-workbuddy" data-flow-node="workbuddy" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
-                  <span class="flow-node-head"><strong>WorkBuddy</strong><span class="flow-node-state" id="flowState-workbuddy">等待数据</span></span>
-                  <span class="flow-node-line"><span><b id="opsNodeQps-workbuddy">—</b> req/s</span><span><b id="flowActive-workbuddy">—</b> 进行中</span><span><b id="opsNodeTps-workbuddy">—</b> tok/s</span></span>
-                  <span class="flow-pool-line"><span id="flowPool-workbuddy">可用账号 —</span><span id="flowCapacity-workbuddy">槽位 —</span></span><span class="flow-capacity-track"><span id="flowCapacityBar-workbuddy"></span></span>
+                {{range .FlowProviders}}
+                <button type="button" class="flow-node flow-channel" id="opsNode-{{.ID}}" data-flow-node="{{.ID}}" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
+                  <span class="flow-node-head"><strong>{{.Label}}</strong><span class="flow-node-state" id="flowState-{{.ID}}">等待数据</span></span>
+                  <span class="flow-node-line"><span><b id="opsNodeQps-{{.ID}}">—</b> req/s</span><span><b id="flowActive-{{.ID}}">—</b> 进行中</span><span><b id="opsNodeTps-{{.ID}}">—</b> tok/s</span></span>
+                  <span class="flow-pool-line"><span id="flowPool-{{.ID}}">可用账号 —</span><span id="flowCapacity-{{.ID}}">槽位 —</span></span><span class="flow-capacity-track"><span id="flowCapacityBar-{{.ID}}"></span></span>
                 </button>
-                <button type="button" class="flow-node flow-channel" id="opsNode-cline" data-flow-node="cline" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
-                  <span class="flow-node-head"><strong>Cline</strong><span class="flow-node-state" id="flowState-cline">等待数据</span></span>
-                  <span class="flow-node-line"><span><b id="opsNodeQps-cline">—</b> req/s</span><span><b id="flowActive-cline">—</b> 进行中</span><span><b id="opsNodeTps-cline">—</b> tok/s</span></span>
-                  <span class="flow-pool-line"><span id="flowPool-cline">可用账号 —</span><span id="flowCapacity-cline">槽位 —</span></span><span class="flow-capacity-track"><span id="flowCapacityBar-cline"></span></span>
-                </button>
-                <button type="button" class="flow-node flow-channel" id="opsNode-grok" data-flow-node="grok" aria-haspopup="dialog" aria-controls="flowDrawer" aria-pressed="false">
-                  <span class="flow-node-head"><strong>Grok</strong><span class="flow-node-state" id="flowState-grok">等待数据</span></span>
-                  <span class="flow-node-line"><span><b id="opsNodeQps-grok">—</b> req/s</span><span><b id="flowActive-grok">—</b> 进行中</span><span><b id="opsNodeTps-grok">—</b> tok/s</span></span>
-                  <span class="flow-pool-line"><span id="flowPool-grok">可用账号 —</span><span id="flowCapacity-grok">槽位 —</span></span><span class="flow-capacity-track"><span id="flowCapacityBar-grok"></span></span>
-                </button>
+                {{end}}
               </section>
             </div>
             <section class="flow-trend" aria-label="近60秒趋势">
@@ -278,6 +268,7 @@
     </section>
 
     {{template "page-scripts.html" .}}
+    <script src="{{.AdminPath}}/js/provider-registry.js?v={{.AssetVersion}}"></script>
     <script src="{{.AdminPath}}/js/ops-flow-model.js?v={{.AssetVersion}}"></script>
     <script src="{{.AdminPath}}/js/ops-flow.js?v={{.AssetVersion}}"></script>
     <script src="{{.AdminPath}}/js/ops.js?v={{.AssetVersion}}"></script>

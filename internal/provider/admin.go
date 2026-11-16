@@ -75,6 +75,10 @@ type Admin struct {
 	// forgets the recorded challenge once the operator answered it.
 	Verification       func(acc *store.Account) (Verification, bool)
 	VerificationSolved func(acc *store.Account)
+
+	// RotateDeviceIdentity creates an identity-only patch for an explicit admin
+	// action. It must not contact upstream or clear credential/verification state.
+	RotateDeviceIdentity func(acc *store.Account) (store.DoubaoIdentityPatch, error)
 }
 
 // Verification is an upstream challenge only a person can answer. SDK names

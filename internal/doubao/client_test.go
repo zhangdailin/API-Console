@@ -589,12 +589,12 @@ func TestVerificationOffersTheRefusedChallenge(t *testing.T) {
 	var refusal map[string]any
 	encoded, _ := json.Marshal(decision)
 	testutil.NoError(t, json.Unmarshal([]byte(`{"error_code":710022004,"extra":{"decision":`+string(encoded)+`}}`), &refusal))
-	acc := &store.Account{ID: 9101, AccountType: "doubao", DoubaoDeviceID: "7500000000000000003", ClientCookie: `{"sessionid":"x","s_v_web_id":"verify_fp_1"}`}
+	acc := &store.Account{ID: 9101, AccountType: "doubao", DoubaoDeviceID: "7500000000000000003", DoubaoWebID: "7500000000000000004", DoubaoTeaUUID: "7500000000000000004", ClientCookie: `{"sessionid":"x","s_v_web_id":"verify_fp_1"}`}
 	t.Cleanup(func() { clearChallenge(acc.ID) })
 
 	_, ok := verification(acc)
 	testutil.False(t, ok, "a challenge was offered before any refusal")
-	noteChallenge(acc.ID, upstreamStreamError(refusal))
+	noteChallenge(acc, upstreamStreamError(refusal))
 	got, ok := verification(acc)
 	testutil.True(t, ok, "the refused challenge was not offered")
 	testutil.Equal(t, got.SDK, "bytedance_captcha")

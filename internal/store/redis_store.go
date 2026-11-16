@@ -263,11 +263,15 @@ var errAccountUnchanged = fmt.Errorf("account unchanged")
 // updateAccountAtomic applies a field mutation with optimistic locking. Every
 // account writer uses the same watched key, so a quota/stat update that lands
 // between read and write causes a retry instead of being silently overwritten.
-func (s *redisStore) updateAccountAtomic(ctx context.Context, id int64, mutate func(*Account) error) error {
+func (s *redisStore) updateAccountAtomic(ctx context.Context, id int64, mutate func(*Account) error, requireExisting ...bool) error {
+	mustExist := len(requireExisting) > 0 && requireExisting[0]
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis store not configured")
 	}
 	if id == 0 {
+		if mustExist {
+			return ErrNoRows
+		}
 		return nil
 	}
 	key := s.accountsKey(id)
@@ -324,6 +328,9 @@ func (s *redisStore) updateAccountAtomic(ctx context.Context, id int64, mutate f
 			return nil
 		}
 		if err == ErrNoRows {
+			if mustExist {
+				return ErrNoRows
+			}
 			return nil
 		}
 		if err != nil {

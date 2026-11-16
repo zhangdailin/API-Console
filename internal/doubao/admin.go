@@ -67,5 +67,15 @@ func adminPort() *provider.Admin {
 		},
 		ErrMissingCredential: ErrMissingCookie, Login: loginPort(),
 		Verification: verification, VerificationSolved: verificationSolved,
+		RotateDeviceIdentity: func(acc *store.Account) (store.DoubaoIdentityPatch, error) {
+			if acc == nil || acc.AccountType != "doubao" || strings.TrimSpace(acc.ClientCookie) == "" {
+				return store.DoubaoIdentityPatch{}, ErrMissingCookie
+			}
+			device, web, tea, err := NewIdentity()
+			if err != nil {
+				return store.DoubaoIdentityPatch{}, err
+			}
+			return store.DoubaoIdentityPatch{ExpectedCookie: acc.ClientCookie, ExpectedDeviceID: acc.DoubaoDeviceID, ExpectedWebID: acc.DoubaoWebID, ExpectedTeaUUID: acc.DoubaoTeaUUID, DeviceID: device, WebID: web, TeaUUID: tea}, nil
+		},
 	}
 }

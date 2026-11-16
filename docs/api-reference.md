@@ -129,6 +129,7 @@ Chat 桥接写递增 sequence_number，便于客户端识别顺序；当前没�
 | `/api/providers` | GET 当前提供者注册表 |
 | `/api/accounts` | GET 列表、POST 创建；各通道创建限制以授权路径为准 |
 | `/api/accounts/{id}` | GET / PUT / DELETE；账号编辑及刷新分支以处理器为准 |
+| `/api/accounts/{id}/device-identity` | POST 管理员显式随机更新豆包 `device_id / web_id / tea_uuid`；只写三项标识，Cookie 与 `s_v_web_id`/`fp` 保持不变，不修改启用、认证、人机验证或冷却状态，不发起上游调用。返回 `status / account_id`，不返回设备原值；其他通道返回 404，并发旧快照返回 409。账号页“更新设备标识”需确认，不会逐请求轮换或自动重试；旧挑战与新标识不匹配时不再提供旧挑战，需下一次拒绝记录新挑战 |
 | `/api/accounts/{id}/verification` | 豆包人机验证（会话认证）：GET 返回最近一次 `710022004` 挑战，供官方验证码 SDK 使用（原样的 decision、本账号请求所用的 `device_id` 与 `fp`；挑战在进程内保留 2 小时，账号无固定设备标识时不提供），无记录返回 404；POST 表示已完成验证，清除记录并只撤销人机验证造成的停用，不标记为已检测。SDK 在账号页的沙箱 iframe（仅 `allow-scripts`）中运行，无法访问后台会话。上游是否放行由下一次请求确认 |
 | `/api/keys` | GET 列表、POST 创建 |
 | `/api/keys/{id}` | PATCH 策略、DELETE 删除 |

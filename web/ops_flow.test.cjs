@@ -2,24 +2,62 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
+const registrySource=fs.readFileSync(__dirname+'/static/js/provider-registry.js','utf8');
 const modelSource=fs.readFileSync(__dirname+'/static/js/ops-flow-model.js','utf8');
 const controllerSource=fs.readFileSync(__dirname+'/static/js/ops-flow.js','utf8');
-function model(){const context=vm.createContext({});vm.runInContext(modelSource,context);return context.FlowScreenModel;}
+function loadRegistry(context,providers) {
+ vm.runInContext(registrySource,context);
+ if(providers!==undefined)context.window.OrchidsProviderRegistry={providers};
+}
+function model({providers,load=true,windowAlias=true}={}) {
+ const context=vm.createContext({});context.window=windowAlias?context:{};
+ if(load)loadRegistry(context,providers);
+ vm.runInContext(modelSource,context);return context.FlowScreenModel;
+}
+const registryContext=vm.createContext({});registryContext.window=registryContext;loadRegistry(registryContext);
+const actualProviders=Array.from(registryContext.OrchidsProviderRegistry.providers);
+const visibleChannels=actualProviders.filter(provider=>provider.flowVisible===true).map(provider=>provider.key);
 const start=Date.parse('2026-10-17T06:00:00Z');
-function snapshot(at=start, overrides={}) {
- const routes=['workbuddy','cline','grok'].flatMap(channel=>['chat','responses','messages'].map(protocol=>({channel,protocol,active:0,started:0,completed:0,qps:0,input_tps:0,output_tps:0,usage_available:true})));
+function snapshot(at=start, overrides={},channels=visibleChannels) {
+ const routes=channels.flatMap(channel=>['chat','responses','messages'].map(protocol=>({channel,protocol,active:0,started:0,completed:0,qps:0,input_tps:0,output_tps:0,usage_available:true})));
  routes[4]={...routes[4],active:2,started:12,completed:10,qps:.4,input_tps:40,output_tps:10};
  const empty={samples:0,p50_ms:null,p95_ms:null};
  const stats={completed:10,failed:2,failure_rate:.2,waiting:1,responding:1,observed:10,usage_reported:8,retried:2,attempts:12,account_switches:1,retry_wait_ms:2000,longest_active_ms:3000,rate_limited:1,timeouts:0,stream_errors:1,canceled:0,
   first_generation:{samples:8,p50_ms:100,p95_ms:1200},first_visible:empty,body_ttfb:empty,duration:{samples:10,p50_ms:2000,p95_ms:4000},http_phases:{dns_ms:{samples:2,avg_ms:0}}};
- return {available:true,instance_started:'one',sampled_at:new Date(at).toISOString(),routes,nodes:Object.fromEntries(['gateway','workbuddy','cline','grok','chat','responses','messages'].map(key=>[key,{...stats}])),...overrides};
+ return {available:true,instance_started:'one',sampled_at:new Date(at).toISOString(),routes,nodes:Object.fromEntries(['gateway',...channels,'chat','responses','messages'].map(key=>[key,{...stats}])),...overrides};
 }
-function pools(at=start,scope='') { return {available:true,sampled_at:new Date(at).toISOString(),rows:['workbuddy','cline','grok'].filter(key=>!scope||scope===key).map(channel=>({channel,accounts_available:2,accounts_enabled:3,capacity_available:true,capacity_slots:20,occupied_slots:5,model_cooldowns:1}))}; }
+function pools(at=start,scope='',channels=visibleChannels) { return {available:true,sampled_at:new Date(at).toISOString(),rows:channels.filter(key=>!scope||scope===key).map(channel=>({channel,accounts_available:2,accounts_enabled:3,capacity_available:true,capacity_slots:20,occupied_slots:5,model_cooldowns:1}))}; }
+
+test('flow channels and display names come from the actual synchronous provider registry',()=>{
+ for(const windowAlias of [true,false]) {
+  const M=model({windowAlias});
+  assert.deepEqual(Array.from(M.channels),['workbuddy','cline','grok','warp']);
+  assert.equal(M.names.warp,'Warp');assert.equal(M.channels.includes('doubao'),false);assert.equal(M.names.doubao,undefined);
+  assert.equal(M.keys.includes('warp'),true);assert.equal(M.keys.includes('doubao'),false);
+ }
+});
+test('missing, malformed and empty visible registries fail closed without fabricated idle pools',()=>{
+ for(const options of [{load:false},{providers:undefined,load:false},{providers:null},{providers:[]},{providers:actualProviders.map(provider=>({...provider,flowVisible:false}))}]) {
+  const M=model(options);
+  assert.equal(M.channels.length,0);assert.equal(M.normalize(snapshot(),''),null);
+  const pool=M.pool(pools(start,'',[]),'gateway','',start,start);
+  assert.equal(pool.fresh,false);assert.equal(pool.available,null);assert.equal(pool.capacity,null);
+ }
+});
+test('future visible providers use registry identity and label without a model channel patch',()=>{
+ const providers=[...actualProviders.map(provider=>provider.key==='warp'?{...provider,label:'Warp Test Label'}:provider),{key:'future',label:'Future Channel',flowVisible:true},{key:'hidden',label:'Hidden Channel',flowVisible:false},{key:'notboolean',label:'Not Visible',flowVisible:'true'}];
+ const M=model({providers}),channels=[...visibleChannels,'future'];
+ assert.deepEqual(Array.from(M.channels),channels);assert.equal(M.names.warp,'Warp Test Label');assert.equal(M.names.future,'Future Channel');
+ assert.equal(M.names.hidden,undefined);assert.equal(M.names.notboolean,undefined);
+ const all=M.normalize(snapshot(start,{},channels),'');assert.equal(all.routes.length,15);
+ assert.equal(M.normalize(snapshot(start,{},channels),'future').routes.length,3);
+ assert.equal(M.pool(pools(start,'',channels),'gateway','',start,start).capacity,100);
+});
 
 test('flow scope and totals count admitted routes once, and separate output from input tokens',()=>{
  const M=model(),data=snapshot();
  const all=M.normalize(data,''),cline=M.normalize(data,'cline');
- assert.equal(all.routes.length,9);assert.equal(cline.routes.length,3);
+ assert.equal(all.routes.length,12);assert.equal(cline.routes.length,3);
  assert.equal(M.rate(M.rowsFor(all,'gateway')).active,2);
  assert.equal(M.rate(M.rowsFor(all,'gateway')).qps,.4);
  assert.equal(M.rate(M.rowsFor(all,'gateway')).output,10);
@@ -40,6 +78,22 @@ test('invalid, duplicate and empty snapshots cannot look like idle traffic',()=>
  assert.equal(M.normalize({...data,routes:[{...data.routes[0],active:null}]},''),null);
  assert.equal(M.normalize({...data,routes:[{...data.routes[0],channel:'unknown'}]},''),null);
 });
+test('Warp scope accepts complete or selected-only routes and rejects unknown, duplicate and missing routes',()=>{
+ const M=model(),data=snapshot();
+ const warp=data.routes.filter(row=>row.channel==='warp');
+ assert.equal(M.normalize(data,'warp').routes.length,3);
+ const nodes=Object.fromEntries(['warp','gateway','chat','responses','messages'].map(key=>[key,data.nodes[key]]));
+ assert.equal(M.normalize({...data,routes:warp,nodes},'warp').routes.length,3);
+ assert.equal(M.normalize({...data,routes:warp},''),null);
+ assert.equal(M.normalize(data,'doubao'),null);assert.equal(M.normalize(data,'unknown'),null);
+ assert.equal(M.normalize({...data,routes:warp.slice(1)},'warp'),null);
+ assert.equal(M.normalize({...data,routes:[...warp,warp[0]]},'warp'),null);
+ assert.equal(M.normalize({...data,routes:[...warp,{...warp[0],channel:'doubao'}]},'warp'),null);
+ assert.equal(M.normalize({...data,routes:[...warp,{...warp[0],protocol:'unknown'}]},'warp'),null);
+ assert.equal(M.normalize({...data,routes:[...data.routes,data.routes[0]]},'warp'),null);
+ assert.equal(M.normalize({...data,routes:[null,...warp]},'warp'),null);
+ assert.equal(M.normalize({...data,nodes:{...data.nodes,warp:null}},'warp'),null);
+});
 test('incoming and completion pulses use positive counter deltas and reset across instances',()=>{
  const M=model(),previous=snapshot(),next=snapshot(start+1000);next.routes[4].started+=3;next.routes[4].completed+=1;
  const diff=M.deltas(previous,next);
@@ -50,8 +104,13 @@ test('incoming and completion pulses use positive counter deltas and reset acros
 test('pool observations expire, stay scoped and never invent capacity',()=>{
  const M=model(),data=pools();
  const cline=M.pool(data,'cline','',start+1000,start);assert.equal(cline.available,2);assert.equal(cline.occupied,5);
- assert.equal(M.pool(data,'gateway','',start+1000,start).capacity,60);
+ assert.equal(M.pool(data,'gateway','',start+1000,start).capacity,80);
  assert.equal(M.pool(pools(start,'cline'),'gateway','cline',start+1000,start).capacity,20);
+ assert.equal(M.pool(pools(start,'warp'),'gateway','warp',start+1000,start).capacity,20);
+ assert.equal(M.pool(data,'warp','warp',start+1000,start).available,2);
+ assert.equal(M.pool(data,'gateway','doubao',start,start).fresh,false);
+ assert.equal(M.pool({...data,rows:[data.rows[0],data.rows[0],data.rows[1],data.rows[2]]},'gateway','',start,start).fresh,false);
+ assert.equal(M.pool({...data,rows:data.rows.slice(0,-1)},'gateway','',start,start).fresh,false);
  assert.equal(M.pool(data,'cline','',start+30000,start).fresh,false);
  assert.equal(M.pool({...data,rows:[]},'gateway','',start,start).fresh,false);
  data.rows[1].capacity_available=false;assert.equal(M.pool(data,'cline','',start,start).capacity,null);assert.equal(M.pool(data,'cline','',start,start).available,2);
@@ -66,7 +125,8 @@ test('trend has a bounded 60-second buffer and leaves outage gaps disconnected',
  trend.clear();assert.equal(trend.path('qps',start+99000).trim(),'');
 });
 
-function harness({fetchPools,search=''}={}) {
+function harness({fetchPools,search='',providers=actualProviders,load=true}={}) {
+ const channels=providers.filter(provider=>provider.flowVisible===true).map(provider=>provider.key);
  let clock=start,timerID=0,focus=null;const timers=new Map(),nodes=new Map(),streams=[],windowEvents={},documentEvents={},requests=[];
  function element(id='',tag='div') {
   const classes=new Set();let text='';
@@ -84,7 +144,7 @@ function harness({fetchPools,search=''}={}) {
   };
   if(id)nodes.set(id,node);return node;
  }
- const keys=['workbuddy','cline','grok','gateway','chat','responses','messages'];
+ const keys=[...channels,'gateway','chat','responses','messages'];
  const get=id=>nodes.get(id)||element(id);
  for(const key of keys)get('opsNode-'+key).dataset.flowNode=key;
  get('flowTabOverview').dataset.flowTab='overview';get('flowTabDetails').dataset.flowTab='details';
@@ -96,9 +156,10 @@ function harness({fetchPools,search=''}={}) {
  const window={location:{search},setTimeout:(fn,delay)=>timeout(fn,delay),clearTimeout:id=>timers.delete(id),setInterval:(fn,delay)=>timeout(fn,delay,delay),clearInterval:id=>timers.delete(id),requestAnimationFrame:fn=>timeout(fn,16),cancelAnimationFrame:id=>timers.delete(id),addEventListener(type,fn){(windowEvents[type]||=[]).push(fn);},matchMedia:()=>({matches:false,addEventListener(){}}),scrollTo(){},scrollY:0};
  const context=vm.createContext({console,Date:Clock,AbortController,URLSearchParams,Event:class{constructor(type){this.type=type;}},document,window,
   ConsoleUI:{el:get,setText:(id,text)=>{get(id).textContent=text;},make:(tag,css,text='')=>{const n=element('',tag);n.textContent=text;return n;}},
-  ConsoleAPI:{json:async(url,options)=>{requests.push({url,options});return fetchPools?fetchPools(url,options):pools(clock,new URL(url,'http://local').searchParams.get('channel')||'');}},
+  ConsoleAPI:{json:async(url,options)=>{requests.push({url,options});return fetchPools?fetchPools(url,options):pools(clock,new URL(url,'http://local').searchParams.get('channel')||'',channels);}},
   EventSource:class{constructor(url){this.url=url;this.listeners={};this.closed=false;streams.push(this);}addEventListener(type,fn){this.listeners[type]=fn;}close(){this.closed=true;}},
  });
+ if(load)loadRegistry(context,providers);
  vm.runInContext(modelSource,context);vm.runInContext(controllerSource,context);
  const send=data=>streams.at(-1).listeners.flow({data:JSON.stringify(data)});
  async function settle(){for(let i=0;i<8;i++)await Promise.resolve();advance(220);}
@@ -111,6 +172,53 @@ test('bookmarked scope applies to the first connection, pool request and both se
  assert.equal(h.streams.length,1);assert.equal(h.streams[0].url,'/api/ops/flow?channel=cline');
  assert.equal(h.requests[0].url,'/api/ops/pools?channel=cline');
  assert.equal(h.get('opsChannel').value,'cline');assert.equal(h.get('flowChannel').value,'cline');
+});
+test('Warp bookmarks and selector changes scope the stream, pools and both selectors',async()=>{
+ const h=harness({search:'?tab=ops&channel=warp'});await h.settle();
+ assert.equal(h.streams[0].url,'/api/ops/flow?channel=warp');assert.equal(h.requests[0].url,'/api/ops/pools?channel=warp');
+ assert.equal(h.get('opsChannel').value,'warp');assert.equal(h.get('flowChannel').value,'warp');
+ assert.equal(h.get('opsChannel').options.find(option=>option.value==='warp').textContent,'Warp');
+ h.send(snapshot(h.time()));await h.settle();
+ assert.equal(h.get('flowScope').textContent,'Warp');assert.equal(h.get('flowPool-warp').textContent,'2/3 可用账号');
+ assert.equal(h.get('flowCapacity-warp').textContent,'槽位 5/20');assert.equal(h.get('opsNode-cline').disabled,true);
+ h.get('flowChannel').value='cline';h.get('flowChannel').emit('change');await h.settle();
+ h.get('opsChannel').value='warp';h.get('opsChannel').emit('change');await h.settle();
+ assert.equal(h.streams.at(-1).url,'/api/ops/flow?channel=warp');assert.equal(h.requests.at(-1).url,'/api/ops/pools?channel=warp');
+ assert.equal(h.get('flowChannel').value,'warp');assert.equal(h.streams.filter(stream=>!stream.closed).length,1);
+});
+test('a nonzero twelve-route Warp snapshot renders Warp and retains other channel aggregates',async()=>{
+ const h=harness(),data=snapshot(h.time());
+ const row=data.routes.find(row=>row.channel==='warp'&&row.protocol==='chat');
+ Object.assign(row,{active:3,started:15,completed:12,qps:.6,input_tps:100,output_tps:30});
+ h.send(data);await h.settle();
+ assert.equal(h.root.dataset.live,'true');assert.equal(h.get('flowTotal-active').textContent,'5');assert.equal(h.get('flowTotal-qps').textContent,'1.00');assert.equal(h.get('flowTotal-tps').textContent,'40.0');
+ assert.equal(h.get('flowActive-warp').textContent,'3');assert.equal(h.get('flowActive-cline').textContent,'2');
+ assert.equal(h.get('opsNodeTps-warp').textContent,'30.0');assert.equal(h.get('opsNodeTps-cline').textContent,'10.0');
+ assert.equal(h.get('opsNode-warp').classList.contains('is-flowing'),true);
+ assert.equal(h.get('opsNode-cline').classList.contains('is-flowing'),true);
+ assert.match(h.get('opsWire-warp').querySelectorAll('path')[0].getAttribute('d'),/Z$/);
+ assert.equal(h.get('opsChannel').options.some(option=>option.value==='doubao'),false);
+ h.get('opsNode-warp').emit('click');assert.equal(h.get('opsFlowDetailTitle').textContent,'Warp');
+ const next=structuredClone(data);next.sampled_at=new Date(h.time()).toISOString();next.routes.find(row=>row.channel==='warp'&&row.protocol==='chat').started+=2;
+ const M=h.context.FlowScreenModel;assert.equal(M.deltas(data,next).get('warp').incoming,2);assert.equal(M.deltas(data,next).get('gateway').incoming,2);
+});
+test('injected future visible providers render and select with registry labels while hidden providers stay absent',async()=>{
+ const providers=[...actualProviders,{key:'future',label:'Future Gateway',flowVisible:true}],channels=[...visibleChannels,'future'];
+ const h=harness({providers,search:'?channel=future'});await h.settle();
+ assert.equal(h.get('opsChannel').options.find(option=>option.value==='future').textContent,'Future Gateway');
+ assert.equal(h.get('opsChannel').options.some(option=>option.value==='doubao'),false);
+ const data=snapshot(h.time(),{},channels),row=data.routes.find(row=>row.channel==='future'&&row.protocol==='messages');Object.assign(row,{active:4,qps:1,output_tps:50});
+ h.send(data);await h.settle();
+ assert.equal(h.streams[0].url,'/api/ops/flow?channel=future');assert.equal(h.requests[0].url,'/api/ops/pools?channel=future');
+ assert.equal(h.get('flowScope').textContent,'Future Gateway');assert.equal(h.get('flowTotal-active').textContent,'4');assert.equal(h.get('flowTotal-tps').textContent,'50.0');
+ assert.equal(h.get('flowPool-future').textContent,'2/3 可用账号');assert.equal(h.get('opsNode-cline').disabled,true);
+ h.get('opsNode-future').emit('click');assert.equal(h.get('opsFlowDetailTitle').textContent,'Future Gateway');
+});
+test('controller does not display fabricated idle totals when the registry is unavailable',async()=>{
+ const h=harness({load:false});h.send(snapshot(h.time()));await h.settle();
+ assert.equal(h.context.FlowScreenModel.channels.length,0);assert.equal(h.root.dataset.live,'false');
+ assert.equal(h.get('flowTotal-active').textContent,'—');assert.equal(h.get('flowTotal-qps').textContent,'—');assert.equal(h.get('flowTotal-tps').textContent,'—');
+ assert.match(h.get('opsFlowStatus').textContent,/无效/);assert.equal(h.get('opsChannel').options.length,0);
 });
 test('screen retains last observations on outage, stops animation, and expires snapshots without an error event',async()=>{
  const h=harness();h.send(snapshot(h.time()));await h.settle();

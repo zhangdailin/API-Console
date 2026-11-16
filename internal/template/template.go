@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"orchids-api/internal/channel"
 	"orchids-api/internal/config"
 	"orchids-api/internal/store"
 	"orchids-api/web"
@@ -78,6 +79,9 @@ func (r *Renderer) RenderIndex(w http.ResponseWriter, req *http.Request, cfg *co
 	}
 	if activeTab == "accounts" {
 		data.LoginProviders = accountLoginProviders
+	}
+	if activeTab == "ops" {
+		data.FlowProviders = channel.FlowDefinitions()
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

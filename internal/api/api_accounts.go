@@ -189,8 +189,13 @@ func (a *API) HandleAccountByID(w http.ResponseWriter, r *http.Request) {
 	isCheck := len(parts) > 1 && parts[1] == "check"
 	isUsage := len(parts) > 1 && parts[1] == "usage"
 	isVerification := len(parts) > 1 && parts[1] == "verification"
-	if len(parts) > 2 || (len(parts) > 1 && !(isCheck || isUsage || isVerification)) {
+	isDeviceIdentity := len(parts) > 1 && parts[1] == "device-identity"
+	if len(parts) > 2 || (len(parts) > 1 && !(isCheck || isUsage || isVerification || isDeviceIdentity)) {
 		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+	if isDeviceIdentity {
+		a.handleDeviceIdentityRotation(w, r, account)
 		return
 	}
 	if isVerification {

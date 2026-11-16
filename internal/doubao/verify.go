@@ -1,6 +1,7 @@
 package doubao
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -102,8 +103,24 @@ func (d sharkAdminDecision) summary() string {
 const challengeTTL = 2 * time.Hour
 
 type recordedChallenge struct {
-	raw string
-	at  time.Time
+	raw            string
+	at             time.Time
+	did            string
+	fp             string
+	identity       [sha256.Size]byte
+	accountVersion time.Time
+}
+
+// challengeIdentity binds a decision to the persisted request identity, including
+// the session and all three identifiers. Missing persisted identifiers make the
+// request identity random, so such a decision cannot safely be offered.
+func challengeIdentity(acc *store.Account) ([sha256.Size]byte, string, bool) {
+	if acc == nil || acc.ID == 0 || strings.TrimSpace(acc.DoubaoDeviceID) == "" || strings.TrimSpace(acc.DoubaoWebID) == "" {
+		return [sha256.Size]byte{}, "", false
+	}
+	fp := fingerprintQuery(decodeCookies(acc.ClientCookie)).Get("fp")
+	encoded, _ := json.Marshal([]string{acc.DoubaoDeviceID, acc.DoubaoWebID, acc.DoubaoTeaUUID, acc.ClientCookie})
+	return sha256.Sum256(encoded), fp, true
 }
 
 // challenges holds the last decision per account in process memory only: it
@@ -113,19 +130,43 @@ var challenges = struct {
 	byAccount map[int64]recordedChallenge
 }{byAccount: map[int64]recordedChallenge{}}
 
-// noteChallenge records the decision of a verification refusal.
-func noteChallenge(accountID int64, err error) {
+// noteChallenge records the decision and identity of a verification refusal.
+// The caller supplies the client's account snapshot, not a newer store value.
+func noteChallenge(acc *store.Account, err error) {
 	var challenge *verificationRequired
-	if accountID == 0 || !errors.As(err, &challenge) || strings.TrimSpace(challenge.raw) == "" {
+	if !errors.As(err, &challenge) || strings.TrimSpace(challenge.raw) == "" {
+		return
+	}
+	identity, fp, ok := challengeIdentity(acc)
+	if !ok {
 		return
 	}
 	challenges.Lock()
-	challenges.byAccount[accountID] = recordedChallenge{raw: challenge.raw, at: time.Now()}
+	if previous, exists := challenges.byAccount[acc.ID]; exists && previous.identity != identity && previous.accountVersion.After(acc.UpdatedAt) {
+		challenges.Unlock()
+		return
+	}
+	challenges.byAccount[acc.ID] = recordedChallenge{
+		raw: challenge.raw, at: time.Now(), did: acc.DoubaoDeviceID, fp: fp, identity: identity, accountVersion: acc.UpdatedAt,
+	}
 	challenges.Unlock()
 }
 
-// clearChallenge forgets an account's decision: it answered again, or the
-// operator solved the challenge.
+// clearChallengeForIdentity prevents an old in-flight success from clearing a
+// newer identity's challenge after an administrator rotates the device tuple.
+func clearChallengeForIdentity(acc *store.Account) {
+	identity, _, ok := challengeIdentity(acc)
+	if !ok {
+		return
+	}
+	challenges.Lock()
+	if recorded, found := challenges.byAccount[acc.ID]; found && recorded.identity == identity {
+		delete(challenges.byAccount, acc.ID)
+	}
+	challenges.Unlock()
+}
+
+// clearChallenge forgets an account's decision after explicit local cleanup.
 func clearChallenge(accountID int64) {
 	challenges.Lock()
 	delete(challenges.byAccount, accountID)
@@ -133,10 +174,12 @@ func clearChallenge(accountID int64) {
 }
 
 // verification returns the account's recorded challenge as the SDK takes it.
-// An account without a stored device id sends a fresh one on every request,
-// so no answer could be bound to it and none is offered.
+// A rotated identity must first receive its own refusal; it cannot reuse a
+// decision from the previous identity. This does not clear the challenge or
+// change the account's human-verification status.
 func verification(acc *store.Account) (provider.Verification, bool) {
-	if acc == nil || acc.ID == 0 || strings.TrimSpace(acc.DoubaoDeviceID) == "" {
+	identity, _, bound := challengeIdentity(acc)
+	if !bound {
 		return provider.Verification{}, false
 	}
 	challenges.Lock()
@@ -146,21 +189,15 @@ func verification(acc *store.Account) (provider.Verification, bool) {
 		ok = false
 	}
 	challenges.Unlock()
-	if !ok {
+	if !ok || recorded.identity != identity {
 		return provider.Verification{}, false
-	}
-	// The fingerprint is the one the chat request presented: s_v_web_id when
-	// the session carries it, nothing otherwise.
-	fp := ""
-	if values := fingerprintQuery(NewFromAccount(acc, nil).jar()); values != nil {
-		fp = values.Get("fp")
 	}
 	return provider.Verification{
 		SDK: "bytedance_captcha",
 		Params: map[string]any{
 			"info": map[string]any{
 				"aid": "582478", "appName": "doubao", "lang": "zh",
-				"did": acc.DoubaoDeviceID, "fp": fp, "pageId": "27032",
+				"did": recorded.did, "fp": recorded.fp, "pageId": "27032",
 			},
 			"host": "https://verify.zijieapi.com",
 			"env": map[string]any{
@@ -173,7 +210,5 @@ func verification(acc *store.Account) (provider.Verification, bool) {
 }
 
 func verificationSolved(acc *store.Account) {
-	if acc != nil {
-		clearChallenge(acc.ID)
-	}
+	clearChallengeForIdentity(acc)
 }

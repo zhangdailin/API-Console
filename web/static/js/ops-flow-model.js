@@ -1,19 +1,21 @@
 // Protocol observations and chart arithmetic are independent of DOM and timers.
 globalThis.FlowScreenModel = (() => {
-  const channels = Object.freeze(['workbuddy', 'cline', 'grok']);
+  const registry = globalThis.OrchidsProviderRegistry || globalThis.window?.OrchidsProviderRegistry;
+  const providers = Array.isArray(registry?.providers) ? registry.providers.filter(provider=>provider.flowVisible===true) : [];
+  const channels = Object.freeze(providers.map(provider=>provider.key));
   const protocols = Object.freeze(['chat', 'responses', 'messages']);
   const keys = Object.freeze([...channels, 'gateway', ...protocols]);
-  const names = Object.freeze({ workbuddy:'WorkBuddy', cline:'Cline', grok:'Grok', gateway:'API Console', chat:'Chat Completions', responses:'Responses', messages:'Messages' });
+  const names = Object.freeze({ ...Object.fromEntries(providers.map(provider=>[provider.key,provider.label])), gateway:'API Console', chat:'Chat Completions', responses:'Responses', messages:'Messages' });
   function numeric(value) { return value != null && value !== '' && Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : null; }
   function number(value, digits = 0) { const n=numeric(value); return n == null ? '—' : n.toLocaleString('en-US',{minimumFractionDigits:digits,maximumFractionDigits:digits}); }
   function milliseconds(value) { const n=numeric(value); return n == null ? '暂无样本' : n < 1000 ? Math.round(n)+' ms' : (n/1000).toFixed(1)+' s'; }
   function percent(value) { const n=numeric(value); return n == null ? '暂无样本' : (n*100).toFixed(1)+'%'; }
   function sum(rows, field) { return rows.reduce((total,row)=>total+(numeric(row[field])??0),0); }
   function normalize(payload, scope) {
-    if (!payload || payload.available !== true || !Array.isArray(payload.routes) || !payload.routes.length || typeof payload.instance_started !== 'string' || !payload.instance_started || !Number.isFinite(Date.parse(payload.sampled_at))) return null;
+    if (!channels.length || (scope && !channels.includes(scope)) || !payload || payload.available !== true || !Array.isArray(payload.routes) || !payload.routes.length || typeof payload.instance_started !== 'string' || !payload.instance_started || !Number.isFinite(Date.parse(payload.sampled_at))) return null;
     const seen=new Set(), routes=[];
     for (const row of payload.routes) {
-      if (!channels.includes(row.channel) || !protocols.includes(row.protocol)) return null;
+      if (!row || !channels.includes(row.channel) || !protocols.includes(row.protocol)) return null;
       if (['active','started','completed','qps'].some(key=>numeric(row[key])==null)) return null;
       const id=row.channel+':'+row.protocol;
       if (seen.has(id)) return null;
@@ -44,10 +46,10 @@ globalThis.FlowScreenModel = (() => {
     return result;
   }
   function pool(snapshot,key,scope,now,receivedAt) {
-    const rows=(snapshot?.rows||[]).filter(row=>channels.includes(row.channel) && (key==='gateway'?(!scope||row.channel===scope):row.channel===key));
-    const expected=key==='gateway'&&!scope?channels.length:1;
+    const rows=(Array.isArray(snapshot?.rows)?snapshot.rows:[]).filter(row=>row && channels.includes(row.channel) && (key==='gateway'?(!scope||row.channel===scope):row.channel===key));
+    const expected=key==='gateway'?(scope?[scope]:channels):channels.includes(key)?[key]:[];
     const sampled=Date.parse(snapshot?.sampled_at);
-    const fresh=snapshot?.available===true && rows.length===expected && Number.isFinite(sampled) && now-sampled>=-30000 && now-sampled<30000 && now-receivedAt<30000 && rows.every(row=>numeric(row.accounts_available)!=null&&numeric(row.accounts_enabled)!=null);
+    const fresh=expected.length>0 && (!scope||channels.includes(scope)) && snapshot?.available===true && rows.length===expected.length && expected.every(channel=>rows.filter(row=>row.channel===channel).length===1) && Number.isFinite(sampled) && now-sampled>=-30000 && now-sampled<30000 && now-receivedAt<30000 && rows.every(row=>numeric(row.accounts_available)!=null&&numeric(row.accounts_enabled)!=null);
     const capacityKnown=fresh && rows.every(row=>row.capacity_available===true && numeric(row.capacity_slots)!=null && numeric(row.occupied_slots)!=null);
     return {fresh,capacityKnown,available:fresh?sum(rows,'accounts_available'):null,enabled:fresh?sum(rows,'accounts_enabled'):null,
       capacity:capacityKnown?sum(rows,'capacity_slots'):null,occupied:capacityKnown?sum(rows,'occupied_slots'):null,
