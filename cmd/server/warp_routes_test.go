@@ -40,12 +40,12 @@ type warpRouteStub struct {
 
 // The upstream speaks Warp's official protobuf SSE, not the gateway's internal
 // event format. Every configured upstream origin points to this listener.
-func newWarpRouteStub(t *testing.T, status int) *warpRouteStub {
+func newWarpRouteStub(t *testing.T, status int, precedingMessages ...*warpapi.Message) *warpRouteStub {
 	t.Helper()
 	id, text := "answer-e2e", warpRouteAnswer
 	answer := warpapi.ResponseEvent_builder{ClientActions: warpapi.ResponseEvent_ClientActions_builder{
 		Actions: []*warpapi.ClientAction{warpapi.ClientAction_builder{AddMessagesToTask: warpapi.ClientAction_AddMessagesToTask_builder{
-			Messages: []*warpapi.Message{warpapi.Message_builder{Id: &id, AgentOutput: warpapi.Message_AgentOutput_builder{Text: &text}.Build()}.Build()},
+			Messages: append(precedingMessages, warpapi.Message_builder{Id: &id, AgentOutput: warpapi.Message_AgentOutput_builder{Text: &text}.Build()}.Build()),
 		}.Build()}.Build()},
 	}.Build()}.Build()
 	done := warpapi.ResponseEvent_builder{Finished: warpapi.ResponseEvent_StreamFinished_builder{

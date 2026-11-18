@@ -55,6 +55,7 @@ type streamResult struct {
 	RecoveryContext []byte
 	RecoverySafe    bool
 	Failure         *streamFailure
+	ModelMismatch   *observedModelMismatch
 }
 
 // toolCall is one client-executable MCP tool invocation observed upstream.
@@ -540,8 +541,10 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 						return errStreamTool
 					case warpapi.Message_ModelUsed_case:
 						used := message.GetModelUsed()
-						if used.GetIsFallback() || (expectedModel != "" && used.GetModelId() != expectedModel) {
-							return errStreamModelSubstitution
+						// Model choice is advisory: accept upstream fallback while
+						// retaining the first discrepancy for private diagnostics.
+						if result.ModelMismatch == nil && (used.GetIsFallback() || (expectedModel != "" && used.GetModelId() != expectedModel)) {
+							result.ModelMismatch = &observedModelMismatch{ID: used.GetModelId(), Fallback: used.GetIsFallback(), Event: result.Events, Action: actionIndex + 1, Message: messageIndex + 1}
 						}
 					case warpapi.Message_RequestMetadata_case:
 						meta := message.GetRequestMetadata()

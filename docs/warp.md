@@ -13,6 +13,32 @@
 
 ## 明确不支持
 
+Selection freshness: routing checks each account's exact model and catalog before
+constructing an inference client. Ready accounts take priority. Only when no
+ready account can serve the model does selection refresh stale candidates, at
+most three accounts within a shared 15-second budget (10 seconds per account).
+Refresh reads the catalog and, if needed, rotates authentication; it never calls
+generation. A per-account process-local gate re-reads stored state so concurrent
+successful refreshes coalesce. Failed refreshes cannot authorize a stale catalog.
+Catalog persistence remains credential-generation guarded; a concurrent disable
+or new login is authoritative. Background maintenance uses the same gate and
+refreshes one minute ahead of the hard 30-minute catalog boundary. An expired
+catalog that cannot be refreshed is a capacity failure, not a client-model 400.
+
+Model mismatch diagnostics retain the requested model, fallback flag, mismatch
+reason, and event/action/message ordinals. Reported model IDs are recorded verbatim
+only if present in the account's observed catalog (or equal to the requested ID);
+unknown values retain only SHA-256 and byte length, never arbitrary upstream text.
+These fields appear in the private diagnostic bundle and structured warning, not
+the public response. Upstream model substitutions and `is_fallback=true` are
+accepted, including cross-provider fallbacks, as long as the complete response
+passes the remaining protocol, tool, usage, and size checks. The gateway still
+sends the requested exact model and does not replay or switch accounts. Public
+response model labels, API-key model admission, pricing, and continuation scope
+remain tied to the requested model; they are not proof of the actual model used.
+Fallbacks can have different capabilities or upstream costs, and missing usage
+is not proof of zero charges.
+
 当前接收 `model`、`messages`、`stream`、`tools`、`tool_choice`、`parallel_tool_calls`，并兼容客户端常带的 `system`、生成控制、`metadata.user_id`、`thinking` 和 `output_config.effort`。纯文本 system 可来自独立字段及消息任意位置，按独立字段在先、消息出现顺序在后的顺序合并并保留原文，不再设置 system 累计字节上限，完整保留、不静默截断；system 前缀也不计入非 system 历史的64 KiB预算，避免相同内容在下一层再次被限制。用户新消息仍限4096字节，非system历史最多8轮、64 KiB；通用HTTP请求体及上游模型上下文窗口仍可能限制最终请求大小。客户端函数工具不再设置数量上限，完整保留顺序和定义、不截断列表；单个描述32 KiB、单个schema64 KiB的独立限制仍保留，schema累计总量不再限制；不再限制完整工具定义（描述、名称、schema及JSON封装）累计总量，超过原160 KiB也会完整传递，不静默截断。其他独立上限继续返回固定字段路径及实测/上限字节数。工具定义变大可能增加上游输入用量，不构成免费或硬性费用上限。
 
 assistant 历史可携带 `thinking` 块（`thinking` 字符串和可选 `signature` 字符串），单块及全部思考/签名合计最多64 KiB。它们作为历史兼容元数据接收，不转成普通提示词、工具输入、可见回答或可迁移的提供者签名；纯 thinking 且无文本/工具调用的 assistant 消息仍拒绝。`context_management` 的 keep-all 仅指不在网关执行上下文清理，不保证把原提供者的思考内容/签名转移给 Warp。文本和工具对照关系仍保留；结果无原有归属绑定或已消费时返回409，不自动重放或切号。
@@ -38,10 +64,10 @@ Content-Type: application/json
 - 精确使用目录模型，不把 auto/auto-efficient/auto-genius 等改写为 auto-open；上述自动模型和 CLI/computer-use 子代理路由不发布且拒绝调用。
 - 仅携带有界历史和客户端显式声明的函数工具，不注入环境文件或动态时间戳，不自动加载 MCP 服务器。工具续接状态仅在已验证归属的会话中私密保存和回传；不会把不支持的请求改写为另一份收费生成。
 - 关闭搜索、网页检索、规划、编排、电脑、文件和命令等能力。不配置额外模型角色。
-- 协议中空工具列表表示允许任意工具：无工具请求使用被动建议围栏；有工具请求仅声明 `CALL_MCP_TOOL`。收到未声明工具、原生执行工具、子代理、模型替换或不理解的协议字段立即终止。
+- An empty protocol tool list permits arbitrary tools: requests without tools retain the passive suggestion fence; requests with tools advertise only `CALL_MCP_TOOL`. Undeclared tools, native execution tools, subagents, and unknown protocol fields still terminate the response. Model substitutions and fallback flags are diagnostic-only and do not terminate it.
 - 官方客户端把 `ToolCall.Server` 与 `ServerEvent` 视为无需客户端执行的不透明簿记，新的根任务也会以服务端引导调用开启；这些变体不执行、不解释、不回显且不产生文本，并计入诊断计数。`ToolCallResult.Server` 仅在已创建的同根任务中、与先前已观测的 `ToolCall.Server` 调用ID配对且结果载荷≤64 KiB时兼容；结果必须通过原始任务状态、事务回滚及掩码后的有效消息校验。官方不透明消息会在私密续接状态中原样保存/往返，不作为客户端工具动作。未知、跨任务、未配对及native结果仍拒绝。这不等于上游未做服务端工作或未计费：流中一旦出现搜索/抓取计数或费用、执行类工具、其他代理消息，仍整体失败。
 - SSE 事件名不作为安全边界：按官方客户端契约只把 `data` 解码为 protobuf，`event: error` 仍立即失败；事件标签任意但数据必须能严格解码且无未知字段。
-- 失败只暴露固定阶段（transport / http_status / content_type / stream_protocol / tool_or_subagent / incomplete / finish / limit / model_substitution / usage_invalid）与枚举编号；详细诊断另记录固定拒绝位置/原因、事件/动作/消息序号、结果子类型、ID存在/相等布尔值、关联类别和载荷字节数。不记录原始ID、载荷、提示词、账号凭据或上游正文。
+- Failures expose only fixed stages (transport / http_status / content_type / stream_protocol / tool_or_subagent / incomplete / finish / limit / usage_invalid) and enum numbers. Private diagnostics retain fixed rejection sites/reasons, event/action/message ordinals, result variants, identity-presence/equality flags, relationship categories, and byte counts; raw IDs, payloads, prompts, credentials, and upstream bodies are not logged. Model discrepancies retain the separately redacted metadata described above, including when another validation fails.
 - 单次上游生成，不自动重试、不自动切号；认证刷新不计为生成重试，实际生成遵守共享尝试预算。
 - 多轮历史按 8 轮 / 64 KiB 截断，超出部分丢弃最旧内容并标注省略；工具往返每会话最多 6 次，达到上限返回 400，避免代理循环无限计费。
 - 客户端工具只以 MCP 工具声明下发，上游只能回调这些工具（`supported_tools` 仅 `CALL_MCP_TOOL`），客户端执行后以结构化 `ToolCallResult` 回传；网关从不自行执行 shell、文件或 MCP 操作。

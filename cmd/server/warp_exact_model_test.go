@@ -37,7 +37,7 @@ func TestWarpExactModelRouteDoesNotResolveEffortAliases(t *testing.T) {
 		},
 		{
 			name: "caller_model_case_mismatch", model: "MODEL-A-MEDIUM",
-			allowedModels: []string{exactModel}, status: http.StatusBadRequest,
+			allowedModels: []string{exactModel}, status: http.StatusNotFound,
 		},
 		{
 			name: "unknown_model_has_no_catalog_fallback", model: "missing-model",
@@ -122,9 +122,9 @@ func TestWarpExactModelRouteDoesNotResolveEffortAliases(t *testing.T) {
 							if tc.status == http.StatusForbidden {
 								code = "permission_error"
 							} else if tc.model == "MODEL-A-MEDIUM" {
-								// Catalog lookup is case-insensitive, but the account's
-								// exact-match client fence must still reject before I/O.
-								code = `"type":"client"`
+								// Pool eligibility is now exact too: a differently cased
+								// model never reaches client construction or upstream I/O.
+								code = `"type":"model_unavailable"`
 							}
 							if !strings.Contains(out, code) {
 								t.Fatalf("unexpected rejection envelope: %s", out)
@@ -134,6 +134,63 @@ func TestWarpExactModelRouteDoesNotResolveEffortAliases(t *testing.T) {
 							t.Fatalf("unexpected paid generation or fallback/refresh: generation=%d want=%d other=%d", stub.aiCalls.Load(), generations, stub.otherCalls.Load())
 						}
 					})
+				}
+			}
+		})
+	}
+}
+
+func TestWarpRoutesAcceptUpstreamModelFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name, reported string
+		fallback       bool
+	}{
+		{"different-model", "other-provider-model", false},
+		{"different-model-fallback", "other-provider-model", true},
+		{"same-model-fallback", warpRouteModel, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			modelUsed := warpapi.Message_builder{ModelUsed: warpapi.Message_ModelUsed_builder{ModelId: proto.String(tc.reported), IsFallback: proto.Bool(tc.fallback)}.Build()}.Build()
+			stub := newWarpRouteStub(t, http.StatusOK, modelUsed)
+			e, _, _ := newWarpRouteE2E(t, stub, 2)
+			var generations int64
+			for _, prefix := range []string{"/warp", "/warp/v1"} {
+				for _, protocol := range []string{"chat/completions", "messages", "responses"} {
+					for _, streaming := range []bool{false, true} {
+						t.Run(fmt.Sprintf("%s/%s/stream=%t", prefix, protocol, streaming), func(t *testing.T) {
+							body := map[string]any{"model": warpRouteModel, "stream": streaming}
+							if protocol == "responses" {
+								body["input"] = warpRouteQuery
+							} else {
+								body["messages"] = []map[string]string{{"role": "user", "content": warpRouteQuery}}
+							}
+							raw, err := json.Marshal(body)
+							if err != nil {
+								t.Fatal(err)
+							}
+							resp := e.do(t, http.MethodPost, prefix+"/"+protocol, string(raw), false)
+							out := e.readBody(t, resp)
+							if resp.StatusCode != http.StatusOK || !strings.Contains(out, warpRouteAnswer) || !strings.Contains(out, `"model":"`+warpRouteModel+`"`) || strings.Contains(out, `"type":"error"`) {
+								t.Fatalf("upstream fallback did not produce a compatible response: status=%d body=%s", resp.StatusCode, out)
+							}
+							if streaming && !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
+								t.Fatal("fallback changed the requested response format")
+							}
+							if tc.reported != warpRouteModel && strings.Contains(out, tc.reported) {
+								t.Fatal("private upstream model metadata escaped into the public response")
+							}
+							generations++
+							if stub.aiCalls.Load() != generations || stub.otherCalls.Load() != 0 {
+								t.Fatal("fallback triggered a replay, account switch, or control-plane request")
+							}
+							select {
+							case raw := <-stub.requests:
+								assertWarpRouteRequest(t, raw)
+							default:
+								t.Fatal("fallback bypassed the real Warp client")
+							}
+						})
+					}
 				}
 			}
 		})

@@ -39,7 +39,6 @@ func TestGenerationStageErrorUsesOnlyFixedFields(t *testing.T) {
 		{"finish", errStreamFinish, 4},
 		{"finish", errStreamUpstream, 4},
 		{"limit", errStreamLimit, 5},
-		{"model_substitution", errStreamModelSubstitution, 6},
 		{"usage_invalid", errUsage, 7},
 	} {
 		t.Run(fmt.Sprintf("%s_%d", tc.stage, tc.category), func(t *testing.T) {

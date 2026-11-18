@@ -143,7 +143,12 @@ func TestToolResultCacheBoundClientRoundtripPreservesWireAndScope(t *testing.T) 
 				if err := s.CreateAccount(ctx, account); err != nil {
 					t.Fatal(err)
 				}
-				create := continuationCreate(warpapi.Message_builder{Id: proto.String("cache-root-message"), TaskId: proto.String("root"), UserQuery: warpapi.Message_UserQuery_builder{Query: proto.String("echo")}.Build()}.Build())
+				// Upstream fallback must not prevent declared tools or weaken
+				// the caller/account/requested-model continuation binding.
+				create := continuationCreate(
+					warpapi.Message_builder{Id: proto.String("cache-root-message"), TaskId: proto.String("root"), UserQuery: warpapi.Message_UserQuery_builder{Query: proto.String("echo")}.Build()}.Build(),
+					warpapi.Message_builder{Id: proto.String("cache-model-used"), TaskId: proto.String("root"), ModelUsed: warpapi.Message_ModelUsed_builder{ModelId: proto.String("model-b"), IsFallback: proto.Bool(true)}.Build()}.Build(),
+				)
 				create.GetCreateTask().GetTask().SetServerData("synthetic-cache-root-state")
 				call := mcpToolCallEvent(t, "call-cache", "echo", map[string]any{})
 				message := call.GetClientActions().GetActions()[0].GetAddMessagesToTask().GetMessages()[0]

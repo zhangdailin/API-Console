@@ -74,14 +74,11 @@ func TestStreamSnapshotsAppendAndRollback(t *testing.T) {
 	}
 }
 func TestStreamRejectsUnsafeWithoutCompletion(t *testing.T) {
-	fallback := true
-	other := "model-b"
 	messages := []*warpapi.Message{
 		warpapi.Message_builder{ToolCall: warpapi.Message_ToolCall_builder{}.Build()}.Build(),
 		warpapi.Message_builder{ToolCall: warpapi.Message_ToolCall_builder{RunShellCommand: warpapi.Message_ToolCall_RunShellCommand_builder{}.Build()}.Build()}.Build(),
 		warpapi.Message_builder{WebSearch: warpapi.Message_WebSearch_builder{}.Build()}.Build(),
 		warpapi.Message_builder{MessagesReceivedFromAgents: warpapi.Message_MessagesReceivedFromAgents_builder{}.Build()}.Build(),
-		warpapi.Message_builder{ModelUsed: warpapi.Message_ModelUsed_builder{ModelId: &other, IsFallback: &fallback}.Build()}.Build(),
 		warpapi.Message_builder{}.Build(),
 	}
 	for i, m := range messages {

@@ -36,8 +36,7 @@ var (
 	errPersistence = errors.New("warp credential persistence failed")
 
 	// Parser failures are classified by identity, never by upstream error text.
-	errStreamModelSubstitution = errors.New("warp upstream model substitution rejected")
-	errStreamFinish            = errors.New("warp stream finish rejected")
+	errStreamFinish = errors.New("warp stream finish rejected")
 )
 
 type AccountUpdater interface {
@@ -246,15 +245,20 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	diagnostic := generationDiagnostic{Stage: "transport", ContentType: "missing"}
 	defer func() {
 		if capture := debug.FromContext(ctx); capture != nil {
-			// This closed schema contains no wire data, content, model IDs, or URLs.
+			// This closed schema contains no wire payloads or credentials.
 			data, _ := json.Marshal(diagnostic)
 			capture.Set("3_warp_diagnostic.json", string(data))
 		}
 		if err != nil {
-			slog.WarnContext(ctx, "Warp generation failed; no automatic retry",
-				"stage", diagnostic.Stage,
+			attrs := []any{"stage", diagnostic.Stage,
 				"upstream_http_status", diagnostic.UpstreamHTTPStatus,
-				"parser_category", diagnostic.ParserCategory)
+				"parser_category", diagnostic.ParserCategory}
+			if diagnostic.ModelMismatch != nil {
+				attrs = append(attrs, "model_mismatch", diagnostic.ModelMismatch)
+			}
+			slog.WarnContext(ctx, "Warp generation failed; no automatic retry", attrs...)
+		} else if diagnostic.ModelMismatch != nil {
+			slog.WarnContext(ctx, "Warp accepted upstream model fallback or substitution", "model_mismatch", diagnostic.ModelMismatch)
 		}
 	}()
 	paidStarted = true
@@ -296,6 +300,9 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	diagnostic.RejectAction, diagnostic.RejectMessage, diagnostic.RejectTool = result.RejectAction, result.RejectMessage, result.RejectTool
 	diagnostic.Rejection = result.Rejection
 	diagnostic.Failure = result.Failure
+	c.mu.Lock()
+	diagnostic.ModelMismatch = modelMismatchDetails(req.Model, result.ModelMismatch, c.account.WarpModelIDs)
+	c.mu.Unlock()
 	if result.Usage.Measured {
 		diagnostic.Usage = result.Usage.event()
 	}
@@ -353,24 +360,26 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 // generationDiagnostic is intentionally a closed, content-free projection. The
 // usage map comes only from observedUsage.event's fixed numeric field allowlist.
 type generationDiagnostic struct {
-	Stage              string           `json:"stage"`
-	UpstreamHTTPStatus int              `json:"upstream_http_status"`
-	ContentType        string           `json:"content_type"`
-	ParserCategory     int              `json:"parser_category"`
-	ParserEvents       int              `json:"parser_events"`
-	TextBytes          int              `json:"text_bytes"`
-	ServerBookkeeping  int              `json:"server_bookkeeping"`
-	RejectAction       int              `json:"reject_action,omitempty"`
-	RejectMessage      int              `json:"reject_message,omitempty"`
-	RejectTool         int              `json:"reject_tool,omitempty"`
-	Rejection          *streamRejection `json:"rejection,omitempty"`
-	Failure            *streamFailure   `json:"failure,omitempty"`
-	Usage              map[string]any   `json:"usage,omitempty"`
+	Stage              string                   `json:"stage"`
+	UpstreamHTTPStatus int                      `json:"upstream_http_status"`
+	ContentType        string                   `json:"content_type"`
+	ParserCategory     int                      `json:"parser_category"`
+	ParserEvents       int                      `json:"parser_events"`
+	TextBytes          int                      `json:"text_bytes"`
+	ServerBookkeeping  int                      `json:"server_bookkeeping"`
+	RejectAction       int                      `json:"reject_action,omitempty"`
+	RejectMessage      int                      `json:"reject_message,omitempty"`
+	RejectTool         int                      `json:"reject_tool,omitempty"`
+	Rejection          *streamRejection         `json:"rejection,omitempty"`
+	Failure            *streamFailure           `json:"failure,omitempty"`
+	ModelMismatch      *modelMismatchDiagnostic `json:"model_mismatch,omitempty"`
+	Usage              map[string]any           `json:"usage,omitempty"`
 }
 
 // Category values are stable local diagnostics, not upstream enum values:
 // 0 none, 1 protocol, 2 tool/subagent, 3 incomplete, 4 finish, 5 limit,
-// 6 model substitution, 7 invalid usage. Unknown errors fail closed as protocol.
+// 6 reserved (formerly model substitution), 7 invalid usage.
+// Unknown errors fail closed as protocol.
 func generationParserFailure(err error) (string, int) {
 	switch {
 	case err == nil:
@@ -385,8 +394,6 @@ func generationParserFailure(err error) (string, int) {
 		return "finish", 4
 	case errors.Is(err, errStreamLimit):
 		return "limit", 5
-	case errors.Is(err, errStreamModelSubstitution):
-		return "model_substitution", 6
 	case errors.Is(err, errUsage):
 		return "usage_invalid", 7
 	default:
@@ -397,7 +404,7 @@ func generationParserFailure(err error) (string, int) {
 func generationStageError(stage string, status int, parseErr error) error {
 	// Do not trust even the supplied stage: only fixed identifiers may escape.
 	switch stage {
-	case "transport", "http_status", "content_type", "stream_protocol", "tool_or_subagent", "incomplete", "finish", "limit", "model_substitution", "usage_invalid":
+	case "transport", "http_status", "content_type", "stream_protocol", "tool_or_subagent", "incomplete", "finish", "limit", "usage_invalid":
 	default:
 		stage = "stream_protocol"
 	}

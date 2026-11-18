@@ -112,12 +112,14 @@ func (h *Handler) selectAccountRecord(ctx context.Context, targetChannel string,
 	}
 	model := strings.TrimSpace(modelID)
 	channel := strings.ToLower(strings.TrimSpace(targetChannel))
-	// honorsModelCooldown already covers the workbuddy channel; cline is the one
-	// extra channel whose catalog the filter below understands.
-	needsFilter := model != "" && (honorsModelCooldown(channel) || channel == "cline")
+	spec, _ := provider.Lookup(channel)
+	needsFilter := model != "" && (honorsModelCooldown(channel) || channel == "cline" || spec.Selection != nil)
 	var filter loadbalancer.AccountFilter
 	if needsFilter {
 		filter = func(acc *store.Account) error {
+			if spec.Selection != nil && spec.Selection.NeedsRefresh != nil && spec.Selection.NeedsRefresh(acc) {
+				return loadbalancer.ErrAccountNotEligible
+			}
 			if !provider.SupportsModel(channel, acc, model) {
 				return loadbalancer.ErrModelUnavailable
 			}
@@ -142,7 +144,48 @@ func (h *Handler) selectAccountRecord(ctx context.Context, targetChannel string,
 			}
 		}
 	}
-	return h.loadBalancer.GetNextAccountExcludingByChannelWithTrackerFilter(ctx, failedAccountIDs, targetChannel, h.connTracker, filter)
+	selectFresh := func(selectionCtx context.Context) (*store.Account, error) {
+		return h.loadBalancer.GetNextAccountExcludingByChannelWithTrackerFilter(selectionCtx, failedAccountIDs, targetChannel, h.connTracker, filter)
+	}
+	account, originalErr := selectFresh(ctx)
+	if originalErr == nil || model == "" || spec.Selection == nil || spec.Selection.Refresh == nil || spec.Selection.NeedsRefresh == nil || h.loadBalancer.Store == nil {
+		return account, originalErr
+	}
+	// Repair only when the fresh pool cannot serve the request. Network reads
+	// stay outside pool locks and before any generation-attempt budget is used.
+	refreshCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	excluded := append([]int64(nil), failedAccountIDs...)
+	refreshFailed := false
+	for range 3 {
+		candidate, err := h.loadBalancer.GetNextAccountExcludingByChannelWithTrackerFilter(refreshCtx, excluded, targetChannel, h.connTracker, func(acc *store.Account) error {
+			if !spec.Selection.NeedsRefresh(acc) {
+				return loadbalancer.ErrAccountNotEligible
+			}
+			return nil
+		})
+		if err != nil {
+			break
+		}
+		excluded = append(excluded, candidate.ID)
+		if err := spec.Selection.Refresh(refreshCtx, provider.Env{Config: h.configSnapshot(), Store: h.loadBalancer.Store}, candidate); err != nil {
+			refreshFailed = true
+			slog.Warn("Account selection catalog refresh failed", "channel", channel, "account_id", candidate.ID)
+		}
+		h.loadBalancer.InvalidateAccounts([]int64{candidate.ID})
+		if account, err := selectFresh(refreshCtx); err == nil {
+			return account, nil
+		} else {
+			originalErr = err
+		}
+	}
+	if ctx.Err() != nil {
+		return nil, context.Cause(ctx)
+	}
+	if refreshFailed || refreshCtx.Err() != nil {
+		return nil, fmt.Errorf("no enabled accounts available for channel: %s (catalog refresh temporarily unavailable)", channel)
+	}
+	return nil, originalErr
 }
 
 func effectiveAccountConcurrencyLimit(acc *store.Account) int64 {
