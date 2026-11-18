@@ -95,6 +95,20 @@ func buildOpenAINonStreamResponse(sh *streamHandler, model string, stopReason st
 		message.ToolCalls = toolCalls
 	}
 
+	usage := openAINonStreamUsage{PromptTokens: sh.inputTokens, CompletionTokens: sh.outputTokens, TotalTokens: sh.totalUsageTokens()}
+	if sh.exclusiveUsage.active {
+		usage.Partial = !sh.hasAuthoritativeUsage()
+		usage.KnownPrompt = !sh.exclusiveUsage.invalid && !sh.exclusiveUsage.incompleteContributors && sh.exclusiveUsage.hasOrdinary && sh.exclusiveUsage.hasRead && sh.exclusiveUsage.hasWrite
+		usage.KnownOutput = !sh.exclusiveUsage.invalid && sh.exclusiveUsage.hasOutput
+		// Preserve separate cache observations while prompt_tokens is inclusive.
+		if sh.exclusiveUsage.hasRead {
+			usage.PromptTokensDetails = map[string]int{"cached_tokens": sh.cachedInputTokens}
+		}
+		if sh.exclusiveUsage.hasWrite {
+			write := sh.cacheWriteTokens
+			usage.CacheCreationInputTokens = &write
+		}
+	}
 	return openAINonStreamResponse{
 		ID:      sh.msgID,
 		Object:  "chat.completion",
@@ -105,11 +119,7 @@ func buildOpenAINonStreamResponse(sh *streamHandler, model string, stopReason st
 			Message:      message,
 			FinishReason: mapStopReasonToOpenAIFinishReason(stopReason),
 		}},
-		Usage: openAINonStreamUsage{
-			PromptTokens:     sh.inputTokens,
-			CompletionTokens: sh.outputTokens,
-			TotalTokens:      sh.inputTokens + sh.outputTokens,
-		},
+		Usage: usage,
 	}
 }
 

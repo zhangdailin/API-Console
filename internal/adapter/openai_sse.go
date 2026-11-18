@@ -15,6 +15,7 @@ type openAIChunk struct {
 	Created int64          `json:"created"`
 	Model   string         `json:"model"`
 	Choices []openAIChoice `json:"choices"`
+	Usage   map[string]any `json:"usage,omitempty"`
 }
 
 type openAIChoice struct {
@@ -395,7 +396,11 @@ func appendOpenAIChunkFast(dst []byte, msgID string, created int64, event string
 		}
 	case "message_delta":
 		if quotedStopReason, ok := extractJSONStringValueAfter(data, openAIStopReasonMarker); ok {
-			return appendOpenAIChunkMessageDelta(dst, msgID, created, normalizeOpenAIStopReasonQuoted(quotedStopReason))
+			raw, ok := appendOpenAIChunkMessageDelta(dst, msgID, created, normalizeOpenAIStopReasonQuoted(quotedStopReason))
+			if !ok || !bytes.Contains(data, []byte(`"usage"`)) {
+				return raw, ok
+			}
+			return appendOpenAIChunkUsage(raw, messageDeltaChatUsage(data)), true
 		}
 	case "message_stop":
 		return nil, false
@@ -482,6 +487,7 @@ func buildOpenAIChunkSlow(msgID string, created int64, event string, data []byte
 		}
 		mapped := normalizeOpenAIStopReason(*payload.Delta.StopReason)
 		choice.FinishReason = new(mapped)
+		chunk.Usage = messageDeltaChatUsage(data)
 	case "message_stop", "content_block_stop":
 		return nil, false
 	default:

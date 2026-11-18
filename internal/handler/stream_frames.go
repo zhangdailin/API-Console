@@ -320,7 +320,17 @@ func (h *streamHandler) writeSSEContentBlockStopLocked(index int, final bool) {
 
 func (h *streamHandler) writeSSEMessageDeltaLocked(stopReason string, outputTokens int, final bool) {
 	raw, err := appendSSEMessageDelta(h.ssePayloadScratch[:0], stopReason, outputTokens)
-	if err == nil && h.useUpstreamUsage {
+	if err == nil && h.exclusiveUsage.active {
+		// The explicit Chat dialect carries canonical inclusive input without
+		// reinterpreting a partial native Messages projection as a full total.
+		raw = raw[:bytes.LastIndex(raw, []byte(`"usage":`))+len(`"usage":`)]
+		raw, err = h.appendExclusiveWireUsage(raw, h.canonicalWireUsage || h.responseFormat == adapter.FormatOpenAI)
+		raw = append(raw, '}')
+	} else if err == nil && h.useUpstreamUsage && (h.canonicalWireUsage || h.responseFormat == adapter.FormatOpenAI) {
+		raw = raw[:bytes.LastIndex(raw, []byte(`"usage":`))+len(`"usage":`)]
+		raw = appendCanonicalWireUsage(raw, h.inputTokens, h.outputTokens, h.cachedInputTokens, h.cacheWriteTokens)
+		raw = append(raw, '}')
+	} else if err == nil && h.useUpstreamUsage {
 		// The opening input count may be an estimate. Preserve the authoritative
 		// final counters for Messages clients and the typed Responses bridge.
 		raw = raw[:len(raw)-2]
@@ -350,6 +360,11 @@ func (h *streamHandler) writeMessageStartLocked(model string, inputTokens, outpu
 		return
 	}
 	raw, err := appendSSEMessageStart(nil, h.msgID, model, inputTokens, outputTokens)
+	if err == nil && h.exclusiveUsage.active {
+		raw = raw[:bytes.LastIndex(raw, []byte(`"usage":`))+len(`"usage":`)]
+		raw, err = h.appendExclusiveWireUsage(raw, h.canonicalWireUsage || h.responseFormat == adapter.FormatOpenAI)
+		raw = append(raw, '}', '}')
+	}
 	if err != nil {
 		h.markWriteErrorLocked("message_start", err)
 		return

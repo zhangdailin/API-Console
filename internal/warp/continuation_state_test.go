@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	warpapi "github.com/warpdotdev/warp-proto-apis/apis/multi_agent/v1/gen/go"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
@@ -66,7 +68,7 @@ func TestContinuationAccumulatorRealSequence(t *testing.T) {
 		t.Fatal(err)
 	}
 	resumed := newContinuationAccumulator(raw)
-	continuationApply(t, resumed, warpapi.ClientAction_builder{UpdateTaskMessage: warpapi.ClientAction_UpdateTaskMessage_builder{TaskId: proto.String("root"), Message: continuationText("out", "replacement")}.Build()}.Build())
+	continuationApply(t, resumed, warpapi.ClientAction_builder{UpdateTaskMessage: warpapi.ClientAction_UpdateTaskMessage_builder{TaskId: proto.String("root"), Message: continuationText("out", "replacement"), Mask: &fieldmaskpb.FieldMask{Paths: []string{"agent_output.text"}}}.Build()}.Build())
 	if continuationRoot(t, resumed).GetMessages()[0].GetAgentOutput().GetText() != "replacement" || continuationRoot(t, a).GetMessages()[0].GetAgentOutput().GetText() != "first second" {
 		t.Fatal("replacement or continuation ownership failed")
 	}
@@ -86,7 +88,7 @@ func TestContinuationTransactionsAndMasks(t *testing.T) {
 		t.Fatal("rollback did not restore full snapshot")
 	}
 	continuationApply(t, a, begin)
-	continuationApply(t, a, warpapi.ClientAction_builder{AppendToMessageContent: warpapi.ClientAction_AppendToMessageContent_builder{TaskId: proto.String("root"), Message: continuationText("out", " committed")}.Build()}.Build())
+	continuationApply(t, a, warpapi.ClientAction_builder{AppendToMessageContent: warpapi.ClientAction_AppendToMessageContent_builder{TaskId: proto.String("root"), Message: continuationText("out", " committed"), Mask: &fieldmaskpb.FieldMask{Paths: []string{"agent_output.text"}}}.Build()}.Build())
 	continuationApply(t, a, warpapi.ClientAction_builder{CommitTransaction: warpapi.ClientAction_CommitTransaction_builder{}.Build()}.Build())
 	if continuationRoot(t, a).GetMessages()[0].GetAgentOutput().GetText() != "before committed" {
 		t.Fatal("commit lost appended content")
@@ -108,10 +110,10 @@ func TestContinuationRejectsInvalidAndOversizedState(t *testing.T) {
 			return a.apply(warpapi.ClientAction_builder{UpdateTaskServerData: warpapi.ClientAction_UpdateTaskServerData_builder{TaskId: proto.String("root"), ServerData: proto.String(strings.Repeat("x", continuationStateLimit))}.Build()}.Build())
 		},
 		"missing message": func(a *continuationAccumulator) error {
-			return a.apply(warpapi.ClientAction_builder{UpdateTaskMessage: warpapi.ClientAction_UpdateTaskMessage_builder{TaskId: proto.String("root"), Message: continuationText("missing", "x")}.Build()}.Build())
+			return a.apply(warpapi.ClientAction_builder{AppendToMessageContent: warpapi.ClientAction_AppendToMessageContent_builder{TaskId: proto.String("root"), Message: continuationText("missing", "x"), Mask: &fieldmaskpb.FieldMask{Paths: []string{"agent_output.text"}}}.Build()}.Build())
 		},
 		"invalid mask": func(a *continuationAccumulator) error {
-			return a.apply(warpapi.ClientAction_builder{UpdateTaskMessage: warpapi.ClientAction_UpdateTaskMessage_builder{TaskId: proto.String("root"), Message: continuationText("out", "x"), Mask: &fieldmaskpb.FieldMask{Paths: []string{"unrecognized"}}}.Build()}.Build())
+			return a.apply(warpapi.ClientAction_builder{UpdateTaskMessage: warpapi.ClientAction_UpdateTaskMessage_builder{TaskId: proto.String("root"), Message: continuationText("out", "x"), Mask: &fieldmaskpb.FieldMask{Paths: []string{"agent_output.text.invalid"}}}.Build()}.Build())
 		},
 		"identity mask": func(a *continuationAccumulator) error {
 			return a.apply(warpapi.ClientAction_builder{UpdateTaskMessage: warpapi.ClientAction_UpdateTaskMessage_builder{TaskId: proto.String("root"), Message: continuationText("out", "x"), Mask: &fieldmaskpb.FieldMask{Paths: []string{"task_id"}}}.Build()}.Build())
@@ -277,6 +279,285 @@ func TestScopedBindingExpiryAndMixedTurnSnapshots(t *testing.T) {
 	b.mu.Unlock()
 	if _, ok := b.lookupScoped(ctx, 7, "model-a", []string{"first"}); ok {
 		t.Fatal("expired scoped binding accepted")
+	}
+}
+
+func continuationUpdate(message *warpapi.Message, mask *fieldmaskpb.FieldMask, appendOnly bool) *warpapi.ClientAction {
+	if appendOnly {
+		return warpapi.ClientAction_builder{AppendToMessageContent: warpapi.ClientAction_AppendToMessageContent_builder{TaskId: proto.String("root"), Message: message, Mask: mask}.Build()}.Build()
+	}
+	return warpapi.ClientAction_builder{UpdateTaskMessage: warpapi.ClientAction_UpdateTaskMessage_builder{TaskId: proto.String("root"), Message: message, Mask: mask}.Build()}.Build()
+}
+
+func requireContinuationError(t *testing.T, err error, reason string, kind int) *continuationStateError {
+	t.Helper()
+	var stateErr *continuationStateError
+	if !errors.Is(err, errContinuationState) || !errors.As(err, &stateErr) {
+		t.Fatalf("expected typed continuation error, got %T: %v", err, err)
+	}
+	if stateErr.Reason != reason || stateErr.ActionKind != kind || stateErr.LimitBytes != continuationStateLimit {
+		t.Fatalf("unexpected continuation error metadata: %+v", stateErr)
+	}
+	return stateErr
+}
+
+func TestContinuationOfficialMaskPresenceAndUpsert(t *testing.T) {
+	for _, appendOnly := range []bool{false, true} {
+		t.Run(map[bool]string{false: "update", true: "append"}[appendOnly], func(t *testing.T) {
+			a := newContinuationAccumulator(nil)
+			continuationApply(t, a, continuationCreate(continuationText("out", "before")))
+			for _, mask := range []*fieldmaskpb.FieldMask{nil, {}} {
+				continuationApply(t, a, continuationUpdate(continuationText("out", "ignored"), mask, appendOnly))
+				if got := continuationRoot(t, a).GetMessages()[0].GetAgentOutput().GetText(); got != "before" {
+					t.Fatalf("absent/empty mask changed existing message: %q", got)
+				}
+			}
+			// Absent masks skip even a missing message and never create a new ID.
+			continuationApply(t, a, continuationUpdate(nil, nil, appendOnly))
+			continuationApply(t, a, continuationUpdate(continuationText("new", "ignored"), nil, appendOnly))
+			if len(continuationRoot(t, a).GetMessages()) != 1 {
+				t.Fatal("absent mask inserted a message")
+			}
+		})
+	}
+	for _, mask := range []*fieldmaskpb.FieldMask{{}, {Paths: []string{"agent_output.text"}}, {Paths: []string{"future.field"}}} {
+		a := newContinuationAccumulator(nil)
+		continuationApply(t, a, continuationCreate())
+		message := continuationText("new", "full supplied message")
+		message.SetServerMessageData("unselected but preserved")
+		continuationApply(t, a, continuationUpdate(message, mask, false))
+		if !proto.Equal(continuationRoot(t, a).GetMessages()[0], message) {
+			t.Fatal("upsert did not insert the full supplied message")
+		}
+		message.GetAgentOutput().SetText("mutated")
+		if continuationRoot(t, a).GetMessages()[0].GetAgentOutput().GetText() != "full supplied message" {
+			t.Fatal("upsert retained an input alias")
+		}
+	}
+}
+
+func TestContinuationUnknownMasksDefaultsAndOrderedDuplicates(t *testing.T) {
+	a := newContinuationAccumulator(nil)
+	continuationApply(t, a, continuationCreate(continuationText("out", "a")))
+	before := proto.Clone(a.root)
+	// Unknown nested fields must not materialize a parent or switch a oneof.
+	continuationApply(t, a, continuationUpdate(continuationText("out", "ignored"), &fieldmaskpb.FieldMask{Paths: []string{"future.field", "tool_call.server.future"}}, false))
+	if !proto.Equal(before, a.root) {
+		t.Fatal("unknown path mutated state")
+	}
+	mask := &fieldmaskpb.FieldMask{Paths: []string{"agent_output.text", "future.field", "agent_output.text"}}
+	continuationApply(t, a, continuationUpdate(continuationText("out", "b"), mask, true))
+	if got := continuationRoot(t, a).GetMessages()[0].GetAgentOutput().GetText(); got != "abb" || len(mask.Paths) != 3 {
+		t.Fatalf("duplicate append paths were normalized or aliased: %q", got)
+	}
+	// Parent/child update order matters. The absent source parent is a default,
+	// not an invalid mask, and the selected text leaf clears to its default.
+	continuationApply(t, a, continuationUpdate(warpapi.Message_builder{Id: proto.String("out")}.Build(), &fieldmaskpb.FieldMask{Paths: []string{"agent_output.text"}}, false))
+	if got := continuationRoot(t, a).GetMessages()[0].GetAgentOutput().GetText(); got != "" {
+		t.Fatalf("absent nested source did not clear selected leaf: %q", got)
+	}
+}
+
+func TestContinuationMaskParentChildOrder(t *testing.T) {
+	for _, parentFirst := range []bool{false, true} {
+		a := newContinuationAccumulator(nil)
+		continuationApply(t, a, continuationCreate(continuationText("out", "before")))
+		paths := []string{"agent_output.text", "agent_output"}
+		if parentFirst {
+			paths[0], paths[1] = paths[1], paths[0]
+		}
+		delta := warpapi.Message_builder{Id: proto.String("out")}.Build()
+		continuationApply(t, a, continuationUpdate(delta, &fieldmaskpb.FieldMask{Paths: paths}, false))
+		if got := continuationRoot(t, a).GetMessages()[0].HasAgentOutput(); got != parentFirst {
+			t.Fatalf("mask order changed: parentFirst=%v hasAgentOutput=%v", parentFirst, got)
+		}
+	}
+}
+
+func TestContinuationRejectsUnsafeMasksAndUnknownUpserts(t *testing.T) {
+	for _, path := range []string{"id", "task_id", "future.id", "tool_call.future.task_id", "agent_output..text", "", "agent_output.text.child", "request_metadata.charges.usage_by_category.key"} {
+		t.Run(path, func(t *testing.T) {
+			a := newContinuationAccumulator(nil)
+			continuationApply(t, a, continuationCreate(continuationText("out", "before")))
+			action := continuationUpdate(continuationText("out", "after"), &fieldmaskpb.FieldMask{Paths: []string{path}}, false)
+			err := a.apply(action)
+			reason := "invalid_mask"
+			for _, part := range strings.Split(path, ".") {
+				if part == "id" || part == "task_id" {
+					reason = "identity_mutation"
+				}
+			}
+			requireContinuationError(t, err, reason, int(action.WhichAction()))
+			if strings.Contains(err.Error(), "before") || len(path) > 8 && strings.Contains(err.Error(), path) {
+				t.Fatal("error included content or a mask path")
+			}
+		})
+	}
+	t.Run("foreign upsert", func(t *testing.T) {
+		a := newContinuationAccumulator(nil)
+		continuationApply(t, a, continuationCreate())
+		message := continuationText("new", "content")
+		message.SetTaskId("foreign")
+		action := continuationUpdate(message, &fieldmaskpb.FieldMask{}, false)
+		requireContinuationError(t, a.apply(action), "invalid_task", int(action.WhichAction()))
+		if len(a.root.GetMessages()) != 0 {
+			t.Fatal("foreign upsert was accepted")
+		}
+	})
+	for _, unknown := range []string{"outer", "nested"} {
+		t.Run(unknown, func(t *testing.T) {
+			a := newContinuationAccumulator(nil)
+			continuationApply(t, a, continuationCreate())
+			message := continuationText("new", "private-payload")
+			reflection := message.ProtoReflect()
+			if unknown == "nested" {
+				reflection = message.GetAgentOutput().ProtoReflect()
+			}
+			reflection.SetUnknown([]byte{0xa0, 0x06, 0x01})
+			action := continuationUpdate(message, &fieldmaskpb.FieldMask{}, false)
+			err := a.apply(action)
+			requireContinuationError(t, err, "unknown_fields", int(action.WhichAction()))
+			if len(a.root.GetMessages()) != 0 || strings.Contains(err.Error(), "private-payload") {
+				t.Fatal("unknown full upsert was partially accepted or exposed")
+			}
+		})
+	}
+}
+
+func continuationReceivedMessage(values ...string) *warpapi.Message {
+	message := warpapi.Message_builder{Id: proto.String("out"), TaskId: proto.String("root")}.Build()
+	reflection := message.ProtoReflect()
+	field := reflection.Descriptor().Fields().ByName("messages_received_from_agents")
+	parent := reflection.Mutable(field).Message()
+	listField := parent.Descriptor().Fields().ByName("messages")
+	list := parent.Mutable(listField).List()
+	for _, value := range values {
+		item := list.NewElement()
+		body := item.Message().Descriptor().Fields().ByName("message_body")
+		item.Message().Set(body, protoreflect.ValueOfString(value))
+		list.Append(item)
+	}
+	return message
+}
+
+func TestContinuationRepeatedMessageMasksPairwise(t *testing.T) {
+	path := "messages_received_from_agents.messages.message_body"
+	for _, appendOnly := range []bool{false, true} {
+		a := newContinuationAccumulator(nil)
+		continuationApply(t, a, continuationCreate(continuationReceivedMessage("a", "b")))
+		continuationApply(t, a, continuationUpdate(continuationReceivedMessage("x", "y"), &fieldmaskpb.FieldMask{Paths: []string{path}}, appendOnly))
+		values := continuationRoot(t, a).GetMessages()[0].GetMessagesReceivedFromAgents().GetMessages()
+		want := []string{"x", "y"}
+		if appendOnly {
+			want = []string{"ax", "by"}
+		}
+		if values[0].GetMessageBody() != want[0] || values[1].GetMessageBody() != want[1] {
+			t.Fatal("repeated message mask did not traverse pairwise")
+		}
+		before := proto.Clone(a.root)
+		action := continuationUpdate(continuationReceivedMessage("z"), &fieldmaskpb.FieldMask{Paths: []string{path}}, appendOnly)
+		requireContinuationError(t, a.apply(action), "invalid_mask", int(action.WhichAction()))
+		if !proto.Equal(before, a.root) {
+			t.Fatal("mismatched array mask partially applied")
+		}
+	}
+}
+
+func TestContinuationSizeLimitsAndLatchedErrors(t *testing.T) {
+	if continuationStateLimit != 2<<20 {
+		t.Fatal("continuation state limit must be 2 MiB")
+	}
+	a := newContinuationAccumulator(nil)
+	continuationApply(t, a, continuationCreate(continuationText("out", strings.Repeat("x", 200<<10))))
+	raw, err := a.snapshot()
+	if err != nil || len(raw) <= 128<<10 {
+		t.Fatalf("200 KiB state rejected: %v", err)
+	}
+	if _, err := decodeContinuationState(raw); err != nil {
+		t.Fatal(err)
+	}
+	// The serialized context, not just a string leaf, owns the exact boundary.
+	boundary := newContinuationAccumulator(nil)
+	boundary.root = warpapi.Task_builder{Id: proto.String("root"), ServerData: proto.String(strings.Repeat("x", continuationStateLimit-32))}.Build()
+	context := warpapi.Request_TaskContext_builder{Tasks: []*warpapi.Task{boundary.root}}.Build()
+	boundary.root.SetServerData(boundary.root.GetServerData() + strings.Repeat("x", continuationStateLimit-proto.Size(context)))
+	atLimit, err := boundary.snapshot()
+	if err != nil || len(atLimit) != continuationStateLimit {
+		t.Fatalf("exact state size boundary rejected: bytes=%d err=%v", len(atLimit), err)
+	}
+	if _, err := decodeContinuationState(atLimit); err != nil {
+		t.Fatal(err)
+	}
+	boundary.root.SetServerData(boundary.root.GetServerData() + "x")
+	_, err = boundary.snapshot()
+	requireContinuationError(t, err, "state_size", 0)
+	// Two individually legal actions exceed the aggregate context bound.
+	continuationApply(t, a, continuationUpdate(continuationText("out", strings.Repeat("y", 1<<20)), &fieldmaskpb.FieldMask{Paths: []string{"agent_output.text"}}, true))
+	action := continuationUpdate(continuationText("out", strings.Repeat("z", 1<<20)), &fieldmaskpb.FieldMask{Paths: []string{"agent_output.text"}}, true)
+	first := a.apply(action)
+	stateErr := requireContinuationError(t, first, "state_size", int(action.WhichAction()))
+	if stateErr.MeasuredBytes <= continuationStateLimit {
+		t.Fatal("state size error omitted the measured bound")
+	}
+	rollback := warpapi.ClientAction_builder{RollbackTransaction: warpapi.ClientAction_RollbackTransaction_builder{}.Build()}.Build()
+	if a.apply(rollback) != first {
+		t.Fatal("later action cleared or replaced the first error")
+	}
+	if _, err := a.snapshot(); err != first {
+		t.Fatal("snapshot did not retain the first error")
+	}
+	a = newContinuationAccumulator(nil)
+	oversized := continuationCreate(continuationText("out", strings.Repeat("x", continuationStateLimit)))
+	sizeErr := requireContinuationError(t, a.apply(oversized), "action_size", int(oversized.WhichAction()))
+	if sizeErr.MeasuredBytes != proto.Size(oversized) {
+		t.Fatal("action error reported an incorrect size")
+	}
+	_, err = decodeContinuationState(bytes.Repeat([]byte("x"), continuationStateLimit+1))
+	requireContinuationError(t, err, "state_size", 0)
+}
+
+func TestContinuationErrorReasonsAndContentFreeLabels(t *testing.T) {
+	tests := []struct {
+		name, reason string
+		action       *warpapi.ClientAction
+	}{
+		{"missing root", "missing_root", continuationUpdate(continuationText("out", "content"), &fieldmaskpb.FieldMask{}, false)},
+		{"transaction", "transaction", warpapi.ClientAction_builder{CommitTransaction: warpapi.ClientAction_CommitTransaction_builder{}.Build()}.Build()},
+		{"invalid action", "invalid_action", nil},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			a := newContinuationAccumulator(nil)
+			kind := 0
+			if test.action != nil {
+				kind = int(test.action.WhichAction())
+			}
+			requireContinuationError(t, a.apply(test.action), test.reason, kind)
+		})
+	}
+	_, err := newContinuationAccumulator(nil).snapshot()
+	requireContinuationError(t, err, "missing_root", 0)
+	_, err = decodeContinuationState(nil)
+	requireContinuationError(t, err, "missing_root", 0)
+	err = continuationError("untrusted-private-content", 0, 0)
+	requireContinuationError(t, err, "invalid_action", 0)
+	if strings.Contains(err.Error(), "untrusted-private-content") {
+		t.Fatal("dynamic reason reached error output")
+	}
+}
+
+func TestContinuationTransactionFailureCannotBeRolledBackToSuccess(t *testing.T) {
+	a := newContinuationAccumulator(nil)
+	continuationApply(t, a, continuationCreate(continuationText("out", "before")))
+	continuationApply(t, a, warpapi.ClientAction_builder{BeginTransaction: warpapi.ClientAction_BeginTransaction_builder{}.Build()}.Build())
+	action := continuationUpdate(continuationText("out", "private"), &fieldmaskpb.FieldMask{Paths: []string{"id"}}, false)
+	first := a.apply(action)
+	requireContinuationError(t, first, "identity_mutation", int(action.WhichAction()))
+	if err := a.apply(warpapi.ClientAction_builder{RollbackTransaction: warpapi.ClientAction_RollbackTransaction_builder{}.Build()}.Build()); err != first {
+		t.Fatal("rollback swallowed a latched transaction error")
+	}
+	if _, err := a.snapshot(); err != first {
+		t.Fatal("failed transaction exported a snapshot")
 	}
 }
 

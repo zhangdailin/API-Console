@@ -11,7 +11,6 @@ import (
 
 	warpapi "github.com/warpdotdev/warp-proto-apis/apis/multi_agent/v1/gen/go"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -42,6 +41,7 @@ type streamResult struct {
 	RejectAction  int
 	RejectMessage int
 	RejectTool    int
+	Rejection     *streamRejection
 	Usage         observedUsage
 	Text          string
 	ToolCalls     []toolCall
@@ -52,6 +52,9 @@ type streamResult struct {
 	RequestID       string
 	RunID           string
 	RootTaskContext []byte
+	RecoveryContext []byte
+	RecoverySafe    bool
+	Failure         *streamFailure
 }
 
 // toolCall is one client-executable MCP tool invocation observed upstream.
@@ -155,6 +158,12 @@ func buildRequest(model string, prepared preparedRequest) ([]byte, error) {
 		Metadata:   buildMetadata(prepared.ConversationID),
 		McpContext: buildMCPContext(prepared.Tools),
 	}.Build()
+	if prepared.Resume {
+		if prepared.ConversationID == "" || len(prepared.RootTaskContext) == 0 {
+			return nil, errContinuationState
+		}
+		request.GetInput().SetResumeConversation(warpapi.Request_Input_ResumeConversation_builder{}.Build())
+	}
 	return proto.MarshalOptions{Deterministic: true}.Marshal(request)
 }
 
@@ -224,9 +233,21 @@ func readStream(source io.Reader, expectedModel string) (streamResult, error) {
 	return readStreamWithContext(source, expectedModel, nil)
 }
 
-func readStreamWithContext(source io.Reader, expectedModel string, initial []byte) (streamResult, error) {
-	var result streamResult
+func readStreamWithContext(source io.Reader, expectedModel string, initial []byte) (result streamResult, parseErr error) {
 	state := newContinuationAccumulator(initial)
+	recoveryCandidate := false
+	checkpointProgress := false
+	defer func() {
+		if parseErr != nil && result.Failure == nil {
+			result.Failure = failureFromState("stream", state)
+		}
+		if parseErr != nil && recoveryCandidate && checkpointProgress && result.Rejection == nil && state.err == nil && result.ConversationID != "" {
+			if snapshot, e := state.snapshot(); e == nil {
+				result.RecoveryContext = snapshot
+				result.RecoverySafe = true
+			}
+		}
+	}()
 	if source == nil {
 		return result, errStreamStream
 	}
@@ -249,6 +270,7 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 	var taskID string
 	createdTask := false
 	previousMCP := make(map[string]bool)
+	serverCalls := observedServerCalls{calls: make(map[string]bool)}
 	if len(initial) > 0 {
 		root, err := decodeContinuationState(initial)
 		if err != nil {
@@ -256,6 +278,7 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 		}
 		taskID, createdTask = root.GetId(), true
 		for _, message := range root.GetMessages() {
+			serverCalls.observe(message, taskID)
 			call := message.GetToolCall()
 			if call != nil && call.WhichTool() == warpapi.Message_ToolCall_CallMcpTool_case && call.GetToolCallId() != "" {
 				previousMCP[call.GetToolCallId()] = true
@@ -322,6 +345,9 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 				return errStreamIncomplete
 			}
 			if event.GetFinished().WhichReason() != warpapi.ResponseEvent_StreamFinished_Done_case {
+				reason := event.GetFinished().WhichReason()
+				recoveryCandidate = reason == warpapi.ResponseEvent_StreamFinished_InternalError_case || reason == warpapi.ResponseEvent_StreamFinished_LlmUnavailable_case
+				result.Failure = &streamFailure{Site: "finish", Reason: "non_done", EventOrdinal: result.Events, ReasonKind: int(reason)}
 				return errStreamUpstream
 			}
 			if result.TextBytes == 0 && len(result.ToolCalls) == 0 {
@@ -334,12 +360,13 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 				var err error
 				result.RootTaskContext, err = state.snapshot()
 				if err != nil {
+					result.Failure = failureFromState("snapshot", state)
 					return errStreamStream
 				}
 			}
 			result.Complete = true
 		case warpapi.ResponseEvent_ClientActions_case:
-			for _, action := range event.GetClientActions().GetActions() {
+			for actionIndex, action := range event.GetClientActions().GetActions() {
 				var messages []*warpapi.Message
 				appendOnly := false
 				switch action.WhichAction() {
@@ -355,11 +382,13 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 					messages = task.GetMessages()
 				case warpapi.ClientAction_AddMessagesToTask_case:
 					if !bindTask(action.GetAddMessagesToTask().GetTaskId()) {
+						result.Rejection = rejectionAt("task_mismatch", "action_task", "none", taskID, result.Events, actionIndex+1, 0, action, nil)
 						return errStreamTool
 					}
 					messages = action.GetAddMessagesToTask().GetMessages()
 				case warpapi.ClientAction_UpdateTaskMessage_case:
 					if !bindTask(action.GetUpdateTaskMessage().GetTaskId()) {
+						result.Rejection = rejectionAt("task_mismatch", "action_task", "none", taskID, result.Events, actionIndex+1, 0, action, nil)
 						return errStreamTool
 					}
 					messages = []*warpapi.Message{action.GetUpdateTaskMessage().GetMessage()}
@@ -374,6 +403,7 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 					if txDepth != 0 {
 						return errStreamStream
 					}
+					serverCalls.begin(taskID, createdTask, result.ServerBookkeeping)
 					txDepth++
 					if txDepth == 1 {
 						txText = result.TextBytes
@@ -396,6 +426,7 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 						return errStreamStream
 					}
 					if txDepth > 0 {
+						taskID, createdTask, result.ServerBookkeeping = serverCalls.rollback()
 						result.TextBytes = txText
 						texts = txTexts
 						order = txOrder
@@ -412,7 +443,8 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 					return errStreamStream
 				case warpapi.ClientAction_UpdateTaskServerData_case:
 					// Opaque bookkeeping may only reference the already bound
-					// root task. Never retain, interpret, or return server_data.
+					// root task. Retain it only in private continuation state;
+					// never interpret it or return it as client-visible output.
 					if !createdTask || action.GetUpdateTaskServerData().GetTaskId() != taskID {
 						result.RejectAction = int(action.WhichAction())
 						return errStreamTool
@@ -426,10 +458,22 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 					result.RejectAction = int(action.WhichAction())
 					return errStreamStream
 				}
-				for _, message := range messages {
+				for messageIndex, message := range messages {
 					if !bindTask(message.GetTaskId()) {
 						result.RejectMessage = int(message.WhichMessage())
+						result.Rejection = rejectionAt("task_mismatch", "message_task", "none", taskID, result.Events, actionIndex+1, messageIndex+1, action, message)
 						return errStreamTool
+					}
+					var err error
+					effectiveText := false
+					message, effectiveText, err = effectiveVisibleUpdate(state, action, message)
+					if err != nil {
+						result.Failure = failureFromState("masked_update", state)
+						return errStreamStream
+					}
+					message, err = effectiveBookkeepingMessage(state, action, message)
+					if err != nil {
+						return err
 					}
 					switch message.WhichMessage() {
 					case warpapi.Message_ToolCall_case:
@@ -437,6 +481,9 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 						// client action. Only validated client MCP calls may execute;
 						// shell, files, subagents, and skills stay rejected.
 						if isServerBookkeeping(message) {
+							if createdTask {
+								serverCalls.observe(message, taskID)
+							}
 							result.ServerBookkeeping++
 							continue
 						}
@@ -477,13 +524,15 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 						result.RejectMessage = int(message.WhichMessage())
 						return errStreamTool
 					case warpapi.Message_ToolCallResult_case:
-						// A resumed task echoes the exact client MCP result it was
-						// supplied. Unbound/native/server results still fail closed.
-						resultMessage := message.GetToolCallResult()
-						if resultMessage.WhichResult() != warpapi.Message_ToolCallResult_CallMcpTool_case || !previousMCP[resultMessage.GetToolCallId()] {
-							result.ToolRequested = true
-							result.RejectMessage = int(message.WhichMessage())
-							return errStreamTool
+						// Server results remain opaque and require a previously observed
+						// same-root Server call. Only prior client MCP results may echo.
+						if err := rejectToolResult(&result, taskID, actionIndex+1, messageIndex+1, action, message, previousMCP, serverCalls.calls); err != nil {
+							return err
+						}
+						if message.GetToolCallResult().WhichResult() == warpapi.Message_ToolCallResult_Server_case {
+							if err := validateServerResultAction(state, action); err != nil {
+								return err
+							}
 						}
 					case warpapi.Message_WebSearch_case, warpapi.Message_WebFetch_case, warpapi.Message_InvokeSkill_case, warpapi.Message_MessagesReceivedFromAgents_case, warpapi.Message_EventsFromAgents_case, warpapi.Message_OrchestrationConfigSnapshot_case:
 						result.ToolRequested = true
@@ -531,7 +580,7 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 							order = append(order, id)
 						}
 						n := len(text)
-						if appendOnly {
+						if appendOnly && !effectiveText {
 							result.TextBytes += n
 							texts[id] += text
 						} else {
@@ -551,7 +600,17 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 				// Track the complete validated root state privately for a client
 				// tool follow-up. Pure text fixtures may not contain CreateTask;
 				// only a tool-bearing completion requires a valid snapshot.
-				_ = state.apply(action)
+				if err := state.apply(action); err == nil {
+					switch action.WhichAction() {
+					case warpapi.ClientAction_AddMessagesToTask_case, warpapi.ClientAction_UpdateTaskMessage_case, warpapi.ClientAction_AppendToMessageContent_case, warpapi.ClientAction_UpdateTaskServerData_case:
+						checkpointProgress = true
+					}
+				} else if result.Failure == nil {
+					result.Failure = failureFromState("state_apply", state)
+					result.Failure.EventOrdinal = result.Events
+					result.Failure.ActionOrdinal = actionIndex + 1
+					result.Failure.ActionKind = int(action.WhichAction())
+				}
 			}
 		default:
 			return errStreamStream
@@ -574,6 +633,8 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 				continue
 			}
 			if err != nil && err != io.EOF {
+				recoveryCandidate = true
+				result.Failure = &streamFailure{Site: "transport_read", Reason: "read_failed", EventOrdinal: result.Events}
 				return result, errStreamStream
 			}
 			if len(line) == 0 && err == io.EOF {
@@ -583,6 +644,8 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 				if result.Complete {
 					return result, nil
 				}
+				recoveryCandidate = true
+				result.Failure = &streamFailure{Site: "transport_read", Reason: "eof_before_finish", EventOrdinal: result.Events}
 				return result, errStreamIncomplete
 			}
 			break
@@ -621,36 +684,4 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 			hasData = true
 		}
 	}
-}
-
-// New schema fields may introduce execution semantics; fail closed until reviewed.
-func hasUnknown(message protoreflect.Message) bool {
-	if len(message.GetUnknown()) != 0 {
-		return true
-	}
-	unknown := false
-	message.Range(func(field protoreflect.FieldDescriptor, value protoreflect.Value) bool {
-		if field.IsMap() {
-			if field.MapValue().Kind() == protoreflect.MessageKind {
-				value.Map().Range(func(_ protoreflect.MapKey, v protoreflect.Value) bool {
-					unknown = hasUnknown(v.Message())
-					return !unknown
-				})
-			}
-		} else if field.IsList() {
-			if field.Kind() == protoreflect.MessageKind {
-				list := value.List()
-				for i := 0; i < list.Len(); i++ {
-					if hasUnknown(list.Get(i).Message()) {
-						unknown = true
-						break
-					}
-				}
-			}
-		} else if field.Kind() == protoreflect.MessageKind {
-			unknown = hasUnknown(value.Message())
-		}
-		return !unknown
-	})
-	return unknown
 }

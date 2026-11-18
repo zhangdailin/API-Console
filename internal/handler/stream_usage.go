@@ -37,6 +37,12 @@ func (h *streamHandler) applyUpstreamUsageTokens(usage map[string]any) {
 	if len(usage) == 0 {
 		return
 	}
+	if semantics, _ := usage["inputTokensSemantics"].(string); semantics == "exclusive_cache" {
+		h.mu.Lock()
+		h.applyExclusiveUsageLocked(usage)
+		h.mu.Unlock()
+		return
+	}
 	read := func(keys ...string) (int, bool) {
 		for _, key := range keys {
 			if value, ok := getUsageIntValue(usage, key); ok {

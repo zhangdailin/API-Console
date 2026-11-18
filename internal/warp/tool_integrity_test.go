@@ -8,6 +8,7 @@ import (
 
 	warpapi "github.com/warpdotdev/warp-proto-apis/apis/multi_agent/v1/gen/go"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -104,7 +105,7 @@ func TestToolIntegrityDeduplicatesAddAndUpdateSnapshots(t *testing.T) {
 	stream := integrityStream(t,
 		compatRootTask("root"),
 		integrityTaskMessages(first),
-		testAction(warpapi.ClientAction_builder{UpdateTaskMessage: warpapi.ClientAction_UpdateTaskMessage_builder{TaskId: proto.String("root"), Message: replay}.Build()}.Build()),
+		testAction(warpapi.ClientAction_builder{UpdateTaskMessage: warpapi.ClientAction_UpdateTaskMessage_builder{TaskId: proto.String("root"), Message: replay, Mask: &fieldmaskpb.FieldMask{Paths: []string{"tool_call"}}}.Build()}.Build()),
 		integrityTaskMessages(integrityMetadata(warpapi.Message_RequestMetadata_ToolCallSummary_builder{ToolCalls: proto.Uint32(1)}.Build(), nil)), testDone(),
 	)
 	result, err := readStream(strings.NewReader(stream), "model-a")
@@ -129,10 +130,43 @@ func TestToolIntegrityRejectsConflictingCallID(t *testing.T) {
 				compatRootTask("root", integrityMCP(t, "message-1", "call-1", "lookup", map[string]any{"q": "x"}, nil)),
 				testAction(warpapi.ClientAction_builder{UpdateTaskMessage: warpapi.ClientAction_UpdateTaskMessage_builder{
 					TaskId: proto.String("root"), Message: integrityMCP(t, "message-1", "call-1", tc.name, tc.args, nil),
+					Mask: &fieldmaskpb.FieldMask{Paths: []string{"tool_call"}},
 				}.Build()}.Build()), testDone(),
 			)
 			if result, err := readStream(strings.NewReader(stream), "model-a"); !errors.Is(err, errStreamTool) || result.Complete || !result.ToolRequested {
 				t.Fatalf("conflicting replay accepted: result=%+v err=%v", result, err)
+			}
+		})
+	}
+}
+
+func TestToolIntegrityUnselectedUpdateCannotChangeCall(t *testing.T) {
+	for name, mask := range map[string]*fieldmaskpb.FieldMask{
+		"absent":   nil,
+		"empty":    {},
+		"metadata": {Paths: []string{"server_message_data"}},
+		"unknown":  {Paths: []string{"future.field"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			update := integrityMCP(t, "message-1", "replacement-call", "replacement-tool", map[string]any{"q": "changed"}, nil)
+			update.SetServerMessageData("private metadata")
+			stream := integrityStream(t,
+				compatRootTask("root", integrityMCP(t, "message-1", "call-1", "lookup", map[string]any{"q": "x"}, nil)),
+				testAction(warpapi.ClientAction_builder{UpdateTaskMessage: warpapi.ClientAction_UpdateTaskMessage_builder{
+					TaskId: proto.String("root"), Message: update, Mask: mask,
+				}.Build()}.Build()), testDone(),
+			)
+			result, err := readStream(strings.NewReader(stream), "model-a")
+			if err != nil || !result.Complete || len(result.ToolCalls) != 1 || result.ToolRequested {
+				t.Fatalf("unselected update changed executable calls: result=%+v err=%v", result, err)
+			}
+			call := result.ToolCalls[0]
+			if call.ID != "call-1" || call.Name != "lookup" || call.Args != `{"q":"x"}` {
+				t.Fatal("unselected tool identity or arguments became executable")
+			}
+			root, err := decodeContinuationState(result.RootTaskContext)
+			if err != nil || root.GetMessages()[0].GetToolCall().GetToolCallId() != "call-1" {
+				t.Fatal("unselected update changed the private continuation call")
 			}
 		})
 	}

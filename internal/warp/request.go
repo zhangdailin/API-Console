@@ -2,6 +2,7 @@ package warp
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"unicode/utf8"
@@ -14,21 +15,22 @@ import (
 )
 
 const (
-	userTextLimit   = 4096
-	systemTextLimit = 8192
+	userTextLimit = 4096
 	// historyTurns bounds how much prior conversation may be replayed. It is a
 	// deliberate cost ceiling, not a protocol limit: Warp accepts a full task
 	// context, but replaying an unbounded transcript is what made earlier
 	// versions expensive.
 	historyTurns    = 8
 	transcriptLimit = 64 << 10
-	toolCountLimit  = 64
 	// toolRoundLimit caps agent loops per conversation. Every tool round costs a
 	// paid inference call, so an unbounded loop is exactly the cost failure this
 	// channel must not repeat.
 	toolRoundLimit     = 6
 	toolSchemaLimit    = 64 << 10
-	toolDescriptionCap = 4 << 10
+	toolDescriptionCap = 32 << 10
+	// Provider reasoning is accepted only as bounded historical metadata, never
+	// replayed as query text or treated as tool input.
+	thinkingHistoryLimit = 64 << 10
 )
 
 type mcpTool struct {
@@ -40,6 +42,8 @@ type mcpTool struct {
 // preparedRequest is everything the wire builder needs, produced before any
 // credential refresh or paid call.
 type preparedRequest struct {
+	// Resume uses the official recovery input and never resends tool results.
+	Resume        bool
 	Query         string
 	Tools         []mcpTool
 	ParallelTools bool
@@ -65,7 +69,7 @@ type preparedToolResult struct {
 }
 
 // validateRequest runs before token renewal or any upstream operation. It accepts
-// one optional instruction message, a bounded recent transcript, and a final user
+// plain-text instructions, a bounded recent transcript, and a final user
 // turn. Tools are declared to upstream as client MCP tools so the client, not the
 // gateway, executes them.
 func validateRequest(req upstream.UpstreamRequest) (preparedRequest, error) {
@@ -75,12 +79,15 @@ func validateRequest(req upstream.UpstreamRequest) (preparedRequest, error) {
 	// Generation controls are accepted for wire compatibility with Anthropic and
 	// OpenAI clients but are not forwarded: the Warp agent endpoint exposes no
 	// equivalent, so the gateway's own byte ceilings bound the answer.
-	if len(req.Messages) < 1 || len(req.Messages) > 2*historyTurns+2 || req.ReasoningEffort != "" || req.ResponseFormat != nil || req.ResponseText != nil || req.Include != nil || req.PromptCacheKey != "" || len(req.ResponsesTools) != 0 {
+	if len(req.Messages) < 1 || req.ResponseFormat != nil || req.ResponseText != nil || req.Include != nil || req.PromptCacheKey != "" || len(req.ResponsesTools) != 0 {
 		return reject()
 	}
-	tools, ok := convertTools(req.Tools)
-	if !ok {
-		return reject()
+	if err := validateThinkingHistory(req.Messages); err != nil {
+		return preparedRequest{}, err
+	}
+	tools, err := convertToolsWithError(req.Tools)
+	if err != nil {
+		return preparedRequest{}, err
 	}
 	choice, disableParallel, ok := parseToolChoice(req.ToolChoice)
 	if !ok {
@@ -90,48 +97,36 @@ func validateRequest(req upstream.UpstreamRequest) (preparedRequest, error) {
 		tools = nil
 	}
 	parallel := req.ParallelToolCalls != nil && *req.ParallelToolCalls && !disableParallel && len(tools) > 0
-	messages := req.Messages
-	if messages[len(messages)-1].Role != "user" {
+	// Anthropic's separate system blocks precede message-level instructions.
+	// Remove instruction roles before validating the remaining dialog; some
+	// clients append their instruction message after the current user turn.
+	system, messages, err := normalizeInstructions(req.System, req.Messages)
+	if err != nil {
+		return preparedRequest{}, err
+	}
+	if len(messages) == 0 || messages[len(messages)-1].Role != "user" {
 		return reject()
 	}
-	var system string
-	if len(req.System) > 0 {
-		parts := make([]string, 0, len(req.System))
-		for _, item := range req.System {
-			if strings.TrimSpace(item.Text) == "" || !utf8.ValidString(item.Text) || !reflect.DeepEqual(item, prompt.SystemItem{Type: item.Type, Text: item.Text}) || (item.Type != "" && item.Type != "text") {
-				return reject()
-			}
-			parts = append(parts, item.Text)
-		}
-		system = strings.Join(parts, "\n")
-		if len(system) > systemTextLimit {
-			return reject()
-		}
+	// Bound the final original user message before joining adjacent context
+	// messages. Joining cannot bypass the existing per-message input ceiling.
+	_, finalText, finalResults, ok := splitCurrentTurn(messages, 0)
+	if !ok || len(finalText) > userTextLimit || (strings.TrimSpace(finalText) == "" && len(finalResults) == 0) {
+		return reject()
 	}
-	start := 0
-	if messages[0].Role == "system" {
-		systemText, ok := messageText(messages[0], systemTextLimit)
-		if !ok || strings.TrimSpace(systemText) == "" {
-			return reject()
-		}
-		if system != "" {
-			return reject()
-		}
-		system, start = systemText, 1
-		if len(messages) == 1 {
-			return reject()
-		}
+	messages, ok = mergeUserContext(messages)
+	if !ok || len(messages) > 2*historyTurns+1 {
+		return reject()
 	}
 	// The final user turn may carry tool results produced by the client. Those
 	// travel as structured inputs; every earlier turn is rendered as transcript.
-	prior, currentText, results, ok := splitCurrentTurn(messages, start)
+	prior, currentText, results, ok := splitCurrentTurn(messages, 0)
 	if !ok {
 		return reject()
 	}
 	if len(prior) == 0 && len(results) > 0 {
 		return reject()
 	}
-	if len(currentText) > userTextLimit || !utf8.ValidString(currentText) || (strings.TrimSpace(currentText) == "" && len(results) == 0) {
+	if !utf8.ValidString(currentText) || (strings.TrimSpace(currentText) == "" && len(results) == 0) {
 		return reject()
 	}
 	for i, message := range prior {
@@ -182,7 +177,7 @@ func validateRequest(req upstream.UpstreamRequest) (preparedRequest, error) {
 		history = append(history, prompt.Message{Role: "user", Content: prompt.MessageContent{Text: strings.Join(currentParts, "\n")}})
 	}
 	// A single plain user turn keeps the original, minimal wire shape.
-	if len(history) == 1 && system == "" && start == 0 && history[0].Role == "user" && len(history[0].Content.Blocks) == 0 && len(preparedResults) == 0 {
+	if len(history) == 1 && system == "" && history[0].Role == "user" && len(history[0].Content.Blocks) == 0 && len(preparedResults) == 0 && len(history[0].Content.Text) <= userTextLimit {
 		text := history[0].Content.Text
 		if strings.TrimSpace(text) == "" || len(text) > userTextLimit || !validModel(req.Model) {
 			return reject()
@@ -203,7 +198,16 @@ func validateRequest(req upstream.UpstreamRequest) (preparedRequest, error) {
 	if transcript == "" && len(preparedResults) == 0 {
 		return reject()
 	}
-	return preparedRequest{Query: transcript, CurrentText: currentText, Tools: tools, ParallelTools: parallel, ToolResults: preparedResults}, nil
+	continuationText := currentText
+	if len(preparedResults) > 0 && system != "" {
+		// A bound continuation omits the replayed dialog, not the caller's
+		// instructions. Keep new/changed system text in the current query.
+		continuationText = "System instructions:\n" + system
+		if currentText != "" {
+			continuationText += "\n\nUser message:\n" + currentText
+		}
+	}
+	return preparedRequest{Query: transcript, CurrentText: continuationText, Tools: tools, ParallelTools: parallel, ToolResults: preparedResults}, nil
 }
 
 func boolToInt(v bool) int {
@@ -318,21 +322,22 @@ func renderTranscriptWithin(system string, messages []prompt.Message, limit int)
 		}
 		parts = append(parts, rendered)
 	}
-	// The instruction prefix is pinned. Only complete oldest user/assistant
-	// pairs may be omitted; the current user input (or latest tool-call pair
-	// when results are structured separately) is always retained.
+	// System instructions are uncapped and outside the non-system history
+	// budget. Only complete oldest dialog pairs may be omitted; instructions
+	// cannot displace dialog or be silently truncated to satisfy that budget.
+	prefix := ""
+	if system != "" {
+		prefix = "System instructions:\n" + system + "\n\n"
+	}
 	for dropped := 0; ; dropped += 2 {
 		all := make([]string, 0, len(parts)+2)
-		if system != "" {
-			all = append(all, "System instructions:\n"+system)
-		}
 		if dropped > 0 {
 			all = append(all, "[earlier history omitted]")
 		}
 		all = append(all, parts[dropped:]...)
 		transcript := strings.Join(all, "\n\n")
 		if len(transcript) <= limit {
-			return transcript, true
+			return prefix + transcript, true
 		}
 		// Keep the latest complete history pair, unless a current user message
 		// exists and is the only context that can fit the hard ceiling.
@@ -362,6 +367,10 @@ func renderMessage(m prompt.Message) (string, bool) {
 			return "", false
 		}
 		switch block.Type {
+		case "thinking":
+			// Historical private reasoning is not a user instruction, tool
+			// parameter, visible answer, or transferable provider signature.
+			continue
 		case "text":
 			if strings.TrimSpace(block.Text) != "" {
 				lines = append(lines, prefix+": "+block.Text)
@@ -381,6 +390,9 @@ func renderMessage(m prompt.Message) (string, bool) {
 		default:
 			return "", false
 		}
+	}
+	if len(lines) == 0 {
+		return "", false
 	}
 	return strings.Join(lines, "\n"), true
 }
@@ -403,9 +415,14 @@ func toolLabel(id, name string) string {
 func validMessageBlock(block prompt.ContentBlock, role string) bool {
 	var expected prompt.ContentBlock
 	switch block.Type {
+	case "thinking":
+		if !validThinkingHistory(block, role) {
+			return false
+		}
+		expected = prompt.ContentBlock{Type: "thinking", Thinking: block.Thinking, Signature: block.Signature}
 	case "text":
-		expected = prompt.ContentBlock{Type: "text", Text: block.Text}
-		if !utf8.ValidString(block.Text) {
+		expected = prompt.ContentBlock{Type: "text", Text: block.Text, CacheControl: block.CacheControl}
+		if !validCacheControl(block.CacheControl) || !utf8.ValidString(block.Text) {
 			return false
 		}
 	case "tool_use":
@@ -415,13 +432,13 @@ func validMessageBlock(block prompt.ContentBlock, role string) bool {
 		}
 		expected = prompt.ContentBlock{Type: "tool_use", ID: block.ID, Name: block.Name, Input: block.Input}
 	case "tool_result":
-		if role != "user" || block.ToolUseID == "" || !utf8.ValidString(block.ToolUseID) {
+		if role != "user" || block.ToolUseID == "" || !utf8.ValidString(block.ToolUseID) || !validCacheControl(block.CacheControl) {
 			return false
 		}
 		if _, ok := toolResultText(block.Content); !ok {
 			return false
 		}
-		expected = prompt.ContentBlock{Type: "tool_result", ToolUseID: block.ToolUseID, Content: block.Content, IsError: block.IsError}
+		expected = prompt.ContentBlock{Type: "tool_result", ToolUseID: block.ToolUseID, Content: block.Content, IsError: block.IsError, CacheControl: block.CacheControl}
 	default:
 		return false
 	}
@@ -506,78 +523,139 @@ func validToolName(name string) bool {
 // convertTools accepts exactly Anthropic client tools or nested OpenAI function
 // tools. Schema/name/description values are forwarded unchanged, never repaired.
 func convertTools(raw []any) ([]mcpTool, bool) {
+	tools, err := convertToolsWithError(raw)
+	return tools, err == nil
+}
+
+// requestFieldError reports only gateway-owned reasons and paths, never input
+// values. Counts and byte measurements are safe to expose to clients.
+func requestFieldError(code, path string) error {
+	return apperrors.New("invalid_request_error", "Warp "+code+" at "+path, 400)
+}
+
+func requestBytesError(code, path string, measured, limit int) error {
+	return apperrors.New("invalid_request_error", fmt.Sprintf("Warp %s at %s: measured_bytes=%d limit_bytes=%d", code, path, measured, limit), 400)
+}
+
+func convertToolsWithError(raw []any) ([]mcpTool, error) {
 	if len(raw) == 0 {
-		return nil, true
-	}
-	if len(raw) > toolCountLimit {
-		return nil, false
+		return nil, nil
 	}
 	tools := make([]mcpTool, 0, len(raw))
-	total := 0
-	for _, item := range raw {
+	for i, item := range raw {
+		path := fmt.Sprintf("tools[%d]", i)
 		entry, ok := item.(map[string]any)
 		if !ok || entry == nil {
-			return nil, false
+			return nil, requestFieldError("invalid_tool", path)
 		}
-		fn, schemaKey := entry, "input_schema"
+		fn, schemaKey, fnPath := entry, "input_schema", path
 		if _, nested := entry["function"]; nested {
 			if !toolKeys(entry, "type", "function") || entry["type"] != "function" {
-				return nil, false
+				return nil, requestFieldError("invalid_tool", path)
 			}
+			fnPath += ".function"
 			fn, ok = entry["function"].(map[string]any)
 			if !ok || fn == nil || !toolKeys(fn, "name", "description", "parameters", "strict") {
-				return nil, false
+				return nil, requestFieldError("invalid_tool", fnPath)
 			}
-			// Warp's MCP dialect cannot promise strict output validation. An
-			// explicit false is equivalent to its normal non-strict behavior.
+			// Warp cannot promise strict output validation. Explicit false is
+			// equivalent to its normal non-strict behavior.
 			if strict, exists := fn["strict"]; exists {
 				value, valid := strict.(bool)
 				if !valid || value {
-					return nil, false
+					return nil, requestFieldError("unsupported_tool_strict", fnPath+".strict")
 				}
 			}
 			schemaKey = "parameters"
-		} else if !toolKeys(entry, "name", "description", "input_schema") {
-			return nil, false
+		} else {
+			if !toolKeys(entry, "name", "description", "input_schema", "eager_input_streaming") {
+				return nil, requestFieldError("invalid_tool", path)
+			}
+			if eager, exists := entry["eager_input_streaming"]; exists {
+				if _, valid := eager.(bool); !valid {
+					return nil, requestFieldError("invalid_eager_input_streaming", path+".eager_input_streaming")
+				}
+			}
 		}
 		name, ok := fn["name"].(string)
 		if !ok || !validToolName(name) {
-			return nil, false
+			return nil, requestFieldError("invalid_tool_name", fnPath+".name")
 		}
 		for _, existing := range tools {
 			if strings.EqualFold(existing.Name, name) {
-				return nil, false
+				return nil, requestFieldError("duplicate_tool_name", fnPath+".name")
 			}
 		}
 		tool := mcpTool{Name: name}
 		if description, exists := fn["description"]; exists {
 			desc, valid := description.(string)
-			if !valid || len(desc) > toolDescriptionCap || !utf8.ValidString(desc) {
-				return nil, false
+			if !valid || !utf8.ValidString(desc) {
+				return nil, requestFieldError("invalid_tool_description", fnPath+".description")
+			}
+			if len(desc) > toolDescriptionCap {
+				return nil, requestBytesError("tool_description_bytes", fnPath+".description", len(desc), toolDescriptionCap)
 			}
 			tool.Description = desc
 		}
 		params, ok := fn[schemaKey].(map[string]any)
 		if !ok || params == nil {
-			return nil, false
+			return nil, requestFieldError("invalid_tool_schema", fnPath+"."+schemaKey)
 		}
 		encoded, err := json.Marshal(params)
-		if err != nil || len(encoded) > toolSchemaLimit {
-			return nil, false
+		if err != nil {
+			return nil, requestFieldError("invalid_tool_schema", fnPath+"."+schemaKey)
+		}
+		if len(encoded) > toolSchemaLimit {
+			return nil, requestBytesError("tool_schema_bytes", fnPath+"."+schemaKey, len(encoded), toolSchemaLimit)
 		}
 		// Validate the actual wire representation before a paid operation;
 		// json.Marshal alone also accepts values structpb cannot encode.
 		if _, err := structpb.NewStruct(params); err != nil {
-			return nil, false
+			return nil, requestFieldError("invalid_tool_schema", fnPath+"."+schemaKey)
 		}
-		total += len(encoded)
-		if total > toolSchemaLimit {
-			return nil, false
-		}
+		// Do not cap accumulated schema/definition bytes or tool count. The
+		// individual description and schema limits remain in force; preserve
+		// every accepted definition without truncation or schema rewriting.
 		tool.Schema = params
 		tools = append(tools, tool)
 	}
-	return tools, true
+	return tools, nil
+}
+
+// normalizeInstructions preserves all instruction text and its source order.
+// Cache markers are validated hints, not instructions supported by Warp.
+func normalizeInstructions(items []prompt.SystemItem, messages []prompt.Message) (string, []prompt.Message, error) {
+	parts := make([]string, 0, len(items))
+	for i, item := range items {
+		path := fmt.Sprintf("system[%d]", i)
+		if (item.Type != "" && item.Type != "text") || strings.TrimSpace(item.Text) == "" || !utf8.ValidString(item.Text) {
+			return "", nil, requestFieldError("invalid_system_text", path)
+		}
+		if !validCacheControl(item.CacheControl) {
+			return "", nil, requestFieldError("invalid_cache_control", path+".cache_control")
+		}
+		parts = append(parts, item.Text)
+	}
+	dialog := make([]prompt.Message, 0, len(messages))
+	for i, message := range messages {
+		if message.Role != "system" && message.Role != "developer" {
+			dialog = append(dialog, message)
+			continue
+		}
+		text, ok := messageText(message, -1)
+		if !ok || strings.TrimSpace(text) == "" {
+			return "", nil, requestFieldError("invalid_system_text", fmt.Sprintf("messages[%d].content", i))
+		}
+		parts = append(parts, text)
+	}
+	system := strings.Join(parts, "\n")
+	return system, dialog, nil
+}
+
+// TTL and other raw cache-control fields are validated before decoding; the
+// shared normalized type retains only Type. Warp ignores the validated hint.
+func validCacheControl(cache *prompt.CacheControl) bool {
+	return cache == nil || cache.Type == "ephemeral"
 }
 
 // messageText extracts plain text from one message. Content blocks must be pure
@@ -591,17 +669,18 @@ func messageText(m prompt.Message, limit int) (string, bool) {
 		if text != "" {
 			return "", false
 		}
+		parts := make([]string, 0, len(m.Content.Blocks))
 		for _, block := range m.Content.Blocks {
-			if block.Type != "text" || !reflect.DeepEqual(block, prompt.ContentBlock{Type: "text", Text: block.Text}) {
+			if block.Type != "text" || !validMessageBlock(block, "system") {
 				return "", false
 			}
-			text += block.Text
-			if len(text) > limit {
-				return "", false
-			}
+			parts = append(parts, block.Text)
 		}
+		// Preserve adjacent block concatenation used by existing clients; only
+		// distinct instruction messages/items receive newline separators.
+		text = strings.Join(parts, "")
 	}
-	if len(text) > limit || !utf8.ValidString(text) {
+	if (limit >= 0 && len(text) > limit) || !utf8.ValidString(text) {
 		return "", false
 	}
 	return text, true

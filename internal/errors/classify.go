@@ -166,6 +166,12 @@ type UpstreamErrorClass struct {
 func ClassifyUpstreamError(errStr string) UpstreamErrorClass {
 	lower := strings.ToLower(errStr)
 	switch {
+	case strings.Contains(lower, "warp tool continuation failed; explicit resume is available with x-warp-resume: true"):
+		return UpstreamErrorClass{Category: "continuation_recoverable"}
+	case HasExplicitHTTPStatus(lower, "409") && (strings.Contains(lower, "warp tool continuation") || strings.Contains(lower, "warp tool results")):
+		// An owned continuation is unavailable or already consumed. Replaying
+		// the same tool result, or switching accounts, cannot resolve it.
+		return UpstreamErrorClass{Category: "continuation_conflict"}
 	case strings.Contains(lower, "context canceled") || strings.Contains(lower, "canceled"):
 		return UpstreamErrorClass{Category: "canceled"}
 	case strings.Contains(lower, " is not configured") ||

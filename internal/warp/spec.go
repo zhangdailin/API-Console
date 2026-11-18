@@ -2,6 +2,7 @@ package warp
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"orchids-api/internal/channel"
@@ -15,7 +16,7 @@ func init() { provider.Register(spec()) }
 func spec() provider.Spec {
 	return provider.Spec{ID: channel.Warp, NewClient: func(acc *store.Account, cfg *config.Config, s *store.Store) provider.Client {
 		return newClientWithStore(acc, cfg, s)
-	}, ValidateRequest: validateRawRequest, Capabilities: capabilities{}, Catalog: catalogPort(), Admin: adminPort(), Maintain: maintain, SingleGenerationAttempt: true, ExactModelID: true, SkipSharedCacheMarkers: true}
+	}, ValidateRequest: validateRawRequest, Capabilities: capabilities{}, Catalog: catalogPort(), Admin: adminPort(), Maintain: maintain, SingleGenerationAttempt: true, ExplicitResume: true, ExactModelID: true, SkipSharedCacheMarkers: true}
 }
 func newClientWithStore(acc *store.Account, cfg *config.Config, s *store.Store) *Client {
 	c := NewFromAccount(acc, cfg)
@@ -78,6 +79,9 @@ func maintain(ctx context.Context, env provider.Env, acc *store.Account) {
 		c := newClientWithStore(acc, env.Config, env.Store)
 		if !freshSnapshot(acc) || !credentials(acc).valid() {
 			observation, err := c.observeCatalog(ctx)
+			if err != nil {
+				slog.Warn("Warp account maintenance failed", "account_id", acc.ID, "error", err)
+			}
 			if err == nil {
 				observation.Record(acc, time.Now())
 				_ = env.Store.UpdateWarpCatalogSnapshot(ctx, acc.ID, store.WarpCatalogPatch{

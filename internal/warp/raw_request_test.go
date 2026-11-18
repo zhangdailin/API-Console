@@ -51,9 +51,9 @@ func TestRawRequestRejectsEveryAdditionalControlByPresence(t *testing.T) {
 		"web_search_options", "output_config", "reasoning", "reasoning_effort", "verbosity",
 		"max_output_tokens",
 		"functions", "function_call", "mcp_servers",
-		"response_format", "text", "include", "stream_options", "modalities", "audio", "prediction",
+		"response_format", "text", "include", "modalities", "audio", "prediction",
 		"client_metadata", "conversation_id", "prompt_cache_key", "instructions",
-		"store", "user", "service_tier", "background", "unknown_control", "Model", "Messages", "Stream",
+		"user", "service_tier", "background", "unknown_control", "Model", "Messages", "Stream",
 	}
 	for _, field := range fields {
 		t.Run(field, func(t *testing.T) {

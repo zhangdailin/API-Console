@@ -222,7 +222,7 @@ func TestStreamSSECompatibilityLabelsDoNotPermitExecution(t *testing.T) {
 	}
 }
 
-func TestStreamSSECompatibilityMetadataOnlyUpdateStillRejected(t *testing.T) {
+func TestStreamSSECompatibilityMetadataOnlyUpdatePreservesVisibleText(t *testing.T) {
 	id, task, metadata := "m", "root", "opaque"
 	update := testAction(warpapi.ClientAction_builder{
 		UpdateTaskMessage: warpapi.ClientAction_UpdateTaskMessage_builder{
@@ -231,9 +231,18 @@ func TestStreamSSECompatibilityMetadataOnlyUpdateStillRejected(t *testing.T) {
 			Mask:    &fieldmaskpb.FieldMask{Paths: []string{"server_message_data"}},
 		}.Build(),
 	}.Build())
-	stream := testSSE(t, compatRootTask(task, testOutput(id, "private partial"))) + testSSE(t, update) + testSSE(t, testDone())
+	// A known metadata mask updates only private task state, retaining the
+	// accepted answer instead of erasing it or exposing opaque data.
+	stream := testSSE(t, compatRootTask(task, testOutput(id, "visible answer"))) + testSSE(t, update) + testSSE(t, testDone())
 	result, err := readStream(strings.NewReader(stream), "model-a")
-	if !errors.Is(err, errStreamStream) || result.Complete || result.Text != "" {
-		t.Fatalf("metadata-only fieldmask unexpectedly accepted: result=%+v, err=%v", result, err)
+	if err != nil || !result.Complete || result.Text != "visible answer" || result.TextBytes != len("visible answer") || result.ToolRequested {
+		t.Fatalf("metadata mask changed the visible answer: result=%+v, err=%v", result, err)
+	}
+	state := newContinuationAccumulator(nil)
+	continuationApply(t, state, continuationCreate(continuationText(id, "visible answer")))
+	continuationApply(t, state, update.GetClientActions().GetActions()[0])
+	message := continuationRoot(t, state).GetMessages()[0]
+	if message.GetServerMessageData() != metadata || message.GetAgentOutput().GetText() != "visible answer" {
+		t.Fatal("metadata mask failed to preserve private state and unselected text")
 	}
 }

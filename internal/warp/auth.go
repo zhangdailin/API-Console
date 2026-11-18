@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,7 +28,7 @@ func credentials(acc *store.Account) Credentials {
 	return Credentials{AccessToken: acc.WarpAccessToken, RefreshToken: acc.WarpRefreshToken, ExpiresAt: acc.WarpExpiresAt, Email: acc.Email, UserID: acc.UserID}
 }
 func (g Credentials) valid() bool {
-	return g.AccessToken != "" && !g.ExpiresAt.IsZero() && time.Until(g.ExpiresAt) > time.Minute
+	return g.AccessToken != "" && !g.ExpiresAt.IsZero() && time.Until(g.ExpiresAt) > 5*time.Minute
 }
 func applyCredentials(acc *store.Account, g Credentials) {
 	acc.WarpAccessToken = g.AccessToken
@@ -69,20 +68,13 @@ func (c *Client) exchangeFirebase(ctx context.Context, custom string) (Credentia
 	if err != nil {
 		return Credentials{}, err
 	}
-	var answer struct {
-		IDToken      string `json:"idToken"`
-		RefreshToken string `json:"refreshToken"`
-		ExpiresIn    string `json:"expiresIn"`
-	}
-	form := url.Values{"returnSecureToken": {"true"}, "token": {custom}}
-	if err := c.json(ctx, endpoint, "application/x-www-form-urlencoded", []byte(form.Encode()), "", &answer); err != nil {
+	g, err := c.exchangeAuthTokens(ctx, endpoint, "/proxy/customToken", "returnSecureToken", "true", "token", custom)
+	if err != nil {
 		return Credentials{}, err
 	}
-	expires, err := expiry(answer.ExpiresIn)
-	if err != nil || answer.IDToken == "" || answer.RefreshToken == "" {
-		return Credentials{}, errResponse
+	if g.RefreshToken == "" {
+		return Credentials{}, transientAuthFailure("invalid_response", 0)
 	}
-	g := Credentials{AccessToken: answer.IDToken, RefreshToken: answer.RefreshToken, ExpiresAt: expires}
 	identityMetadata(&g)
 	return g, nil
 }
@@ -94,23 +86,15 @@ func (c *Client) refresh(ctx context.Context, previous Credentials) (Credentials
 	if err != nil {
 		return Credentials{}, err
 	}
-	var answer struct {
-		IDToken      string `json:"id_token"`
-		RefreshToken string `json:"refresh_token"`
-		ExpiresIn    string `json:"expires_in"`
-	}
-	form := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {previous.RefreshToken}}
-	if err := c.json(ctx, endpoint, "application/x-www-form-urlencoded", []byte(form.Encode()), "", &answer); err != nil {
+	g, err := c.exchangeAuthTokens(ctx, endpoint, "/proxy/token", "grant_type", "refresh_token", "refresh_token", previous.RefreshToken)
+	if err != nil {
 		return Credentials{}, err
 	}
-	expires, err := expiry(answer.ExpiresIn)
-	if err != nil || answer.IDToken == "" {
-		return Credentials{}, errResponse
+	if g.RefreshToken == "" {
+		g.RefreshToken = previous.RefreshToken
 	}
-	if answer.RefreshToken == "" {
-		answer.RefreshToken = previous.RefreshToken
-	}
-	return Credentials{AccessToken: answer.IDToken, RefreshToken: answer.RefreshToken, ExpiresAt: expires, Email: previous.Email, UserID: previous.UserID}, nil
+	g.Email, g.UserID = previous.Email, previous.UserID
+	return g, nil
 }
 
 const (
@@ -225,10 +209,16 @@ func (c *Client) accessToken(ctx context.Context) (string, error) {
 		return current.AccessToken, nil
 	}
 	if !pending {
+		failureKey := c.authFailureKey(current)
+		if failure := cachedAuthFailure(failureKey, time.Now()); failure != nil {
+			return "", c.persistAuthFailure(ctx, current, failure)
+		}
 		next, err = c.refresh(ctx, current)
 		if err != nil {
-			return "", err
+			failure := rememberAuthFailure(failureKey, err, time.Now())
+			return "", c.persistAuthFailure(ctx, current, failure)
 		}
+		forgetAuthFailure(failureKey)
 		if c.owner != nil && id != 0 {
 			rememberRotation(key, next, time.Now())
 		}

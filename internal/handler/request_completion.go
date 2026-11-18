@@ -61,10 +61,7 @@ func (h *Handler) finishMessages(w http.ResponseWriter, r *http.Request, sh *str
 				"model":         req.Model,
 				"stop_reason":   stopReason,
 				"stop_sequence": nil,
-				"usage": map[string]int{
-					"input_tokens":  sh.inputTokens,
-					"output_tokens": sh.outputTokens,
-				},
+				"usage":         sh.messagesUsage(),
 			}
 			response = anthropicResponse
 		}
@@ -80,7 +77,7 @@ func (h *Handler) finishMessages(w http.ResponseWriter, r *http.Request, sh *str
 	// provider-reported usage must not turn the local input estimate into spend;
 	// still count the request itself for operational history.
 	statsInput, statsOutput := sh.inputTokens, sh.outputTokens
-	if sh.requestFailed && !sh.useUpstreamUsage {
+	if sh.requestFailed && !sh.hasAuthoritativeUsage() {
 		statsInput, statsOutput = 0, 0
 	}
 	h.updateAccountStats(r.Context(), currentAccount, statsInput, statsOutput)
@@ -97,7 +94,7 @@ func (h *Handler) finishMessages(w http.ResponseWriter, r *http.Request, sh *str
 			status = "error"
 		}
 		usageSource := audit.UsageSourceEstimated
-		if sh.useUpstreamUsage {
+		if sh.hasAuthoritativeUsage() {
 			usageSource = audit.UsageSourceUpstream
 		}
 		metadata := map[string]any{
@@ -140,7 +137,7 @@ func (h *Handler) finishMessages(w http.ResponseWriter, r *http.Request, sh *str
 			CacheWriteTokens:  sh.cacheWriteTokens,
 			ReasoningTokens:   sh.reasoningTokens,
 			OutputTokens:      sh.outputTokens,
-			TotalTokens:       sh.inputTokens + sh.outputTokens,
+			TotalTokens:       sh.totalUsageTokens(),
 			UsageSource:       usageSource,
 		}
 		// Settle the reservation taken before the request and price the same

@@ -22,7 +22,7 @@ func TestWarpRawControlsRejectedBeforeSelectionRefreshOrGeneration(t *testing.T)
 		{"logprobs", "false"}, {"top_logprobs", "0"}, {"logit_bias", "{}"}, {"web_search_options", "{}"},
 		{"output_config", "{}"}, {"reasoning", "{}"}, {"reasoning_effort", `"low"`},
 		{"functions", "[]"},
-		{"response_format", "{}"}, {"stream_options", "{}"}, {"client_metadata", "{}"},
+		{"response_format", "{}"}, {"stream_options", `{"include_usage":null}`}, {"store", "true"}, {"client_metadata", "{}"},
 		{"conversation_id", `""`}, {"prompt_cache_key", `""`}, {"mcp_servers", "[]"},
 		{"include", "[]"}, {"unknown_control", "{}"}, {"Model", `"ignored"`},
 	}

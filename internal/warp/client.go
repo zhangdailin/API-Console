@@ -50,6 +50,7 @@ type Client struct {
 	account                                    *store.Account
 	owner                                      AccountUpdater
 	bindings                                   *bindingStore
+	recovery                                   *recoveryStore
 	mu                                         sync.Mutex
 }
 
@@ -161,6 +162,19 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	c.mu.Unlock()
 	var continuation *callBinding
 	var continuationIDs []string
+	var recovery *recoveryHead
+	var recoveryRaw []byte
+	explicitResume := upstream.ExplicitResume(ctx)
+	digest := ""
+	if explicitResume || len(prepared.ToolResults) > 0 {
+		digest, err = recoveryDigest(req, prepared)
+		if err != nil {
+			return explicitRecoveryError()
+		}
+	}
+	if explicitResume && len(prepared.ToolResults) == 0 {
+		return explicitRecoveryError()
+	}
 	// Tool results require the original owned task; never pay for an unbound
 	// replay as a silently unrelated stateless request.
 	if len(prepared.ToolResults) > 0 {
@@ -178,6 +192,15 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 		prepared.ConversationID, prepared.Query = binding.ConversationID, prepared.CurrentText
 		prepared.RootTaskContext, prepared.ToolRounds = binding.RootTaskContext, binding.ToolRounds
 		continuation, continuationIDs = &binding, ids
+		if explicitResume {
+			head, raw, loadErr := c.loadRecovery(ctx, accountID, req.Model, ids, digest)
+			if loadErr != nil || head.ConversationID != binding.ConversationID || !recoverySnapshotMatches(binding.RootTaskContext, head.RootTaskContext) {
+				return explicitRecoveryError()
+			}
+			recovery, recoveryRaw = &head, raw
+			prepared.Resume = true
+			prepared.RootTaskContext, prepared.ToolRounds = head.RootTaskContext, head.PaidTurns
+		}
 	}
 	body, err := buildRequest(req.Model, prepared)
 	if err != nil {
@@ -194,11 +217,26 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	if err := c.authorizeGeneration(ctx, token, req.Model); err != nil {
 		return err
 	}
-	if continuation != nil {
+	if recovery != nil {
+		head, raw, reserveErr := c.reserveRecovery(ctx, *recovery, recoveryRaw)
+		if reserveErr != nil {
+			return explicitRecoveryError()
+		}
+		recovery, recoveryRaw = &head, raw
+	} else if continuation != nil {
 		if err := c.bindings.claimToolTurn(ctx, accountID, req.Model, continuationIDs, *continuation); err != nil {
 			return apperrors.New("warp_continuation_conflict", "Warp tool results were already consumed or the paid-turn budget is exhausted; no upstream call was made", 409)
 		}
 	}
+	var result streamResult
+	paidStarted := false
+	defer func() {
+		if continuation != nil && (paidStarted || recovery != nil) {
+			if c.finishRecovery(ctx, accountID, req.Model, continuationIDs, digest, *continuation, recovery, recoveryRaw, result, err != nil, req.RequestID) {
+				err = recoveryAvailableError()
+			}
+		}
+	}()
 	finishAttempt, err := upstream.BeginAttempt(ctx)
 	if err != nil {
 		return err
@@ -219,6 +257,7 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 				"parser_category", diagnostic.ParserCategory)
 		}
 	}()
+	paidStarted = true
 	resp, err := c.request(ctx, c.base+"/ai/multi-agent", "application/x-protobuf", body, token)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -238,14 +277,15 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 		diagnostic.Stage = "content_type"
 		return generationStageError(diagnostic.Stage, resp.StatusCode, nil)
 	}
-	result, err := readStreamWithContext(resp.Body, req.Model, prepared.RootTaskContext)
-	if err == nil {
+	result, err = readStreamWithContext(resp.Body, req.Model, prepared.RootTaskContext)
+	if err == nil || result.RecoverySafe {
 		declared := make(map[string]bool, len(prepared.Tools))
 		for _, tool := range prepared.Tools {
 			declared[tool.Name] = true
 		}
 		for _, call := range result.ToolCalls {
 			if !declared[call.Name] {
+				result.RecoverySafe = false
 				err = errStreamTool
 				break
 			}
@@ -254,6 +294,8 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	diagnostic.ParserEvents, diagnostic.TextBytes = result.Events, result.TextBytes
 	diagnostic.ServerBookkeeping = result.ServerBookkeeping
 	diagnostic.RejectAction, diagnostic.RejectMessage, diagnostic.RejectTool = result.RejectAction, result.RejectMessage, result.RejectTool
+	diagnostic.Rejection = result.Rejection
+	diagnostic.Failure = result.Failure
 	if result.Usage.Measured {
 		diagnostic.Usage = result.Usage.event()
 	}
@@ -271,6 +313,7 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	if len(result.ToolCalls) > 0 {
 		diagnostic.Stage, diagnostic.ParserCategory = "stream_protocol", 1
 		if result.ConversationID == "" || len(result.RootTaskContext) == 0 {
+			diagnostic.Failure = &streamFailure{Site: "binding_save", Reason: "missing_context"}
 			return generationStageError("stream_protocol", resp.StatusCode, errStreamStream)
 		}
 		for _, call := range result.ToolCalls {
@@ -278,6 +321,7 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 				ConversationID: result.ConversationID, RequestID: result.RequestID, RunID: result.RunID, AccountID: accountID,
 				RootTaskContext: result.RootTaskContext, ToolRounds: prepared.ToolRounds + 1,
 			}) {
+				diagnostic.Failure = &streamFailure{Site: "binding_save", Reason: "store_or_identity_conflict", MeasuredBytes: len(result.RootTaskContext), LimitBytes: continuationStateLimit}
 				return generationStageError("stream_protocol", resp.StatusCode, errStreamStream)
 			}
 		}
@@ -285,7 +329,7 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	diagnostic.Stage, diagnostic.ParserCategory = "success", 0
 	// Warp buffers a full verified response. Apply authoritative usage before
 	// opening downstream content, so Messages/Responses do not expose estimates.
-	upstream.ApplyStreamUsage(onMessage, result.Usage.event(), nil, nil)
+	upstream.ApplyStreamUsage(onMessage, result.Usage.streamUsageEvent(), nil, nil)
 	if result.Text != "" {
 		upstream.EmitTextDelta(onMessage, result.Text, nil)
 	}
@@ -309,17 +353,19 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 // generationDiagnostic is intentionally a closed, content-free projection. The
 // usage map comes only from observedUsage.event's fixed numeric field allowlist.
 type generationDiagnostic struct {
-	Stage              string         `json:"stage"`
-	UpstreamHTTPStatus int            `json:"upstream_http_status"`
-	ContentType        string         `json:"content_type"`
-	ParserCategory     int            `json:"parser_category"`
-	ParserEvents       int            `json:"parser_events"`
-	TextBytes          int            `json:"text_bytes"`
-	ServerBookkeeping  int            `json:"server_bookkeeping"`
-	RejectAction       int            `json:"reject_action,omitempty"`
-	RejectMessage      int            `json:"reject_message,omitempty"`
-	RejectTool         int            `json:"reject_tool,omitempty"`
-	Usage              map[string]any `json:"usage,omitempty"`
+	Stage              string           `json:"stage"`
+	UpstreamHTTPStatus int              `json:"upstream_http_status"`
+	ContentType        string           `json:"content_type"`
+	ParserCategory     int              `json:"parser_category"`
+	ParserEvents       int              `json:"parser_events"`
+	TextBytes          int              `json:"text_bytes"`
+	ServerBookkeeping  int              `json:"server_bookkeeping"`
+	RejectAction       int              `json:"reject_action,omitempty"`
+	RejectMessage      int              `json:"reject_message,omitempty"`
+	RejectTool         int              `json:"reject_tool,omitempty"`
+	Rejection          *streamRejection `json:"rejection,omitempty"`
+	Failure            *streamFailure   `json:"failure,omitempty"`
+	Usage              map[string]any   `json:"usage,omitempty"`
 }
 
 // Category values are stable local diagnostics, not upstream enum values:

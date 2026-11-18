@@ -18,6 +18,7 @@ import (
 
 	"orchids-api/internal/adapter"
 	"orchids-api/internal/audit"
+	"orchids-api/internal/chatwire"
 	"orchids-api/internal/config"
 	"orchids-api/internal/debug"
 	apperrors "orchids-api/internal/errors"
@@ -145,12 +146,6 @@ type openAINonStreamChoice struct {
 	FinishReason *string                `json:"finish_reason"`
 }
 
-type openAINonStreamUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
-}
-
 type openAINonStreamResponse struct {
 	ID      string                  `json:"id"`
 	Object  string                  `json:"object"`
@@ -272,6 +267,34 @@ func shortRequestTrace(hash string) string {
 	return hash[:12]
 }
 
+// explicitResumeForRequest accepts one boolean header, never a comma-separated
+// list or repeated field. Header names are case-insensitive even for requests
+// constructed directly in process rather than decoded by net/http.
+func explicitResumeForRequest(r *http.Request, targetChannel string) (bool, error) {
+	var values []string
+	fields := 0
+	for name, entries := range r.Header {
+		if strings.EqualFold(name, "X-Warp-Resume") {
+			fields++
+			values = append(values, entries...)
+		}
+	}
+	if fields == 0 {
+		return false, nil
+	}
+	if fields != 1 || len(values) != 1 {
+		return false, errors.New("X-Warp-Resume must be a single true or false value")
+	}
+	value := strings.TrimSpace(values[0])
+	if !strings.EqualFold(value, "true") && !strings.EqualFold(value, "false") {
+		return false, errors.New("X-Warp-Resume must be a single true or false value")
+	}
+	if spec, ok := provider.Lookup(targetChannel); !ok || !spec.ExplicitResume {
+		return false, errors.New("X-Warp-Resume is unsupported by this provider")
+	}
+	return strings.EqualFold(value, "true"), nil
+}
+
 func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	h.handleMessages(w, r, nil, nil)
 }
@@ -308,8 +331,20 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request, prepare
 		return
 	}
 
+	explicitResume, err := explicitResumeForRequest(r, forcedChannel)
+	if err != nil {
+		if adapter.DetectResponseFormat(r.URL.Path) == adapter.FormatOpenAI {
+			httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_request_error", err.Error())
+		} else {
+			apperrors.New("invalid_request_error", err.Error(), http.StatusBadRequest).WriteResponse(w)
+		}
+		return
+	}
+	// Keep the opt-in on the request itself so timeout, attempt and observer
+	// contexts retain it. This is transport intent, never an auth bypass.
+	r = r.WithContext(upstream.WithExplicitResume(r.Context(), explicitResume))
+
 	var req ClaudeRequest
-	var err error
 	if prepared == nil {
 		if maxRequestBytes > 0 {
 			r.Body = http.MaxBytesReader(w, r.Body, maxRequestBytes)
@@ -634,6 +669,7 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request, prepare
 	r = r.WithContext(upstreamCtx)
 	sh := newStreamHandler(cfg, w, logger, isStream, responseFormat)
 	sh.cancelUpstream = cancelUpstream
+	sh.canonicalWireUsage = responseFormat == adapter.FormatOpenAI || chatwire.SourceOperation(r.Context()) == "responses"
 	sh.setAllowedToolNames(declaredToolNames(effectiveTools))
 	sh.setDisallowToolCalls(gateNoTools)
 	// The compiled schema gates the finished answer; a request that declared no

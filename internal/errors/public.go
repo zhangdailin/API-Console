@@ -24,13 +24,15 @@ func CategoryMessage(category string) string { return messageForCategory(categor
 // it stops), 401 for a credential it must replace, 400 for a request the upstream
 // rejected on its merits, and 5xx for the gateway's or the upstream's own fault.
 var publicStatusForCategory = map[string]int{
-	"quota_exhausted":       http.StatusTooManyRequests,
-	"rate_limit":            http.StatusTooManyRequests,
-	"auth":                  http.StatusUnauthorized,
-	"auth_blocked":          http.StatusUnauthorized,
-	"account_restricted":    http.StatusForbidden,
-	"verification_required": http.StatusForbidden,
-	"client":                http.StatusBadRequest,
+	"quota_exhausted":          http.StatusTooManyRequests,
+	"rate_limit":               http.StatusTooManyRequests,
+	"auth":                     http.StatusUnauthorized,
+	"auth_blocked":             http.StatusUnauthorized,
+	"account_restricted":       http.StatusForbidden,
+	"verification_required":    http.StatusForbidden,
+	"client":                   http.StatusBadRequest,
+	"continuation_conflict":    http.StatusConflict,
+	"continuation_recoverable": http.StatusBadGateway,
 	// The caller closed the connection before an answer existed. 499 is the
 	// conventional (nginx) status for it; nobody receives the body.
 	"client_closed":             499,
@@ -61,6 +63,7 @@ func StatusForCategory(category string) int {
 // of each category. An empty category is the caller that had no error text to
 // classify, and keeps its shorter wording.
 var messageForCategoryTable = map[string]string{
+	"continuation_recoverable":  "The tool continuation failed after an accepted checkpoint. Explicit resume is available with X-Warp-Resume: true and the same original request. Resume may incur an additional upstream charge; no automatic retry was made.",
 	"configuration":             "This provider is not configured correctly. Contact the gateway administrator.",
 	"upstream_upgrade_required": "The upstream requires a newer Build client version. Contact the gateway administrator to update the Build client identity.",
 	"auth":                      "The upstream account session has expired. Re-authenticate the account and retry.",
@@ -71,6 +74,7 @@ var messageForCategoryTable = map[string]string{
 	"rate_limit":                "The available upstream accounts are rate-limited. Retry after the cooldown.",
 	"model_unavailable":         "The requested model is unavailable for the selected upstream accounts.",
 	"client":                    "The upstream rejected the request parameters or model. Check the request and model selection.",
+	"continuation_conflict":     "The tool conversation is unavailable, belongs to a different owner/account/model, or its result was already consumed. Resume the original conversation or start a new one; no upstream generation was made for this request.",
 	"client_closed":             "The client closed the request before the upstream answered.",
 	"timeout":                   "The upstream stream timed out while waiting for generated output.",
 	"network":                   "The gateway lost its connection to the upstream service. Retry later.",

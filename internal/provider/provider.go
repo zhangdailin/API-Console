@@ -95,6 +95,9 @@ type Spec struct {
 	// SkipSharedCacheMarkers leaves this provider's tools and text untouched by
 	// Anthropic-specific cache_control injection from the shared cache policy.
 	SkipSharedCacheMarkers bool
+	// ExplicitResume accepts the caller's explicit continuation opt-in header.
+	// Unsupported providers reject the header rather than silently ignoring it.
+	ExplicitResume bool
 
 	// PublishModels reconciles routes backed by verified account state for a
 	// channel that has no upstream model-list endpoint.

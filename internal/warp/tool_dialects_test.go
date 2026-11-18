@@ -180,7 +180,7 @@ func TestOpenAIToolMessagesRoundTripAndUnknownZeroGuards(t *testing.T) {
 	if err != nil || len(prepared.ToolResults) != 1 || prepared.ToolResults[0].Content != "found" {
 		t.Fatalf("OpenAI tool round trip failed: %+v %v", prepared, err)
 	}
-	for _, role := range []string{"developer", "function", "unknown", "User", " user "} {
+	for _, role := range []string{"function", "unknown", "User", " user "} {
 		assertRawRequestRejected(t, `{"model":"model-a","messages":[{"role":"`+role+`","content":"hi"}]}`)
 	}
 	for _, value := range []string{"null", "false", "0", `""`, "[]", "{}"} {
@@ -194,22 +194,22 @@ func TestOpenAIToolMessagesRoundTripAndUnknownZeroGuards(t *testing.T) {
 	}
 }
 
-func TestTranscriptExactCeilingIncludesSystemSeparatorsAndToolResults(t *testing.T) {
+func TestTranscriptExactCeilingExcludesSystemButIncludesDialogAndToolResults(t *testing.T) {
 	// This transcript contains one history pair and a current user; its byte
-	// boundary includes every label, separator and the pinned system prefix.
+	// boundary includes dialog labels/separators but excludes the system prefix.
 	messages := []prompt.Message{textMessage("user", "old"), textMessage("assistant", ""), textMessage("user", "now")}
-	overhead, ok := renderTranscript("pinned", []prompt.Message{textMessage("user", "old"), textMessage("assistant", "x"), textMessage("user", "now")})
+	overhead, ok := renderTranscript("", []prompt.Message{textMessage("user", "old"), textMessage("assistant", "x"), textMessage("user", "now")})
 	if !ok {
 		t.Fatal("fixture rejected")
 	}
 	messages[1].Content.Text = strings.Repeat("x", transcriptLimit-(len(overhead)-1))
 	query, ok := renderTranscript("pinned", messages)
-	if !ok || len(query) != transcriptLimit {
+	if !ok || len(query) != transcriptLimit+len("System instructions:\npinned\n\n") {
 		t.Fatalf("exact boundary rejected or changed: %d %t", len(query), ok)
 	}
 	messages[1].Content.Text += "x"
 	query, ok = renderTranscript("pinned", messages)
-	if !ok || len(query) > transcriptLimit || !strings.HasPrefix(query, "System instructions:\npinned\n\n") || !strings.Contains(query, "[earlier history omitted]") || strings.Contains(query, "Assistant:") {
+	if !ok || len(query) > transcriptLimit+len("System instructions:\npinned\n\n") || !strings.HasPrefix(query, "System instructions:\npinned\n\n") || !strings.Contains(query, "[earlier history omitted]") || strings.Contains(query, "Assistant:") {
 		t.Fatalf("whole-pair trim or pinned prefix broken: %d %t", len(query), ok)
 	}
 	assistant := prompt.Message{Role: "assistant", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{{Type: "tool_use", ID: "c1", Name: "lookup", Input: map[string]any{}}}}}
@@ -220,10 +220,10 @@ func TestTranscriptExactCeilingIncludesSystemSeparatorsAndToolResults(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	baseLength := len(appendToolResultsText(base.Query, base.ToolResults))
+	baseLength := len(appendToolResultsText(base.Query, base.ToolResults)) - len("System instructions:\npinned\n\n")
 	req.Messages[3].Content.Blocks[0].Content = strings.Repeat("r", transcriptLimit-baseLength)
 	boundary, err := validateRequest(req)
-	if err != nil || len(appendToolResultsText(boundary.Query, boundary.ToolResults)) != transcriptLimit {
+	if err != nil || len(appendToolResultsText(boundary.Query, boundary.ToolResults)) != transcriptLimit+len("System instructions:\npinned\n\n") {
 		t.Fatalf("exact tool-result boundary failed: %v", err)
 	}
 	req.Messages[3].Content.Blocks[0].Content = strings.Repeat("r", transcriptLimit-baseLength+1)

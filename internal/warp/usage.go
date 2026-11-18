@@ -15,16 +15,17 @@ var errUsage = errors.New("invalid warp usage measurement")
 // present components, so they are not a claim that upstream reporting is complete.
 // No model/category identifiers, response text, or raw protobuf data are retained.
 type observedUsage struct {
-	Measured         bool     `json:"measured"`
-	Source           string   `json:"source,omitempty"`
-	InputTokens      *uint64  `json:"input_tokens,omitempty"`
-	OutputTokens     *uint64  `json:"output_tokens,omitempty"`
-	CacheReadTokens  *uint64  `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens *uint64  `json:"cache_write_tokens,omitempty"`
-	InferenceCents   *float64 `json:"inference_cents,omitempty"`
-	InferenceCredits *float64 `json:"inference_credits,omitempty"`
-	PlatformCents    *float64 `json:"platform_cents,omitempty"`
-	PlatformCredits  *float64 `json:"platform_credits,omitempty"`
+	Measured               bool     `json:"measured"`
+	IncompleteContributors bool     `json:"-"`
+	Source                 string   `json:"source,omitempty"`
+	InputTokens            *uint64  `json:"input_tokens,omitempty"`
+	OutputTokens           *uint64  `json:"output_tokens,omitempty"`
+	CacheReadTokens        *uint64  `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens       *uint64  `json:"cache_write_tokens,omitempty"`
+	InferenceCents         *float64 `json:"inference_cents,omitempty"`
+	InferenceCredits       *float64 `json:"inference_credits,omitempty"`
+	PlatformCents          *float64 `json:"platform_cents,omitempty"`
+	PlatformCredits        *float64 `json:"platform_credits,omitempty"`
 }
 
 // extractUsage prefers request_charges wholesale, including when that
@@ -88,6 +89,9 @@ func extractUsage(finish *warpapi.ResponseEvent_StreamFinished) (observedUsage, 
 				for _, model := range observedUsageKeys(models) {
 					inference := models[model]
 					count := inference.GetTokenCount()
+					if count == nil || !count.HasInput() || !count.HasOutput() || !count.HasInputCacheRead() || !count.HasInputCacheWrite() {
+						usage.IncompleteContributors = true
+					}
 					addTokens(&usage.InputTokens, count.HasInput(), count.GetInput())
 					addTokens(&usage.OutputTokens, count.HasOutput(), count.GetOutput())
 					addTokens(&usage.CacheReadTokens, count.HasInputCacheRead(), count.GetInputCacheRead())
@@ -120,6 +124,32 @@ func extractUsage(finish *warpapi.ResponseEvent_StreamFinished) (observedUsage, 
 			addTokens(&usage.CacheWriteTokens, tokens.HasInputCacheWrite(), uint64(tokens.GetInputCacheWrite()))
 			addCost(&usage.InferenceCents, tokens.HasCostInCents(), tokens.GetCostInCents())
 		}
+	}
+	// Shared protocol and billing counters use signed machine integers. Reject
+	// unrepresentable values before content is emitted, never fall back to an
+	// estimate for an overflowing provider measurement.
+	max := uint64(^uint(0) >> 1)
+	for _, value := range []*uint64{usage.InputTokens, usage.OutputTokens, usage.CacheReadTokens, usage.CacheWriteTokens} {
+		if value != nil && *value > max {
+			valid = false
+		}
+	}
+	var knownInput uint64
+	for _, value := range []*uint64{usage.InputTokens, usage.CacheReadTokens, usage.CacheWriteTokens} {
+		if value == nil {
+			continue
+		}
+		if usage.Source != "request_charges" && value != usage.InputTokens {
+			continue
+		}
+		if *value > max-knownInput {
+			valid = false
+			break
+		}
+		knownInput += *value
+	}
+	if usage.OutputTokens != nil && *usage.OutputTokens > max-knownInput {
+		valid = false
 	}
 	if !valid {
 		return observedUsage{}, errUsage
@@ -168,6 +198,21 @@ func observedUsageKeys[T any](values map[string]T) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// streamUsageEvent carries the provider's explicit input-token contract to the
+// shared handler. request_charges reports ordinary input separately from cache
+// reads and writes; legacy total_input has no such exclusive-input guarantee.
+// Keep event() separate: diagnostics must retain the original numeric counts.
+func (u observedUsage) streamUsageEvent() map[string]any {
+	out := u.event()
+	if u.Source == "request_charges" {
+		out["inputTokensSemantics"] = "exclusive_cache"
+		if u.IncompleteContributors {
+			out["inputTokensIncomplete"] = true
+		}
+	}
+	return out
 }
 
 // event carries only numeric request-scoped observations, never a credit ceiling.

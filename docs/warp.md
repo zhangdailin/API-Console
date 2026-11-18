@@ -13,9 +13,15 @@
 
 ## 明确不支持
 
-当前接收 `model`、`messages`、`stream`、`tools`、`tool_choice`、`parallel_tool_calls` 六个顶层字段，并兼容 Anthropic / OpenAI 客户端常带的 `system`、`max_tokens`、`max_completion_tokens`、`temperature`、`top_p`、`top_k`、`stop`、`stop_sequences`、`metadata`、`thinking`。消息内容必须是纯文本（字符串或 `type=text` 内容块），最多一条 system 指令（≤8192 UTF-8 字节）。支持有界多轮历史（最多 8 轮、64 KiB）以及 assistant `tool_calls` / `tool` 结果；客户端函数工具（OpenAI `type=function` + `function` 或 Anthropic `name` + `input_schema` 形状）作为 MCP 工具转发。
+当前接收 `model`、`messages`、`stream`、`tools`、`tool_choice`、`parallel_tool_calls`，并兼容客户端常带的 `system`、生成控制、`metadata.user_id`、`thinking` 和 `output_config.effort`。纯文本 system 可来自独立字段及消息任意位置，按独立字段在先、消息出现顺序在后的顺序合并并保留原文，不再设置 system 累计字节上限，完整保留、不静默截断；system 前缀也不计入非 system 历史的64 KiB预算，避免相同内容在下一层再次被限制。用户新消息仍限4096字节，非system历史最多8轮、64 KiB；通用HTTP请求体及上游模型上下文窗口仍可能限制最终请求大小。客户端函数工具不再设置数量上限，完整保留顺序和定义、不截断列表；单个描述32 KiB、单个schema64 KiB的独立限制仍保留，schema累计总量不再限制；不再限制完整工具定义（描述、名称、schema及JSON封装）累计总量，超过原160 KiB也会完整传递，不静默截断。其他独立上限继续返回固定字段路径及实测/上限字节数。工具定义变大可能增加上游输入用量，不构成免费或硬性费用上限。
 
-生成控制只做线路兼容，不转发到 Warp（该端点没有对应语义），回答仍由网关的字节上限约束。不支持的字段（如 conversation_id、response_format、reasoning_effort、include、mcp_servers、stream_options、图像/文件内容）返回 400，不静默丢弃后收费。Messages 与 Responses 由共享 Chat 桥接提供，`/responses/compact` 可用。
+assistant 历史可携带 `thinking` 块（`thinking` 字符串和可选 `signature` 字符串），单块及全部思考/签名合计最多64 KiB。它们作为历史兼容元数据接收，不转成普通提示词、工具输入、可见回答或可迁移的提供者签名；纯 thinking 且无文本/工具调用的 assistant 消息仍拒绝。`context_management` 的 keep-all 仅指不在网关执行上下文清理，不保证把原提供者的思考内容/签名转移给 Warp。文本和工具对照关系仍保留；结果无原有归属绑定或已消费时返回409，不自动重放或切号。
+
+生成控制、`thinking.display` 和 `output_config.effort` 只做线路兼容，不转发到 Warp，也不改写精确模型。合法文本块与user角色的`tool_result`外层可携带 `cache_control:{type:"ephemeral",ttl?:"5m"|"1h"}`，`tool_use`和tool_result内部文本项不因此放宽。工具结果正文、调用ID和is_error完整保留；缓存标记及 TTL 不转发、不承诺生效或命中；实际缓存仅以上游用量为准。`context_management.edits` 只接受空列表或单个 `{type:"clear_thinking_20251015",keep:"all"}` 不清理提示，其他上下文编辑拒绝。`safeguards` 仅接受空列表，非空明确拒绝：网关没有可保留其权限/分类语义的上游协议，不能静默移除。回答仍由网关的字节上限约束。不支持的字段（如 conversation_id、response_format、reasoning_effort、include、mcp_servers、图像/文件内容）返回 400，不静默丢弃后收费。Messages 与 Responses 由共享 Chat 桥接提供，`/responses/compact` 可用。
+
+Client compatibility: `store: false` is accepted; `true` is rejected because stored Chat responses are unavailable. Configured diagnostic retention remains in effect. `stream_options` accepts an empty object or a boolean `include_usage`; Chat keeps its existing terminal usage output. Anthropic tool declarations accept a boolean `eager_input_streaming` hint while the gateway continues to deliver complete, validated tool arguments. These hints are not forwarded to Warp. Null, incorrectly typed, and unknown options return 400 before credential refresh or generation.
+
+Text-only `developer` messages join the instruction prefix in message order, after any separate `system` field. Adjacent plain-text `user` messages are joined in order with two newlines as one user turn; user context stays user content. The last original user message retains its 4096-byte limit, while the joined context, labels, and recent dialog share the existing 64 KiB transcript budget. Tool-bearing messages are not joined, and tool-result ownership, consumption, and paid-turn checks remain enforced. Regression fixtures cover both route prefixes, Chat/Messages JSON and SSE, 111 tools, and synthetic 30 KB context fragments; this is local mock evidence, not live upstream validation.
 
 这意味着 Codex（Responses）与 Claude Code（Messages）均可携带客户端工具接入，但不要把本渠道标记为完整 Agent/编程客户端兼容：生成控制和部分编程客户端特性仍不受上游支持。
 
@@ -33,9 +39,9 @@ Content-Type: application/json
 - 仅携带有界历史和客户端显式声明的函数工具，不注入环境文件或动态时间戳，不自动加载 MCP 服务器。工具续接状态仅在已验证归属的会话中私密保存和回传；不会把不支持的请求改写为另一份收费生成。
 - 关闭搜索、网页检索、规划、编排、电脑、文件和命令等能力。不配置额外模型角色。
 - 协议中空工具列表表示允许任意工具：无工具请求使用被动建议围栏；有工具请求仅声明 `CALL_MCP_TOOL`。收到未声明工具、原生执行工具、子代理、模型替换或不理解的协议字段立即终止。
-- 官方客户端把 `ToolCall.Server` 与 `ServerEvent` 视为无需客户端执行的不透明簿记，新的根任务也会以服务端引导调用开启；这些变体只跳转、不执行、不解释、不回显且不产生文本，并计入诊断计数。这不等于上游未做服务端工作或未计费：流中一旦出现搜索/抓取计数或费用、执行类工具、其他代理消息，仍整体失败。
+- 官方客户端把 `ToolCall.Server` 与 `ServerEvent` 视为无需客户端执行的不透明簿记，新的根任务也会以服务端引导调用开启；这些变体不执行、不解释、不回显且不产生文本，并计入诊断计数。`ToolCallResult.Server` 仅在已创建的同根任务中、与先前已观测的 `ToolCall.Server` 调用ID配对且结果载荷≤64 KiB时兼容；结果必须通过原始任务状态、事务回滚及掩码后的有效消息校验。官方不透明消息会在私密续接状态中原样保存/往返，不作为客户端工具动作。未知、跨任务、未配对及native结果仍拒绝。这不等于上游未做服务端工作或未计费：流中一旦出现搜索/抓取计数或费用、执行类工具、其他代理消息，仍整体失败。
 - SSE 事件名不作为安全边界：按官方客户端契约只把 `data` 解码为 protobuf，`event: error` 仍立即失败；事件标签任意但数据必须能严格解码且无未知字段。
-- 失败只暴露固定阶段（transport / http_status / content_type / stream_protocol / tool_or_subagent / incomplete / finish / limit / model_substitution / usage_invalid）与枚举编号，不记录提示词、账号凭据或上游正文。
+- 失败只暴露固定阶段（transport / http_status / content_type / stream_protocol / tool_or_subagent / incomplete / finish / limit / model_substitution / usage_invalid）与枚举编号；详细诊断另记录固定拒绝位置/原因、事件/动作/消息序号、结果子类型、ID存在/相等布尔值、关联类别和载荷字节数。不记录原始ID、载荷、提示词、账号凭据或上游正文。
 - 单次上游生成，不自动重试、不自动切号；认证刷新不计为生成重试，实际生成遵守共享尝试预算。
 - 多轮历史按 8 轮 / 64 KiB 截断，超出部分丢弃最旧内容并标注省略；工具往返每会话最多 6 次，达到上限返回 400，避免代理循环无限计费。
 - 客户端工具只以 MCP 工具声明下发，上游只能回调这些工具（`supported_tools` 仅 `CALL_MCP_TOOL`），客户端执行后以结构化 `ToolCallResult` 回传；网关从不自行执行 shell、文件或 MCP 操作。
@@ -44,6 +50,12 @@ Content-Type: application/json
 **依然调用 `/ai/multi-agent`，不是已验证的普通聊天端点。** 本地禁用选项、超时和断开连接不构成上游硬性收费上限，也不保证服务器即时停止活动。单轮稳定前缀不等于已验证缓存命中。
 
 上游返回的 token/cache/费用仅是实际观测组成部分，不把缺失用量标成 0 或免费，不以 conversation 累计账单充作单次账单。配额/套餐未观测时在后台显示未知，不编造剩余额度。普通 API Key 的美元价格结算仍依赖管理员模型定价；上游 credits 不自动等同美元计费限额。
+
+### 用量口径
+
+新式 `request_charges` 的普通输入、缓存读取、缓存写入是独立观测桶；原始诊断保留原值。内部审计、账号统计与 Chat/Responses 的输入为三者之和，缓存读取另列在 details 中；Messages 保留普通 input_tokens、cache_read_input_tokens、cache_creation_input_tokens 独立桶。总量只再加输出，不把缓存重复相加。legacy total_input 不按独立桶重新解释，其他渠道沿用其已有口径。
+
+例如普通输入130、cache-read26892、cache-write64、输出506：内部/Chat/Responses输入27086、总量27592；Messages输入130、cache-read26892、cache-write64、输出506。只有各计费贡献项所需字段完整且算术安全的观测才可作为真实用量结算；缺失保持未知、不以估算补齐收费，溢出/非法负费用在交付内容前失败。API Key结算沿用已配置的模型价格，cache-write当前按普通输入价格而非单独的写缓存溢价计算；不是Warp实际积分的换算。历史日志不会追溯重写。
 
 ## 额度与模型消耗倍率
 
@@ -56,6 +68,14 @@ Content-Type: application/json
 倍率来自账号套餐/工作区的目录观测，不是固定每次调用费用、美元单价或 Token 价格；实际费用仍受输入/输出、缓存、时间及平台计费影响。模型目录刷新不会发起生成，倍率展示不修改管理员模型价格或 API Key 预算。
 
 ## 配置
+
+### Authentication refresh behavior
+
+Firebase ID tokens refresh five minutes before their recorded expiry. Each authentication exchange has a five-second timeout. With all three endpoints left at their official defaults, a transient Firebase failure may fall back once to Warp's official `/proxy/token` or `/proxy/customToken` endpoint. Explicit custom endpoints never enable this fallback or forward their credentials to production. Redirects are not followed.
+
+Firebase error bodies are decoded independently of HTTP status. `TOKEN_EXPIRED`, `INVALID_REFRESH_TOKEN`, and `MISSING_REFRESH_TOKEN` require a new official login; `USER_DISABLED` and `USER_NOT_FOUND` identify an unavailable upstream account. These terminal verdicts do not use proxy fallback. Their routing status is persisted only if the rejected access token, refresh token, and expiry still match, so an old response cannot invalidate a concurrent login replacement.
+
+Transient authentication failures retain the existing credentials and do not request reauthentication. Clients sharing the same account store within one process share a bounded failure cache: retries start after 30 seconds and back off exponentially to five minutes, with bounded `Retry-After` seconds or HTTP-date hints taking precedence. Success or credential replacement clears the corresponding suppression. Cancellation is not cached. Retry suppression is process-local, not a distributed refresh lock; terminal routing status is durable in Redis. Authentication fallback never replays a generation request or expands its single-generation attempt budget.
 
 默认无需手动配置：服务端从固定官方公开源码提交获取 Warp 客户端的 Firebase 项目配置，严格校验单个配置字段、内存缓存，不执行下载内容，不输出或持久化该值。
 

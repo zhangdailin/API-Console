@@ -59,12 +59,13 @@ var (
 type streamHandler struct {
 	cancelUpstream context.CancelFunc
 	// Configuration
-	config            *config.Config
-	isStream          bool
-	useUpstreamUsage  bool
-	responseFormat    adapter.ResponseFormat
-	disallowToolCalls bool
-	allowedToolNames  map[string]struct{}
+	config             *config.Config
+	isStream           bool
+	useUpstreamUsage   bool
+	canonicalWireUsage bool // Chat or internal Responses bridge: inclusive prompt dialect.
+	responseFormat     adapter.ResponseFormat
+	disallowToolCalls  bool
+	allowedToolNames   map[string]struct{}
 	// structured validates the finished answer of a strict structured-output
 	// request. It is nil unless the caller sent `strict: true` with a schema
 	// this gateway could read, so an ordinary request pays nothing here.
@@ -96,14 +97,17 @@ type streamHandler struct {
 	nonStreamKeepAlive bool
 	nonStreamOpened    bool
 	// pendingModel is the model the deferred opening frame reports.
-	pendingModel             string
-	hasReasoningOutput       bool
-	finalStopReason          string
-	outputTokens             int
-	inputTokens              int
-	cachedInputTokens        int
-	cacheWriteTokens         int
-	reasoningTokens          int
+	pendingModel       string
+	hasReasoningOutput bool
+	finalStopReason    string
+	outputTokens       int
+	inputTokens        int
+	cachedInputTokens  int
+	cacheWriteTokens   int
+	reasoningTokens    int
+	// exclusiveUsage is set only by an explicit, recognized provider contract.
+	// Canonical inputTokens is inclusive; Messages projects the ordinary count.
+	exclusiveUsage           exclusiveInputUsage
 	activeThinkingBlockIndex int
 	activeThinkingSSEIndex   int
 	activeTextBlockIndex     int
@@ -274,6 +278,7 @@ func (h *streamHandler) resetRoundState() {
 	h.cachedInputTokens = 0
 	h.cacheWriteTokens = 0
 	h.reasoningTokens = 0
+	h.exclusiveUsage = exclusiveInputUsage{}
 	h.completionLogged = false
 	h.outputEstimator.Reset()
 	h.useUpstreamUsage = false

@@ -23,8 +23,8 @@ func TestValidateRequestFoldsOneBoundedSystemMessage(t *testing.T) {
 	if !strings.Contains(prepared.Query, "Answer briefly.") || !strings.Contains(prepared.Query, "hi") {
 		t.Fatal("system instructions were dropped")
 	}
-	if _, err := validateRequest(systemRequest(strings.Repeat("s", systemTextLimit+1), "hi")); err == nil {
-		t.Fatal("oversized system message accepted")
+	if _, err := validateRequest(systemRequest(strings.Repeat("s", 128<<10), "hi")); err != nil {
+		t.Fatalf("uncapped system message rejected: %v", err)
 	}
 	if _, err := validateRequest(systemRequest("ok", strings.Repeat("u", userTextLimit+1))); err == nil {
 		t.Fatal("oversized user message accepted")
