@@ -42,22 +42,25 @@ const (
 const ModelCooldownEntitlementFloor = time.Hour
 
 type Account struct {
-	ID            int64   `json:"id"`
-	Name          string  `json:"name"`
-	AccountType   string  `json:"account_type"`
-	ClientCookie  string  `json:"client_cookie"`
-	RefreshToken  string  `json:"refresh_token,omitempty"`
-	UserID        string  `json:"user_id"`
-	AgentMode     string  `json:"agent_mode"`
-	Email         string  `json:"email"`
-	Weight        int     `json:"weight"`
-	MaxConcurrent int     `json:"max_concurrent,omitempty"`
-	Enabled       bool    `json:"enabled"`
-	Token         string  `json:"token"`        // Runtime/display token for token-backed channels
-	Subscription  string  `json:"subscription"` // "free", "pro", etc.
-	UsageCurrent  float64 `json:"usage_current"`
-	UsageTotal    float64 `json:"usage_total"` // Used as lifetime usage
-	UsageLimit    float64 `json:"usage_limit"` // Daily limit
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	AccountType  string `json:"account_type"`
+	ClientCookie string `json:"client_cookie"`
+	// DoubaoSessionUpdate is an internal observation intent, never accepted
+	// from JSON. It routes health writes through the narrow generation guard.
+	DoubaoSessionUpdate *DoubaoSessionObservation `json:"-"`
+	RefreshToken        string                    `json:"refresh_token,omitempty"`
+	UserID              string                    `json:"user_id"`
+	AgentMode           string                    `json:"agent_mode"`
+	Email               string                    `json:"email"`
+	Weight              int                       `json:"weight"`
+	MaxConcurrent       int                       `json:"max_concurrent,omitempty"`
+	Enabled             bool                      `json:"enabled"`
+	Token               string                    `json:"token"`        // Runtime/display token for token-backed channels
+	Subscription        string                    `json:"subscription"` // "free", "pro", etc.
+	UsageCurrent        float64                   `json:"usage_current"`
+	UsageTotal          float64                   `json:"usage_total"` // Used as lifetime usage
+	UsageLimit          float64                   `json:"usage_limit"` // Daily limit
 	// TokensToday is the token spend the gateway counted for the account inside
 	// the current local day, and TokensDate is the day it belongs to.
 	//
@@ -555,6 +558,22 @@ func (s *Store) CreateAccount(ctx context.Context, acc *Account) error {
 }
 
 func (s *Store) UpdateAccount(ctx context.Context, acc *Account) error {
+	if acc != nil && acc.DoubaoSessionUpdate != nil {
+		observation := acc.DoubaoSessionUpdate
+		patch := DoubaoSessionPatch{Expected: observation.Expected, Healthy: observation.Healthy, Rejected: observation.Rejected, UserID: observation.UserID, ObservedAt: observation.ObservedAt}
+		if err := s.UpdateDoubaoSession(ctx, acc.ID, patch); err != nil {
+			return err
+		}
+		current, err := s.GetAccount(ctx, acc.ID)
+		if err != nil {
+			return err
+		}
+		if current == nil {
+			return ErrNoRows
+		}
+		*acc = *current
+		return nil
+	}
 	if s.accounts != nil {
 		return s.accounts.UpdateAccount(ctx, acc)
 	}

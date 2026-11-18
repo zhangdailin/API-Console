@@ -2,12 +2,14 @@ package doubao
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"time"
 
 	"orchids-api/internal/channel"
 	"orchids-api/internal/config"
 	"orchids-api/internal/provider"
+	"orchids-api/internal/refreshqueue"
 	"orchids-api/internal/store"
 )
 
@@ -16,8 +18,8 @@ func init() { provider.Register(spec()) }
 func spec() provider.Spec {
 	return provider.Spec{
 		ID: channel.Doubao,
-		NewClient: func(acc *store.Account, cfg *config.Config, _ *store.Store) provider.Client {
-			return NewFromAccount(acc, cfg)
+		NewClient: func(acc *store.Account, cfg *config.Config, s *store.Store) provider.Client {
+			return newClientWithStore(acc, cfg, s)
 		},
 		Capabilities: capabilities{},
 		Catalog:      catalogPort(), Admin: adminPort(), Maintain: maintain, PublishModels: publishModels,
@@ -35,7 +37,7 @@ func catalogPort() *provider.Catalog {
 	return &provider.Catalog{Source: "doubao_web_verified", Kind: provider.CatalogAccountView,
 		Eligible: func(acc *store.Account) bool { return acc != nil && strings.TrimSpace(acc.ClientCookie) != "" },
 		Observe: func(ctx context.Context, env provider.Env, acc *store.Account) (provider.Observation, error) {
-			client := NewFromAccount(acc, env.Config)
+			client := newClientWithStore(acc, env.Config, env.Store)
 			info, err := client.AccountInfo(ctx, client.jar())
 			if err != nil {
 				return provider.Observation{}, err
@@ -65,18 +67,28 @@ func maintain(ctx context.Context, env provider.Env, acc *store.Account) {
 	if acc == nil || env.Store == nil || !acc.DoubaoVerifiedAt.IsZero() && time.Since(acc.DoubaoVerifiedAt) < provider.HealthRefreshInterval {
 		return
 	}
-	client := NewFromAccount(acc, env.Config)
+	refreshqueue.WithLease(acc.ID, func() { maintainSession(ctx, env, acc) })
+}
+
+func maintainSession(ctx context.Context, env provider.Env, acc *store.Account) {
+	client := newClientWithStore(acc, env.Config, env.Store)
 	info, err := client.AccountInfo(ctx, client.jar())
 	now := time.Now()
 	if err != nil {
-		if strings.Contains(err.Error(), "status=401") {
-			acc.StatusCode, acc.StatusMessage, acc.AuthStatus, acc.LastAttempt = "401", "Doubao cookie was rejected; scan again", store.AccountAuthStatusReauthRequired, now
-			_ = env.Store.UpdateAccount(ctx, acc)
+		info.reject(acc, now, err)
+		if acc.DoubaoSessionUpdate != nil {
+			if saveErr := env.Store.UpdateAccount(ctx, acc); saveErr != nil {
+				slog.Warn("Doubao session verdict not saved", "account_id", acc.ID)
+			}
 		}
+		slog.Warn("Doubao session health check failed", "account_id", acc.ID)
 		return
 	}
 	info.apply(acc, now)
-	_ = env.Store.UpdateAccount(ctx, acc)
+	if err := env.Store.UpdateAccount(ctx, acc); err != nil {
+		slog.Warn("Doubao session observation not saved", "account_id", acc.ID)
+		return
+	}
 	// Refresh the published routes too. Capabilities live on the model rows, so
 	// a change to what the channel can do would otherwise stay invisible until
 	// the next account verdict, which for a healthy account may never happen.

@@ -36,9 +36,11 @@ const (
 var chromeVersion = regexp.MustCompile(`Chrome/(\d+)`)
 
 type Client struct {
-	acc  *store.Account
-	cfg  *config.Config
-	http *http.Client
+	acc            *store.Account
+	cfg            *config.Config
+	http           *http.Client
+	store          *store.Store
+	sessionVersion [32]byte
 }
 
 func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
@@ -48,7 +50,10 @@ func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
 	}
 	proxy := httpclient.ProxyFuncFromConfig(cfg)
 	key := "doubao|" + httpclient.GenerateProxyKeyFromConfig(cfg)
-	return &Client{acc: copied, cfg: cfg, http: httpclient.GetSharedBrowserHTTPClientWithLimits(key, 0, 0, proxy, cfg)}
+	shared := httpclient.GetSharedBrowserHTTPClientWithLimits(key, 0, 0, proxy, cfg)
+	local := *shared
+	local.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &Client{acc: copied, cfg: cfg, http: &local, sessionVersion: store.DoubaoSessionVersion(copied)}
 }
 
 func (c *Client) Close() {}
@@ -79,6 +84,11 @@ func (c *Client) jar() cookieJar {
 		return cookieJar{}
 	}
 	jar := decodeCookies(c.acc.ClientCookie)
+	seedPreferences(jar)
+	return jar
+}
+
+func seedPreferences(jar cookieJar) {
 	// The web client always carries its UI preferences; a QR session has them
 	// only if it visited the page with JavaScript enabled. Seeding the static
 	// ones keeps the cookie set from looking like a headless client.
@@ -91,7 +101,6 @@ func (c *Client) jar() cookieJar {
 			jar[name] = value
 		}
 	}
-	return jar
 }
 
 func (c *Client) headers(jar cookieJar, passport bool) http.Header {
@@ -194,6 +203,11 @@ func (c *Client) doJSON(ctx context.Context, method, target string, body []byte,
 // doJSONWithReferer lets the streaming call point Referer at the local
 // conversation the body declares, which is what the web client does.
 func (c *Client) doJSONWithReferer(ctx context.Context, method, target string, body []byte, jar cookieJar, passport bool, contentType, accept, referer string) (*http.Response, error) {
+	release, err := c.prepareSession(ctx, &target, jar)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	req, err := http.NewRequestWithContext(ctx, method, target, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -216,6 +230,10 @@ func (c *Client) doJSONWithReferer(ctx context.Context, method, target string, b
 	if err != nil || response == nil {
 		return response, err
 	}
+	if err := c.receiveSession(ctx, response, jar); err != nil {
+		_ = response.Body.Close()
+		return nil, err
+	}
 	// The browser-like transport deliberately exposes compressed bytes when a
 	// caller supplied Accept-Encoding. Doubao commonly returns passport JSON as
 	// Brotli, so decode it before any endpoint attempts JSON parsing.
@@ -226,7 +244,10 @@ func (c *Client) doJSONWithReferer(ctx context.Context, method, target string, b
 	return response, nil
 }
 
-type AccountInfo struct{ UserID, Name string }
+type AccountInfo struct {
+	UserID, Name string
+	version      [32]byte
+}
 
 // apply writes the observed identity onto an account and stamps the
 // verification time. Every caller that refreshes an account needs exactly this,
@@ -234,6 +255,9 @@ type AccountInfo struct{ UserID, Name string }
 func (info AccountInfo) apply(target *store.Account, now time.Time) bool {
 	if target == nil {
 		return false
+	}
+	if target.ID != 0 && info.version != ([32]byte{}) {
+		target.DoubaoSessionUpdate = &store.DoubaoSessionObservation{Expected: info.version, Healthy: true, UserID: info.UserID, ObservedAt: now}
 	}
 	target.UserID = info.UserID
 	if info.Name != "" {
@@ -245,13 +269,25 @@ func (info AccountInfo) apply(target *store.Account, now time.Time) bool {
 }
 
 func (c *Client) AccountInfo(ctx context.Context, jar cookieJar) (AccountInfo, error) {
+	scoped := c.scopedClient()
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	info, err := scoped.accountInfo(ctx, jar)
+	info.version = scoped.sessionVersion
+	return info, err
+}
+
+func (c *Client) accountInfo(ctx context.Context, jar cookieJar) (AccountInfo, error) {
 	q := "aid=497858&account_sdk_source=web&sdk_version=2.2.11-doubao.0&device_platform=web&language=zh"
 	response, err := c.do(ctx, http.MethodGet, c.baseURL()+"/passport/account/info/v2/?"+q, nil, jar, false)
 	if err != nil {
 		return AccountInfo{}, err
 	}
 	defer response.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	raw, readErr := io.ReadAll(io.LimitReader(response.Body, (1<<20)+1))
+	if readErr != nil || len(raw) > 1<<20 {
+		return AccountInfo{}, fmt.Errorf("doubao protocol error: invalid account response")
+	}
 	if response.StatusCode >= 400 {
 		return AccountInfo{}, statusError(response.StatusCode, raw)
 	}
@@ -264,7 +300,7 @@ func (c *Client) AccountInfo(ctx context.Context, jar cookieJar) (AccountInfo, e
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &envelope); err != nil {
-		return AccountInfo{}, fmt.Errorf("doubao account response is not JSON")
+		return AccountInfo{}, fmt.Errorf("doubao protocol error: account response is not JSON")
 	}
 	if len(envelope.Data.UserID) == 0 {
 		_ = json.Unmarshal(raw, &envelope.Data)
@@ -272,9 +308,14 @@ func (c *Client) AccountInfo(ctx context.Context, jar cookieJar) (AccountInfo, e
 	id := strings.TrimSpace(envelope.Data.UserIDStr)
 	if id == "" {
 		_ = json.Unmarshal(envelope.Data.UserID, &id)
+		if id == "" {
+			if numeric, err := strconv.ParseUint(string(envelope.Data.UserID), 10, 64); err == nil && numeric != 0 {
+				id = strconv.FormatUint(numeric, 10)
+			}
+		}
 	}
 	if id == "" {
-		return AccountInfo{}, fmt.Errorf("status=401: doubao cookie was rejected")
+		return AccountInfo{}, fmt.Errorf("doubao protocol error: account identity was not observed")
 	}
 	return AccountInfo{UserID: id, Name: first(envelope.Data.Name, envelope.Data.ScreenName)}, nil
 }
@@ -401,6 +442,10 @@ func cacheKey(account int64, downstreamID string) string {
 }
 
 func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.UpstreamRequest, onMessage func(upstream.SSEMessage), logger *debug.Logger) error {
+	return c.scopedClient().sendRequestWithPayload(ctx, req, onMessage, logger)
+}
+
+func (c *Client) sendRequestWithPayload(ctx context.Context, req upstream.UpstreamRequest, onMessage func(upstream.SSEMessage), logger *debug.Logger) error {
 	if c == nil || c.acc == nil {
 		return fmt.Errorf("doubao client is missing an account")
 	}
@@ -598,8 +643,11 @@ func statusError(status int, raw []byte) error {
 	if strings.Contains(text, "710022002") || strings.Contains(text, "710022004") || status == 429 {
 		return fmt.Errorf("status=429: doubao upstream rate limited")
 	}
-	if status == 401 || status == 403 || strings.Contains(strings.ToLower(text), "login") {
-		return fmt.Errorf("status=401: doubao cookie was rejected")
+	if status == 401 {
+		return errSessionRejected
+	}
+	if status == 403 {
+		return fmt.Errorf("status=403: doubao upstream access denied")
 	}
 	return fmt.Errorf("status=%d: doubao upstream error", status)
 }

@@ -104,6 +104,9 @@ func (v Verdict) Apply(acc *store.Account) {
 	if at.IsZero() {
 		at = time.Now()
 	}
+	if strings.EqualFold(acc.AccountType, "doubao") && v.NeedsLogin && strings.TrimSpace(v.Status) == "401" {
+		acc.DoubaoSessionUpdate = &store.DoubaoSessionObservation{Expected: store.DoubaoSessionVersion(acc), Rejected: true, ObservedAt: at}
+	}
 	restrictedUntil := store.WorkBuddyRestrictionUntil(acc)
 	if strings.EqualFold(acc.AccountType, "workbuddy") && apperrors.IsWorkBuddyRestricted(v.Message) && !restrictedUntil.After(at) {
 		restrictedUntil = at.Add(store.WorkBuddyRestrictionCooldown)

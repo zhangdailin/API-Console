@@ -13,6 +13,10 @@ func (a *Account) Clone() *Account {
 		return nil
 	}
 	copy := *a
+	if a.DoubaoSessionUpdate != nil {
+		patch := *a.DoubaoSessionUpdate
+		copy.DoubaoSessionUpdate = &patch
+	}
 	copy.GrokModels = slices.Clone(a.GrokModels)
 	copy.GrokModelCatalog = modelcatalog.CloneProfiles(a.GrokModelCatalog)
 	copy.GrokConsoleModels = slices.Clone(a.GrokConsoleModels)

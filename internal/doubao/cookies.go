@@ -3,7 +3,9 @@ package doubao
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/cookiejar"
 	"strings"
+	"time"
 )
 
 type cookieJar map[string]string
@@ -37,8 +39,30 @@ func (j cookieJar) absorb(response *http.Response) {
 		return
 	}
 	for _, cookie := range response.Cookies() {
-		if cookie.Name != "" {
-			j[cookie.Name] = cookie.Value
+		if cookie.Name == "" || (cookie.Path != "" && cookie.Path != "/") {
+			continue
 		}
+		if cookie.Path == "" && response.Request != nil && response.Request.URL != nil && strings.LastIndex(response.Request.URL.Path, "/") > 0 {
+			// An omitted Path defaults to the request directory, not '/'.
+			continue
+		}
+		// The legacy account format stores site-wide cookies only. Do not
+		// broaden a path-specific cookie, or accept an unrelated Domain.
+		if response.Request != nil && response.Request.URL != nil && cookie.Domain != "" {
+			u := *response.Request.URL
+			u.Path = "/"
+			probe, _ := cookiejar.New(nil)
+			validation := *cookie
+			validation.MaxAge, validation.Expires = 0, time.Time{}
+			probe.SetCookies(&u, []*http.Cookie{&validation})
+			if len(probe.Cookies(&u)) == 0 {
+				continue
+			}
+		}
+		if cookie.MaxAge < 0 || (!cookie.Expires.IsZero() && cookie.Expires.Before(time.Now())) {
+			delete(j, cookie.Name)
+			continue
+		}
+		j[cookie.Name] = cookie.Value
 	}
 }

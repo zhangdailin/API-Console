@@ -54,9 +54,10 @@ func adminPort() *provider.Admin {
 			provider.PlanProjection(fields, "", provider.PlanTierUnknown, "")
 		},
 		Verify: func(ctx context.Context, env provider.Env, acc *store.Account) (string, int, error) {
-			client := NewFromAccount(acc, env.Config)
+			client := newClientWithStore(acc, env.Config, env.Store)
 			info, err := client.AccountInfo(ctx, client.jar())
 			if err != nil {
+				info.reject(acc, time.Now(), err)
 				if strings.Contains(err.Error(), "status=401") {
 					return "401", 401, err
 				}

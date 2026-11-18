@@ -781,6 +781,24 @@ func (lb *LoadBalancer) PersistAppliedAccountStatus(ctx context.Context, acc *st
 	if acc == nil || lb.Store == nil {
 		return
 	}
+	if acc.DoubaoSessionUpdate != nil {
+		// Commit the generation-bound verdict before publishing it to the
+		// routing cache. A stale request must not poison a newer QR session.
+		if err := lb.Store.UpdateAccount(ctx, acc); err != nil {
+			current, readErr := lb.Store.GetAccount(ctx, acc.ID)
+			if readErr != nil || current == nil {
+				return
+			}
+			*acc = *current
+		}
+		lb.mu.Lock()
+		if cached := lb.cachedAccountLocked(acc.ID); cached != nil {
+			cached.StatusCode, cached.StatusMessage = acc.StatusCode, acc.StatusMessage
+			cached.AuthStatus, cached.LastAttempt, cached.VerifiedAt = acc.AuthStatus, acc.LastAttempt, acc.VerifiedAt
+		}
+		lb.mu.Unlock()
+		return
+	}
 	lb.mu.Lock()
 	if cached := lb.cachedAccountLocked(acc.ID); cached != nil {
 		cached.StatusCode = acc.StatusCode
