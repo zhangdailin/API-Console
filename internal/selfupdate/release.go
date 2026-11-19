@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -32,6 +33,7 @@ type ReleaseSource interface {
 type GitHub struct {
 	Repository string
 	Client     *http.Client
+	token      string
 }
 
 func trustedURL(raw string) bool {
@@ -46,9 +48,12 @@ func trustedURL(raw string) bool {
 	return false
 }
 func NewGitHub(repo string) *GitHub {
-	return &GitHub{Repository: repo, Client: &http.Client{Timeout: 15 * time.Minute, CheckRedirect: func(r *http.Request, via []*http.Request) error {
+	return &GitHub{Repository: repo, token: strings.TrimSpace(os.Getenv("ORCHIDS_UPDATE_GITHUB_TOKEN")), Client: &http.Client{Timeout: 15 * time.Minute, CheckRedirect: func(r *http.Request, via []*http.Request) error {
 		if len(via) >= 5 || !trustedURL(r.URL.String()) {
 			return errors.New("untrusted release redirect")
+		}
+		if r.URL.Hostname() != "api.github.com" {
+			r.Header.Del("Authorization")
 		}
 		return nil
 	}}}
@@ -62,16 +67,17 @@ func (g *GitHub) Latest(ctx context.Context) (Release, error) {
 	}
 	r.Header.Set("Accept", "application/vnd.github+json")
 	r.Header.Set("User-Agent", "API-Console-Updater")
+	r.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	if g.token != "" {
+		r.Header.Set("Authorization", "Bearer "+g.token)
+	}
 	res, err := g.Client.Do(r)
 	if err != nil {
-		return Release{}, err
+		return Release{}, &releaseCheckError{Code: "github_unreachable", Message: "Could not reach GitHub to check for updates."}
 	}
 	defer res.Body.Close()
-	if res.StatusCode == 404 {
-		return Release{}, errors.New("仓库尚无正式 Release")
-	}
 	if res.StatusCode != 200 {
-		return Release{}, fmt.Errorf("GitHub 检查失败：HTTP %d", res.StatusCode)
+		return Release{}, githubCheckFailure(res, time.Now().UTC())
 	}
 	b, err := io.ReadAll(io.LimitReader(res.Body, 2*1024*1024+1))
 	if err != nil {

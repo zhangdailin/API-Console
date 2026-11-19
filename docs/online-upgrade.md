@@ -4,7 +4,11 @@
 
 管理后台“版本与升级”提供检查、安装、回退与操作进度。检查更新不等于安装，POST 返回 202 也只表示接受异步任务，不表示已重启成功。
 
-默认来源由 internal/buildinfo.Repository 固定为 zhangdailin/API-Console；浏览器不能传任意仓库或下载 URL。检查通常有 20 分钟缓存，可强制刷新；网络失败明确报告，不作为“已是最新”的证据。
+默认来源由 internal/buildinfo.Repository 固定为 zhangdailin/API-Console；浏览器不能传任意仓库或下载 URL。成功检查缓存 20 分钟；强制刷新也必须遵守 1 分钟冷却时间。失败按 1、2、4、8、16、20 分钟退避；GitHub 返回更晚的有效 `Retry-After` 或匿名额度重置时间时，以更晚时间为准。该状态由单个服务进程内所有页面和后台检查共享，重启后重置。
+
+检查响应的 `warning` 和 `check_error_code` 区分限流、认证失败、普通 403 和无可访问发行版；`next_check_at` 给出下次允许主动检查的时间。页面冷却结束只重新启用按钮，不自动向 GitHub 重试。网络失败不作为“已是最新”的证据；此前成功结果仅在原有 20 分钟有效期内保留。
+
+匿名 GitHub REST API 额度按出口 IP 共享。可通过服务进程的专用环境变量 `ORCHIDS_UPDATE_GITHUB_TOKEN` 提供最小只读权限的 GitHub Token，避免匿名额度限制；无此变量时仍支持公开仓库检查。不要将 Token 写入仓库、浏览器或 URL，生产使用受保护的 systemd `EnvironmentFile` 等方式注入。仅发行元数据请求发送 Token；跨到非 `api.github.com` 的可信重定向会删除认证头，发行资产下载不携带 Token。配置无效 Token 会报告认证失败，不自动绕回匿名请求。
 
 ## 2. 发行要求
 

@@ -54,6 +54,8 @@ type Check struct {
 	Available   bool           `json:"available"`
 	Warning     string         `json:"warning,omitempty"`
 	CheckedAt   time.Time      `json:"checked_at"`
+	NextCheckAt *time.Time     `json:"next_check_at,omitempty"`
+	ErrorCode   string         `json:"check_error_code,omitempty"`
 	CanUpdate   bool           `json:"can_update"`
 	Reason      string         `json:"reason,omitempty"`
 	CanRollback bool           `json:"can_rollback"`
@@ -67,6 +69,10 @@ type Manager struct {
 	mu                                  sync.Mutex
 	cached                              *Release
 	checkedAt                           time.Time
+	nextCheckAt                         time.Time
+	checkError                          error
+	checkFailures                       int
+	now                                 func() time.Time
 	// Kept injectable to test replacement failures without restarting a machine.
 	launch func(string, string, string, string, string, string) error
 	rename func(string, string) error
@@ -131,17 +137,39 @@ func (m *Manager) Check(ctx context.Context, force bool) Check {
 	if op, err := m.Status(); err == nil {
 		result.Operation = &op
 	}
-	if force || m.cached == nil || time.Since(m.checkedAt) > 20*time.Minute {
-		release, err := m.Source.Latest(ctx)
-		if err != nil {
-			result.Warning = err.Error()
-			if m.cached == nil || time.Since(m.checkedAt) > 20*time.Minute {
-				return result
-			}
-		} else {
-			m.cached = &release
-			m.checkedAt = time.Now().UTC()
+	now := m.checkTime()
+	if !now.Before(m.nextCheckAt) && (force || m.cached == nil || !now.Before(m.checkedAt.Add(checkCacheTTL))) {
+		if ctx.Err() != nil {
+			result.Warning = "Update check cancelled; retry when the connection is available."
+			return result
 		}
+		m.nextCheckAt = now.Add(checkCooldown)
+		release, err := m.Source.Latest(ctx)
+		if ctx.Err() != nil {
+			result.Warning = "Update check cancelled; retry when the connection is available."
+			next := m.nextCheckAt
+			result.NextCheckAt = &next
+			return result
+		}
+		m.recordCheck(release, err)
+	}
+	if !m.nextCheckAt.IsZero() {
+		next := m.nextCheckAt
+		result.NextCheckAt = &next
+	}
+	if m.checkError != nil {
+		result.Warning = m.checkError.Error()
+		var failure *releaseCheckError
+		if errors.As(m.checkError, &failure) {
+			result.ErrorCode = failure.Code
+		}
+		if m.cached == nil || !m.checkTime().Before(m.checkedAt.Add(checkCacheTTL)) {
+			return result
+		}
+	}
+	if m.cached == nil {
+		result.Warning = "Update check is cooling down; retry after the indicated time."
+		return result
 	}
 	result.Release = m.cached
 	result.Available = true

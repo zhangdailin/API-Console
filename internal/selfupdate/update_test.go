@@ -65,17 +65,21 @@ func TestSemVer(t *testing.T) {
 func TestCheckCacheAndUnknown(t *testing.T) {
 	m := fixture(t, nil)
 	f := m.Source.(*fixtureSource)
+	now := time.Now().UTC()
+	m.now = func() time.Time { return now }
 	a := m.Check(context.Background(), false)
 	testutil.Falsef(t, !a.Available || !a.HasUpdate, "%+v", a)
 	m.Check(context.Background(), false)
 	testutil.Equal(t, f.calls, 1)
 	f.err = errors.New("offline")
+	now = now.Add(time.Minute)
 	a = m.Check(context.Background(), true)
 	testutil.False(t, a.Warning == "" || !a.Available, "valid stale cache not identified")
 	m.checkedAt = time.Now().Add(-21 * time.Minute)
 	a = m.Check(context.Background(), true)
 	testutil.False(t, a.Available || a.Warning == "", "failed check presented as latest")
 	f.err = nil
+	now = now.Add(2 * time.Minute)
 	m.Info.Version = "dev"
 	a = m.Check(context.Background(), true)
 	testutil.False(t, a.Warning == "" || a.HasUpdate, "unknown source version guessed")

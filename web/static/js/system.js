@@ -3,12 +3,16 @@
   let data = null;
   let pending = false;
   let pollTimer = null;
+  let checkTimer = null;
   const busyPhases = new Set(['queued', 'downloading', 'verifying', 'staging', 'restart_pending', 'restarting', 'rolling_back']);
   const terminalPhases = new Set(['complete', 'failed', 'rolled_back', 'recovery_failed']);
   const text = ConsoleUI.setText;
   const node = ConsoleUI.el;
   const checkLoads = ConsoleUI.requestGate();
   const operationLoads = ConsoleUI.requestGate();
+  function checkDelay() {
+    return Math.max(0, (Date.parse(data?.next_check_at) || 0) - Date.now());
+  }
   function render() {
     if (!data) return;
     const op = data.operation;
@@ -17,13 +21,19 @@
     document.querySelectorAll('[data-system-open]').forEach(button => {button.classList.toggle('has-update', data.has_update);button.title = data.has_update ? '发现新版本：' + data.release.tag_name : '版本与升级';});
     text('systemCurrent', `${data.current.version} · ${data.current.commit} · ${data.current.build_type}`);
     text('systemLatest', data.available ? data.release?.tag_name || '暂无发行版' : '未能检查');
-    text('systemCheckState', data.warning || (data.has_update ? '发现新版本' : data.available ? '当前没有更高的稳定发行版' : '正在检查…'));
+    let checkState = data.warning || (data.has_update ? '发现新版本' : data.available ? '当前没有更高的稳定发行版' : '正在检查…');
+    const delay = checkDelay();
+    if (delay && data.warning) checkState += ' · 可重试时间：' + new Date(data.next_check_at).toLocaleString('zh-CN', { hour12: false });
+    text('systemCheckState', checkState);
     text('systemCapability', data.reason || '升级会短暂重启服务；配置和账号数据保留。失败时自动恢复旧程序。');
     text('systemProgress', op ? op.message : '暂无升级操作');
     node('systemProgress').classList.toggle('is-error', ['failed', 'rolled_back', 'recovery_failed'].includes(op?.phase));
     node('systemUpdate').disabled = busy || !data.available || !data.can_update || !data.has_update;
     node('systemRollback').disabled = busy || !data.can_rollback;
-    node('systemCheck').disabled = pending;
+    node('systemCheck').disabled = pending || delay > 0;
+    text('systemCheck', delay ? '检查冷却中' : '检查更新');
+    if (checkTimer) clearTimeout(checkTimer);
+    checkTimer = delay ? setTimeout(() => { checkTimer = null; render(); }, Math.min(delay + 25, 2147483647)) : null;
     const link = node('systemReleaseLink');
     link.hidden = !data.release;
     if (data.release) link.href = `https://github.com/${data.current.repository}/releases/tag/${encodeURIComponent(data.release.tag_name)}`;
@@ -33,7 +43,7 @@
     if (busy && !pollTimer) pollTimer = setTimeout(poll, 1500);
   }
   async function check(force = false) {
-    if (pending) return;
+    if (pending || (force && checkDelay() > 0)) return;
     const ticket = checkLoads.begin();
     const controller = new AbortController();
     ticket.signal.addEventListener('abort', () => controller.abort(), { once: true });

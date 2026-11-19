@@ -12,6 +12,31 @@ function setup(payload) {
 const current={version:'v1.0.2+local',commit:'abcdef0',build_type:'local',repository:'zhangdailin/API-Console'};
 const wait=()=>new Promise(resolve=>setImmediate(resolve));
 test('failed discovery is never displayed as latest and cannot install',async()=>{const h=setup({current,available:false,warning:'GitHub offline',can_update:true});await wait();assert.equal(h.node('systemLatest').textContent,'未能检查');assert.match(h.node('systemCheckState').textContent,/offline/);assert(h.node('systemUpdate').disabled);});
+test('GitHub cooldown displays retry time and suppresses forced checks without automatic retries', async () => {
+  const next = Date.now() + 60000;
+  const h = setup({current, available:false, can_update:true, warning:'GitHub API rate limit reached (HTTP 403)', check_error_code:'github_rate_limited', next_check_at:new Date(next).toISOString()});
+  await wait();
+  assert(h.node('systemCheck').disabled);
+  assert.match(h.node('systemCheckState').textContent, /rate limit.*可重试时间/);
+  assert.equal(h.node('systemCheck').textContent, '检查冷却中');
+  await h.node('systemCheck').click();
+  assert.equal(h.requests.length, 1);
+  h.context.Date = class extends Date { static now() { return next + 1; } };
+  h.timers.at(-1)();
+  assert.equal(h.requests.length, 1);
+  assert.equal(h.node('systemCheck').disabled, false);
+  assert.equal(h.node('systemCheck').textContent, '检查更新');
+  await h.node('systemCheck').click();
+  assert.equal(h.requests.length, 2);
+  assert.match(h.requests[1].url, /force=true/);
+});
+test('fresh cached release remains visible with a failed refresh warning', async () => {
+  const h = setup({current, available:true, has_update:true, can_update:true, release:{tag_name:'v1.0.3'}, warning:'GitHub denied the update check (HTTP 403)', next_check_at:new Date(Date.now()+60000).toISOString()});
+  await wait();
+  assert.equal(h.node('systemLatest').textContent, 'v1.0.3');
+  assert.match(h.node('systemCheckState').textContent, /denied.*可重试时间/);
+  assert(h.node('systemCheck').disabled);
+});
 test('unknown deployment capability prevents online upgrades while exposing release notes as text',async()=>{const h=setup({current,available:true,has_update:true,can_update:false,reason:'Docker',release:{tag_name:'v1.0.3',body:'<script>bad()</script>'}});await wait();assert(h.node('systemUpdate').disabled);assert.equal(h.node('systemReleaseNotes').textContent,'<script>bad()</script>');assert.match(h.node('systemCapability').textContent,/Docker/);});
 test('running operations prevent another upgrade or rollback',async()=>{const h=setup({current,available:true,has_update:true,can_update:true,can_rollback:true,release:{tag_name:'v1.0.3'},operation:{phase:'restarting',message:'等待验证'}});await wait();assert(h.node('systemUpdate').disabled);assert(h.node('systemRollback').disabled);assert(h.timers.length>1);assert.equal(h.node('systemProgress').textContent,'等待验证');});
 test('upgrade submission sends a stable idempotency key and exact release tag',async()=>{const h=setup({current,available:true,has_update:true,can_update:true,release:{tag_name:'v1.0.3'}});await wait();h.context.fetch=async(url,options)=>{h.requests.push({url,options});return{ok:true,json:async()=>({operation:{id:'op1',phase:'queued'}})}};await h.node('systemUpdate').click();const sent=h.requests.at(-1);assert.equal(sent.url,'/api/system/update');assert.equal(sent.options.headers['Idempotency-Key'],'unique-update-id');assert.deepEqual(JSON.parse(sent.options.body),{version:'v1.0.3'});});
