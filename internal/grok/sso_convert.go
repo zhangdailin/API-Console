@@ -42,6 +42,8 @@ type ssoConvertResult struct {
 	Created        bool   `json:"created,omitempty"`
 	Reason         string `json:"reason,omitempty"`
 	Error          string `json:"error,omitempty"`
+	Stage          string `json:"stage,omitempty"`
+	HTTPStatus     int    `json:"http_status,omitempty"`
 }
 
 // convertWebGrant runs the device authorization for one Web account and
@@ -243,11 +245,7 @@ func (h *Handler) HandleSSOConvertConsole(w http.ResponseWriter, r *http.Request
 		}
 		status, verifyErr := console.VerifyAccount(ctx, cfg, fresh)
 		if verifyErr != nil {
-			result.Reason = "failed"
-			if status == "401" {
-				result.Reason = "sso_rejected"
-			}
-			result.Error = grokbase.DiagnosticText(verifyErr.Error(), fresh)
+			applyConsoleVerificationFailure(&result, status, verifyErr)
 			results = append(results, result)
 			continue
 		}
@@ -271,4 +269,14 @@ func (h *Handler) HandleSSOConvertConsole(w http.ResponseWriter, r *http.Request
 		}
 	}
 	util.WriteJSON(w, map[string]any{"status": "success", "total": len(results), "ok": ok, "failed": len(results) - ok, "results": results})
+}
+
+func applyConsoleVerificationFailure(result *ssoConvertResult, status string, err error) {
+	diagnostic := console.DiagnoseVerification(err)
+	result.Reason, result.Error = diagnostic.Reason, diagnostic.Message
+	result.Stage, result.HTTPStatus = diagnostic.Stage, diagnostic.HTTPStatus
+	if status == "401" {
+		result.Reason = "sso_rejected"
+		result.HTTPStatus = http.StatusUnauthorized
+	}
 }

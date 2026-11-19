@@ -39,6 +39,8 @@
 
 普通 Grok 403 也不等同账号封禁。
 
+Web SSO 转为 Console 时，批处理响应的 `status: success` 只表示操作已返回；必须检查 `ok`、`failed` 和每个 `results[].success`。失败项的 `reason`、`stage`、`http_status` 区分 `console_api_key_unavailable`（未取得可用 API Key，不能判断模型权限）、`console_auth_failed`（DPoP 会话建立失败）、`sso_rejected`（SSO 被拒）和 `console_model_access_denied`（已取得 Key，但模型列表被 403 拒绝）。最后一种仍需在官网确认同一账号的团队及 Key 权限，不能仅凭 Web 可登录就断言 Console 可用。诊断不回传 Cookie、Token、Key 或未经筛选的上游错误正文；转换校验失败不保存新的 Console 账号，也不改动来源 Web 账号。不要为了诊断自动重放转换或创建新 Key。
+
 ## 6. 402 / 429 / 503
 
 | 原因 | 处理 |

@@ -157,15 +157,17 @@ type requestOptions struct {
 	accept      string
 	referer     string
 	withAPIKey  bool
+	apiKeyError *error
 }
 
 // Do sends one /v1 request for the credential. A 2xx response is returned
 // open for the caller to stream; any other status is returned as *StatusError
 // with the body consumed.
 func (c *Client) Do(ctx context.Context, ssoToken, method, path string, body []byte, contentType, accept string) (*http.Response, error) {
-	resp, err := c.dpopRequest(ctx, ssoToken, method, c.endpoint(path), body, requestOptions{contentType: contentType, accept: accept, withAPIKey: true})
+	var keyErr error
+	resp, err := c.dpopRequest(ctx, ssoToken, method, c.endpoint(path), body, requestOptions{contentType: contentType, accept: accept, withAPIKey: true, apiKeyError: &keyErr})
 	if err != nil {
-		return nil, err
+		return nil, withAPIKeyDiagnostic(err, keyErr)
 	}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return resp, nil
@@ -173,9 +175,9 @@ func (c *Client) Do(ctx context.Context, ssoToken, method, path string, body []b
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	_ = resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized {
-		return nil, ErrUnauthorized
+		return nil, withAPIKeyDiagnostic(ErrUnauthorized, keyErr)
 	}
-	return nil, &StatusError{Status: resp.StatusCode, Message: upstreamErrorMessage(raw), RetryAfter: resp.Header.Get("Retry-After")}
+	return nil, withAPIKeyDiagnostic(&StatusError{Status: resp.StatusCode, Message: upstreamErrorMessage(raw), RetryAfter: resp.Header.Get("Retry-After")}, keyErr)
 }
 
 func (c *Client) dpopRequest(ctx context.Context, ssoToken, method, target string, body []byte, options requestOptions) (*http.Response, error) {
@@ -189,6 +191,9 @@ func (c *Client) dpopRequest(ctx context.Context, ssoToken, method, target strin
 		// Without a key the upstream still answers with a classified error,
 		// which says more than a local failure would.
 		if apiKey, err = c.apiKey(ctx, ssoToken, false); err != nil {
+			if options.apiKeyError != nil {
+				*options.apiKeyError = err
+			}
 			if ctx.Err() != nil {
 				return nil, err
 			}
@@ -199,7 +204,7 @@ func (c *Client) dpopRequest(ctx context.Context, ssoToken, method, target strin
 	for attempt := 0; attempt < 3; attempt++ {
 		session, key, err := c.session(ctx, ssoToken)
 		if err != nil {
-			return nil, err
+			return nil, &verificationStageError{stage: "dpop", err: err}
 		}
 		req, err := http.NewRequestWithContext(ctx, method, target, bytes.NewReader(body))
 		if err != nil {
@@ -241,7 +246,11 @@ func (c *Client) dpopRequest(ctx context.Context, ssoToken, method, target strin
 			if isMissingAPIKeyBody(raw) {
 				apiKeyRepaired = true
 				c.forgetAPIKey(ssoToken)
-				if repaired, repairErr := c.apiKey(ctx, ssoToken, true); repairErr == nil && repaired != "" {
+				repaired, repairErr := c.apiKey(ctx, ssoToken, true)
+				if options.apiKeyError != nil {
+					*options.apiKeyError = repairErr
+				}
+				if repairErr == nil && repaired != "" {
 					apiKey = repaired
 					continue
 				}
