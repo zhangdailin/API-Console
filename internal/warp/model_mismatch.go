@@ -32,6 +32,9 @@ func modelMismatchDetails(requested string, observed *observedModelMismatch, kno
 	}
 	digest := sha256.Sum256([]byte(observed.ID))
 	d := &modelMismatchDiagnostic{RequestedModel: requested, ReportedModelSHA256: hex.EncodeToString(digest[:]), ReportedModelBytes: len(observed.ID), Fallback: observed.Fallback, Reason: "model_id_mismatch", EventOrdinal: observed.Event, ActionOrdinal: observed.Action, MessageOrdinal: observed.Message}
+	if observed.ID == requested {
+		d.Reason = "matched"
+	}
 	if observed.Fallback {
 		d.Reason = "fallback"
 		if observed.ID != requested {

@@ -45,13 +45,12 @@ func recoveryCAS(ctx context.Context, bindings *bindingStore, local *recoverySto
   local attempts=tonumber(redis.call('GET',KEYS[2]) or '0')
   local paid=tonumber(redis.call('GET',KEYS[3]) or '0')
   if not attempts or not paid or attempts<0 or paid<0 or attempts~=math.floor(attempts) or paid~=math.floor(paid) then return 0 end
-  if paid<tonumber(ARGV[5]) then paid=tonumber(ARGV[5]) end
-  if attempts>=tonumber(ARGV[4]) or paid>=tonumber(ARGV[6]) then return 0 end
+  if paid<tonumber(ARGV[4]) then paid=tonumber(ARGV[4]) end
   redis.call('SET',KEYS[2],attempts+1,'EX',ARGV[3])
   redis.call('SET',KEYS[3],paid+1,'EX',ARGV[3])
  end
  redis.call('SET',KEYS[1],ARGV[2],'EX',ARGV[3]); return 1
- `, keys, string(previous), string(next), int(recoveryTTL.Seconds()), recoveryAttemptLimit, head.PaidTurns, toolRoundLimit).Int()
+ `, keys, string(previous), string(next), int(recoveryTTL.Seconds()), head.PaidTurns).Int()
 		// head is the pre-reservation baseline passed by reserveRecovery.
 		if err != nil || result != 1 {
 			return errRecoveryUnavailable
@@ -83,9 +82,6 @@ func recoveryCAS(ctx context.Context, bindings *bindingStore, local *recoverySto
 		paid := local.paid[paidKey]
 		if paid < head.PaidTurns {
 			paid = head.PaidTurns
-		}
-		if local.attempts[attemptsKey] >= recoveryAttemptLimit || paid >= toolRoundLimit {
-			return errRecoveryUnavailable
 		}
 		local.attempts[attemptsKey]++
 		local.paid[paidKey] = paid + 1

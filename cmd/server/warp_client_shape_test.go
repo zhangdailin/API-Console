@@ -204,7 +204,7 @@ func assertWarpClientShapeWire(t *testing.T, raw []byte, f warpClientShapeFixtur
 		t.Fatal("client hints introduced timestamps, conversation identity or task context")
 	}
 	servers := request.GetMcpContext().GetServers()
-	if len(servers) != 1 || servers[0].GetName() != "client" || servers[0].GetId() != "client-request-tools" || len(servers[0].GetTools()) != 29 {
+	if len(servers) != 1 || servers[0].GetName() != "client" || servers[0].GetId() != warpRouteMCPServerID || len(servers[0].GetTools()) != 29 {
 		t.Fatal("client tool declarations did not retain their single 29-tool server group")
 	}
 	for i, tool := range servers[0].GetTools() {
@@ -394,7 +394,7 @@ func TestWarpNativeMessagesClientShapeLargeSystemPreservesSourceOrder(t *testing
 	}
 }
 
-func TestWarpNativeMessagesClientShapeBudgetRejectionsAreUnpaid(t *testing.T) {
+func TestWarpNativeMessagesClientShapeAboveFormerToolBudget(t *testing.T) {
 	cases := []struct {
 		name, code, path string
 		mutate           func(*warpClientShapeFixture)
@@ -419,14 +419,20 @@ func TestWarpNativeMessagesClientShapeBudgetRejectionsAreUnpaid(t *testing.T) {
 				beforeAI, beforeOther, beforeClients := stub.aiCalls.Load(), stub.otherCalls.Load(), clients.Load()
 				resp := e.do(t, http.MethodPost, prefix+"/messages", f.marshal(t), false)
 				out := e.readBody(t, resp)
-				if resp.StatusCode != http.StatusBadRequest || !strings.Contains(out, "invalid_request_error") || !strings.Contains(out, tc.code) || !strings.Contains(out, tc.path) {
-					t.Fatalf("oversized client shape must identify its budget/path: %d %s", resp.StatusCode, out)
+				if resp.StatusCode != http.StatusOK || !strings.Contains(out, warpRouteAnswer) {
+					t.Fatalf("large tool description rejected: %d %s", resp.StatusCode, out)
 				}
-				if len(out) > 1024 || strings.Contains(out, "synthetic-oversized-") {
-					t.Fatal("budget error echoed input data or exceeded its bounded response")
+				if strings.Contains(out, "synthetic-oversized-") {
+					t.Fatal("tool description escaped into the answer")
 				}
-				if clients.Load()-beforeClients != 0 || stub.aiCalls.Load()-beforeAI != 0 || stub.otherCalls.Load()-beforeOther != 0 {
-					t.Fatalf("oversized input reached account client/generation/refresh: clients=%d generation=%d other=%d", clients.Load()-beforeClients, stub.aiCalls.Load()-beforeAI, stub.otherCalls.Load()-beforeOther)
+				if clients.Load()-beforeClients != 1 || stub.aiCalls.Load()-beforeAI != 1 || stub.otherCalls.Load()-beforeOther != 0 {
+					t.Fatalf("large input call counts: clients=%d generation=%d other=%d", clients.Load()-beforeClients, stub.aiCalls.Load()-beforeAI, stub.otherCalls.Load()-beforeOther)
+				}
+				select {
+				case raw := <-stub.requests:
+					assertWarpClientShapeWire(t, raw, f)
+				default:
+					t.Fatal("large tool description did not reach the isolated upstream")
 				}
 			})
 		}

@@ -1,9 +1,11 @@
 package warp
 
 import (
+	"regexp"
+	"testing"
+
 	warpapi "github.com/warpdotdev/warp-proto-apis/apis/multi_agent/v1/gen/go"
 	"google.golang.org/protobuf/proto"
-	"testing"
 )
 
 // Matches the grouped MCPContext conversion in official convert_to.rs. Local
@@ -23,7 +25,7 @@ func TestMCPGroupedContextMatchesOfficialConversion(t *testing.T) {
 			t.Fatal("grouped and flat MCP forms mixed")
 		}
 		server := mcp.GetServers()[0]
-		if server.GetId() != "client-request-tools" || server.GetName() != "client" || server.HasIdentity() {
+		if server.GetId() != clientMCPServerID || !regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`).MatchString(server.GetId()) || server.GetName() != "client" || server.HasIdentity() {
 			t.Fatal("ad-hoc server identity changed")
 		}
 		tools := server.GetTools()

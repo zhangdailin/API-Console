@@ -41,6 +41,7 @@ type Client struct {
 	http           *http.Client
 	store          *store.Store
 	sessionVersion [32]byte
+	dialogIdentity *conversationIdentity
 }
 
 func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
@@ -155,6 +156,9 @@ func randomHex(size int) string {
 
 func (c *Client) commonQuery(acc *store.Account, extra url.Values) string {
 	deviceID, webID, teaUUID := identityFor(acc)
+	if c.dialogIdentity != nil {
+		deviceID, webID, teaUUID = c.dialogIdentity.deviceID, c.dialogIdentity.webID, c.dialogIdentity.teaUUID
+	}
 	q := url.Values{
 		"version_code": {"20800"}, "language": {"zh"}, "device_platform": {"web"}, "doubao_device_platform": {"web"},
 		"aid": {"497858"}, "real_aid": {"497858"}, "pkg_type": {"release_version"}, "device_id": {deviceID},
@@ -365,82 +369,6 @@ func (c *Client) createConversation(ctx context.Context, jar cookieJar, source s
 	return envelope.Downlink.Create.Info.ID, nil
 }
 
-// conversationFor returns the upstream conversation that carries one downstream
-// conversation, creating it on first use.
-//
-// Isolation is keyed by the caller's conversation id rather than the account.
-// Sharing one upstream conversation per account let one client's history leak
-// into another client's answer and grew a single conversation without bound.
-// Requests without a conversation id fall back to a per-account conversation, so
-// a client that sends no id still reuses one instead of minting a new session
-// per turn.
-func (c *Client) conversationFor(ctx context.Context, jar cookieJar, downstreamID string) (string, error) {
-	account := c.acc.ID
-	root, err := c.mainConversation(ctx, jar)
-	if err != nil {
-		return "", err
-	}
-	if strings.TrimSpace(downstreamID) == "" {
-		// Without a downstream id there is nothing to isolate: keep using the
-		// account's root so a turn does not mint a new upstream session.
-		return root, nil
-	}
-	key := cacheKey(account, downstreamID)
-	if key != "" {
-		conversations.Lock()
-		cached := conversations.byConversation[key]
-		conversations.Unlock()
-		if cached != "" {
-			return cached, nil
-		}
-	}
-	// Creating with a source id opens a *child* conversation. Creating without
-	// one returns the account's root and is idempotent, so it can never isolate
-	// two downstream conversations.
-	id, err := c.createConversation(ctx, jar, root)
-	if err != nil {
-		return "", err
-	}
-	slog.Debug("doubao conversation selected", "account_id", account, "downstream", downstreamID, "root", root, "conversation", id)
-	if key != "" {
-		conversations.Lock()
-		conversations.byConversation[key] = id
-		conversations.Unlock()
-	}
-	return id, nil
-}
-
-// mainConversation returns the account's root conversation, creating it once.
-func (c *Client) mainConversation(ctx context.Context, jar cookieJar) (string, error) {
-	if c.acc.ID != 0 {
-		conversations.Lock()
-		root := conversations.main[c.acc.ID]
-		conversations.Unlock()
-		if root != "" {
-			return root, nil
-		}
-	}
-	root, err := c.createConversation(ctx, jar, "")
-	if err != nil {
-		return "", err
-	}
-	if c.acc.ID != 0 {
-		conversations.Lock()
-		conversations.main[c.acc.ID] = root
-		conversations.Unlock()
-	}
-	return root, nil
-}
-
-// cacheKey scopes a conversation to an account and a downstream conversation.
-// An unknown account disables caching rather than sharing one bucket.
-func cacheKey(account int64, downstreamID string) string {
-	if account == 0 {
-		return ""
-	}
-	return fmt.Sprintf("%d|%s", account, strings.TrimSpace(downstreamID))
-}
-
 func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.UpstreamRequest, onMessage func(upstream.SSEMessage), logger *debug.Logger) error {
 	return c.scopedClient().sendRequestWithPayload(ctx, req, onMessage, logger)
 }
@@ -461,6 +389,9 @@ func (c *Client) sendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	jar := c.jar()
 	if len(jar) == 0 {
 		return fmt.Errorf("status=401: doubao account is missing a cookie")
+	}
+	if err := c.bindConversationIdentity(ctx, req.ConversationID); err != nil {
+		return fmt.Errorf("could not generate Doubao conversation identity: %w", err)
 	}
 	conversationID, err := c.conversationFor(ctx, jar, req.ConversationID)
 	if err != nil {
@@ -491,6 +422,9 @@ func (c *Client) sendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	}
 	query := c.commonQuery(c.acc, fingerprintQuery(jar))
 	chatURL := c.baseURL() + "/chat/completion?" + query
+	model, _ := FindModel(req.Model)
+	// The web selector is a sent route, not proof of the responding backend.
+	upstream.NoteUpstreamCall(ctx, chatURL, model.ModelItemKey)
 	// The diagnostic bundle keeps the upstream stream as received, so a block
 	// this parser drops can be read afterwards. Only the chat call is captured:
 	// the upload calls carry short-lived storage credentials. No header is
@@ -506,7 +440,7 @@ func (c *Client) sendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	if response.StatusCode >= 400 {
 		raw, _ := io.ReadAll(io.LimitReader(response.Body, 8192))
 		err := statusError(response.StatusCode, raw)
-		noteChallenge(c.acc, err)
+		noteChallengeForRequest(c.acc, c.challengeAccount(), err)
 		return err
 	}
 	text, err := consumeStream(response.Body, func(delta string) {
@@ -515,11 +449,11 @@ func (c *Client) sendRequestWithPayload(ctx context.Context, req upstream.Upstre
 		}
 	})
 	if err != nil {
-		noteChallenge(c.acc, err)
+		noteChallengeForRequest(c.acc, c.challengeAccount(), err)
 		return err
 	}
 	if text != "" {
-		clearChallengeForIdentity(c.acc)
+		clearChallengeForRequest(c.acc, c.challengeAccount())
 	}
 	if text == "" {
 		slog.Warn("doubao answer was empty", "account_id", c.acc.ID, "model", req.Model, "attachments", len(attachments))
@@ -656,12 +590,6 @@ var turns = struct {
 	sync.Mutex
 	last map[int64]time.Time
 }{last: map[int64]time.Time{}}
-
-var conversations = struct {
-	sync.Mutex
-	main           map[int64]string
-	byConversation map[string]string
-}{main: map[int64]string{}, byConversation: map[string]string{}}
 
 func waitTurn(ctx context.Context, accountID int64, cfg *config.Config) error {
 	gap := 3 * time.Second

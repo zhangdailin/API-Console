@@ -166,6 +166,10 @@ func (e *messageExecution) run() {
 			e.sh.reportRequestFailure("Request deadline or cancellation", category, apperrors.CategoryMessage(category), 0)
 			return
 		}
+		if message, local := apperrors.LocalRequestMessage(err); local {
+			e.sh.reportRequestFailure("Reporting local request validation failure", "request_validation", message, 0)
+			return
+		}
 		errStr := err.Error()
 		errClass := apperrors.ClassifyUpstreamError(errStr)
 		if e.sh.hasAnyOutput() {

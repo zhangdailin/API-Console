@@ -51,6 +51,14 @@ probe / http 基础设施不进入全部通道业务汇总。已 HTTP 200 后 SS
 
 ## 4. 采集健康
 
+### Response model and provider provenance
+
+Request rows distinguish the requested model, `metadata.upstream_model_sent` (the model or selector actually sent), and `metadata.upstream_model` (an identifier explicitly reported in the upstream response). `upstream_model_source` identifies the fixed protocol source; `upstream_model_status` is `reported`, `unreported`, or `redacted`. An absent status on an old row means the observation was not collected, not that the requested model was confirmed. Sent aliases, catalog entries, model-name prefixes and generated answer text never establish the responding model or provider.
+
+Warp reads current-exchange `ModelUsed` messages, including exact matches, and records `upstream_model_fallback` when that event supplies it. Cline and WorkBuddy read Chat response `model`; Grok Build reads Responses `model`. Doubao web selectors and Grok Web modes remain sent routes, not proof of a backend identity; when their response does not identify one, the UI displays unknown. Only explicit gateway routing metadata supplies `upstream_provider` (currently Cline). Even an upstream-reported identity is not independent verification of the underlying vendor.
+
+Every new inference attempt clears prior response-model/provider facts, including provider-local retries. Empty chunks within the same attempt do not erase an existing report. Oversized/control-bearing response identifiers and unadvertised Warp identities are withheld, not copied into the journal. The observer does not alter public response model labels, admission, billing, tool ownership, retries or account selection. Historical rows are not backfilled or rewritten.
+
 审计队列上限 256 条、单条 32 KiB、序列化预算 8 MiB；入队前生成快照，避免后续修改待写内容。写失败与丢弃不转为无限重试队列。
 
 | 字段 | 意义 |

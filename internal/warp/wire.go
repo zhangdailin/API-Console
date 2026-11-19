@@ -2,6 +2,7 @@ package warp
 
 import (
 	"bufio"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -11,11 +12,9 @@ import (
 
 	warpapi "github.com/warpdotdev/warp-proto-apis/apis/multi_agent/v1/gen/go"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/structpb"
 )
 
 const (
-	outputLimit = 16 << 10
 	frameLimit  = 1 << 20
 	streamLimit = 8 << 20
 )
@@ -48,14 +47,17 @@ type streamResult struct {
 	// Upstream conversation identity from the Init event. A follow-up request
 	// reuses it so the server can correlate a tool result with the call it
 	// answers instead of starting an unrelated conversation.
-	ConversationID  string
-	RequestID       string
-	RunID           string
-	RootTaskContext []byte
-	RecoveryContext []byte
-	RecoverySafe    bool
-	Failure         *streamFailure
-	ModelMismatch   *observedModelMismatch
+	ConversationID      string
+	RequestID           string
+	RunID               string
+	RootTaskContext     []byte
+	RecoveryContext     []byte
+	RecoverySafe        bool
+	Failure             *streamFailure
+	ModelMismatch       *observedModelMismatch
+	ModelUsed           *observedModelMismatch
+	FinishReason        string
+	ConversationContext *conversationContextDiagnostic
 }
 
 // toolCall is one client-executable MCP tool invocation observed upstream.
@@ -70,7 +72,7 @@ func buildRequest(model string, prepared preparedRequest) ([]byte, error) {
 	if !validModel(model) || strings.TrimSpace(model) != model || len(model) > 256 || !utf8.ValidString(model) || strings.ContainsAny(model, "\r\n\x00") {
 		return nil, errors.New("invalid warp model")
 	}
-	no := false
+	no, yes := false, true
 	empty := ""
 	platform, shell := "Linux", "sh"
 	autonomy, isolation := warpapi.AutonomyLevel_SUPERVISED, warpapi.IsolationLevel_SANDBOX
@@ -101,7 +103,7 @@ func buildRequest(model string, prepared preparedRequest) ([]byte, error) {
 		SupportedTools:                             supportedTools,
 		SupportedCliAgentTools:                     []warpapi.ToolType{warpapi.ToolType_SUGGEST_PROMPT},
 		SupportsLongRunningCommands:                &no,
-		ShouldPreserveFileContentInHistory:         &no,
+		ShouldPreserveFileContentInHistory:         &yes,
 		SupportsTodosUi:                            &no,
 		SupportsLinkedCodeBlocks:                   &no,
 		SupportsStartedChildTaskMessage:            &no,
@@ -137,8 +139,14 @@ func buildRequest(model string, prepared preparedRequest) ([]byte, error) {
 		}.Build())
 	}
 	taskContext := warpapi.Request_TaskContext_builder{}.Build()
+	serverID := clientMCPServerID
 	if len(prepared.RootTaskContext) > 0 {
-		if _, err := decodeContinuationState(prepared.RootTaskContext); err != nil {
+		root, err := decodeContinuationState(prepared.RootTaskContext)
+		if err != nil {
+			return nil, err
+		}
+		serverID, err = mcpServerIDForRoot(root)
+		if err != nil {
 			return nil, err
 		}
 		if err := proto.Unmarshal(prepared.RootTaskContext, taskContext); err != nil {
@@ -157,7 +165,7 @@ func buildRequest(model string, prepared preparedRequest) ([]byte, error) {
 		}.Build(),
 		Settings:   settings,
 		Metadata:   buildMetadata(prepared.ConversationID),
-		McpContext: buildMCPContext(prepared.Tools),
+		McpContext: buildMCPContext(prepared.Tools, serverID),
 	}.Build()
 	if prepared.Resume {
 		if prepared.ConversationID == "" || len(prepared.RootTaskContext) == 0 {
@@ -166,36 +174,6 @@ func buildRequest(model string, prepared preparedRequest) ([]byte, error) {
 		request.GetInput().SetResumeConversation(warpapi.Request_Input_ResumeConversation_builder{}.Build())
 	}
 	return proto.MarshalOptions{Deterministic: true}.Marshal(request)
-}
-
-// buildMCPContext declares the client-executable tools. The server may only emit
-// a tool call from this list, so nothing shell- or file-capable is advertised.
-func buildMCPContext(tools []mcpTool) *warpapi.Request_MCPContext {
-	if len(tools) == 0 {
-		return nil
-	}
-	declared := make([]*warpapi.Request_MCPContext_MCPTool, 0, len(tools))
-	for _, tool := range tools {
-		builder := warpapi.Request_MCPContext_MCPTool_builder{Name: &tool.Name}
-		if tool.Description != "" {
-			builder.Description = &tool.Description
-		}
-		// An empty JSON object is still an explicitly supplied valid schema.
-		// The official converter always sets input_schema after conversion.
-		if tool.Schema != nil {
-			if schema, err := structpb.NewStruct(tool.Schema); err == nil {
-				builder.InputSchema = schema
-			}
-		}
-		declared = append(declared, builder.Build())
-	}
-	server := warpapi.Request_MCPContext_MCPServer_builder{
-		Name:        proto.String("client"),
-		Description: proto.String("Tools declared by the client request"),
-		Id:          proto.String("client-request-tools"),
-		Tools:       declared,
-	}.Build()
-	return warpapi.Request_MCPContext_builder{Servers: []*warpapi.Request_MCPContext_MCPServer{server}}.Build()
 }
 
 // buildMetadata continues an existing upstream conversation when a tool result
@@ -235,7 +213,16 @@ func readStream(source io.Reader, expectedModel string) (streamResult, error) {
 }
 
 func readStreamWithContext(source io.Reader, expectedModel string, initial []byte) (result streamResult, parseErr error) {
+	return readStreamWithProgress(source, expectedModel, initial, nil)
+}
+
+func readStreamWithProgress(source io.Reader, expectedModel string, initial []byte, progress func()) (result streamResult, parseErr error) {
 	state := newContinuationAccumulator(initial)
+	models := newModelObservations(state.root)
+	serverID, serverErr := mcpServerIDForRoot(state.root)
+	if state.err != nil || serverErr != nil {
+		return result, errStreamStream
+	}
 	recoveryCandidate := false
 	checkpointProgress := false
 	defer func() {
@@ -268,6 +255,7 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 	// Add/Update snapshots may replay the same invocation more than once.
 	toolCalls := make(map[string]toolCall)
 	var txToolCalls []toolCall
+	var txMismatch *observedModelMismatch
 	var taskID string
 	createdTask := false
 	previousMCP := make(map[string]bool)
@@ -329,6 +317,8 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 			result.RunID = init.GetRunId()
 			return nil
 		case warpapi.ResponseEvent_Finished_case:
+			result.FinishReason = observedFinishReason(event.GetFinished())
+			result.ConversationContext = observeConversationContext(event.GetFinished().GetConversationUsageMetadata())
 			usage, err := extractUsage(event.GetFinished())
 			if err != nil {
 				return err
@@ -405,6 +395,8 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 						return errStreamStream
 					}
 					serverCalls.begin(taskID, createdTask, result.ServerBookkeeping)
+					models.begin()
+					txMismatch = result.ModelMismatch
 					txDepth++
 					if txDepth == 1 {
 						txText = result.TextBytes
@@ -422,11 +414,14 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 					if txDepth > 0 {
 						txDepth--
 					}
+					models.commit()
 				case warpapi.ClientAction_RollbackTransaction_case:
 					if txDepth != 1 {
 						return errStreamStream
 					}
 					if txDepth > 0 {
+						models.rollback()
+						result.ModelMismatch = txMismatch
 						taskID, createdTask, result.ServerBookkeeping = serverCalls.rollback()
 						result.TextBytes = txText
 						texts = txTexts
@@ -476,6 +471,7 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 					if err != nil {
 						return err
 					}
+					models.observe(message, result.Events, actionIndex+1, messageIndex+1)
 					switch message.WhichMessage() {
 					case warpapi.Message_ToolCall_case:
 						// Tool::Server is opaque server-resolved bookkeeping with no
@@ -497,8 +493,8 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 							candidate := toolCall{ID: call.GetToolCallId(), Name: invoke.GetName(), Args: string(args)}
 							prior, exists := toolCalls[candidate.ID]
 							if err != nil || candidate.ID == "" || candidate.Name == "" ||
-								(invoke.HasServerId() && invoke.GetServerId() != "client-request-tools") ||
-								(exists && prior != candidate) || (!exists && len(result.ToolCalls) >= 6) {
+								(invoke.HasServerId() && invoke.GetServerId() != serverID) ||
+								(exists && prior != candidate) {
 								result.ToolRequested = true
 								result.RejectMessage = int(message.WhichMessage())
 								result.RejectTool = int(call.WhichTool())
@@ -540,6 +536,9 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 						result.RejectMessage = int(message.WhichMessage())
 						return errStreamTool
 					case warpapi.Message_ModelUsed_case:
+						if models.inherited[message.GetId()] {
+							continue
+						}
 						used := message.GetModelUsed()
 						// Model choice is advisory: accept upstream fallback while
 						// retaining the first discrepancy for private diagnostics.
@@ -590,9 +589,6 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 							result.TextBytes += n - len(texts[id])
 							texts[id] = text
 						}
-						if result.TextBytes > outputLimit {
-							return errStreamLimit
-						}
 					case warpapi.Message_UserQuery_case, warpapi.Message_AgentReasoning_case:
 						// Echoed user input and reasoning are never counted as output.
 					default:
@@ -600,6 +596,7 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 						return errStreamStream
 					}
 				}
+				result.ModelUsed = models.latest()
 				// Track the complete validated root state privately for a client
 				// tool follow-up. Pure text fixtures may not contain CreateTask;
 				// only a tool-bearing completion requires a valid snapshot.
@@ -617,6 +614,9 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 			}
 		default:
 			return errStreamStream
+		}
+		if progress != nil && len(event.GetClientActions().GetActions()) > 0 {
+			progress()
 		}
 		return nil
 	}
@@ -638,6 +638,14 @@ func readStreamWithContext(source io.Reader, expectedModel string, initial []byt
 			if err != nil && err != io.EOF {
 				recoveryCandidate = true
 				result.Failure = &streamFailure{Site: "transport_read", Reason: "read_failed", EventOrdinal: result.Events}
+				if isGenerationTimeout(err) {
+					result.Failure.Reason = generationTimeoutReason(err)
+					return result, err
+				}
+				if errors.Is(err, context.Canceled) {
+					result.Failure.Reason = "canceled"
+					return result, context.Canceled
+				}
 				return result, errStreamStream
 			}
 			if len(line) == 0 && err == io.EOF {

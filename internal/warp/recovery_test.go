@@ -101,7 +101,7 @@ func TestRecoveryCASConcurrentHeadAndOriginalClaimPreserved(t *testing.T) {
 	}
 }
 
-func TestRecoveryAttemptQuotaAcrossCheckpointsAndConversationHeads(t *testing.T) {
+func TestRecoveryHasNoAttemptQuotaAcrossCheckpointsAndConversationHeads(t *testing.T) {
 	for _, redis := range []bool{false, true} {
 		name := "local"
 		if redis {
@@ -118,7 +118,7 @@ func TestRecoveryAttemptQuotaAcrossCheckpointsAndConversationHeads(t *testing.T)
 			if !c.finishRecovery(ctx, 7, req.Model, ids, digest, original, nil, nil, result, true, "") {
 				t.Fatal("missing checkpoint")
 			}
-			for attempt := 0; attempt < recoveryAttemptLimit; attempt++ {
+			for attempt := 0; attempt < 12; attempt++ {
 				head, raw, err := c.loadRecovery(ctx, 7, req.Model, ids, digest)
 				if err != nil {
 					t.Fatalf("load attempt %d: %v", attempt, err)
@@ -128,14 +128,14 @@ func TestRecoveryAttemptQuotaAcrossCheckpointsAndConversationHeads(t *testing.T)
 					t.Fatalf("reserve attempt %d: %v", attempt, err)
 				}
 				available := c.finishRecovery(ctx, 7, req.Model, ids, digest, original, &running, reserved, result, true, "")
-				if available != (attempt+1 < recoveryAttemptLimit) {
-					t.Fatal("wrong availability at attempt quota")
+				if !available {
+					t.Fatal("valid explicit recovery blocked by a generation quota")
 				}
 			}
-			if _, _, err := c.loadRecovery(ctx, 7, req.Model, ids, digest); err == nil {
-				t.Fatal("fourth resume available")
+			if _, _, err := c.loadRecovery(ctx, 7, req.Model, ids, digest); err != nil {
+				t.Fatal("valid failed checkpoint became unavailable")
 			}
-			// A new tool-result head must not reset the conversation's three attempts.
+			// A new tool-result head is still independently claimable exactly once.
 			newIDs := []string{"next-call"}
 			if !c.finishRecovery(ctx, 7, req.Model, newIDs, digest, original, nil, nil, result, true, "") {
 				t.Fatal("new failed head could not be persisted")
@@ -144,8 +144,8 @@ func TestRecoveryAttemptQuotaAcrossCheckpointsAndConversationHeads(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, _, err := c.reserveRecovery(ctx, head, raw); err == nil {
-				t.Fatal("new failed head reset conversation-wide resume quota")
+			if _, _, err := c.reserveRecovery(ctx, head, raw); err != nil {
+				t.Fatal("new failed head blocked by a conversation-wide quota")
 			}
 		})
 	}
@@ -217,7 +217,7 @@ func TestRecoveryScopeDigestAndCheckpointValidation(t *testing.T) {
 	}
 }
 
-func TestRecoveryRedisPaidLimitExpiryAndStoreFailures(t *testing.T) {
+func TestRecoveryRedisNoPaidLimitExpiryAndStoreFailures(t *testing.T) {
 	mini := miniredis.RunT(t)
 	ctx, original, req, result := recoveryFixture(t)
 	c := recoveryTestClient(toolClaimRedisStore(t, mini))
@@ -228,12 +228,12 @@ func TestRecoveryRedisPaidLimitExpiryAndStoreFailures(t *testing.T) {
 	}
 	head, raw, _ := c.loadRecovery(ctx, 7, req.Model, ids, digest)
 	attempts, paid := recoveryCounterKeys(c.bindings, head)
-	mini.Set(paid, "6")
-	if _, _, err := c.reserveRecovery(ctx, head, raw); err == nil {
-		t.Fatal("resume exceeded paid conversation limit")
+	mini.Set(paid, "100")
+	if _, _, err := c.reserveRecovery(ctx, head, raw); err != nil {
+		t.Fatal("valid resume blocked by persisted paid-turn count")
 	}
-	if mini.Exists(attempts) {
-		t.Fatal("rejected paid reservation consumed resume quota")
+	if !mini.Exists(attempts) {
+		t.Fatal("resume lost its observational counter")
 	}
 	mini.Del(paid)
 	for _, key := range mini.Keys() {
@@ -262,7 +262,7 @@ func TestRecoveryClientRejectsUndeclaredToolInFailedCheckpoint(t *testing.T) {
 	call := mcpToolCallEvent(t, "foreign-call", "undeclared", map[string]any{})
 	message := call.GetClientActions().GetActions()[0].GetAddMessagesToTask().GetMessages()[0]
 	message.SetTaskId("root")
-	message.GetToolCall().GetCallMcpTool().SetServerId("client-request-tools")
+	message.GetToolCall().GetCallMcpTool().SetServerId(clientMCPServerID)
 	stream := integrityStream(t, initEvent(t, original.ConversationID), call)
 	var calls atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -79,7 +79,6 @@ function initDOMCache() {
 const accountLoads = ConsoleUI.requestGate();
 const accountSave = ConsoleUI.submission();
 const accountDeletes = ConsoleUI.submission();
-const deviceIdentityInFlight = new Set();
 async function loadAccounts() {
   const ticket = accountLoads.begin();
   try {
@@ -726,6 +725,7 @@ function renderAccounts() {
     refresh.dataset.action = "refresh";
     refresh.dataset.id = encodeData(acc.id);
     refresh.title = "立即同步状态与额度";
+    if (normalizeAccountType(acc) === "doubao") refresh.title = "同步账号状态；设备标识按对话自动管理";
     setActionContent(refresh, "refresh", "刷新");
 
     const del = document.createElement("button");
@@ -748,17 +748,6 @@ function renderAccounts() {
       actionWrap.appendChild(verify);
     }
     actionWrap.appendChild(refresh);
-    if (normalizeAccountType(acc) === "doubao") {
-      const rotate = document.createElement("button");
-      rotate.type = "button";
-      rotate.className = "action-icon";
-      rotate.dataset.action = "rotate-device-identity";
-      rotate.dataset.id = encodeData(acc.id);
-      rotate.title = "手动随机更新设备标识，保留登录 Cookie 与验证状态";
-      rotate.disabled = deviceIdentityInFlight.has(String(acc.id));
-      setActionContent(rotate, "refresh", "更新设备标识");
-      actionWrap.appendChild(rotate);
-    }
     actionWrap.appendChild(del);
     tdActions.appendChild(actionWrap);
     tr.appendChild(tdActions);
@@ -1104,7 +1093,6 @@ function bindAccountActions(container) {
     const id = parseDataId(actionEl.dataset.id || "");
     if (actionEl.dataset.action === "edit") editAccount(id);
     if (actionEl.dataset.action === "refresh") refreshToken(id);
-    if (actionEl.dataset.action === "rotate-device-identity") return rotateDeviceIdentity(id, actionEl);
     if (actionEl.dataset.action === "delete") deleteAccount(id);
     if (actionEl.dataset.action === "verify" && globalThis.AccountVerification) AccountVerification.open(id);
   };
@@ -1300,34 +1288,6 @@ async function refreshToken(id) {
   const actionText = "刷新";
   showToast(`正在${actionText}账号信息...`, "info");
   await checkAccount(id, false, actionText);
-}
-
-// Device identity updates are manual and do not refresh credentials or resolve
-// verification challenges. Never display the response or a server error body.
-async function rotateDeviceIdentity(id, button) {
-  const key = String(id);
-  const account = accounts.find((candidate) => String(candidate.id) === key);
-  if (!account || normalizeAccountType(account) !== "doubao" || deviceIdentityInFlight.has(key)) return;
-  deviceIdentityInFlight.add(key);
-  const wasDisabled = button?.disabled;
-  if (button) button.disabled = true;
-  try {
-    const prompt = "确定要随机更新设备标识吗？此操作会更改 device_id、web_id、tea_uuid，保留登录 Cookie 和当前验证状态，不会发起生成请求，也不保证解决人机验证。";
-    const accepted = typeof ConsoleUI.confirm === "function" ? await ConsoleUI.confirm(prompt) : confirm(prompt);
-    if (!accepted) return;
-    await ConsoleAPI.checked(`/api/accounts/${encodeURIComponent(id)}/device-identity`, { method: "POST" });
-    await loadAccounts();
-    showToast("设备标识已更新，登录 Cookie 与验证状态保持不变", "success");
-  } catch (_) {
-    showToast("更新设备标识失败，请稍后重试", "error");
-  } finally {
-    deviceIdentityInFlight.delete(key);
-    if (button) button.disabled = wasDisabled;
-    const container = domCache.accountsList || document.getElementById("accountsList");
-    container?.querySelectorAll('[data-action="rotate-device-identity"]').forEach((control) => {
-      if (String(parseDataId(control.dataset.id || "")) === key) control.disabled = false;
-    });
-  }
 }
 
 // Delete account

@@ -137,7 +137,7 @@ func TestClientBudgetSystemNormalizationPreservesOrder(t *testing.T) {
 	}
 	// Instructions do not consume the bounded user/assistant turn count.
 	req.Messages = nil
-	for i := 0; i < historyTurns; i++ {
+	for i := 0; i < 8; i++ {
 		req.Messages = append(req.Messages, prompt.Message{Role: "user", Content: prompt.MessageContent{Text: "q"}}, prompt.Message{Role: "system", Content: prompt.MessageContent{Text: "pinned"}}, prompt.Message{Role: "assistant", Content: prompt.MessageContent{Text: "a"}})
 	}
 	req.Messages = append(req.Messages, prompt.Message{Role: "user", Content: prompt.MessageContent{Text: "now"}}, prompt.Message{Role: "system", Content: prompt.MessageContent{Text: "last"}})
@@ -163,8 +163,8 @@ func TestClientBudgetSystemNoLongerCapped(t *testing.T) {
 		t.Fatal(err)
 	}
 	req.Messages[0].Content.Text += "u"
-	if _, err := validateRequest(req); err == nil {
-		t.Fatal("4097-byte user accepted")
+	if _, err := validateRequest(req); err != nil {
+		t.Fatal("user above former 4096-byte cap rejected")
 	}
 }
 
@@ -182,28 +182,21 @@ func TestClientBudgetTranscriptExactBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	overhead := len(appendToolResultsText(base.Query, base.ToolResults)) - len("System instructions:\npinned\n\n")
-	req.Messages[2].Content.Blocks[0].Content = strings.Repeat("r", transcriptLimit-overhead)
+	req.Messages[2].Content.Blocks[0].Content = strings.Repeat("r", (64<<10)-overhead)
 	prepared, err := validateRequest(req)
 	if err != nil || len(appendToolResultsText(prepared.Query, prepared.ToolResults)) != (64<<10)+len("System instructions:\npinned\n\n") {
 		t.Fatalf("exact full transcript boundary rejected: %v", err)
 	}
-	req.Messages[2].Content.Blocks[0].Content = strings.Repeat("r", transcriptLimit-overhead+1)
-	if _, err := validateRequest(req); err == nil {
-		t.Fatal("65537-byte transcript accepted")
+	req.Messages[2].Content.Blocks[0].Content = strings.Repeat("r", (64<<10)-overhead+1)
+	if _, err := validateRequest(req); err != nil {
+		t.Fatal("transcript above former 64 KiB cap rejected")
 	}
 }
 
 func TestClientBudgetToolDescriptionAndSchemaBoundaries(t *testing.T) {
-	if toolDescriptionCap != 32<<10 || toolSchemaLimit != 64<<10 {
-		t.Fatal("approved tool budgets changed")
-	}
 	for _, openAI := range []bool{false, true} {
 		t.Run(fmt.Sprintf("openAI=%t", openAI), func(t *testing.T) {
-			path, schemaKey := "tools[0]", "input_schema"
-			if openAI {
-				path, schemaKey = "tools[0].function", "parameters"
-			}
-			tool := clientBudgetTool("lookup", map[string]any{}, strings.Repeat("d", toolDescriptionCap), openAI)
+			tool := clientBudgetTool("lookup", map[string]any{}, strings.Repeat("d", (32<<10)), openAI)
 			if _, err := convertToolsWithError([]any{tool}); err != nil {
 				t.Fatal(err)
 			}
@@ -211,23 +204,27 @@ func TestClientBudgetToolDescriptionAndSchemaBoundaries(t *testing.T) {
 			if openAI {
 				fn = tool["function"].(map[string]any)
 			}
-			fn["description"] = strings.Repeat("d", toolDescriptionCap+1)
-			_, err := convertToolsWithError([]any{tool})
-			assertClientBudgetError(t, err, "Warp tool_description_bytes at "+path+".description: measured_bytes=32769 limit_bytes=32768")
-			tool = clientBudgetTool("lookup", clientBudgetSchema(toolSchemaLimit), "", openAI)
+			fn["description"] = strings.Repeat("d", (32<<10)+1)
+			converted, err := convertToolsWithError([]any{tool})
+			if err != nil || len(converted) != 1 || converted[0].Description != fn["description"] {
+				t.Fatal("description above former 32 KiB cap rejected or truncated")
+			}
+			tool = clientBudgetTool("lookup", clientBudgetSchema((64 << 10)), "", openAI)
 			if _, err := convertToolsWithError([]any{tool}); err != nil {
 				t.Fatal(err)
 			}
-			tool = clientBudgetTool("lookup", clientBudgetSchema(toolSchemaLimit+1), "", openAI)
-			_, err = convertToolsWithError([]any{tool})
-			assertClientBudgetError(t, err, "Warp tool_schema_bytes at "+path+"."+schemaKey+": measured_bytes=65537 limit_bytes=65536")
+			tool = clientBudgetTool("lookup", clientBudgetSchema((64<<10)+1), "", openAI)
+			converted, err = convertToolsWithError([]any{tool})
+			if err != nil || len(converted) != 1 || !reflect.DeepEqual(converted[0].Schema, clientBudgetSchema((64<<10)+1)) {
+				t.Fatal("schema above former 64 KiB cap rejected or truncated")
+			}
 		})
 	}
-	tools := []any{clientBudgetTool("first", clientBudgetSchema(toolSchemaLimit/2), "", false), clientBudgetTool("second", clientBudgetSchema(toolSchemaLimit/2), "", false)}
+	tools := []any{clientBudgetTool("first", clientBudgetSchema((64<<10)/2), "", false), clientBudgetTool("second", clientBudgetSchema((64<<10)/2), "", false)}
 	if _, err := convertToolsWithError(tools); err != nil {
 		t.Fatal(err)
 	}
-	tools[1].(map[string]any)["input_schema"] = clientBudgetSchema(toolSchemaLimit/2 + 1)
+	tools[1].(map[string]any)["input_schema"] = clientBudgetSchema((64<<10)/2 + 1)
 	if _, err := convertToolsWithError(tools); err != nil {
 		t.Fatalf("removed aggregate schema limit rejected valid individual schemas: %v", err)
 	}
@@ -266,7 +263,7 @@ func TestClientBudgetFullToolDefinitionsMayExceedFormerLimit(t *testing.T) {
 					if openAI {
 						fn = fn["function"].(map[string]any)
 					}
-					n := min(missing, toolDescriptionCap)
+					n := min(missing, (32 << 10))
 					fn["description"] = strings.Repeat("d", n)
 					missing -= n
 				}

@@ -29,3 +29,30 @@ are disabled so a redirect cannot forward the credential to another origin.
 Regression tests use synthetic local upstreams. They prove persistence, conflict
 guards, and error classification, not live-upstream session lifetime or a new
 refresh API.
+
+## Automatic conversation identity
+
+Every inference dialog now receives its own pseudorandom 19-digit `device_id`
+and `web_id`; `tea_uuid` equals that dialog's `web_id`. The random persisted
+QR-login tuple seeds a domain-separated derivation scoped to the authenticated
+caller and explicit conversation ID. The same dialog therefore keeps its tuple
+across turns, ordinary Cookie refreshes, request-local clients and process
+restarts. Another dialog, caller or QR-login identity gets another tuple.
+The account's stored tuple and authentication verdict are not overwritten.
+
+Supply `conversation_id` (including its existing compatible spellings) or
+`X-Conversation-Id` to identify a continuing dialog. Without an explicit ID,
+each inference request is independent: it gets a fresh random tuple and an
+uncached child conversation, never another caller's account-wide history.
+The upstream conversation cache remains process-local; a restart may recreate
+the upstream child even though the derived device tuple remains stable.
+Legacy accounts without the persisted QR tuple use their session fingerprint
+as compatibility seed; their identity cannot survive a changed session Cookie.
+
+Account rows retain one status/quota refresh action. There is no manual device
+identity control and rendering/reloading the page never rotates identity.
+Neither an HTTP 403 nor a human-verification challenge triggers a new tuple or
+an automatic generation retry. Captcha records retain the exact refused
+dialog's device/fingerprint and are still gated by the current account session;
+success in a different dialog cannot clear the refusal. A fresh QR login or
+explicit legacy identity rotation invalidates an old session's challenge.

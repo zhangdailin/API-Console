@@ -11,8 +11,8 @@ import (
 // deliberately not released. Production Redis clients implement the atomic path;
 // local isolated tests use the binding-store mutex.
 func (b *bindingStore) claimToolTurn(ctx context.Context, accountID int64, model string, ids []string, binding callBinding) error {
-	if b == nil || len(ids) == 0 || binding.ToolRounds >= toolRoundLimit {
-		return fmt.Errorf("Warp tool turn limit or continuation unavailable")
+	if b == nil || len(ids) == 0 || binding.ToolRounds < 0 || binding.ConversationID == "" {
+		return fmt.Errorf("Warp tool continuation unavailable")
 	}
 	owner, ok := bindingOwner(ctx)
 	if !ok {
@@ -30,9 +30,9 @@ func (b *bindingStore) claimToolTurn(ctx context.Context, accountID int64, model
 		claims = append(claims, b.keyBase+"warp:consumed:"+hashID(base+"\x00"+id))
 	}
 	if backend, ok := b.redis.(interface {
-		ClaimToolTurn(context.Context, string, []string, int, time.Duration) error
+		ClaimToolTurn(context.Context, string, []string, time.Duration) error
 	}); ok {
-		return backend.ClaimToolTurn(ctx, conversationKey, claims, toolRoundLimit, bindingTTL)
+		return backend.ClaimToolTurn(ctx, conversationKey, claims, bindingTTL)
 	}
 	if b.redis != nil {
 		return fmt.Errorf("Warp continuation claim store unavailable")

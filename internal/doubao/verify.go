@@ -103,12 +103,13 @@ func (d sharkAdminDecision) summary() string {
 const challengeTTL = 2 * time.Hour
 
 type recordedChallenge struct {
-	raw            string
-	at             time.Time
-	did            string
-	fp             string
-	identity       [sha256.Size]byte
-	accountVersion time.Time
+	raw             string
+	at              time.Time
+	did             string
+	fp              string
+	identity        [sha256.Size]byte
+	accountIdentity [sha256.Size]byte
+	accountVersion  time.Time
 }
 
 // challengeIdentity binds a decision to the persisted request identity, including
@@ -133,11 +134,19 @@ var challenges = struct {
 // noteChallenge records the decision and identity of a verification refusal.
 // The caller supplies the client's account snapshot, not a newer store value.
 func noteChallenge(acc *store.Account, err error) {
+	noteChallengeForRequest(acc, acc, err)
+}
+
+func noteChallengeForRequest(acc, request *store.Account, err error) {
 	var challenge *verificationRequired
 	if !errors.As(err, &challenge) || strings.TrimSpace(challenge.raw) == "" {
 		return
 	}
-	identity, fp, ok := challengeIdentity(acc)
+	identity, fp, ok := challengeIdentity(request)
+	if !ok {
+		return
+	}
+	accountIdentity, _, ok := challengeIdentity(acc)
 	if !ok {
 		return
 	}
@@ -147,7 +156,7 @@ func noteChallenge(acc *store.Account, err error) {
 		return
 	}
 	challenges.byAccount[acc.ID] = recordedChallenge{
-		raw: challenge.raw, at: time.Now(), did: acc.DoubaoDeviceID, fp: fp, identity: identity, accountVersion: acc.UpdatedAt,
+		raw: challenge.raw, at: time.Now(), did: request.DoubaoDeviceID, fp: fp, identity: identity, accountIdentity: accountIdentity, accountVersion: acc.UpdatedAt,
 	}
 	challenges.Unlock()
 }
@@ -155,12 +164,20 @@ func noteChallenge(acc *store.Account, err error) {
 // clearChallengeForIdentity prevents an old in-flight success from clearing a
 // newer identity's challenge after an administrator rotates the device tuple.
 func clearChallengeForIdentity(acc *store.Account) {
-	identity, _, ok := challengeIdentity(acc)
+	clearChallengeForRequest(acc, acc)
+}
+
+func clearChallengeForRequest(acc, request *store.Account) {
+	identity, _, ok := challengeIdentity(request)
+	if !ok {
+		return
+	}
+	accountIdentity, _, ok := challengeIdentity(acc)
 	if !ok {
 		return
 	}
 	challenges.Lock()
-	if recorded, found := challenges.byAccount[acc.ID]; found && recorded.identity == identity {
+	if recorded, found := challenges.byAccount[acc.ID]; found && recorded.identity == identity && recorded.accountIdentity == accountIdentity {
 		delete(challenges.byAccount, acc.ID)
 	}
 	challenges.Unlock()
@@ -189,7 +206,7 @@ func verification(acc *store.Account) (provider.Verification, bool) {
 		ok = false
 	}
 	challenges.Unlock()
-	if !ok || recorded.identity != identity {
+	if !ok || recorded.accountIdentity != identity {
 		return provider.Verification{}, false
 	}
 	return provider.Verification{
@@ -210,5 +227,13 @@ func verification(acc *store.Account) (provider.Verification, bool) {
 }
 
 func verificationSolved(acc *store.Account) {
-	clearChallengeForIdentity(acc)
+	identity, _, ok := challengeIdentity(acc)
+	if !ok {
+		return
+	}
+	challenges.Lock()
+	if recorded, found := challenges.byAccount[acc.ID]; found && recorded.accountIdentity == identity {
+		delete(challenges.byAccount, acc.ID)
+	}
+	challenges.Unlock()
 }

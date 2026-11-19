@@ -31,6 +31,7 @@ var publicStatusForCategory = map[string]int{
 	"account_restricted":       http.StatusForbidden,
 	"verification_required":    http.StatusForbidden,
 	"client":                   http.StatusBadRequest,
+	"request_validation":       http.StatusBadRequest,
 	"continuation_conflict":    http.StatusConflict,
 	"continuation_recoverable": http.StatusBadGateway,
 	// The caller closed the connection before an answer existed. 499 is the
@@ -74,6 +75,7 @@ var messageForCategoryTable = map[string]string{
 	"rate_limit":                "The available upstream accounts are rate-limited. Retry after the cooldown.",
 	"model_unavailable":         "The requested model is unavailable for the selected upstream accounts.",
 	"client":                    "The upstream rejected the request parameters or model. Check the request and model selection.",
+	"request_validation":        "The gateway rejected the request during local validation. Check the supported request fields and limits; no upstream generation was made.",
 	"continuation_conflict":     "The tool conversation is unavailable, belongs to a different owner/account/model, or its result was already consumed. Resume the original conversation or start a new one; no upstream generation was made for this request.",
 	"client_closed":             "The client closed the request before the upstream answered.",
 	"timeout":                   "The upstream stream timed out while waiting for generated output.",

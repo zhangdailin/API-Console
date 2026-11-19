@@ -325,8 +325,9 @@ func (c *Client) runChat(ctx context.Context, url string, payload chatPayload, c
 		if current := c.currentCredentials(); current.HasCredential() {
 			attemptCredentials = current
 		}
+		upstream.NoteUpstreamCall(ctx, url, payload.sentModel)
 		result, err := c.attemptChat(ctx, url, payload, attemptCredentials, emit)
-		upstream.NoteServedModel(ctx, result.Model)
+		upstream.NoteServedModelWithSource(ctx, result.Model, "chat.model")
 		upstream.NoteServedProvider(ctx, result.Provider, result.ProviderAttempts)
 		if err == nil {
 			if !result.SawMeaningfulEvent {

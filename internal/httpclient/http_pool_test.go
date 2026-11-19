@@ -1,10 +1,26 @@
 package httpclient
 
 import (
+	"net/http"
 	"orchids-api/internal/testutil"
 	"testing"
 	"time"
 )
+
+func TestSharedHTTPClientHeaderBudgetsAreIsolated(t *testing.T) {
+	const key = "synthetic-warp-header-budget"
+	ordinary := GetSharedHTTPClientWithLimits(key, 2*time.Hour, nil, false, nil)
+	stream := GetSharedHTTPClientWithTimeouts(key, 2*time.Hour, 5*time.Minute, nil, false, nil)
+	if ordinary == stream || ordinary.Transport == stream.Transport {
+		t.Fatal("stream header policy changed an ordinary shared transport")
+	}
+	if ordinary.Transport.(*http.Transport).ResponseHeaderTimeout != 120*time.Second || stream.Transport.(*http.Transport).ResponseHeaderTimeout != 5*time.Minute {
+		t.Fatal("shared header policies were not preserved")
+	}
+	if got := GetSharedHTTPClientWithTimeouts(key, 2*time.Hour, 5*time.Minute, nil, false, nil); got != stream {
+		t.Fatal("stream connection pool was not reused")
+	}
+}
 
 func TestResponseHeaderTimeoutForClient(t *testing.T) {
 	tests := []struct {

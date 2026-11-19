@@ -245,6 +245,10 @@
       served,
       sent,
       upstream,
+      modelStatus: String(meta.upstream_model_status || (served ? 'reported' : '')).trim(),
+      modelSource: String(meta.upstream_model_source || '').trim(),
+      fallback: meta.upstream_model_fallback === true || meta.upstream_model_fallback === 'true',
+      fallbackKnown: meta.upstream_model_fallback === true || meta.upstream_model_fallback === false || meta.upstream_model_fallback === 'true' || meta.upstream_model_fallback === 'false',
       // Only a model the upstream reported can prove a substitution; a sent
       // name that differs is the gateway's own mapping.
       remapped: !!served && !!requested && !sameModel(served, requested),
@@ -526,30 +530,44 @@
     rows.forEach((row) => body.appendChild(row));
   }
 
-  // appendModelLines shows the requested model and, under it, the model the
-  // upstream actually ran (or, when it names none, the model the gateway sent).
+  function unknownServedModel(route) {
+    if (route.modelStatus === 'redacted') return '未知（已脱敏）';
+    return route.modelStatus ? '未知（未报告）' : '未知（旧记录未采集）';
+  }
+
+  function modelSourceLabel(route) {
+    const labels = { 'warp.model_used': 'Warp ModelUsed', 'chat.model': 'Chat 响应 model',
+      'responses.model': 'Responses 响应 model', upstream_response: '上游响应' };
+    return labels[route.modelSource] || (route.served ? '上游响应（旧记录）' : '未获取');
+  }
+
+  // A sent identifier is never evidence of the responding model or provider.
   function appendModelLines(cell, event) {
     const route = requestRoute(event);
     const requested = make('div', 'logs-model-requested', route.requested || '未标注模型');
     requested.title = '客户端请求的模型';
     cell.appendChild(requested);
-    if (!route.upstream) {
-      appendProviderLine(cell, route);
-      return;
-    }
-    const line = make('div', 'logs-model-upstream' + (route.remapped ? ' is-remapped' : ''));
-    line.appendChild(make('span', 'logs-line-label', route.served ? '上游' : '发送'));
-    line.appendChild(make('span', 'logs-line-value', route.upstream));
+    const line = make('div', 'logs-model-upstream' + (route.remapped || route.fallback ? ' is-remapped' : ''));
+    line.appendChild(make('span', 'logs-line-label', '实际'));
+    line.appendChild(make('span', 'logs-line-value', route.served || unknownServedModel(route)));
     line.title = route.served
-      ? '上游返回的实际模型' + (route.sent && route.sent !== route.served ? '（网关发送：' + route.sent + '）' : '')
-      : '网关发送给上游的模型（上游未在响应中标注模型）';
+      ? '上游报告的响应模型；来源：' + modelSourceLabel(route) + '。这不是对底层服务商的独立验证。'
+      : '当前日志未取得可展示的上游响应模型；发送模型不能证明实际响应模型。';
+    if (route.fallback) line.appendChild(make('span', 'logs-line-label', '回退'));
     cell.appendChild(line);
+    if (route.sent && route.sent !== route.served) {
+      const sent = make('div', 'logs-model-upstream logs-model-sent');
+      sent.appendChild(make('span', 'logs-line-label', '发送'));
+      sent.appendChild(make('span', 'logs-line-value', route.sent));
+      sent.title = '网关发送给上游的模型或路由选择器，不是上游实际响应模型';
+      cell.appendChild(sent);
+    }
     appendProviderLine(cell, route);
   }
 
   // appendProviderLine names the provider the upstream gateway says finally
   // served the request, and how many provider attempts that took. Only a
-  // gateway that reports it (Cline) has this line.
+  // gateway that reports it has this line; never infer it from a model prefix.
   function appendProviderLine(cell, route) {
     if (!route.provider) return;
     const retried = route.providerAttempts > 1;
@@ -728,8 +746,11 @@
       const route = requestRoute(event);
       requestFacts.push(fact('渠道', text(event.channel, '未标注'), { empty: !event.channel }));
       requestFacts.push(fact('请求模型', text(event.model, '未标注'), { empty: !event.model }));
-      requestFacts.push(fact('上游实际模型', route.served || '上游未标注', { empty: !route.served }));
+      requestFacts.push(fact('上游实际模型', route.served || unknownServedModel(route), { empty: !route.served }));
+      requestFacts.push(fact('模型信息来源', modelSourceLabel(route)));
+      if (route.fallbackKnown) requestFacts.push(fact('上游模型回退', route.fallback ? '是' : '否'));
       if (route.sent) requestFacts.push(fact('发送模型', route.sent));
+      if (!route.provider) requestFacts.push(fact('上游服务商', '未知（上游未报告）', { empty: true }));
       if (route.provider) {
         requestFacts.push(fact('上游服务商', route.provider, { title: '上游网关报告的最终服务商' }));
         if (route.providerAttempts > 0) requestFacts.push(fact('服务商尝试', route.providerAttempts + ' 次'));

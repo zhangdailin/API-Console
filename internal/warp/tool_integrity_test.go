@@ -56,7 +56,7 @@ func integrityStream(t *testing.T, events ...*warpapi.ResponseEvent) string {
 
 func TestToolIntegrityAcceptsValidatedMCPSummary(t *testing.T) {
 	stream := integrityStream(t,
-		compatRootTask("root", integrityMCP(t, "message-1", "call-1", "lookup", map[string]any{"q": "x"}, proto.String("client-request-tools"))),
+		compatRootTask("root", integrityMCP(t, "message-1", "call-1", "lookup", map[string]any{"q": "x"}, proto.String(clientMCPServerID))),
 		integrityTaskMessages(integrityMetadata(warpapi.Message_RequestMetadata_ToolCallSummary_builder{ToolCalls: proto.Uint32(1)}.Build(), integrityCharges())),
 		testDone(),
 	)
@@ -101,7 +101,7 @@ func TestToolIntegrityRejectsUnexpectedSummaryAndPreservesCharges(t *testing.T) 
 
 func TestToolIntegrityDeduplicatesAddAndUpdateSnapshots(t *testing.T) {
 	first := integrityMCP(t, "message-1", "call-1", "lookup", map[string]any{"z": 1, "a": map[string]any{"y": 2, "b": 3}}, nil)
-	replay := integrityMCP(t, "message-1", "call-1", "lookup", map[string]any{"a": map[string]any{"b": 3, "y": 2}, "z": 1}, proto.String("client-request-tools"))
+	replay := integrityMCP(t, "message-1", "call-1", "lookup", map[string]any{"a": map[string]any{"b": 3, "y": 2}, "z": 1}, proto.String(clientMCPServerID))
 	stream := integrityStream(t,
 		compatRootTask("root"),
 		integrityTaskMessages(first),
@@ -212,23 +212,19 @@ func TestToolIntegrityRejectsMissingIDAndForeignServer(t *testing.T) {
 	}
 }
 
-func TestToolIntegrityLimitsUniqueEmittedCalls(t *testing.T) {
+func TestToolIntegrityPreservesAllUniqueEmittedCalls(t *testing.T) {
 	events := []*warpapi.ResponseEvent{compatRootTask("root")}
-	for i := 0; i < 6; i++ {
+	for i := 0; i < 40; i++ {
 		id := "call-" + strconv.Itoa(i)
 		events = append(events, integrityTaskMessages(integrityMCP(t, id, id, "lookup", nil, nil)))
 	}
-	// Replays do not consume another call slot, even at the limit.
+	// Repeated stream updates do not duplicate a call in the retained result.
 	events = append(events, testAction(warpapi.ClientAction_builder{UpdateTaskMessage: warpapi.ClientAction_UpdateTaskMessage_builder{
 		TaskId: proto.String("root"), Message: integrityMCP(t, "call-0", "call-0", "lookup", nil, nil),
 	}.Build()}.Build()))
 	stream := integrityStream(t, append(events, testDone())...)
-	if result, err := readStream(strings.NewReader(stream), "model-a"); err != nil || len(result.ToolCalls) != 6 || !result.Complete {
-		t.Fatalf("six unique calls rejected: result=%+v err=%v", result, err)
-	}
-	stream = integrityStream(t, append(events, integrityTaskMessages(integrityMCP(t, "seventh", "call-7", "lookup", nil, nil)), testDone())...)
-	if result, err := readStream(strings.NewReader(stream), "model-a"); !errors.Is(err, errStreamTool) || result.Complete || len(result.ToolCalls) != 6 {
-		t.Fatalf("seven unique calls accepted: result=%+v err=%v", result, err)
+	if result, err := readStream(strings.NewReader(stream), "model-a"); err != nil || len(result.ToolCalls) != 40 || !result.Complete {
+		t.Fatalf("valid parallel calls lost: count=%d err=%v", len(result.ToolCalls), err)
 	}
 }
 

@@ -5,6 +5,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Route facts an upstream client reports about the call it actually made. The
@@ -21,7 +23,10 @@ const (
 	RouteSentModel = "upstream_model_sent"
 	// RouteServedModel is the model identifier the upstream reported in its
 	// response. It is absent when the upstream does not report one.
-	RouteServedModel = "upstream_model"
+	RouteServedModel   = "upstream_model"
+	RouteModelSource   = "upstream_model_source"
+	RouteModelStatus   = "upstream_model_status"
+	RouteModelFallback = "upstream_model_fallback"
 	// RouteProvider is the provider an upstream gateway reports it finally
 	// routed the request to (Cline: provider_metadata.gateway.routing).
 	RouteProvider = "upstream_provider"
@@ -33,8 +38,7 @@ const (
 type routeObserverKey struct{}
 
 // WithRouteObserver installs the callback that records route facts for the
-// request carried by ctx. A later note for the same field replaces an earlier
-// one, so after retries the journal holds the attempt that answered.
+// request carried by ctx. Empty values remove a fact from a previous attempt.
 func WithRouteObserver(ctx context.Context, observer func(field, value string)) context.Context {
 	if observer == nil {
 		return ctx
@@ -56,6 +60,15 @@ func noteRoute(ctx context.Context, field, value string) {
 // sent to and the model identifier it carries. Only the host and path of
 // rawURL are kept; the query string is dropped.
 func NoteUpstreamCall(ctx context.Context, rawURL, sentModel string) {
+	// A previous attempt's response must not identify an unreported new one.
+	if ctx != nil {
+		if observer, ok := ctx.Value(routeObserverKey{}).(func(string, string)); ok {
+			for _, field := range []string{RouteHost, RouteEndpoint, RouteSentModel, RouteServedModel, RouteModelSource, RouteModelFallback, RouteProvider, RouteProviderAttempts} {
+				observer(field, "")
+			}
+		}
+	}
+	noteRoute(ctx, RouteModelStatus, "unreported")
 	if parsed, err := url.Parse(strings.TrimSpace(rawURL)); err == nil && parsed.Path != "" {
 		noteRoute(ctx, RouteHost, parsed.Host)
 		noteRoute(ctx, RouteEndpoint, parsed.Path)
@@ -77,5 +90,46 @@ func NoteServedProvider(ctx context.Context, provider string, attempts int) {
 // NoteServedModel records the model identifier the upstream reported for the
 // response. Callers may report it on every chunk; only a non-empty value is kept.
 func NoteServedModel(ctx context.Context, model string) {
+	NoteServedModelWithSource(ctx, model, "upstream_response")
+}
+
+// NoteServedModelWithSource records response metadata, never a requested alias.
+// Sources are fixed identifiers owned by this gateway, not response text.
+func NoteServedModelWithSource(ctx context.Context, model, source string) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return
+	}
+	if len(model) > 256 || !utf8.ValidString(model) || strings.IndexFunc(model, unicode.IsControl) >= 0 {
+		NoteRedactedServedModel(ctx, source)
+		return
+	}
 	noteRoute(ctx, RouteServedModel, model)
+	noteRoute(ctx, RouteModelStatus, "reported")
+	noteRoute(ctx, RouteModelSource, modelSource(source))
+}
+
+// NoteRedactedServedModel preserves the distinction between a withheld upstream
+// identity and an absent report. It never records the untrusted identifier.
+func NoteRedactedServedModel(ctx context.Context, source string) {
+	if ctx != nil {
+		if observer, ok := ctx.Value(routeObserverKey{}).(func(string, string)); ok {
+			observer(RouteServedModel, "")
+		}
+	}
+	noteRoute(ctx, RouteModelStatus, "redacted")
+	noteRoute(ctx, RouteModelSource, modelSource(source))
+}
+
+func NoteModelFallback(ctx context.Context, fallback bool) {
+	noteRoute(ctx, RouteModelFallback, strconv.FormatBool(fallback))
+}
+
+func modelSource(source string) string {
+	switch source {
+	case "warp.model_used", "chat.model", "responses.model", "grok.modelResponse":
+		return source
+	default:
+		return "upstream_response"
+	}
 }

@@ -153,7 +153,7 @@ func TestToolResultCacheBoundClientRoundtripPreservesWireAndScope(t *testing.T) 
 				call := mcpToolCallEvent(t, "call-cache", "echo", map[string]any{})
 				message := call.GetClientActions().GetActions()[0].GetAddMessagesToTask().GetMessages()[0]
 				message.SetTaskId("root")
-				message.GetToolCall().GetCallMcpTool().SetServerId("client-request-tools")
+				message.GetToolCall().GetCallMcpTool().SetServerId(clientMCPServerID)
 				expectedRoot := proto.Clone(create.GetCreateTask().GetTask()).(*warpapi.Task)
 				expectedRoot.SetMessages(append(expectedRoot.GetMessages(), message))
 				firstStream := integrityStream(t, initEvent(t, "conv-tool-cache"), testAction(create), call, testDone())

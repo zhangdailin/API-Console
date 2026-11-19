@@ -18,7 +18,7 @@ func wireFieldError(path, reason string) error {
 }
 
 // validateRawRequest checks the wire shape before shared decoding can discard
-// unknown controls. The normalized validator still enforces conversation size,
+// unknown controls. The normalized validator still enforces conversation shape,
 // tool shape and model before any credential refresh or generation.
 func validateRawRequest(raw json.RawMessage) error {
 	var request map[string]json.RawMessage
@@ -237,7 +237,7 @@ func validateRawRequest(raw json.RawMessage) error {
 			}
 		}
 	}
-	// Run the instruction budget before selection so its fixed safe error is
+	// Validate instructions before selection so their fixed safe error is
 	// returned directly instead of being scrubbed as an upstream client error.
 	var instructions []prompt.SystemItem
 	if raw, exists := request["system"]; exists {
@@ -335,15 +335,10 @@ func rawContentBlock(block map[string]json.RawMessage, role, path string) error 
 		if !rawString(block["thinking"], &text) || !utf8.ValidString(text) {
 			return wireFieldError(path+".thinking", "must be a valid text string")
 		}
-		size := len(text)
 		if signature, exists := block["signature"]; exists {
 			if !rawString(signature, &text) || !utf8.ValidString(text) {
 				return wireFieldError(path+".signature", "must be a valid string")
 			}
-			size += len(text)
-		}
-		if size > thinkingHistoryLimit {
-			return requestBytesError("thinking_history_bytes", path, size, thinkingHistoryLimit)
 		}
 		return nil
 	case "text":

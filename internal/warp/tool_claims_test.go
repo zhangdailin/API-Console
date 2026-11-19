@@ -98,7 +98,7 @@ func TestToolClaimsConcurrentDuplicateAcrossRedisClients(t *testing.T) {
 	}
 }
 
-func TestToolClaimsConcurrentConversationBudgetAcrossRedisClients(t *testing.T) {
+func TestToolClaimsConcurrentDistinctResultsAcrossRedisClients(t *testing.T) {
 	mini := miniredis.RunT(t)
 	clients := []*bindingStore{toolClaimRedisStore(t, mini), toolClaimRedisStore(t, mini)}
 	ctx := toolClaimContext(t, 1, "synthetic-tool-owner")
@@ -123,8 +123,8 @@ func TestToolClaimsConcurrentConversationBudgetAcrossRedisClients(t *testing.T) 
 			winners++
 		}
 	}
-	if winners != toolRoundLimit {
-		t.Fatalf("concurrent conversation claims had %d winners, want %d", winners, toolRoundLimit)
+	if winners != contenders {
+		t.Fatalf("distinct claims had %d winners, want %d", winners, contenders)
 	}
 }
 
@@ -166,18 +166,16 @@ func TestToolClaimsOwnershipAccountAndModelIsolation(t *testing.T) {
 			{"other model", owner, 7, "model-b"},
 		} {
 			binding := callBinding{ConversationID: "same-conversation"}
-			// Exhaust each scope so both consumed IDs and conversation counters
-			// must be isolated, not just the first claim.
-			for round := 0; round < toolRoundLimit; round++ {
+			// Exercise each scope beyond the former six-generation ceiling.
+			for round := 0; round < 20; round++ {
 				binding.ToolRounds = round
 				ids := []string{fmt.Sprintf("same-call-%d", round)}
 				if err := b.claimToolTurn(scope.ctx, scope.account, scope.model, ids, binding); err != nil {
 					t.Fatalf("%s round %d collided with another scope: %v", scope.name, round, err)
 				}
 			}
-			binding.ToolRounds = toolRoundLimit
-			if err := b.claimToolTurn(scope.ctx, scope.account, scope.model, []string{"beyond-limit"}, binding); err == nil {
-				t.Fatalf("%s exceeded the fixed tool-turn limit", scope.name)
+			if err := b.claimToolTurn(scope.ctx, scope.account, scope.model, []string{"same-call-0"}, binding); err == nil {
+				t.Fatalf("%s replayed its first result", scope.name)
 			}
 		}
 	})
@@ -203,7 +201,7 @@ func TestToolClaimsExpiry(t *testing.T) {
 	t.Run("redis", func(t *testing.T) {
 		mini := miniredis.RunT(t)
 		b := toolClaimRedisStore(t, mini)
-		for round := 0; round < toolRoundLimit; round++ {
+		for round := 0; round < 20; round++ {
 			if err := b.claimToolTurn(ctx, 7, "model-a", []string{fmt.Sprintf("call-%d", round)}, binding); err != nil {
 				t.Fatal(err)
 			}
@@ -227,13 +225,13 @@ func TestToolClaimsExpiry(t *testing.T) {
 	})
 }
 
-func TestToolClaimsRejectBindingAtOrAboveLimit(t *testing.T) {
+func TestToolClaimsRejectNegativeBindingCount(t *testing.T) {
 	toolClaimBackends(t, func(t *testing.T, b *bindingStore) {
 		ctx := toolClaimContext(t, 1, "synthetic-tool-owner")
-		for _, rounds := range []int{toolRoundLimit, toolRoundLimit + 1} {
+		for _, rounds := range []int{-1, -100} {
 			binding := callBinding{ConversationID: "conversation", ToolRounds: rounds}
 			if err := b.claimToolTurn(ctx, 7, "model-a", []string{"call-1"}, binding); err == nil {
-				t.Fatalf("binding with %d rounds bypassed the limit", rounds)
+				t.Fatalf("binding with negative rounds %d was accepted", rounds)
 			}
 		}
 		if err := b.claimToolTurn(ctx, 7, "model-a", []string{"call-1"}, callBinding{ConversationID: "conversation"}); err != nil {
@@ -242,10 +240,10 @@ func TestToolClaimsRejectBindingAtOrAboveLimit(t *testing.T) {
 	})
 }
 
-func TestToolClaimsLocalScopedBindingRoundLimit(t *testing.T) {
+func TestToolClaimsLocalScopedBindingHasNoRoundLimit(t *testing.T) {
 	ctx := toolClaimContext(t, 1, "synthetic-tool-owner")
 	b := newBindingStore()
-	for round := 0; round <= toolRoundLimit; round++ {
+	for round := 0; round <= 100; round++ {
 		id := fmt.Sprintf("call-%d", round)
 		if !b.saveScoped(ctx, 7, "model-a", id, callBinding{ConversationID: "conversation", ToolRounds: round}) {
 			t.Fatalf("failed to save authoritative binding at round %d", round)
@@ -255,39 +253,31 @@ func TestToolClaimsLocalScopedBindingRoundLimit(t *testing.T) {
 			t.Fatalf("failed to restore authoritative binding at round %d", round)
 		}
 		err := b.claimToolTurn(ctx, 7, "model-a", []string{id}, binding)
-		if round < toolRoundLimit && err != nil {
+		if err != nil {
 			t.Fatalf("claim at authoritative round %d failed: %v", round, err)
-		}
-		if round == toolRoundLimit && err == nil {
-			t.Fatal("authoritative scoped binding allowed a seventh local turn")
 		}
 	}
 }
 
-func TestToolClaimsRedisStaleSnapshotCannotResetConversationBudget(t *testing.T) {
-	if toolRoundLimit != 6 {
-		t.Fatalf("tool round limit = %d, want 6", toolRoundLimit)
-	}
+func TestToolClaimsRedisStaleSnapshotCannotReplayConsumedResults(t *testing.T) {
 	mini := miniredis.RunT(t)
 	ctx := toolClaimContext(t, 1, "synthetic-tool-owner")
 	b := toolClaimRedisStore(t, mini)
 	binding := callBinding{ConversationID: "conversation"}
-	for round := 0; round < toolRoundLimit; round++ {
-		// Deliberately keep the caller's stale snapshot at zero. Redis must
-		// enforce the conversation budget independently of this snapshot.
+	for round := 0; round < 20; round++ {
+		// A stale count does not impose a budget or clear consumption state.
 		if err := b.claimToolTurn(ctx, 7, "model-a", []string{fmt.Sprintf("call-%d", round)}, binding); err != nil {
 			t.Fatalf("claim %d of six failed: %v", round+1, err)
 		}
 	}
 	b = toolClaimRedisStore(t, mini)
 	for attempt := 0; attempt < 2; attempt++ {
-		if err := b.claimToolTurn(ctx, 7, "model-a", []string{"call-over-budget"}, binding); err == nil {
-			t.Fatal("a stale snapshot reset the persisted conversation budget")
+		if err := b.claimToolTurn(ctx, 7, "model-a", []string{"call-0"}, binding); err == nil {
+			t.Fatal("a stale snapshot replayed a persisted consumed result")
 		}
 	}
-	binding.ConversationID = "new-conversation"
-	if err := b.claimToolTurn(ctx, 7, "model-a", []string{"call-over-budget"}, binding); err != nil {
-		t.Fatalf("budget rejection consumed an unused ID or blocked another conversation: %v", err)
+	if err := b.claimToolTurn(ctx, 7, "model-a", []string{"call-new"}, binding); err != nil {
+		t.Fatalf("persisted conversation count blocked an unused result: %v", err)
 	}
 }
 

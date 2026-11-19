@@ -226,8 +226,8 @@ func TestScopedBindingsIsolationAndPersistedValidation(t *testing.T) {
 	if b.saveScoped(context.Background(), 7, "model-a", "x", callBinding{ConversationID: "c"}) {
 		t.Fatal("keyless production binding accepted")
 	}
-	if b.saveScoped(ctx, 7, "model-a", "x", callBinding{ConversationID: "c", ToolRounds: maxToolRounds + 1}) {
-		t.Fatal("excessive tool rounds accepted")
+	if b.saveScoped(ctx, 7, "model-a", "x", callBinding{ConversationID: "c", ToolRounds: -1}) {
+		t.Fatal("negative tool rounds accepted")
 	}
 	if b.saveScoped(ctx, 7, "model-a", "x", callBinding{ConversationID: "c", RootTaskContext: bytes.Repeat([]byte("x"), continuationStateLimit+1)}) {
 		t.Fatal("oversized binding accepted")

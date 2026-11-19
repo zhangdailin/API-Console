@@ -54,7 +54,7 @@ func newWarpRecoveryRouteStub(t *testing.T) (*warpRouteStub, *warpapi.Task) {
 	}
 	tool := warpapi.Message_builder{Id: proto.String("tool-message"), TaskId: proto.String("root"), ToolCall: warpapi.Message_ToolCall_builder{
 		ToolCallId: proto.String(warpRecoveryCall), CallMcpTool: warpapi.Message_ToolCall_CallMCPTool_builder{
-			Name: proto.String("lookup"), Args: args, ServerId: proto.String("client-request-tools"),
+			Name: proto.String("lookup"), Args: args, ServerId: proto.String(warpRouteMCPServerID),
 		}.Build(),
 	}.Build()}.Build()
 	root := warpapi.Task_builder{Id: proto.String("root"), Messages: []*warpapi.Message{tool}}.Build()

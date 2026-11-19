@@ -199,26 +199,22 @@ func TestWarpMessagesHistoryThinkingInvalidRawRejectedBeforeClient(t *testing.T)
 		return spec.NewClient(acc, cfg, s)
 	})
 	cases := map[string]string{
-		"wrong_type":               `{"type":"Thinking","thinking":"synthetic"}`,
-		"nonstring_type":           `{"type":7,"thinking":"synthetic"}`,
-		"missing_thinking":         `{"type":"thinking"}`,
-		"null_thinking":            `{"type":"thinking","thinking":null}`,
-		"number_thinking":          `{"type":"thinking","thinking":1}`,
-		"object_thinking":          `{"type":"thinking","thinking":{}}`,
-		"array_thinking":           `{"type":"thinking","thinking":[]}`,
-		"null_signature":           `{"type":"thinking","thinking":"synthetic","signature":null}`,
-		"number_signature":         `{"type":"thinking","thinking":"synthetic","signature":1}`,
-		"object_signature":         `{"type":"thinking","thinking":"synthetic","signature":{}}`,
-		"unknown_field":            `{"type":"thinking","thinking":"synthetic","unexpected":null}`,
-		"text_field":               `{"type":"thinking","thinking":"synthetic","text":""}`,
-		"source_field":             `{"type":"thinking","thinking":"synthetic","source":null}`,
-		"cache_control":            `{"type":"thinking","thinking":"synthetic","cache_control":{"type":"ephemeral"}}`,
-		"redacted_thinking":        `{"type":"redacted_thinking","data":"synthetic"}`,
-		"image":                    `{"type":"image","source":{"type":"base64","media_type":"image/png","data":"synthetic"}}`,
-		"oversized_thinking":       `{"type":"thinking","thinking":"` + strings.Repeat("t", (64<<10)+1) + `"}`,
-		"oversized_signature":      `{"type":"thinking","thinking":"","signature":"` + strings.Repeat("s", (64<<10)+1) + `"}`,
-		"combined_block_overflow":  `{"type":"thinking","thinking":"` + strings.Repeat("t", 32<<10) + `","signature":"` + strings.Repeat("s", (32<<10)+1) + `"}`,
-		"multiple_blocks_overflow": `{"type":"thinking","thinking":"` + strings.Repeat("t", 32<<10) + `"},{"type":"thinking","thinking":"` + strings.Repeat("t", (32<<10)+1) + `"}`,
+		"wrong_type":        `{"type":"Thinking","thinking":"synthetic"}`,
+		"nonstring_type":    `{"type":7,"thinking":"synthetic"}`,
+		"missing_thinking":  `{"type":"thinking"}`,
+		"null_thinking":     `{"type":"thinking","thinking":null}`,
+		"number_thinking":   `{"type":"thinking","thinking":1}`,
+		"object_thinking":   `{"type":"thinking","thinking":{}}`,
+		"array_thinking":    `{"type":"thinking","thinking":[]}`,
+		"null_signature":    `{"type":"thinking","thinking":"synthetic","signature":null}`,
+		"number_signature":  `{"type":"thinking","thinking":"synthetic","signature":1}`,
+		"object_signature":  `{"type":"thinking","thinking":"synthetic","signature":{}}`,
+		"unknown_field":     `{"type":"thinking","thinking":"synthetic","unexpected":null}`,
+		"text_field":        `{"type":"thinking","thinking":"synthetic","text":""}`,
+		"source_field":      `{"type":"thinking","thinking":"synthetic","source":null}`,
+		"cache_control":     `{"type":"thinking","thinking":"synthetic","cache_control":{"type":"ephemeral"}}`,
+		"redacted_thinking": `{"type":"redacted_thinking","data":"synthetic"}`,
+		"image":             `{"type":"image","source":{"type":"base64","media_type":"image/png","data":"synthetic"}}`,
 	}
 	bodies := make(map[string]string, len(cases)+6)
 	for name, block := range cases {
@@ -227,13 +223,6 @@ func TestWarpMessagesHistoryThinkingInvalidRawRejectedBeforeClient(t *testing.T)
 	bodies["user_role"] = `{"model":"` + warpRouteModel + `","messages":[{"role":"user","content":[{"type":"text","text":"Current."},{"type":"thinking","thinking":"synthetic"}]}]}`
 	bodies["system_role"] = `{"model":"` + warpRouteModel + `","messages":[{"role":"system","content":[{"type":"thinking","thinking":"synthetic"}]},{"role":"user","content":"Current."}]}`
 	bodies["malformed_json"] = `{"model":"` + warpRouteModel + `","messages":[{"role":"assistant","content":[{"type":"thinking","thinking":}]}`
-	bodies["multiple_messages_overflow"] = warpHistoryThinkingBody(t, []map[string]any{
-		{"role": "user", "content": "First."},
-		{"role": "assistant", "content": []map[string]any{{"type": "text", "text": "First answer."}, {"type": "thinking", "thinking": strings.Repeat("t", 32<<10)}}},
-		{"role": "user", "content": "Second."},
-		{"role": "assistant", "content": []map[string]any{{"type": "text", "text": "Second answer."}, {"type": "thinking", "thinking": "", "signature": strings.Repeat("s", (32<<10)+1)}}},
-		{"role": "user", "content": "Current."},
-	}, nil)
 	for _, prefix := range []string{"/warp", "/warp/v1"} {
 		for name, body := range bodies {
 			t.Run(prefix+"/"+name, func(t *testing.T) {
@@ -277,16 +266,16 @@ func TestWarpMessagesHistoryThinkingOnlyAssistantRejected(t *testing.T) {
 	}
 }
 
-// The limit counts decoded UTF-8 bytes across thinking and signatures, not JSON
-// escaping or the separately rendered visible conversation.
-func TestWarpMessagesHistoryThinkingAcceptsExactByteBudget(t *testing.T) {
+// Large historical provider metadata remains compatible, but is never replayed
+// as visible dialog or as a transferable provider signature.
+func TestWarpMessagesHistoryThinkingAboveFormerByteBudget(t *testing.T) {
 	stub := newWarpRouteStub(t, http.StatusOK)
 	e, _, _ := newWarpRouteE2E(t, stub, 1)
 	messages := []map[string]any{
 		{"role": "user", "content": "First."},
-		{"role": "assistant", "content": []map[string]any{{"type": "thinking", "thinking": strings.Repeat("界", (32<<10)/3) + "tt"}, {"type": "text", "text": "First answer."}}},
+		{"role": "assistant", "content": []map[string]any{{"type": "thinking", "thinking": strings.Repeat("界", (128<<10)/3) + "tt"}, {"type": "text", "text": "First answer."}}},
 		{"role": "user", "content": "Second."},
-		{"role": "assistant", "content": []map[string]any{{"type": "text", "text": "Second answer."}, {"type": "thinking", "thinking": "", "signature": strings.Repeat("s", 32<<10)}}},
+		{"role": "assistant", "content": []map[string]any{{"type": "text", "text": "Second answer."}, {"type": "thinking", "thinking": "", "signature": strings.Repeat("s", 128<<10)}}},
 		{"role": "user", "content": "Current."},
 	}
 	resp := e.do(t, http.MethodPost, "/warp/v1/messages", warpHistoryThinkingBody(t, messages, nil), false)

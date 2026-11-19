@@ -316,6 +316,10 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 			if box.annotations == nil {
 				box.annotations = make(map[string]any, 4)
 			}
+			if value == "" {
+				delete(box.annotations, field)
+				return
+			}
 			box.annotations[field] = value
 		})
 		r = r.WithContext(requestCtx)

@@ -222,6 +222,40 @@ test('the gateway provider and its retry count are shown under the model', () =>
   assert.match(detail, /服务商尝试[\s\S]*2 次/);
 });
 
+test('all channels distinguish requested, sent and reported models without inferring providers', () => {
+  const api = load(); api.state.kind = 'request';
+  for (const channel of ['warp', 'cline', 'workbuddy', 'grok', 'doubao']) {
+    const metadata = { upstream_model_sent: 'sent-alias', upstream_model: 'actual-model',
+      upstream_model_status: 'reported', upstream_model_source: channel === 'warp' ? 'warp.model_used' : 'upstream_response',
+      upstream_model_fallback: channel === 'warp' ? 'true' : 'false' };
+    api.state.records = [{ id: channel, event: { kind: 'request', action: 'chat_request', status: 'success', channel, model: 'requested-alias', metadata } }];
+    api.renderRows();
+    const row = allText(api.ids.logsRows);
+    assert.match(row, /requested-alias[\s\S]*实际[\s\S]*actual-model[\s\S]*发送[\s\S]*sent-alias/);
+    api.renderDetail(api.state.records[0]);
+    const detail = allText(api.ids.logsDetailBody);
+    assert.match(detail, /上游实际模型[\s\S]*actual-model/);
+    assert.match(detail, /模型信息来源/);
+    assert.match(detail, /上游服务商[\s\S]*未知（上游未报告）/);
+    if (channel === 'warp') { assert.match(row, /回退/); assert.match(detail, /Warp ModelUsed/); }
+  }
+});
+
+test('unreported, withheld and legacy models stay explicitly unknown', () => {
+  const api = load(); api.state.kind = 'request';
+  for (const [status, label] of [['unreported', '未知（未报告）'], ['redacted', '未知（已脱敏）'], ['', '未知（旧记录未采集）']]) {
+    api.state.records = [{ id: status || 'old', event: { kind: 'request', action: 'chat_request', status: 'success',
+      channel: 'warp', model: 'requested', metadata: { upstream_model_status: status, upstream_model_sent: 'sent-only' } } }];
+    api.renderRows();
+    const row = allText(api.ids.logsRows);
+    assert.ok(row.includes(label));
+    assert.match(row, /发送[\s\S]*sent-only/);
+    assert.doesNotMatch(row, /实际\s+sent-only/);
+    api.renderDetail(api.state.records[0]);
+    assert.ok(allText(api.ids.logsDetailBody).includes(label));
+  }
+});
+
 test('output speed is never divided by the last milliseconds of a reply', () => {
   const api = load();
   api.state.kind = 'request';

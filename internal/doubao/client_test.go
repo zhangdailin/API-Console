@@ -643,7 +643,8 @@ func TestChatStreamIsCapturedForDiagnostics(t *testing.T) {
 	defer server.Close()
 	acc := &store.Account{ID: 9103, AccountType: "doubao", ClientCookie: `{"sessionid":"secret-session","passport_csrf_token":"secret-csrf"}`, DoubaoDeviceID: "7500000000000000004", DoubaoWebID: "7500000000000000005"}
 	client := NewFromAccount(acc, &config.Config{DoubaoBaseURL: server.URL, DoubaoRequestGapMS: 1})
-	ctx, capture := debug.WithCapture(context.Background(), "doubao-capture-test")
+	facts := map[string]string{}
+	ctx, capture := debug.WithCapture(upstream.WithRouteObserver(context.Background(), func(k, v string) { facts[k] = v }), "doubao-capture-test")
 	var answer strings.Builder
 	err := client.SendRequestWithPayload(ctx, upstream.UpstreamRequest{Model: "doubao", Messages: []prompt.Message{{Role: "user", Content: prompt.MessageContent{Text: "我想看小猫猫"}}}},
 		func(m upstream.SSEMessage) {
@@ -662,6 +663,9 @@ func TestChatStreamIsCapturedForDiagnostics(t *testing.T) {
 	testutil.MustContain(t, request, "/chat/completion")
 	testutil.MustNotContain(t, request, "secret-session")
 	testutil.MustNotContain(t, request, "secret-csrf")
+	testutil.Equal(t, facts[upstream.RouteSentModel], "0")
+	testutil.Equal(t, facts[upstream.RouteModelStatus], "unreported")
+	testutil.Equal(t, facts[upstream.RouteServedModel], "")
 }
 
 // Image-search results ride on a text block's meta_info, ahead of the text

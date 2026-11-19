@@ -44,7 +44,8 @@ type chatBody struct {
 // chatPayload is one rendered chat request plus what the client half of the
 // stream needs to undo the request-side rewrites.
 type chatPayload struct {
-	body []byte
+	body      []byte
+	sentModel string
 	// toolNames maps an upstream tool name back to the client's original one.
 	// It is nil when no name had to be shortened.
 	toolNames map[string]string
@@ -102,7 +103,7 @@ func buildChatPayload(req upstream.UpstreamRequest, model string) (chatPayload, 
 		return chatPayload{}, err
 	}
 	return chatPayload{body: raw, toolNames: toolNames, defaultMaxTokens: defaultMaxTokens,
-		sessionID: sessionID, hasTools: len(body.Tools) > 0}, nil
+		sessionID: sessionID, sentModel: model, hasTools: len(body.Tools) > 0}, nil
 }
 
 // maxToolNameLength is the upstream's ceiling on a function name. A longer

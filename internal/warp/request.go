@@ -14,25 +14,6 @@ import (
 	"orchids-api/internal/upstream"
 )
 
-const (
-	userTextLimit = 4096
-	// historyTurns bounds how much prior conversation may be replayed. It is a
-	// deliberate cost ceiling, not a protocol limit: Warp accepts a full task
-	// context, but replaying an unbounded transcript is what made earlier
-	// versions expensive.
-	historyTurns    = 8
-	transcriptLimit = 64 << 10
-	// toolRoundLimit caps agent loops per conversation. Every tool round costs a
-	// paid inference call, so an unbounded loop is exactly the cost failure this
-	// channel must not repeat.
-	toolRoundLimit     = 6
-	toolSchemaLimit    = 64 << 10
-	toolDescriptionCap = 32 << 10
-	// Provider reasoning is accepted only as bounded historical metadata, never
-	// replayed as query text or treated as tool input.
-	thinkingHistoryLimit = 64 << 10
-)
-
 type mcpTool struct {
 	Name        string
 	Description string
@@ -69,16 +50,16 @@ type preparedToolResult struct {
 }
 
 // validateRequest runs before token renewal or any upstream operation. It accepts
-// plain-text instructions, a bounded recent transcript, and a final user
+// plain-text instructions, the complete supplied transcript, and a final user
 // turn. Tools are declared to upstream as client MCP tools so the client, not the
 // gateway, executes them.
 func validateRequest(req upstream.UpstreamRequest) (preparedRequest, error) {
 	reject := func() (preparedRequest, error) {
-		return preparedRequest{}, apperrors.New("invalid_request_error", "Warp supports a bounded text conversation (max 8 prior turns, 64 KiB) with one user text message (1-4096 bytes) and optional client tools; no server-side tools, images, or generation controls", 400)
+		return preparedRequest{}, apperrors.NewLocalRequestError("warp_request_shape")
 	}
 	// Generation controls are accepted for wire compatibility with Anthropic and
 	// OpenAI clients but are not forwarded: the Warp agent endpoint exposes no
-	// equivalent, so the gateway's own byte ceilings bound the answer.
+	// equivalent. The gateway does not impose a token-saving answer ceiling.
 	if len(req.Messages) < 1 || req.ResponseFormat != nil || req.ResponseText != nil || req.Include != nil || req.PromptCacheKey != "" || len(req.ResponsesTools) != 0 {
 		return reject()
 	}
@@ -91,7 +72,7 @@ func validateRequest(req upstream.UpstreamRequest) (preparedRequest, error) {
 	}
 	choice, disableParallel, ok := parseToolChoice(req.ToolChoice)
 	if !ok {
-		return reject()
+		return preparedRequest{}, apperrors.NewLocalRequestError("warp_tool_choice")
 	}
 	if choice == "none" {
 		tools = nil
@@ -105,16 +86,15 @@ func validateRequest(req upstream.UpstreamRequest) (preparedRequest, error) {
 		return preparedRequest{}, err
 	}
 	if len(messages) == 0 || messages[len(messages)-1].Role != "user" {
-		return reject()
+		return preparedRequest{}, apperrors.NewLocalRequestError("warp_dialog")
 	}
-	// Bound the final original user message before joining adjacent context
-	// messages. Joining cannot bypass the existing per-message input ceiling.
+	// Validate the final original user message before joining context fragments.
 	_, finalText, finalResults, ok := splitCurrentTurn(messages, 0)
-	if !ok || len(finalText) > userTextLimit || (strings.TrimSpace(finalText) == "" && len(finalResults) == 0) {
-		return reject()
+	if !ok || (strings.TrimSpace(finalText) == "" && len(finalResults) == 0) {
+		return preparedRequest{}, apperrors.NewLocalRequestError("warp_user_turn")
 	}
 	messages, ok = mergeUserContext(messages)
-	if !ok || len(messages) > 2*historyTurns+1 {
+	if !ok {
 		return reject()
 	}
 	// The final user turn may carry tool results produced by the client. Those
@@ -132,26 +112,25 @@ func validateRequest(req upstream.UpstreamRequest) (preparedRequest, error) {
 	for i, message := range prior {
 		role := message.Role
 		if role != "user" && role != "assistant" {
-			return reject()
+			return preparedRequest{}, apperrors.NewLocalRequestError("warp_dialog")
 		}
 		if i == 0 && role != "user" {
-			return reject()
+			return preparedRequest{}, apperrors.NewLocalRequestError("warp_dialog")
 		}
 		if i > 0 && prior[i-1].Role == role {
-			return reject()
+			return preparedRequest{}, apperrors.NewLocalRequestError("warp_dialog")
 		}
 		if _, ok := renderMessage(message); !ok {
 			return reject()
 		}
 	}
-	if len(prior)%2 != 0 || len(prior) > 2*historyTurns {
-		return reject()
-	}
-	if toolRounds(prior) > toolRoundLimit {
-		return preparedRequest{}, apperrors.New("invalid_request_error", "Warp tool loop limit reached for this conversation; start a new conversation", 400)
+	if len(prior)%2 != 0 {
+		return preparedRequest{}, apperrors.NewLocalRequestError("warp_dialog")
 	}
 	// Resolve each current tool result to the call it answers. Anything the
 	// client is not able to type back is rendered as text instead.
+	// A matching call requires its owned binding, never an unrelated paid
+	// stateless replay. Historical calls do not impose a generation budget.
 	uses := indexToolUses(prior)
 	declared := make(map[string]bool, len(tools))
 	for _, tool := range tools {
@@ -177,35 +156,32 @@ func validateRequest(req upstream.UpstreamRequest) (preparedRequest, error) {
 		history = append(history, prompt.Message{Role: "user", Content: prompt.MessageContent{Text: strings.Join(currentParts, "\n")}})
 	}
 	// A single plain user turn keeps the original, minimal wire shape.
-	if len(history) == 1 && system == "" && history[0].Role == "user" && len(history[0].Content.Blocks) == 0 && len(preparedResults) == 0 && len(history[0].Content.Text) <= userTextLimit {
+	if len(history) == 1 && system == "" && history[0].Role == "user" && len(history[0].Content.Blocks) == 0 && len(preparedResults) == 0 {
 		text := history[0].Content.Text
-		if strings.TrimSpace(text) == "" || len(text) > userTextLimit || !validModel(req.Model) {
+		if strings.TrimSpace(text) == "" || !validModel(req.Model) {
 			return reject()
 		}
 		return preparedRequest{Query: text, CurrentText: text, Tools: tools, ParallelTools: parallel}, nil
 	}
-	// Reserve the exact stateless fallback, including labels and separators, even
-	// when a binding will send these results as structured inputs instead.
-	fallback := appendToolResultsText("", preparedResults)
-	reserved := len(fallback)
-	if reserved > 0 {
-		reserved += len("\n\n")
+	transcript, ok := renderTranscript(system, history)
+	if !ok {
+		return reject()
 	}
-	transcript, ok := renderTranscriptWithin(system, history, transcriptLimit-reserved)
-	if !ok || !validModel(req.Model) {
+	if !validModel(req.Model) {
 		return reject()
 	}
 	if transcript == "" && len(preparedResults) == 0 {
 		return reject()
 	}
-	continuationText := currentText
+	continuationText := strings.Join(currentParts, "\n")
 	if len(preparedResults) > 0 && system != "" {
 		// A bound continuation omits the replayed dialog, not the caller's
 		// instructions. Keep new/changed system text in the current query.
-		continuationText = "System instructions:\n" + system
-		if currentText != "" {
-			continuationText += "\n\nUser message:\n" + currentText
+		prefix := "System instructions:\n" + system
+		if continuationText != "" {
+			prefix += "\n\nUser message:\n" + continuationText
 		}
+		continuationText = prefix
 	}
 	return preparedRequest{Query: transcript, CurrentText: continuationText, Tools: tools, ParallelTools: parallel, ToolResults: preparedResults}, nil
 }
@@ -289,31 +265,10 @@ func appendToolResultsText(query string, results []preparedToolResult) string {
 	return query + "\n\n" + strings.Join(parts, "\n\n")
 }
 
-// toolRounds counts how many tool calls the transcript already contains, which
-// is the number of paid turns this conversation has consumed.
-func toolRounds(messages []prompt.Message) int {
-	rounds := 0
-	for _, m := range messages {
-		for _, block := range m.Content.Blocks {
-			if block.Type == "tool_use" {
-				rounds++
-			}
-		}
-	}
-	return rounds
-}
-
-// renderTranscript flattens the bounded conversation into one query string. Tool
+// renderTranscript flattens the complete conversation into one query string. Tool
 // calls and their results are rendered as text so a stateless turn needs no
 // server-side task binding.
 func renderTranscript(system string, messages []prompt.Message) (string, bool) {
-	return renderTranscriptWithin(system, messages, transcriptLimit)
-}
-
-func renderTranscriptWithin(system string, messages []prompt.Message, limit int) (string, bool) {
-	if limit < 0 {
-		return "", false
-	}
 	parts := make([]string, 0, len(messages))
 	for _, m := range messages {
 		rendered, ok := renderMessage(m)
@@ -322,29 +277,12 @@ func renderTranscriptWithin(system string, messages []prompt.Message, limit int)
 		}
 		parts = append(parts, rendered)
 	}
-	// System instructions are uncapped and outside the non-system history
-	// budget. Only complete oldest dialog pairs may be omitted; instructions
-	// cannot displace dialog or be silently truncated to satisfy that budget.
+	// Preserve all supplied instructions and dialog without local trimming.
 	prefix := ""
 	if system != "" {
 		prefix = "System instructions:\n" + system + "\n\n"
 	}
-	for dropped := 0; ; dropped += 2 {
-		all := make([]string, 0, len(parts)+2)
-		if dropped > 0 {
-			all = append(all, "[earlier history omitted]")
-		}
-		all = append(all, parts[dropped:]...)
-		transcript := strings.Join(all, "\n\n")
-		if len(transcript) <= limit {
-			return prefix + transcript, true
-		}
-		// Keep the latest complete history pair, unless a current user message
-		// exists and is the only context that can fit the hard ceiling.
-		if len(parts)-dropped <= 2 || messages[dropped].Role != "user" || messages[dropped+1].Role != "assistant" {
-			return "", false
-		}
-	}
+	return prefix + strings.Join(parts, "\n\n"), true
 }
 
 func renderMessage(m prompt.Message) (string, bool) {
@@ -377,7 +315,7 @@ func renderMessage(m prompt.Message) (string, bool) {
 			}
 		case "tool_use":
 			args, err := json.Marshal(block.Input)
-			if err != nil || len(args) > transcriptLimit {
+			if err != nil {
 				return "", false
 			}
 			lines = append(lines, "Assistant tool call "+toolLabel(block.ID, block.Name)+": "+string(args))
@@ -449,7 +387,7 @@ func validMessageBlock(block prompt.ContentBlock, role string) bool {
 func toolResultText(content any) (string, bool) {
 	switch typed := content.(type) {
 	case string:
-		return typed, utf8.ValidString(typed) && len(typed) <= transcriptLimit
+		return typed, utf8.ValidString(typed)
 	case []any:
 		if typed == nil {
 			return "", false
@@ -467,7 +405,7 @@ func toolResultText(content any) (string, bool) {
 			parts = append(parts, text)
 		}
 		out := strings.Join(parts, "\n")
-		return out, len(out) <= transcriptLimit
+		return out, true
 	default:
 		return "", false
 	}
@@ -533,10 +471,6 @@ func requestFieldError(code, path string) error {
 	return apperrors.New("invalid_request_error", "Warp "+code+" at "+path, 400)
 }
 
-func requestBytesError(code, path string, measured, limit int) error {
-	return apperrors.New("invalid_request_error", fmt.Sprintf("Warp %s at %s: measured_bytes=%d limit_bytes=%d", code, path, measured, limit), 400)
-}
-
 func convertToolsWithError(raw []any) ([]mcpTool, error) {
 	if len(raw) == 0 {
 		return nil, nil
@@ -592,30 +526,22 @@ func convertToolsWithError(raw []any) ([]mcpTool, error) {
 			if !valid || !utf8.ValidString(desc) {
 				return nil, requestFieldError("invalid_tool_description", fnPath+".description")
 			}
-			if len(desc) > toolDescriptionCap {
-				return nil, requestBytesError("tool_description_bytes", fnPath+".description", len(desc), toolDescriptionCap)
-			}
 			tool.Description = desc
 		}
 		params, ok := fn[schemaKey].(map[string]any)
 		if !ok || params == nil {
 			return nil, requestFieldError("invalid_tool_schema", fnPath+"."+schemaKey)
 		}
-		encoded, err := json.Marshal(params)
+		_, err := json.Marshal(params)
 		if err != nil {
 			return nil, requestFieldError("invalid_tool_schema", fnPath+"."+schemaKey)
-		}
-		if len(encoded) > toolSchemaLimit {
-			return nil, requestBytesError("tool_schema_bytes", fnPath+"."+schemaKey, len(encoded), toolSchemaLimit)
 		}
 		// Validate the actual wire representation before a paid operation;
 		// json.Marshal alone also accepts values structpb cannot encode.
 		if _, err := structpb.NewStruct(params); err != nil {
 			return nil, requestFieldError("invalid_tool_schema", fnPath+"."+schemaKey)
 		}
-		// Do not cap accumulated schema/definition bytes or tool count. The
-		// individual description and schema limits remain in force; preserve
-		// every accepted definition without truncation or schema rewriting.
+		// Preserve every definition without size/count caps or schema rewriting.
 		tool.Schema = params
 		tools = append(tools, tool)
 	}
@@ -642,7 +568,7 @@ func normalizeInstructions(items []prompt.SystemItem, messages []prompt.Message)
 			dialog = append(dialog, message)
 			continue
 		}
-		text, ok := messageText(message, -1)
+		text, ok := messageText(message)
 		if !ok || strings.TrimSpace(text) == "" {
 			return "", nil, requestFieldError("invalid_system_text", fmt.Sprintf("messages[%d].content", i))
 		}
@@ -660,7 +586,7 @@ func validCacheControl(cache *prompt.CacheControl) bool {
 
 // messageText extracts plain text from one message. Content blocks must be pure
 // text: no images, files, or reasoning payloads may enter a paid request.
-func messageText(m prompt.Message, limit int) (string, bool) {
+func messageText(m prompt.Message) (string, bool) {
 	if m.ReasoningContent != "" || len(m.ReasoningItem) != 0 {
 		return "", false
 	}
@@ -680,7 +606,7 @@ func messageText(m prompt.Message, limit int) (string, bool) {
 		// distinct instruction messages/items receive newline separators.
 		text = strings.Join(parts, "")
 	}
-	if (limit >= 0 && len(text) > limit) || !utf8.ValidString(text) {
+	if !utf8.ValidString(text) {
 		return "", false
 	}
 	return text, true

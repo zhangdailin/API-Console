@@ -48,6 +48,8 @@ type Client struct {
 	base, firebaseBase, tokenBase, firebaseKey string
 	account                                    *store.Account
 	owner                                      AccountUpdater
+	generationTimeout                          time.Duration
+	streamIdleTimeout                          time.Duration
 	bindings                                   *bindingStore
 	recovery                                   *recoveryStore
 	mu                                         sync.Mutex
@@ -75,7 +77,10 @@ func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
 	if c.firebaseKey == "" {
 		c.firebaseKey = strings.TrimSpace(os.Getenv("ORCHIDS_WARP_FIREBASE_API_KEY"))
 	}
-	shared := httpclient.GetSharedHTTPClientWithLimits(httpclient.GenerateProxyKeyFromConfig(cfg), 90*time.Second, httpclient.ProxyFuncFromConfig(cfg), false, cfg)
+	c.generationTimeout = cfg.UpstreamRequestTimeout()
+	c.streamIdleTimeout = config.SharedStreamIdleTimeout
+	headerTimeout := min(c.generationTimeout, c.streamIdleTimeout)
+	shared := httpclient.GetSharedHTTPClientWithTimeouts(httpclient.GenerateProxyKeyFromConfig(cfg), c.generationTimeout, headerTimeout, httpclient.ProxyFuncFromConfig(cfg), false, cfg)
 	local := *shared
 	local.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	c.http = &local
@@ -102,10 +107,22 @@ func (c *Client) request(ctx context.Context, endpoint, contentType string, body
 		req.Header.Set("Accept", "text/event-stream")
 		req.Header.Set("Accept-Encoding", "identity")
 	}
-	resp, err := c.http.Do(req)
+	client := c.http
+	if contentType != "application/x-protobuf" {
+		// Authentication and device-login calls keep their shorter operation budget.
+		local := *client
+		if local.Timeout <= 0 || local.Timeout > 90*time.Second {
+			local.Timeout = 90 * time.Second
+		}
+		client = &local
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
+		}
+		if contentType == "application/x-protobuf" && isGenerationTimeout(err) {
+			return nil, errGenerationTimeout
 		}
 		return nil, errTransport
 	}
@@ -150,7 +167,7 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	supported := capabilities{}.SupportsModel(c.account, req.Model)
 	c.mu.Unlock()
 	if !supported {
-		return apperrors.New("invalid_request_error", "Warp requires an exact model from a fresh account catalog", 400)
+		return apperrors.NewLocalRequestError("warp_model_catalog")
 	}
 	prepared.ContextWindow = c.modelContextWindow(req.Model)
 	c.mu.Lock()
@@ -185,9 +202,6 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 		if !ok || binding.ConversationID == "" || len(binding.RootTaskContext) == 0 {
 			return apperrors.New("warp_continuation_unavailable", "Warp tool continuation expired or belongs to a different owner, account or model; no upstream call was made", 409)
 		}
-		if binding.ToolRounds >= toolRoundLimit {
-			return apperrors.New("invalid_request_error", "Warp tool conversation paid-turn limit reached; no upstream call was made", 400)
-		}
 		prepared.ConversationID, prepared.Query = binding.ConversationID, prepared.CurrentText
 		prepared.RootTaskContext, prepared.ToolRounds = binding.RootTaskContext, binding.ToolRounds
 		continuation, continuationIDs = &binding, ids
@@ -203,15 +217,13 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	}
 	body, err := buildRequest(req.Model, prepared)
 	if err != nil {
-		return apperrors.New("invalid_request_error", "Warp request is unsupported", 400)
+		return apperrors.NewLocalRequestError("warp_request_shape")
 	}
 	token, err := c.accessToken(ctx)
 	if err != nil {
 		return err
 	}
-	// A tool-driven turn can legitimately take longer than a chat reply; the
-	// stream ceilings still bound bytes and the attempt budget stays single.
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, c.generationTimeout)
 	defer cancel()
 	if err := c.authorizeGeneration(ctx, token, req.Model); err != nil {
 		return err
@@ -224,7 +236,7 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 		recovery, recoveryRaw = &head, raw
 	} else if continuation != nil {
 		if err := c.bindings.claimToolTurn(ctx, accountID, req.Model, continuationIDs, *continuation); err != nil {
-			return apperrors.New("warp_continuation_conflict", "Warp tool results were already consumed or the paid-turn budget is exhausted; no upstream call was made", 409)
+			return apperrors.New("warp_continuation_conflict", "Warp tool results were already consumed or their continuation is unavailable; no upstream call was made", 409)
 		}
 	}
 	var result streamResult
@@ -242,8 +254,11 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	}
 	defer func() { finishAttempt(err) }()
 	upstream.NoteUpstreamCall(ctx, c.base+"/ai/multi-agent", req.Model)
-	diagnostic := generationDiagnostic{Stage: "transport", ContentType: "missing"}
+	diagnostic := generationDiagnostic{Stage: "transport", ContentType: "missing", MCPToolsDeclared: len(prepared.Tools)}
 	defer func() {
+		if diagnostic.TimeoutReason == "" {
+			diagnostic.TimeoutReason = generationTimeoutReason(err)
+		}
 		if capture := debug.FromContext(ctx); capture != nil {
 			// This closed schema contains no wire payloads or credentials.
 			data, _ := json.Marshal(diagnostic)
@@ -264,10 +279,14 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	paidStarted = true
 	resp, err := c.request(ctx, c.base+"/ai/multi-agent", "application/x-protobuf", body, token)
 	if err != nil {
+		diagnostic.TimeoutReason = generationTimeoutReason(err)
+		if isGenerationTimeout(err) {
+			diagnostic.Stage, diagnostic.ParserCategory = generationParserFailure(err)
+		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		return generationStageError(diagnostic.Stage, 0, nil)
+		return generationStageError(diagnostic.Stage, 0, err)
 	}
 	defer resp.Body.Close()
 	diagnostic.UpstreamHTTPStatus = generationHTTPStatus(resp.StatusCode)
@@ -281,7 +300,9 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 		diagnostic.Stage = "content_type"
 		return generationStageError(diagnostic.Stage, resp.StatusCode, nil)
 	}
-	result, err = readStreamWithContext(resp.Body, req.Model, prepared.RootTaskContext)
+	monitored, progress := httpclient.MonitorProgressIdle(resp.Body, c.streamIdleTimeout, cancel, "warp")
+	defer monitored.Close()
+	result, err = readStreamWithProgress(monitored, req.Model, prepared.RootTaskContext, progress)
 	if err == nil || result.RecoverySafe {
 		declared := make(map[string]bool, len(prepared.Tools))
 		for _, tool := range prepared.Tools {
@@ -296,18 +317,26 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 		}
 	}
 	diagnostic.ParserEvents, diagnostic.TextBytes = result.Events, result.TextBytes
+	diagnostic.MCPToolCalls = len(result.ToolCalls)
 	diagnostic.ServerBookkeeping = result.ServerBookkeeping
 	diagnostic.RejectAction, diagnostic.RejectMessage, diagnostic.RejectTool = result.RejectAction, result.RejectMessage, result.RejectTool
 	diagnostic.Rejection = result.Rejection
 	diagnostic.Failure = result.Failure
+	diagnostic.FinishReason = result.FinishReason
+	diagnostic.ConversationContext = result.ConversationContext
 	c.mu.Lock()
 	diagnostic.ModelMismatch = modelMismatchDetails(req.Model, result.ModelMismatch, c.account.WarpModelIDs)
 	c.mu.Unlock()
+	diagnostic.ModelUsed = c.recordObservedModel(ctx, req.Model, result.ModelUsed)
 	if result.Usage.Measured {
 		diagnostic.Usage = result.Usage.event()
 	}
 	if err != nil {
+		diagnostic.TimeoutReason = generationTimeoutReason(err)
 		diagnostic.Stage, diagnostic.ParserCategory = generationParserFailure(err)
+		if errors.Is(err, httpclient.ErrStreamIdle("warp")) {
+			return generationStageError(diagnostic.Stage, resp.StatusCode, err)
+		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -360,28 +389,38 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 // generationDiagnostic is intentionally a closed, content-free projection. The
 // usage map comes only from observedUsage.event's fixed numeric field allowlist.
 type generationDiagnostic struct {
-	Stage              string                   `json:"stage"`
-	UpstreamHTTPStatus int                      `json:"upstream_http_status"`
-	ContentType        string                   `json:"content_type"`
-	ParserCategory     int                      `json:"parser_category"`
-	ParserEvents       int                      `json:"parser_events"`
-	TextBytes          int                      `json:"text_bytes"`
-	ServerBookkeeping  int                      `json:"server_bookkeeping"`
-	RejectAction       int                      `json:"reject_action,omitempty"`
-	RejectMessage      int                      `json:"reject_message,omitempty"`
-	RejectTool         int                      `json:"reject_tool,omitempty"`
-	Rejection          *streamRejection         `json:"rejection,omitempty"`
-	Failure            *streamFailure           `json:"failure,omitempty"`
-	ModelMismatch      *modelMismatchDiagnostic `json:"model_mismatch,omitempty"`
-	Usage              map[string]any           `json:"usage,omitempty"`
+	Stage               string                         `json:"stage"`
+	UpstreamHTTPStatus  int                            `json:"upstream_http_status"`
+	ContentType         string                         `json:"content_type"`
+	ParserCategory      int                            `json:"parser_category"`
+	ParserEvents        int                            `json:"parser_events"`
+	TextBytes           int                            `json:"text_bytes"`
+	ServerBookkeeping   int                            `json:"server_bookkeeping"`
+	MCPToolsDeclared    int                            `json:"mcp_tools_declared"`
+	MCPToolCalls        int                            `json:"mcp_tool_calls"`
+	RejectAction        int                            `json:"reject_action,omitempty"`
+	RejectMessage       int                            `json:"reject_message,omitempty"`
+	RejectTool          int                            `json:"reject_tool,omitempty"`
+	Rejection           *streamRejection               `json:"rejection,omitempty"`
+	Failure             *streamFailure                 `json:"failure,omitempty"`
+	ModelMismatch       *modelMismatchDiagnostic       `json:"model_mismatch,omitempty"`
+	ModelUsed           *modelMismatchDiagnostic       `json:"model_used,omitempty"`
+	Usage               map[string]any                 `json:"usage,omitempty"`
+	FinishReason        string                         `json:"finish_reason,omitempty"`
+	ConversationContext *conversationContextDiagnostic `json:"conversation_context,omitempty"`
+	TimeoutReason       string                         `json:"timeout_reason,omitempty"`
 }
 
 // Category values are stable local diagnostics, not upstream enum values:
 // 0 none, 1 protocol, 2 tool/subagent, 3 incomplete, 4 finish, 5 limit,
-// 6 reserved (formerly model substitution), 7 invalid usage.
+// 6 reserved (formerly model substitution), 7 invalid usage, 8 timeout.
 // Unknown errors fail closed as protocol.
 func generationParserFailure(err error) (string, int) {
 	switch {
+	case isGenerationTimeout(err):
+		return "timeout", 8
+	case errors.Is(err, context.Canceled):
+		return "incomplete", 3
 	case err == nil:
 		return "stream_protocol", 0
 	case errors.Is(err, errStreamStream):
@@ -404,7 +443,7 @@ func generationParserFailure(err error) (string, int) {
 func generationStageError(stage string, status int, parseErr error) error {
 	// Do not trust even the supplied stage: only fixed identifiers may escape.
 	switch stage {
-	case "transport", "http_status", "content_type", "stream_protocol", "tool_or_subagent", "incomplete", "finish", "limit", "usage_invalid":
+	case "transport", "http_status", "content_type", "stream_protocol", "tool_or_subagent", "incomplete", "finish", "limit", "usage_invalid", "timeout":
 	default:
 		stage = "stream_protocol"
 	}

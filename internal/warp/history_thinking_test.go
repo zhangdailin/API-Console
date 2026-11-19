@@ -84,12 +84,12 @@ func TestHistoricalThinkingRejectsForeignFieldsRolesAndLimits(t *testing.T) {
 		t.Fatal("thinking-only assistant treated as a visible answer")
 	}
 	req.Messages[1].Content.Blocks = append(req.Messages[1].Content.Blocks, prompt.ContentBlock{Type: "text", Text: "ok"})
-	req.Messages[1].Content.Blocks[0].Thinking = strings.Repeat("x", thinkingHistoryLimit)
+	req.Messages[1].Content.Blocks[0].Thinking = strings.Repeat("x", 128<<10)
 	if _, err := validateRequest(req); err != nil {
 		t.Fatal("exact reasoning byte boundary rejected")
 	}
 	req.Messages[1].Content.Blocks[0].Signature = "x"
-	if _, err := validateRequest(req); err == nil {
-		t.Fatal("over-bound reasoning accepted")
+	if prepared, err := validateRequest(req); err != nil || strings.Contains(prepared.Query, strings.Repeat("x", 100)) {
+		t.Fatal("large historical reasoning was rejected or exposed as prompt text")
 	}
 }

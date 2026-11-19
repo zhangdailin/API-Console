@@ -15,7 +15,6 @@ import (
 )
 
 const recoveryTTL = time.Hour
-const recoveryAttemptLimit = 3
 const recoveryKeyPrefix = "warp:recovery:v1:"
 
 var errRecoveryUnavailable = errors.New("Warp tool continuation recovery unavailable")
@@ -97,7 +96,7 @@ func recoveryCounterKeys(b *bindingStore, head recoveryHead) (string, string) {
 
 func validRecoveryHead(head recoveryHead, identity recoveryHead, digest string) bool {
 	age := time.Since(head.SavedAt)
-	if head.Version != 1 || head.Revision < 1 || head.State != "failed" || head.Owner != identity.Owner || head.AccountID != identity.AccountID || head.Model != identity.Model || head.Digest != digest || head.ConversationID == "" || head.Attempts < 0 || head.Attempts >= recoveryAttemptLimit || head.PaidTurns < 1 || head.PaidTurns >= toolRoundLimit || age < 0 || age > recoveryTTL || len(head.IDs) != len(identity.IDs) {
+	if head.Version != 1 || head.Revision < 1 || head.State != "failed" || head.Owner != identity.Owner || head.AccountID != identity.AccountID || head.Model != identity.Model || head.Digest != digest || head.ConversationID == "" || head.Attempts < 0 || head.PaidTurns < 1 || age < 0 || age > recoveryTTL || len(head.IDs) != len(identity.IDs) {
 		return false
 	}
 	for i := range head.IDs {
@@ -139,7 +138,7 @@ func (c *Client) loadRecovery(ctx context.Context, accountID int64, model string
 }
 
 // reserveRecovery is the sole transition that permits another paid generation.
-// The checkpoint CAS and both budgets are atomic across processes in Redis.
+// The checkpoint CAS and observational counters are atomic across processes.
 func (c *Client) reserveRecovery(ctx context.Context, head recoveryHead, previous []byte) (recoveryHead, []byte, error) {
 	identity, key, ok := recoveryIdentity(ctx, head.AccountID, head.Model, head.IDs)
 	if !ok || !validRecoveryHead(head, identity, head.Digest) {
@@ -191,7 +190,7 @@ func (c *Client) finishRecovery(ctx context.Context, accountID int64, model stri
 	}
 	head.State = "done"
 	head.RootTaskContext = nil
-	if safe && head.Attempts < recoveryAttemptLimit && head.PaidTurns < toolRoundLimit {
+	if safe {
 		head.State = "failed"
 		head.RootTaskContext = bytes.Clone(result.RecoveryContext)
 	}
@@ -215,7 +214,7 @@ func (c *Client) finishRecovery(ctx context.Context, accountID int64, model stri
 }
 
 func explicitRecoveryError() error {
-	return apperrors.New("warp_continuation_conflict", "Warp tool continuation recovery is unavailable, already running, completed, or its budget is exhausted; no upstream call was made", 409)
+	return apperrors.New("warp_continuation_conflict", "Warp tool continuation recovery is unavailable, already running, or completed; no upstream call was made", 409)
 }
 
 func recoveryAvailableError() error {

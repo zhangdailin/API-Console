@@ -38,7 +38,7 @@ func TestClientToolRoundtripResumesRedisContextAndRejectsReplay(t *testing.T) {
 	callEvent := mcpToolCallEvent(t, "call-echo", "echo", map[string]any{"text": "LIME"})
 	toolMessage := callEvent.GetClientActions().GetActions()[0].GetAddMessagesToTask().GetMessages()[0]
 	toolMessage.SetTaskId("root")
-	toolMessage.GetToolCall().GetCallMcpTool().SetServerId("client-request-tools")
+	toolMessage.GetToolCall().GetCallMcpTool().SetServerId(clientMCPServerID)
 	metadata := integrityMetadata(warpapi.Message_RequestMetadata_ToolCallSummary_builder{ToolCalls: proto.Uint32(1)}.Build(), nil)
 	metadata.SetTaskId("root")
 	firstStream := integrityStream(t, initEvent(t, "conv-roundtrip"), testAction(create), callEvent, integrityTaskMessages(metadata), testDone())
@@ -133,7 +133,7 @@ func TestClientToolRoundtripResumesRedisContextAndRejectsReplay(t *testing.T) {
 	firstWire := <-requests
 	servers := firstWire.GetMcpContext().GetServers()
 	supported := firstWire.GetSettings().GetSupportedTools()
-	if len(servers) != 1 || servers[0].GetId() != "client-request-tools" || len(servers[0].GetTools()) != 1 || servers[0].GetTools()[0].GetName() != "echo" || len(supported) != 1 || supported[0] != warpapi.ToolType_CALL_MCP_TOOL {
+	if len(servers) != 1 || servers[0].GetId() != clientMCPServerID || len(servers[0].GetTools()) != 1 || servers[0].GetTools()[0].GetName() != "echo" || len(supported) != 1 || supported[0] != warpapi.ToolType_CALL_MCP_TOOL {
 		t.Fatal("initial request did not advertise exactly the client MCP tool")
 	}
 

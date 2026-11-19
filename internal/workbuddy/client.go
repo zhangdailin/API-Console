@@ -205,7 +205,7 @@ func (c *Client) runChat(ctx context.Context, req upstream.UpstreamRequest, time
 			onMessage(msg)
 		}
 	}, req.StreamToolDeltas)
-	upstream.NoteServedModel(ctx, result.Model)
+	upstream.NoteServedModelWithSource(ctx, result.Model, "chat.model")
 	if err != nil {
 		if typed, ok := err.(*APIError); ok && typed.RetryDelay == 0 {
 			typed.RetryDelay = parseRetryAfter(resp.Header.Get("Retry-After"))

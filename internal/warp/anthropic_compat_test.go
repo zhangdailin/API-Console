@@ -66,8 +66,11 @@ func TestAnthropicEffortControlsAreAcceptedButNotForwarded(t *testing.T) {
 		if strings.Contains(name, "effort") || strings.Contains(name, "reasoning") && field.Kind() != protoreflect.BoolKind {
 			t.Errorf("settings field %s leaked a reasoning/effort control", field.Name())
 		}
-		if field.Kind() == protoreflect.BoolKind && (!settings.ProtoReflect().Has(field) || settings.ProtoReflect().Get(field).Bool()) {
-			t.Errorf("Warp capability %s must stay explicitly false", field.Name())
+		if field.Kind() == protoreflect.BoolKind {
+			want := name == "should_preserve_file_content_in_history"
+			if !settings.ProtoReflect().Has(field) || settings.ProtoReflect().Get(field).Bool() != want {
+				t.Errorf("Warp capability %s has incorrect value", field.Name())
+			}
 		}
 	}
 	// The Anthropic-shaped tool survives translation into an MCP declaration.

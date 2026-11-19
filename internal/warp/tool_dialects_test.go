@@ -202,15 +202,15 @@ func TestTranscriptExactCeilingExcludesSystemButIncludesDialogAndToolResults(t *
 	if !ok {
 		t.Fatal("fixture rejected")
 	}
-	messages[1].Content.Text = strings.Repeat("x", transcriptLimit-(len(overhead)-1))
+	messages[1].Content.Text = strings.Repeat("x", (64<<10)-(len(overhead)-1))
 	query, ok := renderTranscript("pinned", messages)
-	if !ok || len(query) != transcriptLimit+len("System instructions:\npinned\n\n") {
+	if !ok || len(query) != (64<<10)+len("System instructions:\npinned\n\n") {
 		t.Fatalf("exact boundary rejected or changed: %d %t", len(query), ok)
 	}
 	messages[1].Content.Text += "x"
 	query, ok = renderTranscript("pinned", messages)
-	if !ok || len(query) > transcriptLimit+len("System instructions:\npinned\n\n") || !strings.HasPrefix(query, "System instructions:\npinned\n\n") || !strings.Contains(query, "[earlier history omitted]") || strings.Contains(query, "Assistant:") {
-		t.Fatalf("whole-pair trim or pinned prefix broken: %d %t", len(query), ok)
+	if !ok || len(query) != (64<<10)+1+len("System instructions:\npinned\n\n") || !strings.HasPrefix(query, "System instructions:\npinned\n\n") || strings.Contains(query, "[earlier history omitted]") || !strings.Contains(query, "Assistant:") {
+		t.Fatalf("full history or pinned prefix broken: %d %t", len(query), ok)
 	}
 	assistant := prompt.Message{Role: "assistant", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{{Type: "tool_use", ID: "c1", Name: "lookup", Input: map[string]any{}}}}}
 	current := prompt.Message{Role: "user", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{{Type: "tool_result", ToolUseID: "c1", Content: ""}}}}
@@ -221,14 +221,14 @@ func TestTranscriptExactCeilingExcludesSystemButIncludesDialogAndToolResults(t *
 		t.Fatal(err)
 	}
 	baseLength := len(appendToolResultsText(base.Query, base.ToolResults)) - len("System instructions:\npinned\n\n")
-	req.Messages[3].Content.Blocks[0].Content = strings.Repeat("r", transcriptLimit-baseLength)
+	req.Messages[3].Content.Blocks[0].Content = strings.Repeat("r", (64<<10)-baseLength)
 	boundary, err := validateRequest(req)
-	if err != nil || len(appendToolResultsText(boundary.Query, boundary.ToolResults)) != transcriptLimit+len("System instructions:\npinned\n\n") {
+	if err != nil || len(appendToolResultsText(boundary.Query, boundary.ToolResults)) != (64<<10)+len("System instructions:\npinned\n\n") {
 		t.Fatalf("exact tool-result boundary failed: %v", err)
 	}
-	req.Messages[3].Content.Blocks[0].Content = strings.Repeat("r", transcriptLimit-baseLength+1)
-	if _, err := validateRequest(req); err == nil {
-		t.Fatal("overflowing pinned-system/latest-tool transcript accepted")
+	req.Messages[3].Content.Blocks[0].Content = strings.Repeat("r", (64<<10)-baseLength+1)
+	if _, err := validateRequest(req); err != nil {
+		t.Fatal("pinned-system/latest-tool transcript above former cap rejected")
 	}
 }
 
@@ -258,7 +258,7 @@ func TestCurrentUserAndConversationGuardsRemain(t *testing.T) {
 		}
 	}
 	messages := []prompt.Message{}
-	for i := 0; i < historyTurns; i++ {
+	for i := 0; i < 8; i++ {
 		messages = append(messages, textMessage("user", "q"), textMessage("assistant", "a"))
 	}
 	messages = append(messages, textMessage("user", "current"))
@@ -266,8 +266,9 @@ func TestCurrentUserAndConversationGuardsRemain(t *testing.T) {
 		t.Fatalf("8 prior turns rejected: %v", err)
 	}
 	messages = append(messages, textMessage("assistant", "a"), textMessage("user", "too much"))
-	if _, err := validateRequest(historyRequest(messages...)); err == nil {
-		t.Fatal("9 prior turns accepted")
+	trimmed, err := validateRequest(historyRequest(messages...))
+	if err != nil || strings.Contains(trimmed.Query, "[earlier history omitted]") || strings.Count(trimmed.Query, "Assistant: a") != 9 {
+		t.Fatal("9 prior turns did not retain full history")
 	}
 	req := historyRequest(textMessage("user", "hi"))
 	req.Model = "auto"

@@ -30,7 +30,7 @@ func rawClientOptions(request map[string]json.RawMessage) error {
 
 // Adjacent user text messages are context fragments of one turn. Preserve their
 // order without promoting them to instructions or inventing assistant replies.
-// Tool-bearing messages are never merged, so their ownership checks stay intact.
+// Tool results stay typed when merged; their ownership checks still apply.
 func mergeUserContext(messages []prompt.Message) ([]prompt.Message, bool) {
 	merged := make([]prompt.Message, 0, len(messages))
 	for i := 0; i < len(messages); {
@@ -45,21 +45,40 @@ func mergeUserContext(messages []prompt.Message) ([]prompt.Message, bool) {
 			i = end
 			continue
 		}
-		var text strings.Builder
+		var blocks []prompt.ContentBlock
+		allText := true
 		for j := i; j < end; j++ {
-			part, ok := messageText(messages[j], -1)
-			separator := ""
-			if j > i {
-				separator = "\n\n"
-			}
-			// Include separators and the eventual transcript label in the bound.
-			if !ok || text.Len()+len(separator)+len(part)+len("User: ") > transcriptLimit {
+			message := messages[j]
+			if message.ReasoningContent != "" || len(message.ReasoningItem) != 0 || (message.Content.Blocks != nil && message.Content.Text != "") {
 				return nil, false
 			}
-			text.WriteString(separator)
-			text.WriteString(part)
+			parts := message.Content.Blocks
+			if parts == nil {
+				parts = []prompt.ContentBlock{{Type: "text", Text: message.Content.Text}}
+			}
+			if len(parts) == 0 {
+				return nil, false
+			}
+			for _, part := range parts {
+				if !validMessageBlock(part, "user") {
+					return nil, false
+				}
+				allText = allText && part.Type == "text"
+			}
+			if len(blocks) > 0 && blocks[len(blocks)-1].Type == "text" && parts[0].Type == "text" {
+				blocks = append(blocks, prompt.ContentBlock{Type: "text", Text: "\n\n"})
+			}
+			blocks = append(blocks, parts...)
 		}
-		merged = append(merged, prompt.Message{Role: "user", Content: prompt.MessageContent{Text: text.String()}})
+		content := prompt.MessageContent{Blocks: blocks}
+		if allText {
+			var text strings.Builder
+			for _, block := range blocks {
+				text.WriteString(block.Text)
+			}
+			content = prompt.MessageContent{Text: text.String()}
+		}
+		merged = append(merged, prompt.Message{Role: "user", Content: content})
 		i = end
 	}
 	return merged, true

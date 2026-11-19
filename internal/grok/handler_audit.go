@@ -34,6 +34,7 @@ func (h *Handler) auditAttempt(ctx context.Context, acc *store.Account, provider
 }
 
 func (h *Handler) auditChatOutcome(ctx context.Context, acc *store.Account, req *chatwire.Request, result chatOutcome) {
+	upstream.NoteServedModelWithSource(ctx, result.ServedModel, "responses.model")
 	logger := h.auditLoggerSnapshot()
 	if logger == nil {
 		return
@@ -48,7 +49,6 @@ func (h *Handler) auditChatOutcome(ctx context.Context, acc *store.Account, req 
 	completion, _ := usage["completion_tokens_details"].(map[string]any)
 	metadata := map[string]any{"finish_reason": result.Finish, "visible_output": result.SawText}
 	grokbase.AddReasoningDiagnostics(ctx, metadata)
-	upstream.NoteServedModel(ctx, result.ServedModel)
 	duration := int64(0)
 	if !req.StartedAt.IsZero() {
 		duration = time.Since(req.StartedAt).Milliseconds()

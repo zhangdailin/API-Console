@@ -79,10 +79,17 @@ func HTTPPoolLimits(cfg *config.Config) (maxConns, maxIdle int) {
 }
 
 func GetSharedHTTPClientWithLimits(proxyKey string, timeout time.Duration, proxyFunc func(*http.Request) (*url.URL, error), http2 bool, cfg *config.Config) *http.Client {
+	return GetSharedHTTPClientWithTimeouts(proxyKey, timeout, responseHeaderTimeoutForClient(timeout), proxyFunc, http2, cfg)
+}
+
+// GetSharedHTTPClientWithTimeouts isolates streaming header budgets without
+// changing the transport policy of other callers sharing the same proxy.
+func GetSharedHTTPClientWithTimeouts(proxyKey string, timeout, headerTimeout time.Duration, proxyFunc func(*http.Request) (*url.URL, error), http2 bool, cfg *config.Config) *http.Client {
 	if proxyKey == "" {
 		proxyKey = "direct"
 	}
 	cacheKey := sharedHTTPClientCacheKey(proxyKey, timeout)
+	cacheKey += fmt.Sprintf("|header-timeout=%d", headerTimeout)
 	maxConns, maxIdle := HTTPPoolLimits(cfg)
 	cacheKey += fmt.Sprintf("|connections=%d|idle=%d", maxConns, maxIdle)
 	if http2 {
@@ -111,7 +118,7 @@ func GetSharedHTTPClientWithLimits(proxyKey string, timeout time.Duration, proxy
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
-		ResponseHeaderTimeout: responseHeaderTimeoutForClient(timeout),
+		ResponseHeaderTimeout: headerTimeout,
 		Proxy:                 proxyFunc,
 		TLSClientConfig:       &tls.Config{},
 		ForceAttemptHTTP2:     http2,

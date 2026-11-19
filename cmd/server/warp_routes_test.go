@@ -26,9 +26,10 @@ import (
 )
 
 const (
-	warpRouteModel  = "claude-e2e-exact"
-	warpRouteQuery  = "Explain this isolated test. 好"
-	warpRouteAnswer = "Warp route answer."
+	warpRouteModel       = "claude-e2e-exact"
+	warpRouteQuery       = "Explain this isolated test. 好"
+	warpRouteAnswer      = "Warp route answer."
+	warpRouteMCPServerID = "d8db81de-9599-531a-9f9f-9053f843a477"
 )
 
 type warpRouteStub struct {
@@ -147,8 +148,11 @@ func assertWarpRouteRequest(t *testing.T, raw []byte) {
 	fields := settings.ProtoReflect().Descriptor().Fields()
 	for i := 0; i < fields.Len(); i++ {
 		field := fields.Get(i)
-		if field.Kind() == protoreflect.BoolKind && (!settings.ProtoReflect().Has(field) || settings.ProtoReflect().Get(field).Bool()) {
-			t.Errorf("Warp capability %s must be explicitly false", field.Name())
+		if field.Kind() == protoreflect.BoolKind {
+			want := string(field.Name()) == "should_preserve_file_content_in_history"
+			if !settings.ProtoReflect().Has(field) || settings.ProtoReflect().Get(field).Bool() != want {
+				t.Errorf("Warp capability %s has incorrect value", field.Name())
+			}
 		}
 	}
 	for _, tools := range [][]warpapi.ToolType{settings.GetSupportedTools(), settings.GetSupportedCliAgentTools()} {

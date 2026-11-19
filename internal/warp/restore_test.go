@@ -24,9 +24,9 @@ func textMessage(role, text string) prompt.Message {
 	return prompt.Message{Role: role, Content: prompt.MessageContent{Text: text}}
 }
 
-func TestMultiTurnTranscriptIsBoundedAndOrdered(t *testing.T) {
+func TestMultiTurnTranscriptIsCompleteAndOrdered(t *testing.T) {
 	messages := []prompt.Message{textMessage("system", "Be brief.")}
-	for i := 0; i < historyTurns; i++ {
+	for i := 0; i < 8; i++ {
 		messages = append(messages, textMessage("user", "question"), textMessage("assistant", "answer"))
 	}
 	messages = append(messages, textMessage("user", "final question"))
@@ -39,14 +39,15 @@ func TestMultiTurnTranscriptIsBoundedAndOrdered(t *testing.T) {
 			t.Fatalf("transcript missing %q", want)
 		}
 	}
-	// A turn beyond the cap is rejected rather than silently paid for.
+	// Longer conversations retain every supplied pair.
 	extra := append(append([]prompt.Message(nil), messages...), textMessage("assistant", "answer"), textMessage("user", "too many"))
-	if _, err := validateRequest(historyRequest(extra...)); err == nil {
-		t.Fatal("over-long history accepted")
+	trimmed, err := validateRequest(historyRequest(extra...))
+	if err != nil || strings.Contains(trimmed.Query, "[earlier history omitted]") || strings.Count(trimmed.Query, "Assistant: answer") != 9 || !strings.HasSuffix(trimmed.Query, "User: too many") {
+		t.Fatal("long conversation lost supplied history")
 	}
 }
 
-func TestTranscriptDropsOldestPartsAtByteCeiling(t *testing.T) {
+func TestTranscriptPreservesOldestPartsAboveFormerByteCeiling(t *testing.T) {
 	big := strings.Repeat("x", 40<<10)
 	prepared, err := validateRequest(historyRequest(
 		textMessage("user", big), textMessage("assistant", big), textMessage("user", "now"),
@@ -54,8 +55,8 @@ func TestTranscriptDropsOldestPartsAtByteCeiling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("oversized transcript rejected instead of trimmed: %v", err)
 	}
-	if len(prepared.Query) > transcriptLimit+64 || !strings.Contains(prepared.Query, "[earlier history omitted]") || !strings.Contains(prepared.Query, "now") {
-		t.Fatalf("transcript not bounded: %d bytes", len(prepared.Query))
+	if prepared.Query != "User: "+big+"\n\nAssistant: "+big+"\n\nUser: now" {
+		t.Fatalf("transcript was shortened: %d bytes", len(prepared.Query))
 	}
 }
 
@@ -101,7 +102,7 @@ func TestClientToolsBecomeMCPContextAndSelectOnlyMCPTool(t *testing.T) {
 		t.Fatalf("supported tools = %v, want only CALL_MCP_TOOL", tools)
 	}
 	servers := request.GetMcpContext().GetServers()
-	if len(servers) != 1 || servers[0].GetId() != "client-request-tools" {
+	if len(servers) != 1 || servers[0].GetId() != clientMCPServerID {
 		t.Fatalf("mcp server not declared: %+v", servers)
 	}
 	declared := servers[0].GetTools()
@@ -210,9 +211,9 @@ func TestToolStreamFrameIntegrity(t *testing.T) {
 	}
 }
 
-func TestToolLoopLimitStopsUnboundedAgentConversations(t *testing.T) {
+func TestHistoricalToolCallsDoNotSetPaidGenerationBudget(t *testing.T) {
 	messages := []prompt.Message{textMessage("user", "go")}
-	for i := 0; i < toolRoundLimit; i++ {
+	for i := 0; i < 20; i++ {
 		messages = append(messages,
 			prompt.Message{Role: "assistant", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{
 				{Type: "tool_use", ID: "call", Name: "lookup", Input: map[string]any{}},
@@ -222,7 +223,8 @@ func TestToolLoopLimitStopsUnboundedAgentConversations(t *testing.T) {
 			}}},
 		)
 	}
-	// The limit itself is accepted; one further tool round is refused.
+	// Historical calls may come from another task or a parallel batch. Only
+	// the owned binding's paid-turn count may enforce the generation budget.
 	if _, err := validateRequest(historyRequest(messages...)); err != nil {
 		t.Fatalf("limit-bound conversation rejected: %v", err)
 	}
@@ -230,8 +232,9 @@ func TestToolLoopLimitStopsUnboundedAgentConversations(t *testing.T) {
 		prompt.Message{Role: "assistant", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{{Type: "tool_use", ID: "call", Name: "lookup", Input: map[string]any{}}}}},
 		prompt.Message{Role: "user", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{{Type: "tool_result", ToolUseID: "call", Content: "ok"}}}},
 	)
-	if _, err := validateRequest(historyRequest(messages...)); err == nil {
-		t.Fatal("unbounded tool loop accepted")
+	prepared, err := validateRequest(historyRequest(messages...))
+	if err != nil || prepared.ToolRounds != 0 {
+		t.Fatal("historical tool blocks were treated as paid Warp generations")
 	}
 }
 

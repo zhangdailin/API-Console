@@ -82,6 +82,7 @@ func (c *Client) prepareSession(ctx context.Context, target *string, jar cookieJ
 		jar[key] = value
 	}
 	seedPreferences(jar)
+	c.acc = latest.Clone()
 	c.sessionVersion = store.DoubaoSessionVersion(latest)
 	query := u.Query()
 	if query.Has("device_id") {
@@ -113,6 +114,7 @@ func (c *Client) receiveSession(ctx context.Context, response *http.Response, ja
 	}
 	snapshot := c.acc.Clone()
 	snapshot.ClientCookie = patch.Cookie
+	c.acc = snapshot
 	c.sessionVersion = store.DoubaoSessionVersion(snapshot)
 	return nil
 }

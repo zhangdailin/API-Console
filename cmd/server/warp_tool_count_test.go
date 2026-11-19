@@ -157,7 +157,7 @@ func warpAssertMessagesToolsReachMCPUnchanged(t *testing.T, prefix string, strea
 		}
 		mcp := request.GetMcpContext()
 		servers := mcp.GetServers()
-		if len(mcp.GetTools()) != 0 || len(servers) != 1 || servers[0].GetName() != "client" || servers[0].GetId() != "client-request-tools" {
+		if len(mcp.GetTools()) != 0 || len(servers) != 1 || servers[0].GetName() != "client" || servers[0].GetId() != warpRouteMCPServerID {
 			t.Fatal("tools did not retain their single client MCP server group")
 		}
 		tools := servers[0].GetTools()
@@ -227,10 +227,7 @@ func TestWarpMessagesToolValidationBeyond64StillRejectsBeforeGeneration(t *testi
 			tools[0]["name"], tools[77]["name"] = "kelvin", "\u212aELVIN"
 		}},
 		{"invalid_schema", func(tools []map[string]any) { tools[77]["input_schema"] = []any{} }},
-		{"description_over_32KiB", func(tools []map[string]any) { tools[77]["description"] = strings.Repeat("d", (32<<10)+1) }},
-		{"schema_over_64KiB", func(tools []map[string]any) {
-			tools[77]["input_schema"].(map[string]any)["description"] = strings.Repeat("s", 64<<10)
-		}},
+		{"invalid_description", func(tools []map[string]any) { tools[77]["description"] = false }},
 	}
 	for _, prefix := range []string{"/warp", "/warp/v1"} {
 		for _, streaming := range []bool{false, true} {
@@ -250,6 +247,17 @@ func TestWarpMessagesToolValidationBeyond64StillRejectsBeforeGeneration(t *testi
 					}
 				})
 			}
+		}
+	}
+}
+
+func TestWarpMessagesToolFieldsAboveFormerSizeCaps(t *testing.T) {
+	for _, prefix := range []string{"/warp", "/warp/v1"} {
+		for _, streaming := range []bool{false, true} {
+			tools := warpToolCountDefinitions(t, 78)
+			tools[77]["description"] = strings.Repeat("d", 128<<10)
+			tools[77]["input_schema"].(map[string]any)["description"] = strings.Repeat("s", 128<<10)
+			warpAssertMessagesToolsReachMCPUnchanged(t, prefix, streaming, tools)
 		}
 	}
 }

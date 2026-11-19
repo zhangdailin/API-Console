@@ -102,11 +102,9 @@ func TestClientCompatibilityDeveloperInstructionsAndUserContext(t *testing.T) {
 
 func TestClientCompatibilityContextBudgetsAndToolIsolation(t *testing.T) {
 	for name, messages := range map[string][]prompt.Message{
-		"empty_last_message":     {textMessage("user", "context"), textMessage("user", "")},
-		"blank_last_message":     {textMessage("user", "context"), textMessage("user", " \n")},
-		"oversized_last_message": {textMessage("user", "context"), textMessage("user", strings.Repeat("u", userTextLimit+1))},
-		"oversized_context":      {textMessage("user", strings.Repeat("c", transcriptLimit)), textMessage("user", "now")},
-		"assistant_first":        {textMessage("assistant", "invalid history"), textMessage("user", "context"), textMessage("user", "now")},
+		"empty_last_message": {textMessage("user", "context"), textMessage("user", "")},
+		"blank_last_message": {textMessage("user", "context"), textMessage("user", " \n")},
+		"assistant_first":    {textMessage("assistant", "invalid history"), textMessage("user", "context"), textMessage("user", "now")},
 		"tool_results_not_text": {
 			textMessage("user", "context"),
 			{Role: "user", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{{Type: "tool_result", ToolUseID: "unbound", Content: "result"}}}},
@@ -122,14 +120,11 @@ func TestClientCompatibilityContextBudgetsAndToolIsolation(t *testing.T) {
 			}
 		})
 	}
-	// The original final-message and complete current-turn boundaries are exact.
-	request := historyRequest(textMessage("user", strings.Repeat("c", transcriptLimit-len("User: ")-len("\n\n")-userTextLimit)), textMessage("user", strings.Repeat("u", userTextLimit)))
+	// Both fragments exceed the former per-message and conversation budgets.
+	context, current := strings.Repeat("c", 128<<10), strings.Repeat("u", 128<<10)
+	request := historyRequest(textMessage("user", context), textMessage("user", current))
 	prepared, err := validateRequest(request)
-	if err != nil || len(prepared.Query) != transcriptLimit {
-		t.Fatalf("exact current context boundary rejected: %v", err)
-	}
-	request.Messages[0].Content.Text += "c"
-	if _, err := validateRequest(request); err == nil {
-		t.Fatal("oversized joined context accepted")
+	if err != nil || prepared.Query != context+"\n\n"+current {
+		t.Fatalf("large joined context rejected or changed: %v", err)
 	}
 }

@@ -55,8 +55,11 @@ func TestRequestShape(t *testing.T) {
 	fields := s.ProtoReflect().Descriptor().Fields()
 	for i := 0; i < fields.Len(); i++ {
 		f := fields.Get(i)
-		if f.Kind() == protoreflect.BoolKind && (!s.ProtoReflect().Has(f) || s.ProtoReflect().Get(f).Bool()) {
-			t.Fatalf("capability not false: %s", f.Name())
+		if f.Kind() == protoreflect.BoolKind {
+			want := string(f.Name()) == "should_preserve_file_content_in_history"
+			if !s.ProtoReflect().Has(f) || s.ProtoReflect().Get(f).Bool() != want {
+				t.Fatalf("incorrect history preservation or capability fence: %s", f.Name())
+			}
 		}
 	}
 	for _, list := range [][]warpapi.ToolType{s.GetSupportedTools(), s.GetSupportedCliAgentTools()} {
@@ -95,9 +98,10 @@ func TestStreamRejectsUnsafeWithoutCompletion(t *testing.T) {
 	}
 }
 func TestStreamBounds(t *testing.T) {
-	_, err := readStream(strings.NewReader(testSSE(t, testMessages(testOutput("m", strings.Repeat("x", outputLimit+1))))+testSSE(t, testDone())), "model-a")
-	if !errors.Is(err, errStreamLimit) {
-		t.Fatal("output cap not enforced")
+	text := strings.Repeat("x", 128<<10)
+	result, err := readStream(strings.NewReader(testSSE(t, testMessages(testOutput("m", text)))+testSSE(t, testDone())), "model-a")
+	if err != nil || result.Text != text {
+		t.Fatal("valid answer above the former token-saving output cap was lost")
 	}
 	_, err = readStream(strings.NewReader(strings.Repeat(": heartbeat\n\n", streamLimit/10)), "model-a")
 	if !errors.Is(err, errStreamLimit) {

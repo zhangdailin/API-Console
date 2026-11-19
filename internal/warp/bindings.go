@@ -17,7 +17,6 @@ const (
 	bindingTTL       = time.Hour
 	bindingKeyPrefix = "warp:call:v2:"
 	bindingLimit     = 4096
-	maxToolRounds    = 6
 )
 
 // callBinding contains only continuation state, never account credentials or
@@ -70,7 +69,7 @@ func scopedBindingID(owner string, accountID int64, model, id string) string {
 }
 
 // saveScoped refuses unauthenticated principals, oversized or invalid snapshots,
-// and continuations beyond the fixed tool-turn budget. The input is copied.
+// and malformed continuation state. The input is copied.
 func (b *bindingStore) saveScoped(ctx context.Context, accountID int64, model, id string, binding callBinding) bool {
 	owner, ok := bindingOwner(ctx)
 	if !ok || accountID <= 0 || model == "" {
@@ -80,7 +79,7 @@ func (b *bindingStore) saveScoped(ctx context.Context, accountID int64, model, i
 }
 
 func (b *bindingStore) saveOwned(ctx context.Context, owner string, accountID int64, model, id string, binding callBinding) bool {
-	if b == nil || id == "" || binding.ConversationID == "" || binding.ToolRounds < 0 || binding.ToolRounds > maxToolRounds || len(binding.RootTaskContext) > continuationStateLimit {
+	if b == nil || id == "" || binding.ConversationID == "" || binding.ToolRounds < 0 || len(binding.RootTaskContext) > continuationStateLimit {
 		return false
 	}
 	if len(binding.RootTaskContext) > 0 {
@@ -144,7 +143,7 @@ func (b *bindingStore) lookupOwned(ctx context.Context, owner string, accountID 
 			}
 		}
 		age := time.Since(binding.SavedAt)
-		if !ok || binding.OwnerScope != owner || binding.AccountID != accountID || binding.Model != model || binding.ConversationID == "" || age < 0 || age > bindingTTL || binding.ToolRounds < 0 || binding.ToolRounds > maxToolRounds || len(binding.RootTaskContext) > continuationStateLimit {
+		if !ok || binding.OwnerScope != owner || binding.AccountID != accountID || binding.Model != model || binding.ConversationID == "" || age < 0 || age > bindingTTL || binding.ToolRounds < 0 || len(binding.RootTaskContext) > continuationStateLimit {
 			return callBinding{}, false
 		}
 		if len(binding.RootTaskContext) > 0 {

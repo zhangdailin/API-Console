@@ -93,7 +93,7 @@ func TestModelFallbackDoesNotBypassStreamValidation(t *testing.T) {
 		{"incomplete", "", "incomplete"},
 		{"malformed", "data: not-protobuf\n\n", "stream_protocol"},
 		{"undeclared-tool", testSSE(t, testMessages(warpapi.Message_builder{ToolCall: warpapi.Message_ToolCall_builder{}.Build()}.Build())) + testSSE(t, testDone()), "tool_or_subagent"},
-		{"output-limit", testSSE(t, testMessages(testOutput("large", strings.Repeat("x", outputLimit+1)))) + testSSE(t, testDone()), "limit"},
+		{"frame-limit", strings.Repeat("x", frameLimit+1), "limit"},
 		{"invalid-usage", testSSE(t, warpapi.ResponseEvent_builder{Finished: usageTestFinish(warpapi.ChargedUsage_builder{PlatformUsageInCredits: proto.Float32(-1)}.Build())}.Build()), "usage_invalid"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -26,8 +26,8 @@ func TestValidateRequestFoldsOneBoundedSystemMessage(t *testing.T) {
 	if _, err := validateRequest(systemRequest(strings.Repeat("s", 128<<10), "hi")); err != nil {
 		t.Fatalf("uncapped system message rejected: %v", err)
 	}
-	if _, err := validateRequest(systemRequest("ok", strings.Repeat("u", userTextLimit+1))); err == nil {
-		t.Fatal("oversized user message accepted")
+	if _, err := validateRequest(systemRequest("ok", strings.Repeat("u", 128<<10))); err != nil {
+		t.Fatal("large user message rejected")
 	}
 	for name, req := range map[string]upstream.UpstreamRequest{
 		"assistant_turn":  {Model: "model-a", Messages: []prompt.Message{{Role: "assistant", Content: prompt.MessageContent{Text: "x"}}, {Role: "user", Content: prompt.MessageContent{Text: "hi"}}}},
