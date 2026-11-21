@@ -85,7 +85,7 @@ func TestCheckCacheAndUnknown(t *testing.T) {
 	testutil.False(t, a.Warning == "" || a.HasUpdate, "unknown source version guessed")
 }
 func TestAssetAndChecksumContracts(t *testing.T) {
-	_, _, e := selectAssets(Release{}, "linux", "amd64")
+	_, e := selectAssets(Release{}, "linux", "amd64")
 	testutil.Error(t, e)
 	for _, value := range []string{"bad", "abcd  orchids-server-linux-amd64", ""} {
 		_, e := checksumDigest(value, "orchids-server-linux-amd64")

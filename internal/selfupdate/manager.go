@@ -179,31 +179,34 @@ func (m *Manager) Check(ctx context.Context, force bool) Check {
 	} else {
 		result.Warning = "当前构建没有可比较的版本号"
 	}
-	if _, _, err := selectAssets(*m.cached, m.Info.OS, m.Info.Arch); err != nil {
+	if _, err := selectAssets(*m.cached, m.Info.OS, m.Info.Arch); err != nil {
 		result.CanUpdate = false
 		result.Reason = err.Error()
 	}
 	return result
 }
-func selectAssets(r Release, goos, arch string) (Asset, Asset, error) {
+
+type releaseAssets struct {
+	Binary, Checksum, BuildInfo Asset
+}
+
+func selectAssets(r Release, goos, arch string) (releaseAssets, error) {
 	name := "orchids-server-" + goos + "-" + arch
-	var binary, checksum Asset
-	metadataFound := false
+	var assets releaseAssets
 	for _, a := range r.Assets {
-		if a.Name == name+".build-info.txt" && a.URL != "" {
-			metadataFound = true
-		}
-		if a.Name == name {
-			binary = a
-		}
-		if a.Name == name+".sha256" {
-			checksum = a
+		switch a.Name {
+		case name:
+			assets.Binary = a
+		case name + ".sha256":
+			assets.Checksum = a
+		case name + ".build-info.txt":
+			assets.BuildInfo = a
 		}
 	}
-	if binary.URL == "" || checksum.URL == "" || !metadataFound {
-		return binary, checksum, errors.New("发行版缺少当前平台二进制、SHA-256 或构建信息文件")
+	if assets.Binary.URL == "" || assets.Checksum.URL == "" || assets.BuildInfo.URL == "" {
+		return releaseAssets{}, errors.New("发行版缺少当前平台二进制、SHA-256 或构建信息文件")
 	}
-	return binary, checksum, nil
+	return assets, nil
 }
 func (m *Manager) Start(kind, tag, key string) (Operation, error) {
 	if m.Reason != "" {
@@ -329,15 +332,15 @@ func (m *Manager) perform(ctx context.Context, op *Operation) error {
 		if r.Tag != op.Target.Version {
 			return errors.New("最新发行版已变化，请重新检查后升级")
 		}
-		binary, checksum, e := selectAssets(r, m.Info.OS, m.Info.Arch)
+		assets, e := selectAssets(r, m.Info.OS, m.Info.Arch)
 		if e != nil {
 			return e
 		}
 		var sums bytes.Buffer
-		if e = m.Source.Download(ctx, checksum, &sums, 64*1024); e != nil {
+		if e = m.Source.Download(ctx, assets.Checksum, &sums, 64*1024); e != nil {
 			return e
 		}
-		digest, e := checksumDigest(sums.String(), binary.Name)
+		digest, e := checksumDigest(sums.String(), assets.Binary.Name)
 		if e != nil {
 			return e
 		}
@@ -345,7 +348,7 @@ func (m *Manager) perform(ctx context.Context, op *Operation) error {
 		if e != nil {
 			return e
 		}
-		e = m.Source.Download(ctx, binary, f, maxBinarySize)
+		e = m.Source.Download(ctx, assets.Binary, f, maxBinarySize)
 		if e == nil {
 			e = f.Sync()
 		}
@@ -366,17 +369,8 @@ func (m *Manager) perform(ctx context.Context, op *Operation) error {
 		if hash != digest {
 			return errors.New("SHA-256 不匹配，未修改当前程序")
 		}
-		var metadata Asset
-		for _, asset := range r.Assets {
-			if asset.Name == binary.Name+".build-info.txt" {
-				metadata = asset
-			}
-		}
-		if metadata.URL == "" {
-			return errors.New("发行版缺少构建版本信息")
-		}
 		var info bytes.Buffer
-		if e = m.Source.Download(ctx, metadata, &info, 64*1024); e != nil {
+		if e = m.Source.Download(ctx, assets.BuildInfo, &info, 64*1024); e != nil {
 			return e
 		}
 		values := map[string]string{}

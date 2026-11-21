@@ -1,6 +1,7 @@
 package selfupdate
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,7 +12,11 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"golang.org/x/net/html"
 )
+
+const maxReleaseMetadataSize = 2 << 20
 
 type Asset struct {
 	Name string `json:"name"`
@@ -61,39 +66,133 @@ func NewGitHub(repo string) *GitHub {
 func (g *GitHub) Latest(ctx context.Context) (Release, error) {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	r, err := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/repos/"+g.Repository+"/releases/latest", nil)
-	if err != nil {
-		return Release{}, err
+	if g.token == "" {
+		return g.latestPublic(ctx)
 	}
-	r.Header.Set("Accept", "application/vnd.github+json")
+	return g.latestAPI(ctx)
+}
+
+func releaseRequest(ctx context.Context, client *http.Client, endpoint string, headers http.Header) (*http.Response, error) {
+	r, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	if headers != nil {
+		r.Header = headers
+	}
 	r.Header.Set("User-Agent", "API-Console-Updater")
-	r.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	if g.token != "" {
-		r.Header.Set("Authorization", "Bearer "+g.token)
-	}
-	res, err := g.Client.Do(r)
+	res, err := client.Do(r)
 	if err != nil {
-		return Release{}, &releaseCheckError{Code: "github_unreachable", Message: "Could not reach GitHub to check for updates."}
+		return nil, &releaseCheckError{Code: "github_unreachable", Message: "Could not reach GitHub to check for updates."}
 	}
+	return res, nil
+}
+
+func readReleaseMetadata(res *http.Response) ([]byte, error) {
 	defer res.Body.Close()
-	if res.StatusCode != 200 {
-		return Release{}, githubCheckFailure(res, time.Now().UTC())
+	if res.StatusCode != http.StatusOK {
+		return nil, githubCheckFailure(res, time.Now().UTC())
 	}
-	b, err := io.ReadAll(io.LimitReader(res.Body, 2*1024*1024+1))
+	b, err := io.ReadAll(io.LimitReader(res.Body, maxReleaseMetadataSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > maxReleaseMetadataSize {
+		return nil, errors.New("release metadata too large")
+	}
+	return b, nil
+}
+
+func (g *GitHub) latestAPI(ctx context.Context) (Release, error) {
+	res, err := releaseRequest(ctx, g.Client, "https://api.github.com/repos/"+g.Repository+"/releases/latest", http.Header{
+		"Accept":               {"application/vnd.github+json"},
+		"Authorization":        {"Bearer " + g.token},
+		"X-Github-Api-Version": {"2022-11-28"},
+	})
 	if err != nil {
 		return Release{}, err
 	}
-	if len(b) > 2*1024*1024 {
-		return Release{}, errors.New("release metadata too large")
+	body, err := readReleaseMetadata(res)
+	if err != nil {
+		return Release{}, err
 	}
 	var release Release
-	err = json.Unmarshal(b, &release)
+	if err := json.Unmarshal(body, &release); err != nil {
+		return Release{}, err
+	}
+	if release.Draft || release.Prerelease || !stableTag(release.Tag) {
+		return Release{}, errors.New("the latest GitHub release is not a stable version")
+	}
+	return release, nil
+}
+
+func stableTag(tag string) bool {
+	p := versionParts(tag)
+	return p != nil && p[4] == ""
+}
+
+// The public release page identifies the stable tag without using a REST API
+// quota. Its asset fragment lists the files actually attached to that tag.
+func (g *GitHub) latestPublic(ctx context.Context) (Release, error) {
+	const origin = "https://github.com"
+	base := "/" + g.Repository + "/releases/"
+	client := *g.Client
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	res, err := releaseRequest(ctx, &client, origin+base+"latest", nil)
 	if err != nil {
 		return Release{}, err
 	}
-	p := versionParts(release.Tag)
-	if release.Draft || release.Prerelease || p == nil || p[4] != "" {
-		return Release{}, errors.New("最新发行版不是有效的稳定版本")
+	if res.StatusCode >= 400 {
+		defer res.Body.Close()
+		return Release{}, githubCheckFailure(res, time.Now().UTC())
+	}
+	location, err := res.Location()
+	res.Body.Close()
+	if res.StatusCode < 300 || res.StatusCode >= 400 || err != nil ||
+		!trustedURL(location.String()) || location.Hostname() != "github.com" ||
+		location.RawQuery != "" || location.ForceQuery || location.Fragment != "" {
+		return Release{}, errors.New("GitHub did not return a trusted latest release link")
+	}
+	tag, ok := strings.CutPrefix(location.Path, base+"tag/")
+	if !ok || !stableTag(tag) {
+		return Release{}, errors.New("the latest GitHub release is not a stable version in the configured repository")
+	}
+
+	res, err = releaseRequest(ctx, &client, origin+base+"expanded_assets/"+url.PathEscape(tag), nil)
+	if err != nil {
+		return Release{}, err
+	}
+	body, err := readReleaseMetadata(res)
+	if err != nil {
+		return Release{}, err
+	}
+	prefix := base + "download/" + tag + "/"
+	release := Release{Tag: tag, URL: origin + base + "tag/" + url.PathEscape(tag)}
+	seen := map[string]bool{}
+	z := html.NewTokenizer(bytes.NewReader(body))
+	for kind := z.Next(); kind != html.ErrorToken; kind = z.Next() {
+		if kind != html.StartTagToken {
+			continue
+		}
+		link := z.Token()
+		if link.Data != "a" {
+			continue
+		}
+		for _, attr := range link.Attr {
+			if attr.Key != "href" {
+				continue
+			}
+			u, err := url.Parse(attr.Val)
+			if err != nil || u.IsAbs() || u.Host != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+				continue
+			}
+			name, ok := strings.CutPrefix(u.Path, prefix)
+			if !ok || name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\") || seen[name] {
+				continue
+			}
+			seen[name] = true
+			release.Assets = append(release.Assets, Asset{Name: name, URL: origin + base + "download/" + url.PathEscape(tag) + "/" + url.PathEscape(name)})
+		}
 	}
 	return release, nil
 }

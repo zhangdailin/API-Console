@@ -33,7 +33,7 @@ func githubCheckFailure(res *http.Response, now time.Time) *releaseCheckError {
 	failure := &releaseCheckError{Code: "github_http_error", Message: fmt.Sprintf("GitHub update check failed: HTTP %d.", status)}
 	if rateLimited {
 		failure.Code = "github_rate_limited"
-		failure.Message = fmt.Sprintf("GitHub API rate limit reached (HTTP %d); wait before checking again.", status)
+		failure.Message = fmt.Sprintf("GitHub rate limit reached (HTTP %d); wait before checking again.", status)
 		failure.RetryAt = now.Add(time.Minute)
 		if retry := githubRetryAfter(res.Header.Get("Retry-After"), now); retry.After(failure.RetryAt) {
 			failure.RetryAt = retry

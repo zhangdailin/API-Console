@@ -8,7 +8,9 @@
 
 检查响应的 `warning` 和 `check_error_code` 区分限流、认证失败、普通 403 和无可访问发行版；`next_check_at` 给出下次允许主动检查的时间。页面冷却结束只重新启用按钮，不自动向 GitHub 重试。网络失败不作为“已是最新”的证据；此前成功结果仅在原有 20 分钟有效期内保留。
 
-匿名 GitHub REST API 额度按出口 IP 共享。可通过服务进程的专用环境变量 `ORCHIDS_UPDATE_GITHUB_TOKEN` 提供最小只读权限的 GitHub Token，避免匿名额度限制；无此变量时仍支持公开仓库检查。不要将 Token 写入仓库、浏览器或 URL，生产使用受保护的 systemd `EnvironmentFile` 等方式注入。仅发行元数据请求发送 Token；跨到非 `api.github.com` 的可信重定向会删除认证头，发行资产下载不携带 Token。配置无效 Token 会报告认证失败，不自动绕回匿名请求。
+默认通过 GitHub 公开发布页定位最新稳定标签，再读该标签的实际附件列表。无需 Token，也不占用匿名 REST API 额度；发行说明可通过页面上的 GitHub 链接查看。公开入口不可达或被 GitHub 限流时仍会报告失败并退避。
+
+如需通过 REST API 检查并在后台展示发行说明，可通过服务进程的 `ORCHIDS_UPDATE_GITHUB_TOKEN` 注入最小只读权限的 Token。不要将 Token 写入仓库、浏览器或 URL，生产使用受保护的 systemd `EnvironmentFile` 等方式注入。仅发行元数据请求发送 Token；跨到非 `api.github.com` 的可信重定向会删除认证头，发行资产下载不携带 Token。配置无效 Token 会报告认证失败，不自动绕回公开入口。
 
 ## 2. 发行要求
 
