@@ -2,7 +2,6 @@ package warp
 
 import (
 	warpapi "github.com/warpdotdev/warp-proto-apis/apis/multi_agent/v1/gen/go"
-	"google.golang.org/protobuf/proto"
 )
 
 const serverBookkeepingPayloadLimit = 64 << 10
@@ -66,27 +65,11 @@ func (s *observedServerCalls) rollback() (string, bool, int) {
 	return s.taskID, s.created, s.bookkeeping
 }
 
-// validateServerResultAction prevents an opaque result from turning an invalid
-// task-state action into a successful text-only completion. Keep the historical
-// leniency for unrelated text fixtures, but fail closed for this new variant.
-func validateServerResultAction(state *continuationAccumulator, action *warpapi.ClientAction) error {
-	if state == nil || state.err != nil {
-		return errStreamStream
-	}
-	candidate := &continuationAccumulator{}
-	if state.root != nil {
-		candidate.root = proto.Clone(state.root).(*warpapi.Task)
-	}
-	if candidate.apply(action) != nil {
-		return errStreamStream
-	}
-	return nil
-}
-
-// effectiveBookkeepingMessage validates a masked update against the original
+// bookkeeping validates a masked update against the original
 // task state before classifying it. Checking only its delta could bypass the
 // byte bound (append), lose the paired call ID, or retain unreviewed mask paths.
-func effectiveBookkeepingMessage(state *continuationAccumulator, action *warpapi.ClientAction, message *warpapi.Message) (*warpapi.Message, error) {
+func (p *messageActionPreview) bookkeeping(message *warpapi.Message) (*warpapi.Message, error) {
+	state, action := p.state, p.action
 	var update, masked bool
 	switch action.WhichAction() {
 	case warpapi.ClientAction_UpdateTaskMessage_case:
@@ -131,14 +114,9 @@ func effectiveBookkeepingMessage(state *continuationAccumulator, action *warpapi
 	if state == nil || state.err != nil || state.root == nil {
 		return nil, errStreamStream
 	}
-	candidate := &continuationAccumulator{root: proto.Clone(state.root).(*warpapi.Task)}
-	if candidate.apply(action) != nil {
+	effective, err := p.message(message.GetId())
+	if err != nil {
 		return nil, errStreamStream
 	}
-	for _, effective := range candidate.root.GetMessages() {
-		if effective.GetId() == message.GetId() {
-			return effective, nil
-		}
-	}
-	return nil, errStreamStream
+	return effective, nil
 }

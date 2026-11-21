@@ -439,6 +439,7 @@ func readStreamWithProgress(source io.Reader, expectedModel string, initial []by
 					result.RejectAction = int(action.WhichAction())
 					return errStreamStream
 				}
+				preview := messageActionPreview{state: state, action: action}
 				for messageIndex, message := range messages {
 					if !bindTask(message.GetTaskId()) {
 						result.RejectMessage = int(message.WhichMessage())
@@ -447,12 +448,12 @@ func readStreamWithProgress(source io.Reader, expectedModel string, initial []by
 					}
 					var err error
 					effectiveText := false
-					message, effectiveText, err = effectiveVisibleUpdate(state, action, message)
+					message, effectiveText, err = preview.visible(message)
 					if err != nil {
 						result.Failure = failureFromState("masked_update", state)
 						return errStreamStream
 					}
-					message, err = effectiveBookkeepingMessage(state, action, message)
+					message, err = preview.bookkeeping(message)
 					if err != nil {
 						return err
 					}
@@ -512,7 +513,7 @@ func readStreamWithProgress(source io.Reader, expectedModel string, initial []by
 							return err
 						}
 						if message.GetToolCallResult().WhichResult() == warpapi.Message_ToolCallResult_Server_case {
-							if err := validateServerResultAction(state, action); err != nil {
+							if err := preview.evaluate(); err != nil {
 								return err
 							}
 						}
@@ -585,7 +586,7 @@ func readStreamWithProgress(source io.Reader, expectedModel string, initial []by
 				// Track the complete validated root state privately for a client
 				// tool follow-up. Pure text fixtures may not contain CreateTask;
 				// only a tool-bearing completion requires a valid snapshot.
-				if err := state.apply(action); err == nil {
+				if err := preview.commit(); err == nil {
 					switch action.WhichAction() {
 					case warpapi.ClientAction_AddMessagesToTask_case, warpapi.ClientAction_UpdateTaskMessage_case, warpapi.ClientAction_AppendToMessageContent_case, warpapi.ClientAction_UpdateTaskServerData_case:
 						checkpointProgress = true
