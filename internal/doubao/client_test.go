@@ -153,10 +153,10 @@ func TestConversationCacheKeyRequiresAnAccount(t *testing.T) {
 	testutil.Equal(t, cacheKey(7, " alpha "), "7|alpha")
 }
 
-func TestModelsCarryTheFourStableAliases(t *testing.T) {
+func TestModelsCarryStableAliases(t *testing.T) {
 	got := Models()
-	testutil.Equal(t, len(got), 4)
-	for _, id := range []string{"doubao", "doubao-expert", "doubao-work", "doubao-pro"} {
+	testutil.Equal(t, len(got), 5)
+	for _, id := range []string{"doubao", "doubao-think", "doubao-expert", "doubao-work", "doubao-pro"} {
 		model, ok := FindModel(strings.ToUpper(id))
 		testutil.True(t, ok, "missing %s", id)
 		testutil.False(t, model.ModelItemKey == "", "missing upstream mapping for %s", id)
@@ -323,6 +323,10 @@ func TestChatBodyUsesConfiguredModel(t *testing.T) {
 	if !bytes.Contains(raw, []byte(`"model_item_key":"5"`)) || !bytes.Contains(raw, []byte(`"mode_id":"3"`)) {
 		t.Fatalf("body missing pro route: %s", raw)
 	}
+	think, err := chatBodyWithAttachments("conversation", "local_test", "hello", "doubao-think", nil)
+	testutil.NoError(t, err)
+	testutil.True(t, bytes.Contains(think, []byte(`"need_deep_think":1`)) && bytes.Contains(think, []byte(`"use_deep_think":"1"`)),
+		"thinking alias lacked the upstream selector")
 }
 
 // The builder split must keep every field the web client depends on, including
@@ -709,4 +713,22 @@ func TestHistoryImagesAreReplayedAsCaptions(t *testing.T) {
 	testutil.MustNotContain(t, got, "byteimg.com")
 	testutil.MustNotContain(t, got, "doubaocdn.com")
 	testutil.MustContain(t, got, "![我的猫](https://example.com/cat.png)")
+}
+
+func consumeStream(body io.Reader, emit func(string)) (string, error) {
+	return consumeChatStream(body, emit, func(string) {})
+}
+
+func noteChallenge(acc *store.Account, err error) {
+	noteChallengeForRequest(acc, acc, err)
+}
+
+func clearChallengeForIdentity(acc *store.Account) {
+	clearChallengeForRequest(acc, acc)
+}
+
+func clearChallenge(accountID int64) {
+	challenges.Lock()
+	delete(challenges.byAccount, accountID)
+	challenges.Unlock()
 }

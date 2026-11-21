@@ -126,7 +126,7 @@ func TestRequestJournalCarriesUpstreamRoute(t *testing.T) {
 	defer func() { requestJournal = previous }()
 	h := TraceMiddleware(LoggingMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upstream.NoteUpstreamCall(r.Context(), "https://cli.example.com/v1/responses?x=1", "grok-build-mapped")
-		upstream.NoteServedModel(r.Context(), "grok-build-mapped-0309")
+		upstream.NoteServedModelWithSource(r.Context(), "grok-build-mapped-0309", "upstream_response")
 		w.Write([]byte("ok"))
 	})))
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", "/grok/v1/chat/completions", strings.NewReader("{}")))

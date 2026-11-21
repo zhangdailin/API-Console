@@ -11,9 +11,7 @@ import (
 	"strings"
 )
 
-// Video job helpers shared by the planes that create videos on an xAI video
-// API (Build's CLI proxy and console.x.ai): the create/status response shapes
-// and the credential-free download from xAI's CDN.
+// Video job helpers for xAI's create/status responses and downloads from its CDN.
 
 const (
 	maxVideoStatusBytes = 2 << 20

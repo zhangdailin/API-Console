@@ -11,10 +11,12 @@ type Model struct {
 	AgentMode        int
 	ConversationMode string
 	ReasoningEffort  int
+	DeepThink        int
 }
 
 var models = []Model{
 	{ID: "doubao", Name: "Doubao", ModeID: "1", ModelItemKey: "0", AgentMode: 2, ConversationMode: "1", ReasoningEffort: 4},
+	{ID: "doubao-think", Name: "Doubao Think", ModeID: "1", ModelItemKey: "0", AgentMode: 2, ConversationMode: "1", ReasoningEffort: 1, DeepThink: 1},
 	{ID: "doubao-expert", Name: "Doubao Expert", ModeID: "1", ModelItemKey: "3", AgentMode: 2, ConversationMode: "1", ReasoningEffort: 4},
 	{ID: "doubao-work", Name: "Doubao Work", ModeID: "3", ModelItemKey: "9", AgentMode: 1, ConversationMode: "2", ReasoningEffort: 4},
 	{ID: "doubao-pro", Name: "Doubao Pro", ModeID: "3", ModelItemKey: "5", AgentMode: 1, ConversationMode: "2", ReasoningEffort: 4},

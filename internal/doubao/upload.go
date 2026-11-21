@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"image"
@@ -15,7 +16,6 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"path"
@@ -23,8 +23,10 @@ import (
 	"strings"
 	"time"
 
+	apperrors "orchids-api/internal/errors"
 	"orchids-api/internal/httpclient"
 	"orchids-api/internal/prompt"
+	"orchids-api/internal/store"
 	"orchids-api/internal/upstream"
 )
 
@@ -63,20 +65,11 @@ func (c *Client) prepareUpload(ctx context.Context, jar cookieJar, scene string,
 		"scene_id":      scene,
 		"resource_type": resourceType,
 	})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL()+"/alice/resource/prepare_upload", bytes.NewReader(body))
-	if err != nil {
-		return nil, nil, err
-	}
-	req.Header = c.headers(jar, false)
-	req.Header.Set("Content-Type", "application/json")
-	response, err := c.http.Do(req)
+	response, err := c.doJSON(ctx, http.MethodPost, c.baseURL()+"/alice/resource/prepare_upload", body, jar, false, "application/json", "application/json")
 	if err != nil {
 		return nil, nil, err
 	}
 	defer response.Body.Close()
-	if err := httpclient.DecodeContentEncoding(response); err != nil {
-		return nil, nil, err
-	}
 	raw, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	if response.StatusCode >= 400 {
 		return nil, nil, statusError(response.StatusCode, raw)
@@ -369,7 +362,9 @@ func decodeBase64File(value string) ([]byte, error) {
 // the file.
 var attachmentMIME = map[string]string{
 	".txt": "text/plain", ".md": "text/markdown", ".json": "application/json",
-	".csv": "text/csv", ".pdf": "application/pdf", ".png": "image/png",
+	".csv": "text/csv", ".go": "text/plain", ".py": "text/plain", ".js": "text/plain",
+	".ts": "text/plain", ".rs": "text/plain", ".java": "text/plain", ".c": "text/plain", ".cpp": "text/plain",
+	".sh": "text/plain", ".yaml": "text/plain", ".yml": "text/plain", ".pdf": "application/pdf", ".png": "image/png",
 	".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
 	".webp": "image/webp", ".zip": "application/zip",
 	".doc":  "application/msword",
@@ -414,22 +409,24 @@ func (c *Client) uploadRequestAttachments(ctx context.Context, jar cookieJar, re
 		if !strings.EqualFold(strings.TrimSpace(message.Role), "user") {
 			continue
 		}
+		var total int
 		for _, block := range message.Content.GetBlocks() {
-			if data, name, ok := attachmentData(block); ok {
-				blocks = append(blocks, promptBlock{data: data, name: name, image: isImageBlock(block)})
+			entry, selected, err := c.chatAttachment(ctx, block)
+			if err != nil {
+				var oversized *http.MaxBytesError
+				if errors.Is(err, errInvalidAttachment) || errors.As(err, &oversized) {
+					return nil, apperrors.NewLocalRequestError("doubao_attachment")
+				}
+				return nil, err
+			}
+			if !selected {
 				continue
 			}
-			// A file block that only carries a URL is fetched here rather than
-			// handed to the model as a bare link: the model's browsing path may
-			// answer from the title alone, and a fetch makes the content
-			// deterministic.
-			if remote := remoteFileURL(block); remote != "" {
-				text, err := c.fetchURLText(ctx, remote)
-				if err != nil {
-					return nil, fmt.Errorf("doubao could not read the attached url: %w", err)
-				}
-				blocks = append(blocks, promptBlock{data: []byte(text), name: fileNameFromURL(remote)})
+			total += len(entry.data)
+			if len(blocks) >= maxAttachments || total > store.DoubaoFileLimit {
+				return nil, apperrors.NewLocalRequestError("doubao_attachment")
 			}
+			blocks = append(blocks, entry)
 		}
 		break
 	}
@@ -442,7 +439,6 @@ func (c *Client) uploadRequestAttachments(ctx context.Context, jar cookieJar, re
 		if err != nil {
 			return nil, err
 		}
-		slog.Debug("doubao attachment uploaded", "name", block.name, "bytes", len(block.data), "image", block.image, "uri", uri)
 		entry := storeURI{URI: uri, Name: block.name, Size: len(block.data), Image: block.image}
 		if block.image {
 			entry.Width, entry.Height, entry.Format = imageDimensions(block.data)
@@ -453,6 +449,53 @@ func (c *Client) uploadRequestAttachments(ctx context.Context, jar cookieJar, re
 		out = append(out, entry)
 	}
 	return out, nil
+}
+
+func (c *Client) chatAttachment(ctx context.Context, block prompt.ContentBlock) (promptBlock, bool, error) {
+	image := isImageBlock(block)
+	if !image && block.Type != "file" && block.Type != "input_file" {
+		return promptBlock{}, false, nil
+	}
+	var entry promptBlock
+	switch {
+	case strings.TrimSpace(block.FileID) != "":
+		file, err := loadFile(ctx, c.store, block.FileID)
+		if err != nil {
+			return entry, false, err
+		}
+		if image && !file.Image {
+			return entry, false, errInvalidAttachment
+		}
+		entry = promptBlock{data: file.Data, name: file.Name, image: file.Image}
+	default:
+		if data, name, ok := attachmentData(block); ok {
+			entry = promptBlock{data: data, name: name, image: image}
+			break
+		}
+		remote := remoteFileURL(block)
+		if image {
+			remote = block.URL
+			if remote == "" && block.Source != nil {
+				remote = block.Source.URL
+			}
+		}
+		if !isRemoteAttachment(remote) {
+			return entry, false, errInvalidAttachment
+		}
+		data, name, err := fetchAttachment(ctx, c.cfg, remote, store.DoubaoFileLimit)
+		if err != nil {
+			return entry, false, err
+		}
+		entry = promptBlock{data: data, name: safeAttachmentName(name), image: image}
+	}
+	if entry.image {
+		name, ok := imageNameFromBytes(entry.data)
+		if !ok {
+			return entry, false, errInvalidAttachment
+		}
+		entry.name = name
+	}
+	return entry, true, nil
 }
 
 // imageDimensions reads the original size the attachment block reports. The
@@ -535,17 +578,6 @@ func remoteFileURL(block prompt.ContentBlock) string {
 func isHTTPURL(value string) bool {
 	lower := strings.ToLower(strings.TrimSpace(value))
 	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
-}
-
-// fileNameFromURL derives a filename from a URL path so the attachment keeps a
-// useful extension for the upstream parser.
-func fileNameFromURL(rawURL string) string {
-	if parsed, err := url.Parse(strings.TrimSpace(rawURL)); err == nil {
-		if base := path.Base(parsed.Path); base != "" && base != "." && base != "/" {
-			return base
-		}
-	}
-	return "attachment.txt"
 }
 
 func imageName(mediaType string) string {

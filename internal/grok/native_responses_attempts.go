@@ -31,7 +31,7 @@ func nativeAuditRequest(model string, payload map[string]any) *chatwire.Request 
 // and rejected output never establishes response ownership or replay.
 func (h *Handler) serveNativeResponses(w http.ResponseWriter, r *http.Request, sess *chatAccountSession, pinned bool, spec ModelSpec, payload map[string]any, path string, namespaces responses.ToolNamespaces) (responseID string, captured []byte, result chatOutcome) {
 	ctx := withClientTurnIndex(r.Context(), r)
-	ctx, _ = upstream.WithAttemptBudget(ctx, config.GenerationMaxAttempts)
+	ctx, attempts := upstream.WithAttemptBudget(ctx, config.GenerationMaxAttempts)
 	immutable, err := cloneBuildPayload(payload)
 	if err != nil {
 		writeGrokUpstreamError(w, err)
@@ -39,22 +39,21 @@ func (h *Handler) serveNativeResponses(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 	remaining, physical := h.accountSwitchBudget(), 0
-	used := []int64{}
+	canCall := func() bool { return remaining > 0 && attempts.Remaining() > 0 }
 	var req *chatwire.Request
 	oneCall := func(stage string) (*http.Response, error) {
 		if ctx.Err() != nil {
 			return nil, context.Cause(ctx)
 		}
-		if remaining <= 0 {
+		if !canCall() {
 			return nil, fmt.Errorf("native response attempt budget exhausted")
 		}
 		remaining--
 		physical++
-		used = append(used, sess.acc.ID)
 		started := time.Now()
 		response, failure := h.buildClient().doResponsesAt(grokbase.WithReasoningDiagnostics(ctx, payload), sess.acc, path, payload)
 		if stage != "" {
-			h.auditAttemptDiagnostic(ctx, sess.acc, ProviderBuild, physical, started, failure, stage, response, nil, "")
+			h.auditAttemptDiagnostic(ctx, grokbase.Attempt{Account: sess.acc, Provider: ProviderBuild, Number: physical, Started: started, Err: failure, Stage: stage, Response: response})
 		}
 		return response, failure
 	}
@@ -66,15 +65,15 @@ func (h *Handler) serveNativeResponses(w http.ResponseWriter, r *http.Request, s
 		req = nativeAuditRequest(spec.ID, payload)
 		initialStarted := time.Now()
 		response, failure := oneCall("")
-		if failure == nil || !isReasoningReplayDecodeError(failure) || preservesClientCompaction(payload, failure) || remaining <= 0 {
+		if failure == nil || !isReasoningReplayDecodeError(failure) || preservesClientCompaction(payload, failure) || !canCall() {
 			return response, failure
 		}
-		h.auditAttemptDiagnostic(ctx, sess.acc, ProviderBuild, physical, initialStarted, failure, "reasoning_decode_rejected", response, nil, "")
+		h.auditAttemptDiagnostic(ctx, grokbase.Attempt{Account: sess.acc, Provider: ProviderBuild, Number: physical, Started: initialStarted, Err: failure, Stage: "reasoning_decode_rejected", Response: response})
 		if session := grokbase.SessionFromContext(ctx); session.Key != "" {
 			h.clearReasoningReplay(ctx, spec.ID, session.Key)
 		}
 		lastStage := ""
-		response, failure = recoverChatReasoning(payload, failure, func(stage string) (*http.Response, error) {
+		response, failure = recoverChatReasoningWithinBudget(payload, response, failure, canCall, func(stage string) (*http.Response, error) {
 			lastStage = stage
 			return oneCall(stage)
 		})
@@ -83,7 +82,7 @@ func (h *Handler) serveNativeResponses(w http.ResponseWriter, r *http.Request, s
 		}
 		return response, failure
 	}
-	openNext := func(_ []int64) (*chatAccountSession, error) {
+	openNext := func(used []int64) (*chatAccountSession, error) {
 		return h.openCLIAccountSession(ctx, used, spec.UpstreamModel)
 	}
 	// Hosted tools may already have executed unless the upstream explicitly
@@ -91,13 +90,14 @@ func (h *Handler) serveNativeResponses(w http.ResponseWriter, r *http.Request, s
 	// remain on their creating account, including after such a rejection.
 	continuation := pinned || chatwire.ParseLooseStringAny(immutable["previous_response_id"]) != ""
 	limit := remaining
-	var allowSwitch func(error) bool
+	replayUnsafe := requestReplayUnsafe(nativeAuditRequest(spec.ID, immutable))
+	allowSwitch := func(err error) bool {
+		return canCall() && (!replayUnsafe || isFreeUsageExhaustedError(err))
+	}
 	if continuation {
 		limit = 1
-	} else if requestReplayUnsafe(nativeAuditRequest(spec.ID, immutable)) {
-		allowSwitch = isFreeUsageExhaustedError
 	}
-	resp, failure := h.retryWithAccountSwitchWhen(ctx, sess, 1500*time.Millisecond, request, openNext, nil, limit, allowSwitch)
+	resp, failure := h.retryWithAccountSwitch(ctx, sess, 1500*time.Millisecond, request, openNext, nil, limit, allowSwitch)
 	if failure != nil {
 		result.Err = failure
 		writeGrokUpstreamFailure(w, upstreamHTTPResponseStatus(failure), failure)

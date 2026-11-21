@@ -57,6 +57,14 @@ func (e *messageExecution) run() {
 	if spec, ok := provider.Lookup(e.targetChannel); ok && spec.SingleGenerationAttempt {
 		maxRetries = 0
 	}
+	if e.targetChannel == "doubao" {
+		maxRetries = min(maxRetries, 1)
+		// An explicit dialog is pinned even on its first turn. A retry could
+		// duplicate an accepted turn or silently start a competing history.
+		if explicitConversationID(e.r, e.req) != "" {
+			maxRetries = 0
+		}
+	}
 	retryDelay := time.Duration(e.cfg.RetryDelay) * time.Millisecond
 	retriesRemaining := maxRetries
 	budgetCtx, attemptBudget := upstream.WithAttemptBudget(e.r.Context(), maxRetries+1)

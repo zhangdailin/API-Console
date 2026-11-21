@@ -56,12 +56,11 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	if !requirePost(w, r) {
 		return
 	}
-	p, handled := peekPlane(w, r)
+	isWeb, handled := peekWebModel(w, r)
 	if handled {
 		return
 	}
-	isWeb := p == planeWeb && h.web != nil
-	isConsole := p == planeConsole && h.console != nil
+	isWeb = isWeb && h.web != nil
 	var req anthropicMessagesRequest
 	if !decodeJSONBody(w, r, &req) {
 		return
@@ -79,10 +78,7 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		writeAnthropicError(w, http.StatusBadRequest, "max_tokens must be greater than zero")
 		return
 	}
-	if isConsole {
-		// Console routes are validated by the Console plane when the
-		// translated chat request reaches it.
-	} else if isWeb {
+	if isWeb {
 		// Web conversations are translated to Chat Completions and served by the
 		// Web plane, which validates the route and picks the account itself.
 		// Media routes have no Messages shape.

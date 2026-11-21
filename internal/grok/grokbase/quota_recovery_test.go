@@ -27,7 +27,6 @@ func TestRecoveryQueueClaimsOnceThenBacksOff(t *testing.T) {
 	testutil.Equal(t, q.Reschedule(7, now, reset), reset)
 
 	q.Done(7)
-	testutil.False(t, q.Pending(7))
 	testutil.True(t, q.Claim(7, now))
 }
 

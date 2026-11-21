@@ -22,6 +22,27 @@ func newTestAPI(t *testing.T) (*API, *store.Store, func()) {
 	return New(s, "", "", &config.Config{}), s, func() { _ = s.Close() }
 }
 
+func TestAccountCheckAndUsageRejectWriteMethods(t *testing.T) {
+	s, _ := newTestStore(t, "account-query-method:")
+	a := &API{store: s}
+	acc := &store.Account{AccountType: "doubao", Name: "synthetic account", Enabled: true}
+	testutil.NoError(t, s.CreateAccount(t.Context(), acc))
+	for _, action := range []string{"check", "usage"} {
+		for _, method := range []string{http.MethodPut, http.MethodDelete, http.MethodPost} {
+			t.Run(action+"/"+method, func(t *testing.T) {
+				path := "/api/accounts/" + strconv.FormatInt(acc.ID, 10) + "/" + action
+				rec := httptest.NewRecorder()
+				a.HandleAccountByID(rec, httptest.NewRequest(method, path, strings.NewReader("{")))
+				testutil.Equal(t, rec.Code, http.StatusMethodNotAllowed)
+				testutil.Equal(t, rec.Header().Get("Allow"), http.MethodGet)
+				current, err := s.GetAccount(t.Context(), acc.ID)
+				testutil.NoError(t, err)
+				testutil.Equal(t, current.Name, acc.Name)
+			})
+		}
+	}
+}
+
 func TestHandleAccountByID_PutPreservesGrokOAuthTokens(t *testing.T) {
 	a, s, cleanup := newTestAPI(t)
 	defer cleanup()

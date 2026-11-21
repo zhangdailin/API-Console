@@ -16,6 +16,7 @@ import (
 	"orchids-api/internal/buildinfo"
 	"orchids-api/internal/channel"
 	"orchids-api/internal/config"
+	"orchids-api/internal/doubao"
 	"orchids-api/internal/grok"
 	"orchids-api/internal/handler"
 	"orchids-api/internal/loadbalancer"
@@ -109,8 +110,7 @@ func registerRoutes(
 	}
 	// All inference routes bind a provider by path, with or without /v1.
 	channelPrefixes := channel.GenericPrefixes()
-	// Chat-only channels serve POST /chat/completions and model discovery only.
-	// Their /messages and Responses routes stay unregistered so those wire
+	// Chat-only channels leave /messages and Responses unregistered so those wire
 	// formats fail at routing instead of being bridged onto an upstream that
 	// cannot honour them.
 	protocolPrefixes := channel.GenericPrefixesExcept(channel.ChatOnlyIDs()...)
@@ -128,6 +128,15 @@ func registerRoutes(
 
 	// --- OpenAI-compatible channel chat routes ---
 	registerWithPrefixes(mux, channelPrefixes, "/chat/completions", inferenceAuth(h.HandleMessages))
+
+	doubaoPrefixes := channel.PrefixesFor(channel.Doubao)
+	doubaoMedia := doubao.NewMediaHandler(s, currentConfig, h.AcquireDoubaoMediaAccount)
+	registerWithPrefixes(mux, doubaoPrefixes, "/files", inferenceAuth(doubaoMedia.Files))
+	registerWithPrefixes(mux, doubaoPrefixes, "/files/{file_id}", inferenceAuth(doubaoMedia.FileResource))
+	registerWithPrefixes(mux, doubaoPrefixes, "/images/upload", inferenceAuth(doubaoMedia.ImageUpload))
+	registerWithPrefixes(mux, doubaoPrefixes, "/images/generations", inferenceAuth(doubaoMedia.Images))
+	registerWithPrefixes(mux, doubaoPrefixes, "/images/edits", inferenceAuth(doubaoMedia.ImageEdits))
+	registerWithPrefixes(mux, doubaoPrefixes, "/video/generations", inferenceAuth(doubaoMedia.Videos))
 
 	// --- OpenAI Responses API for the chat-completions-only channels ---
 	// Codex defaults to the Responses wire API, so without this bridge every
@@ -163,17 +172,8 @@ func registerRoutes(
 	// Grok Web (grok.com SSO) media and resources. Only the grok channel serves
 	// them; the conversation routes above dispatch Web models by identifier.
 	webHandler := grokHandler.Web()
-	registerWithPrefixes(mux, grokPrefixes, "/images/generations", inferenceAuth(grokHandler.HandleImagesGenerations))
-	registerWithPrefixes(mux, grokPrefixes, "/images/edits", inferenceAuth(grokHandler.HandleImagesEdits))
-	// Grok Console (console.x.ai SSO) voice: native and OpenAI-shaped speech
-	// and transcription, and the realtime voice WebSocket.
-	consoleHandler := grokHandler.Console()
-	registerWithPrefixes(mux, grokPrefixes, "/tts", inferenceAuth(consoleHandler.HandleTTS))
-	registerWithPrefixes(mux, grokPrefixes, "/tts/voices", inferenceAuth(consoleHandler.HandleTTSVoices))
-	registerWithPrefixes(mux, grokPrefixes, "/stt", inferenceAuth(consoleHandler.HandleSTT))
-	registerWithPrefixes(mux, grokPrefixes, "/audio/speech", inferenceAuth(consoleHandler.HandleAudioSpeech))
-	registerWithPrefixes(mux, grokPrefixes, "/audio/transcriptions", inferenceAuth(consoleHandler.HandleAudioTranscriptions))
-	registerWithPrefixes(mux, grokPrefixes, "/realtime", inferenceAuth(consoleHandler.HandleRealtime))
+	registerWithPrefixes(mux, grokPrefixes, "/images/generations", inferenceAuth(webHandler.HandleImagesGenerations))
+	registerWithPrefixes(mux, grokPrefixes, "/images/edits", inferenceAuth(webHandler.HandleImagesEdits))
 	// xAI uploads a Build fallback video here. The one-time token in the path
 	// is the authorization, so the route takes no API key; it answers 404 for
 	// any token it did not issue.
@@ -207,6 +207,7 @@ func registerRoutes(
 	mux.HandleFunc("/api/cline/login/", sessionAuth(apiHandler.HandleClineLogin))
 	mux.HandleFunc("/api/doubao/login", sessionAuth(apiHandler.HandleDoubaoLogin))
 	mux.HandleFunc("/api/doubao/login/", sessionAuth(apiHandler.HandleDoubaoLogin))
+	mux.HandleFunc("/api/doubao/cookie-import", sessionAuth(apiHandler.HandleDoubaoCookieImport))
 	mux.HandleFunc("/api/warp/login", sessionAuth(apiHandler.HandleWarpLogin))
 	mux.HandleFunc("/api/warp/login/", sessionAuth(apiHandler.HandleWarpLogin))
 	mux.HandleFunc("/api/grok/device-auth", sessionAuth(apiHandler.HandleGrokDeviceAuthorization))

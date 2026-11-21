@@ -83,15 +83,9 @@ func resolveOfficialTokenPrice(model string) (tokenPrice, bool) {
 	return price, true
 }
 
-// normalizePricingModel strips the plane qualifiers of the grok channel: a
-// Build or Console route is billed at the official price of the model it
-// serves.
+// normalizePricingModel maps a qualified Build route to its official model ID.
 func normalizePricingModel(model string) string {
-	normalized := strings.ToLower(strings.TrimSpace(model))
-	for _, prefix := range []string{"build/", "console/"} {
-		normalized = strings.TrimPrefix(normalized, prefix)
-	}
-	return normalized
+	return strings.TrimPrefix(strings.ToLower(strings.TrimSpace(model)), "build/")
 }
 
 // EstimateCost prices one finished text request from its token usage.

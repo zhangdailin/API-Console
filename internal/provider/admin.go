@@ -68,6 +68,9 @@ type Admin struct {
 	// Login is the channel's browser authorization flow, or nil when the
 	// channel is not added that way.
 	Login *Login
+	// ImportBrowserCookie verifies an administrator-supplied browser session
+	// before it may enter the pool. It must not expose raw credentials.
+	ImportBrowserCookie func(context.Context, Env, string) (*store.Account, error)
 
 	// Verification returns the challenge the upstream last put in front of the
 	// account, for the operator to answer in the console, or false when none is

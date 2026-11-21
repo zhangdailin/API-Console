@@ -106,6 +106,11 @@ type UpstreamFailure struct {
 	Body   string
 }
 
+type attemptHTTPError interface {
+	error
+	AttemptFailure() (UpstreamFailure, bool)
+}
+
 // Attempt describes one upstream attempt for the audit journal.
 type Attempt struct {
 	Account  *store.Account
@@ -113,35 +118,33 @@ type Attempt struct {
 	Number   int
 	Started  time.Time
 	Err      error
-	// ErrorKind is the plane's classification of Err.
-	ErrorKind string
-	Stage     string
-	Response  *http.Response
-	Body      []byte
-	Result    string
-	// Upstream extracts the plane's typed upstream error from an error chain.
-	Upstream func(error) (UpstreamFailure, bool)
-	// IsUpstream reports whether one error in the chain is the plane's typed
-	// upstream error, whose message is replaced by the structured fields.
-	IsUpstream func(error) bool
-	// MaxBodyBytes is the plane's bound on an upstream error body.
-	MaxBodyBytes int
+	Stage    string
+	Response *http.Response
 }
 
-// AttemptEvent builds the audit event for one upstream attempt. It never
-// retains request/output bodies, opaque reasoning, or unrestricted headers.
-func AttemptEvent(ctx context.Context, a Attempt) audit.Event {
-	acc, err, resp, body, started := a.Account, a.Err, a.Response, a.Body, a.Started
-	stage, result, provider, attempt := a.Stage, a.Result, a.Provider, a.Number
+// LogAttempt journals one upstream attempt with the plane's error classification.
+func LogAttempt[K fmt.Stringer](ctx context.Context, logger audit.Logger, a Attempt, classify func(error) K) {
+	if logger == nil {
+		return
+	}
+	kind := ""
+	if a.Err != nil {
+		kind = classify(a.Err).String()
+	}
+	logger.Log(ctx, attemptEvent(ctx, a, kind))
+}
+
+// attemptEvent never retains request/output bodies, opaque reasoning, or
+// unrestricted headers.
+func attemptEvent(ctx context.Context, a Attempt, kind string) audit.Event {
+	acc, err, resp, started := a.Account, a.Err, a.Response, a.Started
+	stage, provider, attempt := a.Stage, a.Provider, a.Number
 	metadata := map[string]any{"stage": stage, "started_at": started.UTC().Format(time.RFC3339Nano)}
 	AddReasoningDiagnostics(ctx, metadata)
 	status := "ok"
-	if result != "" {
-		status = result
-	}
 	if err != nil {
 		status = "error"
-		metadata["error_kind"] = a.ErrorKind
+		metadata["error_kind"] = kind
 	}
 	var header http.Header
 	if resp != nil {
@@ -155,14 +158,11 @@ func AttemptEvent(ctx context.Context, a Attempt) audit.Event {
 			metadata["upstream_url"] = DiagnosticText(u.String(), acc)
 		}
 	}
-	upstream, isUpstream := UpstreamFailure{}, false
-	if a.Upstream != nil {
-		upstream, isUpstream = a.Upstream(err)
-	}
-	if isUpstream {
-		metadata["http_status"] = upstream.Status
-		header = upstream.Header
-		if len(body) == 0 {
+	var body []byte
+	if typed, ok := errors.AsType[attemptHTTPError](err); ok {
+		if upstream, valid := typed.AttemptFailure(); valid {
+			metadata["http_status"] = upstream.Status
+			header = upstream.Header
 			body = []byte(upstream.Body)
 		}
 	}
@@ -179,9 +179,9 @@ func AttemptEvent(ctx context.Context, a Attempt) audit.Event {
 	for current, n := err, 0; current != nil && n < 4; current, n = errors.Unwrap(current), n+1 {
 		// Typed HTTP errors are described by the structured body below, not a
 		// string containing its raw body and potentially arbitrary extra fields.
-		message := current.Error()
-		if a.IsUpstream != nil && a.IsUpstream(current) {
-			message = "upstream HTTP request rejected"
+		message := "upstream HTTP request rejected"
+		if _, ok := errors.AsType[attemptHTTPError](current); !ok {
+			message = current.Error()
 		}
 		chain = append(chain, map[string]any{"type": fmt.Sprintf("%T", current), "message": DiagnosticText(message, acc)})
 	}
@@ -192,7 +192,7 @@ func AttemptEvent(ctx context.Context, a Attempt) audit.Event {
 	if len(body) > 0 {
 		metadata["response_body_bytes"] = len(body)
 		metadata["response_body_sha256"] = fmt.Sprintf("%x", sha256.Sum256(body))
-		metadata["response_body_truncated"] = len(body) >= a.MaxBodyBytes && isUpstream
+		metadata["response_body_truncated"] = len(body) >= MaxUpstreamBodyBytes
 		if json.Unmarshal(body, &parsed) == nil {
 			for _, key := range []string{"id", "status"} {
 				if value := responses.StreamString(parsed[key]); value != "" {

@@ -23,9 +23,8 @@ type Definition struct {
 	Default       bool   `json:"default,omitempty"`
 	Theme         string `json:"theme"`
 	AccountCreate string `json:"accountCreate"`
-	// ChatOnly restricts the channel to POST /chat/completions. Channels whose
-	// upstream speaks only the OpenAI-compatible chat wire format leave
-	// /messages and the Responses bridge unregistered.
+	// ChatOnly leaves /messages and the Responses bridge unregistered.
+	// Channel-specific file and media routes are independent of this flag.
 	ChatOnly bool `json:"chatOnly,omitempty"`
 	// FlowVisible controls whether the live traffic screen lists the channel.
 	FlowVisible bool `json:"flowVisible"`

@@ -3,6 +3,7 @@ package warp
 import (
 	"encoding/base64"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -128,4 +129,12 @@ func TestStreamAllowsOpaqueServerBookkeepingWithoutText(t *testing.T) {
 			}
 		})
 	}
+}
+
+func readStream(source io.Reader, expectedModel string) (streamResult, error) {
+	return readStreamWithContext(source, expectedModel, nil)
+}
+
+func readStreamWithContext(source io.Reader, expectedModel string, initial []byte) (result streamResult, parseErr error) {
+	return readStreamWithProgress(source, expectedModel, initial, nil)
 }

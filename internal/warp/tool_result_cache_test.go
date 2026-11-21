@@ -37,7 +37,7 @@ func toolResultCacheRaw(t *testing.T, ttl string, isError bool, content any) jso
 		"tools": []any{map[string]any{"name": "echo", "input_schema": map[string]any{"type": "object"}}},
 		"messages": []any{
 			map[string]any{"role": "user", "content": "echo"},
-			map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "tool_use", "id": "call-cache", "name": "echo", "input": map[string]any{}}}},
+			map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "tool_use", "id": "call-cache", "name": "echo", "input": map[string]any{"query": "safe"}, "cache_control": cache}}},
 			map[string]any{"role": "user", "content": []any{map[string]any{"type": "tool_result", "tool_use_id": "call-cache", "content": content, "is_error": isError, "cache_control": cache}}},
 		},
 	})
@@ -86,6 +86,9 @@ func TestToolResultCacheRawAndNormalizedPreserveResult(t *testing.T) {
 					if !reflect.DeepEqual(prepared.ToolResults, want) || prepared.CurrentText != "" {
 						t.Fatal("cache hint changed result identity, tool name, full content or error status")
 					}
+					if !strings.Contains(prepared.Query, `{"query":"safe"}`) {
+						t.Fatal("cache-marked tool history lost its call arguments")
+					}
 					for _, marker := range []string{"cache_control", "ephemeral", "5m", "1h"} {
 						if strings.Contains(prepared.Query, marker) {
 							t.Fatal("cache hint entered the prepared query")
@@ -94,10 +97,6 @@ func TestToolResultCacheRawAndNormalizedPreserveResult(t *testing.T) {
 					after, err := json.Marshal(req)
 					if err != nil || string(before) != string(after) {
 						t.Fatal("request validation mutated the caller-owned normalized request")
-					}
-					block := req.Messages[2].Content.Blocks[0]
-					if block.CacheControl == nil || block.CacheControl.Type != "ephemeral" {
-						t.Fatal("caller-owned cache marker was removed or changed")
 					}
 				})
 			}
@@ -111,8 +110,8 @@ func TestToolResultCacheNormalizedRejectsOtherVariantsAndLocations(t *testing.T)
 		mutate func(*upstream.UpstreamRequest)
 	}{
 		{"permanent", func(r *upstream.UpstreamRequest) { r.Messages[2].Content.Blocks[0].CacheControl.Type = "permanent" }},
-		{"tool_use", func(r *upstream.UpstreamRequest) {
-			r.Messages[1].Content.Blocks[0].CacheControl = &prompt.CacheControl{Type: "ephemeral"}
+		{"invalid_tool_use_marker", func(r *upstream.UpstreamRequest) {
+			r.Messages[1].Content.Blocks[0].CacheControl = &prompt.CacheControl{Type: "permanent"}
 		}},
 		{"nested_text", func(r *upstream.UpstreamRequest) {
 			r.Messages[2].Content.Blocks[0].Content = []any{map[string]any{"type": "text", "text": "synthetic", "cache_control": map[string]any{"type": "ephemeral"}}}
@@ -150,7 +149,7 @@ func TestToolResultCacheBoundClientRoundtripPreservesWireAndScope(t *testing.T) 
 					warpapi.Message_builder{Id: proto.String("cache-model-used"), TaskId: proto.String("root"), ModelUsed: warpapi.Message_ModelUsed_builder{ModelId: proto.String("model-b"), IsFallback: proto.Bool(true)}.Build()}.Build(),
 				)
 				create.GetCreateTask().GetTask().SetServerData("synthetic-cache-root-state")
-				call := mcpToolCallEvent(t, "call-cache", "echo", map[string]any{})
+				call := mcpToolCallEvent(t, "call-cache", "echo", map[string]any{"query": "safe"})
 				message := call.GetClientActions().GetActions()[0].GetAddMessagesToTask().GetMessages()[0]
 				message.SetTaskId("root")
 				message.GetToolCall().GetCallMcpTool().SetServerId(clientMCPServerID)

@@ -178,6 +178,9 @@ func TestScopedBindingsIsolationAndPersistedValidation(t *testing.T) {
 	b := newBindingStore()
 	b.redis = backend
 	input := callBinding{ConversationID: "conversation", RootTaskContext: raw, ToolRounds: 2}
+	if b.saveScoped(context.Background(), 7, "model-a", "unowned-call", input) || len(backend.values) != 0 {
+		t.Fatal("unauthenticated binding was persisted")
+	}
 	if !b.saveScoped(ctx, 7, "model-a", "same-call", input) {
 		t.Fatal("scoped save failed")
 	}
@@ -561,20 +564,28 @@ func TestContinuationTransactionFailureCannotBeRolledBackToSuccess(t *testing.T)
 	}
 }
 
-func TestLocalBindingWrappersNeverUseRedis(t *testing.T) {
-	backend := &continuationMemoryRedis{values: map[string][]byte{}, ttls: map[string]time.Duration{}}
+func TestScopedBindingsRequireIdenticalSnapshotsForParallelResults(t *testing.T) {
+	ctx := bindingAuthContext(t, 1, "parallel-results-key")
 	b := newBindingStore()
-	b.redis = backend
-	b.save(context.Background(), "call", callBinding{ConversationID: "local-conversation"})
-	if _, ok := b.lookup(context.Background(), []string{"call"}); !ok {
-		t.Fatal("local wrapper failed")
+	binding := func(text string) callBinding {
+		a := newContinuationAccumulator(nil)
+		continuationApply(t, a, continuationCreate(continuationText("out", text)))
+		raw, err := a.snapshot()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return callBinding{ConversationID: "same-dialog", RootTaskContext: raw}
 	}
-	if len(backend.values) != 0 {
-		t.Fatal("local test state reached Redis")
+	same := binding("same history")
+	different := binding("different history")
+	if !b.saveScoped(ctx, 7, "model-a", "a", same) || !b.saveScoped(ctx, 7, "model-a", "b", same) ||
+		!b.saveScoped(ctx, 7, "model-a", "c", different) {
+		t.Fatal("failed to seed scoped bindings")
 	}
-	fresh := newBindingStore()
-	fresh.redis = backend
-	if _, ok := fresh.lookup(context.Background(), []string{"call"}); ok {
-		t.Fatal("local test state escaped constructor")
+	if got, ok := b.lookupScoped(ctx, 7, "model-a", []string{"a", "b"}); !ok || !bytes.Equal(got.RootTaskContext, same.RootTaskContext) {
+		t.Fatal("matching parallel results lost their shared context")
+	}
+	if _, ok := b.lookupScoped(ctx, 7, "model-a", []string{"a", "c"}); ok {
+		t.Fatal("parallel results from different snapshots resumed together")
 	}
 }

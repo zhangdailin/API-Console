@@ -19,7 +19,6 @@ func (a *Account) Clone() *Account {
 	}
 	copy.GrokModels = slices.Clone(a.GrokModels)
 	copy.GrokModelCatalog = modelcatalog.CloneProfiles(a.GrokModelCatalog)
-	copy.GrokConsoleModels = slices.Clone(a.GrokConsoleModels)
 	copy.ModelCooldowns = maps.Clone(a.ModelCooldowns)
 	copy.ModelCooldownReasons = maps.Clone(a.ModelCooldownReasons)
 	copy.WorkBuddyModelIDs = slices.Clone(a.WorkBuddyModelIDs)

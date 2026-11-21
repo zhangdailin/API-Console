@@ -78,8 +78,8 @@ func validateRawRequest(raw json.RawMessage) error {
 			return wireFieldError("thinking", "must be a nonempty object")
 		}
 		var kind string
-		if !rawString(config["type"], &kind) || (kind != "enabled" && kind != "disabled" && kind != "adaptive") {
-			return wireFieldError("thinking.type", "must be enabled, disabled or adaptive")
+		if !rawString(config["type"], &kind) || (kind != "enabled" && kind != "disabled" && kind != "adaptive" && kind != "between_tools") {
+			return wireFieldError("thinking.type", "must be enabled, disabled, adaptive or between_tools")
 		}
 		for _, key := range sortedRawKeys(config) {
 			value := config[key]
@@ -90,9 +90,14 @@ func validateRawRequest(raw json.RawMessage) error {
 					return wireFieldError("thinking.budget_tokens", "must be a nonnegative integer")
 				}
 			case "display":
+				// The Anthropic SDK permits null as an unset display. A known
+				// display can also survive a client's change of thinking mode.
+				if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+					continue
+				}
 				var display string
-				if kind == "disabled" || !rawString(value, &display) || (display != "omitted" && display != "summarized") {
-					return wireFieldError("thinking.display", "must be omitted or summarized with enabled or adaptive thinking")
+				if !rawString(value, &display) || (display != "omitted" && display != "summarized") {
+					return wireFieldError("thinking.display", "must be null, omitted or summarized")
 				}
 			default:
 				return wireFieldError("thinking", "unsupported field")
@@ -356,7 +361,7 @@ func rawContentBlock(block map[string]json.RawMessage, role, path string) error 
 		}
 		return nil
 	case "tool_use":
-		if role != "assistant" || !rawKeys(block, "type", "id", "name", "input") {
+		if role != "assistant" || !rawKeys(block, "type", "id", "name", "input", "cache_control") {
 			return wireFieldError(path, "unsupported tool_use fields or role")
 		}
 		if !rawString(block["id"], &text) || text == "" {
@@ -368,6 +373,9 @@ func rawContentBlock(block map[string]json.RawMessage, role, path string) error 
 		var input map[string]any
 		if json.Unmarshal(block["input"], &input) != nil || input == nil {
 			return wireFieldError(path+".input", "must be a JSON object")
+		}
+		if cache, exists := block["cache_control"]; exists {
+			return rawCacheControl(cache, path+".cache_control")
 		}
 		return nil
 	case "tool_result":

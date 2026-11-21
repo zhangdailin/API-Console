@@ -194,6 +194,11 @@ func (a *API) HandleAccountByID(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Not found", http.StatusNotFound)
 		return
 	}
+	if (isCheck || isUsage) && r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeMethodNotAllowed(w)
+		return
+	}
 	if isDeviceIdentity {
 		a.handleDeviceIdentityRotation(w, r, account)
 		return

@@ -34,6 +34,7 @@ type ContentBlock struct {
 	// providers ignore them.
 	FileData string `json:"file_data,omitempty"`
 	FileName string `json:"filename,omitempty"`
+	FileID   string `json:"file_id,omitempty"`
 
 	// tool_use fields
 	ID        string `json:"id,omitempty"`
@@ -82,6 +83,7 @@ func (b *ContentBlock) UnmarshalJSON(data []byte) error {
 			FileData string `json:"file_data,omitempty"`
 			Filename string `json:"filename,omitempty"`
 			URL      string `json:"url,omitempty"`
+			FileID   string `json:"file_id,omitempty"`
 		}
 		if err := json.Unmarshal(raw.File, &file); err == nil {
 			if b.FileData == "" {
@@ -89,6 +91,9 @@ func (b *ContentBlock) UnmarshalJSON(data []byte) error {
 			}
 			if b.FileName == "" {
 				b.FileName = file.Filename
+			}
+			if b.FileID == "" {
+				b.FileID = file.FileID
 			}
 		}
 	}

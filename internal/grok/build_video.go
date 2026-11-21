@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"orchids-api/internal/grok/console"
 	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/grok/web"
 	"orchids-api/internal/store"
@@ -25,33 +24,6 @@ const (
 	maxBuildVideoInlineBytes = 32 << 20
 )
 
-// videoBackends routes a video job to the plane its model belongs to.
-type videoBackends struct {
-	build   buildVideoBackend
-	console console.VideoBackend
-}
-
-func (v videoBackends) VideoModel(ctx context.Context, modelID string) (string, bool) {
-	if console.IsConsoleModelID(modelID) {
-		return v.console.VideoModel(ctx, modelID)
-	}
-	return v.build.VideoModel(ctx, modelID)
-}
-
-func (v videoBackends) ResumeVideo(ctx context.Context, job web.VideoBackendJob, accountID int64, requestID string) (web.VideoBackendResult, error) {
-	if console.IsConsoleModelID(job.Model) {
-		return v.console.ResumeVideo(ctx, job, accountID, requestID)
-	}
-	return v.build.ResumeVideo(ctx, job, accountID, requestID)
-}
-
-func (v videoBackends) RunVideo(ctx context.Context, job web.VideoBackendJob) (web.VideoBackendResult, error) {
-	if console.IsConsoleModelID(job.Model) {
-		return v.console.RunVideo(ctx, job)
-	}
-	return v.build.RunVideo(ctx, job)
-}
-
 // buildVideoBackend adapts the Build plane to web.VideoBackend.
 type buildVideoBackend struct{ h *Handler }
 
@@ -62,7 +34,7 @@ func (b buildVideoBackend) VideoModel(ctx context.Context, modelID string) (stri
 		return "", false
 	}
 	id := strings.TrimPrefix(normalizeModelID(modelID), "build/")
-	if id == "" || web.IsWebModelID(id) || console.IsConsoleModelID(id) {
+	if id == "" || web.IsWebModelID(id) {
 		return "", false
 	}
 	row, err := h.lb.Store.GetModelByChannelAndModelID(ctx, "grok", id)

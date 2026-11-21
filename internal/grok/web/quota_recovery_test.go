@@ -31,7 +31,7 @@ func TestWebQuotaRecoveryReleasesAnAccountWhenTheWindowRefills(t *testing.T) {
 	settleWebQuotaRecovery(acc, "", nil, now.Add(2*time.Hour))
 	testutil.Equal(t, acc.StatusCode, "")
 	testutil.Equal(t, acc.RateLimitFailures, 0)
-	testutil.False(t, webQuotaRecovery.Pending(acc.ID))
+	testutil.False(t, claimWebQuotaRecovery(acc, now.Add(2*time.Hour)))
 }
 
 func TestWebQuotaRecoveryIgnoresABareThrottle(t *testing.T) {

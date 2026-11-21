@@ -9,7 +9,7 @@ import (
 
 // GrokAccountCatalog prefers upstream profiles over the legacy identifier projection.
 func GrokAccountCatalog(acc *store.Account) []modelcatalog.Profile {
-	if acc == nil {
+	if acc == nil || !store.SupportsGrokProvider(acc.GrokProvider) {
 		return nil
 	}
 	if len(acc.GrokModelCatalog) > 0 {
@@ -25,14 +25,11 @@ func GrokAccountCatalog(acc *store.Account) []modelcatalog.Profile {
 // GrokModelProfiles aggregates only authorized, enabled accounts bound to this route.
 // Temporary concurrency and rate limits do not remove a catalog entitlement.
 func GrokModelProfiles(model *store.Model, accounts []*store.Account) []modelcatalog.Profile {
-	if model == nil {
+	if model == nil || !store.SupportsGrokProvider(model.Provider) {
 		return nil
 	}
 	if strings.EqualFold(strings.TrimSpace(model.Provider), store.GrokProviderWeb) {
 		return grokWebModelProfiles(model, accounts)
-	}
-	if strings.EqualFold(strings.TrimSpace(model.Provider), store.GrokProviderConsole) {
-		return grokConsoleModelProfiles(model, accounts)
 	}
 	id := strings.TrimSpace(model.UpstreamModel)
 	if id == "" {
@@ -51,23 +48,6 @@ func GrokModelProfiles(model *store.Model, accounts []*store.Account) []modelcat
 		}
 	}
 	return modelcatalog.Aggregate(catalogs...)
-}
-
-// grokConsoleModelProfiles answers entitlement for a Console route: an enabled,
-// auth-active Console account whose own catalog read listed the model.
-func grokConsoleModelProfiles(model *store.Model, accounts []*store.Account) []modelcatalog.Profile {
-	id := strings.TrimSpace(model.UpstreamModel)
-	for _, acc := range accounts {
-		if acc == nil || !acc.Enabled || !acc.IsGrokConsole() || !store.AccountAuthActive(acc) || strings.TrimSpace(acc.StatusCode) == "401" || !model.AllowsAccount(acc.ID) {
-			continue
-		}
-		for _, listed := range acc.GrokConsoleModels {
-			if strings.EqualFold(strings.TrimSpace(listed), id) {
-				return []modelcatalog.Profile{{ModelID: id}}
-			}
-		}
-	}
-	return nil
 }
 
 // grokWebModelProfiles answers entitlement for a Grok Web route. grok.com has

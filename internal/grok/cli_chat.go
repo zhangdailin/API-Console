@@ -50,7 +50,7 @@ func (h *Handler) doCLIWithAutoSwitchAt(ctx context.Context, sess *chatAccountSe
 	ctx = grokbase.WithReasoningDiagnostics(ctx, payload)
 	return h.retryWithAccountSwitch(ctx, sess, 1500*time.Millisecond,
 		func() (*http.Response, error) { return h.buildClient().doResponsesAt(ctx, sess.acc, path, payload) },
-		func(used []int64) (*chatAccountSession, error) { return h.openCLIAccountSession(ctx, used, modelID) }, prepare)
+		func(used []int64) (*chatAccountSession, error) { return h.openCLIAccountSession(ctx, used, modelID) }, prepare, 0, nil)
 }
 
 func (h *Handler) openCLIAccountSessionByID(ctx context.Context, accountID int64, modelID string) (*chatAccountSession, error) {

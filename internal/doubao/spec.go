@@ -31,7 +31,7 @@ type capabilities struct{}
 func (capabilities) SupportsModel(*store.Account, string) bool                      { return true }
 func (capabilities) IsFreeModel(*store.Account, string) bool                        { return false }
 func (capabilities) ContextWindows(*store.Account) (map[string]int, map[string]int) { return nil, nil }
-func (capabilities) HonorsModelCooldown() bool                                      { return false }
+func (capabilities) HonorsModelCooldown() bool                                      { return true }
 
 func catalogPort() *provider.Catalog {
 	return &provider.Catalog{Source: "doubao_web_verified", Kind: provider.CatalogAccountView,

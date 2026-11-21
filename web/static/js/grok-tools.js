@@ -131,7 +131,7 @@
     const counts = grokCapabilityState.counts;
     if (tab === "cache") return true;
     // LiveKit uses the Web account's token endpoint, independently of the
-    // inference model catalog and its realtime/TTS/STT capabilities.
+    // inference model catalog and its voice capabilities.
     if (tab === "voice") return counts.web > 0;
     if (chatState.modelsLoaded) return chatState.capabilities[tab] === true;
     if (tab === "chat") return counts.build + counts.web > 0;
@@ -1882,7 +1882,7 @@
         chat: routes.some((item) => supports(item, "chat")),
         imagine: routes.some((item) => supports(item, "image")),
         video: routes.some((item) => supports(item, "video")),
-        voice: routes.some((item) => supports(item, "realtime") || supports(item, "tts") || supports(item, "stt")),
+        voice: routes.some((item) => supports(item, "realtime") || supports(item, "tts")),
       };
       chatState.modelsLoaded = true;
       const models = routes

@@ -186,13 +186,6 @@ func validateRequest(req upstream.UpstreamRequest) (preparedRequest, error) {
 	return preparedRequest{Query: transcript, CurrentText: continuationText, Tools: tools, ParallelTools: parallel, ToolResults: preparedResults}, nil
 }
 
-func boolToInt(v bool) int {
-	if v {
-		return 1
-	}
-	return 0
-}
-
 // splitCurrentTurn separates the final user turn into plain text and the tool
 // results it returns. Tool results never count as answer text.
 func splitCurrentTurn(messages []prompt.Message, start int) ([]prompt.Message, string, []promptToolResult, bool) {
@@ -247,22 +240,6 @@ func indexToolUses(messages []prompt.Message) map[string]string {
 		}
 	}
 	return uses
-}
-
-// appendToolResultsText renders unbound tool results into the transcript so a
-// stateless request still carries the client's findings.
-func appendToolResultsText(query string, results []preparedToolResult) string {
-	if len(results) == 0 {
-		return query
-	}
-	parts := make([]string, 0, len(results))
-	for _, result := range results {
-		parts = append(parts, "Tool result "+toolLabel(result.ID, result.Name)+": "+result.Content)
-	}
-	if strings.TrimSpace(query) == "" {
-		return strings.Join(parts, "\n\n")
-	}
-	return query + "\n\n" + strings.Join(parts, "\n\n")
 }
 
 // renderTranscript flattens the complete conversation into one query string. Tool
@@ -365,10 +342,10 @@ func validMessageBlock(block prompt.ContentBlock, role string) bool {
 		}
 	case "tool_use":
 		input, ok := block.Input.(map[string]any)
-		if role != "assistant" || block.ID == "" || !utf8.ValidString(block.ID) || !validToolName(block.Name) || !ok || input == nil {
+		if role != "assistant" || block.ID == "" || !utf8.ValidString(block.ID) || !validToolName(block.Name) || !ok || input == nil || !validCacheControl(block.CacheControl) {
 			return false
 		}
-		expected = prompt.ContentBlock{Type: "tool_use", ID: block.ID, Name: block.Name, Input: block.Input}
+		expected = prompt.ContentBlock{Type: "tool_use", ID: block.ID, Name: block.Name, Input: block.Input, CacheControl: block.CacheControl}
 	case "tool_result":
 		if role != "user" || block.ToolUseID == "" || !utf8.ValidString(block.ToolUseID) || !validCacheControl(block.CacheControl) {
 			return false
@@ -456,13 +433,6 @@ func toolKeys(object map[string]any, allowed ...string) bool {
 
 func validToolName(name string) bool {
 	return strings.TrimSpace(name) != "" && len(name) <= 128 && utf8.ValidString(name) && !strings.ContainsAny(name, "\r\n\x00")
-}
-
-// convertTools accepts exactly Anthropic client tools or nested OpenAI function
-// tools. Schema/name/description values are forwarded unchanged, never repaired.
-func convertTools(raw []any) ([]mcpTool, bool) {
-	tools, err := convertToolsWithError(raw)
-	return tools, err == nil
 }
 
 // requestFieldError reports only gateway-owned reasons and paths, never input

@@ -75,10 +75,6 @@ func (b *bindingStore) saveScoped(ctx context.Context, accountID int64, model, i
 	if !ok || accountID <= 0 || model == "" {
 		return false
 	}
-	return b.saveOwned(ctx, owner, accountID, model, id, binding)
-}
-
-func (b *bindingStore) saveOwned(ctx context.Context, owner string, accountID int64, model, id string, binding callBinding) bool {
 	if b == nil || id == "" || binding.ConversationID == "" || binding.ToolRounds < 0 || len(binding.RootTaskContext) > continuationStateLimit {
 		return false
 	}
@@ -99,7 +95,7 @@ func (b *bindingStore) saveOwned(ctx context.Context, owner string, accountID in
 	}
 	writer, keyBase := b.redis, b.keyBase
 	b.mu.Unlock()
-	if writer != nil && owner != "local" {
+	if writer != nil {
 		raw, err := json.Marshal(binding)
 		if err != nil || writer.SetBinding(ctx, keyBase+bindingKeyPrefix+id, raw, bindingTTL) != nil {
 			return false
@@ -118,10 +114,6 @@ func (b *bindingStore) lookupScoped(ctx context.Context, accountID int64, model 
 	if !ok || accountID <= 0 || model == "" {
 		return callBinding{}, false
 	}
-	return b.lookupOwned(ctx, owner, accountID, model, ids)
-}
-
-func (b *bindingStore) lookupOwned(ctx context.Context, owner string, accountID int64, model string, ids []string) (callBinding, bool) {
 	if b == nil || len(ids) == 0 {
 		return callBinding{}, false
 	}
@@ -135,7 +127,7 @@ func (b *bindingStore) lookupOwned(ctx context.Context, owner string, accountID 
 		binding, ok := b.memory[id]
 		writer, keyBase := b.redis, b.keyBase
 		b.mu.Unlock()
-		if !ok && writer != nil && owner != "local" {
+		if !ok && writer != nil {
 			raw, err := writer.GetBinding(ctx, keyBase+bindingKeyPrefix+id)
 			// JSON encodes the snapshot in base64; bound before allocating it.
 			if err == nil && len(raw) > 0 && len(raw) <= 2*continuationStateLimit {
@@ -146,14 +138,15 @@ func (b *bindingStore) lookupOwned(ctx context.Context, owner string, accountID 
 		if !ok || binding.OwnerScope != owner || binding.AccountID != accountID || binding.Model != model || binding.ConversationID == "" || age < 0 || age > bindingTTL || binding.ToolRounds < 0 || len(binding.RootTaskContext) > continuationStateLimit {
 			return callBinding{}, false
 		}
-		if len(binding.RootTaskContext) > 0 {
-			if _, err := decodeContinuationState(binding.RootTaskContext); err != nil {
-				return callBinding{}, false
-			}
-		}
 		if i == 0 {
+			if len(binding.RootTaskContext) > 0 {
+				if _, err := decodeContinuationState(binding.RootTaskContext); err != nil {
+					return callBinding{}, false
+				}
+			}
 			found = binding
-		} else if binding.ConversationID != found.ConversationID || binding.RequestID != found.RequestID || binding.RunID != found.RunID || binding.ToolRounds != found.ToolRounds || !bytes.Equal(binding.RootTaskContext, found.RootTaskContext) {
+		} else if !sameBindingResponse(found, binding) {
+			// Identical bytes are already validated by the first lookup.
 			return callBinding{}, false
 		}
 	}
@@ -174,24 +167,6 @@ func (b *bindingStore) cacheLocked(id string, binding callBinding) {
 		}
 	}
 	b.memory[id] = binding
-}
-
-// save and lookup preserve the historical test API. Keyless use is local to
-// this constructor's memory and can never read or write shared Redis state.
-func (b *bindingStore) save(ctx context.Context, id string, binding callBinding) {
-	owner, ok := bindingOwner(ctx)
-	if !ok {
-		owner = "local"
-	}
-	b.saveOwned(ctx, owner, 0, "", id, binding)
-}
-
-func (b *bindingStore) lookup(ctx context.Context, ids []string) (callBinding, bool) {
-	owner, ok := bindingOwner(ctx)
-	if !ok {
-		owner = "local"
-	}
-	return b.lookupOwned(ctx, owner, 0, "", ids)
 }
 
 func sameBindingResponse(a, b callBinding) bool {

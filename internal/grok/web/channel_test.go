@@ -11,6 +11,8 @@ import (
 	"github.com/alicebob/miniredis/v2"
 
 	"orchids-api/internal/config"
+	"orchids-api/internal/loadbalancer"
+	"orchids-api/internal/modelpolicy"
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
 )
@@ -39,15 +41,42 @@ func TestPrepareAccountStoresOnlyTheCookieAndNeverNamesIt(t *testing.T) {
 	testutil.Equal(t, acc.OAuthRefreshToken, "")
 	testutil.CheckNotContain(t, acc.Name, token)
 	testutil.CheckNotContain(t, maskToken(token), token)
-	testutil.True(t, IsWebAccount(acc))
 	testutil.True(t, acc.IsGrokWeb())
 
 	missing := &store.Account{AccountType: "grok", CredentialType: "sso"}
 	testutil.Equal(t, PrepareAccount(missing), ErrMissingSSOToken)
 
 	build := &store.Account{AccountType: "grok", CredentialType: "oauth", OAuthRefreshToken: "r"}
-	testutil.False(t, IsWebAccount(build))
+	testutil.False(t, build.IsGrokWeb())
 	testutil.False(t, LooksLikeWebAccount(build))
+}
+
+func TestWebModelEntitlementMatchesAccountPlane(t *testing.T) {
+	legacy := &store.Account{AccountType: "grok", ClientCookie: "sso=legacy", Enabled: true}
+	route := &store.Model{Channel: "grok", Provider: ProviderWeb, ModelID: "grok-chat-auto"}
+	testutil.Equal(t, len(modelpolicy.GrokModelProfiles(route, []*store.Account{legacy})), 1)
+	for _, provider := range []string{"build", "console"} {
+		account := *legacy
+		account.GrokProvider = provider
+		testutil.Equal(t, len(modelpolicy.GrokModelProfiles(route, []*store.Account{&account})), 0)
+	}
+}
+
+func TestWebModelChecksCurrentRouteAfterTakingItOffline(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.New(store.Options{RedisAddr: miniredis.RunT(t).Addr()})
+	testutil.NoError(t, err)
+	t.Cleanup(func() { _ = st.Close() })
+	h := &Handler{lb: &loadbalancer.LoadBalancer{Store: st}}
+	route := &store.Model{Channel: "grok", ModelID: "grok-chat-auto", Provider: ProviderWeb,
+		Status: store.ModelStatusAvailable, Verified: true, Capabilities: []string{store.CapabilityChat}}
+	testutil.NoError(t, st.CreateModel(ctx, route))
+	testutil.NoError(t, h.ensureModelCapability(ctx, route.ModelID, store.CapabilityChat))
+	route.Status = store.ModelStatusOffline
+	testutil.NoError(t, st.UpdateModel(ctx, route))
+	err = h.ensureModelCapability(ctx, route.ModelID, store.CapabilityChat)
+	testutil.Error(t, err)
+	testutil.Equal(t, err.Error(), "model not available")
 }
 
 func webAccount(id int64, sub string, auto, fast bool) *store.Account {

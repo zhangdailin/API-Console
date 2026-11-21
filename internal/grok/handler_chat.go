@@ -31,13 +31,9 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 	if !requirePost(w, r) {
 		return
 	}
-	switch p, handled := peekPlane(w, r); {
-	case handled:
+	if isWeb, handled := peekWebModel(w, r); handled {
 		return
-	case p == planeConsole && h.console != nil:
-		h.console.HandleChatCompletions(w, r)
-		return
-	case p == planeWeb && h.web != nil:
+	} else if isWeb && h.web != nil {
 		h.web.HandleChatCompletions(w, r)
 		return
 	}

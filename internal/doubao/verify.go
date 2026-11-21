@@ -131,12 +131,6 @@ var challenges = struct {
 	byAccount map[int64]recordedChallenge
 }{byAccount: map[int64]recordedChallenge{}}
 
-// noteChallenge records the decision and identity of a verification refusal.
-// The caller supplies the client's account snapshot, not a newer store value.
-func noteChallenge(acc *store.Account, err error) {
-	noteChallengeForRequest(acc, acc, err)
-}
-
 func noteChallengeForRequest(acc, request *store.Account, err error) {
 	var challenge *verificationRequired
 	if !errors.As(err, &challenge) || strings.TrimSpace(challenge.raw) == "" {
@@ -161,12 +155,6 @@ func noteChallengeForRequest(acc, request *store.Account, err error) {
 	challenges.Unlock()
 }
 
-// clearChallengeForIdentity prevents an old in-flight success from clearing a
-// newer identity's challenge after an administrator rotates the device tuple.
-func clearChallengeForIdentity(acc *store.Account) {
-	clearChallengeForRequest(acc, acc)
-}
-
 func clearChallengeForRequest(acc, request *store.Account) {
 	identity, _, ok := challengeIdentity(request)
 	if !ok {
@@ -180,13 +168,6 @@ func clearChallengeForRequest(acc, request *store.Account) {
 	if recorded, found := challenges.byAccount[acc.ID]; found && recorded.identity == identity && recorded.accountIdentity == accountIdentity {
 		delete(challenges.byAccount, acc.ID)
 	}
-	challenges.Unlock()
-}
-
-// clearChallenge forgets an account's decision after explicit local cleanup.
-func clearChallenge(accountID int64) {
-	challenges.Lock()
-	delete(challenges.byAccount, accountID)
 	challenges.Unlock()
 }
 

@@ -33,6 +33,13 @@ func (e *grokUpstreamError) Error() string {
 	return b.String()
 }
 
+func (e *grokUpstreamError) AttemptFailure() (grokbase.UpstreamFailure, bool) {
+	if e == nil {
+		return grokbase.UpstreamFailure{}, false
+	}
+	return grokbase.UpstreamFailure{Status: e.status, Header: e.header, Body: e.body}, true
+}
+
 // newUpstreamError builds a typed error with a sanitized header copy and a
 // bounded body.
 func newUpstreamError(status int, header http.Header, body []byte) error {

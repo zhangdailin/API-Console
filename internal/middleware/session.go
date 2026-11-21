@@ -124,6 +124,12 @@ func APIKeyID(ctx context.Context) int64 {
 	return principal.ID
 }
 
+// APIKeyHasBillingLimit distinguishes keys that require a known charge.
+func APIKeyHasBillingLimit(ctx context.Context) bool {
+	principal, _ := ctx.Value(apiKeyPrincipalContextKey{}).(*APIKeyPrincipal)
+	return principal != nil && principal.BillingLimitUSDTicks > 0
+}
+
 // APIKeyAllowsModel checks the exact, case-insensitive model allowlist attached
 // by APIKeyAuth. An absent or empty allowlist is unrestricted for compatibility.
 func APIKeyAllowsModel(ctx context.Context, model string) bool {

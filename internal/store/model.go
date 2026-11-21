@@ -17,7 +17,6 @@ const (
 	CapabilityImageEdit = "image_edit"
 	CapabilityTTS       = "tts"
 	CapabilityRealtime  = "realtime"
-	CapabilitySTT       = "stt"
 )
 
 // ModelStatus accepts only the current canonical states.

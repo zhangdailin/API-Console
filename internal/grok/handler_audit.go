@@ -30,7 +30,11 @@ func (h *Handler) auditAttempt(ctx context.Context, acc *store.Account, provider
 	if len(stages) > 0 {
 		stage = stages[0]
 	}
-	h.auditAttemptDiagnostic(ctx, acc, provider, attempt, started, err, stage, nil, nil, "")
+	h.auditAttemptDiagnostic(ctx, grokbase.Attempt{Account: acc, Provider: provider, Number: attempt, Started: started, Err: err, Stage: stage})
+}
+
+func (h *Handler) auditAttemptDiagnostic(ctx context.Context, attempt grokbase.Attempt) {
+	grokbase.LogAttempt(ctx, h.auditLoggerSnapshot(), attempt, ClassifyUpstreamError)
 }
 
 func (h *Handler) auditChatOutcome(ctx context.Context, acc *store.Account, req *chatwire.Request, result chatOutcome) {

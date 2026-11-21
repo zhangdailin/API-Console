@@ -67,7 +67,8 @@ func adminPort() *provider.Admin {
 			return "", 200, nil
 		},
 		ErrMissingCredential: ErrMissingCookie, Login: loginPort(),
-		Verification: verification, VerificationSolved: verificationSolved,
+		ImportBrowserCookie: importBrowserCookie,
+		Verification:        verification, VerificationSolved: verificationSolved,
 		RotateDeviceIdentity: func(acc *store.Account) (store.DoubaoIdentityPatch, error) {
 			if acc == nil || acc.AccountType != "doubao" || strings.TrimSpace(acc.ClientCookie) == "" {
 				return store.DoubaoIdentityPatch{}, ErrMissingCookie

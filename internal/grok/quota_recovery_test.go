@@ -18,7 +18,7 @@ func TestBuildQuotaRecoveryReleasesOnlyOnAnObservedAllowance(t *testing.T) {
 	// A failed billing read keeps the account parked.
 	settleBuildQuotaRecovery(acc, errors.New("timeout"), now)
 	testutil.Equal(t, acc.StatusCode, "402")
-	testutil.True(t, buildQuotaRecovery.Pending(acc.ID))
+	testutil.False(t, claimBuildQuotaRecovery(acc, now.Add(time.Second)))
 
 	// An exhausted snapshot reschedules at the period end.
 	periodEnd := now.Add(6 * time.Hour)
@@ -32,7 +32,7 @@ func TestBuildQuotaRecoveryReleasesOnlyOnAnObservedAllowance(t *testing.T) {
 	settleBuildQuotaRecovery(acc, nil, periodEnd)
 	testutil.Equal(t, acc.StatusCode, "")
 	testutil.True(t, acc.LastAttempt.IsZero())
-	testutil.False(t, buildQuotaRecovery.Pending(acc.ID))
+	testutil.False(t, claimBuildQuotaRecovery(acc, periodEnd))
 }
 
 func TestBuildQuotaRecoveryNeedsABillingSignal(t *testing.T) {
@@ -47,5 +47,4 @@ func TestBuildQuotaRecoveryNeedsABillingSignal(t *testing.T) {
 
 	acc.StatusCode = ""
 	testutil.False(t, claimBuildQuotaRecovery(acc, now.Add(time.Hour)))
-	testutil.False(t, buildQuotaRecovery.Pending(acc.ID))
 }

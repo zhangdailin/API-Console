@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -548,21 +547,4 @@ func firstLiteImage(callURLs, taken []string) string {
 		return candidate
 	}
 	return ""
-}
-
-// imageURLShape describes an image URL for the log without its identifiers:
-// the host and the path, with every segment that looks like an ID elided, so
-// "users/…/generated/…/image.jpg" still tells a drawing from anything else.
-func imageURLShape(raw string) string {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || raw == "" {
-		return ""
-	}
-	segments := strings.Split(strings.Trim(parsed.Path, "/"), "/")
-	for i, segment := range segments {
-		if len(segment) >= 16 || (len(segment) >= 8 && strings.ContainsAny(segment, "0123456789")) {
-			segments[i] = "…"
-		}
-	}
-	return parsed.Host + "/" + strings.Join(segments, "/")
 }

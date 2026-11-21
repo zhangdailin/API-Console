@@ -71,3 +71,49 @@ func TestNativeReasoningRecoverySpendsOnePhysicalCall(t *testing.T) {
 		t.Fatalf("recovery did not complete in one extra call: calls=%d result=%+v", calls.Load(), result)
 	}
 }
+
+func TestNativeRecoveryExhaustionDoesNotSelectAnotherAccount(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if calls.Add(1) == 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"invalid_encrypted_content"}`))
+			return
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":"synthetic temporary unavailable"}`))
+	}))
+	defer server.Close()
+	h, acc := parityBuildHandler(t, server)
+	acc.ID = 0
+	acc.GrokModels = []string{"grok-4.7"}
+	acc.GrokModelsSyncedAt = time.Now()
+	if err := h.lb.Store.CreateAccount(t.Context(), acc); err != nil {
+		t.Fatal(err)
+	}
+	copy := *acc
+	copy.ID = 0
+	copy.OAuthAccessToken = jwtWithClaims(t, `{"sub":"audit-second-fixture","team_id":"audit-second-team"}`)
+	if err := h.lb.Store.CreateAccount(t.Context(), &copy); err != nil {
+		t.Fatal(err)
+	}
+	cfg := h.configSnapshot().Clone()
+	cfg.AccountSwitchCount = 2
+	h.SetConfig(cfg)
+	sess, err := h.openCLIAccountSession(t.Context(), nil, "grok-4.7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	originalAccountID := sess.acc.ID
+	payload := map[string]any{"reasoning": map[string]any{"effort": "high"}, "input": []any{map[string]any{"type": "reasoning", "encrypted_content": "bad-proof", "summary": []any{map[string]any{"text": "old plan"}}}}}
+	rec := httptest.NewRecorder()
+	_, _, result := h.serveNativeResponses(rec, httptest.NewRequest("POST", "/grok/v1/responses", nil), sess, false, ModelSpec{ID: "grok-4.7", UpstreamModel: "grok-4.7"}, payload, "/responses", nil)
+	if calls.Load() != 2 {
+		t.Fatalf("synthetic upstream received %d HTTP calls; want 2", calls.Load())
+	}
+	if sess.acc.ID != originalAccountID || upstreamHTTPResponseStatus(result.Err) != http.StatusServiceUnavailable {
+		t.Errorf("account switched=%t; final upstream status=%d; want no extra reservation and original 503", sess.acc.ID != originalAccountID, upstreamHTTPResponseStatus(result.Err))
+	}
+}

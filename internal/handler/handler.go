@@ -398,6 +398,11 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request, prepare
 		return
 	}
 	targetChannel := strings.TrimSpace(forcedChannel)
+	dialogID := explicitConversationID(r, req)
+	if targetChannel == "doubao" && len(dialogID) > 512 {
+		apperrors.New("invalid_request_error", "Doubao conversation identifier is too long", http.StatusBadRequest).WriteResponse(w)
+		return
+	}
 	if isSuggestionMode(req.Messages) {
 		suggestion := buildLocalSuggestion(req.Messages)
 		logutil.DebugIf(verboseDiagnostics, "Handling suggestion mode request locally", "suggestion", suggestion)
@@ -476,7 +481,7 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request, prepare
 	failedAccountSet := make(map[int64]struct{})
 
 	var e *messageExecution
-	apiClient, currentAccount, releaseClient, trackedAccountID, err := h.acquireReservedAccountSelection(r.Context(), targetChannel, true, failedAccountIDs, strings.TrimSpace(req.Model))
+	apiClient, currentAccount, releaseClient, trackedAccountID, err := h.acquireInitialAccount(r.Context(), targetChannel, strings.TrimSpace(req.Model), dialogID)
 	// The client is held for the whole request: a credential change during it
 	// retires the client and closes it here, after the request finished.
 	defer func() {

@@ -52,7 +52,7 @@ func TestWarpMessagesAcceptsAnthropicEffortAndThinkingWithTools(t *testing.T) {
 		"stream":        false,
 		"max_tokens":    64,
 		"output_config": map[string]any{"effort": "high"},
-		"thinking":      map[string]any{"type": "enabled"},
+		"thinking":      map[string]any{"type": "adaptive", "display": nil},
 		"metadata":      map[string]any{"user_id": "synthetic-user"},
 		"tools":         tools,
 	})

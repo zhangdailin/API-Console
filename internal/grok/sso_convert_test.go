@@ -2,15 +2,12 @@ package grok
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
 
-	"orchids-api/internal/grok/console"
 	"orchids-api/internal/grok/web"
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
@@ -61,15 +58,21 @@ func TestSSOConvertFailureReasons(t *testing.T) {
 	testutil.MustContain(t, message, "invalid_client")
 }
 
-func TestConsoleConversionFailureResponseIsStructuredAndRedacted(t *testing.T) {
-	result := ssoConvertResult{AccountID: 17, Name: "synthetic-source"}
-	applyConsoleVerificationFailure(&result, "", &console.StatusError{Status: 403, Message: "Cookie=synthetic-secret"})
-	if result.Success || result.Created || result.BuildAccountID != 0 || result.Reason != "console_model_access_denied" || result.Stage != "models" || result.HTTPStatus != 403 {
-		t.Fatalf("unexpected conversion failure: %+v", result)
+func TestRetiredGrokAccountCannotEnterAnActivePlane(t *testing.T) {
+	acc := &store.Account{
+		AccountType: "grok", GrokProvider: "console", CredentialType: "sso",
+		ClientCookie: "legacy-sso", Enabled: true, GrokModels: []string{"grok-4.5"},
 	}
-	encoded, err := json.Marshal(result)
-	testutil.NoError(t, err)
-	if strings.Contains(string(encoded), "synthetic-secret") || !strings.Contains(string(encoded), `"http_status":403`) || !strings.Contains(string(encoded), `"stage":"models"`) {
-		t.Fatalf("unsafe or incomplete response: %s", encoded)
-	}
+	admin := adminPort()
+	testutil.False(t, acc.IsGrokWeb())
+	testutil.False(t, AccountSupportsModel(acc, "grok-4.5"))
+	testutil.False(t, store.AccountAuthActive(acc))
+	testutil.Error(t, admin.PrepareCreate(acc))
+	testutil.Equal(t, admin.PrepareImport(acc), "unsupported_grok_provider")
+	testutil.Error(t, admin.PrepareUpdate(&store.Account{AccountType: "grok", GrokProvider: "web"}, acc))
+
+	acc.CredentialType, acc.OAuthAccessToken = "oauth", "stale-token"
+	testutil.False(t, catalogEligible(acc))
+	normalizeBuildProvider(acc)
+	testutil.Equal(t, acc.GrokProvider, "console")
 }

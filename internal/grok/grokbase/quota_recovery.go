@@ -80,14 +80,6 @@ func (q *RecoveryQueue) Done(accountID int64) {
 	q.mu.Unlock()
 }
 
-// Pending reports whether the account is waiting for a recovery probe.
-func (q *RecoveryQueue) Pending(accountID int64) bool {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	_, ok := q.entries[accountID]
-	return ok
-}
-
 // RecoveryBackoff is the delay before the given (1-based) failed attempt's
 // successor.
 func RecoveryBackoff(attempt int) time.Duration {

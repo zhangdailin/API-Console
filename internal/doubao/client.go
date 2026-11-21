@@ -219,6 +219,12 @@ func (c *Client) doJSONWithReferer(ctx context.Context, method, target string, b
 	// Passport endpoints reject the CSRF cookie with 2035 wherever they are
 	// called from, so decide by target as well as by the caller's profile.
 	req.Header = c.headers(jar, passport || strings.Contains(target, "/passport/"))
+	if req.URL.Path == "/samantha/chat/completion" {
+		req.Header.Set("Agw-Js-Conv", "str")
+		if csrf := jar["passport_csrf_token"]; csrf != "" {
+			req.Header.Set("X-Tt-Passport-Csrf-Token", csrf)
+		}
+	}
 	if len(body) > 0 && !passport {
 		req.Header.Set("Content-Type", contentType)
 	}
@@ -443,9 +449,13 @@ func (c *Client) sendRequestWithPayload(ctx context.Context, req upstream.Upstre
 		noteChallengeForRequest(c.acc, c.challengeAccount(), err)
 		return err
 	}
-	text, err := consumeStream(response.Body, func(delta string) {
+	text, err := consumeChatStream(response.Body, func(delta string) {
 		if !toolMode && onMessage != nil {
 			onMessage(upstream.SSEMessage{Type: "model.text-delta", Event: map[string]any{"delta": delta}})
+		}
+	}, func(delta string) {
+		if onMessage != nil {
+			onMessage(upstream.SSEMessage{Type: "model.reasoning-delta", Event: map[string]any{"delta": delta}})
 		}
 	})
 	if err != nil {
@@ -515,7 +525,7 @@ func chatBodyWithAttachments(conversationID, localID, text, modelID string, atta
 			// option block matches what the page sends.
 			"send_message_scene": "", "create_time_ms": now, "collect_id": "",
 			"is_audio": false, "answer_with_suggest": false, "agent_mode": model.AgentMode,
-			"tts_switch": false, "need_deep_think": 0, "click_clear_context": false,
+			"tts_switch": false, "need_deep_think": model.DeepThink, "click_clear_context": false,
 			"from_suggest": false, "is_regen": false, "is_replace": false,
 			"is_from_click_option": false, "is_from_click_softlink": false,
 			"disable_sse_cache": false, "select_text_action": "", "is_select_text": false,
@@ -544,7 +554,7 @@ func chatBodyWithAttachments(conversationID, localID, text, modelID string, atta
 		},
 		"user_context": []any{},
 		"ext": map[string]string{
-			"agent_mode": agent, "use_deep_think": "0", "sub_conv_firstmet_type": "1",
+			"agent_mode": agent, "use_deep_think": strconv.Itoa(model.DeepThink), "sub_conv_firstmet_type": "1",
 			"general_task_param": `{"server_do_compare":true}`, "collection_id": "", "is_finish": "1",
 			"conversation_init_option": `{"need_ack_conversation":true}`, "commerce_credit_config_enable": "0",
 		},

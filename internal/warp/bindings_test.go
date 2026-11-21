@@ -1,12 +1,9 @@
 package warp
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
-	"time"
 
 	warpapi "github.com/warpdotdev/warp-proto-apis/apis/multi_agent/v1/gen/go"
 	"google.golang.org/protobuf/proto"
@@ -50,70 +47,5 @@ func TestToolCallBindingIsRememberedAndResumed(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("tool turn made %d requests, want 1", calls)
-	}
-}
-
-func TestConversationIDIsSentOnlyForBoundToolResults(t *testing.T) {
-	c := NewFromAccount(testAccount(), testConfig("https://example.invalid"))
-	c.bindings.save(context.Background(), "call-7", callBinding{ConversationID: "conv-1"})
-	base := preparedRequest{Query: "history transcript", CurrentText: "next", ToolResults: []preparedToolResult{{ID: "call-7", Name: "lookup", Content: "ok"}}}
-	if binding, ok := c.bindings.lookup(context.Background(), []string{"call-7"}); !ok || binding.ConversationID != "conv-1" {
-		t.Fatal("binding lookup failed")
-	}
-	body, err := buildRequest("model-a", preparedRequest{Query: base.CurrentText, CurrentText: base.CurrentText, ConversationID: "conv-1", ToolResults: base.ToolResults})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var request warpapi.Request
-	if proto.Unmarshal(body, &request) != nil {
-		t.Fatal("request rejected")
-	}
-	if request.GetMetadata().GetConversationId() != "conv-1" {
-		t.Fatalf("conversation id missing: %q", request.GetMetadata().GetConversationId())
-	}
-	// Without a binding the stateless transcript is sent and no conversation id
-	// is claimed.
-	if binding, ok := c.bindings.lookup(context.Background(), []string{"unknown"}); ok || binding.ConversationID != "" {
-		t.Fatal("unknown call id resolved to a conversation")
-	}
-	other, err := buildRequest("model-a", preparedRequest{Query: "transcript"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var plain warpapi.Request
-	if proto.Unmarshal(other, &plain) != nil {
-		t.Fatal("request rejected")
-	}
-	if plain.GetMetadata().GetConversationId() != "" {
-		t.Fatal("unbound request claimed a conversation")
-	}
-}
-
-func TestBindingRejectsMixedConversationsAndExpiry(t *testing.T) {
-	c := NewFromAccount(testAccount(), testConfig("https://example.invalid"))
-	c.bindings.save(context.Background(), "a", callBinding{ConversationID: "conv-1"})
-	c.bindings.save(context.Background(), "b", callBinding{ConversationID: "conv-2"})
-	if _, ok := c.bindings.lookup(context.Background(), []string{"a", "b"}); ok {
-		t.Fatal("mixed conversations resumed together")
-	}
-	c.bindings.save(context.Background(), "old", callBinding{ConversationID: "conv-1"})
-	c.bindings.mu.Lock()
-	key := scopedBindingID("local", 0, "", "old")
-	stale := c.bindings.memory[key]
-	stale.SavedAt = time.Now().Add(-2 * time.Hour)
-	c.bindings.memory[key] = stale
-	c.bindings.mu.Unlock()
-	if _, ok := c.bindings.lookup(context.Background(), []string{"old"}); ok {
-		t.Fatal("expired binding resumed")
-	}
-}
-
-func TestUnboundToolResultsFallBackToTranscriptText(t *testing.T) {
-	query := appendToolResultsText("User: earlier", []preparedToolResult{{ID: "call-9", Name: "lookup", Content: "found"}})
-	if !strings.Contains(query, "Tool result (id=call-9, name=lookup): found") {
-		t.Fatalf("tool result not rendered: %q", query)
-	}
-	if got := appendToolResultsText("", []preparedToolResult{{ID: "x", Content: "y"}}); !strings.Contains(got, "y") {
-		t.Fatalf("empty transcript lost the result: %q", got)
 	}
 }

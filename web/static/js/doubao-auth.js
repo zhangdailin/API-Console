@@ -53,5 +53,29 @@ globalThis.DoubaoLogin = (() => {
     } catch (error) { status(error.message || '生成二维码失败，请重试。', true); }
     finally { if (button) button.disabled = false; }
   }
-  return { start, stop: cancel, reset: () => { cancel(); status(''); if (image()) image().removeAttribute('src'); } };
+  async function importCookie() {
+    const field = document.getElementById('doubaoCookieImport');
+    const button = document.getElementById('doubaoCookieImportButton');
+    if (!field || !button || button.disabled) return;
+    const cookie = field.value.trim();
+    if (!cookie) { status('Provide a Doubao browser Cookie.', true); return; }
+    field.value = '';
+    cancel();
+    button.disabled = true;
+    status('正在验证豆包账号…');
+    try {
+      const response = await fetch('/api/doubao/cookie-import', {
+        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cookie, enabled: document.getElementById('enabled')?.checked !== false })
+      });
+      await readJSON(response, 'Doubao Cookie import');
+      finish('豆包账号已验证并保存');
+    } catch (error) { status(error.message || 'Doubao Cookie import failed.', true); }
+    finally { button.disabled = false; }
+  }
+  document.getElementById('doubaoCookieImportButton')?.addEventListener('click', importCookie);
+  return { start, stop: cancel, reset: () => {
+    cancel(); status(''); if (image()) image().removeAttribute('src');
+    const field = document.getElementById('doubaoCookieImport'); if (field) field.value = '';
+  } };
 })();

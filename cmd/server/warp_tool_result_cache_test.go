@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -27,7 +28,7 @@ func warpToolResultCacheBody(ttl string, streaming bool) map[string]any {
 		"tools": []any{map[string]any{"name": "synthetic_echo", "input_schema": map[string]any{"type": "object"}}},
 		"messages": []map[string]any{
 			{"role": "user", "content": "synthetic echo"},
-			{"role": "assistant", "content": []map[string]any{{"type": "tool_use", "id": "call-synthetic-cache", "name": "synthetic_echo", "input": map[string]any{}}}},
+			{"role": "assistant", "content": []map[string]any{{"type": "tool_use", "id": "call-synthetic-cache", "name": "synthetic_echo", "input": map[string]any{}, "cache_control": maps.Clone(cache)}}},
 			{"role": "user", "content": []map[string]any{{"type": "tool_result", "tool_use_id": "call-synthetic-cache", "content": strings.Repeat("r", 6381), "is_error": false, "cache_control": cache}}},
 		},
 	}
@@ -74,6 +75,10 @@ func TestWarpToolResultCacheUnboundRouteValidatesThenConflictsWithoutPaidCall(t 
 						if payload.Model != warpRouteModel || len(payload.Messages) != 3 || len(payload.Messages[2].Content.Blocks) != 1 {
 							t.Fatal("route changed exact model or normalized conversation")
 						}
+						call := payload.Messages[1].Content.Blocks[0]
+						if call.Type != "tool_use" || call.ID != "call-synthetic-cache" || call.Name != "synthetic_echo" || call.CacheControl == nil || call.CacheControl.Type != "ephemeral" {
+							t.Fatal("route changed the historical tool call or its cache marker")
+						}
 						block := payload.Messages[2].Content.Blocks[0]
 						if block.Type != "tool_result" || block.ToolUseID != "call-synthetic-cache" || block.Content != strings.Repeat("r", 6381) || block.IsError || block.CacheControl == nil || block.CacheControl.Type != "ephemeral" {
 							t.Fatal("route changed result identity, full content, error flag or caller cache marker")
@@ -114,8 +119,8 @@ func TestWarpToolResultCacheInvalidRawShapesRejectedBeforeClient(t *testing.T) {
 		{"unknown_outer", func(b map[string]any) { warpToolResultCacheBlock(b)["synthetic_unknown"] = true }},
 		{"wrong_role_assistant", func(b map[string]any) { b["messages"].([]map[string]any)[2]["role"] = "assistant" }},
 		{"wrong_role_system", func(b map[string]any) { b["messages"].([]map[string]any)[2]["role"] = "system" }},
-		{"tool_use", func(b map[string]any) {
-			b["messages"].([]map[string]any)[1]["content"].([]map[string]any)[0]["cache_control"] = map[string]any{"type": "ephemeral"}
+		{"tool_use_invalid_cache_marker", func(b map[string]any) {
+			b["messages"].([]map[string]any)[1]["content"].([]map[string]any)[0]["cache_control"] = map[string]any{"type": "permanent"}
 		}},
 		{"nested_tool_result_text", func(b map[string]any) {
 			warpToolResultCacheBlock(b)["content"] = []map[string]any{{"type": "text", "text": "synthetic nested result", "cache_control": map[string]any{"type": "ephemeral"}}}

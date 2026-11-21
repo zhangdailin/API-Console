@@ -9,7 +9,6 @@ import (
 	"orchids-api/internal/accountpolicy"
 	"orchids-api/internal/channel"
 	"orchids-api/internal/config"
-	"orchids-api/internal/grok/console"
 	"orchids-api/internal/grok/web"
 	"orchids-api/internal/modelcatalog"
 	"orchids-api/internal/provider"
@@ -43,10 +42,7 @@ func spec() provider.Spec {
 // catalogEligible reports whether an account can read the Build catalog: a
 // Build OAuth account that still holds a token to present.
 func catalogEligible(acc *store.Account) bool {
-	if acc == nil || !accountpolicy.IsGrokAccount(acc) || !strings.EqualFold(strings.TrimSpace(acc.CredentialType), "oauth") {
-		return false
-	}
-	return strings.TrimSpace(acc.OAuthAccessToken) != "" || strings.TrimSpace(acc.OAuthRefreshToken) != ""
+	return accountpolicy.IsGrokAccount(acc) && accountHasOAuthCredentials(acc)
 }
 
 // observeCatalog reads the official Build CLI catalog. It is a control-plane
@@ -68,7 +64,7 @@ func CatalogObservation(catalog []modelcatalog.Profile) provider.Observation {
 			if acc == nil || len(catalog) == 0 {
 				return false
 			}
-			NormalizeProvider(acc)
+			normalizeBuildProvider(acc)
 			ApplyCLIModelCatalog(acc, catalog, now)
 			return true
 		},
@@ -118,18 +114,17 @@ func lastKnownCatalog(acc *store.Account) []provider.Model {
 // refresh cycles and writing the same warning every interval until an operator
 // logs in again (which restores the active state).
 func maintain(ctx context.Context, env provider.Env, acc *store.Account) {
+	if acc == nil || !store.SupportsGrokProvider(acc.GrokProvider) {
+		return
+	}
 	if autoCleanReauthAccount(ctx, env, acc, time.Now()) {
 		return
 	}
-	if web.IsWebAccount(acc) {
+	if acc.IsGrokWeb() {
 		web.Maintain(ctx, env.Config, env.Store, acc)
 		return
 	}
-	if console.IsConsoleAccount(acc) {
-		console.Maintain(ctx, env.Config, env.Store, acc)
-		return
-	}
-	if acc == nil || !strings.EqualFold(strings.TrimSpace(acc.CredentialType), "oauth") {
+	if !accountIsOAuth(acc) {
 		return
 	}
 	if !store.AccountAuthActive(acc) || !acc.Enabled {
@@ -148,7 +143,7 @@ func refreshCLIAccount(ctx context.Context, cfg *config.Config, s *store.Store, 
 	// Persist the compatibility inference for pre-provider OAuth rows while we
 	// already have a safe background update. This makes the product boundary
 	// visible to the admin API instead of leaving old records ambiguous.
-	NormalizeProvider(acc)
+	normalizeBuildProvider(acc)
 	cliClient := NewCLIClient(cfg)
 	cliClient.SetAccountStore(s)
 	if cliRefreshDue(acc, time.Now()) {

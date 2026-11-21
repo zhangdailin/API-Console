@@ -191,7 +191,7 @@ func (h *Handler) HandleSSOImport(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		duplicate, err := st.CreateAccountUnlessDuplicate(ctx, acc, func(other *store.Account) bool {
-			return IsWebAccount(other) && SSOToken(other) == token
+			return other.IsGrokWeb() && SSOToken(other) == token
 		})
 		switch {
 		case err != nil:
@@ -257,9 +257,12 @@ type ssoAccountResult struct {
 	Error     string `json:"error,omitempty"`
 }
 
-// resolveSSOAccounts returns the Web accounts the request names, or every Web
+// ResolveSSOAccounts returns the Web accounts the request names, or every Web
 // account when it names none.
-func (h *Handler) resolveSSOAccounts(r *http.Request) ([]*store.Account, error) {
+func (h *Handler) ResolveSSOAccounts(r *http.Request) ([]*store.Account, error) {
+	if h == nil || h.lb == nil || h.lb.Store == nil {
+		return nil, fmt.Errorf("store not configured")
+	}
 	var req ssoAccountsRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("invalid json")
@@ -274,7 +277,7 @@ func (h *Handler) resolveSSOAccounts(r *http.Request) ([]*store.Account, error) 
 	}
 	out := make([]*store.Account, 0, len(accounts))
 	for _, acc := range accounts {
-		if !IsWebAccount(acc) || (len(wanted) > 0 && !wanted[acc.ID]) {
+		if !acc.IsGrokWeb() || (len(wanted) > 0 && !wanted[acc.ID]) {
 			continue
 		}
 		out = append(out, acc)
@@ -283,15 +286,6 @@ func (h *Handler) resolveSSOAccounts(r *http.Request) ([]*store.Account, error) 
 		return nil, fmt.Errorf("no grok sso accounts selected")
 	}
 	return out, nil
-}
-
-// ResolveSSOAccounts is resolveSSOAccounts for the grok package's SSO
-// operations that span both planes.
-func (h *Handler) ResolveSSOAccounts(r *http.Request) ([]*store.Account, error) {
-	if h == nil || h.lb == nil || h.lb.Store == nil {
-		return nil, fmt.Errorf("store not configured")
-	}
-	return h.resolveSSOAccounts(r)
 }
 
 // refreshAccounts verifies each account against grok.com, persists the
@@ -365,7 +359,7 @@ func (h *Handler) HandleSSORefresh(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteError(w, http.StatusServiceUnavailable, "store not configured")
 		return
 	}
-	accounts, err := h.resolveSSOAccounts(r)
+	accounts, err := h.ResolveSSOAccounts(r)
 	if err != nil {
 		httpserver.WriteError(w, http.StatusBadRequest, err.Error())
 		return
@@ -414,7 +408,7 @@ func (h *Handler) HandleSSONSFW(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteError(w, http.StatusServiceUnavailable, "store not configured")
 		return
 	}
-	accounts, err := h.resolveSSOAccounts(r)
+	accounts, err := h.ResolveSSOAccounts(r)
 	if err != nil {
 		httpserver.WriteError(w, http.StatusBadRequest, err.Error())
 		return
@@ -472,10 +466,11 @@ func (h *Handler) HandleAvailability(w http.ResponseWriter, r *http.Request) {
 			if acc == nil || !acc.Enabled || !store.AccountAuthActive(acc) {
 				continue
 			}
-			if provider := ProviderForAccount(acc); provider != "" {
+			provider := acc.GrokPlane()
+			if provider != "" {
 				counts[provider]++
 			}
-			if IsWebAccount(acc) {
+			if provider == ProviderWeb {
 				plans[webPlanTier(acc)]++
 				for product := range media {
 					media[product] = media[product] || mediaAllowed(acc, product, now)

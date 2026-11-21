@@ -13,10 +13,10 @@ func TestRouteNotesKeepHostAndPathAndLastAttempt(t *testing.T) {
 	ctx := WithRouteObserver(context.Background(), func(field, value string) { got[field] = value })
 
 	NoteUpstreamCall(ctx, "https://api.example.com/v1/chat/completions?token=secret", "model-a")
-	NoteServedModel(ctx, "model-a-2026")
+	NoteServedModelWithSource(ctx, "model-a-2026", "upstream_response")
 	// A retry on another endpoint must not inherit a previous response identity.
 	NoteUpstreamCall(ctx, "https://edge.example.com/v2/chat/completions", "model-b")
-	NoteServedModel(ctx, "  ")
+	NoteServedModelWithSource(ctx, "  ", "upstream_response")
 
 	testutil.Equal(t, got[RouteHost], "edge.example.com")
 	testutil.Equal(t, got[RouteEndpoint], "/v2/chat/completions")
@@ -31,7 +31,7 @@ func TestRouteNotesKeepHostAndPathAndLastAttempt(t *testing.T) {
 
 func TestRouteNotesWithoutObserverAreNoOps(t *testing.T) {
 	NoteUpstreamCall(context.Background(), "https://api.example.com/v1/responses", "m")
-	NoteServedModel(context.Background(), "m")
+	NoteServedModelWithSource(context.Background(), "m", "upstream_response")
 	testutil.Equal(t, WithRouteObserver(context.Background(), nil), context.Background())
 }
 
@@ -64,7 +64,7 @@ func TestRouteNotesResetResponseIdentityAndRetainOnlyNewAttemptEvidence(t *testi
 		}
 	}
 	NoteServedModelWithSource(ctx, "actual-b", "responses.model")
-	NoteServedModel(ctx, "")
+	NoteServedModelWithSource(ctx, "", "upstream_response")
 	if got[RouteServedModel] != "actual-b" || got[RouteModelSource] != "responses.model" || got[RouteModelStatus] != "reported" {
 		t.Fatal("current response identity missing")
 	}
@@ -78,7 +78,7 @@ func TestRouteNotesWithholdMalformedResponseIdentifiers(t *testing.T) {
 	for _, model := range []string{"model\nprivate", "model\x1bprivate", string([]byte{0xff}), strings.Repeat("m", 257)} {
 		got := map[string]string{}
 		ctx := WithRouteObserver(context.Background(), func(k, v string) { got[k] = v })
-		NoteServedModel(ctx, model)
+		NoteServedModelWithSource(ctx, model, "upstream_response")
 		if got[RouteServedModel] != "" || got[RouteModelStatus] != "redacted" {
 			t.Fatal("unsafe identifier reached journal")
 		}

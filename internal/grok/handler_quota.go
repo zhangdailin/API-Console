@@ -42,7 +42,7 @@ func (h *Handler) persistGrokQuotaSync(job grokbase.QuotaJob) {
 		slog.Warn("grok quota account reload failed", "account_id", job.Account.ID, "error", err)
 		return
 	}
-	NormalizeProvider(latest)
+	normalizeBuildProvider(latest)
 	changed := false
 	if accountpolicy.IsGrokAccount(latest) {
 		changed = ApplyBuildRateLimits(latest, headers)

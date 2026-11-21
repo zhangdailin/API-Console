@@ -19,7 +19,7 @@ func TestRequestJournalResponseModelAcrossChannelsAndProtocols(t *testing.T) {
 				defer func() { requestJournal = previous }()
 				h := TraceMiddleware(LoggingMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					upstream.NoteUpstreamCall(r.Context(), "https://gateway.example/response?credential=private", "sent-alias")
-					upstream.NoteServedModel(r.Context(), "reported-model")
+					upstream.NoteServedModelWithSource(r.Context(), "reported-model", "upstream_response")
 					_, _ = w.Write([]byte(`{"model":"requested-alias"}`))
 				})))
 				rr := httptest.NewRecorder()
@@ -43,7 +43,7 @@ func TestRequestJournalClearsPreviousAttemptResponseFacts(t *testing.T) {
 	defer func() { requestJournal = previous }()
 	h := TraceMiddleware(LoggingMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upstream.NoteUpstreamCall(r.Context(), "https://first.example/chat", "first")
-		upstream.NoteServedModel(r.Context(), "failed-attempt-model")
+		upstream.NoteServedModelWithSource(r.Context(), "failed-attempt-model", "upstream_response")
 		upstream.NoteServedProvider(r.Context(), "previous-provider", 2)
 		upstream.NoteModelFallback(r.Context(), true)
 		upstream.NoteUpstreamCall(r.Context(), "https://last.example/chat", "last")

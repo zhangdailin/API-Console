@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -51,6 +52,8 @@ func TestClientToolRoundtripResumesRedisContextAndRejectsReplay(t *testing.T) {
 	)
 	expectedRoot := proto.Clone(create.GetCreateTask().GetTask()).(*warpapi.Task)
 	expectedRoot.SetMessages([]*warpapi.Message{bootstrap, toolMessage, metadata})
+	// Cross the former 64 KiB limit with multibyte text and distinctive ends.
+	toolResult := "start\n" + strings.Repeat("结果🙂\n", 6554) + "end"
 
 	var calls atomic.Int64
 	requests := make(chan *warpapi.Request, 2)
@@ -96,7 +99,7 @@ func TestClientToolRoundtripResumesRedisContextAndRejectsReplay(t *testing.T) {
 			} else {
 				result := inputs[0].GetToolCallResult()
 				texts := result.GetCallMcpTool().GetSuccess().GetResults()
-				if result.GetToolCallId() != "call-echo" || len(texts) != 1 || texts[0].GetText().GetText() != "LIME" {
+				if result.GetToolCallId() != "call-echo" || len(texts) != 1 || texts[0].GetText().GetText() != toolResult {
 					t.Error("continuation changed the MCP result identity or content")
 				}
 			}
@@ -163,10 +166,18 @@ func TestClientToolRoundtripResumesRedisContextAndRejectsReplay(t *testing.T) {
 			{Type: "tool_use", ID: "call-echo", Name: "echo", Input: map[string]any{"text": "LIME"}},
 		}}},
 		prompt.Message{Role: "user", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{
-			{Type: "tool_result", ToolUseID: "call-echo", Content: "LIME"},
+			{Type: "tool_result", ToolUseID: "call-echo", Content: toolResult},
 		}}},
 	)
 	second.Tools = tools
+	var app *apperrors.AppError
+	otherOwner := bindingAuthContext(t, 18, "synthetic-other-owner-key")
+	err = client.SendRequestWithPayload(otherOwner, second, func(upstream.SSEMessage) {
+		t.Error("unbound continuation emitted an event")
+	}, nil)
+	if !errors.As(err, &app) || app.HTTPStatus != http.StatusConflict || calls.Load() != 1 {
+		t.Fatalf("unbound continuation reached the upstream: error=%v, calls=%d", err, calls.Load())
+	}
 	// A fresh Client has no memory binding, so this turn must restore Redis state.
 	resumed := newClientWithStore(account, testConfig(server.URL), s)
 	var secondEvents []upstream.SSEMessage
@@ -183,7 +194,6 @@ func TestClientToolRoundtripResumesRedisContextAndRejectsReplay(t *testing.T) {
 
 	var replayEvents []upstream.SSEMessage
 	err = newClientWithStore(account, testConfig(server.URL), s).SendRequestWithPayload(ctx, second, func(event upstream.SSEMessage) { replayEvents = append(replayEvents, event) }, nil)
-	var app *apperrors.AppError
 	if !errors.As(err, &app) || app.HTTPStatus != http.StatusConflict || len(replayEvents) != 0 || calls.Load() != 2 {
 		t.Fatalf("tool result replay was not rejected before upstream: error=%v, events=%d, calls=%d", err, len(replayEvents), calls.Load())
 	}

@@ -254,11 +254,7 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 		httpserver.WriteErrorCode(w, http.StatusNotFound, "model_not_found", modelNotFoundMessage(req.Model))
 		return
 	}
-	if spec.AliasReasoningEffort != "" {
-		effort := spec.AliasReasoningEffort
-		req.ReasoningEffort = &effort
-	}
-	if err := h.ensureResolvedModelCapability(r.Context(), spec.ID, spec, store.CapabilityChat); err != nil {
+	if err := h.ensureModelCapability(r.Context(), spec.ID, store.CapabilityChat); err != nil {
 		if strings.EqualFold(strings.TrimSpace(err.Error()), "model not found") {
 			httpserver.WriteErrorCode(w, http.StatusNotFound, "model_not_found", modelNotFoundMessage(req.Model))
 			return

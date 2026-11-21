@@ -11,7 +11,6 @@ import (
 
 	"orchids-api/internal/accountpolicy"
 	"orchids-api/internal/config"
-	"orchids-api/internal/grok/console"
 	"orchids-api/internal/grok/web"
 	"orchids-api/internal/modelcatalog"
 	"orchids-api/internal/provider"
@@ -23,17 +22,16 @@ import (
 // access token nor a refresh token.
 var ErrMissingOAuthToken = errors.New("missing oauth token")
 
+var errUnsupportedGrokProvider = errors.New("unsupported Grok provider")
+
 // adminPort is what the management API needs from this channel.
 func adminPort() *provider.Admin {
 	return &provider.Admin{
 		CredentialKey: func(acc *store.Account) string {
-			if acc == nil {
+			if acc == nil || !store.SupportsGrokProvider(acc.GrokProvider) {
 				return ""
 			}
-			if console.IsConsoleAccount(acc) {
-				return console.CredentialKey(acc)
-			}
-			if web.IsWebAccount(acc) {
+			if acc.IsGrokWeb() {
 				return web.CredentialKey(acc)
 			}
 			token := strings.TrimSpace(util.FirstNonEmpty(acc.OAuthRefreshToken, acc.OAuthAccessToken))
@@ -43,10 +41,7 @@ func adminPort() *provider.Admin {
 			return "grok:" + token
 		},
 		IdentityKey: func(acc *store.Account) string {
-			if console.IsConsoleAccount(acc) {
-				return console.IdentityKey(acc)
-			}
-			if web.IsWebAccount(acc) {
+			if acc.IsGrokWeb() {
 				return web.IdentityKey(acc)
 			}
 			if !accountIsOAuth(acc) {
@@ -64,10 +59,7 @@ func adminPort() *provider.Admin {
 			if acc == nil {
 				return ""
 			}
-			if console.IsConsoleAccount(acc) {
-				return console.Fingerprint(acc)
-			}
-			if web.IsWebAccount(acc) {
+			if acc.IsGrokWeb() {
 				return web.Fingerprint(acc)
 			}
 			if accountIsOAuth(acc) {
@@ -76,8 +68,8 @@ func adminPort() *provider.Admin {
 			return util.Fingerprint(util.FirstNonEmpty(acc.ClientCookie, acc.RefreshToken, acc.Token))
 		},
 		PrepareCreate: func(acc *store.Account) error {
-			if console.LooksLikeConsoleAccount(acc) {
-				return console.PrepareAccount(acc)
+			if !store.SupportsGrokProvider(acc.GrokProvider) {
+				return errUnsupportedGrokProvider
 			}
 			if web.LooksLikeWebAccount(acc) {
 				return web.PrepareAccount(acc)
@@ -93,11 +85,10 @@ func adminPort() *provider.Admin {
 			return nil
 		},
 		PrepareUpdate: func(acc, existing *store.Account) error {
-			if console.IsConsoleAccount(existing) {
-				acc.AccountType = existing.AccountType
-				return console.PrepareUpdate(acc, existing)
+			if !store.SupportsGrokProvider(acc.GrokProvider) || !store.SupportsGrokProvider(existing.GrokProvider) {
+				return errUnsupportedGrokProvider
 			}
-			if web.IsWebAccount(existing) {
+			if existing.IsGrokWeb() {
 				acc.AccountType = existing.AccountType
 				return web.PrepareUpdate(acc, existing)
 			}
@@ -112,11 +103,8 @@ func adminPort() *provider.Admin {
 			return nil
 		},
 		PrepareImport: func(acc *store.Account) string {
-			if console.LooksLikeConsoleAccount(acc) {
-				if err := console.PrepareAccount(acc); err != nil {
-					return "missing_sso_token"
-				}
-				return ""
+			if !store.SupportsGrokProvider(acc.GrokProvider) {
+				return "unsupported_grok_provider"
 			}
 			if web.LooksLikeWebAccount(acc) {
 				if err := web.PrepareAccount(acc); err != nil {
@@ -131,22 +119,22 @@ func adminPort() *provider.Admin {
 			return ""
 		},
 		Project: func(out *store.Account) {
-			if console.IsConsoleAccount(out) {
-				console.ProjectOutput(out)
+			if !store.SupportsGrokProvider(out.GrokProvider) {
+				out.Enabled = false
+				out.StatusMessage = errUnsupportedGrokProvider.Error()
 				return
 			}
-			if web.IsWebAccount(out) {
+			if out.IsGrokWeb() {
 				web.ProjectOutput(out)
 				return
 			}
 			projectOutput(out)
 		},
 		ProjectQuota: func(fields map[string]any, acc *store.Account, limit, current float64, observedTokens int64, usageObserved bool) {
-			if console.IsConsoleAccount(acc) {
-				console.ProjectQuota(fields, acc)
+			if !store.SupportsGrokProvider(acc.GrokProvider) {
 				return
 			}
-			if web.IsWebAccount(acc) {
+			if acc.IsGrokWeb() {
 				web.ProjectQuota(fields, acc)
 				return
 			}
@@ -154,24 +142,10 @@ func adminPort() *provider.Admin {
 		},
 		ObservedUsageWindow: FreeBuildUsageWindow,
 		Verify: func(ctx context.Context, env provider.Env, acc *store.Account) (string, int, error) {
-			if console.IsConsoleAccount(acc) {
-				status, err := console.VerifyAccount(ctx, env.Config, acc)
-				if err == nil {
-					if env.Store != nil {
-						defer func() {
-							if publishErr := console.PublishRoutes(context.WithoutCancel(ctx), env.Store); publishErr != nil {
-								slog.Warn("grok console route publication failed", "error", publishErr)
-							}
-						}()
-					}
-					return "", 0, nil
-				}
-				if status != "" {
-					return status, 0, err
-				}
-				return "", http.StatusBadGateway, err
+			if acc != nil && !store.SupportsGrokProvider(acc.GrokProvider) {
+				return "", http.StatusBadRequest, errUnsupportedGrokProvider
 			}
-			if web.IsWebAccount(acc) {
+			if acc.IsGrokWeb() {
 				status, err := web.VerifyAccount(ctx, env.Config, acc)
 				if err == nil {
 					if env.Store != nil {
@@ -203,7 +177,7 @@ func adminPort() *provider.Admin {
 
 // projectOutput shapes the copy of an account a response is built from.
 func projectOutput(out *store.Account) {
-	NormalizeProvider(out)
+	normalizeBuildProvider(out)
 	// The tier column must agree with the quota column. A Build Free account
 	// has no plan name from the identity endpoint (recorded as "unknown"), yet
 	// the same Free inference that produces its quota window already proves it
@@ -251,8 +225,6 @@ func verifyAccount(ctx context.Context, acc *store.Account, cfg *config.Config, 
 		return nil
 	}
 
-	// The website cookie plane was retired: only Build OAuth
-	// credentials can be verified now.
 	return fmt.Errorf("only Grok Build OAuth accounts are supported")
 }
 
@@ -272,7 +244,7 @@ func normalizeTokenInput(acc *store.Account) {
 
 // accountIsOAuth reports whether a Grok account is a Build CLI OAuth account.
 func accountIsOAuth(acc *store.Account) bool {
-	return acc != nil && strings.EqualFold(strings.TrimSpace(acc.CredentialType), "oauth")
+	return acc != nil && store.SupportsGrokProvider(acc.GrokProvider) && strings.EqualFold(strings.TrimSpace(acc.CredentialType), "oauth")
 }
 
 // accountHasOAuthCredentials reports whether an OAuth account carries at

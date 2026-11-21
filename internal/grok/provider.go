@@ -7,31 +7,23 @@ import (
 	"time"
 
 	"orchids-api/internal/accountpolicy"
-	"orchids-api/internal/grok/web"
 	"orchids-api/internal/modelcatalog"
 	"orchids-api/internal/store"
 )
 
 // ProviderBuild identifies the Grok Build OAuth CLI upstream.
-const ProviderBuild = "build"
+const ProviderBuild = store.GrokProviderBuild
 
 const modelSnapshotTTL = 6 * time.Hour
 
-func NormalizeProvider(acc *store.Account) bool {
-	if !accountpolicy.IsGrokAccount(acc) || web.IsWebAccount(acc) || acc.IsGrokConsole() {
-		return false
+func normalizeBuildProvider(acc *store.Account) {
+	if acc.GrokPlane() == ProviderBuild && !strings.EqualFold(strings.TrimSpace(acc.GrokProvider), ProviderBuild) {
+		acc.GrokProvider = ProviderBuild
 	}
-	if strings.EqualFold(strings.TrimSpace(acc.GrokProvider), ProviderBuild) {
-		return false
-	}
-	acc.GrokProvider = ProviderBuild
-	return true
 }
 
 func AccountSupportsModel(acc *store.Account, modelID string) bool {
-	// Only Build accounts serve Build models; a Web or Console credential must
-	// never be selected for one, whatever it lists.
-	if acc == nil || web.IsWebAccount(acc) || acc.IsGrokConsole() {
+	if acc.GrokPlane() != ProviderBuild {
 		return false
 	}
 	modelID = strings.TrimSpace(modelID)

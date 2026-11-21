@@ -23,22 +23,17 @@ function normalizeSidebarStatusCode(statusCode) {
 
 // Identify Grok Build OAuth for its channel-specific quota display.
 function isSidebarGrokOAuthAccount(acc) {
-  return normalizeSidebarAccountType(acc) === "grok" &&
+  const provider = String(acc?.grok_provider || "").trim().toLowerCase();
+  return normalizeSidebarAccountType(acc) === "grok" && (!provider || provider === "build" || provider === "web") &&
     String(acc?.credential_type || "").trim().toLowerCase() === "oauth";
-}
-
-// Identify Grok Console (console.x.ai) accounts. They carry the same SSO
-// cookie as Web accounts, so the provider, not the credential, decides.
-function isSidebarGrokConsoleAccount(acc) {
-  return normalizeSidebarAccountType(acc) === "grok" &&
-    String(acc?.grok_provider || "").trim().toLowerCase() === "console";
 }
 
 // Identify Grok Web (grok.com SSO cookie) accounts.
 function isSidebarGrokWebAccount(acc) {
-  return normalizeSidebarAccountType(acc) === "grok" && !isSidebarGrokConsoleAccount(acc) &&
-    (String(acc?.grok_provider || "").trim().toLowerCase() === "web" ||
-     String(acc?.credential_type || "").trim().toLowerCase() === "sso");
+  const provider = String(acc?.grok_provider || "").trim().toLowerCase();
+  const credential = String(acc?.credential_type || "").trim().toLowerCase();
+  return normalizeSidebarAccountType(acc) === "grok" && credential !== "oauth" &&
+    (provider === "web" || (!provider && credential === "sso"));
 }
 
 function grokWebWindow(snapshot) {
@@ -117,17 +112,6 @@ function getQuotaStats(acc) {
       pctRemaining: limit > 0 ? Math.min(100, Math.round((remaining / limit) * 100)) : 0,
       unit: acc.quota_unit || "credits", plan: acc.quota_plan || "", resetAt: acc.quota_reset_at || "",
       workbuddy: true, packageRemaining: Math.max(0, Number(acc.quota_package_remaining || 0)),
-    };
-  }
-  if (isSidebarGrokConsoleAccount(acc)) {
-    // The weekly included-usage pool, in US dollars.
-    if (acc.quota_supported !== true) return { ...empty, grokConsole: true, unsynced: true, note: String(acc.quota_note || "").trim() };
-    const limit = Math.max(0, Number(acc.quota_limit || 0));
-    const remaining = Math.max(0, Number(acc.quota_remaining || 0));
-    return {
-      supported: true, limit, remaining, used: Math.max(0, Number(acc.quota_used || 0)),
-      pctRemaining: limit > 0 ? Math.min(100, Math.round((remaining / limit) * 100)) : 0,
-      grokConsole: true, resetAt: acc.quota_reset_at || "",
     };
   }
   if (isSidebarGrokWebAccount(acc)) {

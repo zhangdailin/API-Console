@@ -58,6 +58,13 @@
         <div class="account-import-status oauth-status" id="{{.StatusID}}" role="status" aria-live="polite" hidden></div>
 		{{if eq .Key "doubao"}}
 		<div class="doubao-qr-wrap"><img id="doubaoLoginQR" alt="豆包扫码登录二维码" width="240" height="240"></div>
+		<details>
+		  <summary>导入已登录的豆包 Cookie</summary>
+		  <p class="helper-text"><a href="https://www.doubao.com/" target="_blank" rel="noopener noreferrer">在浏览器打开豆包</a>，仅导入你本人账号的会话。</p>
+		  <label class="form-label" for="doubaoCookieImport">Cookie</label>
+		  <textarea class="form-input" id="doubaoCookieImport" autocomplete="off" spellcheck="false" rows="3"></textarea>
+		  <button class="btn" id="doubaoCookieImportButton" type="button">验证并导入</button>
+		</details>
 		{{end}}
       </div>
       {{end}}

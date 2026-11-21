@@ -87,12 +87,6 @@ func NoteServedProvider(ctx context.Context, provider string, attempts int) {
 	noteRoute(ctx, RouteProviderAttempts, strconv.Itoa(max(attempts, 0)))
 }
 
-// NoteServedModel records the model identifier the upstream reported for the
-// response. Callers may report it on every chunk; only a non-empty value is kept.
-func NoteServedModel(ctx context.Context, model string) {
-	NoteServedModelWithSource(ctx, model, "upstream_response")
-}
-
 // NoteServedModelWithSource records response metadata, never a requested alias.
 // Sources are fixed identifiers owned by this gateway, not response text.
 func NoteServedModelWithSource(ctx context.Context, model, source string) {

@@ -89,7 +89,7 @@ func accountUsableForModel(ctx context.Context, acc *store.Account) bool {
 	// A Build Free refusal is authoritative for the whole included-usage
 	// window. Do not send the account back to the upstream every minute while
 	// its confirmed 24-hour reset is still in the future.
-	if ProviderForAccount(acc) == ProviderBuild && !acc.GrokFreeQuota.ResetAt.IsZero() && time.Now().Before(acc.GrokFreeQuota.ResetAt) {
+	if acc.GrokPlane() == ProviderBuild && !acc.GrokFreeQuota.ResetAt.IsZero() && time.Now().Before(acc.GrokFreeQuota.ResetAt) {
 		return false
 	}
 	model := requestModelFromContext(ctx)
@@ -111,7 +111,7 @@ func (h *Handler) openChatAccountSessionExcludingWithPoolsAndFilter(ctx context.
 	// App-chat/media only accepts Web SSO cookie accounts. OAuth Build accounts
 	// are selected by their own provider-specific selector.
 	ssoFilter := func(acc *store.Account) bool {
-		if !isGrokWebAccount(acc) {
+		if !acc.IsGrokWeb() {
 			return false
 		}
 		if !accountUsableForModel(ctx, acc) {
@@ -393,7 +393,7 @@ func (h *Handler) persistGrokQuotaSync(job grokbase.QuotaJob) {
 	// count the request against the locally tracked window.
 	info := ratelimit.ParseHeaders(job.Headers)
 	if info == nil {
-		if _, err := h.lb.Store.ConsumeGrokQuota(ctx, job.Account.ID, ProviderForAccount(&job.Account), float64(job.Requests)); err != nil {
+		if _, err := h.lb.Store.ConsumeGrokQuota(ctx, job.Account.ID, job.Account.GrokPlane(), float64(job.Requests)); err != nil {
 			slog.Warn("grok local quota decrement failed", "account_id", job.Account.ID, "error", err)
 		}
 		return
@@ -403,7 +403,7 @@ func (h *Handler) persistGrokQuotaSync(job grokbase.QuotaJob) {
 		slog.Warn("grok quota account reload failed", "account_id", job.Account.ID, "error", err)
 		return
 	}
-	NormalizeProvider(latest)
+	normalizeWebProvider(latest)
 	changed := ApplyQuotaInfo(latest, info)
 	if changed {
 		if err := h.lb.Store.UpdateAccount(ctx, latest); err != nil {

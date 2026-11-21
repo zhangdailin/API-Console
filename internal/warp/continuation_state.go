@@ -57,6 +57,14 @@ func newContinuationAccumulator(initial []byte) *continuationAccumulator {
 }
 
 func decodeContinuationState(raw []byte) (*warpapi.Task, error) {
+	taskContext, err := decodeTaskContext(raw)
+	if err != nil {
+		return nil, err
+	}
+	return taskContext.GetTasks()[0], nil
+}
+
+func decodeTaskContext(raw []byte) (*warpapi.Request_TaskContext, error) {
 	if len(raw) > continuationStateLimit {
 		return nil, continuationError("state_size", 0, len(raw))
 	}
@@ -73,7 +81,7 @@ func decodeContinuationState(raw []byte) (*warpapi.Task, error) {
 	if len(context.GetTasks()) != 1 || !validContinuationTask(context.GetTasks()[0]) {
 		return nil, continuationError("invalid_task", 0, 0)
 	}
-	return context.GetTasks()[0], nil
+	return context, nil
 }
 
 func validContinuationTask(root *warpapi.Task) bool {

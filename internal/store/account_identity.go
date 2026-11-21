@@ -2,23 +2,36 @@ package store
 
 import "strings"
 
-// IsGrokWeb reports whether the account is a Grok Web (grok.com SSO) account.
-func (a *Account) IsGrokWeb() bool {
-	if a == nil || !strings.EqualFold(strings.TrimSpace(a.AccountType), "grok") || strings.EqualFold(strings.TrimSpace(a.CredentialType), "oauth") {
-		return false
+// GrokPlane identifies the active provider for a stored Grok account.
+// Infer the plane of unlabeled legacy accounts from their credential.
+func (a *Account) GrokPlane() string {
+	if a == nil || !strings.EqualFold(strings.TrimSpace(a.AccountType), "grok") || !SupportsGrokProvider(a.GrokProvider) {
+		return ""
 	}
-	if a.IsGrokConsole() {
-		return false
+	if strings.EqualFold(strings.TrimSpace(a.CredentialType), "oauth") {
+		return GrokProviderBuild
 	}
-	return strings.EqualFold(strings.TrimSpace(a.GrokProvider), GrokProviderWeb) || strings.EqualFold(strings.TrimSpace(a.CredentialType), "sso")
+	if provider := strings.ToLower(strings.TrimSpace(a.GrokProvider)); provider != "" {
+		return provider
+	}
+	if strings.EqualFold(strings.TrimSpace(a.CredentialType), "sso") || strings.TrimSpace(a.ClientCookie) != "" {
+		return GrokProviderWeb
+	}
+	return GrokProviderBuild
 }
 
-// IsGrokConsole reports whether the account is a Grok Console (console.x.ai
-// SSO) account. A Console account carries the same SSO cookie as a Web
-// account, so the provider field, not the credential, tells them apart.
-func (a *Account) IsGrokConsole() bool {
-	return a != nil && strings.EqualFold(strings.TrimSpace(a.AccountType), "grok") &&
-		strings.EqualFold(strings.TrimSpace(a.GrokProvider), GrokProviderConsole)
+// IsGrokWeb reports whether the account belongs to the Grok Web plane.
+func (a *Account) IsGrokWeb() bool { return a.GrokPlane() == GrokProviderWeb }
+
+// SupportsGrokProvider accepts the active provider names and unlabeled legacy
+// Grok records. Explicit unsupported providers must never be inferred from credentials.
+func SupportsGrokProvider(provider string) bool {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "", GrokProviderWeb, GrokProviderBuild:
+		return true
+	default:
+		return false
+	}
 }
 
 // Secrets returns every credential-bearing value the account holds.

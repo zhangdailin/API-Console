@@ -8,6 +8,7 @@ import (
 // Local validation messages are an allowlist, not provider response text. The
 // shared handler must never expose arbitrary AppError messages as trusted text.
 var localRequestMessages = map[string]string{
+	"doubao_attachment":  "Doubao attachment is invalid, too large, unavailable, or expired. Upload it with the same API key and try again.",
 	"warp_request_shape": "The gateway rejected this Warp request during local validation: unsupported request fields or conversation shape. No upstream generation was made.",
 	"warp_dialog":        "The gateway rejected this Warp conversation during local validation: expected complete alternating user and assistant turns followed by a user turn. No upstream generation was made.",
 	"warp_user_turn":     "The gateway rejected the current Warp user turn: provide nonempty text or a valid tool result. No upstream generation was made.",

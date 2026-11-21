@@ -144,3 +144,31 @@ func TestRegisterRoutes_GrokVoiceRelayRequiresSession(t *testing.T) {
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/grok/admin/voice/livekit/rtc?access_token=x", nil))
 	testutil.CheckEqual(t, rec.Code, http.StatusUnauthorized)
 }
+
+func TestRegisterRoutes_GrokConsoleIsRetired(t *testing.T) {
+	cfg := &config.Config{AdminUser: "admin", AdminPass: "secret", AdminToken: "admintoken", AdminPath: "/admin"}
+	mux, s, _ := newRouteMux(t, "retired-grok-console:", cfg)
+	token := createRouteTestKey(t, s)
+	routes := map[string]string{
+		"/api/grok/sso/convert-console": http.MethodPost,
+	}
+	for _, prefix := range []string{"/grok", "/grok/v1"} {
+		for _, suffix := range []string{"/tts", "/stt", "/audio/speech", "/audio/transcriptions"} {
+			routes[prefix+suffix] = http.MethodPost
+		}
+		for _, suffix := range []string{"/tts/voices", "/realtime"} {
+			routes[prefix+suffix] = http.MethodGet
+		}
+	}
+	for path, method := range routes {
+		req := httptest.NewRequest(method, path, nil)
+		req.RemoteAddr = "192.0.2.1:1234"
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("X-Admin-Token", cfg.AdminToken)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s %s returned %d, want 404", method, path, rec.Code)
+		}
+	}
+}

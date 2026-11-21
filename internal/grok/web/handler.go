@@ -35,7 +35,6 @@ type Handler struct {
 	lb          *loadbalancer.LoadBalancer
 	client      *Client
 	connTracker loadbalancer.ConnTracker
-	modelCache  grokbase.ModelValidationCache
 	affinity    grokbase.Affinity
 	instanceID  string
 	auditLogger audit.Logger
@@ -139,7 +138,7 @@ func (h *Handler) resyncUnsynced() {
 	}
 	pending := make([]*store.Account, 0, len(accounts))
 	for _, acc := range accounts {
-		if IsWebAccount(acc) && acc.Enabled && store.AccountAuthActive(acc) && !accountObservesRoutes(acc, time.Now()) {
+		if acc.IsGrokWeb() && acc.Enabled && store.AccountAuthActive(acc) && !accountObservesRoutes(acc, time.Now()) {
 			pending = append(pending, acc)
 		}
 	}
@@ -257,13 +256,6 @@ func (h *Handler) currentClient() *Client {
 	return h.webClient()
 }
 
-// isGrokWebAccount selects only Grok Web SSO sessions. Build OAuth sessions are
-// a separate product and must never be sent to the legacy web transport.
-func isGrokWebAccount(acc *store.Account) bool {
-	return acc != nil && ProviderForAccount(acc) == ProviderWeb &&
-		!strings.EqualFold(strings.TrimSpace(acc.CredentialType), "oauth")
-}
-
 // grokSSOTokenRaw returns the raw SSO credential for an account, preferring the
 // client cookie and falling back to the refresh token (no normalization).
 func grokSSOTokenRaw(acc *store.Account) string {
@@ -281,7 +273,7 @@ func (h *Handler) selectAccount(ctx context.Context) (*store.Account, string, er
 	if h.lb == nil {
 		return nil, "", fmt.Errorf("load balancer not configured")
 	}
-	acc, err := h.lb.GetNextAccountExcludingByChannelWithTrackerFilter(ctx, nil, "grok", h.connTrackerSnapshot(), accountFilter(isGrokWebAccount))
+	acc, err := h.lb.GetNextAccountExcludingByChannelWithTrackerFilter(ctx, nil, "grok", h.connTrackerSnapshot(), accountFilter((*store.Account).IsGrokWeb))
 	if err != nil {
 		return nil, "", err
 	}
@@ -292,78 +284,22 @@ func (h *Handler) selectAccount(ctx context.Context) (*store.Account, string, er
 	return acc, raw, nil
 }
 
-func (h *Handler) ensureModelEnabled(ctx context.Context, modelID string) error {
-	id := normalizeModelID(modelID)
-	if h != nil && h.modelCache.Has(id) {
-		return nil
-	}
+// ensureModelCapability checks visibility, status and capability on the same
+// persisted route, so a model taken offline stops serving immediately.
+func (h *Handler) ensureModelCapability(ctx context.Context, modelID, capability string) error {
 	if h == nil || h.lb == nil || h.lb.Store == nil {
-		// Without a store there is no observed catalog to validate against. A
-		// compiled-in model list is not a substitute: it would accept a model no
-		// active account ever advertised.
 		return fmt.Errorf("model not found")
 	}
-
+	id := normalizeModelID(modelID)
 	m, err := h.lb.Store.GetModelByChannelAndModelID(ctx, "grok", id)
-	if err != nil || m == nil {
-		rawID := strings.ToLower(strings.TrimSpace(modelID))
-		if rawID != "" && rawID != id {
-			m, err = h.lb.Store.GetModelByChannelAndModelID(ctx, "grok", rawID)
-		}
-	}
-	if err != nil || m == nil {
-		return fmt.Errorf("model not found")
-	}
-	if !modelpolicy.IsVisibleGrokModel(id, m.Verified) {
+	if err != nil || m == nil || !modelpolicy.IsVisibleGrokModel(id, m.Verified) {
 		return fmt.Errorf("model not found")
 	}
 	if !m.Status.Enabled() {
 		return fmt.Errorf("model not available")
 	}
-	channel := strings.TrimSpace(m.Channel)
-	if channel == "" {
-		channel = "grok"
-	}
-	if !strings.EqualFold(channel, "grok") {
-		return fmt.Errorf("model not found")
-	}
-	h.modelCache.Remember(id)
-	return nil
-}
-
-// ensureModelCapability applies the persisted route capability policy after
-// the normal visibility/status check. Empty capability lists remain permissive
-// so pre-migration records continue to work until the startup backfill runs.
-func (h *Handler) ensureModelCapability(ctx context.Context, modelID, capability string) error {
-	if err := h.ensureModelEnabled(ctx, modelID); err != nil {
-		return err
-	}
-	if h == nil || h.lb == nil || h.lb.Store == nil {
-		return nil
-	}
-	model, err := h.lb.Store.GetModelByChannelAndModelID(ctx, "grok", normalizeModelID(modelID))
-	if (err != nil || model == nil) && strings.TrimSpace(modelID) != normalizeModelID(modelID) {
-		model, err = h.lb.Store.GetModelByChannelAndModelID(ctx, "grok", strings.TrimSpace(modelID))
-	}
-	if err != nil || model == nil {
-		return nil
-	}
-	if !model.SupportsCapability(capability) {
-		return fmt.Errorf("model %s does not support %s", normalizeModelID(modelID), strings.ToLower(strings.TrimSpace(capability)))
-	}
-	return nil
-}
-
-func (h *Handler) ensureResolvedModelCapability(ctx context.Context, modelID string, spec ModelSpec, capability string) error {
-	if err := h.ensureResolvedModelEnabled(ctx, modelID, spec); err != nil {
-		return err
-	}
-	if h == nil || h.lb == nil || h.lb.Store == nil {
-		return nil
-	}
-	model, err := h.lb.Store.GetModelByChannelAndModelID(ctx, "grok", normalizeModelID(modelID))
-	if err == nil && model != nil && !model.SupportsCapability(capability) {
-		return fmt.Errorf("model %s does not support %s", normalizeModelID(modelID), strings.ToLower(strings.TrimSpace(capability)))
+	if !m.SupportsCapability(capability) {
+		return fmt.Errorf("model %s does not support %s", id, capability)
 	}
 	return nil
 }
@@ -371,7 +307,7 @@ func (h *Handler) ensureResolvedModelCapability(ctx context.Context, modelID str
 // resolveConversationModel resolves a Web route from the route table and
 // overlays the operator-controlled upstream identity from the model store.
 func (h *Handler) resolveConversationModel(ctx context.Context, modelID string) (ModelSpec, bool) {
-	spec, _, ok := ResolveModelAlias(modelID)
+	spec, ok := ResolveModel(modelID)
 	if !ok {
 		return ModelSpec{}, false
 	}
@@ -392,10 +328,6 @@ func (h *Handler) applyPersistedRoute(ctx context.Context, spec ModelSpec) Model
 		spec.UpstreamModel = upstream
 	}
 	return spec
-}
-
-func (h *Handler) ensureResolvedModelEnabled(ctx context.Context, modelID string, _ ModelSpec) error {
-	return h.ensureModelEnabled(ctx, modelID)
 }
 
 func modelNotFoundMessage(modelID string) string {
@@ -448,7 +380,7 @@ func (h *Handler) markAccountStatus(ctx context.Context, acc *store.Account, err
 	if err != nil && isResourceExhaustedError(err) && acc != nil {
 		cooldown := accountpolicy.CooldownRateLimitBase
 		if meta := ratelimit.ParseMetadata([]byte(err.Error())); meta != nil {
-			identity := ProviderForAccount(acc) + ":" + rateLimitIdentity(withRateLimitAccount(ctx, acc), "")
+			identity := acc.GrokPlane() + ":" + rateLimitIdentity(withRateLimitAccount(ctx, acc), "")
 			if remaining := ratelimit.Cooldowns.RetryAfterFor(meta.Scope, identity, meta.Model); remaining > 0 {
 				cooldown = accountpolicy.BoundRateLimitCooldown(remaining)
 			} else if meta.RetryAfter > 0 {
@@ -480,13 +412,13 @@ func (h *Handler) markAccountStatus(ctx context.Context, acc *store.Account, err
 			if h.lb != nil && h.lb.Store != nil {
 				_ = h.lb.Store.UpdateAccount(ctx, acc)
 			}
-			h.unbindAffinity(ctx, ProviderForAccount(acc), acc.ID)
+			h.unbindAffinity(ctx, acc.GrokPlane(), acc.ID)
 			return
 		}
 	}
 	// The credential cannot serve this session any more: drop the affinity so the
 	// next turn picks a different account instead of coming back here.
-	h.unbindAffinity(ctx, ProviderForAccount(acc), acc.ID)
+	h.unbindAffinity(ctx, acc.GrokPlane(), acc.ID)
 	h.base.MarkAccountStatus(ctx, acc, err)
 }
 

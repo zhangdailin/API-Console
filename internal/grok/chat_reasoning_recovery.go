@@ -5,14 +5,13 @@ import (
 	"orchids-api/internal/chatwire"
 )
 
-// recoverChatReasoning runs only after a recognized pre-generation decode 400.
+// recoverChatReasoningWithinBudget runs only after a recognized pre-generation decode 400.
 // A genuine compaction rejection is client-held upstream state and is never
 // rewritten; every other recognized decode failure is recoverable.
-func recoverChatReasoning(payload map[string]any, initial error, call func(string) (*http.Response, error)) (*http.Response, error) {
-	if preservesClientCompaction(payload, initial) {
-		return nil, initial
+func recoverChatReasoningWithinBudget(payload map[string]any, response *http.Response, initial error, canCall func() bool, call func(string) (*http.Response, error)) (*http.Response, error) {
+	if preservesClientCompaction(payload, initial) || !canCall() {
+		return response, initial
 	}
-	var response *http.Response
 	failure := initial
 	if stripInjectedReasoningReplay(payload) {
 		response, failure = call("reasoning_encrypted_content_retry")
@@ -20,7 +19,7 @@ func recoverChatReasoning(payload map[string]any, initial error, call func(strin
 			return response, failure
 		}
 	}
-	if chatwire.ParseLooseStringAny(payload["previous_response_id"]) != "" || chatwire.ParseLooseStringAny(payload["prompt_cache_key"]) == "" {
+	if !canCall() || chatwire.ParseLooseStringAny(payload["previous_response_id"]) != "" || chatwire.ParseLooseStringAny(payload["prompt_cache_key"]) == "" {
 		return response, failure
 	}
 	delete(payload, "prompt_cache_key")

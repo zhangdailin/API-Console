@@ -194,7 +194,7 @@ func TestOpenAIToolMessagesRoundTripAndUnknownZeroGuards(t *testing.T) {
 	}
 }
 
-func TestTranscriptExactCeilingExcludesSystemButIncludesDialogAndToolResults(t *testing.T) {
+func TestTranscriptPreservesHistoryAboveFormerLimit(t *testing.T) {
 	// This transcript contains one history pair and a current user; its byte
 	// boundary includes dialog labels/separators but excludes the system prefix.
 	messages := []prompt.Message{textMessage("user", "old"), textMessage("assistant", ""), textMessage("user", "now")}
@@ -211,24 +211,6 @@ func TestTranscriptExactCeilingExcludesSystemButIncludesDialogAndToolResults(t *
 	query, ok = renderTranscript("pinned", messages)
 	if !ok || len(query) != (64<<10)+1+len("System instructions:\npinned\n\n") || !strings.HasPrefix(query, "System instructions:\npinned\n\n") || strings.Contains(query, "[earlier history omitted]") || !strings.Contains(query, "Assistant:") {
 		t.Fatalf("full history or pinned prefix broken: %d %t", len(query), ok)
-	}
-	assistant := prompt.Message{Role: "assistant", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{{Type: "tool_use", ID: "c1", Name: "lookup", Input: map[string]any{}}}}}
-	current := prompt.Message{Role: "user", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{{Type: "tool_result", ToolUseID: "c1", Content: ""}}}}
-	req := historyRequest(textMessage("system", "pinned"), textMessage("user", "go"), assistant, current)
-	req.Tools = []any{map[string]any{"name": "lookup", "input_schema": map[string]any{}}}
-	base, err := validateRequest(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	baseLength := len(appendToolResultsText(base.Query, base.ToolResults)) - len("System instructions:\npinned\n\n")
-	req.Messages[3].Content.Blocks[0].Content = strings.Repeat("r", (64<<10)-baseLength)
-	boundary, err := validateRequest(req)
-	if err != nil || len(appendToolResultsText(boundary.Query, boundary.ToolResults)) != (64<<10)+len("System instructions:\npinned\n\n") {
-		t.Fatalf("exact tool-result boundary failed: %v", err)
-	}
-	req.Messages[3].Content.Blocks[0].Content = strings.Repeat("r", (64<<10)-baseLength+1)
-	if _, err := validateRequest(req); err != nil {
-		t.Fatal("pinned-system/latest-tool transcript above former cap rejected")
 	}
 }
 

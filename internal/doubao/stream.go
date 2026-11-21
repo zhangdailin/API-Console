@@ -11,11 +11,12 @@ import (
 	"strings"
 )
 
-func consumeStream(body io.Reader, emit func(string)) (string, error) {
+func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, error) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 4096), 8<<20)
 	var event, data, userMessageID string
 	var text, snapshot string
+	thinking := thinkingStream{}
 	// emitted tracks how much of the answer has reached the client. A snapshot
 	// can arrive before the first delta (the opening words of an answer are
 	// often delivered whole), and later deltas continue from there; emitting the
@@ -55,6 +56,11 @@ func consumeStream(body io.Reader, emit func(string)) (string, error) {
 				}
 			case "CHUNK_DELTA":
 				if delta, _ := value["text"].(string); delta != "" {
+					if thinking.active() {
+						thinking.size += len(delta)
+						reasoning(delta)
+						break
+					}
 					text += delta
 					emit(delta)
 					emitted = len(text)
@@ -80,7 +86,7 @@ func consumeStream(body io.Reader, emit func(string)) (string, error) {
 					found.WriteString(markdown)
 					emit(markdown)
 				}
-				fragment, full := partitionText(value)
+				fragment, full := partitionText(value, &thinking, reasoning)
 				if fragment != "" {
 					// patch_type 1 appends a fragment; several can precede the
 					// first CHUNK_DELTA, so both sources feed the same buffer.
@@ -291,7 +297,27 @@ func imageMarkdown(images []creationImage) string {
 // partitionText splits one frame into appended fragments (patch_type 1) and the
 // longest whole-answer snapshot (any other patch type). The web client uses
 // both: an answer can open with fragments and continue with CHUNK_DELTA events.
-func partitionText(value map[string]any) (fragment, snapshot string) {
+type thinkingStream struct {
+	markers, size int
+	seen          map[string]bool
+}
+
+func (s *thinkingStream) active() bool { return s.markers == 1 }
+
+func (s *thinkingStream) mark(block map[string]any) {
+	if id, _ := block["block_id"].(string); id != "" {
+		if s.seen == nil {
+			s.seen = make(map[string]bool)
+		}
+		if s.seen[id] {
+			return
+		}
+		s.seen[id] = true
+	}
+	s.markers = min(s.markers+1, 2)
+}
+
+func partitionText(value map[string]any, thinking *thinkingStream, emitReasoning func(string)) (fragment, snapshot string) {
 	var fragments strings.Builder
 	var walk func(any)
 	walk = func(node any) {
@@ -300,10 +326,24 @@ func partitionText(value map[string]any) (fragment, snapshot string) {
 			if blocks, ok := typed["content_block"].([]any); ok {
 				for _, raw := range blocks {
 					block, _ := raw.(map[string]any)
+					if patchType(block["block_type"]) == 10040 {
+						thinking.mark(block)
+						continue
+					}
 					content, _ := block["content"].(map[string]any)
 					textBlock, _ := content["text_block"].(map[string]any)
 					text, _ := textBlock["text"].(string)
 					if text == "" {
+						continue
+					}
+					if thinking.active() {
+						if patchType(block["patch_type"]) == 1 {
+							thinking.size += len(text)
+							emitReasoning(text)
+						} else if len(text) > thinking.size {
+							emitReasoning(text[thinking.size:])
+							thinking.size = len(text)
+						}
 						continue
 					}
 					if patchType(block["patch_type"]) == 1 {

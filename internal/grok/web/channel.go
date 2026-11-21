@@ -16,8 +16,20 @@ import (
 
 // This file is the Web plane's half of the grok channel port: credential
 // normalization, verification, scheduled maintenance, quota projection and the
-// publication of Web routes. The grok package calls into it for every account
-// that IsWebAccount reports.
+// publication of Web routes.
+
+const (
+	ProviderBuild = store.GrokProviderBuild
+	ProviderWeb   = store.GrokProviderWeb
+)
+
+// normalizeWebProvider pins the markers on a stored Web account.
+func normalizeWebProvider(acc *store.Account) {
+	if acc.IsGrokWeb() {
+		acc.GrokProvider = ProviderWeb
+		acc.CredentialType = "sso"
+	}
+}
 
 // ErrMissingSSOToken is returned for a Web account that carries no SSO cookie.
 var ErrMissingSSOToken = errors.New("missing sso token")
@@ -61,7 +73,7 @@ func LooksLikeWebAccount(acc *store.Account) bool {
 	if acc == nil || !strings.EqualFold(strings.TrimSpace(acc.AccountType), "grok") {
 		return false
 	}
-	if strings.EqualFold(strings.TrimSpace(acc.CredentialType), "oauth") || acc.IsGrokConsole() {
+	if strings.EqualFold(strings.TrimSpace(acc.CredentialType), "oauth") || !store.SupportsGrokProvider(acc.GrokProvider) {
 		return false
 	}
 	if strings.EqualFold(strings.TrimSpace(acc.GrokProvider), ProviderWeb) || strings.EqualFold(strings.TrimSpace(acc.CredentialType), "sso") {
@@ -165,7 +177,7 @@ func ProjectOutput(out *store.Account) {
 	if out == nil {
 		return
 	}
-	NormalizeProvider(out)
+	normalizeWebProvider(out)
 	out.RefreshToken = ""
 	out.OAuthAccessToken = ""
 	out.OAuthRefreshToken = ""
@@ -278,7 +290,7 @@ func VerifyAccount(ctx context.Context, cfg *config.Config, acc *store.Account) 
 // Maintain re-reads a Web account's identity and quota on its own cadence and
 // republishes the Web routes when the observation changed what is servable.
 func Maintain(ctx context.Context, cfg *config.Config, st *store.Store, acc *store.Account) {
-	if acc == nil || st == nil || !IsWebAccount(acc) || !acc.Enabled || !store.AccountAuthActive(acc) {
+	if acc == nil || st == nil || !acc.IsGrokWeb() || !acc.Enabled || !store.AccountAuthActive(acc) {
 		return
 	}
 	// A spent allowance is re-read on the recovery queue's schedule (the stated
@@ -317,7 +329,7 @@ func Maintain(ctx context.Context, cfg *config.Config, st *store.Store, acc *sto
 		}
 		acc.VerifiedAt = now
 	}
-	NormalizeProvider(acc)
+	normalizeWebProvider(acc)
 	if err := st.UpdateAccount(ctx, acc); err != nil {
 		slog.Warn("grok web account maintenance: update failed", "account_id", acc.ID, "error", err)
 		return
@@ -332,7 +344,7 @@ func Maintain(ctx context.Context, cfg *config.Config, st *store.Store, acc *sto
 // accountObservesRoutes reports whether an account's stored observation is
 // current evidence that it can serve Web routes.
 func accountObservesRoutes(acc *store.Account, now time.Time) bool {
-	if !IsWebAccount(acc) || !acc.Enabled || !store.AccountAuthActive(acc) || SSOToken(acc) == "" {
+	if !acc.IsGrokWeb() || !acc.Enabled || !store.AccountAuthActive(acc) || SSOToken(acc) == "" {
 		return false
 	}
 	synced := acc.GrokWebQuota.SyncedAt

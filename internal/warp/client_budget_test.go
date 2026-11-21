@@ -168,31 +168,6 @@ func TestClientBudgetSystemNoLongerCapped(t *testing.T) {
 	}
 }
 
-func TestClientBudgetTranscriptExactBoundary(t *testing.T) {
-	req := clientBudgetRequest()
-	req.System = []prompt.SystemItem{{Type: "text", Text: "pinned"}}
-	req.Tools = []any{clientBudgetTool("lookup", map[string]any{}, "", false)}
-	req.Messages = []prompt.Message{
-		{Role: "user", Content: prompt.MessageContent{Text: "go"}},
-		{Role: "assistant", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{{Type: "tool_use", ID: "c1", Name: "lookup", Input: map[string]any{}}}}},
-		{Role: "user", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{{Type: "tool_result", ToolUseID: "c1", Content: ""}}}},
-	}
-	base, err := validateRequest(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	overhead := len(appendToolResultsText(base.Query, base.ToolResults)) - len("System instructions:\npinned\n\n")
-	req.Messages[2].Content.Blocks[0].Content = strings.Repeat("r", (64<<10)-overhead)
-	prepared, err := validateRequest(req)
-	if err != nil || len(appendToolResultsText(prepared.Query, prepared.ToolResults)) != (64<<10)+len("System instructions:\npinned\n\n") {
-		t.Fatalf("exact full transcript boundary rejected: %v", err)
-	}
-	req.Messages[2].Content.Blocks[0].Content = strings.Repeat("r", (64<<10)-overhead+1)
-	if _, err := validateRequest(req); err != nil {
-		t.Fatal("transcript above former 64 KiB cap rejected")
-	}
-}
-
 func TestClientBudgetToolDescriptionAndSchemaBoundaries(t *testing.T) {
 	for _, openAI := range []bool{false, true} {
 		t.Run(fmt.Sprintf("openAI=%t", openAI), func(t *testing.T) {
@@ -363,4 +338,9 @@ func TestClientBudgetRejectsInvalidCacheAndUnsupportedBlocks(t *testing.T) {
 			t.Fatal("invalid separate system item accepted")
 		}
 	}
+}
+
+func convertTools(raw []any) ([]mcpTool, bool) {
+	tools, err := convertToolsWithError(raw)
+	return tools, err == nil
 }

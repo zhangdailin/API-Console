@@ -162,17 +162,16 @@ func TestClientHintsSafeguardsCannotBeSilentlyDiscarded(t *testing.T) {
 }
 
 func TestClientHintsThinkingDisplayEnum(t *testing.T) {
-	for _, mode := range []string{"enabled", "adaptive"} {
-		for _, display := range []string{"omitted", "summarized"} {
+	for _, mode := range []string{"enabled", "adaptive", "disabled", "between_tools"} {
+		for _, display := range []any{nil, "omitted", "summarized"} {
 			if err := validateRawRequest(clientHintsRaw(t, map[string]any{"thinking": map[string]any{"type": mode, "display": display}})); err != nil {
 				t.Fatalf("supported thinking display rejected: %v", err)
 			}
 		}
 	}
-	for _, value := range []any{"hidden", "visible", "", nil, true, 7, []any{}, map[string]any{}} {
+	for _, value := range []any{"hidden", "visible", "", true, 7, []any{}, map[string]any{}} {
 		assertClientHintsError(t, clientHintsRaw(t, map[string]any{"thinking": map[string]any{"type": "adaptive", "display": value}}), "thinking.display", "omitted or summarized")
 	}
-	assertClientHintsError(t, clientHintsRaw(t, map[string]any{"thinking": map[string]any{"type": "disabled", "display": "omitted"}}), "thinking.display", "enabled or adaptive")
 }
 
 func TestClientHintsCacheControlStrictShapeAndLocations(t *testing.T) {
@@ -201,17 +200,32 @@ func TestClientHintsCacheControlStrictShapeAndLocations(t *testing.T) {
 			assertClientHintsError(t, raw, "system[0].cache_control", "Warp request field")
 		})
 	}
-	// Cache hints on tool_use remain unsupported; tool_result compatibility has
-	// separate strict raw/normalized and continuation regressions.
-	for _, block := range []any{
-		map[string]any{"type": "tool_use", "id": "call-1", "name": "synthetic", "input": map[string]any{}, "cache_control": map[string]any{"type": "ephemeral"}},
+	for _, tc := range []struct {
+		name, role, path string
+		cache            any
+	}{
+		{"production_shape", "assistant", "", map[string]any{"type": "ephemeral"}},
+		{"invalid_marker", "assistant", ".cache_control.type", map[string]any{"type": "permanent"}},
+		{"invalid_ttl", "assistant", ".cache_control.ttl", map[string]any{"type": "ephemeral", "ttl": "24h"}},
+		{"null_marker", "assistant", ".cache_control", nil},
+		{"wrong_role", "user", "", map[string]any{"type": "ephemeral"}},
 	} {
-		role := "assistant"
-		if block.(map[string]any)["type"] == "tool_result" {
-			role = "user"
-		}
-		raw := clientHintsRaw(t, map[string]any{"messages": []any{map[string]any{"role": role, "content": []any{block}}}})
-		assertClientHintsError(t, raw, "messages[0].content[0]", "unsupported")
+		t.Run(tc.name, func(t *testing.T) {
+			block := map[string]any{"type": "tool_use", "id": "call-1", "name": "synthetic", "input": map[string]any{"arg": "value"}, "cache_control": tc.cache}
+			raw := clientHintsRaw(t, map[string]any{"messages": []any{
+				map[string]any{"role": "system", "content": "Synthetic instructions."},
+				map[string]any{"role": "user", "content": "First message."},
+				map[string]any{"role": tc.role, "content": []any{map[string]any{"type": "text", "text": "Next."}, block}},
+				map[string]any{"role": "user", "content": []any{map[string]any{"type": "tool_result", "tool_use_id": "call-1", "content": "Synthetic result."}}},
+			}})
+			if tc.name == "production_shape" {
+				if err := validateRawRequest(raw); err != nil {
+					t.Fatalf("valid historical tool-use cache marker rejected: %v", err)
+				}
+				return
+			}
+			assertClientHintsError(t, raw, "messages[2].content[1]"+tc.path, "Warp request field")
+		})
 	}
 }
 

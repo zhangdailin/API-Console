@@ -26,7 +26,7 @@ func TestChatReasoningRecoveryResetsOnlyAfterDecodeFailure(t *testing.T) {
 	initial := newCLIUpstreamError(400, nil, []byte("invalid_encrypted_content"))
 	payload := map[string]any{"prompt_cache_key": "session", "input": []any{map[string]any{"type": "reasoning", "encrypted_content": "opaque", "summary": []any{map[string]any{"text": "remember this"}}}}}
 	calls := 0
-	response, err := recoverChatReasoning(payload, initial, func(stage string) (*http.Response, error) {
+	response, err := recoverChatReasoningWithinBudget(payload, nil, initial, func() bool { return true }, func(stage string) (*http.Response, error) {
 		calls++
 		if calls == 1 {
 			item := payload["input"].([]any)[0].(map[string]any)
@@ -43,7 +43,7 @@ func TestChatReasoningRecoveryResetsOnlyAfterDecodeFailure(t *testing.T) {
 func TestChatReasoningRecoveryPreservesPreviousResponse(t *testing.T) {
 	initial := newCLIUpstreamError(400, nil, []byte("invalid_encrypted_content"))
 	payload := map[string]any{"prompt_cache_key": "session", "previous_response_id": "resp_1"}
-	_, err := recoverChatReasoning(payload, initial, func(string) (*http.Response, error) { t.Fatal("unsafe reset"); return nil, nil })
+	_, err := recoverChatReasoningWithinBudget(payload, nil, initial, func() bool { return true }, func(string) (*http.Response, error) { t.Fatal("unsafe reset"); return nil, nil })
 	testutil.Fail(t, err != initial || payload["prompt_cache_key"] != "session", err, payload)
 }
 
@@ -52,6 +52,21 @@ func TestChatReasoningRecoveryDoesNotRetryRateLimit(t *testing.T) {
 	limited := newCLIUpstreamError(429, nil, []byte("rate limited"))
 	payload := map[string]any{"prompt_cache_key": "session", "input": []any{map[string]any{"type": "reasoning", "encrypted_content": "opaque"}}}
 	calls := 0
-	_, err := recoverChatReasoning(payload, initial, func(string) (*http.Response, error) { calls++; return nil, limited })
+	_, err := recoverChatReasoningWithinBudget(payload, nil, initial, func() bool { return true }, func(string) (*http.Response, error) { calls++; return nil, limited })
 	testutil.Fail(t, err != limited || calls != 1, err, calls)
+}
+
+func TestChatReasoningRecoveryRetainsLastRefusalWhenBudgetEnds(t *testing.T) {
+	initial := newCLIUpstreamError(400, nil, []byte("invalid_encrypted_content"))
+	last := newCLIUpstreamError(400, nil, []byte("invalid_encrypted_content: second response"))
+	payload := map[string]any{"prompt_cache_key": "session", "input": []any{map[string]any{"type": "reasoning", "encrypted_content": "opaque"}}}
+	calls := 0
+	_, err := recoverChatReasoningWithinBudget(payload, nil, initial, func() bool { return calls == 0 }, func(stage string) (*http.Response, error) {
+		calls++
+		testutil.Equal(t, stage, "reasoning_encrypted_content_retry")
+		return nil, last
+	})
+	if err != last || calls != 1 || payload["prompt_cache_key"] != "session" {
+		t.Fatalf("exhausted recovery lost the last refusal or reset the session: err=%v calls=%d", err, calls)
+	}
 }

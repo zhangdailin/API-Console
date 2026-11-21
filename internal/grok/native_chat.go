@@ -12,6 +12,7 @@ import (
 	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/httpserver"
 	"orchids-api/internal/responses"
+	"orchids-api/internal/store"
 	"strings"
 	"time"
 
@@ -378,7 +379,7 @@ func (h *Handler) serveNativeChat(ctx context.Context, w http.ResponseWriter, re
 		req.StartedAt = time.Now()
 	}
 	// Authentication replays and reasoning recovery spend this same HTTP budget.
-	ctx, _ = upstream.WithAttemptBudget(ctx, config.GenerationMaxAttempts)
+	ctx, attempts := upstream.WithAttemptBudget(ctx, config.GenerationMaxAttempts)
 	payload, err := h.responsesPayloadFromChat(spec, req, true)
 	if err != nil {
 		writeGrokUpstreamError(w, err)
@@ -392,14 +393,11 @@ func (h *Handler) serveNativeChat(ctx context.Context, w http.ResponseWriter, re
 		return
 	}
 	replayUnsafe := requestReplayUnsafe(req)
-	remaining := h.accountSwitchBudget()
-	used := make([]int64, 0, remaining)
-	openNext := func(_ []int64) (*chatAccountSession, error) {
+	canCall := func() bool { return attempts.Remaining() > 0 }
+	openNext := func(used []int64) (*chatAccountSession, error) {
 		return h.openCLIAccountSession(ctx, used, model)
 	}
 	request := func() (*http.Response, error) {
-		remaining--
-		used = append(used, sess.acc.ID)
 		// Apply the selected account's model menu on every attempt. Derive it
 		// from the original request so one account's defaults or aliases never
 		// become the next account's requested effort.
@@ -409,14 +407,14 @@ func (h *Handler) serveNativeChat(ctx context.Context, w http.ResponseWriter, re
 		ctx = grokbase.WithReasoningDiagnostics(ctx, payload)
 		attemptStarted := time.Now()
 		resp, requestErr := h.buildClient().doResponsesAt(ctx, sess.acc, "/responses", payload)
-		if requestErr == nil || !req.ReasoningReplay || !isReasoningReplayDecodeError(requestErr) || preservesClientCompaction(payload, requestErr) {
+		if requestErr == nil || !req.ReasoningReplay || !isReasoningReplayDecodeError(requestErr) || preservesClientCompaction(payload, requestErr) || !canCall() {
 			return resp, requestErr
 		}
 		h.auditAttempt(ctx, sess.acc, ProviderBuild, 1, attemptStarted, requestErr, "reasoning_replay_recovery")
 		h.clearReasoningReplay(ctx, req.Model, req.PromptCacheKey)
 		recoveryAttempt := 1
 		lastRecoveryStage := ""
-		retryResp, retryErr := recoverChatReasoning(payload, requestErr, func(stage string) (*http.Response, error) {
+		retryResp, retryErr := recoverChatReasoningWithinBudget(payload, resp, requestErr, canCall, func(stage string) (*http.Response, error) {
 			recoveryAttempt++
 			lastRecoveryStage = stage
 			started := time.Now()
@@ -429,13 +427,12 @@ func (h *Handler) serveNativeChat(ctx context.Context, w http.ResponseWriter, re
 		}
 		return retryResp, retryErr
 	}
-	var allowSwitch func(error) bool
-	if replayUnsafe {
+	allowSwitch := func(err error) bool {
 		// A hosted tool may already have run: only a refusal before generation
 		// moves the request to another account.
-		allowSwitch = isFreeUsageExhaustedError
+		return canCall() && (!replayUnsafe || isFreeUsageExhaustedError(err))
 	}
-	resp, err := h.retryWithAccountSwitchWhen(ctx, sess, 1500*time.Millisecond, request, openNext, nil, remaining, allowSwitch)
+	resp, err := h.retryWithAccountSwitch(ctx, sess, 1500*time.Millisecond, request, openNext, nil, 0, allowSwitch)
 	h.finishUpstreamChat(ctx, w, req, sess, logger, provider, endpoint, func() http.Header {
 		return h.cliHeaders(sess.acc, sess.token)
 	}, payload, resp, err)
@@ -446,79 +443,40 @@ const (
 	maxAccountSwitchBudget     = 100
 )
 
-// retryWithAccountSwitch runs a request in a bounded loop, switching to
-// the next account whenever shouldSwitchGrokAccount fires. doRequest issues the
-// request against the current session; openNext returns its replacement.
-// onSwitch runs after each successful account swap (e.g. to rebuild the request
-// payload for the new account).
-func (h *Handler) retryWithAccountSwitch(ctx context.Context, sess *chatAccountSession, switchPace time.Duration, doRequest func() (*http.Response, error), openNext func(used []int64) (*chatAccountSession, error), onSwitch func() error) (*http.Response, error) {
-	return h.retryWithAccountSwitchLimit(ctx, sess, switchPace, doRequest, openNext, onSwitch, 0)
-}
-
-func (h *Handler) retryWithAccountSwitchLimit(ctx context.Context, sess *chatAccountSession, switchPace time.Duration, doRequest func() (*http.Response, error), openNext func(used []int64) (*chatAccountSession, error), onSwitch func() error, hardLimit int) (*http.Response, error) {
-	return h.retryWithAccountSwitchWhen(ctx, sess, switchPace, doRequest, openNext, onSwitch, hardLimit, nil)
-}
-
-func (h *Handler) retryWithAccountSwitchWhen(ctx context.Context, sess *chatAccountSession, switchPace time.Duration, doRequest func() (*http.Response, error), openNext func(used []int64) (*chatAccountSession, error), onSwitch func() error, hardLimit int, allowSwitch func(error) bool) (*http.Response, error) {
-	maxAttempts := h.accountSwitchBudget()
-	if hardLimit > 0 && maxAttempts > hardLimit {
-		maxAttempts = hardLimit
+func (h *Handler) retryWithAccountSwitch(ctx context.Context, sess *chatAccountSession, switchPace time.Duration, call func() (*http.Response, error), next func([]int64) (*chatAccountSession, error), rebuild func() error, hardLimit int, allowSwitch func(error) bool) (*http.Response, error) {
+	limit := h.accountSwitchBudget()
+	if hardLimit > 0 {
+		limit = min(limit, hardLimit)
 	}
-
-	used := make([]int64, 0)
-	attempt := 0
-	for {
-		if ctx.Err() != nil {
-			return nil, context.Cause(ctx)
-		}
-		attempt++
-		if sess.acc != nil && sess.acc.ID != 0 {
-			used = append(used, sess.acc.ID)
-		}
-		started := time.Now()
-		resp, err := doRequest()
-		provider := ProviderBuild
-		h.auditAttemptDiagnostic(ctx, sess.acc, provider, attempt, started, err, "account_attempt", resp, nil, "")
-		if err == nil {
-			return resp, nil
-		}
-		if ctx.Err() != nil {
-			return nil, context.Cause(ctx)
-		}
-		if markAllGrokAccountStatuses(err) {
-			h.markAccountStatus(ctx, sess.acc, err)
-		}
-		if !shouldSwitchGrokAccount(err) || attempt >= maxAttempts || (allowSwitch != nil && !allowSwitch(err)) {
-			return nil, err
-		}
-
-		sess.Close()
-		pace := switchPace
-		if _, ok := errors.AsType[*syntheticCooldownError](err); ok {
-			// This attempt never reached upstream. Rotate immediately; sleeping
-			// would serialize the same-team skip and hide the cooldown outcome.
-			pace = 0
-		}
-		if !util.RetryWaitFits(ctx, pace) {
-			return nil, err
-		}
-		if !util.SleepWithContext(ctx, pace) {
-			return nil, context.Cause(ctx)
-		}
-		next, switchErr := openNext(used)
-		if switchErr != nil {
-			return nil, err
-		}
-		sess.acc = next.acc
-		sess.token = next.token
-		sess.poolCandidates = next.poolCandidates
-		sess.release = next.release
-		if onSwitch != nil {
-			if err := onSwitch(); err != nil {
-				return nil, err
+	return grokbase.RetryAccountSwitch(ctx, sess, grokbase.AccountSwitch[chatAccountSession]{
+		Limit: limit, CancelEarly: true,
+		Account: func() *store.Account { return sess.acc }, Release: sess.Close,
+		Call: call, Next: next, Rebuild: rebuild,
+		Audit: func(a grokbase.Attempt) {
+			a.Provider = ProviderBuild
+			h.auditAttemptDiagnostic(ctx, a)
+		},
+		MarkFailure: func(acc *store.Account, err error) {
+			if markAllGrokAccountStatuses(err) {
+				h.markAccountStatus(ctx, acc, err)
 			}
-		}
-	}
+		},
+		ShouldSwitch: shouldSwitchGrokAccount, AllowSwitch: allowSwitch,
+		Wait: func(err error) error {
+			pace := switchPace
+			if _, ok := errors.AsType[*syntheticCooldownError](err); ok {
+				// The attempt never went upstream; rotate immediately.
+				pace = 0
+			}
+			if !util.RetryWaitFits(ctx, pace) {
+				return err
+			}
+			if !util.SleepWithContext(ctx, pace) {
+				return context.Cause(ctx)
+			}
+			return nil
+		},
+	})
 }
 
 func (h *Handler) accountSwitchBudget() int {

@@ -2,9 +2,42 @@ package store
 
 import (
 	"context"
-	"orchids-api/internal/testutil"
+	"errors"
 	"testing"
+
+	"orchids-api/internal/testutil"
 )
+
+func TestRetiredGrokRoutesAreHiddenWithoutDeletingStoredRows(t *testing.T) {
+	s, _ := newTestRedisStore(t, "test:")
+	ctx := context.Background()
+	build := &Model{Channel: "grok", ModelID: "grok-4.5", Provider: GrokProviderBuild}
+	web := &Model{Channel: "grok", ModelID: "grok-chat-auto", Provider: GrokProviderWeb}
+	retired := []*Model{
+		{Channel: "grok", ModelID: "console/grok-4.5", Provider: "console"},
+		{Channel: "grok", ModelID: "console/grok-imagine-video-1.5"},
+	}
+	for _, m := range []*Model{build, web} {
+		testutil.NoError(t, s.CreateModel(ctx, m))
+	}
+	for _, m := range retired {
+		testutil.NoError(t, s.models.CreateModel(ctx, m))
+	}
+
+	s.prepareModels()
+	models, err := s.ListModels(ctx)
+	testutil.NoError(t, err)
+	testutil.Equal(t, len(models), 2)
+	for _, m := range retired {
+		_, err := s.GetModel(ctx, m.ID)
+		testutil.True(t, errors.Is(err, ErrNoRows))
+		_, err = s.GetModelByChannelAndModelID(ctx, m.Channel, m.ModelID)
+		testutil.True(t, errors.Is(err, ErrNoRows))
+		stored, err := s.models.GetModel(ctx, m.ID)
+		testutil.NoError(t, err)
+		testutil.Equal(t, stored.Provider, m.Provider)
+	}
+}
 
 func TestReconcileDiscoveredModelsProtectsManualAndPrunesDiscovery(t *testing.T) {
 	s, _ := newTestRedisStore(t, "test:")

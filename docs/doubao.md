@@ -56,3 +56,53 @@ an automatic generation retry. Captcha records retain the exact refused
 dialog's device/fingerprint and are still gated by the current account session;
 success in a different dialog cannot clear the refusal. A fresh QR login or
 explicit legacy identity rotation invalidates an old session's challenge.
+
+## OpenAI-compatible endpoints
+
+Use `/doubao/v1` (or `/doubao`) with a managed gateway API key. Chat Completions
+supports JSON and SSE, the `doubao-think` selector, and idle SSE heartbeat
+comments. When the upstream marks a reasoning segment, it is kept separate
+from answer text. Messages and Responses are not offered by this channel.
+
+| Method and path | Request and result |
+| --- | --- |
+| `POST /files` | Multipart field `file`; accepts a document or image and returns an opaque `file_db_…` ID. |
+| `GET /files/{file_id}`, `DELETE /files/{file_id}` | Read file metadata or delete the temporary upload. |
+| `POST /images/upload` | Multipart field `image` or `file`; PNG, JPEG, GIF or WebP. The returned ID can be used as a reference image. |
+| `POST /images/generations` | JSON `prompt`, optional `model: "doubao-image"`, `ratio`, `n`, and `response_format: "url"` or `"b64_json"`. |
+| `POST /images/edits` | Same image output options. Supply `image` or `images` as a public URL, base64, data URL, or an object with `file_id`. Multipart accepts binary `image` or repeated `image[]` fields. The default model is `doubao-image-edit`; `doubao-image` is also accepted. |
+| `POST /video/generations` | Experimental. JSON or multipart; `prompt`, optional `model: "doubao-video"`, `ratio`, and optional reference images (same shapes as image edits). Waits for the submitted task and returns `data[].video_url` when a completed video is present. |
+
+For chat, attach a previous upload as
+`{"type":"file","file":{"file_id":"file_db_…"}}` in the latest user turn.
+You can also send inline/base64 documents or image blocks and public attachment
+URLs. PDF, TXT, Markdown, and code files are forwarded as attachments rather
+than converted by a local document parser. Uploads expire after one hour, are
+restricted to the creating key, and are encrypted in deployments configured
+with a credential encryption key. Each key may have eight active uploads,
+with a 16 MiB per-file and per-request attachment limit and up to four
+attachments per request. Gateway file deletion removes the staged copy;
+it does not delete attachments already sent to Doubao.
+
+In the account console, Doubao supports QR sign-in or importing a browser Cookie
+that the administrator already owns. Imports verify the session and reject
+duplicate users before saving; refresh an existing account by QR sign-in.
+The console can open the official site in the operator's browser and keeps
+the existing interactive verification flow for provider challenges.
+
+An explicit conversation ID binds to the selected account for 24 hours after
+the latest turn; a request to that ID does not silently switch accounts.
+Anonymous chat can retry once under the existing account policy before any
+output. The upstream conversation itself is still cached in-process. A clear
+daily video quota rejection affects only video, until the next Shanghai
+midnight. A video request can try one other account on that rejection, but
+an accepted task is polled on the original account and never re-submitted.
+
+These standalone media adapters were tested against synthetic upstream responses.
+They are not published as verified entries in the live model catalog.
+A missing completed asset returns 502, and video generation remains
+unverified against the live upstream. There is no guessed media pricing;
+keys with a USD billing cap cannot issue these unpriced media generations.
+
+The independent media contract and acceptance cases were informed by
+[doubao2api](https://github.com/SeiShonagon520/doubao2api/tree/a33787d5421ec8bf4b9c6cab0be24e95e4433486).

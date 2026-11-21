@@ -16,9 +16,6 @@ type ModelSpec struct {
 	IsImage       bool
 	IsVideo       bool
 	MediaAPIOnly  bool
-	// AliasReasoningEffort is kept for request-shape compatibility; Web modes
-	// have no effort aliases, so it is always empty.
-	AliasReasoningEffort string
 }
 
 const (
@@ -60,24 +57,9 @@ func normalizeModelID(modelID string) string {
 	return strings.ToLower(strings.TrimSpace(modelID))
 }
 
-// stripProviderPublicPrefix removes the "web/" qualifier, reporting whether it
-// removed anything.
-func stripProviderPublicPrefix(id string) (string, bool) {
-	normalized := normalizeModelID(id)
-	if rest, ok := strings.CutPrefix(normalized, "web/"); ok {
-		return strings.TrimSpace(rest), true
-	}
-	return normalized, false
-}
-
-func ResolveModelAlias(modelID string) (ModelSpec, string, bool) {
-	id, _ := stripProviderPublicPrefix(modelID)
-	m, ok := modelByID[id]
-	return m, "", ok
-}
-
 func ResolveModel(modelID string) (ModelSpec, bool) {
-	m, _, ok := ResolveModelAlias(modelID)
+	id := strings.TrimSpace(strings.TrimPrefix(normalizeModelID(modelID), "web/"))
+	m, ok := modelByID[id]
 	return m, ok
 }
 

@@ -71,6 +71,13 @@ func (e *grokUpstreamError) RetryAfter() time.Duration {
 	return ratelimit.ParseRetryAfter(e.header.Get("Retry-After"), time.Now())
 }
 
+func (e *grokUpstreamError) AttemptFailure() (grokbase.UpstreamFailure, bool) {
+	if e == nil {
+		return grokbase.UpstreamFailure{}, false
+	}
+	return grokbase.UpstreamFailure{Status: e.status, Header: e.header, Body: e.body}, true
+}
+
 // newCLIUpstreamError builds a typed error with a sanitized header copy, a
 // bounded body, and a CLI-prefixed message.
 func newCLIUpstreamError(status int, header http.Header, body []byte) error {

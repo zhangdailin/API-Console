@@ -26,7 +26,8 @@ func publishModels(ctx context.Context, env provider.Env) error {
 
 // publishedModels returns the routes a verified account supports, or nothing
 // when no account has been verified inside the observation window. The channel
-// serves Chat Completions only, so /messages and Responses are not advertised:
+// uses Chat Completions as its conversation protocol, so /messages and
+// Responses are not advertised:
 // offering them would promise a wire format the route table does not answer.
 func publishedModels(accounts []*store.Account, now time.Time) []*store.Model {
 	verified := false
@@ -46,8 +47,8 @@ func publishedModels(accounts []*store.Account, now time.Time) []*store.Model {
 	for index, model := range Models() {
 		// Chat is the only wire protocol this channel routes, but the model
 		// itself accepts images and files and can answer with generated images.
-		// Those are chat-content capabilities, not extra endpoints, so clients
-		// discover them here instead of probing /responses or /messages.
+		// These rows describe chat models. Standalone media model IDs stay
+		// out of the verified catalog until their upstream routes are tested.
 		rows = append(rows, &store.Model{Channel: "doubao", ModelID: model.ID, Name: model.Name, Status: store.ModelStatusAvailable, Verified: true, SortOrder: index, Provider: "doubao-web", UpstreamModel: model.ModelItemKey, Capabilities: []string{store.CapabilityChat, store.CapabilityImage}})
 	}
 	return rows

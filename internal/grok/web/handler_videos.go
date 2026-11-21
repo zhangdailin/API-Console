@@ -402,7 +402,7 @@ func webFreeVideoDurationCap(acc *store.Account) int {
 	if acc == nil {
 		return 0
 	}
-	if ProviderForAccount(acc) != ProviderWeb {
+	if !acc.IsGrokWeb() {
 		return 0
 	}
 	switch strings.ToLower(strings.TrimSpace(acc.Subscription)) {
