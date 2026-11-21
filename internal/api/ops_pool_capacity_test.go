@@ -39,11 +39,11 @@ func TestOpsMatrixPreservesCapacityReadFailure(t *testing.T) {
 	a, s, _ := setupConfigAPI(t)
 	a.opsAggregator = opsagg.New(s.RedisClient(), "test:")
 	a.connTracker = failedMonitoringCounts{loadbalancer.NewMemoryConnTracker()}
-	if _, err := a.opsMatrix(context.Background(), []string{"cline"}, time.Now().Add(-time.Minute), time.Now()); err == nil {
+	if _, err := a.opsMatrix(context.Background(), &opsWindow{channels: []string{"cline"}, since: time.Now().Add(-time.Minute), until: time.Now()}); err == nil {
 		t.Fatal("failed capacity read appeared idle")
 	}
 	a.connTracker = loadbalancer.NewMemoryConnTracker()
-	rows, err := a.opsMatrix(context.Background(), []string{"cline"}, time.Now().Add(-time.Minute), time.Now())
+	rows, err := a.opsMatrix(context.Background(), &opsWindow{channels: []string{"cline"}, since: time.Now().Add(-time.Minute), until: time.Now()})
 	if err != nil || len(rows) != 1 || rows[0]["capacity_available"] != true || rows[0]["capacity_slots"] != int64(0) {
 		t.Fatalf("empty pool: %v %+v", err, rows)
 	}

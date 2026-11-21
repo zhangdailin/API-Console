@@ -66,6 +66,7 @@ type Outcome struct {
 
 // Bucket is one minute of one channel.
 type Bucket struct {
+	modelCounts map[string]modelBucketCounts
 	Counters
 	DurationFailed, FirstTokenFailed, DurationAttempt, FirstTokenAttempt []int64   `json:"-"`
 	Channel                                                              string    `json:"channel"`
@@ -471,6 +472,7 @@ func bucketFromFields(minute time.Time, channel string, fields map[string]string
 	toInt := func(name string) int64 { value, _ := strconv.ParseInt(fields[name], 10, 64); return value }
 	return &Bucket{
 		Counters:         countersFrom(fields),
+		modelCounts:      decodeModelBucketCounts(fields),
 		Channel:          normalizeChannel(channel),
 		Minute:           minute,
 		Requests:         toInt("requests"),
@@ -639,100 +641,4 @@ type ModelStats struct {
 	FirstTokenP95MS   int64   `json:"first_token_p95_ms"`
 	DurationP95MS     int64   `json:"duration_p95_ms"`
 	Samples           int64   `json:"samples"`
-}
-
-// ModelStatsFromBucketsChecked extracts per-model counters and latency samples,
-// preserving read failures so unavailable statistics cannot appear as empty.
-func (a *Aggregator) ModelStatsFromBucketsChecked(ctx context.Context, channel string, buckets []Bucket) ([]ModelStats, error) {
-	if !a.Enabled() || len(buckets) == 0 {
-		return nil, nil
-	}
-	type acc struct {
-		requests, success, failed int64
-		duration, ttfts           []int64
-	}
-	byModel := map[string]*acc{}
-	for _, bucket := range buckets {
-		key := a.key(bucket.Minute, channel)
-		fields, err := a.client.HGetAll(ctx, key).Result()
-		if err != nil {
-			return nil, err
-		}
-		bucketModels := map[string]*acc{}
-		for field, value := range fields {
-			if !strings.HasPrefix(field, "model:") {
-				continue
-			}
-			trimmed := strings.TrimPrefix(field, "model:")
-			index := strings.LastIndex(trimmed, ":")
-			if index <= 0 {
-				continue
-			}
-			model, metric := trimmed[:index], trimmed[index+1:]
-			entry := bucketModels[model]
-			if entry == nil {
-				entry = byModel[model]
-				if entry == nil {
-					entry = &acc{}
-					byModel[model] = entry
-				}
-				bucketModels[model] = entry
-			}
-			parsed, _ := strconv.ParseInt(value, 10, 64)
-			switch metric {
-			case "requests":
-				entry.requests += parsed
-			case "success":
-				entry.success += parsed
-			case "failed":
-				entry.failed += parsed
-			}
-		}
-		for model, entry := range bucketModels {
-			duration, err := a.readListInts(ctx, key+":model:"+model)
-			if err != nil {
-				return nil, err
-			}
-			ttft, err := a.readListInts(ctx, key+":model:"+model+":ttft")
-			if err != nil {
-				return nil, err
-			}
-			entry.duration = append(entry.duration, duration...)
-			entry.ttfts = append(entry.ttfts, ttft...)
-		}
-	}
-	stats := make([]ModelStats, 0, len(byModel))
-	for model, entry := range byModel {
-		stat := ModelStats{
-			Model:           model,
-			Requests:        entry.requests,
-			Success:         entry.success,
-			Failed:          entry.failed,
-			DurationP95MS:   percentile(entry.duration, 0.95),
-			FirstTokenP95MS: percentile(entry.ttfts, 0.95), FirstTokenSamples: int64(len(entry.ttfts)),
-			Samples: int64(len(entry.duration)),
-		}
-		if entry.requests > 0 {
-			stat.SuccessRate = float64(entry.success) / float64(entry.requests)
-		}
-		stats = append(stats, stat)
-	}
-	sort.Slice(stats, func(i, j int) bool { return stats[i].Requests > stats[j].Requests })
-	return stats, nil
-}
-
-func (a *Aggregator) readListInts(ctx context.Context, key string) ([]int64, error) {
-	values, err := a.client.LRange(ctx, key, -5000, -1).Result()
-	if err != nil {
-		return nil, err
-	}
-	out := make([]int64, 0, len(values))
-	for _, raw := range values {
-		value, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, value)
-	}
-	return out, nil
 }

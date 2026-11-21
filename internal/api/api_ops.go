@@ -165,7 +165,8 @@ func (a *API) HandleOpsOverview(w http.ResponseWriter, r *http.Request) {
 
 	scope := target
 	scope = util.FirstNonEmptyUntrimmed(scope, "all")
-	buckets, durations, ttfts, err := a.opsBucketsWithSamples(r.Context(), scope, since, until)
+	readWindow := &opsWindow{agg: a.opsAggregator, since: since, until: until, channels: channels}
+	buckets, durations, ttfts, err := readWindow.bucketsWithSamples(r.Context(), scope)
 	if err != nil {
 		http.Error(w, "failed to read metric buckets", http.StatusInternalServerError)
 		return
@@ -181,7 +182,7 @@ func (a *API) HandleOpsOverview(w http.ResponseWriter, r *http.Request) {
 		SamplesProvided: true,
 	})
 	payload["series"] = opsSeries(buckets)
-	matrix, err := a.opsMatrix(r.Context(), channels, since, until)
+	matrix, err := a.opsMatrix(r.Context(), readWindow)
 	if err != nil {
 		http.Error(w, "failed to read channel metrics", http.StatusServiceUnavailable)
 		return
@@ -505,83 +506,6 @@ func decodeAuditEvent(entry redis.XMessage) (audit.Event, bool) {
 	return event, true
 }
 
-// opsBucketsWithSamples reads one scope's per-minute buckets AND the latency
-// samples behind them.
-//
-// Percentiles are not additive, so a merged view must collect the raw samples of
-// every channel before computing one percentile. The earlier code asked the
-// aggregator to summarise the scope label "all", whose own sample lists do not
-// exist, which is why both P95 figures came back as zero whenever "all channels"
-// was selected.
-func (a *API) opsBucketsWithSamples(ctx context.Context, scope string, since, until time.Time) ([]opsagg.Bucket, []int64, []int64, error) {
-	if scope != "all" {
-		buckets, err := a.opsAggregator.Range(ctx, scope, since, until)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		durations, ttfts, err := a.opsAggregator.SamplesForChecked(ctx, scope, buckets)
-		return buckets, durations, ttfts, err
-	}
-
-	channels, err := a.opsAggregator.Channels(ctx, since, until)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	merged := map[time.Time]opsagg.Bucket{}
-	var durations, ttfts []int64
-	for _, channel := range channels {
-		// The infrastructure aggregates are not user traffic: the http catch-all
-		// covers the admin UI, health checks and scanners, and probe is synthetic.
-		if !IsProviderChannel(channel) {
-			continue
-		}
-		buckets, err := a.opsAggregator.Range(ctx, channel, since, until)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		channelDurations, channelTTFTs, err := a.opsAggregator.SamplesForChecked(ctx, channel, buckets)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		durations = append(durations, channelDurations...)
-		ttfts = append(ttfts, channelTTFTs...)
-
-		for _, bucket := range buckets {
-			combined := merged[bucket.Minute]
-			combined.Minute = bucket.Minute
-			combined.Counters.Add(bucket.Counters)
-			combined.DurationFailed = append(combined.DurationFailed, bucket.DurationFailed...)
-			combined.FirstTokenFailed = append(combined.FirstTokenFailed, bucket.FirstTokenFailed...)
-			combined.DurationAttempt = append(combined.DurationAttempt, bucket.DurationAttempt...)
-			combined.FirstTokenAttempt = append(combined.FirstTokenAttempt, bucket.FirstTokenAttempt...)
-			combined.Requests += bucket.Requests
-			combined.Success += bucket.Success
-			combined.Failed += bucket.Failed
-			combined.Input += bucket.Input
-			combined.Cached += bucket.Cached
-			combined.Reasoning += bucket.Reasoning
-			if bucket.Total > 0 {
-				combined.Total += bucket.Total
-			} else {
-				combined.Total += bucket.Input + bucket.Output
-			}
-			combined.PricedRequests += bucket.PricedRequests
-			combined.UnpricedRequests += bucket.UnpricedRequests
-			combined.PricedTokens += bucket.PricedTokens
-			combined.UnpricedTokens += bucket.UnpricedTokens
-			combined.CostInUSDTicks += bucket.CostInUSDTicks
-			combined.Output += bucket.Output
-			merged[bucket.Minute] = combined
-		}
-	}
-	out := make([]opsagg.Bucket, 0, len(merged))
-	for _, bucket := range merged {
-		out = append(out, bucket)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Minute.Before(out[j].Minute) })
-	return out, durations, ttfts, nil
-}
-
 func opsSeries(buckets []opsagg.Bucket) []map[string]any {
 	series := make([]map[string]any, 0, len(buckets))
 	for _, bucket := range buckets {
@@ -598,7 +522,7 @@ func opsSeries(buckets []opsagg.Bucket) []map[string]any {
 
 // opsMatrix builds the channel × model status rows. A row with no samples is
 // reported as such (samples = 0) instead of a green, traffic-free channel.
-func (a *API) opsMatrix(ctx context.Context, channels []string, since, until time.Time) ([]map[string]any, error) {
+func (a *API) opsMatrix(ctx context.Context, window *opsWindow) ([]map[string]any, error) {
 	accounts, err := a.store.ListAccounts(ctx)
 	if err != nil {
 		return nil, err
@@ -626,13 +550,13 @@ func (a *API) opsMatrix(ctx context.Context, channels []string, since, until tim
 	}
 	now := time.Now()
 	// The rate is per minute of the requested window, not per bucket that exists.
-	windowMinutes := until.Sub(since).Minutes()
+	windowMinutes := window.until.Sub(window.since).Minutes()
 	if windowMinutes <= 0 {
 		windowMinutes = 1
 	}
 
-	rows := make([]map[string]any, 0, len(channels))
-	for _, channel := range channels {
+	rows := make([]map[string]any, 0, len(window.channels))
+	for _, channel := range window.channels {
 		// The matrix answers "which provider channel × model is healthy", so the
 		// infrastructure aggregates are not rows in it.
 		if !IsProviderChannel(channel) {
@@ -660,31 +584,20 @@ func (a *API) opsMatrix(ctx context.Context, channels []string, since, until tim
 			maps.Copy(row, opsPoolCapacity(accounts, counts, channel))
 		}
 		if a.opsAggregator != nil && a.opsAggregator.Enabled() {
-			buckets, err := a.opsAggregator.Range(ctx, channel, since, until)
-			if err == nil {
-				durations, ttfts, err := a.opsAggregator.SamplesForChecked(ctx, channel, buckets)
-				if err != nil {
-					return nil, err
-				}
-				summary := a.opsAggregator.SummarizeWith(ctx, opsagg.SummaryInput{
-					Channel:         channel,
-					Buckets:         buckets,
-					WindowMinutes:   windowMinutes,
-					Durations:       durations,
-					FirstTokenMS:    ttfts,
-					SamplesProvided: true,
-				})
-				row["summary"] = summary
-				models, err := a.opsAggregator.ModelStatsFromBucketsChecked(ctx, channel, buckets)
-				if err != nil {
-					return nil, err
-				}
-				row["models"] = models
-				row["has_sample"] = summary.Requests > 0
-				row["series"] = opsSeries(buckets)
-			} else {
+			data, err := window.read(ctx, channel)
+			if err != nil {
 				return nil, err
 			}
+			summary := a.opsAggregator.SummarizeWith(ctx, opsagg.SummaryInput{
+				Channel: channel, Buckets: data.buckets, WindowMinutes: windowMinutes,
+				Durations: data.durations, FirstTokenMS: data.ttfts, SamplesProvided: true,
+			})
+			models, err := a.opsAggregator.ModelStatsFromBucketsChecked(ctx, channel, data.buckets)
+			if err != nil {
+				return nil, err
+			}
+			row["summary"], row["models"] = summary, models
+			row["has_sample"], row["series"] = summary.Requests > 0, opsSeries(data.buckets)
 		}
 		rows = append(rows, row)
 	}

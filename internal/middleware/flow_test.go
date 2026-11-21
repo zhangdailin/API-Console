@@ -231,13 +231,14 @@ func TestFlowLatencyWindowBoundaries(t *testing.T) {
 		route.samples[i] = flowLatencySample{at: now.Add(-age), firstGeneration: -1, firstVisible: -1, bodyTTFB: int64(i), duration: 1000}
 	}
 	var builder flowMetricBuilder
-	builder.add(route, now)
+	captured := captureFlowRoute(route, now)
+	builder.add(&captured, now)
 	stats := builder.metrics()
 	if stats.Completed != 0 || stats.FailureRate != nil || stats.BodyTTFB.Samples != 2 || *stats.BodyTTFB.P50MS != 0 || *stats.BodyTTFB.P95MS != 1 || stats.FirstGeneration.P95MS != nil {
 		t.Fatalf("wrong independent windows or body TTFB distribution: %+v", stats)
 	}
 	var expired flowMetricBuilder
-	expired.add(route, now.Add(901*time.Second))
+	expired.add(&captured, now.Add(901*time.Second))
 	stats = expired.metrics()
 	if stats.BodyTTFB.Samples != 0 || stats.BodyTTFB.P95MS != nil || stats.Duration.P95MS != nil {
 		t.Fatalf("latency samples survived the 15-minute window: %+v", stats)
@@ -334,4 +335,25 @@ func TestFlowInputRateIsLiveFromMessageStart(t *testing.T) {
 	route := tracker.Snapshot("cline").Routes[2]
 	testutil.Equal(t, route.InputTokens, int64(1000))
 	testutil.Equal(t, route.OutputTokens, int64(5))
+}
+
+func TestEncodedFlowSnapshotsAreSharedOnlyForTheirScope(t *testing.T) {
+	tracker := NewFlowTracker()
+	initial, err := tracker.SnapshotJSON("cline", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracker.Track(func(http.ResponseWriter, *http.Request) {})(httptest.NewRecorder(), httptest.NewRequest("POST", "/cline/v1/chat/completions", nil))
+	shared, err := tracker.SnapshotJSON("cline", time.Hour)
+	if err != nil || shared != initial {
+		t.Fatalf("subscriber did not reuse the frame: %v", err)
+	}
+	updated, err := tracker.SnapshotJSON("cline", 0)
+	if err != nil || !strings.Contains(updated, `"started":1`) {
+		t.Fatalf("fresh frame omitted the request: %v", err)
+	}
+	other, err := tracker.SnapshotJSON("warp", time.Hour)
+	if err != nil || strings.Contains(other, `"channel":"cline"`) || strings.Contains(other, `"started":1`) {
+		t.Fatalf("subscriber received a different scope: %v", err)
+	}
 }

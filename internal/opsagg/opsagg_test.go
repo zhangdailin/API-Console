@@ -156,7 +156,7 @@ func TestRange_SpansMinutesInOrder(t *testing.T) {
 
 // TestModelStatsFromBuckets reports per-model quality without extra keys.
 func TestModelStatsFromBuckets(t *testing.T) {
-	agg, _ := newAggregator(t)
+	agg, mini := newAggregator(t)
 	ctx := context.Background()
 	at := time.Now().Truncate(time.Minute)
 
@@ -167,8 +167,12 @@ func TestModelStatsFromBuckets(t *testing.T) {
 
 	buckets, err := agg.Range(ctx, "grok", at, at)
 	testutil.NoError(t, err, "Range() error = %v")
+	reads := mini.CommandCount()
 	stats, err := agg.ModelStatsFromBucketsChecked(ctx, "grok", buckets)
 	testutil.NoError(t, err, "ModelStatsFromBucketsChecked() error = %v")
+	if extra := mini.CommandCount() - reads; extra != 4 {
+		t.Fatalf("model stats issued %d commands, want only the two sample lists per model", extra)
+	}
 	testutil.Equal(t, len(stats), 2)
 	// Sorted by request count: grok-4.6 leads.
 	testutil.Equal(t, stats[0].Model, "grok-4.6")
@@ -210,9 +214,9 @@ func TestModelStatsFromBuckets_MixedMinutesAndMissingDuration(t *testing.T) {
 	})
 	stats, err := agg.ModelStatsFromBucketsChecked(ctx, "grok", buckets)
 	testutil.NoError(t, err, "ModelStatsFromBucketsChecked() error = %v")
-	// Three HGETALLs plus two LRANGEs per present (minute, model) pair:
-	// alpha; alpha+beta; alpha+gamma = five pairs, not 3*3 models.
-	testutil.Equal(t, hashReads.Load(), int64(3))
+	// Reuse the hashes read by Range. Only the five present (minute, model)
+	// pairs need two sample lists each: alpha; alpha+beta; alpha+gamma.
+	testutil.Equal(t, hashReads.Load(), int64(0))
 	testutil.Equal(t, listReads.Load(), int64(2*5))
 	testutil.Equal(t, len(stats), 3)
 	byName := make(map[string]ModelStats, len(stats))

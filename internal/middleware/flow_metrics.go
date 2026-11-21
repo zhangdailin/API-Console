@@ -88,15 +88,10 @@ type flowMetricBuilder struct {
 	phases                              [5]flowPhase
 }
 
-func (b *flowMetricBuilder) add(route *flowRouteState, now time.Time) {
-	for request := range route.activeRequests {
-		if request.responding {
-			b.Responding++
-		} else {
-			b.Waiting++
-		}
-		b.LongestActiveMS = max(b.LongestActiveMS, now.Sub(request.started).Milliseconds())
-	}
+func (b *flowMetricBuilder) add(route *flowRouteSnapshot, now time.Time) {
+	b.Responding += route.responding
+	b.Waiting += route.waiting
+	b.LongestActiveMS = max(b.LongestActiveMS, route.longestActiveMS)
 	for _, bucket := range route.buckets {
 		if bucket.second <= now.Unix()-flowWindowSeconds || bucket.second > now.Unix() {
 			continue

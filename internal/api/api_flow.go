@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -44,7 +43,7 @@ func (a *API) HandleOpsFlow(w http.ResponseWriter, r *http.Request) {
 	var lastSentAt time.Time
 	send := func() error {
 		controller.SetWriteDeadline(time.Now().Add(10 * time.Second))
-		data, err := json.Marshal(a.flowTracker.Snapshot(scope))
+		data, err := a.flowTracker.SnapshotJSON(scope, flowPushInterval/2)
 		if err != nil {
 			return err
 		}

@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"sync"
 	"time"
@@ -16,6 +17,8 @@ type FlowTracker struct {
 	startedAt   time.Time
 	routes      map[string]*flowRouteState
 	subscribers map[chan struct{}]struct{}
+	snapshotMu  sync.Mutex
+	encoded     map[string]encodedFlowSnapshot
 }
 
 type FlowRoute struct {
@@ -227,16 +230,78 @@ func (t *FlowTracker) Track(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+type encodedFlowSnapshot struct {
+	at   time.Time
+	data string
+}
+
+// SnapshotJSON shares a short-lived immutable frame among subscribers of the same scope.
+func (t *FlowTracker) SnapshotJSON(scope string, maxAge time.Duration) (string, error) {
+	t.snapshotMu.Lock()
+	defer t.snapshotMu.Unlock()
+	now := time.Now()
+	if cached, ok := t.encoded[scope]; ok && now.Sub(cached.at) < maxAge {
+		return cached.data, nil
+	}
+	data, err := json.Marshal(t.Snapshot(scope))
+	if err != nil {
+		return "", err
+	}
+	encoded := string(data)
+	if scope == "" || channel.IsSupported(scope) {
+		if t.encoded == nil {
+			t.encoded = make(map[string]encodedFlowSnapshot)
+		}
+		t.encoded[scope] = encodedFlowSnapshot{at: now, data: encoded}
+	}
+	return encoded, nil
+}
+
+type flowRouteSnapshot struct {
+	FlowRoute
+	buckets                              [flowWindowSeconds]flowBucket
+	samples                              [flowSampleLimit]flowLatencySample
+	waiting, responding, longestActiveMS int64
+}
+
+func captureFlowRoute(route *flowRouteState, now time.Time) flowRouteSnapshot {
+	snapshot := flowRouteSnapshot{FlowRoute: route.FlowRoute, buckets: route.buckets, samples: route.samples}
+	for request := range route.activeRequests {
+		if request.responding {
+			snapshot.responding++
+		} else {
+			snapshot.waiting++
+		}
+		snapshot.longestActiveMS = max(snapshot.longestActiveMS, now.Sub(request.started).Milliseconds())
+	}
+	return snapshot
+}
+
+func (t *FlowTracker) captureRoutes(scope string) (time.Time, []flowRouteSnapshot) {
+	definitions := channel.FlowDefinitions()
+	routes := make([]flowRouteSnapshot, 0, len(definitions)*3)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	now := time.Now()
+	for _, def := range definitions {
+		if scope != "" && scope != string(def.ID) {
+			continue
+		}
+		for _, protocol := range []string{"chat", "responses", "messages"} {
+			routes = append(routes, captureFlowRoute(t.routes[string(def.ID)+":"+protocol], now))
+		}
+	}
+	return now, routes
+}
+
 func (t *FlowTracker) Snapshot(scope string) FlowSnapshot {
 	snapshot := FlowSnapshot{Routes: []FlowRoute{}}
 	if t == nil {
 		return snapshot
 	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	snapshot.Available = true
 	snapshot.InstanceStarted = t.startedAt.UTC().Format(time.RFC3339Nano)
-	now := time.Now()
+	now, routes := t.captureRoutes(scope)
 	snapshot.SampledAt = now.UTC().Format(time.RFC3339Nano)
 	snapshot.RateSeconds = flowRateSeconds
 	snapshot.WindowSeconds = flowWindowSeconds
@@ -244,36 +309,31 @@ func (t *FlowTracker) Snapshot(scope string) FlowSnapshot {
 	snapshot.SampleLimit = flowSampleLimit
 	snapshot.Nodes = make(map[string]FlowMetrics)
 	nodes := make(map[string]*flowMetricBuilder)
-	for _, def := range channel.FlowDefinitions() {
-		if scope != "" && scope != string(def.ID) {
-			continue
+	for i := range routes {
+		current := &routes[i]
+		route := current.FlowRoute
+		var requests, input, output, samples int64
+		for _, bucket := range current.buckets {
+			if bucket.second > now.Unix()-flowRateSeconds && bucket.second <= now.Unix() {
+				requests += bucket.requests
+				input += bucket.input
+				output += bucket.output
+				samples += bucket.usageSamples
+			}
 		}
-		for _, protocol := range []string{"chat", "responses", "messages"} {
-			current := t.routes[string(def.ID)+":"+protocol]
-			route := current.FlowRoute
-			var requests, input, output, samples int64
-			for _, bucket := range current.buckets {
-				if bucket.second > now.Unix()-flowRateSeconds && bucket.second <= now.Unix() {
-					requests += bucket.requests
-					input += bucket.input
-					output += bucket.output
-					samples += bucket.usageSamples
-				}
+		route.QPS = float64(requests) / flowRateSeconds
+		route.InputTPS = float64(max(input, 0)) / flowRateSeconds
+		// An estimate corrected downward leaves a negative bucket behind;
+		// the window as a whole never reports a negative rate.
+		route.OutputTPS = float64(max(output, 0)) / flowRateSeconds
+		route.TPS = route.InputTPS + route.OutputTPS
+		route.UsageAvailable = samples > 0 || (requests == 0 && route.Active == 0)
+		snapshot.Routes = append(snapshot.Routes, route)
+		for _, key := range []string{route.Channel, route.Protocol, "gateway"} {
+			if nodes[key] == nil {
+				nodes[key] = &flowMetricBuilder{}
 			}
-			route.QPS = float64(requests) / flowRateSeconds
-			route.InputTPS = float64(max(input, 0)) / flowRateSeconds
-			// An estimate corrected downward leaves a negative bucket behind;
-			// the window as a whole never reports a negative rate.
-			route.OutputTPS = float64(max(output, 0)) / flowRateSeconds
-			route.TPS = route.InputTPS + route.OutputTPS
-			route.UsageAvailable = samples > 0 || (requests == 0 && route.Active == 0)
-			snapshot.Routes = append(snapshot.Routes, route)
-			for _, key := range []string{route.Channel, route.Protocol, "gateway"} {
-				if nodes[key] == nil {
-					nodes[key] = &flowMetricBuilder{}
-				}
-				nodes[key].add(current, now)
-			}
+			nodes[key].add(current, now)
 		}
 	}
 	for key, node := range nodes {
