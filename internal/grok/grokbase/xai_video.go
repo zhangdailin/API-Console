@@ -15,7 +15,7 @@ import (
 
 const (
 	maxVideoStatusBytes = 2 << 20
-	maxVideoAssetBytes  = 512 << 20
+	MaxVideoAssetBytes  = 512 << 20
 	videoMessageLimit   = 160
 )
 
@@ -163,9 +163,9 @@ func TrustedVideoURL(rawURL string) bool {
 	return false
 }
 
-// DownloadVideo fetches a finished video from xAI's CDN. The asset host
-// needs no credential, so none is sent, and redirects must stay on xAI hosts.
-func DownloadVideo(ctx context.Context, httpClient *http.Client, rawURL string) ([]byte, string, error) {
+// OpenVideo fetches a finished video from xAI's CDN without credentials. The
+// caller owns the response body and must enforce MaxVideoAssetBytes while copying.
+func OpenVideo(ctx context.Context, httpClient *http.Client, rawURL string) (io.ReadCloser, string, error) {
 	if httpClient == nil || !TrustedVideoURL(rawURL) {
 		return nil, "", errors.New("xAI video content URL is not trusted")
 	}
@@ -188,15 +188,12 @@ func DownloadVideo(ctx context.Context, httpClient *http.Client, rawURL string) 
 	if err != nil {
 		return nil, "", err
 	}
-	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		response.Body.Close()
 		return nil, "", fmt.Errorf("xAI video download returned status %d", response.StatusCode)
 	}
-	raw, err := io.ReadAll(io.LimitReader(response.Body, maxVideoAssetBytes+1))
-	if err != nil {
-		return nil, "", err
-	}
-	if len(raw) == 0 || len(raw) > maxVideoAssetBytes {
+	if response.ContentLength == 0 || response.ContentLength > MaxVideoAssetBytes {
+		response.Body.Close()
 		return nil, "", errors.New("xAI video is empty or exceeds 512 MiB")
 	}
 	mimeType := strings.ToLower(strings.TrimSpace(strings.Split(response.Header.Get("Content-Type"), ";")[0]))
@@ -204,7 +201,8 @@ func DownloadVideo(ctx context.Context, httpClient *http.Client, rawURL string) 
 		mimeType = "video/mp4"
 	}
 	if !strings.HasPrefix(mimeType, "video/") {
+		response.Body.Close()
 		return nil, "", errors.New("xAI video has an invalid Content-Type")
 	}
-	return raw, mimeType, nil
+	return response.Body, mimeType, nil
 }

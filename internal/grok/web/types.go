@@ -74,7 +74,6 @@ type videoJob struct {
 	VideoURL          string
 	ContentPath       string
 	RemixedFromID     string
-	InputReferences   []string
 	Operation         string
 	StandardAPI       bool
 	OwnerHash         string

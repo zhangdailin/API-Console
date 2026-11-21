@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -22,7 +23,7 @@ type VideoBackend interface {
 	// VideoModel reports whether modelID is one of the backend's observed
 	// video routes, and names the upstream model it maps to.
 	VideoModel(ctx context.Context, modelID string) (upstreamModel string, ok bool)
-	// RunVideo creates the video upstream, waits for it and returns its bytes.
+	// RunVideo creates the video upstream, waits for it and returns its content stream.
 	RunVideo(ctx context.Context, job VideoBackendJob) (VideoBackendResult, error)
 }
 
@@ -44,15 +45,18 @@ type VideoBackendJob struct {
 	Progress func(percent int)
 }
 
-// VideoBackendResult is a finished video.
+// VideoBackendResult transfers ownership of the finished video body to the caller.
 type VideoBackendResult struct {
 	URL      string
-	Data     []byte
+	Body     io.ReadCloser
 	MimeType string
 }
 
 // maxBackendVideoReferences bounds the reference images of a backend job.
 const maxBackendVideoReferences = 8
+
+// MaxVideoInlineReferenceBytes bounds encoded inline reference images for a job.
+const MaxVideoInlineReferenceBytes = 32 << 20
 
 // SetVideoBackend installs the backend for video routes the Web plane does not
 // serve itself. It must be called before the handler serves requests.
@@ -80,10 +84,18 @@ func (h *Handler) startBackendVideoJob(w http.ResponseWriter, r *http.Request, r
 		httpserver.WriteError(w, http.StatusBadRequest, fmt.Sprintf("input_references supports at most %d images for this model", maxBackendVideoReferences))
 		return
 	}
+	inline := 0
 	for _, reference := range req.InputReferences {
 		if !validBackendVideoReference(reference) {
 			httpserver.WriteError(w, http.StatusBadRequest, "input_references must be https URLs or data: image URIs")
 			return
+		}
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(reference)), "data:") {
+			inline += len(strings.TrimSpace(reference))
+			if inline > MaxVideoInlineReferenceBytes {
+				httpserver.WriteError(w, http.StatusBadRequest, "combined inline reference images exceed 32 MiB")
+				return
+			}
 		}
 	}
 	cfg, err := validateVideoConfigForModel(&VideoConfig{
@@ -97,18 +109,17 @@ func (h *Handler) startBackendVideoJob(w http.ResponseWriter, r *http.Request, r
 		return
 	}
 	job := &videoJob{
-		ID:              "video_" + randomHex(16),
-		Model:           req.Model,
-		Prompt:          req.Prompt,
-		Seconds:         cfg.VideoLength,
-		Size:            firstNonEmpty(cfg.Size, req.Size, cfg.AspectRatio),
-		Quality:         "standard",
-		CreatedAt:       time.Now().Unix(),
-		Status:          "queued",
-		InputReferences: req.InputReferences,
-		Operation:       "generate",
-		OwnerHash:       videoRequestOwner(r),
-		PublicBaseURL:   detectPublicBaseURL(r),
+		ID:            "video_" + randomHex(16),
+		Model:         req.Model,
+		Prompt:        req.Prompt,
+		Seconds:       cfg.VideoLength,
+		Size:          firstNonEmpty(cfg.Size, req.Size, cfg.AspectRatio),
+		Quality:       "standard",
+		CreatedAt:     time.Now().Unix(),
+		Status:        "queued",
+		Operation:     "generate",
+		OwnerHash:     videoRequestOwner(r),
+		PublicBaseURL: detectPublicBaseURL(r),
 	}
 	putVideoJob(job)
 	h.persistVideoJob(r.Context(), job)
@@ -119,7 +130,7 @@ func (h *Handler) startBackendVideoJob(w http.ResponseWriter, r *http.Request, r
 			"resolution": cfg.ResolutionName, "input_images": len(req.InputReferences),
 		})
 	}
-	go h.runBackendVideoJob(context.Background(), job, upstreamModel, cfg)
+	go h.runBackendVideoJob(context.Background(), job, upstreamModel, cfg, req.InputReferences)
 	util.WriteJSON(w, response)
 }
 
@@ -129,7 +140,7 @@ func validBackendVideoReference(value string) bool {
 	return strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "data:image/")
 }
 
-func (h *Handler) runBackendVideoJob(ctx context.Context, job *videoJob, upstreamModel string, cfg *VideoConfig) {
+func (h *Handler) runBackendVideoJob(ctx context.Context, job *videoJob, upstreamModel string, cfg *VideoConfig, references []string) {
 	ctx, cancel := context.WithTimeout(ctx, videoJobTTL)
 	defer cancel()
 	release, _ := h.holdVideoLease(ctx, job)
@@ -144,7 +155,7 @@ func (h *Handler) runBackendVideoJob(ctx context.Context, job *videoJob, upstrea
 	result, err := h.videoBackend.RunVideo(ctx, VideoBackendJob{
 		ID: job.ID, Model: job.Model, UpstreamModel: upstreamModel, Prompt: job.Prompt,
 		Seconds: cfg.VideoLength, AspectRatio: cfg.AspectRatio, Resolution: cfg.ResolutionName,
-		InputReferences: append([]string(nil), job.InputReferences...),
+		InputReferences: references,
 		Bind: func(accountID int64, provider, upstreamRequestID string) {
 			update(func() {
 				if accountID != 0 {
@@ -166,5 +177,5 @@ func (h *Handler) runBackendVideoJob(ctx context.Context, job *videoJob, upstrea
 		h.failVideoJob(job, err)
 		return
 	}
-	h.completeBackendVideoJob(ctx, job, result, update)
+	h.completeBackendVideoJob(job, result, update)
 }

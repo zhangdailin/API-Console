@@ -256,17 +256,15 @@ func (h *Handler) imageOutputValue(ctx context.Context, token, url, format strin
 }
 
 // writeImageResults writes the non-streaming image generation/edit response.
-// With strict=true a conversion failure aborts with 502; otherwise the failing
-// entry falls back to the raw URL (url format) or an empty value (b64_json).
-func (h *Handler) writeImageResults(w http.ResponseWriter, ctx context.Context, token, prompt string, urls []string, format, publicBase string, strict bool) {
-	_ = strict // kept for callers: every conversion failure is fatal now.
+// A failed conversion aborts the response instead of returning a partial result.
+func (h *Handler) writeImageResults(w http.ResponseWriter, ctx context.Context, token, prompt string, urls []string, format, publicBase string) {
 	field := imageResponseField(format)
 	data := make([]map[string]any, 0, len(urls))
 	for _, u := range urls {
 		val, err := h.imageOutputValue(ctx, token, u, format)
 		if err != nil {
 			// No pass-through: either the asset is cached and served from this
-			// gateway, or the request fails. strict only decides the error shape.
+			// gateway, or the request fails.
 			slog.Warn("grok image convert failed", "url", u, "error", err)
 			writeGrokUpstreamError(w, err)
 			return

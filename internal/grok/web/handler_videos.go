@@ -196,7 +196,6 @@ func cloneVideoJob(job *videoJob) *videoJob {
 		return nil
 	}
 	cloned := *job
-	cloned.InputReferences = append([]string(nil), job.InputReferences...)
 	if job.Error != nil {
 		cloned.Error = make(map[string]any, len(job.Error))
 		maps.Copy(cloned.Error, job.Error)
@@ -266,7 +265,7 @@ func (h *Handler) lookupVideoJob(ctx context.Context, id, owner string) (*videoJ
 		if jobOwner == "" {
 			jobOwner = "anonymous"
 		}
-		if jobOwner == owner {
+		if jobOwner == owner && (videoRunningHere(job.ID) || h == nil || h.lb == nil || h.lb.Store == nil) {
 			snapshot := cloneVideoJob(job)
 			videoJobsMu.Unlock()
 			return snapshot, true
@@ -284,8 +283,7 @@ func (h *Handler) lookupVideoJob(ctx context.Context, id, owner string) (*videoJ
 	if job == nil {
 		return nil, false
 	}
-	putVideoJob(job)
-	return cloneVideoJob(job), true
+	return job, true
 }
 
 func (h *Handler) HandleVideosCreate(w http.ResponseWriter, r *http.Request) {
@@ -363,19 +361,18 @@ func (h *Handler) startVideoJob(w http.ResponseWriter, r *http.Request, req Vide
 		return
 	}
 	job := &videoJob{
-		ID:              "video_" + randomHex(16),
-		Model:           req.Model,
-		Prompt:          req.Prompt,
-		Seconds:         cfg.VideoLength,
-		Size:            firstNonEmpty(cfg.Size, req.Size, cfg.AspectRatio),
-		Quality:         "standard",
-		CreatedAt:       time.Now().Unix(),
-		Status:          "queued",
-		Progress:        0,
-		InputReferences: req.InputReferences,
-		Operation:       "generate",
-		OwnerHash:       videoRequestOwner(r),
-		PublicBaseURL:   detectPublicBaseURL(r),
+		ID:            "video_" + randomHex(16),
+		Model:         req.Model,
+		Prompt:        req.Prompt,
+		Seconds:       cfg.VideoLength,
+		Size:          firstNonEmpty(cfg.Size, req.Size, cfg.AspectRatio),
+		Quality:       "standard",
+		CreatedAt:     time.Now().Unix(),
+		Status:        "queued",
+		Progress:      0,
+		Operation:     "generate",
+		OwnerHash:     videoRequestOwner(r),
+		PublicBaseURL: detectPublicBaseURL(r),
 	}
 	putVideoJob(job)
 	h.persistVideoJob(r.Context(), job)
@@ -460,23 +457,19 @@ func (h *Handler) runVideoCreateJob(ctx context.Context, job *videoJob, spec Mod
 		cfg.VideoLength = cap
 	}
 
-	attachments := make([]AttachmentInput, 0, len(job.InputReferences))
-	for _, ref := range job.InputReferences {
-		attachments = append(attachments, AttachmentInput{Type: "image", Data: ref})
-	}
-	artifact, err := h.runVideoSegments(ctx, sess, spec, job.Prompt, attachments, cfg, nil, func(progress int) {
+	artifact, err := h.runVideoSegments(ctx, sess, spec, job.Prompt, nil, cfg, nil, func(progress int) {
 		update("in_progress", progress)
 	})
 	if err != nil {
 		h.failVideoJob(job, err)
 		return
 	}
-	raw, _, err := h.webClient().downloadAsset(ctx, sess.token, artifact.URL)
+	body, _, err := h.webClient().openAsset(ctx, sess.token, artifact.URL)
 	if err != nil {
 		h.failVideoJob(job, err)
 		return
 	}
-	name, err := h.cacheMediaBytes(artifact.URL, "video", raw, "video/mp4")
+	name, err := cacheVideoStream(artifact.URL, body, "video/mp4")
 	if err != nil {
 		h.failVideoJob(job, err)
 		return

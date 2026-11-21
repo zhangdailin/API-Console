@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,7 +21,7 @@ func parseVideosRequest(r *http.Request) (VideosRequest, error) {
 	var req VideosRequest
 	contentType := strings.ToLower(r.Header.Get("Content-Type"))
 	if strings.Contains(contentType, "multipart/form-data") {
-		if err := r.ParseMultipartForm(80 << 20); err != nil {
+		if err := r.ParseMultipartForm(8 << 20); err != nil {
 			return req, err
 		}
 		refs, err := readVideoInputReferenceFiles(r)
@@ -162,11 +163,22 @@ func readVideoInputReferenceFiles(r *http.Request) ([]string, error) {
 		return nil, nil
 	}
 	var out []string
+	total := 0
 	for _, key := range []string{"input_reference", "input_reference[]"} {
 		for _, fh := range r.MultipartForm.File[key] {
+			if len(out) >= maxBackendVideoReferences {
+				return nil, fmt.Errorf("too many video reference images")
+			}
+			if fh.Size > MaxVideoInlineReferenceBytes || base64.StdEncoding.EncodedLen(int(fh.Size)) > MaxVideoInlineReferenceBytes-total {
+				return nil, fmt.Errorf("combined inline reference images exceed 32 MiB")
+			}
 			dataURI, err := uploadFileHeaderToDataURI(fh)
 			if err != nil {
 				return nil, err
+			}
+			total += len(dataURI)
+			if total > MaxVideoInlineReferenceBytes {
+				return nil, fmt.Errorf("combined inline reference images exceed 32 MiB")
 			}
 			out = append(out, dataURI)
 		}

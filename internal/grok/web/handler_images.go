@@ -248,7 +248,7 @@ func (h *Handler) serveImagesGenerations(ctx context.Context, w http.ResponseWri
 		return
 	}
 
-	h.writeImageResults(w, ctx, sess.token, req.Prompt, urls, req.ResponseFormat, publicBase, true)
+	h.writeImageResults(w, ctx, sess.token, req.Prompt, urls, req.ResponseFormat, publicBase)
 	if cost, priced := pricing.EstimateImageCost(spec.UpstreamModel, req.Resolution, req.Quality, len(urls)); priced {
 		h.settleMediaBilling(ctx, req.Model, cost, map[string]any{
 			"plane": "web", "images": len(urls), "resolution": req.Resolution,

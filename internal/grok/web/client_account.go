@@ -169,6 +169,19 @@ func (c *Client) uploadFile(ctx context.Context, token, fileName, fileMimeType, 
 }
 
 func (c *Client) downloadAsset(ctx context.Context, token, rawURL string) ([]byte, string, error) {
+	body, mime, err := c.openAsset(ctx, token, rawURL)
+	if err != nil {
+		return nil, "", err
+	}
+	defer body.Close()
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return nil, "", err
+	}
+	return data, mime, nil
+}
+
+func (c *Client) openAsset(ctx context.Context, token, rawURL string) (io.ReadCloser, string, error) {
 	link := strings.TrimSpace(rawURL)
 	if link == "" {
 		return nil, "", fmt.Errorf("empty asset url")
@@ -200,13 +213,8 @@ func (c *Client) downloadAsset(ctx context.Context, token, rawURL string) ([]byt
 	if err != nil {
 		return nil, "", err
 	}
-	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, "", err
-	}
 	mime := strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0])
-	return data, mime, nil
+	return resp.Body, mime, nil
 }
 
 func (c *Client) getVoiceToken(ctx context.Context, token, voice, personality string, speed float64, instruction string) (map[string]any, error) {

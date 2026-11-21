@@ -102,7 +102,10 @@ func TestBuildVideoRunsCreatePollAndDownloadOnAnObservedRoute(t *testing.T) {
 		Progress: func(p int) { progress = append(progress, p) },
 	})
 	testutil.NoError(t, err)
-	testutil.Equal(t, string(result.Data), "mp4-bytes")
+	defer result.Body.Close()
+	content, err := io.ReadAll(result.Body)
+	testutil.NoError(t, err)
+	testutil.Equal(t, string(content), "mp4-bytes")
 	testutil.Equal(t, result.MimeType, "video/mp4")
 	testutil.Equal(t, boundAccount, acc.ID)
 	testutil.Equal(t, boundRequest, "vid_req_1")

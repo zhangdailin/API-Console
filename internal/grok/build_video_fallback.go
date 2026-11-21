@@ -31,7 +31,7 @@ import (
 // a video may still create it on the xAI API with the same OAuth token, but
 // that route returns no video: xAI uploads the finished file to an upload_url
 // the caller supplies. The gateway issues a one-time URL under its public
-// origin, receives the PUT and hands the bytes to the job.
+// origin, receives the PUT and hands the file stream to the job.
 //
 // The fallback is off unless grok_build_video_upload_base_url is set, because
 // it needs a public route reachable from xAI. The upload token is the only
@@ -42,7 +42,7 @@ const (
 	defaultBuildFallbackBaseURL = "https://api.x.ai/v1"
 	buildFallbackVideoModel     = "grok-imagine-video-1.5-preview"
 	videoUploadTicketTTL        = 2 * time.Hour
-	videoUploadMaxBytes         = 512 << 20
+	videoUploadMaxBytes         = grokbase.MaxVideoAssetBytes
 	videoUploadWait             = 2 * time.Minute
 	videoUploadReadDeadline     = 15 * time.Minute
 	// VideoUploadPath is where xAI PUTs a finished fallback video.
@@ -204,8 +204,8 @@ func (h *Handler) issueVideoUpload(ctx context.Context, cfg *config.Config) (upl
 	return base + "/grok/v1" + VideoUploadPath + token, hash, nil
 }
 
-// waitVideoUpload waits for the ticket's PUT and returns the bytes.
-func (h *Handler) waitVideoUpload(ctx context.Context, hash string) ([]byte, string, error) {
+// waitVideoUpload waits for the ticket's PUT and transfers ownership of the file.
+func (h *Handler) waitVideoUpload(ctx context.Context, hash string) (io.ReadCloser, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, videoUploadWait)
 	defer cancel()
 	ticker := time.NewTicker(500 * time.Millisecond)
@@ -216,12 +216,11 @@ func (h *Handler) waitVideoUpload(ctx context.Context, hash string) ([]byte, str
 			return nil, "", err
 		}
 		if ok && ticket.Received {
-			data, err := os.ReadFile(ticket.Path)
-			_ = os.Remove(ticket.Path)
+			file, err := os.Open(ticket.Path)
 			if err != nil {
 				return nil, "", fmt.Errorf("read the uploaded video: %w", err)
 			}
-			return data, ticket.MimeType, nil
+			return &uploadedVideo{File: file, path: ticket.Path}, ticket.MimeType, nil
 		}
 		select {
 		case <-ctx.Done():
@@ -229,6 +228,17 @@ func (h *Handler) waitVideoUpload(ctx context.Context, hash string) ([]byte, str
 		case <-ticker.C:
 		}
 	}
+}
+
+type uploadedVideo struct {
+	*os.File
+	path string
+}
+
+func (v *uploadedVideo) Close() error {
+	err := v.File.Close()
+	_ = os.Remove(v.path)
+	return err
 }
 
 // HandleVideoUpload receives xAI's PUT of a finished fallback video. The
@@ -390,16 +400,16 @@ func (b buildVideoBackend) runFallbackVideo(ctx context.Context, job web.VideoBa
 			return web.VideoBackendResult{}, statusErr
 		}
 		if done || statusErr != nil {
-			data, mimeType, waitErr := h.waitVideoUpload(ctx, hash)
+			asset, mimeType, waitErr := h.waitVideoUpload(ctx, hash)
 			if waitErr == nil {
-				return web.VideoBackendResult{URL: videoURL, Data: data, MimeType: mimeType}, nil
+				return web.VideoBackendResult{URL: videoURL, Body: asset, MimeType: mimeType}, nil
 			}
 			if videoURL != "" {
-				data, mimeType, err := grokbase.DownloadVideo(ctx, client.httpClient, videoURL)
+				asset, mimeType, err := grokbase.OpenVideo(ctx, client.httpClient, videoURL)
 				if err != nil {
 					return web.VideoBackendResult{}, err
 				}
-				return web.VideoBackendResult{URL: videoURL, Data: data, MimeType: mimeType}, nil
+				return web.VideoBackendResult{URL: videoURL, Body: asset, MimeType: mimeType}, nil
 			}
 			return web.VideoBackendResult{}, waitErr
 		}

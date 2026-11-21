@@ -202,16 +202,16 @@ func (h *Handler) recoverVideoJob(ctx context.Context, job *videoJob, release fu
 		h.failVideoJob(job, err)
 		return
 	}
-	h.completeBackendVideoJob(ctx, job, result, update)
+	h.completeBackendVideoJob(job, result, update)
 }
 
 // completeBackendVideoJob caches a finished backend video and marks the job.
-func (h *Handler) completeBackendVideoJob(ctx context.Context, job *videoJob, result VideoBackendResult, update func(func())) {
-	if len(result.Data) == 0 {
+func (h *Handler) completeBackendVideoJob(job *videoJob, result VideoBackendResult, update func(func())) {
+	if result.Body == nil {
 		h.failVideoJob(job, errors.New("video backend returned no content"))
 		return
 	}
-	name, err := h.cacheMediaBytes(firstNonEmpty(result.URL, job.ID), "video", result.Data, firstNonEmpty(result.MimeType, "video/mp4"))
+	name, err := cacheVideoStream(firstNonEmpty(result.URL, job.ID), result.Body, firstNonEmpty(result.MimeType, "video/mp4"))
 	if err != nil {
 		h.failVideoJob(job, err)
 		return

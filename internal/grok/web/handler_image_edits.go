@@ -184,7 +184,7 @@ func (h *Handler) handleChatImageEdit(
 		return
 	}
 
-	h.writeImageResults(w, ctx, sess.token, prompt, urls, responseFormat, publicBase, false)
+	h.writeImageResults(w, ctx, sess.token, prompt, urls, responseFormat, publicBase)
 }
 
 func isAllowedEditImageMime(mime string) bool {
@@ -521,5 +521,5 @@ func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.writeImageResults(w, r.Context(), sess.token, prompt, urls, responseFormat, publicBase, false)
+	h.writeImageResults(w, r.Context(), sess.token, prompt, urls, responseFormat, publicBase)
 }

@@ -19,10 +19,7 @@ import (
 // row, so an account pool that never observed the model serves nothing. Jobs
 // run on the Web plane's video job runtime through web.VideoBackend.
 
-const (
-	buildVideoPollInterval   = 2 * time.Second
-	maxBuildVideoInlineBytes = 32 << 20
-)
+const buildVideoPollInterval = 2 * time.Second
 
 // buildVideoBackend adapts the Build plane to web.VideoBackend.
 type buildVideoBackend struct{ h *Handler }
@@ -111,11 +108,11 @@ func pollBuildVideo(ctx context.Context, client *CLIClient, acc *store.Account, 
 			return web.VideoBackendResult{}, err
 		}
 		if done {
-			data, mimeType, err := grokbase.DownloadVideo(ctx, client.httpClient, videoURL)
+			asset, mimeType, err := grokbase.OpenVideo(ctx, client.httpClient, videoURL)
 			if err != nil {
 				return web.VideoBackendResult{}, err
 			}
-			return web.VideoBackendResult{URL: videoURL, Data: data, MimeType: mimeType}, nil
+			return web.VideoBackendResult{URL: videoURL, Body: asset, MimeType: mimeType}, nil
 		}
 		timer := time.NewTimer(buildVideoPollInterval)
 		select {
@@ -158,7 +155,7 @@ func buildVideoPayload(job web.VideoBackendJob) (map[string]any, error) {
 			}
 			if strings.HasPrefix(strings.ToLower(reference), "data:") {
 				inline += len(reference)
-				if inline > maxBuildVideoInlineBytes {
+				if inline > web.MaxVideoInlineReferenceBytes {
 					return nil, errors.New("combined inline reference images exceed 32 MiB")
 				}
 			}
