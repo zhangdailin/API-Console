@@ -2,6 +2,7 @@ package doubao
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,11 +12,24 @@ import (
 	"strings"
 )
 
+const (
+	maxChatEventBytes  = 8 << 20
+	maxChatAnswerBytes = 16 << 20
+)
+
 func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, error) {
 	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 4096), 8<<20)
-	var event, data, userMessageID string
-	var text, snapshot string
+	scanner.Buffer(make([]byte, 4096), maxChatEventBytes)
+	var event, userMessageID, snapshot string
+	var data []byte
+	var text, found strings.Builder
+	appendText := func(value string) error {
+		if len(value) > maxChatAnswerBytes-text.Len()-found.Len() {
+			return fmt.Errorf("Doubao stream answer exceeds size limit")
+		}
+		text.WriteString(value)
+		return nil
+	}
 	thinking := thinkingStream{}
 	// emitted tracks how much of the answer has reached the client. A snapshot
 	// can arrive before the first delta (the opening words of an answer are
@@ -34,18 +48,17 @@ func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, er
 	seenImages := map[string]bool{}
 	// found holds the image-search results, emitted where they arrive: the
 	// upstream sends them ahead of the text they illustrate.
-	var found strings.Builder
 	// shapes counts the event names and block layouts of the stream, never
 	// their content, so an answer this parser could not read can be diagnosed.
 	shapes := map[string]int{}
 	flush := func() error {
 		if event == "" {
-			data = ""
+			data = data[:0]
 			return nil
 		}
 		shapes[event]++
 		var value map[string]any
-		if data != "" && json.Unmarshal([]byte(data), &value) == nil {
+		if len(data) > 0 && json.Unmarshal(data, &value) == nil {
 			if event != "FULL_MSG_NOTIFY" && event != "CHUNK_DELTA" {
 				blockShapes(value, event, shapes)
 			}
@@ -61,9 +74,11 @@ func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, er
 						reasoning(delta)
 						break
 					}
-					text += delta
+					if err := appendText(delta); err != nil {
+						return err
+					}
 					emit(delta)
-					emitted = len(text)
+					emitted = text.Len()
 				}
 			case "STREAM_ERROR":
 				return upstreamStreamError(value)
@@ -83,6 +98,9 @@ func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, er
 					}
 					seenImages[image.url] = true
 					markdown := searchImageMarkdown(image)
+					if len(markdown) > maxChatAnswerBytes-text.Len()-found.Len() {
+						return fmt.Errorf("Doubao stream answer exceeds size limit")
+					}
 					found.WriteString(markdown)
 					emit(markdown)
 				}
@@ -90,15 +108,20 @@ func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, er
 				if fragment != "" {
 					// patch_type 1 appends a fragment; several can precede the
 					// first CHUNK_DELTA, so both sources feed the same buffer.
-					text += fragment
+					if err := appendText(fragment); err != nil {
+						return err
+					}
 					emit(fragment)
-					emitted = len(text)
+					emitted = text.Len()
 				}
 				if len(full) > len(snapshot) {
 					snapshot = full
-					if len(snapshot) > len(text) {
+					if len(snapshot) > text.Len() {
+						text.Reset()
+						if err := appendText(snapshot); err != nil {
+							return err
+						}
 						emitUnseen(snapshot)
-						text = snapshot
 					}
 				}
 				// Image answers arrive as creation blocks with no text at all;
@@ -112,22 +135,26 @@ func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, er
 				}
 			}
 		}
-		event, data = "", ""
+		event, data = "", data[:0]
 		return nil
 	}
 	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
+		line := scanner.Bytes()
+		if len(line) == 0 {
 			if err := flush(); err != nil {
 				return "", err
 			}
 			continue
 		}
-		if value, ok := strings.CutPrefix(line, "event:"); ok {
-			event = strings.TrimSpace(value)
+		if value, ok := bytes.CutPrefix(line, []byte("event:")); ok {
+			event = string(bytes.TrimSpace(value))
 		}
-		if value, ok := strings.CutPrefix(line, "data:"); ok {
-			data += strings.TrimSpace(value)
+		if value, ok := bytes.CutPrefix(line, []byte("data:")); ok {
+			value = bytes.TrimSpace(value)
+			if len(value) > maxChatEventBytes-len(data) {
+				return "", fmt.Errorf("Doubao stream event exceeds size limit")
+			}
+			data = append(data, value...)
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -136,18 +163,22 @@ func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, er
 	if err := flush(); err != nil {
 		return "", err
 	}
-	if text == "" {
-		text = snapshot
-		emit(text)
+	if text.Len() == 0 {
+		if err := appendText(snapshot); err != nil {
+			return "", err
+		}
+		emit(snapshot)
 	}
 	if markdown := imageMarkdown(images); markdown != "" {
-		text += markdown
+		if err := appendText(markdown); err != nil {
+			return "", err
+		}
 		emit(markdown)
 	}
 	// The returned answer keeps the stream's order: the search images came
 	// first. Tool mode reads only this value, so it must carry them too.
-	text = found.String() + text
-	if text == "" {
+	answer := found.String() + text.String()
+	if answer == "" {
 		slog.Warn("doubao stream carried no readable answer", "shapes", shapeSummary(shapes))
 	} else if unrendered := unrenderedShapes(shapes); len(unrendered) > 0 {
 		// The answer was delivered without these blocks (an image the parser
@@ -155,7 +186,7 @@ func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, er
 		// to parse next; the diagnostic bundle holds the stream itself.
 		slog.Info("doubao stream carried blocks the parser does not render", "shapes", shapeSummary(unrendered))
 	}
-	return text, nil
+	return answer, nil
 }
 
 // renderedContentFields are the block content fields consumeStream turns into

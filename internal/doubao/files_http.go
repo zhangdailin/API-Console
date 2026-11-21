@@ -80,7 +80,7 @@ func (h *MediaHandler) uploadFile(w http.ResponseWriter, r *http.Request, imageO
 		writeDoubaoError(w, http.StatusServiceUnavailable, "service_unavailable", "Could not store the Doubao upload")
 		return
 	}
-	writeFileObject(w, &file)
+	writeFileObject(w, file.Metadata())
 }
 
 func (h *MediaHandler) FileResource(w http.ResponseWriter, r *http.Request) {
@@ -92,7 +92,7 @@ func (h *MediaHandler) FileResource(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		file, err := h.store.GetDoubaoFile(r.Context(), owner, id)
+		file, err := h.store.GetDoubaoFileMetadata(r.Context(), owner, id)
 		if fileResourceError(w, err) {
 			return
 		}
@@ -121,14 +121,14 @@ func fileResourceError(w http.ResponseWriter, err error) bool {
 	return true
 }
 
-func writeFileObject(w http.ResponseWriter, file *store.DoubaoFile) {
+func writeFileObject(w http.ResponseWriter, file store.DoubaoFileMetadata) {
 	kind := "file"
 	if file.Image {
 		kind = "image"
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	util.WriteJSONStatus(w, http.StatusOK, map[string]any{
-		"id": file.ID, "object": "file", "filename": file.Name, "bytes": len(file.Data), "type": kind,
+		"id": file.ID, "object": "file", "filename": file.Name, "bytes": file.Size, "type": kind,
 		"purpose": "user_data", "created_at": file.CreatedAt, "expires_at": file.CreatedAt + int64(store.DoubaoFileTTL.Seconds()),
 	})
 }
