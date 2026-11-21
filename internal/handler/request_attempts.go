@@ -221,6 +221,8 @@ func (e *messageExecution) run() {
 				store.RecordModelCooldownWithReason(e.currentAccount, verdict.Model, time.Now().Add(verdict.Cooldown), verdict.ModelCooldownKind)
 				if persistErr := e.h.loadBalancer.Store.UpdateAccount(e.r.Context(), e.currentAccount); persistErr != nil {
 					slog.Warn("persist model cooldown failed", "account_id", e.currentAccount.ID, "model", verdict.Model, "error", persistErr)
+				} else {
+					e.h.loadBalancer.InvalidateAccounts([]int64{e.currentAccount.ID})
 				}
 			} else if verdict.Status != "" {
 				logutil.DebugIf(e.verboseDiagnostics, "标记账号状态", "account_id", e.currentAccount.ID, "status", verdict.Status, "scope", string(verdict.Scope), "category", errClass.Category)

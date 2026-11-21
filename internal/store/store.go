@@ -589,8 +589,9 @@ func (s *Store) IncrementAccountStats(ctx context.Context, id int64, usage float
 }
 
 // IncrementAccountStatsOperation applies one completed request's counters. A
-// non-empty operationID makes retries durable and idempotent across processes;
-// completedAt determines the fixed UTC daily bucket rather than retry time.
+// non-empty operationID makes retries durable and idempotent within the
+// retention window; completedAt determines the fixed UTC daily bucket rather
+// than retry time. A deleted account returns ErrNoRows.
 func (s *Store) IncrementAccountStatsOperation(ctx context.Context, id int64, usage float64, count int64, operationID string, completedAt time.Time) error {
 	if s.accounts != nil {
 		return s.accounts.IncrementAccountStatsOperation(ctx, id, usage, count, operationID, completedAt)

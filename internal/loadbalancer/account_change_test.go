@@ -76,3 +76,65 @@ func TestInvalidateAccounts_WithEmptySnapshotIsSafe(t *testing.T) {
 	lb.AccountChanges(nil)
 	testutil.Equal(t, len(lb.cachedAccounts), 0)
 }
+
+func TestAccountSelectionOwnsItsMutableAccount(t *testing.T) {
+	initialHold := time.Now().Add(time.Hour)
+	initial := &store.Account{
+		ID: 1, AccountType: "workbuddy", Enabled: true,
+		ModelCooldowns: map[string]time.Time{"model": initialHold},
+	}
+	lb := NewWithCacheTTL(&store.Store{}, time.Hour)
+	lb.cachedAccounts = []*store.Account{initial}
+	lb.cachedByChannel = indexAccountsByChannel(lb.cachedAccounts)
+	lb.cacheExpires = time.Now().Add(time.Hour)
+
+	selected, err := lb.GetNextAccountExcludingByChannelWithTracker(t.Context(), nil, "workbuddy", nil)
+	testutil.NoError(t, err)
+	selected.ModelCooldowns["model"] = initialHold.Add(time.Hour)
+	lb.MarkAccountStatus(t.Context(), selected, "429")
+
+	if initial.StatusCode != "" || initial.ModelCooldowns["model"] != initialHold {
+		t.Fatal("write to a request account mutated the old cached snapshot")
+	}
+	if current := lb.cachedByChannel["workbuddy"][0]; current == initial || current.StatusCode != "429" || current.ModelCooldowns["model"] != initialHold {
+		t.Fatal("new routing snapshot did not preserve the cached data and publish the verdict")
+	}
+}
+
+func TestInvalidateAccountsDiscardsInFlightLoad(t *testing.T) {
+	lb := NewWithCacheTTL(nil, time.Hour)
+	read := make(chan struct{})
+	resume := make(chan struct{})
+	result := make(chan struct {
+		rows []*store.Account
+		err  error
+	}, 1)
+	loads := 0
+	go func() {
+		rows, err := lb.getOrLoadEnabledAccounts(t.Context(), func(ctx context.Context) ([]*store.Account, error) {
+			loads++
+			if loads == 1 {
+				close(read)
+				select {
+				case <-resume:
+					return []*store.Account{{ID: 1, AccountType: "workbuddy", Enabled: true}}, nil
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			}
+			return []*store.Account{{ID: 2, AccountType: "workbuddy", Enabled: true}}, nil
+		})
+		result <- struct {
+			rows []*store.Account
+			err  error
+		}{rows, err}
+	}()
+	<-read
+	lb.InvalidateAccounts([]int64{1})
+	close(resume)
+	got := <-result
+	testutil.NoError(t, got.err)
+	if loads != 2 || len(got.rows) != 1 || got.rows[0].ID != 2 || lb.cachedByChannel["workbuddy"][0].ID != 2 {
+		t.Fatalf("obsolete Redis result was returned or published after invalidation (loads=%d)", loads)
+	}
+}

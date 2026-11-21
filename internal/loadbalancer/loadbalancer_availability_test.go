@@ -12,28 +12,28 @@ import (
 func TestIsAccountAvailable_401RequiresReauth(t *testing.T) {
 	lb := &LoadBalancer{connTracker: NewMemoryConnTracker()}
 	acc := &store.Account{ID: 1, AccountType: "grok", StatusCode: "401", AuthStatus: store.AccountAuthStatusReauthRequired, LastAttempt: time.Now().Add(-24 * time.Hour)}
-	testutil.False(t, lb.isAccountAvailable(context.Background(), acc), "reauthRequired account must remain excluded regardless of age")
+	testutil.False(t, lb.availableAccount(context.Background(), acc) != nil, "reauthRequired account must remain excluded regardless of age")
 }
 
 func TestIsAccountAvailable_PaidGrokBillingExhaustion(t *testing.T) {
 	lb := &LoadBalancer{connTracker: NewMemoryConnTracker()}
 	acc := &store.Account{ID: 1, AccountType: "grok", GrokProvider: "build", CredentialType: "oauth", Subscription: "super"}
 	acc.GrokBilling.Monthly = store.GrokQuotaWindow{HasLimit: true, Limit: 100, HasRemaining: true, Remaining: 0, ResetAt: time.Now().Add(time.Hour)}
-	testutil.False(t, lb.isAccountAvailable(context.Background(), acc), "known exhausted paid Build account must be gated")
+	testutil.False(t, lb.availableAccount(context.Background(), acc) != nil, "known exhausted paid Build account must be gated")
 	acc.GrokBilling.Monthly.Remaining = 1
-	testutil.False(t, !lb.isAccountAvailable(context.Background(), acc), "paid Build account with remaining billing must be available")
+	testutil.False(t, lb.availableAccount(context.Background(), acc) == nil, "paid Build account with remaining billing must be available")
 }
 
 func TestIsAccountAvailable_Paid402UsesBillingPeriodEnd(t *testing.T) {
 	lb := &LoadBalancer{connTracker: NewMemoryConnTracker()}
 	acc := &store.Account{ID: 1, AccountType: "grok", GrokProvider: "build", CredentialType: "oauth", Subscription: "super", StatusCode: "402", LastAttempt: time.Now().Add(-48 * time.Hour)}
 	acc.GrokBilling.Weekly = store.GrokQuotaWindow{HasUsage: true, UsagePercent: 100, ResetAt: time.Now().Add(time.Hour)}
-	testutil.False(t, lb.isAccountAvailable(context.Background(), acc), "paid 402 must remain gated until billing period end")
+	testutil.False(t, lb.availableAccount(context.Background(), acc) != nil, "paid 402 must remain gated until billing period end")
 	acc.GrokBilling.Weekly.ResetAt = time.Now().Add(-time.Second)
 	// A post-period probe is admitted through the atomic store claim, not by a
 	// store-less LoadBalancer: without the claim every concurrent request would
 	// hit the exhausted account at once.
-	testutil.False(t, lb.isAccountAvailable(context.Background(), acc), "paid 402 must remain gated when no atomic probe store is configured")
+	testutil.False(t, lb.availableAccount(context.Background(), acc) != nil, "paid 402 must remain gated when no atomic probe store is configured")
 }
 
 func TestIsAccountAvailable_429UsesQuotaResetAt(t *testing.T) {
@@ -46,9 +46,13 @@ func TestIsAccountAvailable_429UsesQuotaResetAt(t *testing.T) {
 		QuotaResetAt: time.Now().Add(-time.Second),
 	}
 
-	testutil.False(t, !lb.isAccountAvailable(context.Background(), acc), "expected expired quota reset to re-enable account")
-	testutil.Equal(t, acc.StatusCode, "")
-	testutil.Falsef(t, !acc.QuotaResetAt.IsZero(), "expected quota reset timestamp to be cleared, got %v", acc.QuotaResetAt)
+	recovered := lb.availableAccount(context.Background(), acc)
+	if recovered == nil {
+		t.Fatal("expected expired quota reset to re-enable account")
+	}
+	testutil.Equal(t, recovered.StatusCode, "")
+	testutil.Falsef(t, !recovered.QuotaResetAt.IsZero(), "expected quota reset timestamp to be cleared, got %v", recovered.QuotaResetAt)
+	testutil.Equal(t, acc.StatusCode, "429")
 }
 
 // TestIsAccountAvailable_WorkBuddyCreditExhaustionReachesModelFilter pins that
@@ -60,7 +64,7 @@ func TestIsAccountAvailable_WorkBuddyCreditExhaustionReachesModelFilter(t *testi
 		ID: 1, AccountType: "workbuddy", StatusCode: store.AccountStatusWorkBuddyQuotaExhausted,
 		StatusMessage: "credits exhausted", LastAttempt: time.Now(), QuotaResetAt: time.Now().Add(48 * time.Hour),
 	}
-	testutil.False(t, !lb.isAccountAvailable(context.Background(), acc), "expected exhausted WorkBuddy account to reach the free-model filter")
+	testutil.False(t, lb.availableAccount(context.Background(), acc) == nil, "expected exhausted WorkBuddy account to reach the free-model filter")
 	testutil.Equal(t, acc.StatusCode, store.AccountStatusWorkBuddyQuotaExhausted)
 }
 
@@ -69,8 +73,12 @@ func TestIsAccountAvailable_WorkBuddyCreditExhaustionReachesModelFilter(t *testi
 func TestIsAccountAvailable_WorkBuddyCreditExhaustionClearsWhenQuotaReturns(t *testing.T) {
 	lb := &LoadBalancer{connTracker: NewMemoryConnTracker()}
 	acc := &store.Account{ID: 1, AccountType: "workbuddy", StatusCode: store.AccountStatusWorkBuddyQuotaExhausted, UsageCurrent: 10}
-	testutil.False(t, !lb.isAccountAvailable(context.Background(), acc), "expected account to remain available when quota returns")
-	testutil.Equal(t, acc.StatusCode, "")
+	recovered := lb.availableAccount(context.Background(), acc)
+	if recovered == nil {
+		t.Fatal("expected account to remain available when quota returns")
+	}
+	testutil.Equal(t, recovered.StatusCode, "")
+	testutil.Equal(t, acc.StatusCode, store.AccountStatusWorkBuddyQuotaExhausted)
 }
 
 // TestIsAccountAvailable_402KeepsLongCooldownForOtherChannels pins that the
@@ -85,5 +93,5 @@ func TestIsAccountAvailable_402KeepsLongCooldownForOtherChannels(t *testing.T) {
 		LastAttempt: time.Now().Add(-time.Hour),
 	}
 
-	testutil.False(t, lb.isAccountAvailable(context.Background(), acc), "expected a 402 account to keep the long cooldown")
+	testutil.False(t, lb.availableAccount(context.Background(), acc) != nil, "expected a 402 account to keep the long cooldown")
 }

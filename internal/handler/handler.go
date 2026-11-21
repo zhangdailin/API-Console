@@ -67,8 +67,7 @@ type Handler struct {
 	connTracker   loadbalancer.ConnTracker
 	auditLogger   audit.Logger
 
-	// Completed API requests update usage asynchronously. Coalescing by account
-	// keeps this path at one worker instead of spawning a goroutine per request.
+	// A single bounded worker persists completed requests by operation ID.
 	statsOnce      sync.Once
 	statsCloseOnce sync.Once
 	statsMu        sync.Mutex
@@ -386,13 +385,14 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request, prepare
 	logutil.DebugIf(verboseDiagnostics, "Request dispatch initialized", "trace_id", traceID, "path", r.URL.Path, "conversation_id", conversationKey, "model", req.Model, "stream", req.Stream)
 
 	effort := requestReasoningEffort(req)
-	req.Model = h.resolveEffortModelVariant(r.Context(), req.Model, effort, forcedChannel)
+	resolved := h.resolveModel(r.Context(), req.Model, effort, forcedChannel)
+	req.Model = resolved.id
 	// Any shared resolution must still satisfy the key's actual model scope.
 	if !middleware.APIKeyAllowsModel(r.Context(), req.Model) {
 		apperrors.New("permission_error", "API key is not allowed to use the resolved model", http.StatusForbidden).WriteResponse(w)
 		return
 	}
-	_, err = h.validateModelAvailability(r.Context(), req.Model, forcedChannel)
+	_, err = h.validateModelAvailability(r.Context(), resolved, forcedChannel)
 	if err != nil {
 		apperrors.New("invalid_request_error", err.Error(), http.StatusBadRequest).WriteResponse(w)
 		return

@@ -81,11 +81,26 @@ func TestValidateModelAvailability_WorkBuddyUsesChannelSpecificModel(t *testing.
 	ctx := context.Background()
 	publishModel(t, s, &store.Model{Channel: "WorkBuddy", ModelID: "claude-opus-5"})
 
-	got, err := h.validateModelAvailability(ctx, "claude-opus-5", "workbuddy")
+	got, err := h.validateModelAvailability(ctx, resolvedModel{id: "claude-opus-5"}, "workbuddy")
 	testutil.NoError(t, err, "validateModelAvailability() error = %v")
 	testutil.False(t, got == nil, "validateModelAvailability() returned nil model")
 	testutil.Equal(t, got.Channel, "WorkBuddy")
 	testutil.Equal(t, got.ModelID, "claude-opus-5")
+}
+
+func TestResolvedModelValidationReusesTheCatalogRow(t *testing.T) {
+	h, s, mini := setupModelValidationHandler(t)
+	publishModel(t, s, &store.Model{Channel: "WorkBuddy", ModelID: "resolver-fixture"})
+	ctx := context.Background()
+	resolved := h.resolveModel(ctx, "resolver-fixture", "", "workbuddy")
+	commands := mini.CommandCount()
+	row, err := h.validateModelAvailability(ctx, resolved, "workbuddy")
+	if err != nil || row == nil || row.ModelID != "resolver-fixture" {
+		t.Fatalf("resolved catalog row rejected: %v", err)
+	}
+	if extra := mini.CommandCount() - commands; extra != 0 {
+		t.Fatalf("validation repeated the catalog read: %d Redis commands", extra)
+	}
 }
 
 // TestSelectAccountRecord_WorkBuddyParksModelNotAccount is the routing half of
@@ -157,7 +172,7 @@ func TestValidateModelAvailability_RejectsOfflineExactMatchEvenWhenAliasExists(t
 
 	mustCreateModel(t, s, "200", "WorkBuddy", "claude-opus-4.6", store.ModelStatusAvailable)
 
-	_, err := h.validateModelAvailability(ctx, "claude-opus-4-6", "workbuddy")
+	_, err := h.validateModelAvailability(ctx, resolvedModel{id: "claude-opus-4-6"}, "workbuddy")
 	testutil.Error(t, err, "validateModelAvailability() error = nil, got model=%v")
 	testutil.Equal(t, err.Error(), "model not available")
 }
@@ -171,7 +186,7 @@ func TestValidateModelAvailability_ReturnsOfflineExactMatch(t *testing.T) {
 
 	mustCreateModel(t, s, "201", "WorkBuddy", "claude-opus-4.6", store.ModelStatusOffline)
 
-	_, err := h.validateModelAvailability(ctx, "claude-opus-4-6", "workbuddy")
+	_, err := h.validateModelAvailability(ctx, resolvedModel{id: "claude-opus-4-6"}, "workbuddy")
 	testutil.False(t, err == nil, "validateModelAvailability() error = nil, want model not available")
 	testutil.Equal(t, err.Error(), "model not available")
 }

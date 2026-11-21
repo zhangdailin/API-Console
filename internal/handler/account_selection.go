@@ -178,7 +178,7 @@ func (h *Handler) selectAccountRecord(ctx context.Context, targetChannel string,
 			refreshFailed = true
 			slog.Warn("Account selection catalog refresh failed", "channel", channel, "account_id", candidate.ID)
 		}
-		h.loadBalancer.InvalidateAccounts([]int64{candidate.ID})
+		h.loadBalancer.InvalidateAccountSnapshot(candidate)
 		if account, err := selectFresh(refreshCtx); err == nil {
 			return account, nil
 		} else {

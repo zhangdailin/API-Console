@@ -402,7 +402,7 @@ func (s *redisStore) DeleteAccount(ctx context.Context, id int64) error {
 	}
 
 	pipe := s.client.Pipeline()
-	pipe.Del(ctx, s.accountsKey(id), s.accountStatsOperationsKey(id))
+	pipe.Del(ctx, s.accountsKey(id), s.accountStatsOperationsKey(id), s.accountStatsExpiryKey(id))
 	pipe.SRem(ctx, s.accountsIDsKey(), id)
 	pipe.SRem(ctx, s.accountsEnabledKey(), id)
 	if _, err := pipe.Exec(ctx); err != nil {
@@ -447,6 +447,8 @@ func (s *redisStore) IncrementAccountStats(ctx context.Context, id int64, usage 
 	return s.IncrementAccountStatsOperation(ctx, id, usage, count, "", time.Now().UTC())
 }
 
+const accountStatsOperationTTL = 8 * 24 * time.Hour
+
 func (s *redisStore) IncrementAccountStatsOperation(ctx context.Context, id int64, usage float64, count int64, operationID string, completedAt time.Time) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis store not configured")
@@ -467,14 +469,20 @@ func (s *redisStore) IncrementAccountStatsOperation(ctx context.Context, id int6
 	// Daily counters belong to request completion, not a delayed retry. This
 	// avoids moving a pre-midnight completion into the following UTC day.
 	today := completedAt.Format("2006-01-02")
-	keys := []string{s.accountsKey(id), s.accountStatsOperationsKey(id)}
-	args := []any{usage, count, nowStr, today, strings.TrimSpace(operationID)}
-
-	err := incrementAccountStatsScript.Run(ctx, s.client, keys, args...).Err()
-	if err != nil && err != redis.Nil {
+	keys := []string{s.accountsKey(id), s.accountStatsOperationsKey(id), s.accountStatsExpiryKey(id)}
+	args := []any{usage, count, nowStr, today, strings.TrimSpace(operationID), int64(accountStatsOperationTTL / time.Second)}
+	result, err := incrementAccountStatsScript.Run(ctx, s.client, keys, args...).Text()
+	if err != nil {
 		return err
 	}
-	return nil
+	switch result {
+	case "MISSING":
+		return ErrNoRows
+	case "OK", "DUPLICATE":
+		return nil
+	default:
+		return fmt.Errorf("unexpected account stats result")
+	}
 }
 
 func decrementQuotaWindow(window *GrokQuotaWindow, amount float64) bool {
@@ -643,6 +651,10 @@ func (s *redisStore) accountsKey(id int64) string {
 
 func (s *redisStore) accountStatsOperationsKey(id int64) string {
 	return s.prefix + "accounts:stats_ops:" + strconv.FormatInt(id, 10)
+}
+
+func (s *redisStore) accountStatsExpiryKey(id int64) string {
+	return s.prefix + "accounts:stats_ops_expiry:" + strconv.FormatInt(id, 10)
 }
 
 func (s *redisStore) accountsIDsKey() string { return s.prefix + "accounts:ids" }

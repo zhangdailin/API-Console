@@ -57,11 +57,17 @@ var (
 		local now_str = ARGV[3]
 		local today = ARGV[4]
 		local operation_id = ARGV[5]
+		local operation_ttl = tonumber(ARGV[6])
+		local now
 		if operation_id ~= "" then
+			-- Recognize the old set during upgrades without writing or extending it.
 			if redis.call("SISMEMBER", KEYS[2], operation_id) == 1 then return "DUPLICATE" end
+			now = tonumber(redis.call("TIME")[1])
+			redis.call("ZREMRANGEBYSCORE", KEYS[3], "-inf", now)
+			if redis.call("ZSCORE", KEYS[3], operation_id) then return "DUPLICATE" end
 		end
 		local val = redis.call("GET", key)
-		if not val then return redis.error_reply("account not found") end
+		if not val then return "MISSING" end
 		local acc = cjson.decode(val)
 		local acc_type = ""
 		if acc.account_type ~= nil then
@@ -86,8 +92,8 @@ var (
 		acc.updated_at = now_str
 		redis.call("SET", key, cjson.encode(acc))
 		if operation_id ~= "" then
-			redis.call("SADD", KEYS[2], operation_id)
-			redis.call("EXPIRE", KEYS[2], 691200)
+			redis.call("ZADD", KEYS[3], now + operation_ttl, operation_id)
+			redis.call("EXPIRE", KEYS[3], operation_ttl)
 		end
 		return "OK"
 	`)

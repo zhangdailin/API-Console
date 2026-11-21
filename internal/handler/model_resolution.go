@@ -105,7 +105,17 @@ func looseNumber(value any) (float64, bool) {
 // while clients such as Codex send the family name plus reasoning_effort.
 var effortVariantOrder = []string{"medium", "high", "low", "xhigh", "max"}
 
-// resolveEffortModelVariant maps a bare model name onto the catalog entry that
+type resolvedModel struct {
+	id       string
+	row      *store.Model
+	lookedUp bool
+}
+
+func (h *Handler) resolveEffortModelVariant(ctx context.Context, modelID, effort, forcedChannel string) string {
+	return h.resolveModel(ctx, modelID, effort, forcedChannel).id
+}
+
+// resolveModel maps a bare model name onto the catalog entry that
 // actually exists. An exact catalog hit always wins; otherwise the requested
 // reasoning_effort is tried as a suffix and then the default effort order.
 // Without this, "gpt-5-6-sol" is rejected as "model not found" even though the
@@ -114,23 +124,23 @@ var effortVariantOrder = []string{"medium", "high", "low", "xhigh", "max"}
 // A model that already carries an effort suffix is never suffixed again: the
 // old code would have tried "gpt-5-6-sol-low-low" and then fallen through to
 // "-medium", silently serving an effort the client never asked for.
-func (h *Handler) resolveEffortModelVariant(ctx context.Context, modelID, effort, forcedChannel string) string {
+func (h *Handler) resolveModel(ctx context.Context, modelID, effort, forcedChannel string) resolvedModel {
 	if spec, ok := provider.Lookup(forcedChannel); ok && spec.ExactModelID {
-		return modelID
+		return resolvedModel{id: modelID}
 	}
 	modelID = normalizeRequestedModelID(modelID)
 	if modelID == "" || h == nil || h.loadBalancer == nil || h.loadBalancer.Store == nil {
-		return modelID
+		return resolvedModel{id: modelID}
 	}
 	lookup := func(id string) *store.Model { return h.lookupModelRow(ctx, forcedChannel, id) }
 	if m := lookup(modelID); m != nil {
-		return modelID
+		return resolvedModel{id: modelID, row: m, lookedUp: true}
 	}
 	// "gpt-5-6-sol-low" is final: it is an exact catalog entry under a name that
 	// happens to end in an effort word, and appending another suffix can only
 	// produce a wrong model.
 	if _, level := splitEffortVariantSuffix(modelID); level != "" {
-		return modelID
+		return resolvedModel{id: modelID, lookedUp: true}
 	}
 
 	effort = strings.ToLower(strings.TrimSpace(effort))
@@ -139,27 +149,32 @@ func (h *Handler) resolveEffortModelVariant(ctx context.Context, modelID, effort
 		candidates = append(candidates, modelID+"-"+effort)
 	}
 	for _, suffix := range effortVariantOrder {
-		candidates = append(candidates, modelID+"-"+suffix)
+		if suffix != effort {
+			candidates = append(candidates, modelID+"-"+suffix)
+		}
 	}
 	for _, candidate := range candidates {
 		if m := lookup(candidate); m != nil && m.Status.Enabled() {
 			slog.Info("Resolved bare model to an effort variant",
 				"model", modelID, "resolved", candidate, "reasoning_effort", effort, "channel", forcedChannel)
-			return candidate
+			return resolvedModel{id: candidate, row: m, lookedUp: true}
 		}
 	}
-	return modelID
+	return resolvedModel{id: modelID, lookedUp: true}
 }
 
-func (h *Handler) validateModelAvailability(ctx context.Context, modelID, forcedChannel string) (*store.Model, error) {
+func (h *Handler) validateModelAvailability(ctx context.Context, selection resolvedModel, forcedChannel string) (*store.Model, error) {
 	if h == nil || h.loadBalancer == nil || h.loadBalancer.Store == nil {
 		return nil, nil
 	}
-	modelID = strings.TrimSpace(modelID)
+	modelID := strings.TrimSpace(selection.id)
 	if modelID == "" {
 		return nil, nil
 	}
-	m := h.lookupModelRow(ctx, forcedChannel, modelID)
+	m := selection.row
+	if !selection.lookedUp {
+		m = h.lookupModelRow(ctx, forcedChannel, modelID)
+	}
 	if m == nil {
 		return nil, fmt.Errorf("model not found")
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -48,11 +49,14 @@ func EffectiveAccountConcurrencyLimit(acc *store.Account) int64 {
 }
 
 type LoadBalancer struct {
-	Store           *store.Store
-	mu              sync.RWMutex
+	Store *store.Store
+	mu    sync.RWMutex
+	// Published rows and their channel lists are immutable. Callers receive a
+	// private copy of the selected account, not a pointer into this snapshot.
 	cachedAccounts  []*store.Account
 	cachedByChannel map[string][]*store.Account
 	cacheExpires    time.Time
+	cacheGeneration uint64
 	cacheTTL        time.Duration
 	connTracker     ConnTracker
 	sfGroup         singleflight.Group
@@ -101,7 +105,8 @@ func (lb *LoadBalancer) SetConnTracker(ct ConnTracker) { lb.connTracker = ct }
 // accepts it; a non-nil one withholds it and says why, because the reason is what
 // an emptied pool has to report. A throttle means "come back later" and a plan
 // that does not cover the model means "this will never work here"; the pool
-// cannot tell those apart from the outside, and only the filter knows.
+// cannot tell those apart from the outside, and only the filter knows. The
+// candidate is a read-only snapshot and must not be retained for mutation.
 type AccountFilter func(*store.Account) error
 
 // The model-cooldown verdicts a filter can hand back. They are not failures:
@@ -128,7 +133,8 @@ func (lb *LoadBalancer) GetNextAccountExcludingByChannelWithTrackerFilter(ctx co
 }
 
 // PreparedAccountFilter batches request-scoped observations before filtering a
-// scan window. Prepare may be called again for a full-pool fallback.
+// scan window. Prepare may be called again for a full-pool fallback. Like Match,
+// Prepare must treat the supplied snapshot as read-only.
 type PreparedAccountFilter struct {
 	Prepare func([]*store.Account) error
 	Match   AccountFilter
@@ -194,15 +200,6 @@ func (lb *LoadBalancer) getNextAccountWithFilter(ctx context.Context, excludeIDs
 			scanErr = context.Cause(ctx)
 			return false
 		}
-		if strings.EqualFold(channel, "grok") {
-			lb.mu.RLock()
-			copies := make([]*store.Account, len(candidates))
-			for i, acc := range candidates {
-				copies[i] = acc.Clone()
-			}
-			lb.mu.RUnlock()
-			candidates = copies
-		}
 		if prepare != nil {
 			if err := prepare(candidates); err != nil {
 				scanErr = err
@@ -221,7 +218,7 @@ func (lb *LoadBalancer) getNextAccountWithFilter(ctx context.Context, excludeIDs
 				scanErr = context.Cause(ctx)
 				return false
 			}
-			if excludeSet[acc.ID] {
+			if acc == nil || excludeSet[acc.ID] {
 				continue
 			}
 			if channel != "" {
@@ -251,7 +248,8 @@ func (lb *LoadBalancer) getNextAccountWithFilter(ctx context.Context, excludeIDs
 				}
 			}
 			channelMatched++
-			if !lb.isAccountAvailable(ctx, acc) {
+			available := lb.availableAccount(ctx, acc)
+			if available == nil {
 				if store.WorkBuddyRestrictionUntil(acc).After(time.Now()) {
 					restrictedUnavailable++
 				}
@@ -263,7 +261,7 @@ func (lb *LoadBalancer) getNextAccountWithFilter(ctx context.Context, excludeIDs
 				}
 				continue
 			}
-			filtered = append(filtered, acc)
+			filtered = append(filtered, available)
 		}
 		return len(filtered) > 0
 	}
@@ -341,7 +339,7 @@ func (lb *LoadBalancer) getNextAccountWithFilter(ctx context.Context, excludeIDs
 
 	slog.Debug("Selected account", "id", account.ID, "name", account.Name, "type", account.AccountType)
 
-	return account, nil
+	return account.Clone(), nil
 }
 
 // InvalidateAccounts drops the cached snapshot entries for the given accounts so
@@ -367,6 +365,28 @@ func (lb *LoadBalancer) InvalidateAccounts(ids []int64) {
 
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
+	lb.invalidateAccountsLocked(changed)
+}
+
+// InvalidateAccountSnapshot invalidates only the observed cached revision. A
+// shared provider refresh can return to several concurrent selectors; once one
+// has invalidated the old row, the others must not evict the new row again.
+func (lb *LoadBalancer) InvalidateAccountSnapshot(observed *store.Account) {
+	if lb == nil || observed == nil {
+		return
+	}
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+	for _, current := range lb.cachedAccounts {
+		if current != nil && current.ID == observed.ID && current.UpdatedAt.Equal(observed.UpdatedAt) {
+			lb.invalidateAccountsLocked(map[int64]struct{}{observed.ID: {}})
+			return
+		}
+	}
+}
+
+func (lb *LoadBalancer) invalidateAccountsLocked(changed map[int64]struct{}) {
+	lb.cacheGeneration++
 	// A change to the pool always invalidates the TTL as well: keeping the deadline
 	// would let a later read serve the pre-change snapshot from a slice another
 	// caller still holds.
@@ -392,60 +412,90 @@ func (lb *LoadBalancer) InvalidateAccounts(ids []int64) {
 func (lb *LoadBalancer) AccountChanges(ids []int64) { lb.InvalidateAccounts(ids) }
 
 func (lb *LoadBalancer) getEnabledAccounts(ctx context.Context) ([]*store.Account, error) {
-	now := time.Now()
-	if accounts, ok := lb.cachedAccountsBefore(now); ok {
-		return accounts, nil
-	}
+	return lb.getOrLoadEnabledAccounts(ctx, func(ctx context.Context) ([]*store.Account, error) {
+		if lb.Store == nil {
+			return nil, errors.New("account store is not configured")
+		}
+		return lb.Store.GetEnabledAccounts(ctx)
+	})
+}
 
-	// Use singleflight to prevent cache stampede
-	val, err, _ := lb.sfGroup.Do("getEnabledAccounts", func() (any, error) {
-		// Double check after acquiring singleflight lock
-		if accounts, ok := lb.cachedAccountsBefore(now); ok {
+func (lb *LoadBalancer) getOrLoadEnabledAccounts(ctx context.Context, load func(context.Context) ([]*store.Account, error)) ([]*store.Account, error) {
+	type publishedLoad struct {
+		rows       []*store.Account
+		generation uint64
+	}
+	const maxLoads = 3
+	for attempt := 0; ; attempt++ {
+		if ctx.Err() != nil {
+			return nil, context.Cause(ctx)
+		}
+		lb.mu.RLock()
+		accounts, valid := lb.cachedAccounts, time.Now().Before(lb.cacheExpires)
+		lb.mu.RUnlock()
+		if valid {
 			return accounts, nil
 		}
-
-		accounts, err := lb.Store.GetEnabledAccounts(ctx)
+		if attempt >= maxLoads {
+			return nil, errors.New("account pool changed while refreshing")
+		}
+		result, err, _ := lb.sfGroup.Do("getEnabledAccounts", func() (any, error) {
+			lb.mu.RLock()
+			valid, generation := time.Now().Before(lb.cacheExpires), lb.cacheGeneration
+			current := lb.cachedAccounts
+			lb.mu.RUnlock()
+			if valid {
+				return publishedLoad{rows: current, generation: generation}, nil
+			}
+			loaded, err := load(ctx)
+			if err != nil {
+				return nil, err
+			}
+			byChannel := indexAccountsByChannel(loaded)
+			lb.mu.Lock()
+			defer lb.mu.Unlock()
+			if lb.cacheGeneration == generation {
+				lb.cachedAccounts = loaded
+				lb.cachedByChannel = byChannel
+				ttl := lb.cacheTTL
+				if ttl <= 0 {
+					ttl = defaultCacheTTL
+				}
+				lb.cacheExpires = time.Now().Add(ttl)
+				return publishedLoad{rows: loaded, generation: generation}, nil
+			}
+			return nil, nil
+		})
 		if err != nil {
 			return nil, err
 		}
-
-		lb.mu.Lock()
-		lb.cachedAccounts = accounts
-		lb.cachedByChannel = make(map[string][]*store.Account)
-		for _, acc := range accounts {
-			if acc == nil {
-				continue
-			}
-			typ, mode := strings.ToLower(acc.AccountType), strings.ToLower(acc.AgentMode)
-			if typ != "" {
-				lb.cachedByChannel[typ] = append(lb.cachedByChannel[typ], acc)
-			}
-			if mode != "" && mode != typ {
-				lb.cachedByChannel[mode] = append(lb.cachedByChannel[mode], acc)
+		if filled, ok := result.(publishedLoad); ok {
+			lb.mu.RLock()
+			current := lb.cacheGeneration == filled.generation
+			lb.mu.RUnlock()
+			if current {
+				return filled.rows, nil
 			}
 		}
-		lb.cacheExpires = time.Now().Add(lb.cacheTTL)
-		lb.mu.Unlock()
-
-		return accounts, nil
-	})
-
-	if err != nil {
-		return nil, err
+		// An invalidation overlapped this load or its notification to waiters.
 	}
-	return val.([]*store.Account), nil
 }
 
-// cachedAccountsBefore reports the snapshot while it is still inside its TTL. The
-// rule lives here because both the lock-free fast path and the singleflight
-// double-check must agree on when a cached read is valid.
-func (lb *LoadBalancer) cachedAccountsBefore(now time.Time) ([]*store.Account, bool) {
-	lb.mu.RLock()
-	defer lb.mu.RUnlock()
-	if len(lb.cachedAccounts) > 0 && now.Before(lb.cacheExpires) {
-		return lb.cachedAccounts, true
+func indexAccountsByChannel(accounts []*store.Account) map[string][]*store.Account {
+	byChannel := make(map[string][]*store.Account)
+	for _, acc := range accounts {
+		if acc == nil {
+			continue
+		}
+		typ, mode := strings.ToLower(acc.AccountType), strings.ToLower(acc.AgentMode)
+		if typ != "" {
+			byChannel[typ] = append(byChannel[typ], acc)
+		}
+		if mode != "" && mode != typ {
+			byChannel[mode] = append(byChannel[mode], acc)
+		}
 	}
-	return nil, false
+	return byChannel
 }
 
 // selectionScratch holds the per-call working slices of one account selection.
@@ -621,12 +671,12 @@ const (
 	retry403Grok = accountpolicy.CooldownBlockedGro
 )
 
-func (lb *LoadBalancer) isAccountAvailable(ctx context.Context, acc *store.Account) bool {
+func (lb *LoadBalancer) availableAccount(ctx context.Context, acc *store.Account) *store.Account {
 	if !store.AccountAuthActive(acc) {
-		return false
+		return nil
 	}
 	if until := store.WorkBuddyRestrictionUntil(acc); until.After(time.Now()) {
-		return false
+		return nil
 	}
 	// A paid Build billing snapshot is an authoritative routing signal: do not
 	// keep probing an account known to be exhausted before the period resets.
@@ -634,58 +684,56 @@ func (lb *LoadBalancer) isAccountAvailable(ctx context.Context, acc *store.Accou
 		now := time.Now().UTC()
 		periodEnd := acc.GrokBilling.PeriodEnd()
 		if periodEnd.IsZero() || now.Before(periodEnd) {
-			return false
+			return nil
 		}
 		// Once the billing period ends, admit exactly one account probe per
 		// bounded interval. Without an atomic claim every concurrent request
 		// floods the same exhausted account the instant PeriodEnd passes.
 		if lb.Store == nil {
-			return false
+			return nil
 		}
 		claimed, err := lb.Store.ClaimGrokPaidQuotaProbe(ctx, acc.ID, now)
 		if err != nil || !claimed {
-			return false
+			return nil
 		}
 	}
 	status := strings.TrimSpace(acc.StatusCode)
 	if status == "" {
-		return true
+		return acc
 	}
 
 	now := time.Now()
 	switch status {
 	case store.AccountStatusWorkBuddyQuotaExhausted:
 		if !strings.EqualFold(strings.TrimSpace(acc.AccountType), "workbuddy") {
-			return false
+			return nil
 		}
 		if acc.UsageCurrent > 0 {
-			lb.clearAccountStatus(ctx, acc, "WorkBuddy 额度已刷新，恢复完整能力")
+			return lb.clearAccountStatus(ctx, acc, "WorkBuddy quota refreshed")
 		}
-		return true
+		return acc
 	case "401":
 		// A refused credential needs operator re-authentication. Legacy rows that
 		// only carry StatusCode=401 are also kept out rather than automatically
 		// retried with the same dead credential.
-		return false
+		return nil
 	case "429":
 		if acc.LastAttempt.IsZero() {
-			return false
+			return nil
 		}
 		if !accountpolicy.AccountHeld(acc, now) {
-			lb.clearAccountStatus(ctx, acc, "429 冷却完成，自动恢复尝试")
-			return true
+			return lb.clearAccountStatus(ctx, acc, "429 冷却完成，自动恢复尝试")
 		}
-		return false
+		return nil
 	case "402":
 		// Paid Build exhaustion recovers at the billing period boundary rather
 		// than after an arbitrary 24-hour probe window.
 		if isPaidGrokBuildAccount(acc) {
 			if periodEnd := acc.GrokBilling.PeriodEnd(); !periodEnd.IsZero() {
 				if !now.Before(periodEnd) {
-					lb.clearAccountStatus(ctx, acc, "402 账期已结束，恢复尝试")
-					return true
+					return lb.clearAccountStatus(ctx, acc, "402 账期已结束，恢复尝试")
 				}
-				return false
+				return nil
 			}
 		}
 		// 402 usually means the balance/credits are gone. A reset time from the
@@ -694,16 +742,14 @@ func (lb *LoadBalancer) isAccountAvailable(ctx context.Context, acc *store.Accou
 		// account that has no allowance.
 		if !acc.QuotaResetAt.IsZero() {
 			if !now.Before(acc.QuotaResetAt) {
-				lb.clearAccountStatus(ctx, acc, "402 冷却完成，自动恢复尝试")
-				return true
+				return lb.clearAccountStatus(ctx, acc, "402 冷却完成，自动恢复尝试")
 			}
-			return false
+			return nil
 		}
 		if cooldownElapsed(acc.LastAttempt, retry402Default, now) {
-			lb.clearAccountStatus(ctx, acc, "402 冷却完成，自动恢复尝试")
-			return true
+			return lb.clearAccountStatus(ctx, acc, "402 冷却完成，自动恢复尝试")
 		}
-		return false
+		return nil
 	case "403", "404":
 		// 403/404 can be a temporary ban or a configuration problem.
 		// For Grok, a 403 is often a transient upstream denial, so the account
@@ -713,18 +759,16 @@ func (lb *LoadBalancer) isAccountAvailable(ctx context.Context, acc *store.Accou
 			cooldown = retry403Grok
 		}
 		if cooldownElapsed(acc.LastAttempt, cooldown, now) {
-			lb.clearAccountStatus(ctx, acc, status+" 冷却完成，自动恢复尝试")
-			return true
+			return lb.clearAccountStatus(ctx, acc, status+" 冷却完成，自动恢复尝试")
 		}
-		return false
+		return nil
 	default:
 		// Unknown status codes are treated as transient errors with a short cooldown
 		// to prevent permanent account exclusion.
 		if cooldownElapsed(acc.LastAttempt, retry401Default, now) {
-			lb.clearAccountStatus(ctx, acc, status+" 未知状态冷却完成，自动恢复尝试")
-			return true
+			return lb.clearAccountStatus(ctx, acc, status+" 未知状态冷却完成，自动恢复尝试")
 		}
-		return false
+		return nil
 	}
 }
 
@@ -752,26 +796,32 @@ func resetAccountRuntimeState(acc *store.Account) {
 	acc.RateLimitFailures = 0
 }
 
-// cachedAccountLocked returns the cached copy of the account with the given id,
-// or nil when the snapshot does not hold it. lb.mu must be held.
-func (lb *LoadBalancer) cachedAccountLocked(id int64) *store.Account {
-	for _, cached := range lb.cachedAccounts {
-		if cached.ID == id {
-			return cached
+// publishCachedStatus edits routing scalars on a new snapshot. The old slice
+// and row may still be used by concurrent selectors.
+func (lb *LoadBalancer) publishCachedStatus(id int64, expected *store.Account, update func(*store.Account)) {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+	for i, cached := range lb.cachedAccounts {
+		if cached == nil || cached.ID != id || (expected != nil && cached != expected) {
+			continue
 		}
+		next := *cached
+		update(&next)
+		accounts := slices.Clone(lb.cachedAccounts)
+		accounts[i] = &next
+		lb.cachedAccounts = accounts
+		lb.cachedByChannel = indexAccountsByChannel(accounts)
+		lb.cacheGeneration++
+		return
 	}
-	return nil
 }
 
-func (lb *LoadBalancer) clearAccountStatus(ctx context.Context, acc *store.Account, reason string) {
-	// Update the cached copy as well so the change reflects immediately.
-	lb.mu.Lock()
-	resetAccountRuntimeState(acc)
-	if cached := lb.cachedAccountLocked(acc.ID); cached != nil {
-		resetAccountRuntimeState(cached)
-	}
-	lb.mu.Unlock()
-	lb.persistAccountStatus(ctx, acc, reason)
+func (lb *LoadBalancer) clearAccountStatus(ctx context.Context, acc *store.Account, reason string) *store.Account {
+	next := acc.Clone()
+	resetAccountRuntimeState(next)
+	lb.publishCachedStatus(acc.ID, acc, resetAccountRuntimeState)
+	lb.persistAccountStatus(ctx, next, reason)
+	return next
 }
 
 // PersistAppliedAccountStatus publishes and persists an account that was already
@@ -791,16 +841,13 @@ func (lb *LoadBalancer) PersistAppliedAccountStatus(ctx context.Context, acc *st
 			}
 			*acc = *current
 		}
-		lb.mu.Lock()
-		if cached := lb.cachedAccountLocked(acc.ID); cached != nil {
+		lb.publishCachedStatus(acc.ID, nil, func(cached *store.Account) {
 			cached.StatusCode, cached.StatusMessage = acc.StatusCode, acc.StatusMessage
 			cached.AuthStatus, cached.LastAttempt, cached.VerifiedAt = acc.AuthStatus, acc.LastAttempt, acc.VerifiedAt
-		}
-		lb.mu.Unlock()
+		})
 		return
 	}
-	lb.mu.Lock()
-	if cached := lb.cachedAccountLocked(acc.ID); cached != nil {
+	lb.publishCachedStatus(acc.ID, nil, func(cached *store.Account) {
 		cached.StatusCode = acc.StatusCode
 		cached.StatusMessage = acc.StatusMessage
 		cached.LastAttempt = acc.LastAttempt
@@ -809,8 +856,7 @@ func (lb *LoadBalancer) PersistAppliedAccountStatus(ctx context.Context, acc *st
 		cached.QuotaResetAt = acc.QuotaResetAt
 		cached.VerifiedAt = acc.VerifiedAt
 		cached.WorkBuddyRestrictedUntil = acc.WorkBuddyRestrictedUntil
-	}
-	lb.mu.Unlock()
+	})
 	lb.persistAccountStatus(ctx, acc, reason)
 }
 
@@ -820,7 +866,6 @@ func (lb *LoadBalancer) MarkAccountStatus(ctx context.Context, acc *store.Accoun
 	if acc == nil || lb.Store == nil || status == "" {
 		return
 	}
-	lb.mu.Lock()
 	now := time.Now()
 	acc.StatusCode = status
 	acc.LastAttempt = now
@@ -838,15 +883,13 @@ func (lb *LoadBalancer) MarkAccountStatus(ctx context.Context, acc *store.Accoun
 		}
 	}
 
-	// Ensure the cache is updated as well
-	if cached := lb.cachedAccountLocked(acc.ID); cached != nil {
+	lb.publishCachedStatus(acc.ID, nil, func(cached *store.Account) {
 		cached.StatusCode = status
 		cached.LastAttempt = now
 		cached.AuthStatus = acc.AuthStatus
 		cached.RateLimitFailures = acc.RateLimitFailures
 		cached.QuotaResetAt = acc.QuotaResetAt
-	}
-	lb.mu.Unlock()
+	})
 	lb.persistAccountStatus(ctx, acc, "账号状态标记: "+status)
 }
 
@@ -858,5 +901,6 @@ func (lb *LoadBalancer) persistAccountStatus(ctx context.Context, acc *store.Acc
 		slog.Warn("账号状态更新失败", "account_id", acc.ID, "reason", reason, "error", err)
 		return
 	}
+	lb.InvalidateAccounts([]int64{acc.ID})
 	slog.Debug("账号状态已更新", "account_id", acc.ID, "status", acc.StatusCode, "reason", reason)
 }
