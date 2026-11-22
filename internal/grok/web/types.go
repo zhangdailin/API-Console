@@ -195,6 +195,9 @@ func (r *ChatCompletionsRequest) Validate() error {
 	if len(r.Messages) == 0 {
 		return fmt.Errorf("messages is required")
 	}
+	if err := normalizeChatDocuments(r.Messages); err != nil {
+		return err
+	}
 	if err := chatwire.ValidateMessages(r.Messages); err != nil {
 		return err
 	}

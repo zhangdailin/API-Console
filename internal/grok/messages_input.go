@@ -160,6 +160,14 @@ func anthropicResponsesInput(messages []anthropicMessage) ([]any, error) {
 			continue
 		}
 		blocks, _ := message.Content.([]any)
+		hasDocument := false
+		for _, raw := range blocks {
+			block, _ := raw.(map[string]any)
+			if kind := buildContentType(block); role == "user" && kind == "document" {
+				hasDocument = true
+				break
+			}
+		}
 		parts := make([]any, 0, len(blocks))
 		flush := func() {
 			if len(parts) == 0 {
@@ -173,6 +181,9 @@ func anthropicResponsesInput(messages []anthropicMessage) ([]any, error) {
 			kind := strings.ToLower(strings.TrimSpace(fmt.Sprint(block["type"])))
 			switch kind {
 			case "text":
+				if text, ok := block["text"].(string); hasDocument && ok && strings.TrimSpace(text) == "" {
+					continue
+				}
 				partType := "input_text"
 				if role == "assistant" {
 					partType = "output_text"

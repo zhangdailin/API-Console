@@ -319,7 +319,15 @@ func normalizeResponsesMessageContent(content any) any {
 				// The chat layer validates the portable file shape, so carry the
 				// resolved reference as file_data instead of a nested url. This
 				// also makes the chat->Responses->chat round trip lossless.
-				out = append(out, map[string]any{"type": "file", "file": map[string]any{"file_data": url}})
+				file := map[string]any{"file_data": url}
+				name := chatwire.ParseLooseStringAny(part["filename"])
+				if nested, ok := part["file"].(map[string]any); name == "" && ok {
+					name = chatwire.ParseLooseStringAny(nested["filename"])
+				}
+				if name != "" {
+					file["filename"] = name
+				}
+				out = append(out, map[string]any{"type": "file", "file": file})
 			}
 		default:
 			out = append(out, part)

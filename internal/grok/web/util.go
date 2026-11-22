@@ -372,7 +372,7 @@ func isRemoteURL(raw string) bool {
 	return scheme == "http" || scheme == "https"
 }
 
-func fetchRemoteAsDataURI(rawURL string, timeout time.Duration, proxyFunc func(*http.Request) (*url.URL, error)) (string, error) {
+func fetchRemoteAsDataURI(ctx context.Context, rawURL string, timeout time.Duration, proxyFunc func(*http.Request) (*url.URL, error), maxBytes int64) (string, error) {
 	u := strings.TrimSpace(rawURL)
 	if u == "" {
 		return "", fmt.Errorf("empty url")
@@ -382,7 +382,7 @@ func fetchRemoteAsDataURI(rawURL string, timeout time.Duration, proxyFunc func(*
 	}
 	// The URL comes from the caller's message payload, so it is untrusted: the
 	// target must resolve to a public address before the gateway dials it.
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	target, err := checkRemoteFetchTarget(ctx, u, proxyFunc != nil)
 	if err != nil {
@@ -403,12 +403,14 @@ func fetchRemoteAsDataURI(rawURL string, timeout time.Duration, proxyFunc func(*
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return "", fmt.Errorf("fetch url status=%d body=%s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("fetch url status=%d", resp.StatusCode)
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 60*1024*1024))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
 	if err != nil {
 		return "", err
+	}
+	if int64(len(data)) > maxBytes {
+		return "", fmt.Errorf("remote attachment exceeds the size limit")
 	}
 	mime := strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0])
 	if mime == "" {

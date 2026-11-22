@@ -463,7 +463,6 @@
               ? {
                   name: String(msg.attachment.name || ""),
                   type: String(msg.attachment.type || ""),
-                  dataUrl: msg.attachment.dataUrl,
                 }
               : undefined,
           }))
@@ -501,11 +500,12 @@
       const bounded = boundedChatPayload();
       // Keep memory and disk subject to the same limits, so an evicted session
       // cannot reappear during the next save in this tab.
-      chatState.sessions = bounded.sessions;
+      const liveSessions = new Map(chatState.sessions.map((session) => [session.id, session]));
+      chatState.sessions = bounded.sessions.map((session) => liveSessions.get(session.id));
       if (!chatState.sessions.some((item) => item.id === chatState.activeId)) {
         chatState.activeId = chatState.sessions[0]?.id || "";
       }
-      localStorage.setItem(scopedChatStorageKey(), chatPayloadJSON(chatState.sessions));
+      localStorage.setItem(scopedChatStorageKey(), bounded.payload);
     } catch (err) {
       updateChatStatus("浏览器存储空间不足，会话尚未保存；请释放存储空间后重试", "error");
     }
@@ -1746,6 +1746,11 @@
     const route = chatState.routes?.find((item) => item.id === chatState.model);
     const effortControl = document.getElementById("grokReasoningEffort");
     const session = activeChatSession();
+    const documentInput = document.getElementById("grokChatDocument");
+    if (documentInput) {
+      documentInput.disabled = !supportsChatDocuments(chatState.model);
+      if (documentInput.disabled) documentInput.value = "";
+    }
     if (effortControl) {
       const labels = { none: "关闭", low: "低", medium: "中", high: "高", xhigh: "极高" };
       const advertised = Array.isArray(route?.reasoning_efforts)
@@ -1993,14 +1998,17 @@
       throw new Error("missing chat session");
     }
     const input = [];
+    const documentMessage = supportsChatDocuments(chatState.model)
+      ? session.messages.findLast((msg) => msg.role === "user" && msg.attachment?.dataUrl)
+      : null;
     session.messages.forEach((msg) => {
       const role = msg.role === "assistant" ? "assistant" : "user";
       const parts = [];
       if (msg.content) {
         parts.push({ type: role === "assistant" ? "output_text" : "input_text", text: String(msg.content || "") });
       }
-      if (role === "user" && msg.attachment?.dataUrl) {
-        parts.push({ type: "input_file", file: { data: msg.attachment.dataUrl } });
+      if (msg === documentMessage) {
+        parts.push({ type: "input_file", filename: msg.attachment.name, file_data: msg.attachment.dataUrl });
       }
       if (parts.length === 0) return;
       input.push({ type: "message", role, content: parts });
@@ -2040,14 +2048,47 @@
     if (xSearch) xSearch.checked = session?.xSearch === true;
   }
 
+  function supportsChatDocuments(model) {
+    return /^(?:web\/)?grok-chat-(?:fast|auto|expert|heavy)$/i.test(String(model || ""));
+  }
+
   async function sendChatMessage() {
-    if (chatState.sending) return;
+    if (chatState.sending || chatState.readingDocument) return;
     const input = document.getElementById("grokPromptInput");
+    const fileInput = document.getElementById("grokChatDocument");
+    const file = fileInput?.files?.[0];
     const prompt = String(input?.value || "").trim();
-    if (!prompt) return;
+    if (!prompt && !file) return;
     const session = activeChatSession();
     if (!session) return;
-    session.messages.push({ role: "user", content: prompt });
+    const message = { role: "user", content: prompt };
+    if (file) {
+      if (!supportsChatDocuments(chatState.model) || !/\.pdf$/i.test(file.name) || !file.size || file.size > 16 * 1024 * 1024) {
+        updateChatStatus("请选择 Grok Web 文本模型，并使用不超过 16 MiB 的 PDF", "error");
+        return;
+      }
+      try {
+        chatState.readingDocument = true;
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ""));
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(file);
+        });
+        if (activeChatSession() !== session || !supportsChatDocuments(chatState.model) || fileInput.files?.[0] !== file) return;
+        for (const previous of session.messages) {
+          if (previous.attachment) delete previous.attachment.dataUrl;
+        }
+        message.attachment = { name: file.name, type: "application/pdf", dataUrl: dataUrl.replace(/^data:[^,]*,/, "data:application/pdf;base64,") };
+        fileInput.value = "";
+      } catch (_) {
+        updateChatStatus("无法读取 PDF，请重新选择文件", "error");
+        return;
+      } finally {
+        chatState.readingDocument = false;
+      }
+    }
+    session.messages.push(message);
     session.updatedAt = Date.now();
     ensureChatTitle(session);
     renderChatSessions();

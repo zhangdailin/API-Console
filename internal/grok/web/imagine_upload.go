@@ -27,10 +27,14 @@ const (
 
 // uploadImagineInput uploads one edit input and returns its fileMetadataId.
 func (c *Client) uploadImagineInput(ctx context.Context, token, filename, mimeType string, data []byte) (string, error) {
+	return c.uploadDirectAttachment(ctx, token, filename, mimeType, data, "/imagine", imagineSelfUploadSource)
+}
+
+func (c *Client) uploadDirectAttachment(ctx context.Context, token, filename, mimeType string, data []byte, referer, source string) (string, error) {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	header := make(textproto.MIMEHeader)
-	name := strings.NewReplacer("\r", "", "\n", "", `"`, "").Replace(strings.TrimSpace(filename))
+	name := strings.NewReplacer("\r", "", "\n", "", `\`, `\\`, `"`, `\"`).Replace(strings.TrimSpace(filename))
 	if name == "" {
 		name = "image.png"
 	}
@@ -43,8 +47,10 @@ func (c *Client) uploadImagineInput(ctx context.Context, token, filename, mimeTy
 	if _, err := part.Write(data); err != nil {
 		return "", err
 	}
-	if err := writer.WriteField("file_source", imagineSelfUploadSource); err != nil {
-		return "", err
+	if source != "" {
+		if err := writer.WriteField("file_source", source); err != nil {
+			return "", err
+		}
 	}
 	if err := writer.Close(); err != nil {
 		return "", err
@@ -52,7 +58,7 @@ func (c *Client) uploadImagineInput(ctx context.Context, token, filename, mimeTy
 	reqURL := c.baseURL() + imagineUploadPath
 	headers := c.headersFor(ctx, token, http.MethodPost, reqURL)
 	headers.Set("Content-Type", writer.FormDataContentType())
-	headers.Set("Referer", c.baseURL()+"/imagine")
+	headers.Set("Referer", c.baseURL()+referer)
 	headers.Del("x-xai-request-id")
 	reqCtx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
@@ -66,7 +72,10 @@ func (c *Client) uploadImagineInput(ctx context.Context, token, filename, mimeTy
 		return "", err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", err
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", &grokUpstreamError{status: resp.StatusCode, body: string(raw), header: resp.Header}
 	}
@@ -79,17 +88,17 @@ func (c *Client) uploadImagineInput(ctx context.Context, token, filename, mimeTy
 		} `json:"fileMetadata"`
 	}
 	if err := json.Unmarshal(raw, &value); err != nil {
-		return "", fmt.Errorf("imagine upload: invalid response")
+		return "", fmt.Errorf("Grok upload returned an invalid response")
 	}
 	if terminal := strings.TrimSpace(string(value.TerminalError)); terminal != "" && terminal != "null" && terminal != "{}" && terminal != "false" {
-		return "", fmt.Errorf("imagine upload rejected by the upstream")
+		return "", fmt.Errorf("Grok upload was rejected by the upstream")
 	}
 	for _, id := range []string{value.FileMetadata.ID, value.FileMetadata.FileID, value.UploadID} {
 		if id = strings.TrimSpace(id); id != "" {
 			return id, nil
 		}
 	}
-	return "", fmt.Errorf("imagine upload returned no fileMetadataId")
+	return "", fmt.Errorf("Grok upload returned no attachment identifier")
 }
 
 // uploadImageEditInput resolves one edit input (a data URI or a remote URL)
@@ -104,7 +113,7 @@ func (h *Handler) uploadImageEditInput(ctx context.Context, token, input string)
 		if cfg := h.configSnapshot(); cfg != nil {
 			proxyFunc = httpclient.ProxyFuncFromConfig(cfg)
 		}
-		fetched, err := fetchRemoteAsDataURI(data, 30*time.Second, proxyFunc)
+		fetched, err := fetchRemoteAsDataURI(ctx, data, 30*time.Second, proxyFunc, 60<<20)
 		if err != nil {
 			return "", err
 		}

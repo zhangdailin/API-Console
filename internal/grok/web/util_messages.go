@@ -7,8 +7,9 @@ import (
 )
 
 type AttachmentInput struct {
-	Type string
-	Data string
+	Type     string
+	Data     string
+	Filename string
 }
 
 func extractMessageAndAttachmentsWithTools(messages []ChatMessage, isVideo bool, tools []ToolDef, toolChoice any, parallelToolCalls bool) (string, []AttachmentInput, error) {
@@ -41,7 +42,7 @@ func extractMessageAndAttachmentsWithTools(messages []ChatMessage, isVideo bool,
 				}
 				blockType := strings.ToLower(strings.TrimSpace(fmt.Sprint(m["type"])))
 				switch blockType {
-				case "text":
+				case "text", "input_text":
 					if s, ok := m["text"].(string); ok && strings.TrimSpace(s) != "" {
 						parts = append(parts, strings.TrimSpace(s))
 					}
@@ -54,7 +55,9 @@ func extractMessageAndAttachmentsWithTools(messages []ChatMessage, isVideo bool,
 						return "", nil, fmt.Errorf("video model does not support file content blocks")
 					}
 					if data := extractAttachmentURL(m["file"]); data != "" {
-						attachments = append(attachments, AttachmentInput{Type: "file", Data: data})
+						file, _ := m["file"].(map[string]any)
+						name, _ := file["filename"].(string)
+						attachments = append(attachments, AttachmentInput{Type: "file", Data: data, Filename: name})
 					}
 				case "input_audio":
 					if isVideo {

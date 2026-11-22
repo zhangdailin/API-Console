@@ -53,6 +53,10 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 	// request to a model: the latency middleware cannot read the body itself.
 	r = r.WithContext(middleware.WithRequestModel(r.Context(), req.Model))
 	h.applyDefaultChatStream(&req)
+	if err := normalizeBuildChatDocuments(req.Messages); err != nil {
+		writeGrokUpstreamError(w, err)
+		return
+	}
 	if err := req.Validate(); err != nil {
 		writeGrokUpstreamError(w, err)
 		return

@@ -433,7 +433,7 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 
 	payload, err := buildPayload(sess.token)
 	if err != nil {
-		if skipExternalAttachmentFetchGrokAccountStatus(err) {
+		if isUpstreamFailure(err) && skipExternalAttachmentFetchGrokAccountStatus(err) {
 			h.markAccountStatus(r.Context(), sess.acc, err)
 		}
 		writeGrokUpstreamError(w, err)

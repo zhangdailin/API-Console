@@ -56,9 +56,25 @@ function chatPayloadHarness() {
     document: { addEventListener() {}, getElementById: () => null, querySelector: () => null, querySelectorAll: () => [] },
   });
   const source = fs.readFileSync(path.join(__dirname, 'static/js/grok-tools.js'), 'utf8');
-  vm.runInContext(source.replace('document.addEventListener("DOMContentLoaded", init);', 'window.chatTest = { chatState, buildResponsesPayload };'), context);
+  vm.runInContext(source.replace('document.addEventListener("DOMContentLoaded", init);', 'window.chatTest = { chatState, buildResponsesPayload, persistedChatSession };'), context);
   return context.window.chatTest;
 }
+
+test('Grok Web sends the selected PDF as a file part without persisting the bytes', () => {
+  const { chatState, buildResponsesPayload, persistedChatSession } = chatPayloadHarness();
+  const dataUrl = 'data:application/pdf;base64,fixture';
+  const session = { id: 'pdf', messages: [{ role: 'user', content: '', attachment: { name: 'report.pdf', dataUrl } }] };
+  chatState.sessions = [session];
+  chatState.activeId = session.id;
+  chatState.model = 'grok-chat-fast';
+  assert.deepEqual(JSON.parse(JSON.stringify(buildResponsesPayload().input[0].content)), [
+    { type: 'input_file', filename: 'report.pdf', file_data: dataUrl },
+  ]);
+  assert.equal(persistedChatSession(session).messages[0].attachment.dataUrl, undefined);
+  assert.equal(session.messages[0].attachment.dataUrl, dataUrl);
+  chatState.model = 'grok-4.7';
+  assert.equal(buildResponsesPayload().input.length, 0);
+});
 
 // Grok Web routes publish supports_backend_search=false; X search used to be
 // sent anyway and failed with "requires a native Responses provider".

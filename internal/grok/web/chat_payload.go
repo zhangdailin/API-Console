@@ -84,7 +84,21 @@ func (h *Handler) uploadAttachmentInputs(ctx context.Context, token string, inpu
 		return nil, nil
 	}
 	out := make([]string, 0, len(inputs))
+	remaining := maxChatDocumentBytes
 	for _, item := range inputs {
+		if item.Type == "file" {
+			filename, mime, data, err := h.loadChatDocument(ctx, item, remaining)
+			if err != nil {
+				return nil, err
+			}
+			remaining -= len(data)
+			id, err := h.webClient().uploadDirectAttachment(ctx, token, filename, mime, data, "/", "")
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, id)
+			continue
+		}
 		fileID, fileURI, err := h.uploadSingleInput(ctx, token, item.Data)
 		if err != nil {
 			return nil, err
@@ -111,7 +125,7 @@ func (h *Handler) uploadSingleInput(ctx context.Context, token, input string) (s
 		if h != nil && h.configSnapshot() != nil {
 			proxyFunc = httpclient.ProxyFuncFromConfig(h.configSnapshot())
 		}
-		data, err = fetchRemoteAsDataURI(data, 30*time.Second, proxyFunc)
+		data, err = fetchRemoteAsDataURI(ctx, data, 30*time.Second, proxyFunc, 60<<20)
 		if err != nil {
 			return "", "", err
 		}

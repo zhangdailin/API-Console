@@ -79,8 +79,12 @@ func validateNativeChatContent(messages []chatwire.Message) error {
 		for _, part := range responses.InterfaceMaps(message.Content) {
 			switch chatwire.ParseLooseStringAny(part["type"]) {
 			case "text", "input_text", "output_text", "image_url", "input_image":
+			case "input_file":
+				if !strings.EqualFold(strings.TrimSpace(message.Role), "user") {
+					return fmt.Errorf("Build file attachments are only supported in user messages")
+				}
 			default:
-				return fmt.Errorf("Build/Build Chat does not support content.type=%q", part["type"])
+				return fmt.Errorf("Build Chat does not support content.type=%q", part["type"])
 			}
 		}
 	}
