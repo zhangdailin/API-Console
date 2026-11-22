@@ -9,7 +9,7 @@
 | `/workbuddy`、`/workbuddy/v1` | WorkBuddy 账号池 |
 | `/cline`、`/cline/v1` | Cline 账号池 |
 | `/grok`、`/grok/v1` | Grok Build OAuth 账号池 |
-| `/warp`、`/warp/v1` | Warp 文本账号池；Chat Completions、Messages 与 Responses（共享 Chat 桥接）和目录，限制见 [Warp 渠道](warp.md) |
+| `/warp`、`/warp/v1` | Warp 账号池；Chat Completions、Messages、Responses 和模型目录，图文支持见 [Warp 渠道](warp.md) |
 
 推理和模型接口使用管理后台创建的 Key：`Authorization: Bearer <API_KEY>` 或 `x-api-key: <API_KEY>`，同时提供时 Bearer 优先。管理接口使用管理员会话或既有管理 token，不接受推理 Key 替代管理员。
 
@@ -67,6 +67,8 @@ stream 省略时可能采用服务默认，需 JSON 非流式结果时显式 str
 WorkBuddy 和 Cline 的图文输入可用 Chat Completions 的 `image_url`、Messages 的 `image` 或 Responses 的 `input_image` 用户内容块。可传 PNG、JPEG、GIF、WebP 的 Base64 data URI（Messages 也接受 `source.type: "base64"`）。每次请求最多 8 张，内联图片解码后合计最多 16 MiB。网关也会转发公开 HTTP(S) URL；WorkBuddy 上游负责读取，Cline 的上游 URL 支持尚未实测，建议优先使用 Base64。
 
 请选用支持图片的模型。WorkBuddy 模型列表从账号目录公布已观察到的 `supports_images` 和 `input_modalities`；若旧目录没有这些字段，可先刷新模型目录。Cline 账号目录没有明确的图片能力字段，网关不会根据模型名称推断；如果账号列出了 `cline-free/nemotron-3.5-super-vl`，可用它验收。
+
+Warp 也接受这三种用户图片块，但只接收 Base64 PNG 或 JPEG。每次请求最多 8 张，解码后合计最多 512 KiB，含随请求重放的历史图片。请在账号目录中选择支持图片的模型，详见 [Warp 渠道](warp.md)。
 
 Grok Web 文本模型（例如 `grok-chat-fast`）可在 `POST /grok/v1/chat/completions` 的用户消息中附带 PDF：
 

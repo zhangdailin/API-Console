@@ -8,20 +8,20 @@ import (
 
 // WarpCatalogPatch owns only the observations of one authenticated catalog
 // read. ExpectedRefreshToken ties them to the credential generation that
-// produced them; model IDs and context windows always travel together because
-// a window that outlives the catalog row it describes is a stale budget.
+// produced them; budgets and vision flags belong only to this model ID list.
 type WarpCatalogPatch struct {
 	ExpectedRefreshToken string
 	ModelIDs             []string
 	ModelWindows         map[string]int
+	ModelVision          map[string]bool
 	SyncedAt             time.Time
 }
 
 // UpdateWarpCatalogSnapshot persists a catalog observation and its per-model
-// context windows atomically, without replaying operator, credential, status,
+// model metadata atomically, without replaying operator, credential, status,
 // quota, or usage state from the account that performed the read. A snapshot
 // from a previous credential generation, or one that is not newer than the
-// stored catalog, is rejected as a whole: IDs and windows can never come from
+// stored catalog, is rejected as a whole: IDs and metadata can never come from
 // different observations.
 func (s *Store) UpdateWarpCatalogSnapshot(ctx context.Context, id int64, patch WarpCatalogPatch) error {
 	if s != nil && s.accounts != nil {
@@ -44,9 +44,27 @@ func (s *redisStore) UpdateWarpCatalogSnapshot(ctx context.Context, id int64, pa
 		}
 		acc.WarpModelIDs = append([]string(nil), patch.ModelIDs...)
 		acc.WarpModelWindows = cloneWarpModelWindows(patch.ModelWindows)
+		acc.WarpModelVision = cloneWarpModelVision(patch.ModelIDs, patch.ModelVision)
 		acc.WarpModelsSyncedAt = patch.SyncedAt
 		return nil
 	})
+}
+
+// cloneWarpModelVision keeps only observations for IDs in the same snapshot.
+func cloneWarpModelVision(ids []string, vision map[string]bool) map[string]bool {
+	if len(vision) == 0 {
+		return nil
+	}
+	var result map[string]bool
+	for _, id := range ids {
+		if supported, observed := vision[id]; observed {
+			if result == nil {
+				result = make(map[string]bool, len(vision))
+			}
+			result[id] = supported
+		}
+	}
+	return result
 }
 
 // cloneWarpModelWindows copies only positive windows. A missing or non-positive

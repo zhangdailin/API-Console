@@ -151,6 +151,16 @@ func buildRequest(model string, prepared preparedRequest) ([]byte, error) {
 			return nil, err
 		}
 	}
+	var images []*warpapi.InputContext_Image
+	if !prepared.Resume && len(prepared.Images) != 0 {
+		images = make([]*warpapi.InputContext_Image, 0, len(prepared.Images))
+		for _, image := range prepared.Images {
+			// The official client carries Base64 ASCII in this protobuf bytes field.
+			images = append(images, warpapi.InputContext_Image_builder{
+				Data: []byte(image.base64), MimeType: &image.mime,
+			}.Build())
+		}
+	}
 	request := warpapi.Request_builder{
 		TaskContext: taskContext,
 		Input: warpapi.Request_Input_builder{
@@ -158,6 +168,7 @@ func buildRequest(model string, prepared preparedRequest) ([]byte, error) {
 				Directory:       warpapi.InputContext_Directory_builder{Pwd: &empty, Home: &empty, PwdFileSymbolsIndexed: &no}.Build(),
 				OperatingSystem: warpapi.InputContext_OperatingSystem_builder{Platform: &platform, Distribution: &empty}.Build(),
 				Shell:           warpapi.InputContext_Shell_builder{Name: &shell, Version: &empty}.Build(),
+				Images:          images,
 			}.Build(),
 			UserInputs: warpapi.Request_Input_UserInputs_builder{Inputs: inputs}.Build(),
 		}.Build(),

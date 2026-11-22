@@ -14,6 +14,8 @@ var localRequestMessages = map[string]string{
 	"warp_request_shape": "The gateway rejected this Warp request during local validation: unsupported request fields or conversation shape. No upstream generation was made.",
 	"warp_dialog":        "The gateway rejected this Warp conversation during local validation: expected complete alternating user and assistant turns followed by a user turn. No upstream generation was made.",
 	"warp_user_turn":     "The gateway rejected the current Warp user turn: provide nonempty text or a valid tool result. No upstream generation was made.",
+	"warp_image":         "Warp accepts up to 8 inline Base64 PNG or JPEG images in user messages, with a combined decoded size of at most 512 KiB. No upstream generation was made.",
+	"warp_image_model":   "The selected Warp model does not support image input. Select a model with image support. No upstream generation was made.",
 	"warp_tool_choice":   "The gateway rejected this Warp tool choice: only auto and none are supported. No upstream generation was made.",
 	"warp_model_catalog": "The gateway could not validate this exact Warp model against the account's fresh catalog. Refresh the model catalog and check the model selection. No upstream generation was made.",
 }

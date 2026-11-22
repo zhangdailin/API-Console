@@ -29,6 +29,9 @@ type preparedRequest struct {
 	Tools         []mcpTool
 	ParallelTools bool
 	ContextWindow int
+	Images        []warpImage
+	// HistoryImages counts the leading attachments replayed on a stateless turn.
+	HistoryImages int
 	// CurrentText is the new instruction in this turn, without replayed history.
 	// It is what a resumed conversation sends; Query is the stateless transcript.
 	CurrentText string
@@ -50,7 +53,7 @@ type preparedToolResult struct {
 }
 
 // validateRequest runs before token renewal or any upstream operation. It accepts
-// plain-text instructions, the complete supplied transcript, and a final user
+// plain-text instructions, user images, the complete transcript, and a final user
 // turn. Tools are declared to upstream as client MCP tools so the client, not the
 // gateway, executes them.
 func validateRequest(req upstream.UpstreamRequest) (preparedRequest, error) {
@@ -88,6 +91,11 @@ func validateRequest(req upstream.UpstreamRequest) (preparedRequest, error) {
 	if len(messages) == 0 || messages[len(messages)-1].Role != "user" {
 		return preparedRequest{}, apperrors.NewLocalRequestError("warp_dialog")
 	}
+	messages, images, historical, err := prepareImageContext(messages)
+	if err != nil {
+		return preparedRequest{}, err
+	}
+	prepared := preparedRequest{Tools: tools, ParallelTools: parallel, Images: images, HistoryImages: historical}
 	// Validate the final original user message before joining context fragments.
 	_, finalText, finalResults, ok := splitCurrentTurn(messages, 0)
 	if !ok || (strings.TrimSpace(finalText) == "" && len(finalResults) == 0) {
@@ -161,7 +169,8 @@ func validateRequest(req upstream.UpstreamRequest) (preparedRequest, error) {
 		if strings.TrimSpace(text) == "" || !validModel(req.Model) {
 			return reject()
 		}
-		return preparedRequest{Query: text, CurrentText: text, Tools: tools, ParallelTools: parallel}, nil
+		prepared.Query, prepared.CurrentText = text, text
+		return prepared, nil
 	}
 	transcript, ok := renderTranscript(system, history)
 	if !ok {
@@ -183,7 +192,8 @@ func validateRequest(req upstream.UpstreamRequest) (preparedRequest, error) {
 		}
 		continuationText = prefix
 	}
-	return preparedRequest{Query: transcript, CurrentText: continuationText, Tools: tools, ParallelTools: parallel, ToolResults: preparedResults}, nil
+	prepared.Query, prepared.CurrentText, prepared.ToolResults = transcript, continuationText, preparedResults
+	return prepared, nil
 }
 
 // splitCurrentTurn separates the final user turn into plain text and the tool

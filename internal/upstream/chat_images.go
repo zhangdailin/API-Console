@@ -96,28 +96,36 @@ func (b *ChatImageBudget) imageURL(block prompt.ContentBlock) (string, bool) {
 }
 
 func (b *ChatImageBudget) takeInlineImage(mime, data string) bool {
+	size, ok := InlineImageSize(mime, data, maxInlineImageSize-b.inlineBytes)
+	if ok {
+		b.inlineBytes += size
+	}
+	return ok
+}
+
+// InlineImageSize validates Base64 raster data within a decoded byte limit
+// without retaining a copy of the decoded image.
+func InlineImageSize(mime, data string, limit int) (int, bool) {
 	switch mime {
 	case "image/png", "image/jpeg", "image/gif", "image/webp":
 	default:
-		return false
+		return 0, false
 	}
-	remaining := maxInlineImageSize - b.inlineBytes
-	if len(data) == 0 || len(data) > base64.StdEncoding.EncodedLen(remaining) {
-		return false
+	if limit <= 0 || len(data) == 0 || len(data) > base64.StdEncoding.EncodedLen(limit) {
+		return 0, false
 	}
 	decoded := base64.NewDecoder(base64.StdEncoding, strings.NewReader(data))
 	var header [512]byte
 	n, err := io.ReadFull(decoded, header[:])
 	if err != nil && err != io.ErrUnexpectedEOF {
-		return false
+		return 0, false
 	}
 	if http.DetectContentType(header[:n]) != mime {
-		return false
+		return 0, false
 	}
 	rest, err := io.Copy(io.Discard, decoded)
-	if size := n + int(rest); err == nil && size <= remaining {
-		b.inlineBytes += size
-		return true
+	if size := n + int(rest); err == nil && size <= limit {
+		return size, true
 	}
-	return false
+	return 0, false
 }

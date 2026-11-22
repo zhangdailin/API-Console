@@ -56,7 +56,7 @@ type PublicModelResponse struct {
 
 func applyObservedImageSupport(entry *PublicModelResponse, observations *modelContextWindows, channel string, modelIDs ...string) {
 	for _, modelID := range modelIDs {
-		if supported, observed := observations.images[contextKey(channel, modelID)]; observed {
+		if supported, observed := observations.images[imageSupportKey(channel, modelID)]; observed {
 			entry.SupportsImages = new(supported)
 			entry.InputModalities = []string{"text"}
 			if supported {

@@ -333,6 +333,8 @@ func rawContentBlock(block map[string]json.RawMessage, role, path string) error 
 		return wireFieldError(path+".type", "must be a supported content type")
 	}
 	switch kind {
+	case "image", "image_url", "input_image":
+		return rawImageBlock(block, kind, role, path)
 	case "thinking":
 		if role != "assistant" || !rawKeys(block, "type", "thinking", "signature") {
 			return wireFieldError(path, "thinking is supported only as assistant history without extra fields")

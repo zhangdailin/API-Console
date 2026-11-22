@@ -270,6 +270,12 @@ func (p accountPatch) mergeWarpCredentials() {
 		case modelsNewer:
 			u.WarpModelWindows = nil
 		}
+		switch {
+		case acc.WarpModelVision != nil:
+			u.WarpModelVision = cloneWarpModelVision(u.WarpModelIDs, acc.WarpModelVision)
+		case modelsNewer:
+			u.WarpModelVision = nil
+		}
 		if !acc.WarpModelsSyncedAt.IsZero() {
 			u.WarpModelsSyncedAt = acc.WarpModelsSyncedAt
 		}

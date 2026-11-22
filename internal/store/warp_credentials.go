@@ -45,15 +45,9 @@ func (s *Store) UpdateWarpCatalog(ctx context.Context, id int64, expectedRefresh
 }
 
 func (s *redisStore) UpdateWarpCatalog(ctx context.Context, id int64, expectedRefresh string, ids []string, syncedAt time.Time) error {
-	return s.updateAccountAtomic(ctx, id, func(acc *Account) error {
-		if acc.WarpRefreshToken != expectedRefresh {
-			return fmt.Errorf("warp credential changed concurrently")
-		}
-		if !syncedAt.After(acc.WarpModelsSyncedAt) {
-			return nil
-		}
-		acc.WarpModelIDs = append([]string(nil), ids...)
-		acc.WarpModelsSyncedAt = syncedAt
-		return nil
+	return s.UpdateWarpCatalogSnapshot(ctx, id, WarpCatalogPatch{
+		ExpectedRefreshToken: expectedRefresh,
+		ModelIDs:             ids,
+		SyncedAt:             syncedAt,
 	})
 }

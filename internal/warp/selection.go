@@ -48,8 +48,5 @@ func refreshSelectionCatalog(ctx context.Context, env provider.Env, snapshot *st
 	if observation.Record == nil || !observation.Record(current, time.Now()) {
 		return errors.New("Warp catalog observation was empty")
 	}
-	return env.Store.UpdateWarpCatalogSnapshot(ctx, current.ID, store.WarpCatalogPatch{
-		ExpectedRefreshToken: current.WarpRefreshToken, ModelIDs: current.WarpModelIDs,
-		ModelWindows: current.WarpModelWindows, SyncedAt: current.WarpModelsSyncedAt,
-	})
+	return env.Store.UpdateWarpCatalogSnapshot(ctx, current.ID, catalogPatch(current))
 }

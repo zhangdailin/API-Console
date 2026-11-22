@@ -50,8 +50,7 @@ func adminPort() *provider.Admin {
 			applyCredentials(acc, credentials(existing))
 			acc.Email = existing.Email
 			acc.UserID = existing.UserID
-			acc.WarpModelIDs = append([]string(nil), existing.WarpModelIDs...)
-			acc.WarpModelsSyncedAt = existing.WarpModelsSyncedAt
+			copyCatalogSnapshot(acc, existing)
 			acc.WarpQuota = existing.WarpQuota.Clone()
 			provider.PreserveObservedState(acc, existing)
 			return nil

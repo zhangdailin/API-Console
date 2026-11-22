@@ -120,7 +120,7 @@ func TestWarpCatalogUpdateRequiresConfiguredStore(t *testing.T) {
 	testutil.Error(t, (&Store{}).UpdateWarpCatalog(t.Context(), 1, "", []string{"model-a"}, time.Now()))
 }
 
-func TestWarpCatalogSnapshotPersistsWindowsAtomically(t *testing.T) {
+func TestWarpCatalogSnapshotPersistsMetadataAtomically(t *testing.T) {
 	s, _ := newWarpTestStore(t)
 	ctx := t.Context()
 	observed := time.Date(2030, 1, 2, 0, 0, 0, 0, time.UTC)
@@ -130,6 +130,7 @@ func TestWarpCatalogSnapshotPersistsWindowsAtomically(t *testing.T) {
 		WarpExpiresAt: observed.Add(24 * time.Hour),
 		WarpModelIDs:  []string{"old-model"}, WarpModelsSyncedAt: observed,
 		WarpModelWindows: map[string]int{"old-model": 1000},
+		WarpModelVision:  map[string]bool{"old-model": true},
 		UsageCurrent:     3, UsageTotal: 10, RequestCount: 2,
 	}
 	testutil.NoError(t, s.CreateAccount(ctx, acc))
@@ -141,6 +142,7 @@ func TestWarpCatalogSnapshotPersistsWindowsAtomically(t *testing.T) {
 		ExpectedRefreshToken: "catalog-refresh",
 		ModelIDs:             []string{"model-b", "model-a"},
 		ModelWindows:         map[string]int{"model-a": 200000, "model-b": 0},
+		ModelVision:          map[string]bool{"model-a": true, "model-b": false, "foreign-model": true},
 		SyncedAt:             newer,
 	}))
 	got, err := s.GetAccount(ctx, acc.ID)
@@ -148,10 +150,11 @@ func TestWarpCatalogSnapshotPersistsWindowsAtomically(t *testing.T) {
 	want := before.Clone()
 	want.WarpModelIDs = []string{"model-b", "model-a"}
 	want.WarpModelWindows = map[string]int{"model-a": 200000}
+	want.WarpModelVision = map[string]bool{"model-a": true, "model-b": false}
 	want.WarpModelsSyncedAt = newer
 	want.UpdatedAt = got.UpdatedAt
-	// Compare the whole row: a catalog owns IDs, windows and the timestamp only.
-	testutil.True(t, reflect.DeepEqual(got, want), "catalog snapshot changed non-catalog account fields or stored a non-positive window")
+	// Compare the whole row to detect writes outside the catalog snapshot.
+	testutil.True(t, reflect.DeepEqual(got, want), "catalog metadata or account fields changed unexpectedly")
 
 	// A stale or equal observation must not replace IDs and windows, because
 	// they belong to the same catalog generation.
@@ -160,6 +163,7 @@ func TestWarpCatalogSnapshotPersistsWindowsAtomically(t *testing.T) {
 			ExpectedRefreshToken: "catalog-refresh",
 			ModelIDs:             []string{"stale-model"},
 			ModelWindows:         map[string]int{"stale-model": 1},
+			ModelVision:          map[string]bool{"stale-model": true},
 			SyncedAt:             stamp,
 		}))
 		unchanged, err := s.GetAccount(ctx, acc.ID)
@@ -179,6 +183,7 @@ func TestWarpCatalogSnapshotPersistsWindowsAtomically(t *testing.T) {
 		ExpectedRefreshToken: "catalog-refresh",
 		ModelIDs:             []string{"late-model"},
 		ModelWindows:         map[string]int{"late-model": 5},
+		ModelVision:          map[string]bool{"late-model": true},
 		SyncedAt:             newer.Add(time.Hour),
 	})
 	testutil.Error(t, err)
@@ -188,7 +193,7 @@ func TestWarpCatalogSnapshotPersistsWindowsAtomically(t *testing.T) {
 	testutil.True(t, reflect.DeepEqual(rejected, authoritative), "rejected catalog snapshot changed the account")
 }
 
-func TestWarpCatalogSnapshotClearsOlderWindows(t *testing.T) {
+func TestWarpCatalogSnapshotClearsOlderMetadata(t *testing.T) {
 	s, _ := newWarpTestStore(t)
 	ctx := t.Context()
 	observed := time.Date(2030, 1, 2, 0, 0, 0, 0, time.UTC)
@@ -196,6 +201,7 @@ func TestWarpCatalogSnapshotClearsOlderWindows(t *testing.T) {
 		AccountType: "warp", Enabled: false, WarpRefreshToken: "catalog-refresh",
 		WarpModelIDs: []string{"old-model"}, WarpModelsSyncedAt: observed,
 		WarpModelWindows: map[string]int{"old-model": 1000},
+		WarpModelVision:  map[string]bool{"old-model": true},
 	}
 	testutil.NoError(t, s.CreateAccount(ctx, acc))
 	// A newer catalog observation without window evidence clears the previous
@@ -209,6 +215,7 @@ func TestWarpCatalogSnapshotClearsOlderWindows(t *testing.T) {
 	testutil.NoError(t, err)
 	testutil.True(t, slices.Equal(got.WarpModelIDs, []string{"new-model"}), "catalog IDs were not replaced")
 	testutil.True(t, got.WarpModelWindows == nil, "older catalog windows survived a newer observation without evidence")
+	testutil.True(t, got.WarpModelVision == nil, "older vision capabilities survived a newer observation without evidence")
 	testutil.False(t, got.Enabled, "catalog snapshot re-enabled a disabled account")
 }
 
@@ -265,11 +272,15 @@ func TestWarpAccountUpdateMergesWindowsWithCatalogGeneration(t *testing.T) {
 	}
 }
 
-func TestWarpAccountCloneIsolatesModelWindows(t *testing.T) {
-	acc := &Account{WarpModelWindows: map[string]int{"model-a": 1000}}
+func TestWarpAccountCloneIsolatesModelMetadata(t *testing.T) {
+	acc := &Account{WarpModelWindows: map[string]int{"model-a": 1000}, WarpModelVision: map[string]bool{"model-a": false}}
 	clone := acc.Clone()
 	clone.WarpModelWindows["model-a"] = 2000
 	clone.WarpModelWindows["model-b"] = 1
+	clone.WarpModelVision["model-a"] = true
+	clone.WarpModelVision["model-b"] = false
 	testutil.Equal(t, acc.WarpModelWindows["model-a"], 1000)
 	testutil.Equal(t, len(acc.WarpModelWindows), 1)
+	testutil.False(t, acc.WarpModelVision["model-a"], "clone changed original vision capability")
+	testutil.Equal(t, len(acc.WarpModelVision), 1)
 }

@@ -165,9 +165,16 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	}
 	c.mu.Lock()
 	supported := capabilities{}.SupportsModel(c.account, req.Model)
+	var vision, visionKnown bool
+	if supported && len(prepared.Images) != 0 {
+		vision, visionKnown = c.account.WarpModelVision[req.Model]
+	}
 	c.mu.Unlock()
 	if !supported {
 		return apperrors.NewLocalRequestError("warp_model_catalog")
+	}
+	if visionKnown && !vision {
+		return apperrors.NewLocalRequestError("warp_image_model")
 	}
 	prepared.ContextWindow = c.modelContextWindow(req.Model)
 	c.mu.Lock()
@@ -203,6 +210,7 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 			return apperrors.New("warp_continuation_unavailable", "Warp tool continuation expired or belongs to a different owner, account or model; no upstream call was made", 409)
 		}
 		prepared.ConversationID, prepared.Query = binding.ConversationID, prepared.CurrentText
+		prepared.Images = prepared.Images[prepared.HistoryImages:]
 		prepared.RootTaskContext, prepared.ToolRounds = binding.RootTaskContext, binding.ToolRounds
 		continuation, continuationIDs = &binding, ids
 		if explicitResume {

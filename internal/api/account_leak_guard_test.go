@@ -50,7 +50,7 @@ func TestAccountSecretFieldsAreComplete(t *testing.T) {
 		WorkBuddyModelsSyncedAt WorkBuddyQuota WorkBuddyRestrictedUntil
 		ClineExpiresAt ClineEmail ClinePlan ReplaceClineCredentials ClineModelIDs
 		ClineModelsSyncedAt
-		WarpExpiresAt ReplaceWarpCredentials WarpModelIDs WarpModelsSyncedAt WarpModelWindows WarpQuota
+		WarpExpiresAt ReplaceWarpCredentials WarpModelIDs WarpModelsSyncedAt WarpModelWindows WarpModelVision WarpQuota
 		DoubaoVerifiedAt DoubaoSessionUpdate
 	`) {
 		nonSecret[name] = true

@@ -232,6 +232,9 @@ type Account struct {
 	// observed with a window; it is not defaulted here, because a guess would be
 	// indistinguishable from evidence to the prompt budgeter.
 	WarpModelWindows map[string]int `json:"warp_model_windows,omitempty"`
+	// WarpModelVision is observed image input support for the same catalog.
+	// A missing entry is unknown and is distinct from a reported false.
+	WarpModelVision map[string]bool `json:"warp_model_vision,omitempty"`
 	// WarpQuota is display-only and must never drive production scheduling.
 	WarpQuota WarpQuotaSnapshot `json:"warp_quota"`
 

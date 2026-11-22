@@ -102,15 +102,7 @@ func loginPort() *provider.Login {
 			// failure must not discard an otherwise successful login. The
 			// maintenance loop retries both until they are observed.
 			if choices, err := c.FetchModelChoices(ctx); err == nil {
-				ids := make([]string, 0, len(choices))
-				windows := make(map[string]int, len(choices))
-				for _, choice := range choices {
-					ids = append(ids, choice.ID)
-					if choice.ContextWindow > 0 {
-						windows[choice.ID] = choice.ContextWindow
-					}
-				}
-				setCatalogSnapshotWithWindows(acc, ids, windows, time.Now())
+				setCatalogChoices(acc, choices, time.Now())
 			}
 			c.refreshQuota(ctx, acc, nil)
 			return acc, nil
@@ -121,8 +113,7 @@ func loginPort() *provider.Login {
 			existing.ReplaceWarpCredentials = true
 			existing.Email = fresh.Email
 			existing.UserID = fresh.UserID
-			existing.WarpModelIDs = append([]string(nil), fresh.WarpModelIDs...)
-			existing.WarpModelsSyncedAt = fresh.WarpModelsSyncedAt
+			copyCatalogSnapshot(existing, fresh)
 			existing.WarpQuota = fresh.WarpQuota.Clone()
 			existing.ClearVerifiedAt = true
 			existing.AuthStatus = store.AccountAuthStatusActive

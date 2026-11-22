@@ -36,6 +36,13 @@ func contextKey(channel, modelID string) string {
 	return strings.ToLower(strings.TrimSpace(channel)) + "\x00" + strings.ToLower(strings.TrimSpace(modelID))
 }
 
+func imageSupportKey(channel, modelID string) string {
+	if spec, ok := provider.Lookup(channel); ok && spec.ExactModelID {
+		return string(spec.ID) + "\x00" + strings.TrimSpace(modelID)
+	}
+	return contextKey(channel, modelID)
+}
+
 // lookup answers the input window and output budget for one model. A zero means
 // "never observed" and must be rendered as an absent field, not as a zero.
 func (w *modelContextWindows) lookup(channel string, modelIDs ...string) (int, int) {
@@ -94,7 +101,7 @@ func (h *Handler) observedModelContextWindows(ctx context.Context) *modelContext
 		// nothing here.
 		channel := strings.ToLower(strings.TrimSpace(acc.AccountType))
 		for modelID, supports := range provider.ImageSupport(channel, acc) {
-			key := contextKey(channel, modelID)
+			key := imageSupportKey(channel, modelID)
 			prior, exists := w.images[key]
 			w.images[key] = supports && (!exists || prior)
 		}

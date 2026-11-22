@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"orchids-api/internal/provider"
 	"orchids-api/internal/store"
 )
 
@@ -56,7 +57,7 @@ func planesCatalogClient(t *testing.T, response string) *Client {
 		}
 		for _, field := range []string{
 			"agentMode", "planning", "coding", "cliAgent", "computerUseAgent",
-			"contextWindow { default max min isConfigurable }",
+			"contextWindow { default max min isConfigurable }", "visionSupported",
 		} {
 			if !strings.Contains(request.Query, field) {
 				t.Errorf("catalog query does not request %q", field)
@@ -214,5 +215,44 @@ func TestCapabilitiesContextWindowsObservedOnly(t *testing.T) {
 	}
 	if input, output := caps.ContextWindows(&store.Account{}); input != nil || output != nil {
 		t.Fatalf("empty observation produced budgets: %v %v", input, output)
+	}
+}
+
+func TestCatalogPublishesObservedVisionForFreshExactModels(t *testing.T) {
+	client := planesCatalogClient(t, catalogResponseWithChoices(`
+		{"id":"vision-model","visionSupported":true},
+		{"id":"text-model","visionSupported":false},
+		{"id":"old-model"},
+		{"id":"unknown-null","visionSupported":null},
+		{"id":"unknown-invalid","visionSupported":"true"},
+		{"id":"conflicting-model","visionSupported":true},
+		{"id":"conflicting-model","visionSupported":false},
+		{"id":"conflicting-model","visionSupported":true},
+		{"id":"auto","visionSupported":true}`))
+	observation, err := client.observeCatalog(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	acc := testAccount()
+	acc.WarpModelVision = map[string]bool{"old-model": true}
+	if !observation.Record(acc, time.Now()) {
+		t.Fatal("successful catalog was not recorded")
+	}
+	want := map[string]bool{"vision-model": true, "text-model": false, "conflicting-model": false}
+	if got := provider.ImageSupport("warp", acc); !reflect.DeepEqual(got, want) {
+		t.Fatalf("published image support = %v, want %v", got, want)
+	}
+	acc.WarpModelVision["Vision-Model"] = true
+	got := provider.ImageSupport("warp", acc)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("an ID outside the exact catalog was published: %v", got)
+	}
+	got["vision-model"] = false
+	if !acc.WarpModelVision["vision-model"] {
+		t.Fatal("capability projection exposed mutable account state")
+	}
+	acc.WarpModelsSyncedAt = time.Now().Add(-2 * provider.HealthRefreshInterval)
+	if got := provider.ImageSupport("warp", acc); got != nil {
+		t.Fatalf("published stale image support: %v", got)
 	}
 }

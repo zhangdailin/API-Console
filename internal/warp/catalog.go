@@ -3,6 +3,7 @@ package warp
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"math"
 	"regexp"
 	"sort"
@@ -18,7 +19,7 @@ const catalogSource = "warp_feature_model_choice"
 // contextWindow is a direct field of the official LlmInfo choice (not nested
 // under spec, which only carries cost/quality/speed). Each of the five feature
 // planes is an execution profile of the same account catalog.
-const catalogChoiceSelection = `id disableReason usageMetadata { creditMultiplier requestMultiplier } contextWindow { default max min isConfigurable }`
+const catalogChoiceSelection = `id disableReason visionSupported usageMetadata { creditMultiplier requestMultiplier } contextWindow { default max min isConfigurable }`
 const catalogQuery = `query GetFeatureModelChoices($requestContext: RequestContext!) { user(requestContext: $requestContext) { __typename ... on UserOutput { user { workspaces { featureModelChoice { agentMode { choices { ` + catalogChoiceSelection + ` } } planning { choices { ` + catalogChoiceSelection + ` } } coding { choices { ` + catalogChoiceSelection + ` } } cliAgent { choices { ` + catalogChoiceSelection + ` } } computerUseAgent { choices { ` + catalogChoiceSelection + ` } } } } } } } }`
 
 // ModelChoice carries usage and context budget observed in a single account's
@@ -30,6 +31,7 @@ type ModelChoice struct {
 	CreditMultiplier  *float64
 	RequestMultiplier *float64
 	ContextWindow     int
+	VisionSupported   *bool
 }
 
 // catalogPlane is one feature plane of a workspace's featureModelChoice.
@@ -41,6 +43,7 @@ type catalogChoice struct {
 	ID       string          `json:"id"`
 	Disabled json.RawMessage `json:"disableReason"`
 	Usage    json.RawMessage `json:"usageMetadata"`
+	Vision   json.RawMessage `json:"visionSupported"`
 	// contextWindow is a direct LlmInfo field in the official schema; it is not
 	// inside spec (which only holds cost/quality/speed scalars).
 	ContextWindow struct {
@@ -84,6 +87,17 @@ func parseCatalogUsage(raw json.RawMessage) (credit, request *float64) {
 		return nil, nil
 	}
 	return parseCatalogMultiplier(usage.Credit), parseCatalogMultiplier(usage.Request)
+}
+
+func parseCatalogVision(raw json.RawMessage) *bool {
+	switch string(raw) {
+	case "true":
+		return new(true)
+	case "false":
+		return new(false)
+	default:
+		return nil
+	}
 }
 
 func equalCatalogMultiplier(a, b *float64) bool {
@@ -181,15 +195,22 @@ func (c *Client) FetchModelChoices(ctx context.Context) ([]ModelChoice, error) {
 				}
 				credit, request := parseCatalogUsage(choice.Usage)
 				window := parseCatalogContextWindow(choice)
+				vision := parseCatalogVision(choice.Vision)
 				index, exists := seen[choice.ID]
 				if !exists {
 					seen[choice.ID] = len(choices)
 					choices = append(choices, ModelChoice{
 						ID: choice.ID, CreditMultiplier: credit, RequestMultiplier: request, ContextWindow: window,
+						VisionSupported: vision,
 					})
 					continue
 				}
 				previous := &choices[index]
+				// A missing flag is not a denial. A known denial in any plane
+				// prevents us from claiming the exact model always accepts images.
+				if previous.VisionSupported == nil || (vision != nil && !*vision) {
+					previous.VisionSupported = vision
+				}
 				if conflicting[choice.ID] || !equalCatalogMultiplier(previous.CreditMultiplier, credit) || !equalCatalogMultiplier(previous.RequestMultiplier, request) {
 					// Workspace and plane disagreements are not a range across
 					// accounts. Do not let whichever one happens to come first
@@ -231,12 +252,8 @@ func (c *Client) observeCatalog(ctx context.Context) (provider.Observation, erro
 	grant := credentials(c.account)
 	c.mu.Unlock()
 	ids := make([]string, 0, len(choices))
-	windows := make(map[string]int, len(choices))
 	for _, choice := range choices {
 		ids = append(ids, choice.ID)
-		if choice.ContextWindow > 0 {
-			windows[choice.ID] = choice.ContextWindow
-		}
 	}
 	models := catalogModels(ids)
 	observedAt := time.Now().UTC()
@@ -259,44 +276,58 @@ func (c *Client) observeCatalog(ctx context.Context) (provider.Observation, erro
 			// Rotation has already been committed by accessToken. Do not request
 			// credential replacement when this snapshot is persisted later.
 			applyCredentials(acc, grant)
-			setCatalogSnapshotWithWindows(acc, ids, windows, now)
+			setCatalogChoices(acc, choices, now)
 			return true
 		},
 	}, nil
 }
 
-// setCatalogSnapshot records a catalog identity list without window evidence.
-// It is the shape the login flow has: a fresh list and no contextWindow read.
+// setCatalogSnapshot records a catalog identity list without metadata evidence.
 func setCatalogSnapshot(acc *store.Account, ids []string, now time.Time) {
-	setCatalogSnapshotWithWindows(acc, ids, nil, now)
-}
-
-// setCatalogSnapshotWithWindows records one catalog observation. The windows
-// map is replaced, never merged with the previous generation: a model that
-// disappeared from the catalog must not keep an old budget, and an observation
-// without windows must not inherit them.
-func setCatalogSnapshotWithWindows(acc *store.Account, ids []string, windows map[string]int, now time.Time) {
 	acc.WarpModelIDs = append([]string(nil), ids...)
 	acc.WarpModelsSyncedAt = now
-	acc.WarpModelWindows = catalogWindows(windows)
+	acc.WarpModelWindows = nil
+	acc.WarpModelVision = nil
 }
 
-// catalogWindows keeps only positive windows of IDs this channel can publish.
-// An absent window is unknown, so it is omitted rather than defaulted.
-func catalogWindows(windows map[string]int) map[string]int {
-	if len(windows) == 0 {
-		return nil
-	}
-	observed := make(map[string]int, len(windows))
-	for id, window := range windows {
-		if validModel(id) && window > 0 {
-			observed[id] = window
+// setCatalogChoices replaces the IDs, windows and vision flags together so
+// models never inherit metadata from a different observation.
+func setCatalogChoices(acc *store.Account, choices []ModelChoice, now time.Time) {
+	acc.WarpModelIDs = make([]string, 0, len(choices))
+	acc.WarpModelsSyncedAt = now
+	acc.WarpModelWindows, acc.WarpModelVision = nil, nil
+	for _, choice := range choices {
+		acc.WarpModelIDs = append(acc.WarpModelIDs, choice.ID)
+		if choice.ContextWindow > 0 {
+			if acc.WarpModelWindows == nil {
+				acc.WarpModelWindows = make(map[string]int)
+			}
+			acc.WarpModelWindows[choice.ID] = choice.ContextWindow
+		}
+		if choice.VisionSupported != nil {
+			if acc.WarpModelVision == nil {
+				acc.WarpModelVision = make(map[string]bool)
+			}
+			acc.WarpModelVision[choice.ID] = *choice.VisionSupported
 		}
 	}
-	if len(observed) == 0 {
-		return nil
+}
+
+func copyCatalogSnapshot(dst, src *store.Account) {
+	dst.WarpModelIDs = append([]string(nil), src.WarpModelIDs...)
+	dst.WarpModelsSyncedAt = src.WarpModelsSyncedAt
+	dst.WarpModelWindows = maps.Clone(src.WarpModelWindows)
+	dst.WarpModelVision = maps.Clone(src.WarpModelVision)
+}
+
+func catalogPatch(acc *store.Account) store.WarpCatalogPatch {
+	return store.WarpCatalogPatch{
+		ExpectedRefreshToken: acc.WarpRefreshToken,
+		ModelIDs:             acc.WarpModelIDs,
+		ModelWindows:         acc.WarpModelWindows,
+		ModelVision:          acc.WarpModelVision,
+		SyncedAt:             acc.WarpModelsSyncedAt,
 	}
-	return observed
 }
 func catalogModels(ids []string) []provider.Model {
 	out := make([]provider.Model, 0, len(ids))
@@ -318,12 +349,7 @@ func catalogPort() *provider.Catalog {
 		LastKnown:   func(*store.Account) []provider.Model { return nil },
 		SetSnapshot: setCatalogSnapshot,
 		Persist: func(ctx context.Context, s *store.Store, acc *store.Account) error {
-			return s.UpdateWarpCatalogSnapshot(ctx, acc.ID, store.WarpCatalogPatch{
-				ExpectedRefreshToken: acc.WarpRefreshToken,
-				ModelIDs:             acc.WarpModelIDs,
-				ModelWindows:         acc.WarpModelWindows,
-				SyncedAt:             acc.WarpModelsSyncedAt,
-			})
+			return s.UpdateWarpCatalogSnapshot(ctx, acc.ID, catalogPatch(acc))
 		},
 		ShapeRecord: func(m *store.Model) { m.Capabilities = []string{"chat", "text"} },
 	}

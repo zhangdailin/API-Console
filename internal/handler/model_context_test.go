@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
@@ -82,6 +83,33 @@ func TestPublicModelsPublishWorkBuddyContextWindow(t *testing.T) {
 	testutil.Equal(t, entries["wb-model"].MaxCompletionTokens, 32000)
 	testutil.Equal(t, entries["legacy-model"].ContextLength, 0)
 	testutil.Equal(t, entries["legacy-model"].MaxCompletionTokens, 0)
+}
+
+func TestWarpModelsPublishVisionOnlyForObservedExactID(t *testing.T) {
+	h, s, _ := setupModelValidationHandler(t)
+	ctx := t.Context()
+	acc := createEnabledTestAccount(t, s, "warp-1", "warp")
+	ids := []string{"Vision-model", "vision-model", "unobserved-model"}
+	testutil.NoError(t, s.UpdateWarpCatalogSnapshot(ctx, acc.ID, store.WarpCatalogPatch{
+		ExpectedRefreshToken: acc.WarpRefreshToken,
+		ModelIDs:             ids,
+		ModelVision:          map[string]bool{ids[0]: true, ids[1]: false},
+		SyncedAt:             time.Now(),
+	}))
+	for _, id := range ids {
+		publishModel(t, s, &store.Model{Channel: "warp", ModelID: id})
+	}
+	for i, want := range []*bool{new(true), new(false), nil} {
+		rec := httptest.NewRecorder()
+		h.HandleModelByID(rec, httptest.NewRequest(http.MethodGet, "http://example.com/warp/v1/models/"+ids[i], nil))
+		testutil.Equal(t, rec.Code, http.StatusOK)
+		var entry PublicModelResponse
+		testutil.NoError(t, json.Unmarshal(rec.Body.Bytes(), &entry))
+		testutil.Equal(t, entry.ID, ids[i])
+		if got := entry.SupportsImages; (got == nil) != (want == nil) || (got != nil && want != nil && *got != *want) {
+			t.Errorf("model %s advertises %v, want %v", ids[i], got, want)
+		}
+	}
 }
 
 // A Grok model name alone must not manufacture a context window.

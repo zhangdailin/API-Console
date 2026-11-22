@@ -63,6 +63,23 @@ func (capabilities) ContextWindows(acc *store.Account) (input, output map[string
 	return windows, nil
 }
 
+// ImageSupport publishes only flags observed for exact IDs in a fresh catalog.
+func (capabilities) ImageSupport(acc *store.Account) map[string]bool {
+	if !freshSnapshot(acc) || len(acc.WarpModelVision) == 0 {
+		return nil
+	}
+	vision := make(map[string]bool, len(acc.WarpModelVision))
+	for _, id := range acc.WarpModelIDs {
+		if flag, ok := acc.WarpModelVision[id]; ok && validModel(id) {
+			vision[id] = flag
+		}
+	}
+	if len(vision) == 0 {
+		return nil
+	}
+	return vision
+}
+
 func (capabilities) HonorsModelCooldown() bool { return false }
 
 // Maintenance reads only credentials and catalog, never a paid generation.
