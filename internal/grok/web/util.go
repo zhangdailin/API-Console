@@ -373,9 +373,17 @@ func isRemoteURL(raw string) bool {
 }
 
 func fetchRemoteAsDataURI(ctx context.Context, rawURL string, timeout time.Duration, proxyFunc func(*http.Request) (*url.URL, error), maxBytes int64) (string, error) {
+	data, mime, err := fetchRemoteAttachment(ctx, rawURL, timeout, proxyFunc, maxBytes, "image/*, video/*;q=0.9, */*;q=0.8")
+	if err != nil {
+		return "", err
+	}
+	return dataURIFromBytes(mime, data), nil
+}
+
+func fetchRemoteAttachment(ctx context.Context, rawURL string, timeout time.Duration, proxyFunc func(*http.Request) (*url.URL, error), maxBytes int64, accept string) ([]byte, string, error) {
 	u := strings.TrimSpace(rawURL)
 	if u == "" {
-		return "", fmt.Errorf("empty url")
+		return nil, "", fmt.Errorf("empty url")
 	}
 	if timeout <= 0 {
 		timeout = 30 * time.Second
@@ -386,37 +394,40 @@ func fetchRemoteAsDataURI(ctx context.Context, rawURL string, timeout time.Durat
 	defer cancel()
 	target, err := checkRemoteFetchTarget(ctx, u, proxyFunc != nil)
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
 	client := newRemoteFetchClient(timeout, proxyFunc)
 	req, err := http.NewRequest(http.MethodGet, target.String(), nil)
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
 	// Many image hosts and CDNs refuse Go's default client identity.
 	req.Header.Set("User-Agent", config.DefaultGrokWebUserAgent)
-	req.Header.Set("Accept", "image/*, video/*;q=0.9, */*;q=0.8")
+	req.Header.Set("Accept", accept)
 	req = req.WithContext(ctx)
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("fetch url status=%d", resp.StatusCode)
+		return nil, "", fmt.Errorf("fetch url status=%d", resp.StatusCode)
+	}
+	if resp.ContentLength > maxBytes {
+		return nil, "", fmt.Errorf("remote attachment exceeds the size limit")
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
 	if int64(len(data)) > maxBytes {
-		return "", fmt.Errorf("remote attachment exceeds the size limit")
+		return nil, "", fmt.Errorf("remote attachment exceeds the size limit")
 	}
 	mime := strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0])
 	if mime == "" {
 		mime = mimeFromFilename(u)
 	}
-	return dataURIFromBytes(mime, data), nil
+	return data, mime, nil
 }
 
 func mimeFromFilename(name string) string {

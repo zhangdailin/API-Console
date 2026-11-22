@@ -2,12 +2,10 @@ package web
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"maps"
-	"net/http"
-	"orchids-api/internal/httpclient"
 	"strings"
-	"time"
 )
 
 func (h *Handler) buildChatPayload(spec ModelSpec, text string, fileAttachments []string, req *ChatCompletionsRequest) map[string]any {
@@ -79,63 +77,25 @@ func buildVideoCreatePayload(spec ModelSpec, text string, attachmentInputs []Att
 	return payload, nil
 }
 
-func (h *Handler) uploadAttachmentInputs(ctx context.Context, token string, inputs []AttachmentInput) ([]string, error) {
-	if len(inputs) == 0 {
-		return nil, nil
-	}
+func (h *Handler) uploadChatAttachments(ctx context.Context, token string, inputs []preparedChatAttachment) ([]string, error) {
 	out := make([]string, 0, len(inputs))
-	remaining := maxChatDocumentBytes
 	for _, item := range inputs {
-		if item.Type == "file" {
-			filename, mime, data, err := h.loadChatDocument(ctx, item, remaining)
-			if err != nil {
-				return nil, err
-			}
-			remaining -= len(data)
-			id, err := h.webClient().uploadDirectAttachment(ctx, token, filename, mime, data, "/", "")
+		if item.document {
+			id, err := h.webClient().uploadDirectAttachment(ctx, token, item.name, item.mime, item.data, "/", "")
 			if err != nil {
 				return nil, err
 			}
 			out = append(out, id)
 			continue
 		}
-		fileID, fileURI, err := h.uploadSingleInput(ctx, token, item.Data)
+		id, uri, err := h.webClient().uploadFile(ctx, token, item.name, item.mime, base64.StdEncoding.EncodeToString(item.data))
 		if err != nil {
 			return nil, err
 		}
-		id := strings.TrimSpace(fileID)
 		if id == "" {
-			id = strings.TrimSpace(fileURI)
+			id = uri
 		}
-		if id != "" {
-			out = append(out, id)
-		}
+		out = append(out, id)
 	}
 	return uniqueStrings(out), nil
-}
-
-func (h *Handler) uploadSingleInput(ctx context.Context, token, input string) (string, string, error) {
-	data := strings.TrimSpace(input)
-	if data == "" {
-		return "", "", fmt.Errorf("empty attachment")
-	}
-	if isRemoteURL(data) {
-		var err error
-		proxyFunc := http.ProxyFromEnvironment
-		if h != nil && h.configSnapshot() != nil {
-			proxyFunc = httpclient.ProxyFuncFromConfig(h.configSnapshot())
-		}
-		data, err = fetchRemoteAsDataURI(ctx, data, 30*time.Second, proxyFunc, 60<<20)
-		if err != nil {
-			return "", "", err
-		}
-	}
-	filename, contentBase64, mime, err := parseDataURI(data)
-	if err != nil {
-		// Fallback for plain base64 payloads.
-		filename = "file.bin"
-		mime = "application/octet-stream"
-		contentBase64 = data
-	}
-	return h.webClient().uploadFile(ctx, token, filename, mime, contentBase64)
 }

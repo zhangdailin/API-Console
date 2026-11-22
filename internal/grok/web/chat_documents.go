@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"mime"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 	"time"
@@ -14,7 +15,11 @@ import (
 	"orchids-api/internal/httpclient"
 )
 
-const maxChatDocumentBytes = 16 << 20
+const (
+	maxChatDocumentBytes   = 16 << 20
+	maxChatAttachmentBytes = 64 << 20
+	maxChatMediaBytes      = 60 << 20
+)
 
 // Canonicalize documents before the shared validator. Ignore empty text
 // placeholders only in a user message that actually contains a document.
@@ -78,55 +83,169 @@ func normalizeChatDocuments(messages []ChatMessage) error {
 	return nil
 }
 
-func (h *Handler) loadChatDocument(ctx context.Context, input AttachmentInput, limit int) (string, string, []byte, error) {
-	source := input.Data
-	if isRemoteURL(source) {
+type preparedChatAttachment struct {
+	document   bool
+	name, mime string
+	data       []byte
+}
+
+// Decode and check the complete batch before any upload. The decoded bytes are
+// request-local; account switches may upload them again without fetching URLs again.
+func (h *Handler) prepareChatAttachments(ctx context.Context, inputs []AttachmentInput) ([]preparedChatAttachment, error) {
+	if len(inputs) > maxChatAttachments {
+		return nil, fmt.Errorf("at most %d attachments are supported per request", maxChatAttachments)
+	}
+	seen := make(map[AttachmentInput]struct{}, len(inputs))
+	out := make([]preparedChatAttachment, 0, len(inputs))
+	remaining, documents := maxChatAttachmentBytes, maxChatDocumentBytes
+	for _, input := range inputs {
+		input.Data = strings.TrimSpace(input.Data)
+		input.Filename = cleanChatAttachmentName(input.Filename)
+		if _, ok := seen[input]; ok {
+			continue
+		}
+		limit := min(remaining, maxChatMediaBytes)
+		document := input.Type == "file"
+		if document {
+			limit = min(remaining, documents)
+		}
+		attachment, err := h.loadChatAttachment(ctx, input, limit, document)
+		if err != nil {
+			return nil, err
+		}
+		seen[input] = struct{}{}
+		remaining -= len(attachment.data)
+		if document {
+			documents -= len(attachment.data)
+		}
+		out = append(out, attachment)
+	}
+	return out, nil
+}
+
+func (h *Handler) loadChatAttachment(ctx context.Context, input AttachmentInput, limit int, document bool) (preparedChatAttachment, error) {
+	if limit <= 0 {
+		return preparedChatAttachment{}, fmt.Errorf("chat attachments exceed the total size limit")
+	}
+	if err := ctx.Err(); err != nil {
+		return preparedChatAttachment{}, err
+	}
+	name := cleanChatAttachmentName(input.Filename)
+	var data []byte
+	var fallback, mediaType string
+	var err error
+	if isRemoteURL(input.Data) {
 		proxy := http.ProxyFromEnvironment
 		if cfg := h.configSnapshot(); cfg != nil {
 			proxy = httpclient.ProxyFuncFromConfig(cfg)
 		}
-		var err error
-		source, err = fetchRemoteAsDataURI(ctx, source, 30*time.Second, proxy, int64(limit))
+		accept := "*/*"
+		if !document {
+			accept = "image/*, video/*;q=0.9, */*;q=0.8"
+		}
+		data, mediaType, err = fetchRemoteAttachment(ctx, input.Data, 30*time.Second, proxy, int64(limit), accept)
 		if err != nil {
 			if ctx.Err() != nil {
-				return "", "", nil, ctx.Err()
+				return preparedChatAttachment{}, ctx.Err()
 			}
-			return "", "", nil, fmt.Errorf("could not fetch the public document URL within the attachment limits")
+			return preparedChatAttachment{}, fmt.Errorf("could not fetch the public attachment URL within the size limit")
+		}
+		if u, err := url.Parse(input.Data); err == nil && name == "" {
+			name = cleanChatAttachmentName(u.Path)
+		}
+	} else {
+		var encoded string
+		fallback, encoded, mediaType, err = parseDataURI(input.Data)
+		if err != nil {
+			if document {
+				return preparedChatAttachment{}, fmt.Errorf("file_data must be a Base64 data URI")
+			}
+			fallback, encoded, mediaType = "file.bin", input.Data, "application/octet-stream"
+		}
+		if base64.StdEncoding.DecodedLen(len(encoded)) > limit+2 {
+			return preparedChatAttachment{}, fmt.Errorf("chat attachments exceed the size limit")
+		}
+		data, err = base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			data, err = base64.RawStdEncoding.DecodeString(encoded)
+		}
+		if err != nil {
+			return preparedChatAttachment{}, fmt.Errorf("attachment must contain valid Base64 data")
 		}
 	}
-	fallback, encoded, mediaType, err := parseDataURI(source)
-	if err != nil {
-		return "", "", nil, fmt.Errorf("file_data must be a Base64 data URI")
+	if len(data) == 0 || len(data) > limit {
+		return preparedChatAttachment{}, fmt.Errorf("attachment is empty or exceeds the size limit")
 	}
-	if base64.StdEncoding.DecodedLen(len(encoded)) > limit+2 {
-		return "", "", nil, fmt.Errorf("chat documents exceed the attachment size limit")
+	if document {
+		name, mediaType, err = chatDocumentFormat(name, mediaType, data)
+		if err != nil {
+			return preparedChatAttachment{}, err
+		}
 	}
-	data, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil || len(data) == 0 || len(data) > limit {
-		return "", "", nil, fmt.Errorf("chat document must contain valid Base64 data within the attachment size limit")
+	if name == "" {
+		name = cleanChatAttachmentName(fallback)
+		if name == "" {
+			name = "file.bin"
+		}
 	}
-	mediaType, _, err = mime.ParseMediaType(mediaType)
-	if err != nil || !strings.Contains(mediaType, "/") {
-		return "", "", nil, fmt.Errorf("invalid attachment media type")
-	}
-	name := path.Base(strings.ReplaceAll(strings.TrimSpace(input.Filename), "\\", "/"))
+	return preparedChatAttachment{document: document, name: name, mime: mediaType, data: data}, nil
+}
+
+func cleanChatAttachmentName(name string) string {
+	name = path.Base(strings.ReplaceAll(strings.TrimSpace(name), "\\", "/"))
 	name = strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {
 			return -1
 		}
 		return r
 	}, name)
-	if name == "." || name == "/" || name == "" || len(name) > 255 {
-		name = path.Base(fallback)
+	if name == "." || name == ".." || name == "/" || len(name) > 255 {
+		return ""
 	}
-	if strings.HasPrefix(string(data[:min(len(data), 5)]), "%PDF-") {
+	return name
+}
+
+func chatDocumentFormat(name, declared string, data []byte) (string, string, error) {
+	mediaType, _, _ := mime.ParseMediaType(declared)
+	ext := strings.ToLower(path.Ext(name))
+	detected, _, _ := mime.ParseMediaType(http.DetectContentType(data))
+	hasPDFHeader := strings.HasPrefix(string(data[:min(len(data), 5)]), "%PDF-")
+	if hasPDFHeader {
 		mediaType = "application/pdf"
-		if !strings.EqualFold(path.Ext(name), ".pdf") {
+		if ext != ".pdf" {
 			name = "file.pdf"
 		}
+	} else if mediaType == "application/pdf" || ext == ".pdf" {
+		return "", "", fmt.Errorf("attachment is not a valid PDF")
 	}
-	if mediaType == "application/pdf" && (len(data) < 5 || string(data[:5]) != "%PDF-") {
-		return "", "", nil, fmt.Errorf("attachment is not a valid PDF")
+	if mediaType == "" || mediaType == "application/octet-stream" || mediaType == "application/zip" {
+		if hint := chatDocumentMIME(ext); hint != "" {
+			mediaType = hint
+		} else if mediaType != "application/zip" || detected != "application/octet-stream" {
+			mediaType = detected
+		}
 	}
-	return name, mediaType, data, nil
+	return name, mediaType, nil
+}
+
+func chatDocumentMIME(ext string) string {
+	switch ext {
+	case ".docx":
+		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	case ".xlsx":
+		return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	case ".pptx":
+		return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+	case ".doc":
+		return "application/msword"
+	case ".xls":
+		return "application/vnd.ms-excel"
+	case ".ppt":
+		return "application/vnd.ms-powerpoint"
+	case ".md", ".markdown":
+		return "text/markdown"
+	default:
+		value, _, _ := mime.ParseMediaType(mime.TypeByExtension(ext))
+		return value
+	}
 }

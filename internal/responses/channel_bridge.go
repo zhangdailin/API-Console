@@ -146,6 +146,10 @@ func ResponsesBridgeHandler(chat http.HandlerFunc, opts BridgeOptions) http.Hand
 			httpserver.WriteError(w, http.StatusInternalServerError, "failed to build chat request")
 			return
 		}
+		if opts.StoredInputReplayLimit > 0 && len(raw) > opts.StoredInputReplayLimit {
+			WriteAPIError(w, http.StatusRequestEntityTooLarge, "request_too_large", "conversation history exceeds the request size limit")
+			return
+		}
 
 		subReq := r.Clone(chatwire.WithSourceOperation(r.Context(), "responses"))
 		subReq.Method = http.MethodPost
@@ -295,7 +299,19 @@ func expandBridgedPreviousResponse(w http.ResponseWriter, r *http.Request, req *
 		WriteStoredLookupError(w, err, "previous response not found")
 		return false
 	}
-	expanded, err := expandStoredResponseInput(previous.Body, req.Input)
+	var storedInput []byte
+	if limit := opts.StoredInputReplayLimit; limit > 0 {
+		if previous.Provider != bridgedResponseProvider || previous.Model != req.Model {
+			WriteAPIError(w, http.StatusBadRequest, "invalid_request_error", "previous response belongs to a different model or route")
+			return false
+		}
+		if len(previous.InputItems)+len(previous.Body) > limit {
+			WriteAPIError(w, http.StatusRequestEntityTooLarge, "request_too_large", "stored conversation history exceeds the request size limit")
+			return false
+		}
+		storedInput = previous.InputItems
+	}
+	expanded, err := expandStoredResponseInput(previous.Body, storedInput, req.Input)
 	if err != nil {
 		WriteAPIError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return false

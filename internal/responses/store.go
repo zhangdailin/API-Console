@@ -43,6 +43,10 @@ type BridgeOptions struct {
 	Store Store
 	// TTL overrides the stored-response lifetime; zero uses the default.
 	TTL time.Duration
+	// StoredInputReplayLimit enables stateless history replay for providers
+	// that need the original user turns and attachments on each request.
+	// It bounds both stored history and the translated Chat request.
+	StoredInputReplayLimit int
 }
 
 // memoryFallbackWarned keeps the "no shared store" warning to one line per

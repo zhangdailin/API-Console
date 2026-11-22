@@ -124,6 +124,9 @@ func upstreamRetryAfterSeconds(err error) int {
 // unbounded Decode lets one client allocate arbitrary memory in the gateway.
 const maxGrokJSONBodyBytes = 32 << 20
 
+// MaxChatJSONBodyBytes is also enforced on internally bridged chat requests.
+const MaxChatJSONBodyBytes = maxGrokJSONBodyBytes
+
 // writeSSE sends an SSE frame and flushes when the writer supports it.
 func writeSSE(w http.ResponseWriter, flusher http.Flusher, event string, data []byte) {
 	httpserver.WriteSSEBytes(w, event, data)

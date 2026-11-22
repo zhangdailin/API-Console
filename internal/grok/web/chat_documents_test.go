@@ -54,7 +54,11 @@ func TestChatDocumentUsesUpstreamMultipartUpload(t *testing.T) {
 			}),
 		}}
 		h := &Handler{client: client}
-		ids, err := h.uploadAttachmentInputs(t.Context(), "fixture", inputs)
+		prepared, err := h.prepareChatAttachments(t.Context(), append(inputs, inputs...))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids, err := h.uploadChatAttachments(t.Context(), "fixture", prepared)
 		if err != nil || len(ids) != 1 || ids[0] != "fixture-upload" {
 			t.Fatalf("IDs=%v, err=%v", ids, err)
 		}
@@ -81,7 +85,31 @@ func TestChatDocumentValidationBoundaries(t *testing.T) {
 		}
 	}
 	h := &Handler{}
-	if _, _, _, err := h.loadChatDocument(t.Context(), AttachmentInput{Data: "data:application/pdf;base64,aGVsbG8="}, 100); err == nil {
+	if _, err := h.loadChatAttachment(t.Context(), AttachmentInput{Data: "data:application/pdf;base64,aGVsbG8="}, 100, true); err == nil {
 		t.Fatal("non-PDF body declared as PDF passed validation")
+	}
+}
+
+func TestChatAttachmentBatchRejectsInvalidLaterFile(t *testing.T) {
+	h := &Handler{}
+	prepared, err := h.prepareChatAttachments(t.Context(), []AttachmentInput{
+		{Type: "file", Filename: "first.pdf", Data: "data:application/pdf;base64,JVBERi0xLjQKJSVFT0Y="},
+		{Type: "image", Data: "data:image/png;base64,invalid%%"},
+	})
+	if err == nil || prepared != nil {
+		t.Fatalf("a rejected batch must leave nothing to upload: %v", err)
+	}
+}
+
+func TestChatDocumentOfficeMIMEFallback(t *testing.T) {
+	h := &Handler{}
+	file, err := h.loadChatAttachment(t.Context(), AttachmentInput{
+		Type: "file", Filename: "report.docx", Data: "data:application/octet-stream;base64,UEsDBA==",
+	}, 100, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file.name != "report.docx" || file.mime != "application/vnd.openxmlformats-officedocument.wordprocessingml.document" {
+		t.Fatalf("name=%q MIME=%q", file.name, file.mime)
 	}
 }

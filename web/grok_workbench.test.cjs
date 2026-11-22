@@ -60,17 +60,22 @@ function chatPayloadHarness() {
   return context.window.chatTest;
 }
 
-test('Grok Web sends the selected PDF as a file part without persisting the bytes', () => {
+test('Grok Web retains PDFs across turns without persisting their bytes', () => {
   const { chatState, buildResponsesPayload, persistedChatSession } = chatPayloadHarness();
   const dataUrl = 'data:application/pdf;base64,fixture';
-  const session = { id: 'pdf', messages: [{ role: 'user', content: '', attachment: { name: 'report.pdf', dataUrl } }] };
+  const session = { id: 'pdf', messages: [
+    { role: 'user', content: '', attachment: { name: 'report.pdf', dataUrl } },
+    { role: 'user', content: '', attachments: [{ name: 'notes.pdf', dataUrl }, { name: 'summary.pdf', dataUrl }] },
+  ] };
   chatState.sessions = [session];
   chatState.activeId = session.id;
   chatState.model = 'grok-chat-fast';
-  assert.deepEqual(JSON.parse(JSON.stringify(buildResponsesPayload().input[0].content)), [
+  assert.deepEqual(JSON.parse(JSON.stringify(buildResponsesPayload().input.flatMap((msg) => msg.content))), [
     { type: 'input_file', filename: 'report.pdf', file_data: dataUrl },
+    { type: 'input_file', filename: 'notes.pdf', file_data: dataUrl },
+    { type: 'input_file', filename: 'summary.pdf', file_data: dataUrl },
   ]);
-  assert.equal(persistedChatSession(session).messages[0].attachment.dataUrl, undefined);
+  assert.equal(JSON.stringify(persistedChatSession(session)).includes(dataUrl), false);
   assert.equal(session.messages[0].attachment.dataUrl, dataUrl);
   chatState.model = 'grok-4.7';
   assert.equal(buildResponsesPayload().input.length, 0);

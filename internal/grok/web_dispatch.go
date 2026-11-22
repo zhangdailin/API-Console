@@ -44,7 +44,7 @@ func peekWebModel(w http.ResponseWriter, r *http.Request) (isWeb, handled bool) 
 // chat→Responses bridge, over the Web plane's chat completions handler.
 func (h *Handler) webResponsesBridge() http.HandlerFunc {
 	h.webBridgeOnce.Do(func() {
-		options := responses.BridgeOptions{}
+		options := responses.BridgeOptions{StoredInputReplayLimit: web.MaxChatJSONBodyBytes}
 		if h.lb != nil && h.lb.Store != nil {
 			options.Store = h.lb.Store
 		}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"orchids-api/internal/chatwire"
 	"orchids-api/internal/httpserver"
 
@@ -13,7 +14,7 @@ import (
 	"orchids-api/internal/util"
 )
 
-func expandStoredResponseInput(responseBody []byte, current any) (any, error) {
+func expandStoredResponseInput(responseBody, previousInput []byte, current any) (any, error) {
 	var previous map[string]any
 	if json.Unmarshal(responseBody, &previous) != nil {
 		return nil, fmt.Errorf("stored response is invalid")
@@ -38,7 +39,12 @@ func expandStoredResponseInput(responseBody []byte, current any) (any, error) {
 	if len(currentItems) == 0 {
 		return nil, fmt.Errorf("input is required")
 	}
-	combined := make([]any, 0, len(output)+len(currentItems))
+	var combined []any
+	if len(previousInput) != 0 {
+		if err := json.Unmarshal(previousInput, &combined); err != nil {
+			return nil, fmt.Errorf("stored response input is invalid")
+		}
+	}
 	combined = append(combined, output...)
 	combined = append(combined, currentItems...)
 	return combined, nil
@@ -249,9 +255,13 @@ func InputToMessagesMode(input any, strict bool) ([]chatwire.Message, error) {
 				if role == "" {
 					role = "user"
 				}
+				content, err := normalizeResponsesMessageContent(item["content"], strict)
+				if err != nil {
+					return nil, fmt.Errorf("input[%d]: %w", index, err)
+				}
 				messages = append(messages, chatwire.Message{
 					Role:    role,
-					Content: normalizeResponsesMessageContent(item["content"]),
+					Content: content,
 				})
 			default:
 				if !strict {
@@ -291,13 +301,13 @@ func responsesReasoningSummary(item map[string]any) string {
 	return strings.Join(parts, "")
 }
 
-func normalizeResponsesMessageContent(content any) any {
+func normalizeResponsesMessageContent(content any, strict bool) (any, error) {
 	parts, ok := content.([]any)
 	if !ok {
-		return content
+		return content, nil
 	}
 	out := make([]any, 0, len(parts))
-	for _, raw := range parts {
+	for i, raw := range parts {
 		part, _ := raw.(map[string]any)
 		if part == nil {
 			continue
@@ -311,29 +321,68 @@ func normalizeResponsesMessageContent(content any) any {
 				out = append(out, map[string]any{"type": "image_url", "image_url": map[string]any{"url": url}})
 			}
 		case "input_file", "file":
-			url := responsesPartURL(part, []string{"file", "file_url", "source", "file_data"}, []string{"url", "file_url", "data", "file_data"})
-			if url == "" {
-				url = chatwire.ParseLooseStringAny(part["file_id"])
-			}
-			if url != "" {
-				// The chat layer validates the portable file shape, so carry the
-				// resolved reference as file_data instead of a nested url. This
-				// also makes the chat->Responses->chat round trip lossless.
-				file := map[string]any{"file_data": url}
-				name := chatwire.ParseLooseStringAny(part["filename"])
-				if nested, ok := part["file"].(map[string]any); name == "" && ok {
-					name = chatwire.ParseLooseStringAny(nested["filename"])
+			file, err := responsesFilePart(part)
+			if err != nil {
+				if strict {
+					return nil, fmt.Errorf("content[%d]: %w", i, err)
 				}
-				if name != "" {
-					file["filename"] = name
-				}
-				out = append(out, map[string]any{"type": "file", "file": file})
+				continue
 			}
+			out = append(out, map[string]any{"type": "file", "file": file})
 		default:
 			out = append(out, part)
 		}
 	}
-	return out
+	return out, nil
+}
+
+func responsesFilePart(part map[string]any) (map[string]any, error) {
+	nested, _ := part["file"].(map[string]any)
+	source, _ := part["source"].(map[string]any)
+	var value, id string
+	for _, scope := range []map[string]any{part, nested, source} {
+		for _, key := range []string{"file_url", "url", "file_data", "data", "file_id", "file", "source"} {
+			raw := scope[key]
+			if raw == nil {
+				continue
+			}
+			if _, ok := raw.(map[string]any); ok && (key == "file" || key == "source") {
+				continue
+			}
+			str, ok := raw.(string)
+			if !ok {
+				return nil, fmt.Errorf("input_file.%s must be a string", key)
+			}
+			str = strings.TrimSpace(str)
+			if str == "" {
+				continue
+			}
+			if value != "" {
+				return nil, fmt.Errorf("input_file requires exactly one file source")
+			}
+			if key == "file_url" || key == "url" {
+				u, err := url.Parse(str)
+				if err != nil || u.Hostname() == "" || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") {
+					return nil, fmt.Errorf("input_file.%s must be an HTTP or HTTPS URL without credentials", key)
+				}
+			}
+			value = str
+			if key == "file_id" {
+				id = str
+			}
+		}
+	}
+	if value == "" {
+		return nil, fmt.Errorf("input_file requires a file source")
+	}
+	file := map[string]any{"file_data": value}
+	if id != "" {
+		file["file_id"] = id
+	}
+	if name := util.FirstNonEmpty(chatwire.ParseLooseStringAny(part["filename"]), chatwire.ParseLooseStringAny(nested["filename"])); name != "" {
+		file["filename"] = name
+	}
+	return file, nil
 }
 
 func responsesPartURL(part map[string]any, keys, nestedKeys []string) string {

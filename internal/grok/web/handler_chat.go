@@ -423,8 +423,14 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 	defer sess.Close()
 	req.account = sess.acc
 
+	prepared, err := h.prepareChatAttachments(r.Context(), attachments)
+	if err != nil {
+		writeGrokUpstreamError(w, err)
+		return
+	}
+
 	buildPayload := func(token string) (map[string]any, error) {
-		fileAttachments, err := h.uploadAttachmentInputs(r.Context(), token, attachments)
+		fileAttachments, err := h.uploadChatAttachments(r.Context(), token, prepared)
 		if err != nil {
 			return nil, fmt.Errorf("attachment upload failed: %w", err)
 		}
