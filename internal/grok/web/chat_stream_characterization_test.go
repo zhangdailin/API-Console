@@ -1,12 +1,18 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/config"
 	"orchids-api/internal/testutil"
 )
 
@@ -90,7 +96,7 @@ func runStream(t *testing.T, tools []ToolDef, body *strings.Reader) streamedChat
 	recorder := httptest.NewRecorder()
 	h := &Handler{}
 	req := &ChatCompletionsRequest{Request: chatwire.Request{Model: "grok-4", Stream: true, Tools: tools}}
-	h.streamChat(recorder, req, "grok-4", ModelSpec{ID: "grok-4"}, "token", "", false, tools, nil, body, nil)
+	h.streamChat(t.Context(), recorder, req, "token", "", false, body, nil)
 	return readStream(t, recorder.Body.String())
 }
 
@@ -99,10 +105,90 @@ func runCollect(t *testing.T, tools []ToolDef, body *strings.Reader) map[string]
 	recorder := httptest.NewRecorder()
 	h := &Handler{}
 	req := &ChatCompletionsRequest{Request: chatwire.Request{Model: "grok-4", Tools: tools}}
-	h.collectChat(recorder, req, "grok-4", ModelSpec{ID: "grok-4"}, "token", "", false, tools, nil, body, nil)
+	h.collectChat(t.Context(), recorder, req, "token", "", false, body, nil)
 	var out map[string]any
 	testutil.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &out), "response is not JSON: "+recorder.Body.String())
 	return out
+}
+
+type chatAssetTransport func(*http.Request) (*http.Response, error)
+
+func (transport chatAssetTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	return transport(r)
+}
+
+func TestWebCancellationStopsAssetDownloads(t *testing.T) {
+	for _, mode := range []string{"stream", "collect", "image_stream"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			started, unblock, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			defer close(unblock)
+			var fetches atomic.Int32
+			transport := chatAssetTransport(func(r *http.Request) (*http.Response, error) {
+				if fetches.Add(1) == 1 {
+					close(started)
+				}
+				select {
+				case <-r.Context().Done():
+					return nil, r.Context().Err()
+				case <-unblock:
+					return nil, context.Canceled
+				}
+			})
+			client := &http.Client{Transport: transport}
+			h := &Handler{client: &Client{httpClient: client, assetClient: client}}
+			body := upstreamLines(line(map[string]any{"modelResponse": map[string]any{
+				"generatedImageUrls": []string{
+					"https://assets.grok.com/users/u1/generated/e1/image.jpg",
+					"https://assets.grok.com/users/u1/generated/e2/image.jpg",
+				},
+			}}))
+			rec := httptest.NewRecorder()
+			req := &ChatCompletionsRequest{Request: chatwire.Request{Model: "grok-4", Stream: mode == "stream"}}
+			go func() {
+				defer close(finished)
+				switch mode {
+				case "stream":
+					h.streamChat(ctx, rec, req, "fixture", "", true, body, nil)
+				case "collect":
+					h.collectChat(ctx, rec, req, "fixture", "", true, body, nil)
+				case "image_stream":
+					h.streamImageResults(ctx, rec, body, "fixture", "fixture", "url", 2, "", nil)
+				}
+			}()
+			select {
+			case <-started:
+			case <-time.After(2 * time.Second):
+				t.Fatal("handler did not start downloading its first generated image")
+			}
+			cancel()
+			select {
+			case <-finished:
+			case <-time.After(2 * time.Second):
+				t.Fatal("handler remained blocked downloading an image after cancellation")
+			}
+			got := rec.Body.String()
+			if n := fetches.Load(); n != 1 || strings.Contains(got, "[DONE]") || strings.Contains(got, "image_cache_failed") {
+				t.Fatalf("cancelled handler tried %d downloads or wrote a terminal frame: %s", n, got)
+			}
+		})
+	}
+}
+
+func TestChatSnapshotPrefixDoesNotSplitUTF8(t *testing.T) {
+	for _, sample := range []struct{ a, b, prefix, delta string }{
+		{"你好", "你好世界", "你好", "世界"},
+		{"看🐈", "看🐕", "看", "🐕"},
+		{"你好世界", "你好", "你好", ""},
+	} {
+		if got := commonPrefixText(sample.a, sample.b); got != sample.prefix {
+			t.Errorf("shared prefix = %q, want %q", got, sample.prefix)
+		}
+		if got := streamMessageDelta(sample.a, sample.b); got != sample.delta {
+			t.Errorf("snapshot delta = %q, want %q", got, sample.delta)
+		}
+	}
 }
 
 func weatherTool() []ToolDef {
@@ -226,7 +312,7 @@ func TestWebCollectChatToolCall(t *testing.T) {
 func TestWebCollectChatUpstreamError(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	h := &Handler{}
-	h.collectChat(recorder, &ChatCompletionsRequest{Request: chatwire.Request{Model: "grok-4"}}, "grok-4", ModelSpec{ID: "grok-4"}, "token", "", false, nil, nil,
+	h.collectChat(t.Context(), recorder, &ChatCompletionsRequest{Request: chatwire.Request{Model: "grok-4"}}, "token", "", false,
 		upstreamLines(`{"error":{"message":"denied"}}`), nil)
 	testutil.True(t, recorder.Code >= 400, "an upstream error is not a success")
 	testutil.MustNotContain(t, recorder.Body.String(), "denied")
@@ -266,13 +352,38 @@ func TestStreamMarkupFilterHoldsBackOnlyAPossibleMarker(t *testing.T) {
 
 // Video progress is not the answer. It used to be streamed as content, so
 // the chat showed a line per update above the video link.
-func TestWebStreamChatVideoProgressIsReasoning(t *testing.T) {
+func TestWebVideoChatProgressIsReasoning(t *testing.T) {
+	useTempMediaCache(t)
+	const asset = "https://assets.grok.com/video-fixture.mp4"
+	client := &http.Client{Transport: chatAssetTransport(func(r *http.Request) (*http.Response, error) {
+		resp := &http.Response{StatusCode: http.StatusOK, Header: make(http.Header)}
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == defaultChatPath:
+			resp.Body = io.NopCloser(upstreamLines(
+				line(map[string]any{"streamingVideoGenerationResponse": map[string]any{"progress": 50}}),
+				line(map[string]any{"streamingVideoGenerationResponse": map[string]any{"progress": 100, "videoUrl": asset}}),
+			))
+		case r.Method == http.MethodGet && r.URL.String() == asset:
+			resp.Header.Set("Content-Type", "video/mp4")
+			resp.Body = io.NopCloser(strings.NewReader("fixture video bytes"))
+		default:
+			t.Fatalf("unexpected video request: %s %s", r.Method, r.URL)
+		}
+		return resp, nil
+	})}
 	recorder := httptest.NewRecorder()
-	req := &ChatCompletionsRequest{Request: chatwire.Request{Model: "grok-imagine-video", Stream: true}}
-	(&Handler{}).streamChat(recorder, req, "grok-imagine-video", ModelSpec{ID: "grok-imagine-video", IsVideo: true}, "token", "", false, nil, nil, upstreamLines(
-		line(map[string]any{"streamingVideoGenerationResponse": map[string]any{"progress": 50}}),
-	), nil)
+	spec, ok := ResolveModel("grok-imagine-video")
+	testutil.True(t, ok)
+	req := &ChatCompletionsRequest{
+		Request:     chatwire.Request{Model: spec.ID, Stream: true},
+		VideoConfig: &VideoConfig{VideoLength: 6},
+	}
+	h := &Handler{client: &Client{cfg: &config.Config{GrokStatsigSignerURL: new("")}, httpClient: client, assetClient: client}}
+	h.streamVideoChatCompletion(t.Context(), recorder, req, spec, "fixture", nil, "", &chatAccountSession{token: "token"}, nil)
 	got := readStream(t, recorder.Body.String())
-	testutil.Equal(t, got.reasoning, "视频正在生成 50%\n")
+	testutil.Equal(t, got.reasoning, "视频正在生成 50%\n视频正在生成 100%\n")
 	testutil.Falsef(t, strings.Contains(got.content, "50%"), "progress leaked into content: %q", got.content)
+	testutil.MustContain(t, got.content, "/grok/v1/files/video/")
+	testutil.Equal(t, got.finish, "stop")
+	testutil.True(t, got.done)
 }

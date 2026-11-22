@@ -424,15 +424,11 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 	req.account = sess.acc
 
 	buildPayload := func(token string) (map[string]any, error) {
-		fileAttachments := []string(nil)
-		if !spec.IsVideo {
-			var upErr error
-			fileAttachments, upErr = h.uploadAttachmentInputs(r.Context(), token, attachments)
-			if upErr != nil {
-				return nil, fmt.Errorf("attachment upload failed: %w", upErr)
-			}
+		fileAttachments, err := h.uploadAttachmentInputs(r.Context(), token, attachments)
+		if err != nil {
+			return nil, fmt.Errorf("attachment upload failed: %w", err)
 		}
-		return h.buildChatPayload(r.Context(), token, spec, text, fileAttachments, attachments, req.VideoConfig, &req)
+		return h.buildChatPayload(spec, text, fileAttachments, &req), nil
 	}
 
 	payload, err := buildPayload(sess.token)
@@ -457,10 +453,8 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 
 	hasAttachments := len(attachments) > 0
 	if req.Stream {
-		h.streamChat(w, &req, req.Model, spec, sess.token, publicBase, hasAttachments, req.Tools, req.ToolChoice, resp.Body, logger)
+		h.streamChat(r.Context(), w, &req, sess.token, publicBase, hasAttachments, resp.Body, logger)
 		return
 	}
-	h.collectChat(w, &req, req.Model, spec, sess.token, publicBase, hasAttachments, req.Tools, req.ToolChoice, resp.Body, logger)
+	h.collectChat(r.Context(), w, &req, sess.token, publicBase, hasAttachments, resp.Body, logger)
 }
-
-// NOTE: streamMarkupFilter.feed is implemented earlier in this file.

@@ -346,11 +346,6 @@ func assetURLs(assetIDs []string) []string {
 	return out
 }
 
-// firstAssetURL returns the first resolvable media URL in an upstream response.
-func firstAssetURL(resp map[string]any) string {
-	return firstNonEmpty(assetURLs(extractAssetIDs(resp))...)
-}
-
 func appendImageResultURLs(urls []string, resp map[string]any) []string {
 	added := make(map[string]struct{}, len(urls)+8)
 	for _, u := range urls {

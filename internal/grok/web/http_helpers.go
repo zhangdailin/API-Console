@@ -137,9 +137,7 @@ func writeSSELog(w http.ResponseWriter, flusher http.Flusher, logger *debug.Logg
 	if err := httpserver.WriteSSEBytes(w, "", raw); err != nil {
 		return err
 	}
-	if logger != nil {
-		logger.LogOutputSSE("", string(raw))
-	}
+	logger.LogOutputSSEBytes("", raw)
 	if flusher != nil {
 		flusher.Flush()
 	}

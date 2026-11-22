@@ -457,7 +457,7 @@ func (h *Handler) runVideoCreateJob(ctx context.Context, job *videoJob, spec Mod
 		cfg.VideoLength = cap
 	}
 
-	artifact, err := h.runVideoSegments(ctx, sess, spec, job.Prompt, nil, cfg, nil, func(progress int) {
+	artifact, err := h.runVideoGeneration(ctx, sess, spec, job.Prompt, nil, cfg, nil, func(progress int) {
 		update("in_progress", progress)
 	})
 	if err != nil {

@@ -9,16 +9,13 @@ import (
 	"strings"
 	"time"
 
-	"encoding/json"
-
 	"orchids-api/internal/debug"
 	"orchids-api/internal/httpserver"
 	"orchids-api/internal/util"
 )
 
-type videoSegmentResult struct {
+type videoGenerationResult struct {
 	URL         string
-	AssetID     string
 	VideoPostID string
 }
 
@@ -46,81 +43,7 @@ func (h *Handler) serveVideoChatCompletion(
 	h.collectVideoChatCompletion(ctx, w, req, spec, prompt, attachments, publicBase, sess, logger)
 }
 
-func (h *Handler) runVideoSegment(
-	ctx context.Context,
-	sess *chatAccountSession,
-	payload map[string]any,
-	rebuild func(token string) (map[string]any, error),
-	logger *debug.Logger,
-	onProgress func(int),
-) (videoSegmentResult, error) {
-	if h == nil || h.webClient() == nil {
-		return videoSegmentResult{}, fmt.Errorf("grok client not configured")
-	}
-	if logger != nil {
-		if !logger.Capturing() {
-			logger.LogUpstreamRequest(h.webClient().baseURL()+defaultChatPath, debugHeaderMap(h.webClient().headers(sess.token)), payload)
-		}
-	}
-	resp, err := h.doChatWithAutoSwitchRebuild(ctx, sess, &payload, rebuild)
-	if err != nil {
-		return videoSegmentResult{}, err
-	}
-	defer resp.Body.Close()
-	h.syncGrokQuota(sess.acc, resp.Header)
-	return h.collectVideoSegmentFromBody(resp.Body, logger, onProgress)
-}
-
-func (h *Handler) collectVideoSegmentFromBody(body io.Reader, logger *debug.Logger, onProgress func(int)) (videoSegmentResult, error) {
-	var result videoSegmentResult
-	err := parseUpstreamLines(body, func(resp map[string]any) error {
-		if logger != nil {
-			if raw, err := json.Marshal(resp); err == nil {
-				logger.LogOutputSSE("response", string(raw))
-			}
-		}
-		if postID := extractVideoPostID(resp); postID != "" {
-			result.VideoPostID = postID
-		}
-		if result.AssetID == "" {
-			result.AssetID = firstNonEmpty(extractAssetIDs(resp)...)
-		}
-		progress, videoURL, ok := extractVideoProgress(resp)
-		if !ok {
-			return nil
-		}
-		if onProgress != nil {
-			onProgress(progress)
-		}
-		if progress >= 100 && strings.TrimSpace(videoURL) != "" {
-			result.URL = strings.TrimSpace(videoURL)
-		}
-		return nil
-	})
-	if err != nil {
-		return videoSegmentResult{}, err
-	}
-	if strings.TrimSpace(result.URL) == "" && strings.TrimSpace(result.AssetID) != "" {
-		result.URL = assetURLFromAssetID(result.AssetID)
-	}
-	if strings.TrimSpace(result.VideoPostID) == "" {
-		result.VideoPostID = firstNonEmpty(result.AssetID, result.URL)
-	}
-	if strings.TrimSpace(result.URL) == "" {
-		return videoSegmentResult{}, fmt.Errorf("video generation returned no final video URL")
-	}
-	return result, nil
-}
-
-func videoParentPostIDFromPayload(payload map[string]any) string {
-	respMeta, _ := payload["responseMetadata"].(map[string]any)
-	modelCfg, _ := respMeta["modelConfigOverride"].(map[string]any)
-	modelMap, _ := modelCfg["modelMap"].(map[string]any)
-	videoCfg, _ := modelMap["videoGenModelConfig"].(map[string]any)
-	return strings.TrimSpace(fmt.Sprint(videoCfg["parentPostId"]))
-}
-
-func (h *Handler) runVideoSegments(
+func (h *Handler) runVideoGeneration(
 	ctx context.Context,
 	sess *chatAccountSession,
 	spec ModelSpec,
@@ -129,58 +52,66 @@ func (h *Handler) runVideoSegments(
 	cfg *VideoConfig,
 	logger *debug.Logger,
 	onProgress func(int),
-) (videoSegmentResult, error) {
-	segments, err := videoSegmentLengths(cfg.VideoLength)
+) (videoGenerationResult, error) {
+	if cfg.VideoLength < 1 || cfg.VideoLength > 15 {
+		return videoGenerationResult{}, fmt.Errorf("video_length must be between 1 and 15 seconds")
+	}
+	payload, err := buildVideoCreatePayload(spec, prompt, attachments, *cfg)
 	if err != nil {
-		return videoSegmentResult{}, err
+		return videoGenerationResult{}, err
 	}
-	total := len(segments)
-	parentPostID := ""
-	extendPostID := ""
-	elapsed := 0
-	var artifact videoSegmentResult
-
-	for idx, length := range segments {
-		segmentCfg := *cfg
-		segmentCfg.VideoLength = length
-		var payload map[string]any
-		var rebuild func(string) (map[string]any, error)
-		if idx == 0 {
-			payload, err = h.buildVideoCreatePayload(ctx, sess.token, spec, prompt, attachments, &segmentCfg)
-			if err != nil {
-				return videoSegmentResult{}, err
-			}
-			rebuild = func(token string) (map[string]any, error) {
-				return h.buildVideoCreatePayload(ctx, token, spec, prompt, attachments, &segmentCfg)
-			}
-		} else {
-			payload = h.buildVideoExtendPayload(spec, prompt, parentPostID, extendPostID, &segmentCfg, length, elapsed)
-			rebuild = func(string) (map[string]any, error) {
-				return h.buildVideoExtendPayload(spec, prompt, parentPostID, extendPostID, &segmentCfg, length, elapsed), nil
-			}
-		}
-
-		segmentIndex := idx
-		artifact, err = h.runVideoSegment(ctx, sess, payload, rebuild, logger, func(progress int) {
-			if onProgress == nil {
-				return
-			}
-			scaled := int(((float64(segmentIndex) + float64(clampProgress(progress))/100.0) / float64(total)) * 100)
-			onProgress(scaled)
-		})
-		if err != nil {
-			return videoSegmentResult{}, err
-		}
-		if idx == 0 {
-			parentPostID = videoParentPostIDFromPayload(payload)
-			if total > 1 {
-				artifact.VideoPostID = firstNonEmpty(artifact.VideoPostID, parentPostID)
-			}
-		}
-		extendPostID = firstNonEmpty(artifact.VideoPostID, artifact.AssetID, parentPostID)
-		elapsed += length
+	if h == nil || h.webClient() == nil {
+		return videoGenerationResult{}, fmt.Errorf("grok client not configured")
 	}
-	return artifact, nil
+	if logger != nil && !logger.Capturing() {
+		logger.LogUpstreamRequest(h.webClient().baseURL()+defaultChatPath, debugHeaderMap(h.webClient().headers(sess.token)), payload)
+	}
+	// Video creation has no account-specific inputs; a switch reuses the payload.
+	resp, err := h.doChatWithAutoSwitchRebuild(ctx, sess, &payload, nil)
+	if err != nil {
+		return videoGenerationResult{}, err
+	}
+	defer resp.Body.Close()
+	h.syncGrokQuota(sess.acc, resp.Header)
+	return collectVideoResult(resp.Body, logger, onProgress)
+}
+
+func collectVideoResult(body io.Reader, logger *debug.Logger, onProgress func(int)) (videoGenerationResult, error) {
+	var result videoGenerationResult
+	var assetID string
+	err := parseUpstreamLines(body, func(resp map[string]any) error {
+		logger.LogOutputSSEJSON("response", resp)
+		if postID := extractVideoPostID(resp); postID != "" {
+			result.VideoPostID = postID
+		}
+		if assetID == "" {
+			assetID = firstNonEmpty(extractAssetIDs(resp)...)
+		}
+		progress, videoURL, ok := extractVideoProgress(resp)
+		if !ok {
+			return nil
+		}
+		if onProgress != nil {
+			onProgress(clampProgress(progress))
+		}
+		if progress >= 100 && strings.TrimSpace(videoURL) != "" {
+			result.URL = strings.TrimSpace(videoURL)
+		}
+		return nil
+	})
+	if err != nil {
+		return videoGenerationResult{}, err
+	}
+	if result.URL == "" {
+		result.URL = assetURLFromAssetID(assetID)
+	}
+	if strings.TrimSpace(result.VideoPostID) == "" {
+		result.VideoPostID = firstNonEmpty(assetID, result.URL)
+	}
+	if strings.TrimSpace(result.URL) == "" {
+		return videoGenerationResult{}, fmt.Errorf("video generation returned no final video URL")
+	}
+	return result, nil
 }
 
 func clampProgress(progress int) int {
@@ -226,8 +157,7 @@ func (h *Handler) streamVideoChatCompletion(
 	chunkScratch = role[:0]
 	httpserver.WriteSSEBytes(w, "", role)
 	lastProgress := -1
-	artifact, err := h.runVideoSegments(ctx, sess, spec, prompt, attachments, req.VideoConfig, logger, func(progress int) {
-		progress = clampProgress(progress)
+	artifact, err := h.runVideoGeneration(ctx, sess, spec, prompt, attachments, req.VideoConfig, logger, func(progress int) {
 		if progress <= lastProgress {
 			return
 		}
@@ -243,6 +173,9 @@ func (h *Handler) streamVideoChatCompletion(
 		return
 	}
 	content := h.videoOutputURL(ctx, sess.token, artifact.URL, publicBase)
+	if ctx.Err() != nil {
+		return
+	}
 	emit(content, "", false, nil)
 	emit("", "stop", true, buildChatUsagePayload(req, content, nil))
 	writeSSE(w, flusher, "", []byte("[DONE]"))
@@ -261,8 +194,7 @@ func (h *Handler) collectVideoChatCompletion(
 ) {
 	reasoning := make([]string, 0, 8)
 	lastProgress := -1
-	artifact, err := h.runVideoSegments(ctx, sess, spec, prompt, attachments, req.VideoConfig, logger, func(progress int) {
-		progress = clampProgress(progress)
+	artifact, err := h.runVideoGeneration(ctx, sess, spec, prompt, attachments, req.VideoConfig, logger, func(progress int) {
 		if progress <= lastProgress {
 			return
 		}
@@ -274,6 +206,9 @@ func (h *Handler) collectVideoChatCompletion(
 		return
 	}
 	content := h.videoOutputURL(ctx, sess.token, artifact.URL, publicBase)
+	if ctx.Err() != nil {
+		return
+	}
 	resp := map[string]any{
 		"id":                 "chatcmpl_" + randomHex(8),
 		"object":             "chat.completion",

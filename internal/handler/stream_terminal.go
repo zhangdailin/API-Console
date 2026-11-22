@@ -77,15 +77,10 @@ func (h *streamHandler) finishResponse(stopReason string) {
 		h.flushPendingToolCalls()
 		h.finalizeOutputTokens()
 		h.mu.Lock()
-		h.writeSSEMessageDeltaLocked(stopReason, h.outputTokens, true)
+		h.writeSSEMessageDeltaLocked(stopReason, h.outputTokens)
 		h.mu.Unlock()
 
-		stopData, err := marshalSSEMessageStopBytes()
-		if err != nil {
-			slog.Error("Failed to marshal message_stop", "error", err)
-		} else {
-			h.writeFinalSSEBytes("message_stop", stopData)
-		}
+		h.writeFinalSSEBytes("message_stop", sseMessageStopBytes)
 	} else {
 		h.flushPendingToolCalls()
 		h.finalizeOutputTokens()

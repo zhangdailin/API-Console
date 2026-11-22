@@ -328,12 +328,7 @@ func (h *streamHandler) ensureBlock(blockType string) int {
 		h.thinkingBlockSigs[internalIdx] = signature
 
 		raw, err := appendSSEContentBlockStartThinking(h.ssePayloadScratch[:0], sseIdx, signature)
-		if err != nil {
-			h.markWriteErrorLocked("content_block_start", err)
-			break
-		}
-		h.ssePayloadScratch = raw[:0]
-		h.writeSSEBytesLockedWithHint("content_block_start", raw, true)
+		h.writeEncodedSSELocked("content_block_start", raw, err, true, false)
 	case "text":
 		h.contentBlocks = append(h.contentBlocks, map[string]any{
 			"type": "text",
@@ -344,7 +339,7 @@ func (h *streamHandler) ensureBlock(blockType string) int {
 		h.textBlockBuilders = growBuilderSlots(h.textBlockBuilders, internalIdx)
 		h.textBlockBuilders[internalIdx] = perf.AcquireStringBuilder()
 
-		h.writeSSEContentBlockStartTextLocked(sseIdx, false)
+		h.writeSSEContentBlockStartTextLocked(sseIdx)
 	}
 
 	return sseIdx
@@ -527,7 +522,7 @@ func (h *streamHandler) handleMessage(msg upstream.SSEMessage) {
 			builder := h.historyBuilderAt(&h.thinkingBlockBuilders, internalIdx)
 			builder.WriteString(delta)
 		}
-		h.writeSSEContentBlockDeltaThinkingLocked(sseIdx, delta, false)
+		h.writeSSEContentBlockDeltaThinkingLocked(sseIdx, delta)
 		h.mu.Unlock()
 
 	case "model.reasoning-end":
@@ -570,7 +565,7 @@ func (h *streamHandler) handleMessage(msg upstream.SSEMessage) {
 			builder := h.historyBuilderAt(&h.textBlockBuilders, internalIdx)
 			builder.WriteString(delta)
 		}
-		h.writeSSEContentBlockDeltaTextLocked(sseIdx, delta, false)
+		h.writeSSEContentBlockDeltaTextLocked(sseIdx, delta)
 		h.mu.Unlock()
 
 	case "model.text-end":

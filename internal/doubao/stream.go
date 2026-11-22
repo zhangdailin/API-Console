@@ -20,7 +20,7 @@ const (
 func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, error) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 4096), maxChatEventBytes)
-	var event, userMessageID, snapshot string
+	var event, userMessageID string
 	var data []byte
 	var text, found strings.Builder
 	appendText := func(value string) error {
@@ -31,19 +31,6 @@ func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, er
 		return nil
 	}
 	thinking := thinkingStream{}
-	// emitted tracks how much of the answer has reached the client. A snapshot
-	// can arrive before the first delta (the opening words of an answer are
-	// often delivered whole), and later deltas continue from there; emitting the
-	// snapshot's unseen suffix keeps the two sources from dropping or repeating
-	// text.
-	emitted := 0
-	emitUnseen := func(full string) {
-		if len(full) <= emitted {
-			return
-		}
-		emit(full[emitted:])
-		emitted = len(full)
-	}
 	var images []creationImage
 	seenImages := map[string]bool{}
 	// found holds the image-search results, emitted where they arrive: the
@@ -78,7 +65,6 @@ func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, er
 						return err
 					}
 					emit(delta)
-					emitted = text.Len()
 				}
 			case "STREAM_ERROR":
 				return upstreamStreamError(value)
@@ -112,17 +98,15 @@ func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, er
 						return err
 					}
 					emit(fragment)
-					emitted = text.Len()
 				}
-				if len(full) > len(snapshot) {
-					snapshot = full
-					if len(snapshot) > text.Len() {
-						text.Reset()
-						if err := appendText(snapshot); err != nil {
-							return err
-						}
-						emitUnseen(snapshot)
+				// Every answer byte already buffered was emitted by a delta,
+				// fragment, or prior snapshot. Send only the unseen suffix.
+				if n := text.Len(); len(full) > n {
+					text.Reset()
+					if err := appendText(full); err != nil {
+						return err
 					}
+					emit(full[n:])
 				}
 				// Image answers arrive as creation blocks with no text at all;
 				// they have to be collected separately or the turn looks empty.
@@ -162,12 +146,6 @@ func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, er
 	}
 	if err := flush(); err != nil {
 		return "", err
-	}
-	if text.Len() == 0 {
-		if err := appendText(snapshot); err != nil {
-			return "", err
-		}
-		emit(snapshot)
 	}
 	if markdown := imageMarkdown(images); markdown != "" {
 		if err := appendText(markdown); err != nil {

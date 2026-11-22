@@ -17,27 +17,20 @@ import (
 	"orchids-api/internal/util"
 )
 
-func (h *Handler) streamImageGeneration(w http.ResponseWriter, body io.Reader, token, prompt, format string, n int, publicBase string) {
-	h.streamImageResults(w, body, token, prompt, format, n, publicBase, nil)
-}
-
-// streamImageEdit streams one edit call. editInputs are the uploaded input
-// asset IDs, which the edit stream echoes back and which are not results.
-func (h *Handler) streamImageEdit(w http.ResponseWriter, body io.Reader, token, prompt, format string, publicBase string, editInputs []string) {
-	h.streamImageResults(w, body, token, prompt, format, 1, publicBase, editInputs)
-}
-
 // streamImageResults relays image progress and then the finished images. A
 // non-nil editInputs marks an edit stream, whose previews and echoed inputs
 // are dropped from the results.
-func (h *Handler) streamImageResults(w http.ResponseWriter, body io.Reader, token, prompt, format string, n int, publicBase string, editInputs []string) {
+func (h *Handler) streamImageResults(ctx context.Context, w http.ResponseWriter, body io.Reader, token, prompt, format string, n int, publicBase string, editInputs []string) {
 	flusher := httpserver.StreamResponseHeaders(w)
 
 	field := imageResponseField(format)
 	var urls []string
 	targetIndex := -1
 
-	if err := parseUpstreamLines(body, func(resp map[string]any) error {
+	err := parseUpstreamLines(body, func(resp map[string]any) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if index, progress, ok := extractImageProgress(resp); ok {
 			outIndex := index
 			if n == 1 {
@@ -63,7 +56,11 @@ func (h *Handler) streamImageResults(w http.ResponseWriter, body io.Reader, toke
 			urls = appendImageResultURLs(urls, resp)
 		}
 		return nil
-	}); err != nil {
+	})
+	if ctx.Err() != nil {
+		return
+	}
+	if err != nil {
 		httpserver.WriteSSEStreamError(w, flusher, nil, "stream parse error: "+err.Error())
 		return
 	}
@@ -77,8 +74,12 @@ func (h *Handler) streamImageResults(w http.ResponseWriter, body io.Reader, toke
 		return
 	}
 
+	usage := buildImageUsagePayload(prompt, len(urls))
 	for i, u := range urls {
-		val, err := h.imageOutputValue(context.Background(), token, u, format)
+		val, err := h.imageOutputValue(ctx, token, u, format)
+		if ctx.Err() != nil {
+			return
+		}
 		if err != nil {
 			// Always fatal: the caller gets this gateway's own absolute asset URL
 			// or an error, never the upstream CDN address.
@@ -101,11 +102,13 @@ func (h *Handler) streamImageResults(w http.ResponseWriter, body io.Reader, toke
 			"index":          i,
 			"revised_prompt": "",
 			"mime_type":      imageMimeTypeForValue(field, val),
-			"usage":          buildImageUsagePayload(prompt, len(urls)),
+			"usage":          usage,
 		}
 		writeSSE(w, flusher, "image_generation.completed", util.EncodeJSONBytes(data))
 	}
-	writeSSE(w, flusher, "", []byte("[DONE]"))
+	if ctx.Err() == nil {
+		writeSSE(w, flusher, "", []byte("[DONE]"))
+	}
 }
 
 func (h *Handler) HandleImagesGenerations(w http.ResponseWriter, r *http.Request) {
@@ -413,7 +416,7 @@ func (h *Handler) streamAppChatImagesGeneration(ctx context.Context, w http.Resp
 	}
 	defer resp.Body.Close()
 	h.syncGrokQuota(sess.acc, resp.Header)
-	h.streamImageGeneration(w, resp.Body, sess.token, req.Prompt, req.ResponseFormat, req.N, publicBase)
+	h.streamImageResults(ctx, w, resp.Body, sess.token, req.Prompt, req.ResponseFormat, req.N, publicBase, nil)
 	if cost, priced := pricing.EstimateImageCost(spec.UpstreamModel, req.Resolution, req.Quality, req.N); priced {
 		h.settleMediaBilling(ctx, req.Model, cost, map[string]any{
 			"plane": "web", "stream": true, "images": req.N,

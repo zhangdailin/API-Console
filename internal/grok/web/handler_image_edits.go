@@ -170,7 +170,7 @@ func (h *Handler) handleChatImageEdit(
 		}
 		defer resp.Body.Close()
 		h.syncGrokQuota(sess.acc, resp.Header)
-		h.streamImageEdit(w, resp.Body, sess.token, prompt, responseFormat, publicBase, nonNilStrings(imageEditInputAssets(rawPayload)))
+		h.streamImageResults(ctx, w, resp.Body, sess.token, prompt, responseFormat, 1, publicBase, nonNilStrings(imageEditInputAssets(rawPayload)))
 		if cost, priced := pricing.EstimateImageEditCost(spec.UpstreamModel, imageCfg.Resolution, "", n, len(imageURLs)); priced {
 			h.settleMediaBilling(ctx, req.Model, cost, map[string]any{
 				"plane": "web", "stream": true, "images": n, "input_images": len(imageURLs),
@@ -503,7 +503,7 @@ func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
 		}
 		defer resp.Body.Close()
 		h.syncGrokQuota(sess.acc, resp.Header)
-		h.streamImageEdit(w, resp.Body, sess.token, prompt, responseFormat, publicBase, nonNilStrings(imageEditInputAssets(rawPayload)))
+		h.streamImageResults(r.Context(), w, resp.Body, sess.token, prompt, responseFormat, 1, publicBase, nonNilStrings(imageEditInputAssets(rawPayload)))
 		inputs := len(inputValues)
 		if inputs == 0 {
 			inputs = len(uploads)

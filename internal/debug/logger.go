@@ -188,9 +188,31 @@ func (l *Logger) LogUpstreamHTTPError(url string, status int, body string, err e
 
 // LogOutputSSE records step 5: the SSE handed to the client (appended).
 func (l *Logger) LogOutputSSE(event string, data string) {
-	if !l.enabled || !l.sseEnabled {
+	if l.outputSSEEnabled() {
+		l.logOutputSSE(event, data)
+	}
+}
+
+// LogOutputSSEBytes converts the frame only when it will be recorded.
+func (l *Logger) LogOutputSSEBytes(event string, data []byte) {
+	if l.outputSSEEnabled() {
+		l.logOutputSSE(event, string(data))
+	}
+}
+
+// LogOutputSSEJSON encodes an observation only for an active SSE log or capture.
+func (l *Logger) LogOutputSSEJSON(event string, value any) {
+	if !l.outputSSEEnabled() {
 		return
 	}
+	if data, err := json.Marshal(value); err == nil {
+		l.logOutputSSE(event, string(data))
+	}
+}
+
+func (l *Logger) outputSSEEnabled() bool { return l != nil && l.enabled && l.sseEnabled }
+
+func (l *Logger) logOutputSSE(event string, data string) {
 	elapsed := time.Since(l.startTime).Milliseconds()
 	l.appendStream(&l.outFile, &l.outBytes, "5_client_sse.jsonl", fmt.Sprintf("[%dms] event: %s\ndata: %s\n\n", elapsed, event, data))
 }

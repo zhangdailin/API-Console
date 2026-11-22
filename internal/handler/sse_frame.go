@@ -338,8 +338,6 @@ func marshalSSEMessageDeltaBytes(stopReason string, outputTokens int) ([]byte, e
 	return appendSSEMessageDelta(make([]byte, 0, 88+len(stopReason)), stopReason, outputTokens)
 }
 
-func marshalSSEMessageStopBytes() ([]byte, error) { return sseMessageStopBytes, nil }
-
 // appendAnthropicError renders the Anthropic protocol's in-band failure event.
 //
 // The wire protocol carries a failure as `event: error` with an

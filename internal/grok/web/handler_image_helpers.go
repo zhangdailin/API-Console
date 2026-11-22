@@ -146,46 +146,42 @@ func isLikelyRasterImageBytes(data []byte) bool {
 }
 
 func (h *Handler) cacheMediaURL(ctx context.Context, token, rawURL, mediaType string) (string, error) {
-	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
-	if mediaType != "video" {
-		mediaType = "image"
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 	trimURL := strings.TrimSpace(rawURL)
+	if strings.EqualFold(strings.TrimSpace(mediaType), "video") {
+		body, mimeType, err := h.webClient().openAsset(ctx, token, trimURL)
+		if err != nil {
+			return "", err
+		}
+		return cacheVideoStream(trimURL, body, mimeType)
+	}
+
 	lurl := strings.ToLower(trimURL)
 	// Never cache known low-res thumbnail hosts; they lead to blurry results.
-	if mediaType == "image" && strings.Contains(lurl, "encrypted-tbn0.gstatic.com") {
+	if strings.Contains(lurl, "encrypted-tbn0.gstatic.com") {
 		return "", fmt.Errorf("skip thumbnail url")
 	}
-	// If the client can't reach Grok/X assets (common in some regions), caching through this server
-	// is required for images to display at all.
-	forceCache := mediaType == "image" && mustCacheImageURL(lurl)
-
-	data, mimeType, err := h.webClient().downloadAsset(ctx, token, rawURL)
+	// Grok/X images may be unreachable to the client. Cache those even when the
+	// upstream only provided a preview.
+	forceCache := mustCacheImageURL(lurl)
+	data, mimeType, err := h.webClient().downloadAsset(ctx, token, trimURL)
 	if err != nil {
 		return "", err
 	}
-	// Heuristic: avoid caching tiny/low-res images (often thumbnails/previews).
-	if mediaType == "image" {
-		if !isRasterImageMime(mimeType) {
-			return "", fmt.Errorf("unsupported image mime type: %s", strings.TrimSpace(mimeType))
-		}
-		w, hgt := imageDimsFromBytes(data)
-		if w <= 0 || hgt <= 0 {
-			if !forceCache || !isLikelyRasterImageBytes(data) {
-				return "", fmt.Errorf("unsupported image data")
-			}
-		}
-		// For Grok/X image assets, caching is required for display (clients may not reach the CDN).
-		if forceCache {
-			// Always cache (even previews). We already avoid emitting -part-0 when full exists.
-		} else {
-			if (w > 0 && hgt > 0 && (w < 900 || hgt < 900)) || len(data) < 60*1024 {
-				slog.Debug("skip caching low-res image", "url", trimURL, "bytes", len(data), "w", w, "h", hgt)
-				return "", fmt.Errorf("skip low-res image")
-			}
-		}
+	if !isRasterImageMime(mimeType) {
+		return "", fmt.Errorf("unsupported image mime type: %s", strings.TrimSpace(mimeType))
 	}
-	return h.cacheMediaBytes(rawURL, mediaType, data, mimeType)
+	w, hgt := imageDimsFromBytes(data)
+	if (w <= 0 || hgt <= 0) && (!forceCache || !isLikelyRasterImageBytes(data)) {
+		return "", fmt.Errorf("unsupported image data")
+	}
+	if !forceCache && ((w > 0 && hgt > 0 && (w < 900 || hgt < 900)) || len(data) < 60*1024) {
+		slog.Debug("skip caching low-res image", "url", trimURL, "bytes", len(data), "w", w, "h", hgt)
+		return "", fmt.Errorf("skip low-res image")
+	}
+	return h.cacheMediaBytes(trimURL, "image", data, mimeType)
 }
 
 func isRasterImageMime(mimeType string) bool {

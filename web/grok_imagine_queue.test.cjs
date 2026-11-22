@@ -14,7 +14,7 @@ function element(){
   return node;
 }
 
-function setup(){
+function setup(afterRequest){
   const state={inFlight:0,peak:0,bodies:[]};
   const context=vm.createContext({
     console,Promise,JSON,Math,Number,String,Array,Boolean,
@@ -23,9 +23,11 @@ function setup(){
     localStorage:{getItem:()=>null,setItem(){}},sessionStorage:{getItem:()=>null},
     fetch:async(_url,options)=>{
       state.inFlight+=1; state.peak=Math.max(state.peak,state.inFlight);
-      const body=JSON.parse(options.body); state.bodies.push(body);
+      const body=JSON.parse(options.body); const request=state.bodies.push(body);
       await new Promise((r)=>setImmediate(r));
       state.inFlight-=1;
+      const response=afterRequest?.(request);
+      if (response) return response;
       const data=Array.from({length:body.n},(_,i)=>({url:'https://assets.grok.com/a/'+state.bodies.length+'-'+i+'.jpg'}));
       return {ok:true,json:async()=>({data})};
     },
@@ -40,7 +42,7 @@ function setup(){
 test('a Free-only pool runs one request for one image at a time',async()=>{
   const {state,review,batch}=setup();
   review.setAvailability({webPlans:{free:3,paid:0,unknown:0},media:{image_pro:true,image_edit:false}});
-  const results=await review.runBatch(batch,'a cat','1:1','grok-imagine-image','basic',false,undefined);
+  const results=await review.runBatch(batch,'a cat','1:1','grok-imagine-image',false);
   assert.equal(state.peak,1,'never more than one request in flight');
   assert.equal(state.bodies.length,6,'one request per image');
   assert.ok(state.bodies.every((body)=>body.n===1),'each request asks for one image');
@@ -51,12 +53,34 @@ test('a pool with a paid account keeps the parallel batch',async()=>{
   for (const plans of [{free:3,paid:1,unknown:0},{free:0,paid:2,unknown:0},{free:2,paid:0,unknown:1},null]) {
     const {state,review,batch}=setup();
     review.setAvailability({webPlans:plans,media:null});
-    const results=await review.runBatch(batch,'a cat','1:1','grok-imagine-image','basic',false,undefined);
+    const results=await review.runBatch(batch,'a cat','1:1','grok-imagine-image',false);
     assert.equal(state.peak,2,`two requests run side by side for ${JSON.stringify(plans)}`);
     assert.equal(state.bodies.length,3,'three requests of two images fill six slots');
     assert.ok(state.bodies.every((body)=>body.n===2));
     assert.deepEqual(Array.from(results),[true,true,true,true,true,true]);
   }
+});
+
+test('quota exhaustion stops queued images while allowing requests in flight to finish',async()=>{
+  for (const paid of [0,1]) {
+    const {state,review,batch}=setup((request)=>request===1
+      ? {ok:false,text:async()=>JSON.stringify({error:{code:'media_quota_exhausted',message:'No image allowance'}})}
+      : undefined);
+    review.setAvailability({webPlans:{free:1,paid,unknown:0},media:null});
+    const results=await review.runBatch(batch,'a cat','1:1','grok-imagine-image',false);
+    assert.equal(state.bodies.length,paid ? 2 : 1);
+    assert.deepEqual(Array.from(results),paid
+      ? [false,false,true,true,false,false]
+      : [false,false,false,false,false,false]);
+  }
+});
+
+test('cancelling an image batch prevents queued requests from starting',async()=>{
+  const controller=new AbortController();
+  const {state,review,batch}=setup(()=>{controller.abort()});
+  review.setAvailability({webPlans:{free:1,paid:0,unknown:0},media:null});
+  await review.runBatch(batch,'a cat','1:1','grok-imagine-image',false,controller.signal);
+  assert.equal(state.bodies.length,1);
 });
 
 test('the panel offers 标准 and 高质量 only, and edits follow the pool allowance',()=>{

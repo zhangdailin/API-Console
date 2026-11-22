@@ -100,7 +100,6 @@ func TestStreamErrorSurfacesTheHumanVerificationChallenge(t *testing.T) {
 	}
 }
 
-// The root conversation is stable for an account; recreating it every turn
 // A downstream conversation id selects its own child conversation under the
 // account root. Creating without a source id is idempotent and always returns
 // the root, so isolation requires the child call.
@@ -111,13 +110,15 @@ func TestConversationIsIsolatedPerDownstreamID(t *testing.T) {
 		_, _ = io.WriteString(w, fmt.Sprintf(`{"status_code":0,"downlink_body":{"create_conv_downlink_body":{"conversation_info":{"conversation_id":"conv-%d"}}}}`, created))
 	}))
 	defer server.Close()
-	client := NewFromAccount(&store.Account{ID: 9001, ClientCookie: `{"sid":"x"}`}, &config.Config{DoubaoBaseURL: server.URL})
-	alpha, err := client.conversationFor(context.Background(), client.jar(), "alpha")
-	testutil.NoError(t, err)
-	alphaAgain, err := client.conversationFor(context.Background(), client.jar(), "alpha")
-	testutil.NoError(t, err)
-	beta, err := client.conversationFor(context.Background(), client.jar(), "beta")
-	testutil.NoError(t, err)
+	prototype := NewFromAccount(&store.Account{ID: 9001, ClientCookie: `{"sid":"x"}`}, &config.Config{DoubaoBaseURL: server.URL})
+	conversation := func(name string) string {
+		client := prototype.scopedClient()
+		testutil.NoError(t, client.bindConversationIdentity(t.Context(), name))
+		id, err := client.conversationFor(t.Context(), client.jar())
+		testutil.NoError(t, err)
+		return id
+	}
+	alpha, alphaAgain, beta := conversation("alpha"), conversation("alpha"), conversation("beta")
 
 	// root, alpha child, beta child.
 	testutil.Equal(t, created, 3)
@@ -127,30 +128,11 @@ func TestConversationIsIsolatedPerDownstreamID(t *testing.T) {
 	}
 }
 
-// Without a downstream id the turn uses the account root directly: no child is
-// created, so repeated turns stay at one IM call.
-func TestConversationWithoutIDUsesTheRoot(t *testing.T) {
-	created := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		created++
-		_, _ = io.WriteString(w, fmt.Sprintf(`{"status_code":0,"downlink_body":{"create_conv_downlink_body":{"conversation_info":{"conversation_id":"conv-%d"}}}}`, created))
-	}))
-	defer server.Close()
-	client := NewFromAccount(&store.Account{ID: 9002, ClientCookie: `{"sid":"x"}`}, &config.Config{DoubaoBaseURL: server.URL})
-	first, err := client.conversationFor(context.Background(), client.jar(), "")
-	testutil.NoError(t, err)
-	second, err := client.conversationFor(context.Background(), client.jar(), "")
-	testutil.NoError(t, err)
-	testutil.Equal(t, first, "conv-1")
-	testutil.Equal(t, second, "conv-1")
-	testutil.Equal(t, created, 1)
-}
-
-// An account without an id cannot be isolated, so it must not share a cache
-// bucket with every other unsaved account.
-func TestConversationCacheKeyRequiresAnAccount(t *testing.T) {
-	testutil.Equal(t, cacheKey(0, "alpha"), "")
-	testutil.Equal(t, cacheKey(7, " alpha "), "7|alpha")
+func TestConversationRequiresBoundIdentity(t *testing.T) {
+	client := &Client{acc: &store.Account{ID: 9002}}
+	if id, err := client.conversationFor(t.Context(), nil); id != "" || err == nil {
+		t.Fatalf("unbound conversation: id=%q err=%v", id, err)
+	}
 }
 
 func TestModelsCarryStableAliases(t *testing.T) {

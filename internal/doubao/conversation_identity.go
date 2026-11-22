@@ -16,8 +16,7 @@ import (
 
 type conversationIdentity struct {
 	deviceID, webID, teaUUID string
-	scope                    string
-	anonymous                bool
+	scope                    string // Empty for anonymous requests.
 }
 
 // The persisted QR-login tuple is random session seed material. Deriving a
@@ -31,7 +30,7 @@ func (c *Client) bindConversationIdentity(ctx context.Context, downstreamID stri
 		if err != nil {
 			return err
 		}
-		c.dialogIdentity = &conversationIdentity{deviceID: device, webID: web, teaUUID: tea, anonymous: true}
+		c.dialogIdentity = &conversationIdentity{deviceID: device, webID: web, teaUUID: tea}
 		return nil
 	}
 	acc := c.acc

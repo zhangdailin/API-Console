@@ -78,7 +78,7 @@ func TestDialogIdentityIsolatesCallerConversationAndLogin(t *testing.T) {
 		}
 	}
 	first, second := dialogClient(t, acc, "caller-a", ""), dialogClient(t, acc, "caller-a", "")
-	if !first.dialogIdentity.anonymous || first.dialogIdentity.deviceID == second.dialogIdentity.deviceID {
+	if first.dialogIdentity.scope != "" || second.dialogIdentity.scope != "" || first.dialogIdentity.deviceID == second.dialogIdentity.deviceID {
 		t.Fatal("anonymous independent requests reused an identity")
 	}
 }
@@ -260,7 +260,7 @@ func TestConcurrentNamedDialogCreatesOneUpstreamChild(t *testing.T) {
 			}
 			ready <- struct{}{}
 			<-start
-			id, err := c.conversationFor(t.Context(), c.jar(), "concurrent-9405")
+			id, err := c.conversationFor(t.Context(), c.jar())
 			if err != nil || id != "synthetic-single-child" {
 				t.Errorf("concurrent conversation: %q %v", id, err)
 			}

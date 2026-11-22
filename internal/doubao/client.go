@@ -57,8 +57,6 @@ func NewFromAccount(acc *store.Account, cfg *config.Config) *Client {
 	return &Client{acc: copied, cfg: cfg, http: &local, sessionVersion: store.DoubaoSessionVersion(copied)}
 }
 
-func (c *Client) Close() {}
-
 func (c *Client) baseURL() string {
 	if c != nil && c.cfg != nil && strings.TrimSpace(c.cfg.DoubaoBaseURL) != "" {
 		return strings.TrimRight(strings.TrimSpace(c.cfg.DoubaoBaseURL), "/")
@@ -399,7 +397,7 @@ func (c *Client) sendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	if err := c.bindConversationIdentity(ctx, req.ConversationID); err != nil {
 		return fmt.Errorf("could not generate Doubao conversation identity: %w", err)
 	}
-	conversationID, err := c.conversationFor(ctx, jar, req.ConversationID)
+	conversationID, err := c.conversationFor(ctx, jar)
 	if err != nil {
 		return err
 	}

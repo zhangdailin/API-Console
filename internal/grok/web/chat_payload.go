@@ -10,16 +10,7 @@ import (
 	"time"
 )
 
-func (h *Handler) buildChatPayload(
-	ctx context.Context,
-	token string,
-	spec ModelSpec,
-	text string,
-	fileAttachments []string,
-	attachmentInputs []AttachmentInput,
-	videoCfg *VideoConfig,
-	req *ChatCompletionsRequest,
-) (map[string]any, error) {
+func (h *Handler) buildChatPayload(spec ModelSpec, text string, fileAttachments []string, req *ChatCompletionsRequest) map[string]any {
 	payload := h.webClient().chatPayload(spec, text, true, 0)
 	if len(fileAttachments) > 0 {
 		payload["fileAttachments"] = fileAttachments
@@ -52,25 +43,10 @@ func (h *Handler) buildChatPayload(
 		}
 	}
 
-	if !spec.IsVideo {
-		return payload, nil
-	}
-	return h.buildVideoCreatePayload(ctx, token, spec, text, attachmentInputs, videoCfg)
+	return payload
 }
 
-func (h *Handler) buildVideoCreatePayload(
-	ctx context.Context,
-	token string,
-	spec ModelSpec,
-	text string,
-	attachmentInputs []AttachmentInput,
-	videoCfg *VideoConfig,
-) (map[string]any, error) {
-	_ = ctx
-	_ = token
-	if videoCfg == nil {
-		videoCfg = &VideoConfig{}
-	}
+func buildVideoCreatePayload(spec ModelSpec, text string, attachmentInputs []AttachmentInput, videoCfg VideoConfig) (map[string]any, error) {
 	videoCfg.Normalize()
 	for _, item := range attachmentInputs {
 		if strings.EqualFold(strings.TrimSpace(item.Type), "image") && strings.TrimSpace(item.Data) != "" {
@@ -101,71 +77,6 @@ func (h *Handler) buildVideoCreatePayload(
 		"kind": "CONVERSATION_KIND_IMAGINE",
 	}
 	return payload, nil
-}
-
-func (h *Handler) buildVideoExtendPayload(spec ModelSpec, prompt string, parentPostID string, extendPostID string, videoCfg *VideoConfig, segmentLength int, elapsedSeconds int) map[string]any {
-	if videoCfg == nil {
-		videoCfg = &VideoConfig{}
-	}
-	videoCfg.Normalize()
-	message := strings.TrimSpace(prompt)
-	if modeFlag := videoPresetFlag(videoCfg.Preset); modeFlag != "" {
-		message = strings.TrimSpace(message + " " + modeFlag)
-	}
-	temporary := true
-	if h != nil && h.configSnapshot() != nil {
-		temporary = h.configSnapshot().GrokChatTemporary()
-	}
-	payload := map[string]any{
-		"temporary":        temporary,
-		"modelName":        spec.UpstreamModel,
-		"message":          message,
-		"enableSideBySide": true,
-		"responseMetadata": map[string]any{
-			"experiments": []any{},
-			"modelConfigOverride": map[string]any{
-				"modelMap": map[string]any{
-					"videoGenModelConfig": map[string]any{
-						"isVideoExtension":        true,
-						"videoExtensionStartTime": videoExtensionStartTime(elapsedSeconds),
-						"extendPostId":            strings.TrimSpace(extendPostID),
-						"stitchWithExtendPostId":  true,
-						"originalPrompt":          strings.TrimSpace(prompt),
-						"originalPostId":          strings.TrimSpace(parentPostID),
-						"originalRefType":         "ORIGINAL_REF_TYPE_VIDEO_EXTENSION",
-						"mode":                    strings.TrimSpace(videoCfg.Preset),
-						"aspectRatio":             videoCfg.AspectRatio,
-						"videoLength":             segmentLength,
-						"resolutionName":          videoCfg.ResolutionName,
-						"parentPostId":            strings.TrimSpace(parentPostID),
-						"isVideoEdit":             false,
-					},
-				},
-			},
-			"requestModelDetails": map[string]any{
-				"modelId": spec.UpstreamModel,
-			},
-		},
-	}
-	if strings.TrimSpace(spec.ModelMode) != "" {
-		payload["modelMode"] = spec.ModelMode
-	}
-	return payload
-}
-
-func videoPresetFlag(preset string) string {
-	switch strings.ToLower(strings.TrimSpace(preset)) {
-	case "fun":
-		return "--mode=extremely-crazy"
-	case "normal":
-		return "--mode=normal"
-	case "spicy":
-		return "--mode=extremely-spicy-or-crazy"
-	case "", "custom":
-		return "--mode=custom"
-	default:
-		return "--mode=custom"
-	}
 }
 
 func (h *Handler) uploadAttachmentInputs(ctx context.Context, token string, inputs []AttachmentInput) ([]string, error) {

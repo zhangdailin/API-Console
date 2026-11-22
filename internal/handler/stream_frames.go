@@ -208,15 +208,7 @@ func (h *streamHandler) writeFinalSSEBytes(event string, data []byte) {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.writeFinalSSEBytesLocked(event, data)
-}
-
-func (h *streamHandler) writeFinalSSEBytesLocked(event string, data []byte) {
-	h.writeFinalSSEBytesLockedWithHint(event, data, false)
-}
-
-func (h *streamHandler) writeFinalSSEBytesLockedWithHint(event string, data []byte, immediate bool) {
-	h.emitSSEFrameLocked(event, data, immediate, true)
+	h.emitSSEFrameLocked(event, data, false, true)
 }
 
 func (h *streamHandler) writeSSEBytesLockedWithHint(event string, data []byte, immediate bool) {
@@ -234,91 +226,50 @@ func (h *streamHandler) writeSSEBytesLockedWithHint(event string, data []byte, i
 	}
 }
 
-func (h *streamHandler) writeSSEContentBlockStartToolUseLocked(index int, id, name string, final bool) {
-	raw, err := appendSSEContentBlockStartToolUse(h.ssePayloadScratch[:0], index, id, name)
+func (h *streamHandler) writeEncodedSSELocked(event string, raw []byte, err error, immediate, final bool) {
 	if err != nil {
-		h.markWriteErrorLocked("content_block_start", err)
+		h.markWriteErrorLocked(event, err)
 		return
 	}
 	h.ssePayloadScratch = raw[:0]
 	if final {
-		h.writeFinalSSEBytesLockedWithHint("content_block_start", raw, true)
+		h.emitSSEFrameLocked(event, raw, immediate, true)
 		return
 	}
-	h.writeSSEBytesLockedWithHint("content_block_start", raw, true)
+	h.writeSSEBytesLockedWithHint(event, raw, immediate)
 }
 
-func (h *streamHandler) writeSSEContentBlockStartTextLocked(index int, final bool) {
+func (h *streamHandler) writeSSEContentBlockStartToolUseLocked(index int, id, name string, final bool) {
+	raw, err := appendSSEContentBlockStartToolUse(h.ssePayloadScratch[:0], index, id, name)
+	h.writeEncodedSSELocked("content_block_start", raw, err, true, final)
+}
+
+func (h *streamHandler) writeSSEContentBlockStartTextLocked(index int) {
 	raw, err := appendSSEContentBlockStartText(h.ssePayloadScratch[:0], index)
-	if err != nil {
-		h.markWriteErrorLocked("content_block_start", err)
-		return
-	}
-	h.ssePayloadScratch = raw[:0]
-	if final {
-		h.writeFinalSSEBytesLockedWithHint("content_block_start", raw, true)
-		return
-	}
-	h.writeSSEBytesLockedWithHint("content_block_start", raw, true)
+	h.writeEncodedSSELocked("content_block_start", raw, err, true, false)
 }
 
 func (h *streamHandler) writeSSEContentBlockDeltaInputJSONLocked(index int, partialJSON string, final bool) {
 	raw, err := appendSSEContentBlockDeltaInputJSON(h.ssePayloadScratch[:0], index, partialJSON)
-	if err != nil {
-		h.markWriteErrorLocked("content_block_delta", err)
-		return
-	}
-	h.ssePayloadScratch = raw[:0]
-	if final {
-		h.writeFinalSSEBytesLockedWithHint("content_block_delta", raw, false)
-		return
-	}
-	h.writeSSEBytesLockedWithHint("content_block_delta", raw, false)
+	h.writeEncodedSSELocked("content_block_delta", raw, err, false, final)
 }
 
-func (h *streamHandler) writeSSEContentBlockDeltaTextLocked(index int, text string, final bool) {
+func (h *streamHandler) writeSSEContentBlockDeltaTextLocked(index int, text string) {
 	raw, err := appendSSEContentBlockDeltaText(h.ssePayloadScratch[:0], index, text)
-	if err != nil {
-		h.markWriteErrorLocked("content_block_delta", err)
-		return
-	}
-	h.ssePayloadScratch = raw[:0]
-	if final {
-		h.writeFinalSSEBytesLockedWithHint("content_block_delta", raw, true)
-		return
-	}
-	h.writeSSEBytesLockedWithHint("content_block_delta", raw, true)
+	h.writeEncodedSSELocked("content_block_delta", raw, err, true, false)
 }
 
-func (h *streamHandler) writeSSEContentBlockDeltaThinkingLocked(index int, thinking string, final bool) {
+func (h *streamHandler) writeSSEContentBlockDeltaThinkingLocked(index int, thinking string) {
 	raw, err := appendSSEContentBlockDeltaThinking(h.ssePayloadScratch[:0], index, thinking)
-	if err != nil {
-		h.markWriteErrorLocked("content_block_delta", err)
-		return
-	}
-	h.ssePayloadScratch = raw[:0]
-	if final {
-		h.writeFinalSSEBytesLockedWithHint("content_block_delta", raw, false)
-		return
-	}
-	h.writeSSEBytesLockedWithHint("content_block_delta", raw, false)
+	h.writeEncodedSSELocked("content_block_delta", raw, err, false, false)
 }
 
 func (h *streamHandler) writeSSEContentBlockStopLocked(index int, final bool) {
 	raw, err := appendSSEContentBlockStop(h.ssePayloadScratch[:0], index)
-	if err != nil {
-		h.markWriteErrorLocked("content_block_stop", err)
-		return
-	}
-	h.ssePayloadScratch = raw[:0]
-	if final {
-		h.writeFinalSSEBytesLockedWithHint("content_block_stop", raw, true)
-		return
-	}
-	h.writeSSEBytesLockedWithHint("content_block_stop", raw, true)
+	h.writeEncodedSSELocked("content_block_stop", raw, err, true, final)
 }
 
-func (h *streamHandler) writeSSEMessageDeltaLocked(stopReason string, outputTokens int, final bool) {
+func (h *streamHandler) writeSSEMessageDeltaLocked(stopReason string, outputTokens int) {
 	raw, err := appendSSEMessageDelta(h.ssePayloadScratch[:0], stopReason, outputTokens)
 	if err == nil && h.exclusiveUsage.active {
 		// The explicit Chat dialect carries canonical inclusive input without
@@ -342,16 +293,7 @@ func (h *streamHandler) writeSSEMessageDeltaLocked(stopReason string, outputToke
 		raw = strconv.AppendInt(raw, int64(h.cacheWriteTokens), 10)
 		raw = append(raw, '}', '}')
 	}
-	if err != nil {
-		h.markWriteErrorLocked("message_delta", err)
-		return
-	}
-	h.ssePayloadScratch = raw[:0]
-	if final {
-		h.writeFinalSSEBytesLockedWithHint("message_delta", raw, true)
-		return
-	}
-	h.writeSSEBytesLockedWithHint("message_delta", raw, true)
+	h.writeEncodedSSELocked("message_delta", raw, err, true, true)
 }
 
 // writeMessageStartLocked emits the opening frame. It takes the lock as held.

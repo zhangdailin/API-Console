@@ -33,7 +33,6 @@
     abortController: null,
     selectionMode: false,
     selected: new Set(),
-    finalMinBytes: 100000,
     nsfwEnabled: true,
     saveState: null,
     showToast: null,
@@ -195,7 +194,7 @@
     }
   }
 
-  async function requestImageEdit(prompt, ratio, model, quality, signal, count = 1) {
+  async function requestImageEdit(prompt, ratio, signal, count) {
     const inputs = state.editFileIDs.map((file_id) => ({ file_id }));
     for (const url of editURLInputs()) inputs.push({ url });
     if (!inputs.length) throw new Error("请上传或填写至少一张编辑素材");
@@ -406,8 +405,8 @@
 
   // Every tier goes through /images/generations, where the server picks an
   // account that still has the tier's allowance. Edits go to /images/edits.
-  async function requestImages(prompt, ratio, model, quality, nsfw, signal, count = 1) {
-    if (imageOperation() === "edit") return requestImageEdit(prompt, ratio, model, quality, signal, count);
+  async function requestImages(prompt, ratio, model, nsfw, signal, count) {
+    if (imageOperation() === "edit") return requestImageEdit(prompt, ratio, signal, count);
     const chosen = String(model || "").trim() || "grok-imagine-image";
     const res = await fetch(`${inferencePrefix()}/images/generations`, {
       method: "POST",
@@ -430,7 +429,7 @@
     return images;
   }
 
-  async function runSlots(batch, slots, prompt, ratio, model, quality, nsfw, signal) {
+  async function runSlots(batch, slots, prompt, ratio, model, nsfw, signal) {
     let tick = 0;
     slots.forEach((slot) => setSlotProgress(slot, 0));
     const timer = window.setInterval(() => {
@@ -438,7 +437,7 @@
       slots.forEach((slot) => setSlotProgress(slot, Math.min(92, 8 + tick * 7)));
     }, 900);
     try {
-      const images = await requestImages(prompt, ratio, model, quality, nsfw, signal, slots.length);
+      const images = await requestImages(prompt, ratio, model, nsfw, signal, slots.length);
       slots.forEach((slot, index) => {
         if (images[index]) {
           finishSlot(slot, images[index], { prompt });
@@ -479,29 +478,18 @@
   // runBatch fills the slots of one round. A Free-only pool runs one request
   // for one image at a time (the other slots wait as 排队中); otherwise two
   // requests of two images each run side by side.
-  async function runBatch(batch, prompt, ratio, model, quality, nsfw, signal) {
-    if (!freeOnlyPool()) return runBatchParallel(batch, prompt, ratio, model, quality, nsfw, signal);
-    const results = new Array(batch.slots.length).fill(false);
-    for (let index = 0; index < batch.slots.length; index += 1) {
-      if (signal?.aborted) break;
-      const [ok] = await runSlots(batch, [batch.slots[index]], prompt, ratio, model, quality, nsfw, signal);
-      results[index] = ok;
-      // A spent allowance does not come back within the batch.
-      if (batch.quotaExhausted) break;
-    }
-    return results;
-  }
-
-  async function runBatchParallel(batch, prompt, ratio, model, quality, nsfw, signal) {
+  async function runBatch(batch, prompt, ratio, model, nsfw, signal) {
+    const freeOnly = freeOnlyPool();
+    const groupSize = freeOnly ? 1 : 2;
+    const workerCount = Math.min(freeOnly ? 1 : PARALLELISM, Math.ceil(batch.slots.length / groupSize));
     const results = new Array(batch.slots.length).fill(false);
     let cursor = 0;
-    const workers = Array.from({ length: Math.min(PARALLELISM, Math.ceil(batch.slots.length / 2)) }, async () => {
-      while (cursor < batch.slots.length) {
-        if (signal?.aborted) break;
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (cursor < batch.slots.length && !signal?.aborted) {
         const index = cursor;
-        cursor += 2;
-        const slots = batch.slots.slice(index, index + 2);
-        const outcome = await runSlots(batch, slots, prompt, ratio, model, quality, nsfw, signal);
+        cursor += groupSize;
+        const slots = batch.slots.slice(index, cursor);
+        const outcome = await runSlots(batch, slots, prompt, ratio, model, nsfw, signal);
         outcome.forEach((ok, offset) => { results[index + offset] = ok; });
         // A spent allowance does not come back within the batch.
         if (batch.quotaExhausted) break;
@@ -573,7 +561,7 @@
         const batch = createBatch(prompt, ratio, quality, round);
         if (!batch) throw new Error("瀑布流容器不存在");
         setStatus(`生成中 · 第 ${round} 轮`);
-        const results = await runBatch(batch, prompt, ratio, model, quality, state.nsfwEnabled, state.abortController.signal);
+        const results = await runBatch(batch, prompt, ratio, model, state.nsfwEnabled, state.abortController.signal);
         updateBatch(batch, true);
         if (!state.running || runMode !== "continuous") break;
         // A failed batch used to resolve normally and immediately start another
@@ -793,8 +781,6 @@
       const res = await fetch("/api/grok/admin/imagine/config", { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
-        const value = parseInt(data?.final_min_bytes, 10);
-        if (Number.isFinite(value) && value >= 0) state.finalMinBytes = value;
         if (typeof data?.nsfw === "boolean") state.nsfwEnabled = data.nsfw;
       }
     } catch (err) {

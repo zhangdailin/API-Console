@@ -2,9 +2,7 @@ package web
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"maps"
 	"net/http"
@@ -22,12 +20,11 @@ import (
 // snapshots; the stream prefers the snapshots (they carry the final text) and
 // falls back to the deltas when no snapshot arrives.
 type webChatStream struct {
+	ctx        context.Context
 	h          *Handler
 	w          http.ResponseWriter
 	flusher    http.Flusher
 	req        *ChatCompletionsRequest
-	model      string
-	spec       ModelSpec
 	token      string
 	publicBase string
 	logger     *debug.Logger
@@ -49,16 +46,15 @@ type webChatStream struct {
 	finalSnapshotMarkdown []string
 
 	// Text: the latest snapshot, what of it was emitted, and the delta fallback.
-	lastMessage          string
-	sawModelMessage      bool
-	tokenFallback        strings.Builder
-	reasoningContent     strings.Builder
-	thinkingMarkup       streamMarkupFilter
-	lastThinkingMessage  string
-	emittedModelMessage  string
-	pendingModelMessage  string
-	finalSnapshotEnabled bool
-	markup               *streamMarkupFilter
+	lastMessage         string
+	sawModelMessage     bool
+	tokenFallback       strings.Builder
+	reasoningContent    strings.Builder
+	thinkingMarkup      streamMarkupFilter
+	lastThinkingMessage string
+	emittedModelMessage string
+	pendingModelMessage string
+	markup              *streamMarkupFilter
 
 	// Tools: calls are parsed out of the text and sent as tool_calls chunks.
 	toolStreamMode bool
@@ -67,14 +63,14 @@ type webChatStream struct {
 	toolCallIndex  int
 }
 
-func newWebChatStream(h *Handler, w http.ResponseWriter, req *ChatCompletionsRequest, model string, spec ModelSpec, token, publicBase string, hasAttachments bool, tools []ToolDef, toolChoice any, logger *debug.Logger) *webChatStream {
+func newWebChatStream(ctx context.Context, h *Handler, w http.ResponseWriter, req *ChatCompletionsRequest, token, publicBase string, hasAttachments bool, logger *debug.Logger) *webChatStream {
 	s := &webChatStream{
-		h: h, w: w, flusher: httpserver.StreamResponseHeaders(w), req: req, model: model, spec: spec,
+		ctx: ctx, h: h, w: w, flusher: httpserver.StreamResponseHeaders(w), req: req,
 		token: token, publicBase: publicBase, logger: logger,
 		id:                    "chatcmpl_" + randomHex(8),
-		enableMediaExtraction: hasAttachments || spec.IsVideo,
-		toolStreamMode:        toolCallsEnabled(tools, toolChoice),
-		toolParser:            newToolCallParser(tools, toolChoice),
+		enableMediaExtraction: hasAttachments,
+		toolStreamMode:        toolCallsEnabled(req.Tools, req.ToolChoice),
+		toolParser:            newToolCallParser(req.Tools, req.ToolChoice),
 		finalSnapshotMarkdown: make([]string, 0, 4),
 		chunkScratch:          make([]byte, 0, 256),
 	}
@@ -84,7 +80,6 @@ func newWebChatStream(h *Handler, w http.ResponseWriter, req *ChatCompletionsReq
 		s.emitted = map[string]bool{}
 		s.textRefCollector = newStreamTextImageRefCollector()
 	}
-	s.finalSnapshotEnabled = !s.toolStreamMode && !spec.IsVideo
 	if s.toolStreamMode {
 		s.toolPump = newToolStreamPump(s.toolParser)
 	}
@@ -110,7 +105,7 @@ func (s *webChatStream) emitRaw(raw []byte) {
 }
 
 func (s *webChatStream) emitChunk(role, content, finish string, hasFinish bool) {
-	raw := appendChatCompletionChunkWithUsage(s.chunkScratch[:0], s.id, time.Now().Unix(), s.model, s.fingerprint, role, content, finish, hasFinish, s.finalUsage)
+	raw := appendChatCompletionChunkWithUsage(s.chunkScratch[:0], s.id, time.Now().Unix(), s.req.Model, s.fingerprint, role, content, finish, hasFinish, s.finalUsage)
 	s.chunkScratch = raw[:0]
 	s.emitRaw(raw)
 	s.sentAny = true
@@ -131,7 +126,7 @@ func (s *webChatStream) emitReasoningChunk(content string) {
 	if content == "" {
 		return
 	}
-	raw := appendChatCompletionReasoningChunk(s.chunkScratch[:0], s.id, time.Now().Unix(), s.model, s.fingerprint, content)
+	raw := appendChatCompletionReasoningChunk(s.chunkScratch[:0], s.id, time.Now().Unix(), s.req.Model, s.fingerprint, content)
 	s.chunkScratch = raw[:0]
 	s.emitRaw(raw)
 	s.sentAny = true
@@ -156,7 +151,7 @@ func (s *webChatStream) emitCleanText(raw string) {
 // emitImageURL sends an image found in the stream as Markdown, once, holding a
 // -part-0 preview back until it is clear no full variant follows.
 func (s *webChatStream) emitImageURL(raw string) {
-	if !s.enableMediaExtraction {
+	if !s.enableMediaExtraction || s.deliveryError() != nil {
 		return
 	}
 	raw = strings.TrimSpace(raw)
@@ -175,7 +170,10 @@ func (s *webChatStream) emitImageURL(raw string) {
 	if s.emitted[raw] {
 		return
 	}
-	val, errV := s.h.imageOutputValue(context.Background(), s.token, raw, "url")
+	val, errV := s.h.imageOutputValue(s.ctx, s.token, raw, "url")
+	if s.deliveryError() != nil {
+		return
+	}
 	if errV != nil || strings.TrimSpace(val) == "" {
 		val = raw
 	}
@@ -212,7 +210,7 @@ func (s *webChatStream) emitToolCallsChunk(content string, toolCalls []map[strin
 	if len(indexedToolCalls) == 0 {
 		return
 	}
-	raw := appendChatCompletionToolCallsChunkWithUsage(s.chunkScratch[:0], s.id, time.Now().Unix(), s.model, s.fingerprint, indexedToolCalls, finish, hasFinish, s.finalUsage)
+	raw := appendChatCompletionToolCallsChunkWithUsage(s.chunkScratch[:0], s.id, time.Now().Unix(), s.req.Model, s.fingerprint, indexedToolCalls, finish, hasFinish, s.finalUsage)
 	s.chunkScratch = raw[:0]
 	s.emitRaw(raw)
 	s.sentAny = true
@@ -226,16 +224,19 @@ func (s *webChatStream) onToolStreamCall(toolCall map[string]any) {
 
 // --- upstream lines -----------------------------------------------------------
 
-// onUpstream handles one grok.com response line.
-func (s *webChatStream) onUpstream(resp map[string]any) error {
+func (s *webChatStream) deliveryError() error {
 	if s.downstreamWriteErr != nil {
 		return s.downstreamWriteErr
 	}
-	if s.logger != nil {
-		if raw, err := json.Marshal(resp); err == nil {
-			s.logger.LogOutputSSE("response", string(raw))
-		}
+	return s.ctx.Err()
+}
+
+// onUpstream handles one grok.com response line.
+func (s *webChatStream) onUpstream(resp map[string]any) error {
+	if err := s.deliveryError(); err != nil {
+		return err
 	}
+	s.logger.LogOutputSSEJSON("response", resp)
 	mr := extractUpstreamModelResponse(resp)
 	if s.fingerprint == "" {
 		s.fingerprint = extractUpstreamFingerprint(resp, mr)
@@ -250,7 +251,7 @@ func (s *webChatStream) onUpstream(resp map[string]any) error {
 	tokenDelta := extractUpstreamTokenDelta(resp, mr)
 	if isThinkingResponse(resp) {
 		s.onThinking(tokenDelta, mr)
-		return nil
+		return s.deliveryError()
 	}
 	if tokenDelta != "" {
 		if s.textRefCollector != nil {
@@ -271,10 +272,7 @@ func (s *webChatStream) onUpstream(resp map[string]any) error {
 	if s.enableMediaExtraction {
 		forEachImageCandidateFromValue(resp, true, true, 120, s.emitImageURL)
 	}
-	if s.spec.IsVideo {
-		s.onVideoProgress(resp)
-	}
-	return nil
+	return s.deliveryError()
 }
 
 func (s *webChatStream) onThinking(tokenDelta string, mr map[string]any) {
@@ -340,29 +338,6 @@ func (s *webChatStream) onModelResponse(mr map[string]any) {
 	}
 }
 
-func (s *webChatStream) onVideoProgress(resp map[string]any) {
-	progress, videoURL, ok := extractVideoProgress(resp)
-	if !ok {
-		return
-	}
-	if progress > 0 && progress < 100 {
-		s.emitReasoningChunk(fmt.Sprintf("视频正在生成 %d%%\n", progress))
-	}
-	if progress >= 100 && strings.TrimSpace(videoURL) == "" {
-		videoURL = firstAssetURL(resp)
-	}
-	if progress >= 100 && strings.TrimSpace(videoURL) != "" {
-		finalURL := strings.TrimSpace(videoURL)
-		if name, err := s.h.cacheMediaURL(context.Background(), s.token, finalURL, "video"); err == nil && name != "" {
-			finalURL = "/grok/v1/files/video/" + name
-		}
-		if s.publicBase != "" && strings.HasPrefix(finalURL, "/") {
-			finalURL = s.publicBase + finalURL
-		}
-		s.emitChunk("", finalURL, "", false)
-	}
-}
-
 // --- end of stream ------------------------------------------------------------
 
 // fail ends a stream the upstream or the client broke. A stalled upstream is
@@ -394,7 +369,7 @@ func (s *webChatStream) flushText() (buffered string) {
 			s.emitTextChunk(rest)
 		}
 		if s.tokenFallback.Len() > 0 && !s.sawModelMessage && s.h != nil && s.h.configSnapshot() != nil && s.h.configSnapshot().DebugEnabled {
-			slog.Debug("grok stream fallback used token deltas (no modelResponse)", "model", s.model)
+			slog.Debug("grok stream fallback used token deltas (no modelResponse)", "model", s.req.Model)
 		}
 		return ""
 	}
@@ -416,14 +391,17 @@ func (s *webChatStream) flushText() (buffered string) {
 // flushMedia sends previews whose full variant never appeared (trying the full
 // one through the media cache first), then image references found in text.
 func (s *webChatStream) flushMedia() {
-	if !s.enableMediaExtraction {
+	if !s.enableMediaExtraction || s.deliveryError() != nil {
 		return
 	}
 	for full, part := range s.pendingPart {
+		if s.deliveryError() != nil {
+			return
+		}
 		if s.seenFull[full] {
 			continue
 		}
-		if name, err := s.h.cacheMediaURL(context.Background(), s.token, full, "image"); err == nil && name != "" {
+		if name, err := s.h.cacheMediaURL(s.ctx, s.token, full, "image"); err == nil && name != "" {
 			val := "/grok/v1/files/image/" + name
 			if s.publicBase != "" && strings.HasPrefix(val, "/") {
 				val = s.publicBase + val
@@ -440,6 +418,9 @@ func (s *webChatStream) flushMedia() {
 
 // finish flushes what was held back and sends the final chunk with usage.
 func (s *webChatStream) finish() {
+	if s.deliveryError() != nil {
+		return
+	}
 	s.flushThinking()
 	finalBufferedText := s.flushText()
 	finalUsageText := strings.TrimSpace(finalBufferedText)
@@ -459,13 +440,16 @@ func (s *webChatStream) finish() {
 		}
 	}
 	s.flushMedia()
+	if s.deliveryError() != nil {
+		return
+	}
 
 	if s.toolStreamMode && s.finishToolCalls(finalBufferedText) {
 		return
 	}
 	s.finalUsage = grokbase.AddReasoningUsage(buildChatUsagePayload(s.req, finalUsageText, nil), s.reasoningContent.String())
-	if s.finalSnapshotEnabled && finalSnapshotContent != "" {
-		raw := appendChatCompletionSnapshotChunkWithUsage(s.chunkScratch[:0], s.id, time.Now().Unix(), s.model, s.fingerprint, finalSnapshotContent, "stop", true, s.finalUsage)
+	if !s.toolStreamMode && finalSnapshotContent != "" {
+		raw := appendChatCompletionSnapshotChunkWithUsage(s.chunkScratch[:0], s.id, time.Now().Unix(), s.req.Model, s.fingerprint, finalSnapshotContent, "stop", true, s.finalUsage)
 		s.chunkScratch = raw[:0]
 		s.emitRaw(raw)
 	} else {

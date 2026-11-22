@@ -2,7 +2,6 @@ package web
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,46 +11,32 @@ import (
 	"orchids-api/internal/util"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 func streamMessageDelta(previous, current string) string {
-	if current == "" || current == previous {
-		return ""
-	}
-	if previous == "" {
-		return current
-	}
-	if strings.HasPrefix(current, previous) {
-		return current[len(previous):]
-	}
-	prevRunes := []rune(previous)
-	currRunes := []rune(current)
-	maxPrefix := min(len(currRunes), len(prevRunes))
-	prefix := 0
-	for prefix < maxPrefix && prevRunes[prefix] == currRunes[prefix] {
-		prefix++
-	}
-	if prefix >= len(currRunes) {
-		return ""
-	}
-	return string(currRunes[prefix:])
+	return current[sharedSnapshotPrefix(previous, current):]
 }
 
 func commonPrefixText(a, b string) string {
-	if a == "" || b == "" {
-		return ""
+	return a[:sharedSnapshotPrefix(a, b)]
+}
+
+// JSON decoding supplies valid UTF-8. The usual growing snapshot takes the
+// prefix check without allocating; a revised tail can split a rune's bytes.
+func sharedSnapshotPrefix(a, b string) int {
+	limit := min(len(a), len(b))
+	if a[:limit] == b[:limit] {
+		return limit
 	}
-	ar := []rune(a)
-	br := []rune(b)
-	limit := min(len(br), len(ar))
-	idx := 0
-	for idx < limit && ar[idx] == br[idx] {
-		idx++
+	i := 0
+	for i < limit && a[i] == b[i] {
+		i++
 	}
-	if idx == 0 {
-		return ""
+	for i > 0 && !utf8.RuneStart(a[i]) {
+		i--
 	}
-	return string(ar[:idx])
+	return i
 }
 
 func toolCallsEnabled(tools []ToolDef, toolChoice any) bool {
@@ -84,13 +69,16 @@ func suffixPrefixOverlap(text, tag string) int {
 // per-stream state and its emitters live on webChatStream
 // (chat_stream_state.go); this function is the order of events: open, relay
 // each upstream line, then flush what was buffered and finish.
-func (h *Handler) streamChat(w http.ResponseWriter, req *ChatCompletionsRequest, model string, spec ModelSpec, token string, publicBase string, hasAttachments bool, tools []ToolDef, toolChoice any, body io.Reader, logger *debug.Logger) {
-	s := newWebChatStream(h, w, req, model, spec, token, publicBase, hasAttachments, tools, toolChoice, logger)
+func (h *Handler) streamChat(ctx context.Context, w http.ResponseWriter, req *ChatCompletionsRequest, token, publicBase string, hasAttachments bool, body io.Reader, logger *debug.Logger) {
+	s := newWebChatStream(ctx, h, w, req, token, publicBase, hasAttachments, logger)
 	defer s.auditOutcome()
 
 	err := parseUpstreamLines(body, s.onUpstream)
-	if err == nil && s.downstreamWriteErr != nil {
-		err = s.downstreamWriteErr
+	if ctx.Err() != nil {
+		return
+	}
+	if err == nil {
+		err = s.deliveryError()
 	}
 	if err != nil {
 		s.fail(err)
@@ -99,12 +87,10 @@ func (h *Handler) streamChat(w http.ResponseWriter, req *ChatCompletionsRequest,
 	s.finish()
 }
 
-func (h *Handler) collectChat(w http.ResponseWriter, req *ChatCompletionsRequest, model string, spec ModelSpec, token string, publicBase string, hasAttachments bool, tools []ToolDef, toolChoice any, body io.Reader, logger *debug.Logger) {
+func (h *Handler) collectChat(ctx context.Context, w http.ResponseWriter, req *ChatCompletionsRequest, token, publicBase string, hasAttachments bool, body io.Reader, logger *debug.Logger) {
 	id := "chatcmpl_" + randomHex(8)
 	lastMessage := ""
-	videoURL := ""
 	fingerprint := ""
-	enableMediaExtraction := hasAttachments || spec.IsVideo
 	imageCandidates := make([]string, 0, 8)
 	imageCandidateSet := map[string]struct{}{}
 	var tokenContent strings.Builder
@@ -123,11 +109,10 @@ func (h *Handler) collectChat(w http.ResponseWriter, req *ChatCompletionsRequest
 	}
 
 	err := parseUpstreamLines(body, func(resp map[string]any) error {
-		if logger != nil {
-			if raw, err := json.Marshal(resp); err == nil {
-				logger.LogOutputSSE("response", string(raw))
-			}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
+		logger.LogOutputSSEJSON("response", resp)
 		mr := extractUpstreamModelResponse(resp)
 		if fingerprint == "" {
 			fingerprint = extractUpstreamFingerprint(resp, mr)
@@ -158,23 +143,18 @@ func (h *Handler) collectChat(w http.ResponseWriter, req *ChatCompletionsRequest
 					slog.Debug("grok message contains render/tool markup", "has_modelResponse", true)
 				}
 			}
-			if enableMediaExtraction {
+			if hasAttachments {
 				forEachImageCandidateFromValue(mr, true, false, 0, addImageCandidate)
 			}
 		}
-		if enableMediaExtraction {
+		if hasAttachments {
 			forEachImageCandidateFromValue(resp, false, false, 0, addImageCandidate)
-		}
-		if spec.IsVideo {
-			if progress, vurl, ok := extractVideoProgress(resp); ok && progress >= 100 {
-				videoURL = strings.TrimSpace(vurl)
-				if videoURL == "" {
-					videoURL = firstAssetURL(resp)
-				}
-			}
 		}
 		return nil
 	})
+	if ctx.Err() != nil {
+		return
+	}
 	if err != nil {
 		writeGrokUpstreamError(w, err)
 		return
@@ -193,30 +173,20 @@ func (h *Handler) collectChat(w http.ResponseWriter, req *ChatCompletionsRequest
 	}
 
 	var toolCalls []map[string]any
-	if toolCallsEnabled(tools, toolChoice) {
-		textContent, parsedToolCalls := newToolCallParser(tools, toolChoice).parseCalls(finalContent)
+	if toolCallsEnabled(req.Tools, req.ToolChoice) {
+		textContent, parsedToolCalls := newToolCallParser(req.Tools, req.ToolChoice).parseCalls(finalContent)
 		finalContent = strings.TrimSpace(textContent)
 		toolCalls = parsedToolCalls
 	}
 
-	if videoURL != "" {
-		if name, err := h.cacheMediaURL(context.Background(), token, videoURL, "video"); err == nil && name != "" {
-			videoURL = "/grok/v1/files/video/" + name
-		}
-		if publicBase != "" && strings.HasPrefix(videoURL, "/") {
-			videoURL = publicBase + videoURL
-		}
-		if strings.TrimSpace(finalContent) != "" {
-			finalContent += "\n"
-		}
-		finalContent += videoURL
-	}
-
 	// Append any collected image links as Markdown, after text cleanup.
-	if enableMediaExtraction {
+	if hasAttachments {
 		imgs := normalizeImageURLs(imageCandidates, 8)
 		for _, u := range imgs {
-			val, errV := h.imageOutputValue(context.Background(), token, u, "url")
+			val, errV := h.imageOutputValue(ctx, token, u, "url")
+			if ctx.Err() != nil {
+				return
+			}
 			if errV != nil || strings.TrimSpace(val) == "" {
 				val = u
 			}
@@ -225,6 +195,9 @@ func (h *Handler) collectChat(w http.ResponseWriter, req *ChatCompletionsRequest
 			}
 			finalContent += formatImageMarkdown(val)
 		}
+	}
+	if ctx.Err() != nil {
+		return
 	}
 	message := map[string]any{
 		"role":        "assistant",
@@ -240,7 +213,7 @@ func (h *Handler) collectChat(w http.ResponseWriter, req *ChatCompletionsRequest
 		"id":                 id,
 		"object":             "chat.completion",
 		"created":            time.Now().Unix(),
-		"model":              model,
+		"model":              req.Model,
 		"service_tier":       nil,
 		"system_fingerprint": fingerprint,
 		"choices": []map[string]any{

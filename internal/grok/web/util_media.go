@@ -2,7 +2,6 @@ package web
 
 import (
 	"fmt"
-	"math"
 	"sort"
 	"strings"
 
@@ -446,17 +445,6 @@ func validateVideoConfigForModel(cfg *VideoConfig, spec ModelSpec, referenceCoun
 	}
 	validated.ResolutionName = "1080p"
 	return validated, nil
-}
-
-func videoSegmentLengths(seconds int) ([]int, error) {
-	if seconds < 1 || seconds > 15 {
-		return nil, fmt.Errorf("video_length must be between 1 and 15 seconds")
-	}
-	return []int{seconds}, nil
-}
-
-func videoExtensionStartTime(seconds int) float64 {
-	return math.Round((float64(seconds)+1.0/24.0)*1e6) / 1e6
 }
 
 func normalizeImageSize(size string) (string, error) {

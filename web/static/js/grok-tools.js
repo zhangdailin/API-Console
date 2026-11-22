@@ -31,7 +31,6 @@
     running: false,
     startAt: 0,
     elapsedTimer: null,
-    lastProgress: 0,
     currentPreviewItem: null,
     previewCount: 0,
     pollTimer: null,
@@ -81,11 +80,8 @@
     "common.generating": "生成中",
     "common.done": "已完成",
     "common.connectionError": "连接中断",
-    "common.createTaskFailed": "创建任务失败",
-    "common.enterPrompt": "请输入 Prompt",
     "video.alreadyRunning": "Video 任务已在运行中",
     "video.enterPrompt": "请输入 Video Prompt",
-    "video.superResolution": "超分辨率处理中...",
     "video.downloadFailed": "视频下载失败",
     "video.taskEmpty": "创建任务失败：空 task_id",
     "video.startFailed": "启动失败",
@@ -93,19 +89,10 @@
     "voice.alreadyRunning": "Voice 会话已在运行中",
     "voice.tokenUnavailable": "voice token unavailable",
     "voice.connected": "已连接",
-    "voice.stopped": "未连接",
     "voice.connectFailed": "连接失败",
   };
 
-  function t(key, vars) {
-    let text = i18nMap[key] || key;
-    if (vars && typeof vars === "object") {
-      Object.keys(vars).forEach((name) => {
-        text = text.replace(new RegExp(`\\{${name}\\}`, "g"), String(vars[name]));
-      });
-    }
-    return text;
-  }
+  function t(key) { return i18nMap[key]; }
 
   function handleUnauthorized(res) {
     if (!res || res.status !== 401) return false;
@@ -267,19 +254,6 @@
     });
     applyGrokCapabilityControls();
     updateGrokCapabilityPresentation(currentGrokToolTab());
-  }
-
-  function formatBytes(bytes) {
-    const num = Number(bytes || 0);
-    if (!Number.isFinite(num) || num <= 0) return "0 B";
-    const units = ["B", "KB", "MB", "GB", "TB"];
-    let value = num;
-    let idx = 0;
-    while (value >= 1024 && idx < units.length - 1) {
-      value /= 1024;
-      idx++;
-    }
-    return `${value.toFixed(value >= 10 ? 1 : 2)} ${units[idx]}`;
   }
 
   function relativeTime(ms) {
@@ -2829,7 +2803,6 @@
 
   function setVideoProgress(value) {
     const safe = Math.max(0, Math.min(100, Number(value) || 0));
-    videoState.lastProgress = safe;
     const fill = document.getElementById("videoProgressFill");
     const text = document.getElementById("videoProgressText");
     if (fill) fill.style.width = `${safe}%`;
@@ -2873,7 +2846,6 @@
   function resetVideoOutput(keepPreview) {
     const stage = document.getElementById("videoStage");
     const empty = document.getElementById("videoEmpty");
-    videoState.lastProgress = 0;
     videoState.currentPreviewItem = null;
     setVideoProgress(0);
     setVideoIndeterminate(false);
@@ -3058,24 +3030,7 @@
     return fileID;
   }
 
-  async function importMediaURL(url, expectedKind) {
-    const clientMode = toolAuthState.mode === "client";
-    const res = await fetch(clientMode ? "/grok/v1/media/inputs/import" : "/api/grok/admin/media/inputs/import", {
-      method: "POST",
-      headers: toolAuthHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ url }),
-    });
-    if (!clientMode && handleUnauthorized(res)) throw new Error("登录已失效");
-    if (!res.ok) throw new Error(await res.text());
-    const payload = await res.json();
-    const data = clientMode ? payload : (payload?.data || {});
-    if (expectedKind && data.kind !== expectedKind) throw new Error(`URL 必须指向${expectedKind === "image" ? "图片" : "视频"}`);
-    const fileID = String(data.file_id || data.fileId || data.id || "").trim();
-    if (!fileID) throw new Error("暂存响应缺少 file_id");
-    return fileID;
-  }
-
-  window.GrokMediaStaging = Object.freeze({ upload: stageMediaFile, importURL: importMediaURL });
+  window.GrokMediaStaging = Object.freeze({ upload: stageMediaFile });
 
   // syncVideoRouteControls limits resolution and length to what the selected
   // video route advertises (video_constraints). Grok Web generates from text
