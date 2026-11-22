@@ -74,7 +74,7 @@ func TestBuildChatBodyKeepsOpenAITools(t *testing.T) {
 // tool_calls entry and its tool_result becomes a paired `tool` message: an
 // orphan tool result is rejected upstream.
 func TestBuildMessagesMapsToolHistory(t *testing.T) {
-	out := buildMessages(upstream.UpstreamRequest{
+	out, err := buildMessages(upstream.UpstreamRequest{
 		System: []prompt.SystemItem{{Type: "text", Text: "be terse"}},
 		Messages: []prompt.Message{
 			{Role: "user", Content: prompt.MessageContent{Text: "read the file"}},
@@ -92,6 +92,7 @@ func TestBuildMessagesMapsToolHistory(t *testing.T) {
 			},
 		},
 	})
+	testutil.NoError(t, err)
 	testutil.Equal(t, len(out), 4)
 	testutil.CheckEqual(t, out[0].Role, "system")
 	testutil.CheckEqual(t, out[0].Content, "be terse")
@@ -106,7 +107,7 @@ func TestBuildMessagesMapsToolHistory(t *testing.T) {
 // be rejected: a tool_result whose call is not in the history has nothing to
 // pair with.
 func TestBuildMessagesDropsOrphanToolResults(t *testing.T) {
-	out := buildMessages(upstream.UpstreamRequest{
+	out, err := buildMessages(upstream.UpstreamRequest{
 		Messages: []prompt.Message{
 			{Role: "user", Content: prompt.MessageContent{Text: "hi"}},
 			{
@@ -117,6 +118,7 @@ func TestBuildMessagesDropsOrphanToolResults(t *testing.T) {
 			},
 		},
 	})
+	testutil.NoError(t, err)
 	testutil.Equal(t, len(out), 1)
 	testutil.Equal(t, out[0].Content, "hi")
 }

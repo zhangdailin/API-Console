@@ -30,6 +30,7 @@ func TestCodexCatalogExposesContextWindowAndModalities(t *testing.T) {
 		textModel("grok-4.6"),
 		textModel("grok-composer-2.5-fast"),
 		textModel("grok-unknown-model"),
+		{ID: "workbuddy-vision", Object: "model", OwnedBy: "workbuddy", InputModalities: []string{"text", "image"}},
 	})
 
 	for _, tc := range []struct {
@@ -40,6 +41,7 @@ func TestCodexCatalogExposesContextWindowAndModalities(t *testing.T) {
 		{"grok-4.6", 0, []string{"text"}},
 		{"grok-composer-2.5-fast", 0, []string{"text"}},
 		{"grok-unknown-model", 0, []string{"text"}},
+		{"workbuddy-vision", 0, []string{"text", "image"}},
 	} {
 		entry := codexEntryFor(t, catalog, tc.slug)
 		testutil.Equal(t, entry.ContextWindow, tc.context)

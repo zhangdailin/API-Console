@@ -280,7 +280,10 @@ func newCodexModelCatalog(items []PublicModelResponse) codexModelCatalog {
 		if description == "" {
 			description = item.ID
 		}
-		modalities := []string{"text"}
+		modalities := item.InputModalities
+		if len(modalities) == 0 {
+			modalities = []string{"text"}
+		}
 		// Agent tools require the Build Responses route.
 		toolsSupported := codexAgentToolsSupported(item)
 		reasoningSupported := false

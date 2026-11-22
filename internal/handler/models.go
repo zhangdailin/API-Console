@@ -50,6 +50,21 @@ type PublicModelResponse struct {
 	DefaultReasoningEffort  string   `json:"default_reasoning_effort,omitempty"`
 	SupportsReasoningEffort *bool    `json:"supports_reasoning_effort,omitempty"`
 	SupportsBackendSearch   *bool    `json:"supports_backend_search,omitempty"`
+	SupportsImages          *bool    `json:"supports_images,omitempty"`
+	InputModalities         []string `json:"input_modalities,omitempty"`
+}
+
+func applyObservedImageSupport(entry *PublicModelResponse, observations *modelContextWindows, channel string, modelIDs ...string) {
+	for _, modelID := range modelIDs {
+		if supported, observed := observations.images[contextKey(channel, modelID)]; observed {
+			entry.SupportsImages = new(supported)
+			entry.InputModalities = []string{"text"}
+			if supported {
+				entry.InputModalities = append(entry.InputModalities, "image")
+			}
+			return
+		}
+	}
 }
 
 type PublicModelsListResponse struct {
@@ -192,6 +207,7 @@ func (h *Handler) HandleModels(w http.ResponseWriter, r *http.Request) {
 		entry.MaxInputTokens = input
 		entry.MaxOutputTokens = output
 		entry.MaxCompletionTokens = output
+		applyObservedImageSupport(&entry, contextWindows, mChannel, m.ModelID, publicID)
 		if strings.EqualFold(mChannel, "grok") {
 			if profiles := modelpolicy.GrokModelProfiles(m, grokAccounts); len(profiles) > 0 {
 				applyGrokBuildProfile(&entry, profiles[0])
@@ -295,6 +311,7 @@ func (h *Handler) HandleModelByID(w http.ResponseWriter, r *http.Request) {
 	resp.MaxInputTokens = input
 	resp.MaxOutputTokens = output
 	resp.MaxCompletionTokens = output
+	applyObservedImageSupport(&resp, contextWindows, mChannel, m.ModelID, resp.ID)
 	if profile != nil {
 		applyGrokBuildProfile(&resp, *profile)
 	}

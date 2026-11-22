@@ -29,6 +29,7 @@ type modelContextWindows struct {
 	input map[string]int
 	// output carries the declared output budget where the catalog published one.
 	output map[string]int
+	images map[string]bool
 }
 
 func contextKey(channel, modelID string) string {
@@ -60,7 +61,7 @@ func (w *modelContextWindows) lookup(channel string, modelIDs ...string) (int, i
 // an account-scoped window table and an account-global one are filled from the
 // same pass.
 func (h *Handler) observedModelContextWindows(ctx context.Context) *modelContextWindows {
-	w := &modelContextWindows{input: map[string]int{}, output: map[string]int{}}
+	w := &modelContextWindows{input: map[string]int{}, output: map[string]int{}, images: map[string]bool{}}
 	accounts, err := h.enabledAccountsForContextWindows(ctx)
 	if err != nil {
 		return w
@@ -92,6 +93,11 @@ func (h *Handler) observedModelContextWindows(ctx context.Context) *modelContext
 		// names models but not windows, so it registers none and contributes
 		// nothing here.
 		channel := strings.ToLower(strings.TrimSpace(acc.AccountType))
+		for modelID, supports := range provider.ImageSupport(channel, acc) {
+			key := contextKey(channel, modelID)
+			prior, exists := w.images[key]
+			w.images[key] = supports && (!exists || prior)
+		}
 		input, output := provider.ContextWindows(channel, acc)
 		if len(input) > 0 {
 			mergeInputWindows(w, channel, input)

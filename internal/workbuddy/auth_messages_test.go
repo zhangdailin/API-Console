@@ -67,7 +67,7 @@ func TestBuildMessagesKeepsToolTurnAndUserBoundaries(t *testing.T) {
 		return prompt.Message{Role: "user", Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{{Type: "tool_result", ToolUseID: id, Content: id + " result"}}}}
 	}
 	history := []prompt.Message{userMessage(t, "start"), call("a"), result("a"), call("b"), userMessage(t, "new request"), call("c"), result("b"), result("c"), roleMessage(t, "assistant", "first answer"), roleMessage(t, "assistant", "second answer")}
-	messages := buildMessages(upstream.UpstreamRequest{Messages: history})
+	messages := mustBuildMessages(t, upstream.UpstreamRequest{Messages: history})
 	want := []string{"system", "user", "assistant", "tool", "assistant", "user", "assistant", "tool", "tool", "assistant", "assistant"}
 	var roles []string
 	for _, m := range messages {
@@ -85,7 +85,7 @@ func TestBuildMessagesKeepsToolTurnAndUserBoundaries(t *testing.T) {
 func TestBuildMessages_RequiresSystemFirst(t *testing.T) {
 	t.Parallel()
 
-	messages := buildMessages(upstream.UpstreamRequest{Messages: []prompt.Message{userMessage(t, "hello")}})
+	messages := mustBuildMessages(t, upstream.UpstreamRequest{Messages: []prompt.Message{userMessage(t, "hello")}})
 	testutil.Equal(t, len(messages), 2)
 	testutil.Equal(t, messages[0].Role, "system")
 	testutil.Equal(t, messages[0].Content, defaultSystem)
@@ -98,7 +98,7 @@ func TestBuildMessages_NormalizesDeveloperRole(t *testing.T) {
 
 	// `developer` is OpenAI's alias for the system role; the upstream rejects
 	// it, and the rewrite must preserve content and position.
-	messages := buildMessages(upstream.UpstreamRequest{Messages: []prompt.Message{roleMessage(t, "developer", "stay terse")}})
+	messages := mustBuildMessages(t, upstream.UpstreamRequest{Messages: []prompt.Message{roleMessage(t, "developer", "stay terse")}})
 	testutil.Equal(t, len(messages), 1)
 	testutil.Equal(t, messages[0].Role, "system")
 	testutil.Equal(t, messages[0].Content, "stay terse")
@@ -116,7 +116,7 @@ func TestBuildMessagesMergesInterleavedSystemWithoutLosingTools(t *testing.T) {
 			userMessage(t, "question two"),
 		},
 	}
-	messages := buildMessages(req)
+	messages := mustBuildMessages(t, req)
 	if len(messages) != 5 || messages[0].Content != "first instruction\n\nsecond instruction\n\nthird instruction" {
 		t.Fatalf("instructions lost: %#v", messages)
 	}
@@ -133,7 +133,7 @@ func TestBuildMessagesMergesInterleavedSystemWithoutLosingTools(t *testing.T) {
 func TestBuildMessages_KeepsSystemItemsAndToolResults(t *testing.T) {
 	t.Parallel()
 
-	messages := buildMessages(upstream.UpstreamRequest{
+	messages := mustBuildMessages(t, upstream.UpstreamRequest{
 		System: []prompt.SystemItem{{Type: "text", Text: "be brief"}},
 		Messages: []prompt.Message{{
 			Role: "assistant",
@@ -162,7 +162,7 @@ func TestBuildMessages_KeepsSystemItemsAndToolResults(t *testing.T) {
 func TestBuildMessages_DropsAnthropicClientMarkers(t *testing.T) {
 	t.Parallel()
 
-	messages := buildMessages(upstream.UpstreamRequest{
+	messages := mustBuildMessages(t, upstream.UpstreamRequest{
 		System: []prompt.SystemItem{
 			{Type: "text", Text: "x-anthropic-billing-header: cc_version=2.1.268.e0e; cc_entrypoint=claude-vscode;"},
 			{Type: "text", Text: "You are Claude Code, Anthropic's official CLI for Claude, running within the Claude Agent SDK."},
@@ -185,7 +185,7 @@ func TestBuildMessages_DropsAnthropicClientMarkers(t *testing.T) {
 func TestBuildMessages_ClientMarkerOnlyFallsBackToDefaultSystem(t *testing.T) {
 	t.Parallel()
 
-	messages := buildMessages(upstream.UpstreamRequest{
+	messages := mustBuildMessages(t, upstream.UpstreamRequest{
 		System:   []prompt.SystemItem{{Type: "text", Text: "You are Claude Code"}},
 		Messages: []prompt.Message{userMessage(t, "hello")},
 	})
@@ -200,7 +200,7 @@ func TestBuildMessages_ClientMarkerOnlyFallsBackToDefaultSystem(t *testing.T) {
 func TestBuildMessages_DropsClientMarkerSystemMessage(t *testing.T) {
 	t.Parallel()
 
-	messages := buildMessages(upstream.UpstreamRequest{Messages: []prompt.Message{
+	messages := mustBuildMessages(t, upstream.UpstreamRequest{Messages: []prompt.Message{
 		roleMessage(t, "system", "x-anthropic-billing-header: cc_version=2.1.268.e0e; cc_entrypoint=claude-vscode;"),
 		userMessage(t, "hello"),
 	}})
@@ -217,7 +217,7 @@ func TestBuildMessages_KeepsOrdinaryClaudeMention(t *testing.T) {
 
 	const instruction = "You are an interactive agent. Follow the Claude Code project conventions."
 
-	messages := buildMessages(upstream.UpstreamRequest{
+	messages := mustBuildMessages(t, upstream.UpstreamRequest{
 		System:   []prompt.SystemItem{{Type: "text", Text: instruction}},
 		Messages: []prompt.Message{userMessage(t, "hello")},
 	})
@@ -226,7 +226,7 @@ func TestBuildMessages_KeepsOrdinaryClaudeMention(t *testing.T) {
 
 func TestBuildMessagesDropsDanglingToolResult(t *testing.T) {
 	t.Parallel()
-	messages := buildMessages(upstream.UpstreamRequest{Messages: []prompt.Message{{
+	messages := mustBuildMessages(t, upstream.UpstreamRequest{Messages: []prompt.Message{{
 		Role: "user",
 		Content: prompt.MessageContent{Blocks: []prompt.ContentBlock{{
 			Type: "tool_result", ToolUseID: "missing", Content: "must not be sent",
@@ -242,7 +242,7 @@ func TestBuildMessages_DefaultSystemPromptOnly(t *testing.T) {
 
 	// A request without any history still has to produce a system-first pair,
 	// because the upstream rejects anything else with code=11128.
-	messages := buildMessages(upstream.UpstreamRequest{})
+	messages := mustBuildMessages(t, upstream.UpstreamRequest{})
 	testutil.Equal(t, len(messages), 2)
 	testutil.Equal(t, messages[0].Role, "system")
 	testutil.Equal(t, messages[0].Content, defaultSystem)
@@ -273,7 +273,7 @@ func TestBuildMessagesFiltersClientIdentityAcrossSystemForms(t *testing.T) {
 					{Type: "text", Text: instructions},
 				}}}}, req.Messages...)
 			}
-			messages := buildMessages(req)
+			messages := mustBuildMessages(t, req)
 			testutil.Equal(t, len(messages), 2)
 			testutil.Equal(t, messages[0].Role, "system")
 			testutil.Equal(t, messages[0].Content, want)
@@ -301,7 +301,7 @@ func TestFilterClientSystemTextPreservesRulesAfterCodexIdentity(t *testing.T) {
 func TestBuildMessagesCodexMarkerFallbackAndHistoryPreservation(t *testing.T) {
 	t.Parallel()
 	const marker = "You are Codex."
-	messages := buildMessages(upstream.UpstreamRequest{
+	messages := mustBuildMessages(t, upstream.UpstreamRequest{
 		System: []prompt.SystemItem{{Type: "text", Text: marker}},
 		Messages: []prompt.Message{
 			userMessage(t, marker),
@@ -322,7 +322,7 @@ func TestBuildMessagesCodexMarkerFallbackAndHistoryPreservation(t *testing.T) {
 	}
 	testutil.Equal(t, messages[2].ToolCalls[0].ID, messages[3].ToolCallID)
 	for _, ordinary := range []string{"Use Codex conventions.\r\nKeep this spacing.  ", "You are Codexify, a helper.", "Explain why `You are Codex` appears in requests."} {
-		got := buildMessages(upstream.UpstreamRequest{System: []prompt.SystemItem{{Type: "text", Text: ordinary}}})
+		got := mustBuildMessages(t, upstream.UpstreamRequest{System: []prompt.SystemItem{{Type: "text", Text: ordinary}}})
 		testutil.Equal(t, got[0].Content, ordinary)
 	}
 }

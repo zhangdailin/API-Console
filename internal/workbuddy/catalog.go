@@ -13,6 +13,7 @@ type catalogSnapshotRow struct {
 	MaxInputTokens  int64  `json:"max_input_tokens,omitempty"`
 	MaxOutputTokens int64  `json:"max_output_tokens,omitempty"`
 	Credits         string `json:"credits,omitempty"`
+	SupportsImages  *bool  `json:"supports_images,omitempty"`
 }
 
 // CatalogSnapshot projects the observed catalog onto its stored form.
@@ -32,6 +33,7 @@ func CatalogSnapshot(models []WorkBuddyModel) []string {
 			MaxInputTokens:  model.MaxInputTokens,
 			MaxOutputTokens: model.MaxOutputTokens,
 			Credits:         model.Credits,
+			SupportsImages:  modelImageSupport(model),
 		})
 		if err != nil {
 			continue
@@ -42,6 +44,34 @@ func CatalogSnapshot(models []WorkBuddyModel) []string {
 		return nil
 	}
 	return rows
+}
+
+func modelImageSupport(model WorkBuddyModel) *bool {
+	if model.ImagesDisabled {
+		return new(false)
+	}
+	return model.SupportsImages
+}
+
+// CatalogImageSupport projects only explicitly observed image support.
+func CatalogImageSupport(rows []string) map[string]bool {
+	var out map[string]bool
+	for _, raw := range rows {
+		var row catalogSnapshotRow
+		if json.Unmarshal([]byte(raw), &row) != nil || row.SupportsImages == nil {
+			continue
+		}
+		id := strings.ToLower(strings.TrimSpace(row.ID))
+		if id == "" {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]bool)
+		}
+		prior, exists := out[id]
+		out[id] = *row.SupportsImages && (!exists || prior)
+	}
+	return out
 }
 
 // CatalogContextWindows reads the windows back out of a stored snapshot.

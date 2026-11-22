@@ -9,6 +9,8 @@ import (
 // shared handler must never expose arbitrary AppError messages as trusted text.
 var localRequestMessages = map[string]string{
 	"doubao_attachment":  "Doubao attachment is invalid, too large, unavailable, or expired. Upload it with the same API key and try again.",
+	"cline_image":        "Cline requires an HTTP(S) image URL or a valid Base64 PNG, JPEG, GIF, or WebP image. Use at most 8 images and 16 MiB of inline image data per request.",
+	"workbuddy_image":    "WorkBuddy requires an HTTP(S) image URL or a valid Base64 PNG, JPEG, GIF, or WebP image. Use at most 8 images and 16 MiB of inline image data per request.",
 	"warp_request_shape": "The gateway rejected this Warp request during local validation: unsupported request fields or conversation shape. No upstream generation was made.",
 	"warp_dialog":        "The gateway rejected this Warp conversation during local validation: expected complete alternating user and assistant turns followed by a user turn. No upstream generation was made.",
 	"warp_user_turn":     "The gateway rejected the current Warp user turn: provide nonempty text or a valid tool result. No upstream generation was made.",

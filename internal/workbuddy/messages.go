@@ -4,12 +4,12 @@ import (
 	"regexp"
 	"strings"
 
-	"orchids-api/internal/prompt"
+	apperrors "orchids-api/internal/errors"
 	"orchids-api/internal/upstream"
 	"orchids-api/internal/util"
 )
 
-// ChatMessage is one OpenAI-shaped message in the WorkBuddy payload.
+// ChatMessage is the OpenAI-shaped message used by WorkBuddy.
 type ChatMessage = upstream.ChatMessage
 
 // ToolCall is the OpenAI tool-call shape used both inbound and outbound.
@@ -101,16 +101,17 @@ func filterClientSystemText(text string) string {
 // are emitted first, tool results become `tool` messages, and a minimal system
 // prompt is prepended when the caller supplied none. Anthropic client markers
 // are dropped for the reason documented above.
-func buildMessages(req upstream.UpstreamRequest) []ChatMessage {
+func buildMessages(req upstream.UpstreamRequest) ([]ChatMessage, error) {
 	out := make([]ChatMessage, 0, len(req.Messages)+len(req.System)+2)
 	pendingToolCalls := make(map[string]bool)
+	var images upstream.ChatImageBudget
 
 	for _, item := range req.System {
 		text := filterClientSystemText(item.Text)
 		if strings.TrimSpace(text) == "" {
 			continue
 		}
-		out = append(out, ChatMessage{Role: "system", Content: text})
+		out = append(out, textMessage("system", text))
 	}
 
 	for _, msg := range req.Messages {
@@ -143,8 +144,18 @@ func buildMessages(req upstream.UpstreamRequest) []ChatMessage {
 			if converted, ok := upstream.ConvertAssistantMessage(msg, pendingToolCalls); ok {
 				out = append(out, converted)
 			}
+		case "user":
+			converted, err := upstream.ConvertUserMessage(msg, pendingToolCalls, &images)
+			if err != nil {
+				return nil, apperrors.NewLocalRequestError("workbuddy_image")
+			}
+			out = append(out, converted...)
 		default:
-			out = append(out, convertBlockMessage(role, msg, pendingToolCalls)...)
+			var filter func(string) string
+			if role == "system" {
+				filter = filterClientSystemText
+			}
+			out = append(out, upstream.ConvertBlockMessage(role, msg, pendingToolCalls, filter)...)
 		}
 	}
 
@@ -153,14 +164,14 @@ func buildMessages(req upstream.UpstreamRequest) []ChatMessage {
 		if prompt == "" {
 			prompt = defaultSystem
 		}
-		out = append(out, ChatMessage{Role: "user", Content: prompt})
+		out = append(out, textMessage("user", prompt))
 	}
 	hasSystem := false
 	for _, message := range out {
 		hasSystem = hasSystem || message.Role == "system"
 	}
 	if !hasSystem {
-		out = append([]ChatMessage{{Role: "system", Content: defaultSystem}}, out...)
+		out = append([]ChatMessage{textMessage("system", defaultSystem)}, out...)
 	}
 	// WorkBuddy chat compatibility uses one leading system message. Preserve
 	// each system/developer block in encounter order, then assemble split
@@ -177,8 +188,12 @@ func buildMessages(req upstream.UpstreamRequest) []ChatMessage {
 		}
 		normalized = append(normalized, message)
 	}
-	normalized[0] = ChatMessage{Role: "system", Content: strings.Join(system, "\n\n")}
-	return mergeAssistantToolTurns(normalized)
+	normalized[0] = textMessage("system", strings.Join(system, "\n\n"))
+	return mergeAssistantToolTurns(normalized), nil
+}
+
+func textMessage(role, text string) ChatMessage {
+	return ChatMessage{Role: role, Content: text}
 }
 
 // Responses represents each parallel call as a separate item. WorkBuddy's
@@ -200,7 +215,7 @@ func mergeAssistantToolTurns(messages []ChatMessage) []ChatMessage {
 		if !hasCalls || end == start+1 {
 			out = append(out, messages[start:end]...)
 		} else {
-			merged := ChatMessage{Role: "assistant"}
+			merged := textMessage("assistant", "")
 			var text, reasoning []string
 			for _, message := range messages[start:end] {
 				if message.Content != "" {
@@ -218,16 +233,6 @@ func mergeAssistantToolTurns(messages []ChatMessage) []ChatMessage {
 		start = end
 	}
 	return out
-}
-
-// convertBlockMessage is the shared block conversion with the client markers
-// dropped from system text.
-func convertBlockMessage(role string, msg prompt.Message, pendingToolCalls map[string]bool) []ChatMessage {
-	var filter func(string) string
-	if role == "system" {
-		filter = filterClientSystemText
-	}
-	return upstream.ConvertBlockMessage(role, msg, pendingToolCalls, filter)
 }
 
 // normalizeToolChoice converts both OpenAI and Anthropic selection forms to

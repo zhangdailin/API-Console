@@ -317,8 +317,10 @@ func normalizeResponsesMessageContent(content any, strict bool) (any, error) {
 		case "input_text", "output_text":
 			out = append(out, map[string]any{"type": "text", "text": fmt.Sprint(part["text"])})
 		case "input_image", "image":
-			if url := responsesPartURL(part, []string{"image_url", "source"}, []string{"url"}); url != "" {
+			if url := responsesPartURL(part, []string{"image_url", "url", "source"}, []string{"url"}); url != "" {
 				out = append(out, map[string]any{"type": "image_url", "image_url": map[string]any{"url": url}})
+			} else if strict {
+				return nil, fmt.Errorf("content[%d]: input_image requires an image URL", i)
 			}
 		case "input_file", "file":
 			file, err := responsesFilePart(part)

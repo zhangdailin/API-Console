@@ -65,7 +65,7 @@ func TestDSHPathCompatibilityPreservesUserToolDataAndOtherSentences(t *testing.T
 			{Type: "text", Text: original},
 		}}},
 	}}
-	messages := buildMessages(req)
+	messages := mustBuildMessages(t, req)
 	testutil.Equal(t, messages[1].Content, original)
 	testutil.MustContain(t, messages[2].Content, "are paths that the user")
 	var args map[string]string

@@ -74,6 +74,13 @@ func (capabilities) ContextWindows(acc *store.Account) (map[string]int, map[stri
 
 func (capabilities) HonorsModelCooldown() bool { return true }
 
+func (capabilities) ImageSupport(acc *store.Account) map[string]bool {
+	if acc == nil {
+		return nil
+	}
+	return CatalogImageSupport(acc.WorkBuddyModelIDs)
+}
+
 func catalogPort() *provider.Catalog {
 	return &provider.Catalog{
 		Source:                "workbuddy_cli_models",

@@ -150,12 +150,12 @@ func (c *Client) runChat(ctx context.Context, req upstream.UpstreamRequest, time
 		return fmt.Errorf("workbuddy client is nil")
 	}
 
-	accessToken, err := c.ensureAccessToken(ctx)
+	body, err := c.buildBody(req)
 	if err != nil {
 		return err
 	}
 
-	body, err := c.buildBody(req)
+	accessToken, err := c.ensureAccessToken(ctx)
 	if err != nil {
 		return err
 	}
@@ -280,12 +280,16 @@ func (c *Client) buildBody(req upstream.UpstreamRequest) ([]byte, error) {
 	if err := req.ValidateProtocolControls("workbuddy"); err != nil {
 		return nil, err
 	}
+	messages, err := buildMessages(req)
+	if err != nil {
+		return nil, err
+	}
 	model := upstreamModel(req)
 	body := map[string]any{
 		"model":          model,
 		"stream":         true,
 		"stream_options": map[string]any{"include_usage": true},
-		"messages":       buildMessages(req),
+		"messages":       messages,
 	}
 	if format := req.ChatResponseFormat(); len(format) > 0 {
 		body["response_format"] = format

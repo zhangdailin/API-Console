@@ -7,13 +7,15 @@ import (
 	"orchids-api/internal/util"
 )
 
-// ChatMessage is a text-only OpenAI-shaped upstream message.
+// ChatMessage is an OpenAI-shaped upstream message. User turns with images
+// use typed content parts; other messages keep their string content.
 type ChatMessage struct {
 	Role             string     `json:"role"`
 	Content          string     `json:"content"`
 	ReasoningContent string     `json:"reasoning_content,omitempty"`
 	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID       string     `json:"tool_call_id,omitempty"`
+	parts            []chatContentPart
 }
 
 // ToolCall is the OpenAI function-call wire shape.
@@ -77,26 +79,61 @@ func ConvertAssistantMessage(msg prompt.Message, pendingToolCalls map[string]boo
 // into standalone `tool` messages so the assistant/tool pairing stays intact.
 // filterText, when set, rewrites each text block before it is kept.
 func ConvertBlockMessage(role string, msg prompt.Message, pendingToolCalls map[string]bool, filterText func(string) string) []ChatMessage {
+	out, _ := convertBlockMessage(role, msg, pendingToolCalls, filterText, nil)
+	return out
+}
+
+// ConvertUserMessage also preserves images. Pass the same budget for every
+// user message in a request, including image parts from replayed history.
+func ConvertUserMessage(msg prompt.Message, pendingToolCalls map[string]bool, images *ChatImageBudget) ([]ChatMessage, error) {
+	return convertBlockMessage("user", msg, pendingToolCalls, nil, images)
+}
+
+func convertBlockMessage(role string, msg prompt.Message, pendingToolCalls map[string]bool, filterText func(string) string, images *ChatImageBudget) ([]ChatMessage, error) {
 	blocks := msg.Content.GetBlocks()
 	out := make([]ChatMessage, 0, len(blocks))
-	pending := make([]string, 0, len(blocks))
+	var textParts []string
+	var imageParts []chatContentPart
 	flush := func() {
-		if len(pending) == 0 {
-			return
+		if len(imageParts) != 0 {
+			out = append(out, ChatMessage{Role: role, parts: imageParts})
+			imageParts = nil
+		} else if len(textParts) != 0 {
+			out = append(out, ChatMessage{Role: role, Content: strings.Join(textParts, "\n")})
 		}
-		out = append(out, ChatMessage{Role: role, Content: strings.Join(pending, "\n")})
-		pending = pending[:0]
+		textParts = textParts[:0]
 	}
 	for _, block := range blocks {
 		switch block.Type {
-		case "text":
+		case "text", "input_text":
+			if block.Type == "input_text" && images == nil {
+				continue
+			}
 			text := block.Text
 			if filterText != nil {
 				text = filterText(text)
 			}
 			if strings.TrimSpace(text) != "" {
-				pending = append(pending, text)
+				if len(imageParts) != 0 {
+					imageParts = append(imageParts, chatContentPart{Type: "text", Text: text})
+				} else {
+					textParts = append(textParts, text)
+				}
 			}
+		case "image", "image_url", "input_image":
+			if images == nil {
+				continue
+			}
+			url, ok := images.imageURL(block)
+			if !ok {
+				return nil, errInvalidChatImage
+			}
+			if len(imageParts) == 0 {
+				for _, text := range textParts {
+					imageParts = append(imageParts, chatContentPart{Type: "text", Text: text})
+				}
+			}
+			imageParts = append(imageParts, chatContentPart{Type: "image_url", ImageURL: &chatImageURL{URL: url}})
 		case "tool_result":
 			flush()
 			toolID := strings.TrimSpace(block.ToolUseID)
@@ -114,5 +151,5 @@ func ConvertBlockMessage(role string, msg prompt.Message, pendingToolCalls map[s
 		}
 	}
 	flush()
-	return out
+	return out, nil
 }

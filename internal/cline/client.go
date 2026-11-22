@@ -1,6 +1,7 @@
 package cline
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -284,15 +285,15 @@ func (c *Client) SendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	if c == nil {
 		return fmt.Errorf("cline client is nil")
 	}
-	creds, err := c.ensureAccessToken(ctx)
-	if err != nil {
-		return err
-	}
 	model, err := c.resolveModel(req)
 	if err != nil {
 		return err
 	}
 	payload, err := buildChatPayload(req, model)
+	if err != nil {
+		return err
+	}
+	creds, err := c.ensureAccessToken(ctx)
 	if err != nil {
 		return err
 	}
@@ -374,7 +375,7 @@ func (c *Client) attemptChat(ctx context.Context, url string, payload chatPayloa
 	reqCtx, cancel := util.WithAttemptTimeout(ctx, c.requestTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, url, strings.NewReader(string(body)))
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return streamResult{}, &attemptStreamError{err: fmt.Errorf("build cline request: %w", err)}
 	}

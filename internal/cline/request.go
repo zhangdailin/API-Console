@@ -12,6 +12,7 @@ import (
 
 	"encoding/json"
 
+	apperrors "orchids-api/internal/errors"
 	"orchids-api/internal/upstream"
 	"orchids-api/internal/util"
 )
@@ -65,6 +66,10 @@ func buildChatPayload(req upstream.UpstreamRequest, model string) (chatPayload, 
 	if err := req.ValidateProtocolControls("cline"); err != nil {
 		return chatPayload{}, err
 	}
+	messages, err := buildMessages(req)
+	if err != nil {
+		return chatPayload{}, err
+	}
 	sessionID := logicalTaskID(req.RequestID)
 	maxTokens := DefaultMaxTokens
 	defaultMaxTokens := true
@@ -85,7 +90,7 @@ func buildChatPayload(req upstream.UpstreamRequest, model string) (chatPayload, 
 		MaxTokens:       maxTokens,
 		SessionID:       sessionID,
 		ReasoningEffort: effort,
-		Messages:        buildMessages(req),
+		Messages:        messages,
 		Stream:          true,
 	}
 	if req.Stop != nil {
@@ -278,9 +283,10 @@ func repairChatBody(body []byte, kind int) ([]byte, bool) {
 // Cline accepts the OpenAI roles directly, so the mapping is a straight
 // projection: system items first, assistant tool_use blocks become tool_calls,
 // and a tool_result becomes a `tool` message paired with the call it answers.
-func buildMessages(req upstream.UpstreamRequest) []chatMessage {
+func buildMessages(req upstream.UpstreamRequest) ([]chatMessage, error) {
 	out := make([]chatMessage, 0, len(req.Messages)+len(req.System)+2)
 	pendingToolCalls := make(map[string]bool)
+	var images upstream.ChatImageBudget
 
 	for _, item := range req.System {
 		if strings.TrimSpace(item.Text) == "" {
@@ -316,6 +322,12 @@ func buildMessages(req upstream.UpstreamRequest) []chatMessage {
 			if converted, ok := upstream.ConvertAssistantMessage(msg, pendingToolCalls); ok {
 				out = append(out, converted)
 			}
+		case "user":
+			converted, err := upstream.ConvertUserMessage(msg, pendingToolCalls, &images)
+			if err != nil {
+				return nil, apperrors.NewLocalRequestError("cline_image")
+			}
+			out = append(out, converted...)
 		default:
 			out = append(out, upstream.ConvertBlockMessage(role, msg, pendingToolCalls, nil)...)
 		}
@@ -328,7 +340,7 @@ func buildMessages(req upstream.UpstreamRequest) []chatMessage {
 		}
 		out = append(out, chatMessage{Role: "user", Content: text})
 	}
-	return out
+	return out, nil
 }
 
 func normalizeToolChoice(choice any) any {

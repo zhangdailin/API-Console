@@ -595,6 +595,8 @@ type WorkBuddyModel struct {
 	MaxOutputTokens int64  `json:"maxOutputTokens"`
 	SupportsTools   bool   `json:"supportsToolCall"`
 	SupportsReason  bool   `json:"supportsReasoning"`
+	SupportsImages  *bool  `json:"supportsImages"`
+	ImagesDisabled  bool   `json:"disabledMultimodal"`
 	Disabled        bool   `json:"disabled"`
 	Credits         string `json:"credits"`
 	Reasoning       struct {

@@ -59,6 +59,18 @@ func ContextWindows(accountType string, acc *store.Account) (input, output map[s
 	return caps.ContextWindows(acc)
 }
 
+// ImageSupport returns observed image input support for each model. A missing
+// entry is unknown; providers without metadata do not advertise support.
+func ImageSupport(accountType string, acc *store.Account) map[string]bool {
+	observer, ok := CapabilitiesFor(accountType).(interface {
+		ImageSupport(*store.Account) map[string]bool
+	})
+	if !ok {
+		return nil
+	}
+	return observer.ImageSupport(acc)
+}
+
 // HonorsModelCooldown reports whether the channel scopes cooldowns per model.
 func HonorsModelCooldown(accountType string) bool {
 	caps := CapabilitiesFor(accountType)
