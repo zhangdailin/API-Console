@@ -100,23 +100,23 @@
         <button class="btn btn-page btn-outline" id="logsNext" type="button">下一页</button>
       </div>
     </nav>
-
-
-    <aside class="drawer" id="logsDetail" aria-live="polite" aria-label="日志详情" aria-hidden="true">
-      <div class="drawer-head">
-        <div>
-          <div class="logs-detail-section-title" id="logsDetailTitle">详情</div>
-          <p class="muted" id="logsDetailSub">选择左侧一条记录查看详情</p>
-        </div>
-        <button class="panel-close-btn" id="logsDetailClose" type="button" aria-label="关闭详情">✕</button>
-      </div>
-      <div class="drawer-body" id="logsDetailBody"></div>
-    </aside>
-    <div class="drawer-backdrop" id="logsDetailBackdrop"></div>
-
-    {{template "page-scripts.html" .}}
-    <script src="{{.AdminPath}}/js/logs.js?v={{.AssetVersion}}"></script>
   </main>
+
+  {{/* Mount the drawer outside the animated page so it sits above the mobile navigation. */}}
+  <aside class="drawer" id="logsDetail" aria-label="日志详情" aria-hidden="true">
+    <div class="drawer-head">
+      <div class="logs-detail-heading" aria-live="polite">
+        <h2 id="logsDetailTitle">详情</h2>
+        <p class="muted" id="logsDetailSub">选择左侧一条记录查看详情</p>
+      </div>
+      <button class="btn btn-outline" id="logsDetailClose" type="button" aria-label="关闭详情">关闭</button>
+    </div>
+    <div class="drawer-body" id="logsDetailBody"></div>
+  </aside>
+  <div class="drawer-backdrop" id="logsDetailBackdrop"></div>
+
+  {{template "page-scripts.html" .}}
+  <script src="{{.AdminPath}}/js/logs.js?v={{.AssetVersion}}"></script>
 </body>
 
 </html>

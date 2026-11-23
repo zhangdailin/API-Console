@@ -1092,6 +1092,8 @@
       tr.classList.toggle('is-selected', Number(tr.dataset.index) === index);
     });
     renderDetail(record);
+    const body = el('logsDetailBody');
+    if (body) body.scrollTop = 0;
     openDrawer();
   }
 

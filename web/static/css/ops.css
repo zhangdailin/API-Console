@@ -657,6 +657,22 @@
 
 .logs-page-size { display: inline-flex; align-items: center; gap: var(--space-2); margin-right: var(--space-2); color: var(--text-muted); font-size: 0.76rem; }
 
+#logsDetail { padding-top: env(safe-area-inset-top); visibility: hidden; }
+
+#logsDetail.is-open { visibility: visible; }
+
+#logsDetail .drawer-head { flex: none; align-items: flex-start; }
+
+.logs-detail-heading { min-width: 0; overflow-wrap: anywhere; }
+
+#logsDetailTitle { margin: 0 0 var(--space-1); color: var(--text-main); font-size: 1rem; }
+
+#logsDetailSub { margin: 0; }
+
+#logsDetailClose { flex: none; }
+
+#logsDetailBody { min-height: 0; overscroll-behavior: contain; }
+
 .logs-detail-outcome {
   display: flex;
   flex-wrap: wrap;
