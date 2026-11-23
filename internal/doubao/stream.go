@@ -353,29 +353,51 @@ func imageMarkdown(images []creationImage) string {
 	return out.String()
 }
 
-// partitionText splits one frame into appended fragments (patch_type 1) and the
-// longest whole-answer snapshot (any other patch type). The web client uses
-// both: an answer can open with fragments and continue with CHUNK_DELTA events.
 type thinkingStream struct {
-	markers, size int
-	seen          map[string]bool
+	markers, size    int
+	blocks           map[string]bool
+	sawThinkingChild bool
+	answerStarted    bool
 }
 
-func (s *thinkingStream) active() bool { return s.markers == 1 }
+func (s *thinkingStream) active() bool { return s.markers == 1 && !s.answerStarted }
 
 func (s *thinkingStream) mark(block map[string]any) {
 	if id, _ := block["block_id"].(string); id != "" {
-		if s.seen == nil {
-			s.seen = make(map[string]bool)
+		if s.blocks == nil {
+			s.blocks = make(map[string]bool)
 		}
-		if s.seen[id] {
+		if s.blocks[id] {
 			return
 		}
-		s.seen[id] = true
+		s.blocks[id] = true
 	}
 	s.markers = min(s.markers+1, 2)
 }
 
+func (s *thinkingStream) blockIsReasoning(block map[string]any, hasText bool) bool {
+	rawParent, present := block["parent_id"]
+	parent, explicit := rawParent.(string)
+	if parent != "" && s.blocks[parent] {
+		s.sawThinkingChild = true
+		// A late snapshot may still update an earlier thinking block.
+		return true
+	}
+	// Some streams patch the same thinking block throughout the turn. Their
+	// first root text block starts the answer and its following bare deltas.
+	// Keep the legacy markers until a child confirms a block tree.
+	root := s.sawThinkingChild && (!present || explicit && parent == "")
+	if root && hasText && s.active() && patchType(block["block_type"]) == 10000 {
+		if id, _ := block["block_id"].(string); id != "" && !s.blocks[id] {
+			s.answerStarted = true
+		}
+	}
+	return s.active()
+}
+
+// partitionText splits one frame into appended fragments (patch_type 1) and the
+// longest whole-answer snapshot (any other patch type). An answer can open
+// with fragments and continue in CHUNK_DELTA events.
 func partitionText(value map[string]any, thinking *thinkingStream, emitReasoning func(string)) (fragment, snapshot string) {
 	var fragments strings.Builder
 	var walk func(any)
@@ -392,10 +414,11 @@ func partitionText(value map[string]any, thinking *thinkingStream, emitReasoning
 					content, _ := block["content"].(map[string]any)
 					textBlock, _ := content["text_block"].(map[string]any)
 					text, _ := textBlock["text"].(string)
+					reasoning := thinking.blockIsReasoning(block, text != "")
 					if text == "" {
 						continue
 					}
-					if thinking.active() {
+					if reasoning {
 						if patchType(block["patch_type"]) == 1 {
 							thinking.size += len(text)
 							emitReasoning(text)

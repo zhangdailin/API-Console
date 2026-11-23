@@ -56,3 +56,32 @@ func TestChatStreamRecognizesDoubaoReplyEnd(t *testing.T) {
 		}
 	})
 }
+
+func TestChatStreamSeparatesAnswerAfterRepeatedThinkingBlock(t *testing.T) {
+	const (
+		thinking = "event: STREAM_CHUNK\ndata: {\"content_block\":[{\"block_type\":10040,\"block_id\":\"think\",\"parent_id\":\"\",\"patch_type\":2}]}\n\n"
+		nested   = "event: STREAM_CHUNK\ndata: {\"content_block\":[{\"block_type\":10000,\"block_id\":\"plan\",\"parent_id\":\"think\",\"patch_type\":1,\"content\":{\"text_block\":{\"text\":\"plan\"}}}]}\n\n"
+		summary  = "event: STREAM_CHUNK\ndata: {\"content_block\":[{\"block_type\":10000,\"block_id\":\"plan\",\"parent_id\":\"think\",\"patch_type\":1,\"content\":{\"text_block\":{\"summary\":\"plan metadata\"}}}]}\n\n"
+		answer   = "event: STREAM_CHUNK\ndata: {\"content_block\":[{\"block_type\":10000,\"block_id\":\"answer\",\"patch_type\":1,\"content\":{\"text_block\":{\"text\":\"Final\"}}}]}\n\n"
+		delta    = "event: CHUNK_DELTA\ndata: {\"text\":\" answer\"}\n\n"
+		latePlan = "event: STREAM_CHUNK\ndata: {\"content_block\":[{\"block_type\":10000,\"block_id\":\"plan\",\"parent_id\":\"think\",\"patch_type\":2,\"content\":{\"text_block\":{\"text\":\"plan update\"}}}]}\n\n"
+		end      = "event: SSE_REPLY_END\ndata: {\"end_type\":3}\n\n"
+	)
+	for _, tc := range []struct {
+		name, stream, text, reasoning string
+		err                           error
+	}{
+		{"captured repeated thinking block", thinking + summary + thinking + summary + thinking + answer + delta + end + end, "Final answer", "", nil},
+		{"late thought stays separate", thinking + nested + thinking + answer + latePlan + delta + end, "Final answer", "plan update", nil},
+		{"reasoning only is incomplete", thinking + nested + thinking + end, "", "plan", errIncompleteChatStream},
+		{"legacy marker without a child", thinking + answer + delta + end, "", "Final answer", errIncompleteChatStream},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var text, reasoning strings.Builder
+			answer, err := consumeChatStream(strings.NewReader(tc.stream), func(v string) { text.WriteString(v) }, func(v string) { reasoning.WriteString(v) })
+			if !errors.Is(err, tc.err) || answer != tc.text || text.String() != tc.text || reasoning.String() != tc.reasoning {
+				t.Fatalf("answer = %q, text = %q, reasoning = %q, error = %v", answer, text.String(), reasoning.String(), err)
+			}
+		})
+	}
+}
