@@ -130,3 +130,25 @@ func TestRawRequestRejectsMalformedAndWrongShapedFields(t *testing.T) {
 		t.Run(name, func(t *testing.T) { assertRawRequestRejected(t, raw) })
 	}
 }
+
+func TestRawRequestValidatesAssistantReasoningContent(t *testing.T) {
+	message := func(role, value string) string {
+		return `{"model":"model-a","messages":[{"role":"user","content":"question"},{"role":"` + role +
+			`","content":"visible answer","reasoning_content":` + value + `},{"role":"user","content":"next"}]}`
+	}
+	for _, value := range []string{`"synthetic reasoning"`, `""`, "null"} {
+		if err := validateRawRequest(json.RawMessage(message("assistant", value))); err != nil {
+			t.Errorf("valid optional assistant reasoning rejected: %v", err)
+		}
+	}
+	for _, value := range []string{"{}", "[]", "42", "true"} {
+		err := validateRawRequest(json.RawMessage(message("assistant", value)))
+		var app *apperrors.AppError
+		if !errors.As(err, &app) || app.HTTPStatus != http.StatusBadRequest ||
+			app.Message != "Warp request field messages[1].reasoning_content: must be a string or null" {
+			t.Errorf("wrong rejection for malformed reasoning: %v", err)
+		}
+	}
+	assertRawRequestRejected(t, message("user", `"not assistant metadata"`))
+	assertRawRequestRejected(t, `{"model":"model-a","messages":[{"role":"user","content":"question"},{"role":"assistant","content":null,"reasoning_content":"not a visible answer"},{"role":"user","content":"next"}]}`)
+}

@@ -166,7 +166,7 @@ func validateRawRequest(raw json.RawMessage) error {
 	}
 	for i, message := range messages {
 		path := "messages[" + strconv.Itoa(i) + "]"
-		if message == nil || !rawKeys(message, "role", "content", "tool_calls", "tool_call_id") {
+		if message == nil || !rawKeys(message, "role", "content", "tool_calls", "tool_call_id", "reasoning_content") {
 			return wireFieldError(path, "must be an object with supported message fields")
 		}
 		var role, text string
@@ -184,6 +184,14 @@ func validateRawRequest(raw json.RawMessage) error {
 			}
 		default:
 			return wireFieldError(path+".role", "unsupported role")
+		}
+		if reasoning, exists := message["reasoning_content"]; exists {
+			if role != "assistant" {
+				return wireFieldError(path+".reasoning_content", "only supported for assistant history")
+			}
+			if !bytes.Equal(bytes.TrimSpace(reasoning), []byte("null")) && !rawString(reasoning, &text) {
+				return wireFieldError(path+".reasoning_content", "must be a string or null")
+			}
 		}
 		content := bytes.TrimSpace(message["content"])
 		switch {

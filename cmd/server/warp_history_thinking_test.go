@@ -287,3 +287,68 @@ func TestWarpMessagesHistoryThinkingAboveFormerByteBudget(t *testing.T) {
 		t.Fatalf("boundary request calls: generation=%d other=%d", stub.aiCalls.Load(), stub.otherCalls.Load())
 	}
 }
+
+func TestWarpChatHistoryReasoningContentStaysOffUpstreamWire(t *testing.T) {
+	stub := newWarpRouteStub(t, http.StatusOK)
+	e, _, _ := newWarpRouteE2E(t, stub, 1)
+	const private = "synthetic-private-chat-reasoning"
+	for _, tc := range []struct {
+		name, path   string
+		stream       bool
+		secondPair   bool
+		emptyHistory bool
+	}{
+		{name: "non-streaming", path: "/warp/v1/chat/completions"},
+		{name: "multi-turn streaming", path: "/warp/chat/completions", stream: true, secondPair: true},
+		{name: "empty reasoning and multipart history", path: "/warp/v1/chat/completions", stream: true, emptyHistory: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			messages := []map[string]any{
+				{"role": "user", "content": "First question."},
+				{"role": "assistant", "content": "First answer.", "reasoning_content": private},
+			}
+			want := "User: First question.\n\nAssistant: First answer."
+			if tc.emptyHistory {
+				messages[0]["content"] = []map[string]string{{"type": "text", "text": "First question."}, {"type": "text", "text": "Extra context."}}
+				messages[1]["reasoning_content"] = ""
+				want = "User: First question.\nUser: Extra context.\n\nAssistant: First answer."
+			}
+			if tc.secondPair {
+				messages = append(messages,
+					map[string]any{"role": "user", "content": "Second question."},
+					map[string]any{"role": "assistant", "content": "Second answer.", "reasoning_content": private + "-two"})
+				want += "\n\nUser: Second question.\n\nAssistant: Second answer."
+			}
+			messages = append(messages, map[string]any{"role": "user", "content": warpRouteQuery})
+			want += "\n\nUser: " + warpRouteQuery
+			body, err := json.Marshal(map[string]any{"model": warpRouteModel, "messages": messages, "stream": tc.stream})
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp := e.do(t, http.MethodPost, tc.path, string(body), false)
+			out := e.readBody(t, resp)
+			if resp.StatusCode != http.StatusOK || !strings.Contains(out, warpRouteAnswer) || strings.Contains(out, private) {
+				t.Fatalf("unexpected client response: status=%d, hasAnswer=%v", resp.StatusCode, strings.Contains(out, warpRouteAnswer))
+			}
+			if tc.stream && !strings.Contains(out, "data: [DONE]") {
+				t.Fatal("stream did not complete")
+			}
+			select {
+			case raw := <-stub.requests:
+				var request warpapi.Request
+				if err := proto.Unmarshal(raw, &request); err != nil {
+					t.Fatal(err)
+				}
+				inputs := request.GetInput().GetUserInputs().GetInputs()
+				if len(inputs) != 1 || inputs[0].GetUserQuery().GetQuery() != want {
+					t.Fatal("upstream query did not preserve exactly the visible dialog")
+				}
+				if strings.Contains(string(raw), private) {
+					t.Fatal("private reasoning reached the Warp request")
+				}
+			default:
+				t.Fatal("request did not reach the local Warp stub")
+			}
+		})
+	}
+}

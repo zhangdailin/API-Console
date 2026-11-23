@@ -273,7 +273,10 @@ func renderTranscript(system string, messages []prompt.Message) (string, bool) {
 }
 
 func renderMessage(m prompt.Message) (string, bool) {
-	if (m.Role != "user" && m.Role != "assistant") || m.ReasoningContent != "" || len(m.ReasoningItem) != 0 || (m.Content.Blocks != nil && m.Content.Text != "") {
+	// Chat reasoning_content is metadata, just like an assistant thinking
+	// block. Keep it outside the query even when the visible answer is replayed.
+	if (m.Role != "user" && m.Role != "assistant") || (m.Role != "assistant" && m.ReasoningContent != "") ||
+		len(m.ReasoningItem) != 0 || (m.Content.Blocks != nil && m.Content.Text != "") {
 		return "", false
 	}
 	prefix := "User"
