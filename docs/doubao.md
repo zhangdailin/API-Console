@@ -60,6 +60,12 @@ explicit legacy identity rotation invalidates an old session's challenge.
 
 ## OpenAI-compatible endpoints
 
+The current Doubao chat stream ends with `SSE_REPLY_END` and
+`end_type: 3`. Message and answer notifications (`1` and `2`) are intermediate.
+When that sequence is present, the gateway waits for the final marker and
+does not report partial text as a successful completion. Older stream formats
+without this sequence retain their existing completion checks.
+
 Use `/doubao/v1` (or `/doubao`) with a managed gateway API key. Chat Completions
 supports JSON and SSE, the `doubao-think` selector, and idle SSE heartbeat
 comments. When the upstream marks a reasoning segment, it is kept separate

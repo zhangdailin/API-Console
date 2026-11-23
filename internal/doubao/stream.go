@@ -16,6 +16,8 @@ import (
 const (
 	maxChatEventBytes  = 8 << 20
 	maxChatAnswerBytes = 16 << 20
+
+	replyStreamEnd = 3 // The upstream's final SSE_REPLY_END, after message and answer notifications.
 )
 
 var errIncompleteChatStream = errors.New("status=502: Doubao stream ended before a final answer")
@@ -24,7 +26,7 @@ func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, er
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 4096), maxChatEventBytes)
 	var event, userMessageID string
-	var complete bool
+	var complete, sawReplyEnd, replyEnded bool
 	var data []byte
 	var text, found strings.Builder
 	appendText := func(value string) error {
@@ -44,11 +46,10 @@ func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, er
 	shapes := map[string]int{}
 	flush := func() error {
 		defer func() { event, data = "", data[:0] }()
-		if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
-			complete = true
-			return nil
-		}
-		if event == "" {
+		if event == "" || event == "message" {
+			if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
+				complete = true
+			}
 			return nil
 		}
 		shapes[event]++
@@ -63,6 +64,12 @@ func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, er
 			}
 			return upstreamStreamError(value)
 		}
+		if event == "SSE_REPLY_END" {
+			// The catch-all snapshot fallback is for legacy streams. Once a
+			// reply explicitly signals its end sequence, an intermediate
+			// message/answer notification cannot substitute for stream end.
+			sawReplyEnd = true
+		}
 		if decodeErr == nil {
 			if rawCode := value["error_code"]; rawCode != nil {
 				if code := errorCodeString(rawCode); code != "" && code != "0" {
@@ -73,6 +80,12 @@ func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, er
 				blockShapes(value, event, shapes)
 			}
 			switch event {
+			case "SSE_REPLY_END":
+				// json.Unmarshal into any produces float64. Match exactly;
+				// a malformed, unknown, or intermediate end cannot complete.
+				if value["end_type"] == float64(replyStreamEnd) {
+					replyEnded = true
+				}
 			case "FULL_MSG_NOTIFY":
 				if message, ok := value["message"].(map[string]any); ok {
 					userMessageID, _ = message["message_id"].(string)
@@ -84,7 +97,7 @@ func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, er
 						reasoning(delta)
 						break
 					}
-					complete = false
+					complete, replyEnded = false, false
 					if err := appendText(delta); err != nil {
 						return err
 					}
@@ -114,7 +127,7 @@ func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, er
 				}
 				fragment, full := partitionText(value, &thinking, reasoning)
 				if fragment != "" {
-					complete = false
+					complete, replyEnded = false, false
 					// patch_type 1 appends a fragment; several can precede the
 					// first CHUNK_DELTA, so both sources feed the same buffer.
 					if err := appendText(fragment); err != nil {
@@ -176,6 +189,9 @@ func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, er
 	if event != "" || len(data) != 0 {
 		// SSE only dispatches a frame after its blank-line separator.
 		return "", errIncompleteChatStream
+	}
+	if sawReplyEnd {
+		complete = replyEnded
 	}
 	if !complete || (strings.TrimSpace(text.String()) == "" && found.Len() == 0 && len(images) == 0) {
 		slog.Warn("doubao stream did not complete", "shapes", shapeSummary(shapes))
