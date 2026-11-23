@@ -31,6 +31,36 @@ var (
 	}
 )
 
+// DropBlankUserTextParts removes whitespace-only text placeholders from mixed
+// user content. Leave all-blank arrays and malformed parts for validation.
+func DropBlankUserTextParts(messages []Message) {
+	for i, msg := range messages {
+		parts, ok := msg.Content.([]any)
+		if !ok || len(parts) < 2 || !strings.EqualFold(strings.TrimSpace(msg.Role), "user") {
+			continue
+		}
+		var kept []any
+		for j, part := range parts {
+			block, _ := part.(map[string]any)
+			kind, _ := block["type"].(string)
+			kind = strings.TrimSpace(kind)
+			if text, ok := block["text"].(string); ok && strings.TrimSpace(text) == "" &&
+				(strings.EqualFold(kind, "text") || strings.EqualFold(kind, "input_text")) {
+				if kept == nil {
+					kept = append(make([]any, 0, len(parts)-1), parts[:j]...)
+				}
+				continue
+			}
+			if kept != nil {
+				kept = append(kept, part)
+			}
+		}
+		if len(kept) != 0 {
+			messages[i].Content = kept
+		}
+	}
+}
+
 func ValidateMessages(messages []Message) error {
 	for _, msg := range messages {
 		roleRaw := strings.TrimSpace(msg.Role)

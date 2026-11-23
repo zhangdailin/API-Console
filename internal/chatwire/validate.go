@@ -12,6 +12,7 @@ func (r *Request) Validate() error {
 	if len(r.Messages) == 0 {
 		return fmt.Errorf("messages is required")
 	}
+	DropBlankUserTextParts(r.Messages)
 	if err := ValidateMessages(r.Messages); err != nil {
 		return err
 	}

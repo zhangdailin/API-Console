@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -21,8 +22,7 @@ const (
 	maxChatMediaBytes      = 60 << 20
 )
 
-// Canonicalize documents before the shared validator. Ignore empty text
-// placeholders only in a user message that actually contains a document.
+// Canonicalize user documents before the shared validator.
 func normalizeChatDocuments(messages []ChatMessage) error {
 	for i := range messages {
 		msg := &messages[i]
@@ -33,9 +33,8 @@ func normalizeChatDocuments(messages []ChatMessage) error {
 		if !ok {
 			continue
 		}
-		hasDocument := false
-		next := make([]any, 0, len(parts))
-		for _, part := range parts {
+		var next []any
+		for j, part := range parts {
 			block, _ := part.(map[string]any)
 			kind, _ := block["type"].(string)
 			switch strings.ToLower(strings.TrimSpace(kind)) {
@@ -61,23 +60,14 @@ func normalizeChatDocuments(messages []ChatMessage) error {
 					data = url
 				}
 				name, _ := source["filename"].(string)
-				part = map[string]any{"type": "file", "file": map[string]any{"file_data": data, "filename": name}}
-				hasDocument = true
-			}
-			next = append(next, part)
-		}
-		if hasDocument {
-			kept := next[:0]
-			for _, part := range next {
-				block, _ := part.(map[string]any)
-				kind, _ := block["type"].(string)
-				if value, ok := block["text"].(string); ok && strings.TrimSpace(value) == "" &&
-					(strings.EqualFold(strings.TrimSpace(kind), "text") || strings.EqualFold(strings.TrimSpace(kind), "input_text")) {
-					continue
+				if next == nil {
+					next = slices.Clone(parts)
 				}
-				kept = append(kept, part)
+				next[j] = map[string]any{"type": "file", "file": map[string]any{"file_data": data, "filename": name}}
 			}
-			msg.Content = kept
+		}
+		if next != nil {
+			msg.Content = next
 		}
 	}
 	return nil

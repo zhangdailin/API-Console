@@ -90,6 +90,22 @@ func TestChatDocumentValidationBoundaries(t *testing.T) {
 	}
 }
 
+func TestChatSkipsBlankUserTextWithImage(t *testing.T) {
+	var request ChatCompletionsRequest
+	const image = "data:image/png;base64,dGVzdA=="
+	raw := `{"model":"grok-chat-fast","messages":[{"role":"user","content":[{"type":"text","text":" "},{"type":"image_url","image_url":{"url":"` + image + `"}},{"type":"input_text","text":"Describe this"}]}]}`
+	if err := json.Unmarshal([]byte(raw), &request); err != nil {
+		t.Fatal(err)
+	}
+	if err := request.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	prompt, attachments, err := extractMessageAndAttachmentsWithTools(request.Messages, false, nil, nil, false)
+	if err != nil || prompt != "Describe this" || len(attachments) != 1 || attachments[0] != (AttachmentInput{Type: "image", Data: image}) {
+		t.Fatalf("prompt=%q, attachments=%+v, err=%v", prompt, attachments, err)
+	}
+}
+
 func TestChatAttachmentBatchRejectsInvalidLaterFile(t *testing.T) {
 	h := &Handler{}
 	prepared, err := h.prepareChatAttachments(t.Context(), []AttachmentInput{

@@ -198,6 +198,7 @@ func (r *ChatCompletionsRequest) Validate() error {
 	if err := normalizeChatDocuments(r.Messages); err != nil {
 		return err
 	}
+	chatwire.DropBlankUserTextParts(r.Messages)
 	if err := chatwire.ValidateMessages(r.Messages); err != nil {
 		return err
 	}

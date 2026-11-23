@@ -30,10 +30,6 @@ func normalizeBuildChatDocuments(messages []chatwire.Message) error {
 					return fmt.Errorf("messages[%d].content[%d]: %w", i, j, err)
 				}
 				converted = append(converted, file)
-			case "text", "input_text":
-				if text, ok := part["text"].(string); !ok || strings.TrimSpace(text) != "" {
-					converted = append(converted, raw)
-				}
 			default:
 				converted = append(converted, raw)
 			}
