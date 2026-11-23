@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"maps"
 	"net/http"
@@ -10,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"orchids-api/internal/accountpolicy"
 	apperrors "orchids-api/internal/errors"
 	"orchids-api/internal/provider"
 	"orchids-api/internal/refreshqueue"
@@ -403,45 +404,44 @@ func (a *API) handleAccountVerification(w http.ResponseWriter, r *http.Request, 
 		util.WriteJSONStatus(w, http.StatusNotFound, map[string]string{"error": "this channel has no verification challenge"})
 		return
 	}
+	env := provider.Env{Store: a.store, Config: a.ConfigSnapshot()}
+	w.Header().Set("Cache-Control", "no-store")
 	switch r.Method {
 	case http.MethodGet:
-		challenge, ok := admin.Verification(account)
-		if !ok {
+		challenge, err := admin.Verification(r.Context(), env, account)
+		if errors.Is(err, store.ErrNoRows) {
 			util.WriteJSONStatus(w, http.StatusNotFound, map[string]string{"error": "no recent verification challenge is recorded for this account; send one request through it and try again"})
 			return
 		}
-		w.Header().Set("Cache-Control", "no-store")
+		if err != nil {
+			http.Error(w, "Could not load verification challenge", http.StatusServiceUnavailable)
+			return
+		}
 		util.WriteJSON(w, challenge)
 	case http.MethodPost:
-		if admin.VerificationSolved != nil {
-			admin.VerificationSolved(account)
+		var input struct {
+			Version string `json:"version"`
 		}
-		if liftVerificationPark(account) {
-			if err := a.store.UpdateAccount(r.Context(), account); err != nil {
-				http.Error(w, "Failed to save account: "+err.Error(), http.StatusInternalServerError)
-				return
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
+		if err := decoder.Decode(&input); err != nil || strings.TrimSpace(input.Version) == "" || len(input.Version) > 128 ||
+			decoder.Decode(&struct{}{}) != io.EOF {
+			http.Error(w, "Verification challenge version is required", http.StatusBadRequest)
+			return
+		}
+		if admin.VerificationSolved == nil {
+			writeMethodNotAllowed(w)
+			return
+		}
+		if err := admin.VerificationSolved(r.Context(), env, account, input.Version); err != nil {
+			if errors.Is(err, store.ErrDoubaoVerificationChanged) {
+				http.Error(w, "Verification challenge changed or expired; reload it", http.StatusConflict)
+			} else {
+				http.Error(w, "Could not acknowledge verification challenge", http.StatusServiceUnavailable)
 			}
+			return
 		}
-		util.WriteJSON(w, a.normalizeAccountOutputObserved(r.Context(), account))
+		util.WriteJSON(w, map[string]bool{"acknowledged": true})
 	default:
 		writeMethodNotAllowed(w)
 	}
-}
-
-// liftVerificationPark undoes exactly what a human-verification verdict wrote:
-// the status, and the reset time it set. A park for any other reason stays.
-func liftVerificationPark(acc *store.Account) bool {
-	if acc == nil || !strings.Contains(strings.ToLower(acc.StatusMessage), "requires human verification") {
-		return false
-	}
-	parkedAt := acc.LastAttempt
-	if !acc.QuotaResetAt.IsZero() && !acc.QuotaResetAt.After(parkedAt.Add(accountpolicy.CooldownVerification)) {
-		acc.QuotaResetAt = time.Time{}
-	}
-	// Answering the challenge is not a check of the credential: keep the time
-	// the account was last actually verified.
-	verifiedAt := acc.VerifiedAt
-	accountpolicy.Verdict{}.Apply(acc)
-	acc.VerifiedAt = verifiedAt
-	return true
 }

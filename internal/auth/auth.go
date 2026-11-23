@@ -41,6 +41,8 @@ func SetSessionBackend(backend SessionBackend) {
 	sessionBackendMu.Unlock()
 }
 
+func HasDurableAdminSessions() bool { return durableSessionBackend() != nil }
+
 func durableSessionBackend() SessionBackend {
 	sessionBackendMu.RLock()
 	defer sessionBackendMu.RUnlock()

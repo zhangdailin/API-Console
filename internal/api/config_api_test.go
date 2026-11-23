@@ -63,8 +63,8 @@ func TestHandleConfigListReturnsCodeFreeMaxShape(t *testing.T) {
 
 func TestBuildConfigFromPatchRejectsAdminToken(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/config/save", strings.NewReader(`{"admin_token":"browser-controlled"}`))
-	_, err := buildConfigFromPatch(req, &config.Config{AdminToken: "deployment-secret"})
-	testutil.Falsef(t, err == nil || !strings.Contains(err.Error(), "deployment-managed"), "buildConfigFromPatch() error=%v, want deployment-managed rejection", err)
+	_, err := decodeConfigPatch(req)
+	testutil.Falsef(t, err == nil || !strings.Contains(err.Error(), "deployment-managed"), "decodeConfigPatch() error=%v, want deployment-managed rejection", err)
 }
 
 func TestHandleConfigSaveRejectsRetiredLocalCacheFields(t *testing.T) {

@@ -73,11 +73,11 @@ type Admin struct {
 	ImportBrowserCookie func(context.Context, Env, string) (*store.Account, error)
 
 	// Verification returns the challenge the upstream last put in front of the
-	// account, for the operator to answer in the console, or false when none is
+	// account, for the operator to answer in the console, or store.ErrNoRows when none is
 	// recorded. Nil means the channel has no such challenge. VerificationSolved
 	// forgets the recorded challenge once the operator answered it.
-	Verification       func(acc *store.Account) (Verification, bool)
-	VerificationSolved func(acc *store.Account)
+	Verification       func(context.Context, Env, *store.Account) (Verification, error)
+	VerificationSolved func(context.Context, Env, *store.Account, string) error
 
 	// RotateDeviceIdentity creates an identity-only patch for an explicit admin
 	// action. It must not contact upstream or clear credential/verification state.
@@ -88,6 +88,7 @@ type Admin struct {
 // the upstream's own in-browser challenge kit the console loads in an isolated
 // frame; Params are handed to it unchanged. The gateway solves nothing.
 type Verification struct {
+	Version    string         `json:"version"`
 	SDK        string         `json:"sdk"`
 	Params     map[string]any `json:"params"`
 	RecordedAt time.Time      `json:"recorded_at"`

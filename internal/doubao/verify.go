@@ -1,10 +1,14 @@
 package doubao
 
 import (
+	"context"
 	"crypto/sha256"
+	"log/slog"
+
 	"encoding/json"
 	"errors"
 	"fmt"
+	"orchids-api/internal/accountpolicy"
 	"regexp"
 	"strings"
 	"sync"
@@ -30,8 +34,11 @@ type verificationRequired struct {
 	code     string
 	decision sharkAdminDecision
 	// raw is the decision exactly as the upstream sent it, for the SDK.
-	raw string
+	raw         string
+	parkHandled bool
 }
+
+func (e *verificationRequired) VerificationParkHandled() bool { return e.parkHandled }
 
 func (e *verificationRequired) Error() string {
 	// The "requires human verification" wording is what the account policy
@@ -124,8 +131,8 @@ func challengeIdentity(acc *store.Account) ([sha256.Size]byte, string, bool) {
 	return sha256.Sum256(encoded), fp, true
 }
 
-// challenges holds the last decision per account in process memory only: it
-// is short-lived, and it binds nothing a restart needs to keep.
+// Standalone clients without a store retain their local challenge state.
+// Gateway clients and the admin API always use the shared Redis record.
 var challenges = struct {
 	sync.Mutex
 	byAccount map[int64]recordedChallenge
@@ -190,21 +197,88 @@ func verification(acc *store.Account) (provider.Verification, bool) {
 	if !ok || recorded.accountIdentity != identity {
 		return provider.Verification{}, false
 	}
+	return verificationPayload(recorded.raw, recorded.did, recorded.fp, "", recorded.at), true
+}
+
+func verificationFromStore(ctx context.Context, env provider.Env, acc *store.Account) (provider.Verification, error) {
+	challenge, err := env.Store.GetDoubaoVerification(ctx, acc)
+	if err != nil {
+		return provider.Verification{}, err
+	}
+	return verificationPayload(challenge.Decision, challenge.DeviceID, challenge.Fingerprint, challenge.ID, challenge.RecordedAt), nil
+}
+
+func acknowledgeVerification(ctx context.Context, env provider.Env, acc *store.Account, version string) error {
+	return env.Store.AcknowledgeDoubaoVerification(ctx, acc, version)
+}
+
+func (c *Client) noteVerification(ctx context.Context, err error) {
+	var challenge *verificationRequired
+	if !errors.As(err, &challenge) || strings.TrimSpace(challenge.raw) == "" {
+		return
+	}
+	request := c.challengeAccount()
+	if c.store == nil {
+		noteChallengeForRequest(c.acc, request, err)
+		return
+	}
+	_, fp, valid := challengeIdentity(request)
+	if !valid {
+		return
+	}
+	if _, _, valid := challengeIdentity(c.acc); !valid {
+		return
+	}
+	now := time.Now()
+	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	saveErr := c.store.SaveDoubaoVerification(saveCtx, c.acc.ID, store.DoubaoVerificationChallenge{
+		ID: randomUUID(), Decision: challenge.raw, DeviceID: request.DoubaoDeviceID, Fingerprint: fp,
+		AccountVersion: store.DoubaoSessionVersion(c.acc), RequestVersion: store.DoubaoSessionVersion(request),
+		Message: challenge.Error(), RecordedAt: now, ParkUntil: now.Add(accountpolicy.CooldownVerification),
+	})
+	if saveErr == nil || errors.Is(saveErr, store.ErrDoubaoVerificationChanged) || errors.Is(saveErr, store.ErrNoRows) {
+		// A stale refusal must not fall through to an unbound status update.
+		challenge.parkHandled = true
+	} else {
+		slog.Warn("Doubao verification observation was not saved", "account_id", c.acc.ID, "error", saveErr)
+	}
+}
+
+func (c *Client) clearVerificationOnSuccess(ctx context.Context) {
+	request := c.challengeAccount()
+	if c.store == nil {
+		clearChallengeForRequest(c.acc, request)
+		return
+	}
+	// Avoid a Redis read on ordinary successful turns. A request that began
+	// before a later refusal cannot clear that refusal.
+	if !strings.Contains(c.acc.StatusMessage, "requires human verification") {
+		return
+	}
+	challenge, err := c.store.GetDoubaoVerification(ctx, c.acc)
+	if err == nil && c.acc.LastAttempt.Equal(challenge.RecordedAt) &&
+		challenge.RequestVersion == store.DoubaoSessionVersion(request) {
+		_ = c.store.AcknowledgeDoubaoVerification(ctx, c.acc, challenge.ID)
+	}
+}
+
+func verificationPayload(raw, did, fp, version string, recordedAt time.Time) provider.Verification {
 	return provider.Verification{
-		SDK: "bytedance_captcha",
+		SDK: "bytedance_captcha", Version: version,
 		Params: map[string]any{
 			"info": map[string]any{
 				"aid": "582478", "appName": "doubao", "lang": "zh",
-				"did": recorded.did, "fp": recorded.fp, "pageId": "27032",
+				"did": did, "fp": fp, "pageId": "27032",
 			},
 			"host": "https://verify.zijieapi.com",
 			"env": map[string]any{
 				"h5_check_version": "4.0.16", "product_host": "https://www.doubao.com", "vc_version": "1.0.0.739",
 			},
-			"verify_data": recorded.raw,
+			"verify_data": raw,
 		},
-		RecordedAt: recorded.at,
-	}, true
+		RecordedAt: recordedAt,
+	}
 }
 
 func verificationSolved(acc *store.Account) {

@@ -82,6 +82,7 @@ func registerRoutes(
 				switch {
 				case err == nil:
 					return &middleware.APIKeyPrincipal{
+						ResourceOwner:        key.ResourceOwner,
 						ID:                   key.ID,
 						AllowedModels:        key.AllowedModels,
 						MaxConcurrent:        key.MaxConcurrent,

@@ -289,6 +289,7 @@ func run() error {
 	ctx, cancelBackground := context.WithCancel(context.Background())
 	defer cancelBackground()
 	updater.StartBackground(ctx)
+	apiHandler.StartConfigSync(ctx)
 
 	refresh.StartTokenRefreshLoop(ctx, apiHandler.ConfigSnapshot, s, lb)
 	// Take over video jobs whose process stopped (a restart, a crash).

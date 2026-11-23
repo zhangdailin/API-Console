@@ -2,16 +2,19 @@ package web
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
-	"orchids-api/internal/audit"
-	"orchids-api/internal/debug"
-	"orchids-api/internal/grok/grokbase"
-	"orchids-api/internal/util"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"orchids-api/internal/audit"
+	"orchids-api/internal/debug"
+	"orchids-api/internal/grok/grokbase"
+	"orchids-api/internal/httpserver"
+	"orchids-api/internal/util"
 )
 
 func streamMessageDelta(previous, current string) string {
@@ -65,6 +68,36 @@ func suffixPrefixOverlap(text, tag string) int {
 	return 0
 }
 
+var errIncompleteWebChat = errors.New("upstream conversation ended before a final answer")
+
+// parseChatUpstream requires an answer snapshot or an explicit stop. A clean
+// transport EOF can also follow a prefix of a syntactically valid NDJSON body.
+func parseChatUpstream(body io.Reader, hasAttachments bool, handle func(map[string]any) error) error {
+	var complete, answer bool
+	err := parseUpstreamLines(body, func(frame map[string]any) error {
+		if !isThinkingResponse(frame) {
+			model := extractUpstreamModelResponse(frame)
+			if strings.TrimSpace(extractUpstreamTokenDelta(frame, model)) != "" {
+				complete, answer = false, true
+			}
+			if strings.TrimSpace(extractUpstreamMessage(model)) != "" {
+				complete, answer = true, true
+			}
+			if hasAttachments && ((model != nil && len(extractImageURLs(model)) > 0) || len(extractAppChatImageURLs(frame)) > 0) {
+				complete, answer = true, true
+			}
+			if stopped, _ := frame["isSoftStop"].(bool); stopped && answer {
+				complete = true
+			}
+		}
+		return handle(frame)
+	})
+	if (err == nil && !complete) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return errIncompleteWebChat
+	}
+	return err
+}
+
 // streamChat relays a grok.com AppChat stream as Chat Completions chunks. The
 // per-stream state and its emitters live on webChatStream
 // (chat_stream_state.go); this function is the order of events: open, relay
@@ -73,7 +106,7 @@ func (h *Handler) streamChat(ctx context.Context, w http.ResponseWriter, req *Ch
 	s := newWebChatStream(ctx, h, w, req, token, publicBase, hasAttachments, logger)
 	defer s.auditOutcome()
 
-	err := parseUpstreamLines(body, s.onUpstream)
+	err := parseChatUpstream(body, hasAttachments, s.onUpstream)
 	if ctx.Err() != nil {
 		return
 	}
@@ -108,7 +141,7 @@ func (h *Handler) collectChat(ctx context.Context, w http.ResponseWriter, req *C
 		imageCandidates = append(imageCandidates, u)
 	}
 
-	err := parseUpstreamLines(body, func(resp map[string]any) error {
+	err := parseChatUpstream(body, hasAttachments, func(resp map[string]any) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -156,7 +189,15 @@ func (h *Handler) collectChat(ctx context.Context, w http.ResponseWriter, req *C
 		return
 	}
 	if err != nil {
-		writeGrokUpstreamError(w, err)
+		h.auditChatOutcome(context.WithoutCancel(ctx), req.account, req, chatOutcome{Err: err})
+		switch {
+		case errors.Is(err, errIncompleteWebChat):
+			httpserver.WriteErrorCode(w, http.StatusBadGateway, "upstream_stream_incomplete", err.Error())
+		case isUpstreamFailure(err):
+			writeGrokUpstreamError(w, err)
+		default:
+			httpserver.WriteErrorCode(w, http.StatusBadGateway, "upstream_stream_error", "Invalid upstream conversation stream")
+		}
 		return
 	}
 
@@ -235,5 +276,5 @@ func (h *Handler) collectChat(ctx context.Context, w http.ResponseWriter, req *C
 		choice["finish_reason"] = "tool_calls"
 	}
 	util.WriteJSON(w, resp)
-	h.auditChatOutcome(context.Background(), req.account, req, chatOutcome{Finish: "stop", Usage: usage, UsageSource: audit.UsageSourceEstimated})
+	h.auditChatOutcome(context.WithoutCancel(ctx), req.account, req, chatOutcome{Finish: "stop", Usage: usage, UsageSource: audit.UsageSourceEstimated})
 }

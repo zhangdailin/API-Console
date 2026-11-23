@@ -81,7 +81,7 @@ func (c *Client) generateMedia(ctx context.Context, req mediaRequest) ([]generat
 	if len(result) < req.Count {
 		return nil, errNoMedia
 	}
-	clearChallengeForRequest(c.acc, c.challengeAccount())
+	c.clearVerificationOnSuccess(ctx)
 	return result[:req.Count], nil
 }
 
@@ -126,12 +126,12 @@ func (c *Client) mediaCall(ctx context.Context, jar cookieJar, payload map[strin
 	if response.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(io.LimitReader(response.Body, 8192))
 		err = mediaError(response.StatusCode, raw, video)
-		noteChallengeForRequest(c.acc, c.challengeAccount(), err)
+		c.noteVerification(ctx, err)
 		return nil, "", err
 	}
 	media, task, err := consumeMediaStream(response.Body, video)
 	if err != nil {
-		noteChallengeForRequest(c.acc, c.challengeAccount(), err)
+		c.noteVerification(ctx, err)
 	}
 	return media, task, err
 }

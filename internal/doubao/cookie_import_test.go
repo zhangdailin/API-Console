@@ -39,7 +39,7 @@ func TestDoubaoThinkingFramesStaySeparate(t *testing.T) {
 	input := "event: STREAM_CHUNK\ndata: {\"content_block\":[{\"block_type\":10040,\"block_id\":\"start\"}]}\n\n" +
 		"event: CHUNK_DELTA\ndata: {\"text\":\"plan\"}\n\n" +
 		"event: STREAM_CHUNK\ndata: {\"content_block\":[{\"block_type\":10040,\"block_id\":\"start\"},{\"block_type\":10040,\"block_id\":\"end\"}]}\n\n" +
-		"event: CHUNK_DELTA\ndata: {\"text\":\"answer\"}\n\n"
+		"event: CHUNK_DELTA\ndata: {\"text\":\"answer\"}\n\ndata: [DONE]\n\n"
 	var text, reasoning string
 	got, err := consumeChatStream(strings.NewReader(input), func(s string) { text += s }, func(s string) { reasoning += s })
 	if err != nil || got != "answer" || text != "answer" || reasoning != "plan" {

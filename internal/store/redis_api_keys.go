@@ -19,6 +19,7 @@ type apiKeyRecord struct {
 	ID                   int64    `json:"id"`
 	Name                 string   `json:"name"`
 	KeyHash              string   `json:"key_hash"`
+	ResourceOwner        string   `json:"resource_owner,omitempty"`
 	KeyPrefix            string   `json:"key_prefix"`
 	KeySuffix            string   `json:"key_suffix"`
 	Enabled              bool     `json:"enabled"`
@@ -107,6 +108,7 @@ func (s *redisStore) UpdateApiKey(ctx context.Context, key *ApiKey) error {
 			next.KeyHash, next.KeyPrefix, next.KeySuffix = current.KeyHash, current.KeyPrefix, current.KeySuffix
 		}
 		next.EncryptedSecret = current.EncryptedSecret
+		next.ResourceOwner = current.ResourceOwner
 		*current = next
 		return nil
 	})
@@ -494,9 +496,10 @@ func (s *redisStore) apiKeyBillingLimitKey(id int64) string {
 
 func apiKeyRecordFromKey(key *ApiKey) apiKeyRecord {
 	return apiKeyRecord{
-		ID:      key.ID,
-		Name:    key.Name,
-		KeyHash: key.KeyHash,
+		ID:            key.ID,
+		Name:          key.Name,
+		KeyHash:       key.KeyHash,
+		ResourceOwner: key.ResourceOwner,
 		// KeyFull is deliberately never persisted; it is only returned once by
 		// the create endpoint before this record reaches Redis.
 		KeyPrefix:              key.KeyPrefix,
@@ -516,7 +519,12 @@ func apiKeyRecordFromKey(key *ApiKey) apiKeyRecord {
 }
 
 func (r apiKeyRecord) toApiKey() *ApiKey {
+	owner := r.ResourceOwner
+	if owner == "" {
+		owner = r.KeyHash
+	}
 	return &ApiKey{
+		ResourceOwner:          owner,
 		SecretAvailable:        r.EncryptedSecret != "",
 		ID:                     r.ID,
 		Name:                   r.Name,

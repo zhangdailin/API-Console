@@ -95,7 +95,7 @@ func (h *MediaHandler) generate(w http.ResponseWriter, r *http.Request, model st
 		client := newClientWithStore(account, cfg, h.store)
 		media, err := client.generateMedia(ctx, req)
 		var challenge *verificationRequired
-		if errors.As(err, &challenge) {
+		if errors.As(err, &challenge) && !challenge.VerificationParkHandled() {
 			at := time.Now()
 			if saveErr := h.store.SetDoubaoVerificationPark(ctx, client.acc, challenge.Error(), at, at.Add(accountpolicy.CooldownVerification)); saveErr != nil {
 				slog.Warn("Doubao media verification observation was not saved", "account_id", account.ID)

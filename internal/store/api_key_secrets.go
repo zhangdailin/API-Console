@@ -116,6 +116,11 @@ func (s *redisStore) RotateApiKey(ctx context.Context, id int64, secret string) 
 	digest := sha256.Sum256([]byte(secret))
 	var committed apiKeyRecord
 	err = s.mutateApiKey(ctx, id, func(row *apiKeyRecord) error {
+		// Preserve the existing resource namespace through the first and later
+		// rotations without keeping an authentication index for the old hash.
+		if row.ResourceOwner == "" {
+			row.ResourceOwner = row.KeyHash
+		}
 		row.KeyHash = hex.EncodeToString(digest[:])
 		row.EncryptedSecret = sealed
 		row.KeyPrefix = "sk-"

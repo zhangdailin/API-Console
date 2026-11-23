@@ -1,6 +1,8 @@
 package store
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -79,6 +81,40 @@ func knownModelCooldownReason(reason ModelCooldownReason) ModelCooldownReason {
 	default:
 		return ""
 	}
+}
+
+// SetModelCooldown changes only the specified model on the credential generation
+// that saw the refusal. An in-flight request cannot restore operator settings.
+func (s *Store) SetModelCooldown(ctx context.Context, observed *Account, model string, until time.Time, reason ModelCooldownReason) error {
+	if s == nil || observed == nil {
+		return fmt.Errorf("model cooldown store is unavailable")
+	}
+	backend, ok := s.accounts.(*redisStore)
+	if !ok {
+		return fmt.Errorf("model cooldown store is unavailable")
+	}
+	return backend.updateAccountAtomic(ctx, observed.ID, func(current *Account) error {
+		if !current.Enabled || !sameCooldownCredential(current, observed) {
+			return errAccountUnchanged
+		}
+		current.ModelCooldowns = mergeModelCooldowns(nil, current.ModelCooldowns)
+		current.ModelCooldownReasons = mergeModelCooldownReasons(nil, current.ModelCooldownReasons, nil, current.ModelCooldowns)
+		RecordModelCooldownWithReason(current, model, until, reason)
+		return nil
+	}, true)
+}
+
+func sameCooldownCredential(current, observed *Account) bool {
+	if current.AccountType != observed.AccountType || current.UserID != observed.UserID {
+		return false
+	}
+	before := accountCredentialFields(observed)
+	for i, field := range accountCredentialFields(current) {
+		if *field != *before[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // RecordModelCooldown marks one model of an account as throttled until the given

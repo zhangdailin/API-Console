@@ -19,6 +19,7 @@ import (
 	"orchids-api/internal/config"
 	"orchids-api/internal/middleware"
 	"orchids-api/internal/prompt"
+	"orchids-api/internal/provider"
 	"orchids-api/internal/store"
 	"orchids-api/internal/upstream"
 )
@@ -314,10 +315,10 @@ func TestRefusedDialogUsesItsOwnChallengeAndNeverAutomaticallyRetries(t *testing
 	if stored.DoubaoDeviceID != acc.DoubaoDeviceID || stored.AuthStatus != acc.AuthStatus || decodeCookies(stored.ClientCookie)["sessionid"] != "synthetic-refreshed-after-refusal" {
 		t.Fatal("dialog rotation changed the base tuple/verdict or lost the real Cookie rotation")
 	}
-	challenge, ok := verification(stored)
+	challenge, challengeErr := verificationFromStore(t.Context(), provider.Env{Store: s}, stored)
 	mu.Lock()
 	defer mu.Unlock()
-	if !ok || challenge.Params["info"].(map[string]any)["did"] != device || device == stored.DoubaoDeviceID {
+	if challengeErr != nil || challenge.Params["info"].(map[string]any)["did"] != device || device == stored.DoubaoDeviceID {
 		t.Fatal("SDK challenge did not preserve the refused dialog's actual device")
 	}
 	next := newClientWithStore(stored, nil, s)

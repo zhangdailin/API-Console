@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -147,7 +148,7 @@ func TestModelsCarryStableAliases(t *testing.T) {
 
 func TestConsumeStreamUsesDeltaAndFallsBackToSnapshot(t *testing.T) {
 	deltas := []string{}
-	text, err := consumeStream(strings.NewReader("event: CHUNK_DELTA\ndata: {\"text\":\"hello\"}\n\nevent: CHUNK_DELTA\ndata: {\"text\":\" world\"}\n\n"), func(value string) { deltas = append(deltas, value) })
+	text, err := consumeStream(strings.NewReader("event: CHUNK_DELTA\ndata: {\"text\":\"hello\"}\n\nevent: CHUNK_DELTA\ndata: {\"text\":\" world\"}\n\ndata: [DONE]\n\n"), func(value string) { deltas = append(deltas, value) })
 	testutil.NoError(t, err)
 	testutil.Equal(t, text, "hello world")
 	testutil.Equal(t, strings.Join(deltas, ""), "hello world")
@@ -158,7 +159,9 @@ func TestConsumeStreamUsesDeltaAndFallsBackToSnapshot(t *testing.T) {
 
 func TestConsumeStreamNeverFallsBackToUserEcho(t *testing.T) {
 	text, err := consumeStream(strings.NewReader("event: FULL_MSG_NOTIFY\ndata: {\"message\":{\"message_id\":\"user\"}}\n\nevent: STREAM_MSG_NOTIFY\ndata: {\"message\":{\"message_id\":\"user\"},\"content\":{\"content_block\":[{\"content\":{\"text_block\":{\"text\":\"prompt\"}}}]}}\n\n"), func(string) {})
-	testutil.NoError(t, err)
+	if !errors.Is(err, errIncompleteChatStream) {
+		t.Fatalf("expected missing answer error, got %v", err)
+	}
 	testutil.Equal(t, text, "")
 }
 
@@ -204,6 +207,8 @@ data: {"message_id":"bot","patch_op":[{"patch_object":1,"patch_value":{"content_
 
 event: CHUNK_DELTA
 data: {"text":"-9f2c71"}
+
+data: [DONE]
 
 `
 	var emitted []string
@@ -668,7 +673,7 @@ func TestSearchImagesAreEmittedAheadOfTheText(t *testing.T) {
 	text, _ := json.Marshal(map[string]any{"patch_op": []any{map[string]any{"patch_object": 1, "patch_type": 1, "patch_value": map[string]any{"content_block": []any{
 		map[string]any{"block_type": 10000, "block_id": "b1", "patch_type": 1, "content": map[string]any{"text_block": map[string]any{"text": "\n\n奶橘来啦！"}}},
 	}}}}})
-	stream := "event: STREAM_CHUNK\ndata: " + string(images) + "\n\nevent: STREAM_CHUNK\ndata: " + string(images) + "\n\nevent: STREAM_CHUNK\ndata: " + string(text) + "\n\n"
+	stream := "event: STREAM_CHUNK\ndata: " + string(images) + "\n\nevent: STREAM_CHUNK\ndata: " + string(images) + "\n\nevent: STREAM_CHUNK\ndata: " + string(text) + "\n\ndata: [DONE]\n\n"
 	var deltas []string
 	got, err := consumeStream(strings.NewReader(stream), func(delta string) { deltas = append(deltas, delta) })
 	testutil.NoError(t, err)
@@ -713,4 +718,23 @@ func clearChallenge(accountID int64) {
 	challenges.Lock()
 	delete(challenges.byAccount, accountID)
 	challenges.Unlock()
+}
+
+func TestIncompleteChatStreamNeverFinishesSuccessfully(t *testing.T) {
+	for _, c := range []struct{ name, body, emitted string }{
+		{"empty", "", ""},
+		{"partial", "event: CHUNK_DELTA\ndata: {\"text\":\"partial\"}\n\n", "partial"},
+		{"malformed_error", "event: CHUNK_DELTA\ndata: {\"text\":\"partial\"}\n\nevent: STREAM_ERROR\ndata: invalid\n\n", "partial"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var emitted strings.Builder
+			answer, err := consumeStream(strings.NewReader(c.body), func(v string) { emitted.WriteString(v) })
+			if err == nil || answer != "" || emitted.String() != c.emitted {
+				t.Fatalf("expected failure after exactly the available prefix: err=%v", err)
+			}
+			if c.name == "malformed_error" && !strings.Contains(err.Error(), "malformed Doubao stream error") {
+				t.Fatalf("malformed error frame was not reported: %v", err)
+			}
+		})
+	}
 }

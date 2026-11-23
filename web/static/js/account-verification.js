@@ -77,10 +77,10 @@
     ConsoleUI.modal('verificationModal', false);
   }
 
-  async function solved(id) {
+  async function solved(id, version) {
     setStatus('验证已完成，正在恢复账号调度…', 'info');
     try {
-      await ConsoleAPI.json(`/api/accounts/${id}/verification`, ConsoleAPI.jsonOptions('POST', {}));
+      await ConsoleAPI.json(`/api/accounts/${id}/verification`, ConsoleAPI.jsonOptions('POST', { version }));
       close();
       showToast('验证已完成，账号已恢复调度；下一次请求会确认上游是否放行', 'success');
       if (typeof loadAccounts === 'function') loadAccounts();
@@ -99,7 +99,7 @@
         : '获取验证信息失败', 'error');
       return;
     }
-    if (!challenge || challenge.sdk !== 'bytedance_captcha' || !challenge.params) {
+    if (!challenge || challenge.sdk !== 'bytedance_captcha' || !challenge.params || !challenge.version) {
       showToast('该账号的验证类型暂不支持', 'error');
       return;
     }
@@ -115,7 +115,7 @@
           setStatus('请完成下方的豆包官方验证', '');
           break;
         case 'success':
-          solved(id);
+          solved(id, challenge.version);
           break;
         case 'closed':
           setStatus('验证已关闭，可重新打开再试', 'warn');

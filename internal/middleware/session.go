@@ -25,6 +25,7 @@ const (
 )
 
 type APIKeyPrincipal struct {
+	ResourceOwner string
 	ID            int64
 	AllowedModels []string
 	MaxConcurrent int
@@ -174,8 +175,12 @@ func APIKeyAuth(validate APIKeyValidator, next http.HandlerFunc) http.HandlerFun
 			writeAPIKeyError(w, http.StatusTooManyRequests, "API key rate limit exceeded", APIKeyDenialRateLimited)
 			return
 		}
-		digest := sha256.Sum256([]byte(token))
-		ctx := context.WithValue(r.Context(), apiKeyFingerprintContextKey{}, hex.EncodeToString(digest[:]))
+		owner := principal.ResourceOwner
+		if owner == "" {
+			digest := sha256.Sum256([]byte(token))
+			owner = hex.EncodeToString(digest[:])
+		}
+		ctx := WithAPIKeyFingerprint(r.Context(), owner)
 		ctx = context.WithValue(ctx, apiKeyPrincipalContextKey{}, principal)
 		next(w, r.WithContext(ctx))
 	}
@@ -222,6 +227,13 @@ func apiKeyToken(r *http.Request) string {
 	return strings.TrimSpace(r.Header.Get("x-api-key"))
 }
 
+type adminConfigWriteCredentials struct{ session, password string }
+
+func AdminConfigWriteCredentials(ctx context.Context) (session, password string) {
+	guard, _ := ctx.Value(adminConfigWriteCredentials{}).(adminConfigWriteCredentials)
+	return guard.session, guard.password
+}
+
 func SessionAuthDynamic(credentials func() (adminPass, adminToken string), next http.HandlerFunc, limiters ...*RateLimiter) http.HandlerFunc {
 	limiter := &RateLimiter{maxAttempts: 5, window: 15 * time.Minute}
 	if len(limiters) > 0 && limiters[0] != nil {
@@ -238,6 +250,9 @@ func SessionAuthDynamic(credentials func() (adminPass, adminToken string), next 
 		if err == nil && auth.ValidateSessionToken(cookie.Value) {
 			if !CheckAdminCookieWrite(w, r) {
 				return
+			}
+			if auth.HasDurableAdminSessions() {
+				r = r.WithContext(context.WithValue(r.Context(), adminConfigWriteCredentials{}, adminConfigWriteCredentials{session: cookie.Value}))
 			}
 			audited(w, r)
 			return
@@ -276,7 +291,8 @@ func SessionAuthDynamic(credentials func() (adminPass, adminToken string), next 
 			return
 		}
 		if valid {
-			audited(w, r)
+			guard := adminConfigWriteCredentials{password: adminPass}
+			audited(w, r.WithContext(context.WithValue(r.Context(), adminConfigWriteCredentials{}, guard)))
 			return
 		}
 

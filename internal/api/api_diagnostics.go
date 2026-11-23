@@ -1,14 +1,16 @@
 package api
 
 import (
+	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
-	"orchids-api/internal/util"
 	"strings"
 
-	"encoding/json"
-
+	"orchids-api/internal/config"
 	"orchids-api/internal/debug"
+	"orchids-api/internal/store"
+	"orchids-api/internal/util"
 )
 
 func (a *API) SetDiagnosticStore(s *debug.DiagnosticStore) { a.diagnostics = s }
@@ -18,8 +20,6 @@ func (a *API) HandleDiagnosticSettings(w http.ResponseWriter, r *http.Request) {
 		writeMethodNotAllowed(w)
 		return
 	}
-	a.configMu.Lock()
-	defer a.configMu.Unlock()
 	if r.Method == http.MethodPut {
 		var input struct {
 			Enabled *bool `json:"enabled"`
@@ -34,15 +34,16 @@ func (a *API) HandleDiagnosticSettings(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Invalid JSON", http.StatusBadRequest)
 			return
 		}
-		current := a.config.Load()
-		if current == nil {
-			http.Error(w, "Configuration unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		next := current.Clone()
-		next.DebugEnabled = *input.Enabled
-		if err := a.persistConfig(r.Context(), current, next); err != nil {
-			http.Error(w, "Could not save diagnostic setting", http.StatusServiceUnavailable)
+		if err := a.mutateSavedConfig(r.Context(), func(base *config.Config) (*config.Config, error) {
+			next := base.Clone()
+			next.DebugEnabled = *input.Enabled
+			return next, nil
+		}); err != nil {
+			if errors.Is(err, store.ErrConfigConflict) {
+				http.Error(w, "Configuration changed; reload before saving", http.StatusConflict)
+			} else {
+				http.Error(w, "Could not save diagnostic setting", http.StatusServiceUnavailable)
+			}
 			return
 		}
 	}

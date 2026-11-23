@@ -35,7 +35,7 @@ func newDoubaoE2EStub() *doubaoE2EStub {
 			stub.chatBody = string(raw)
 			w.Header().Set("Content-Type", "text/event-stream")
 			fmt.Fprintf(w, "event: FULL_MSG_NOTIFY\ndata: {\"message\":{\"message_id\":\"u1\"}}\n\n")
-			fmt.Fprintf(w, "event: CHUNK_DELTA\ndata: {\"text\":%q}\n\n", stub.answer)
+			fmt.Fprintf(w, "event: CHUNK_DELTA\ndata: {\"text\":%q}\n\ndata: [DONE]\n\n", stub.answer)
 			fmt.Fprintf(w, "event: SSE_REPLY_END\ndata: {\"end_type\":3}\n\n")
 		default:
 			http.NotFound(w, r)

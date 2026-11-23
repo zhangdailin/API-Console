@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -17,10 +18,13 @@ const (
 	maxChatAnswerBytes = 16 << 20
 )
 
+var errIncompleteChatStream = errors.New("status=502: Doubao stream ended before a final answer")
+
 func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, error) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 4096), maxChatEventBytes)
 	var event, userMessageID string
+	var complete bool
 	var data []byte
 	var text, found strings.Builder
 	appendText := func(value string) error {
@@ -39,13 +43,32 @@ func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, er
 	// their content, so an answer this parser could not read can be diagnosed.
 	shapes := map[string]int{}
 	flush := func() error {
+		defer func() { event, data = "", data[:0] }()
+		if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
+			complete = true
+			return nil
+		}
 		if event == "" {
-			data = data[:0]
 			return nil
 		}
 		shapes[event]++
 		var value map[string]any
-		if len(data) > 0 && json.Unmarshal(data, &value) == nil {
+		decodeErr := json.Unmarshal(data, &value)
+		if event == "STREAM_ERROR" || event == "gateway-error" {
+			if decodeErr != nil || value == nil {
+				return errors.New("status=502: malformed Doubao stream error")
+			}
+			if event == "gateway-error" {
+				value["error_code"] = value["code"]
+			}
+			return upstreamStreamError(value)
+		}
+		if decodeErr == nil {
+			if rawCode := value["error_code"]; rawCode != nil {
+				if code := errorCodeString(rawCode); code != "" && code != "0" {
+					return upstreamStreamError(value)
+				}
+			}
 			if event != "FULL_MSG_NOTIFY" && event != "CHUNK_DELTA" {
 				blockShapes(value, event, shapes)
 			}
@@ -61,13 +84,12 @@ func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, er
 						reasoning(delta)
 						break
 					}
+					complete = false
 					if err := appendText(delta); err != nil {
 						return err
 					}
 					emit(delta)
 				}
-			case "STREAM_ERROR":
-				return upstreamStreamError(value)
 			case "STREAM_CHUNK", "STREAM_MSG_NOTIFY", "MSG_NOTIFY":
 				messageID, _ := value["message_id"].(string)
 				if messageID == "" {
@@ -92,6 +114,7 @@ func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, er
 				}
 				fragment, full := partitionText(value, &thinking, reasoning)
 				if fragment != "" {
+					complete = false
 					// patch_type 1 appends a fragment; several can precede the
 					// first CHUNK_DELTA, so both sources feed the same buffer.
 					if err := appendText(fragment); err != nil {
@@ -101,6 +124,9 @@ func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, er
 				}
 				// Every answer byte already buffered was emitted by a delta,
 				// fragment, or prior snapshot. Send only the unseen suffix.
+				if strings.TrimSpace(full) != "" && len(full) >= text.Len() {
+					complete = true
+				}
 				if n := text.Len(); len(full) > n {
 					text.Reset()
 					if err := appendText(full); err != nil {
@@ -110,16 +136,19 @@ func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, er
 				}
 				// Image answers arrive as creation blocks with no text at all;
 				// they have to be collected separately or the turn looks empty.
+				if ready, _ := value["is_finish"].(bool); ready {
+					complete = true
+				}
 				for _, image := range creationImages(value) {
 					if seenImages[image.url] {
 						continue
 					}
 					seenImages[image.url] = true
 					images = append(images, image)
+					complete = true
 				}
 			}
 		}
-		event, data = "", data[:0]
 		return nil
 	}
 	for scanner.Scan() {
@@ -144,8 +173,13 @@ func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, er
 	if err := scanner.Err(); err != nil {
 		return "", err
 	}
-	if err := flush(); err != nil {
-		return "", err
+	if event != "" || len(data) != 0 {
+		// SSE only dispatches a frame after its blank-line separator.
+		return "", errIncompleteChatStream
+	}
+	if !complete || (strings.TrimSpace(text.String()) == "" && found.Len() == 0 && len(images) == 0) {
+		slog.Warn("doubao stream did not complete", "shapes", shapeSummary(shapes))
+		return "", errIncompleteChatStream
 	}
 	if markdown := imageMarkdown(images); markdown != "" {
 		if err := appendText(markdown); err != nil {

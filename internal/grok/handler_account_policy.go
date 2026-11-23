@@ -79,9 +79,8 @@ func (h *Handler) markAccountStatus(ctx context.Context, acc *store.Account, err
 	}
 	if acc != nil && isModelScopedRefusal(err) {
 		if model := requestModelFromContext(ctx); model != "" {
-			store.RecordModelCooldown(acc, model, time.Now().Add(modelScopedRefusalCooldown))
 			if h.lb != nil && h.lb.Store != nil {
-				_ = h.lb.Store.UpdateAccount(ctx, acc)
+				_ = h.lb.Store.SetModelCooldown(ctx, acc, model, time.Now().Add(modelScopedRefusalCooldown), store.ModelCooldownThrottled)
 			}
 			h.unbindAffinity(ctx, ProviderBuild, acc.ID)
 			return

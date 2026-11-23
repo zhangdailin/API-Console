@@ -265,6 +265,14 @@ var errAccountUnchanged = fmt.Errorf("account unchanged")
 // between read and write causes a retry instead of being silently overwritten.
 func (s *redisStore) updateAccountAtomic(ctx context.Context, id int64, mutate func(*Account) error, requireExisting ...bool) error {
 	mustExist := len(requireExisting) > 0 && requireExisting[0]
+	return s.updateAccountAndRelated(ctx, id, mustExist, nil, func(current *Account, _ *redis.Tx) (func(redis.Pipeliner), error) {
+		return nil, mutate(current)
+	})
+}
+
+// updateAccountAndRelated commits an optional related Redis mutation under the
+// same optimistic lock. Mutate may be called again after a concurrent writer.
+func (s *redisStore) updateAccountAndRelated(ctx context.Context, id int64, mustExist bool, related []string, mutate func(*Account, *redis.Tx) (func(redis.Pipeliner), error)) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis store not configured")
 	}
@@ -275,10 +283,12 @@ func (s *redisStore) updateAccountAtomic(ctx context.Context, id int64, mutate f
 		return nil
 	}
 	key := s.accountsKey(id)
+	watchKeys := append([]string{key}, related...)
 	// A normal Grok account admits ten concurrent requests; eight retries can
 	// abandon a verdict while that initial burst is still making progress.
 	for range 32 {
 		var previous *Account
+		var accountChanged bool
 		err := s.client.Watch(ctx, func(tx *redis.Tx) error {
 			value, err := tx.Get(ctx, key).Bytes()
 			if err == redis.Nil {
@@ -293,34 +303,39 @@ func (s *redisStore) updateAccountAtomic(ctx context.Context, id int64, mutate f
 			}
 			copied := *current
 			previous = &copied
-			if err := mutate(current); err != nil {
-				return err
-			}
-			// UpdatedAt describes a persisted semantic change. Do not rewrite the
-			// row or publish an event when a refresh observed exactly the state we
-			// already have.
-			current.UpdatedAt = previous.UpdatedAt
-			if reflect.DeepEqual(current, previous) {
-				return errAccountUnchanged
-			}
-			current.UpdatedAt = time.Now()
-			if !current.UpdatedAt.After(previous.UpdatedAt) {
-				// Some platforms expose a coarser wall-clock resolution than the
-				// update rate. UpdatedAt is also the stale-snapshot version marker,
-				// so equal timestamps must still advance monotonically.
-				current.UpdatedAt = previous.UpdatedAt.Add(time.Nanosecond)
-			}
-			data, err := s.marshalAccount(current)
+			sideEffect, err := mutate(current, tx)
 			if err != nil {
 				return err
 			}
+			// An unchanged account neither gets a new revision nor publishes an event.
+			current.UpdatedAt = previous.UpdatedAt
+			accountChanged = !reflect.DeepEqual(current, previous)
+			if !accountChanged && sideEffect == nil {
+				return errAccountUnchanged
+			}
+			var data []byte
+			if accountChanged {
+				current.UpdatedAt = time.Now()
+				if !current.UpdatedAt.After(previous.UpdatedAt) {
+					current.UpdatedAt = previous.UpdatedAt.Add(time.Nanosecond)
+				}
+				data, err = s.marshalAccount(current)
+				if err != nil {
+					return err
+				}
+			}
 			_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-				pipe.Set(ctx, key, data, 0)
-				pipeAccountMembership(ctx, pipe, s, id, current.Enabled)
+				if accountChanged {
+					pipe.Set(ctx, key, data, 0)
+					pipeAccountMembership(ctx, pipe, s, id, current.Enabled)
+				}
+				if sideEffect != nil {
+					sideEffect(pipe)
+				}
 				return nil
 			})
 			return err
-		}, key)
+		}, watchKeys...)
 		if err == redis.TxFailedErr {
 			continue
 		}
@@ -336,7 +351,9 @@ func (s *redisStore) updateAccountAtomic(ctx context.Context, id int64, mutate f
 		if err != nil {
 			return err
 		}
-		s.publishChange(ctx, previous, id)
+		if accountChanged {
+			s.publishChange(ctx, previous, id)
+		}
 		return nil
 	}
 	return fmt.Errorf("account %d changed too frequently; update could not be committed", id)

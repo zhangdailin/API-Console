@@ -151,7 +151,7 @@ Chat 桥接写递增 sequence_number，便于客户端识别顺序；当前没�
 | `/api/accounts/{id}` | GET 查询、PUT 更新、DELETE 删除 |
 | `/api/accounts/{id}/check` / `/api/accounts/{id}/usage` | 仅支持 GET；分别执行账号状态检查和查询已记录的用量 |
 | `/api/accounts/{id}/device-identity` | POST 管理员显式随机更新豆包 `device_id / web_id / tea_uuid`；只写三项标识，Cookie 与 `s_v_web_id`/`fp` 保持不变，不修改启用、认证、人机验证或冷却状态，不发起上游调用。返回 `status / account_id`，不返回设备原值；其他通道返回 404，并发旧快照返回 409。账号页不提供此操作按钮。旧挑战与新标识不匹配时不再提供旧挑战，需下一次拒绝记录新挑战 |
-| `/api/accounts/{id}/verification` | 豆包人机验证（会话认证）：GET 返回最近一次 `710022004` 挑战，供官方验证码 SDK 使用（原样的 decision、本账号请求所用的 `device_id` 与 `fp`；挑战在进程内保留 2 小时，账号无固定设备标识时不提供），无记录返回 404；POST 表示已完成验证，清除记录并只撤销人机验证造成的停用，不标记为已检测。SDK 在账号页的沙箱 iframe（仅 `allow-scripts`）中运行，无法访问后台会话。上游是否放行由下一次请求确认 |
+| `/api/accounts/{id}/verification` | 豆包人机验证（会话认证）：GET 返回最近一次挑战及 `version`，供官方验证窗口使用。挑战在共享 Redis 中加密保留最多两小时，并绑定当时的账号凭据和请求身份；无可用记录返回 404。手动完成后，POST `{"version":"GET 返回的值"}`；记录已更新或过期返回 409。确认只撤销该挑战写入的停用状态，不代表上游已接受。 |
 | `/api/keys` | GET 列表、POST 创建 |
 | `/api/keys/{id}` | PATCH 策略、DELETE 删除 |
 | `/api/keys/{id}/secret` | GET 管理员按需读取完整秘密，禁止缓存；内容不可用返回 503 |
@@ -181,7 +181,7 @@ Chat 桥接写递增 sequence_number，便于客户端识别顺序；当前没�
 | `/api/grok/tools/v1/*` | Grok 工具页推理投影（models、chat/completions、responses、images、videos、files、media/inputs），以管理会话鉴权，资源归属固定为 `admin-tools` |
 | `/api/grok/admin/*` | 工具页管理接口：`imagine/config`、`voice/token`、`voice/livekit/`（LiveKit 信令中转，仅转发 `/rtc` WebSocket 和 `/rtc/validate`）及 `media/` 下的媒体缓存和上传。图片、视频生成走上表的工具页推理路由。 |
 
-API Key 创建和轮换时返回完整秘密，并使用主密钥派生的独立加密用途保存密文；认证继续使用哈希。管理员可通过 secret 接口读取，列表仅返回掩码及 secret_available。加密能力未配置、密文损坏或解密失败时明确报错，不回退明文。轮换原子替换密文、哈希及索引，使旧 Key 立即失效；列表掩码不能用于调用。前端创建默认消费不限额，编辑不提交预算字段，已有后台预算策略继续生效。支持模型白名单、请求限速、有效期、并发及预算；空模型白名单兼容解释为不限模型。费用预留和结算用整数 USD ticks，1 USD 为 100 亿 ticks。
+API Key 创建和轮换时返回完整秘密，并使用主密钥派生的独立加密用途保存密文；认证继续使用哈希。管理员可通过 secret 接口读取，列表仅返回掩码及 secret_available。加密能力未配置、密文损坏或解密失败时明确报错，不回退明文。轮换原子替换密文、哈希及索引，使旧 Key 立即失效；同一 Key 记录已有的响应和其他按 Key 隔离的资源仍归该记录所有。升级前、更早轮换已经失去关联的资源不会自动恢复。列表掩码不能用于调用。前端创建默认消费不限额，编辑不提交预算字段，已有后台预算策略继续生效。支持模型白名单、请求限速、有效期、并发及预算；空模型白名单兼容解释为不限模型。费用预留和结算用整数 USD ticks，1 USD 为 100 亿 ticks。
 
 `POST /api/config/save` 增量保存，下一次请求使用新配置；省略字段保留原值。固定上限见[配置说明](configuration.md#推理延迟与等待预算)；已退役的 `inference_profile`、`grok_low_latency`、任意生成期限、重试次数和质量阈值参数返回 HTTP 400，配置及 Redis 保持不变。
 

@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -444,7 +443,7 @@ func (c *Client) sendRequestWithPayload(ctx context.Context, req upstream.Upstre
 	if response.StatusCode >= 400 {
 		raw, _ := io.ReadAll(io.LimitReader(response.Body, 8192))
 		err := statusError(response.StatusCode, raw)
-		noteChallengeForRequest(c.acc, c.challengeAccount(), err)
+		c.noteVerification(ctx, err)
 		return err
 	}
 	text, err := consumeChatStream(response.Body, func(delta string) {
@@ -457,14 +456,11 @@ func (c *Client) sendRequestWithPayload(ctx context.Context, req upstream.Upstre
 		}
 	})
 	if err != nil {
-		noteChallengeForRequest(c.acc, c.challengeAccount(), err)
+		c.noteVerification(ctx, err)
 		return err
 	}
 	if text != "" {
-		clearChallengeForRequest(c.acc, c.challengeAccount())
-	}
-	if text == "" {
-		slog.Warn("doubao answer was empty", "account_id", c.acc.ID, "model", req.Model, "attachments", len(attachments))
+		c.clearVerificationOnSuccess(ctx)
 	}
 	finishReason := "stop"
 	if toolMode && emitToolOrText(text, req.Tools, onMessage) {

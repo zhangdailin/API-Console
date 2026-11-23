@@ -213,6 +213,7 @@ func TestWebStreamChatTokenOnlyFallback(t *testing.T) {
 	got := runStream(t, nil, upstreamLines(
 		line(map[string]any{"token": "only "}),
 		line(map[string]any{"token": "tokens"}),
+		line(map[string]any{"isSoftStop": true}),
 	))
 	testutil.MustContain(t, got.content, "only tokens")
 	testutil.Equal(t, got.finish, "stop")

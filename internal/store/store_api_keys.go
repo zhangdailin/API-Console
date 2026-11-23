@@ -15,6 +15,7 @@ type ApiKey struct {
 	ID              int64    `json:"id"`
 	Name            string   `json:"name"`
 	KeyHash         string   `json:"-"`
+	ResourceOwner   string   `json:"-"`
 	KeyFull         string   `json:"-"`
 	KeyPrefix       string   `json:"key_prefix"`
 	SecretAvailable bool     `json:"secret_available"`

@@ -7,14 +7,17 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"orchids-api/internal/httpclient"
-	"orchids-api/internal/httpserver"
+	"reflect"
 	"strconv"
 	"strings"
+	"time"
 
 	"orchids-api/internal/auth"
 	"orchids-api/internal/config"
+	"orchids-api/internal/httpclient"
+	"orchids-api/internal/httpserver"
 	"orchids-api/internal/middleware"
+	"orchids-api/internal/store"
 	"orchids-api/internal/util"
 )
 
@@ -143,23 +146,27 @@ func (a *API) HandleConfigList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) HandleConfigSave(w http.ResponseWriter, r *http.Request) {
-	a.configMu.Lock()
-	defer a.configMu.Unlock()
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	current := a.config.Load()
-	newCfg, err := buildConfigFromPatch(r, current)
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	patch, err := decodeConfigPatch(r)
 	if err != nil {
 		if errors.Is(err, errRetiredCacheSetting) || errors.Is(err, errFixedRuntimeSetting) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+		} else {
+			writeCodeEnvelope(w, 1, nil, "parse request failed: "+err.Error())
 		}
-		writeCodeEnvelope(w, 1, nil, "parse request failed: "+err.Error())
 		return
 	}
-	if err := a.persistConfig(r.Context(), current, newCfg); err != nil {
-		writeCodeEnvelope(w, 1, nil, "save config failed: "+err.Error())
+	if err := a.mutateSavedConfig(r.Context(), func(base *config.Config) (*config.Config, error) {
+		return mergeConfigPatch(base, patch)
+	}); err != nil {
+		if errors.Is(err, store.ErrConfigConflict) {
+			http.Error(w, "Configuration changed; reload before saving", http.StatusConflict)
+		} else {
+			writeCodeEnvelope(w, 1, nil, "save config failed: "+err.Error())
+		}
 		return
 	}
 	writeCodeEnvelope(w, 0, nil, "success")
@@ -197,23 +204,7 @@ var errFixedRuntimeSetting = errors.New("generation and authentication policy is
 
 var errRetiredCacheSetting = errors.New("local token cache settings are retired; cache_strategy still controls upstream cache_control")
 
-func buildConfigFromPatch(r *http.Request, current *config.Config) (*config.Config, error) {
-	base := &config.Config{}
-	if current != nil {
-		copyCfg := *current
-		base = &copyCfg
-	}
-
-	// Merge into the internal configuration, never the redacted public view.
-	rawBase, err := json.Marshal(base)
-	if err != nil {
-		return nil, err
-	}
-	baseMap := map[string]any{}
-	if err := json.Unmarshal(rawBase, &baseMap); err != nil {
-		return nil, err
-	}
-
+func decodeConfigPatch(r *http.Request) (map[string]any, error) {
 	patch := map[string]any{}
 	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 		return nil, err
@@ -242,6 +233,26 @@ func buildConfigFromPatch(r *http.Request, current *config.Config) (*config.Conf
 		} else if password, ok := v.(string); ok && strings.TrimSpace(password) == "" {
 			delete(patch, "admin_pass")
 		}
+	}
+
+	return patch, nil
+}
+
+func mergeConfigPatch(current *config.Config, patch map[string]any) (*config.Config, error) {
+	base := &config.Config{}
+	if current != nil {
+		copyCfg := *current
+		base = &copyCfg
+	}
+
+	// Merge into the internal configuration, never the redacted public view.
+	rawBase, err := json.Marshal(base)
+	if err != nil {
+		return nil, err
+	}
+	baseMap := map[string]any{}
+	if err := json.Unmarshal(rawBase, &baseMap); err != nil {
+		return nil, err
 	}
 
 	for key, value := range patch {
@@ -351,7 +362,92 @@ func normalizeProxyBypassValue(value any) []string {
 	}
 }
 
-func (a *API) persistConfig(ctx context.Context, current, newCfg *config.Config) error {
+func (a *API) readSavedConfig(ctx context.Context, local *config.Config) (*config.Config, string, error) {
+	if a.store == nil || local == nil {
+		return nil, "", fmt.Errorf("configuration unavailable")
+	}
+	raw, err := a.store.GetSetting(ctx, "config")
+	if err != nil || raw == "" {
+		return local, raw, err
+	}
+	durable := local.Clone()
+	if err := json.Unmarshal([]byte(raw), durable); err != nil || strings.TrimSpace(durable.AdminPass) == "" {
+		return nil, "", fmt.Errorf("saved configuration is invalid")
+	}
+	config.ApplyHardcoded(durable)
+	return durable, raw, nil
+}
+
+// mutateSavedConfig merges a patch with the latest committed snapshot. Redis
+// compares that exact preimage so two simultaneous saves cannot drop updates.
+func (a *API) mutateSavedConfig(ctx context.Context, patch func(*config.Config) (*config.Config, error)) error {
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
+	local := a.config.Load()
+	base, raw, err := a.readSavedConfig(ctx, local)
+	if err != nil {
+		return err
+	}
+	session, password := middleware.AdminConfigWriteCredentials(ctx)
+	if (password != "" && password != base.AdminPass) ||
+		(session == "" && password == "" && (base.AdminPass != local.AdminPass || base.AdminUser != local.AdminUser)) {
+		return store.ErrConfigConflict
+	}
+	next, err := patch(base)
+	if err != nil {
+		return err
+	}
+	return a.commitConfig(ctx, raw, session, next)
+}
+
+func (a *API) persistConfig(ctx context.Context, current, next *config.Config) error {
+	return a.mutateSavedConfig(ctx, func(base *config.Config) (*config.Config, error) {
+		if current != nil && !reflect.DeepEqual(base, current) {
+			return nil, store.ErrConfigConflict
+		}
+		return next, nil
+	})
+}
+
+func (a *API) syncSavedConfig(ctx context.Context) error {
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
+	local := a.config.Load()
+	current, raw, err := a.readSavedConfig(ctx, local)
+	if err != nil || raw == "" || reflect.DeepEqual(local, current) {
+		return err
+	}
+	if err := config.ValidateProxyConfig(current); err != nil {
+		return err
+	}
+	if err := config.ValidateSavedConfig(current); err != nil {
+		return err
+	}
+	a.publishConfig(current)
+	return nil
+}
+
+func (a *API) StartConfigSync(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(3 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+				err := a.syncSavedConfig(readCtx)
+				cancel()
+				if err != nil && ctx.Err() == nil {
+					slog.Warn("could not synchronize runtime configuration", "error", err)
+				}
+			}
+		}
+	}()
+}
+
+func (a *API) commitConfig(ctx context.Context, previous, session string, newCfg *config.Config) error {
 	if newCfg == nil {
 		return fmt.Errorf("config is nil")
 	}
@@ -375,23 +471,18 @@ func (a *API) persistConfig(ctx context.Context, current, newCfg *config.Config)
 	if err != nil {
 		return err
 	}
-	base := current
-	if base == nil {
-		base = a.config.Load()
-	}
-	if base == nil {
-		return fmt.Errorf("current configuration unavailable")
-	}
-	if err := a.store.SaveConfigForCredentials(ctx, string(data), base.AdminPass, base.AdminUser); err != nil {
+	if err := a.store.CompareAndSaveConfig(ctx, previous, string(data), session); err != nil {
 		return err
 	}
-	if current == nil || current.AdminPass != storedCfg.AdminPass || current.AdminUser != storedCfg.AdminUser {
+	a.publishConfig(storedCfg)
+	return nil
+}
+
+func (a *API) publishConfig(next *config.Config) {
+	current := a.config.Load()
+	if current == nil || current.AdminPass != next.AdminPass || current.AdminUser != next.AdminUser {
 		auth.ClearLocalSessions()
 	}
-	// Runtime configs are immutable after publication. Replacing the pointer is
-	// atomic; mutating the previously published object would race with request
-	// handlers and background jobs reading its fields.
-	a.config.Store(storedCfg)
-	a.notifyConfigChanged(storedCfg)
-	return nil
+	a.config.Store(next)
+	a.notifyConfigChanged(next)
 }

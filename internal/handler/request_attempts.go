@@ -218,8 +218,7 @@ func (e *messageExecution) run() {
 				// The verdict's kind travels with the deadline: the selection
 				// layer cannot see this request, and has to know whether the
 				// model is throttled or simply not covered by the plan.
-				store.RecordModelCooldownWithReason(e.currentAccount, verdict.Model, time.Now().Add(verdict.Cooldown), verdict.ModelCooldownKind)
-				if persistErr := e.h.loadBalancer.Store.UpdateAccount(e.r.Context(), e.currentAccount); persistErr != nil {
+				if persistErr := e.h.loadBalancer.Store.SetModelCooldown(e.r.Context(), e.currentAccount, verdict.Model, time.Now().Add(verdict.Cooldown), verdict.ModelCooldownKind); persistErr != nil {
 					slog.Warn("persist model cooldown failed", "account_id", e.currentAccount.ID, "model", verdict.Model, "error", persistErr)
 				} else {
 					e.h.loadBalancer.InvalidateAccounts([]int64{e.currentAccount.ID})
@@ -255,7 +254,15 @@ func (e *messageExecution) run() {
 						"account_id", e.currentAccount.ID, "model", upstreamReq.Model, "hold", freeTierHold)
 					store.RecordModelCooldownWithReason(e.currentAccount, upstreamReq.Model, time.Now().Add(freeTierHold), store.ModelCooldownUnavailable)
 				}
-				e.h.loadBalancer.PersistAppliedAccountStatus(e.r.Context(), e.currentAccount, "账号策略判定: "+verdict.Status)
+				type verificationPark interface {
+					error
+					VerificationParkHandled() bool
+				}
+				if handled, ok := errors.AsType[verificationPark](err); !ok || !handled.VerificationParkHandled() {
+					e.h.loadBalancer.PersistAppliedAccountStatus(e.r.Context(), e.currentAccount, "账号策略判定: "+verdict.Status)
+				} else {
+					e.h.loadBalancer.InvalidateAccounts([]int64{e.currentAccount.ID})
+				}
 			}
 		}
 

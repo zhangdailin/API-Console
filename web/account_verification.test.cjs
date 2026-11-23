@@ -23,7 +23,7 @@ function harness({ challenge, getError } = {}) {
     ConsoleAPI: {
       jsonOptions: (method, value) => ({ method, body: JSON.stringify(value) }),
       json: async (url, options) => {
-        calls.push([url, options && options.method || 'GET']);
+        calls.push(options ? [url, options.method, JSON.parse(options.body)] : [url, 'GET']);
         if (!options && getError) throw new Error(getError);
         return options ? {} : challenge;
       },
@@ -37,7 +37,7 @@ function harness({ challenge, getError } = {}) {
   return { api: context.AccountVerification, calls, toasts, posted, frame, frameWindow, status, modals, dispatch, listeners };
 }
 
-const challenge = { sdk: 'bytedance_captcha', params: { info: { did: '75', fp: 'verify_x' }, verify_data: '{"type":"verify"}' } };
+const challenge = { version: 'fixture-version', sdk: 'bytedance_captcha', params: { info: { did: '75', fp: 'verify_x' }, verify_data: '{"type":"verify"}' } };
 
 test('the captcha SDK runs only in a sandboxed frame without same-origin access', () => {
   const html = fs.readFileSync(path.join(__dirname, 'templates/pages/accounts.html'), 'utf8');
@@ -64,7 +64,7 @@ test('the challenge reaches only the frame and an answer lifts the park', async 
   assert.deepEqual(JSON.parse(JSON.stringify(h.posted[0].data.params)), challenge.params);
   h.dispatch(h.frameWindow, { source: 'doubao-verify', type: 'success' });
   await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(h.calls[1], ['/api/accounts/7/verification', 'POST']);
+  assert.deepEqual(h.calls[1], ['/api/accounts/7/verification', 'POST', { version: challenge.version }]);
   assert.deepEqual(h.calls[2], ['reload']);
   assert.equal(h.toasts.at(-1)[1], 'success');
   assert.equal(h.listeners.length, 0, 'the message listener outlived the dialog');

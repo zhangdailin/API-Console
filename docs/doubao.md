@@ -53,8 +53,9 @@ Account rows retain one status/quota refresh action. There is no manual device
 identity control and rendering/reloading the page never rotates identity.
 Neither an HTTP 403 nor a human-verification challenge triggers a new tuple or
 an automatic generation retry. Captcha records retain the exact refused
-dialog's device/fingerprint and are still gated by the current account session;
-success in a different dialog cannot clear the refusal. A fresh QR login or
+dialog's device/fingerprint in encrypted, short-lived Redis records shared by
+replicas. An acknowledgement names the displayed challenge version; a success
+in a different dialog cannot clear the refusal. A fresh QR login or
 explicit legacy identity rotation invalidates an old session's challenge.
 
 ## OpenAI-compatible endpoints

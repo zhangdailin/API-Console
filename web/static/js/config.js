@@ -178,7 +178,7 @@ function renderConfigDirtyState() {
     // claiming the settings already match the server.
     if (dirtyEl) dirtyEl.classList.add("hidden");
     if (cleanEl) {
-      cleanEl.textContent = "配置未加载，可直接编辑后保存";
+      cleanEl.textContent = "配置未加载，请刷新后再保存";
       cleanEl.classList.remove("hidden");
     }
     return;
@@ -358,11 +358,16 @@ async function loadConfiguration() {
 // Save configuration to API
 async function saveConfiguration() {
   if (configSaving) return;
+  if (!configBaseline) {
+    setConfigSaveError("配置未加载，请刷新后再保存");
+    return;
+  }
+  const submittedState = collectConfigState(CONFIG_TRACKED_FIELDS);
+  const changed = (id) => Object.hasOwn(submittedState, id) && submittedState[id] !== configBaseline[id];
   const data = {};
   CONFIG_FIELDS.forEach((field) => {
-    if (!field.key) return;
-    const raw = readConfigFieldValue(field.id);
-    if (raw === null) return;
+    if (!field.key || !changed(field.id) || field.id === "cfg_grok_statsig_id" || field.id === "cfg_grok_statsig_signer_url") return;
+    const raw = submittedState[field.id];
     switch (field.type) {
       case "bool": data[field.key] = raw === "true"; break;
       case "lines": data[field.key] = parseProxyBypass(raw); break;
@@ -372,20 +377,19 @@ async function saveConfiguration() {
       default: data[field.key] = String(raw).trim();
     }
   });
-  const statsig = readConfigFieldValue("cfg_statsig_mode");
-  if (statsig === "manual") {
-    // A fixed ID replaces the signer entirely.
+  const statsig = submittedState.cfg_statsig_mode;
+  if (statsig === "manual" && (changed("cfg_statsig_mode") || changed("cfg_grok_statsig_id"))) {
+    data.grok_statsig_id = (submittedState.cfg_grok_statsig_id || "").trim();
     data.grok_statsig_signer_url = "";
-  } else if (statsig === "url") {
+  } else if (statsig === "url" && (changed("cfg_statsig_mode") || changed("cfg_grok_statsig_signer_url"))) {
     data.grok_statsig_id = "";
-    // Empty means the built-in signer (null), not "signer disabled" ("").
-    if (!data.grok_statsig_signer_url) data.grok_statsig_signer_url = null;
+    data.grok_statsig_signer_url = (submittedState.cfg_grok_statsig_signer_url || "").trim() || null;
   }
-	const password = document.getElementById("cfg_admin_pass").value;
-	if (password.trim()) data.admin_password = password;
+  const password = submittedState.cfg_admin_pass;
+  if (changed("cfg_admin_pass") && password.trim()) data.admin_password = password;
+  if (Object.keys(data).length === 0) return;
 
   const saveBtn = document.getElementById("cfgSaveBtn");
-  const submittedState = collectConfigState(CONFIG_TRACKED_FIELDS);
   configSaving = true;
   if (saveBtn) {
     saveBtn.disabled = true;

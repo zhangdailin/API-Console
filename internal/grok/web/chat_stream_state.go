@@ -91,9 +91,14 @@ func newWebChatStream(ctx context.Context, h *Handler, w http.ResponseWriter, re
 
 // auditOutcome journals the usage of a stream that finished with one.
 func (s *webChatStream) auditOutcome() {
-	if len(s.finalUsage) > 0 {
-		s.h.auditChatOutcome(context.Background(), s.req.account, s.req, chatOutcome{Finish: "stop", Usage: s.finalUsage, UsageSource: audit.UsageSourceEstimated})
+	if len(s.finalUsage) == 0 {
+		return
 	}
+	outcome := chatOutcome{Finish: "stop", Usage: s.finalUsage, UsageSource: audit.UsageSourceEstimated}
+	if err := s.deliveryError(); err != nil {
+		outcome = chatOutcome{Err: err}
+	}
+	s.h.auditChatOutcome(context.WithoutCancel(s.ctx), s.req.account, s.req, outcome)
 }
 
 // --- emitters ---------------------------------------------------------------
@@ -343,6 +348,17 @@ func (s *webChatStream) onModelResponse(mr map[string]any) {
 // fail ends a stream the upstream or the client broke. A stalled upstream is
 // not a parse error: the idle sentinel gets its own text and code.
 func (s *webChatStream) fail(err error) {
+	s.h.auditChatOutcome(context.WithoutCancel(s.ctx), s.req.account, s.req, chatOutcome{Err: err})
+	if s.downstreamWriteErr != nil {
+		return
+	}
+	if errors.Is(err, errIncompleteWebChat) {
+		_ = writeOpenAIStreamError(s.w, err.Error(), "upstream_stream_incomplete")
+		if s.flusher != nil {
+			s.flusher.Flush()
+		}
+		return
+	}
 	slog.Warn("grok stream parse failed", "error", err)
 	if errors.Is(err, ErrGrokSemanticIdle) {
 		writeChatStreamError(s.w, s.flusher, s.logger, "upstream stream timed out while waiting for generated output", "upstream_stream_idle_timeout")

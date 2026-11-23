@@ -17,8 +17,11 @@ var (
    if previous then old = cjson.decode(previous) end
    if type(old) ~= "table" then old = {} end
    if type(next) ~= "table" then next = {} end
-   if ARGV[2] and previous and (old.admin_pass ~= ARGV[2] or (old.admin_user or "") ~= ARGV[3]) then
-     return redis.error_reply("admin configuration changed; reload before saving")
+   if ARGV[2] and (previous or "") ~= ARGV[2] then return 0 end
+   if KEYS[3] then
+     local session = redis.call("GET", KEYS[3])
+     local generation = redis.call("GET", KEYS[2]) or "1"
+     if not session or session ~= generation then return 0 end
    end
    if old.admin_pass ~= next.admin_pass or old.admin_user ~= next.admin_user then
      redis.call("SETNX", KEYS[2], "1")
