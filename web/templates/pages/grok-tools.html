@@ -60,135 +60,104 @@
       </section>
 
       <section id="grokChatSection" class="content-card grok-section chat-main section-hidden">
-        <div class="chat-layout">
-          <aside class="chat-sidebar" id="grokChatSidebar">
-            <div class="sidebar-header">
-              <span class="sidebar-title">会话</span>
-              <div class="sidebar-actions">
-                <button id="grokChatNewBtn" class="icon-btn sidebar-action-btn" type="button" title="新增会话">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <line x1="12" y1="5" x2="12" y2="19"></line>
-                  <line x1="5" y1="12" x2="19" y2="12"></line>
-                </svg>
-              </button>
-                <button id="grokChatCollapseBtn" class="icon-btn sidebar-action-btn" type="button" title="折叠会话">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <polyline points="15 6 9 12 15 18"></polyline>
+        <div class="chat-shell">
+          <div class="chat-title">
+            <div class="chat-title-main">
+              <h2 class="chat-title-text">对话</h2>
+              <p class="chat-subtitle">与 Grok 实时对话，支持推理与联网工具</p>
+            </div>
+            <div class="chat-title-actions">
+              <details id="grokChatHistory" class="chat-history">
+                <summary class="btn btn-outline chat-header-btn">会话历史</summary>
+                <div id="grokSessionList" class="chat-history-list" aria-label="会话历史"></div>
+              </details>
+              <button id="grokChatNewBtn" class="btn btn-outline chat-header-btn" type="button">新建会话</button>
+              <button id="grokChatClearBtn" class="btn btn-outline chat-header-btn chat-clear-btn" type="button">清空当前会话</button>
+              <span id="grokChatStatus" class="status-text">就绪</span>
+            </div>
+          </div>
+          <div id="grokChatLog" class="chat-thread">
+            <div id="grokChatEmpty" class="chat-empty">
+              <div class="gw-hero">
+                <span class="gw-hero-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/></svg></span>
+                <h3 class="gw-hero-title">今天想和 Grok 聊点什么？</h3>
+                <p class="gw-hero-sub">在下方选择模型并输入问题；会话保存在本浏览器里。</p>
+                <div class="gw-suggestions">
+                  <button type="button" class="gw-suggestion" data-chat-suggestion="用三句话解释量子纠缠，并给一个生活中的类比。"><strong>解释概念</strong><span>用三句话讲清量子纠缠</span></button>
+                  <button type="button" class="gw-suggestion" data-chat-suggestion="用 Go 写一个按 API Key 限流的令牌桶，支持突发 20、每秒 5 个。"><strong>写代码</strong><span>Go 实现按 Key 限流的令牌桶</span></button>
+                  <button type="button" class="gw-suggestion" data-chat-suggestion="帮我起草一封邮件，礼貌地把周会改到周四下午三点。"><strong>写邮件</strong><span>礼貌地改约周会时间</span></button>
+                  <button type="button" class="gw-suggestion" data-chat-suggestion="总结今天 X 上关于 AI 的热门讨论，列出三个要点。"><strong>看热点</strong><span>总结 X 上的 AI 热门讨论</span></button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="composer-shell">
+            <div class="composer-input">
+              <textarea id="grokPromptInput" class="composer-textarea" placeholder="给 Grok 发送消息…  Enter 发送，Shift+Enter 换行"></textarea>
+              <div>
+                <label for="grokChatDocument">PDF 附件（Grok Web，每个会话最多 8 份、共 16 MiB）</label>
+                <input id="grokChatDocument" type="file" accept=".pdf,application/pdf" multiple disabled>
+              </div>
+              <div class="composer-actions">
+                <div class="model-chip" id="grokModelChip">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                    <line x1="8" y1="21" x2="16" y2="21"></line>
+                    <line x1="12" y1="17" x2="12" y2="21"></line>
                   </svg>
-                </button>
-              </div>
-            </div>
-            <div id="grokSessionList" class="sidebar-list"></div>
-          </aside>
-          <div id="grokChatSidebarOverlay" class="sidebar-overlay"></div>
-          <button id="grokChatExpandBtn" class="icon-btn sidebar-expand-btn" type="button" title="展开会话">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="9 6 15 12 9 18"></polyline>
-            </svg>
-          </button>
-          <div class="chat-shell">
-            <div class="chat-title">
-              <div class="inline-flex-row chat-title-main">
-                <button id="grokChatSidebarToggle" class="icon-btn sidebar-toggle" type="button" title="会话列表">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="3" y1="6" x2="21" y2="6"></line>
-                    <line x1="3" y1="12" x2="21" y2="12"></line>
-                    <line x1="3" y1="18" x2="21" y2="18"></line>
+                  <span id="grokModelLabel" class="model-label">加载模型…</span>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="6 9 12 15 18 9"></polyline>
                   </svg>
-                </button>
-                <div>
-                <h2 class="chat-title-text">对话</h2>
-                <p class="chat-subtitle">与 Grok 实时对话，支持推理与联网工具</p>
+                  <div id="grokModelDropdown" class="model-dropdown"></div>
                 </div>
-              </div>
-              <div class="chat-title-actions">
-                <button id="grokChatClearBtn" class="btn btn-outline chat-clear-btn" type="button" title="清空当前会话">清空当前会话</button>
-                <span id="grokChatStatus" class="status-text">就绪</span>
-              </div>
-            </div>
-            <div id="grokChatLog" class="chat-thread">
-              <div id="grokChatEmpty" class="chat-empty">
-                <div class="gw-hero">
-                  <span class="gw-hero-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/></svg></span>
-                  <h3 class="gw-hero-title">今天想和 Grok 聊点什么？</h3>
-                  <p class="gw-hero-sub">在下方选择模型并输入问题；会话保存在本浏览器里。</p>
-                  <div class="gw-suggestions">
-                    <button type="button" class="gw-suggestion" data-chat-suggestion="用三句话解释量子纠缠，并给一个生活中的类比。"><strong>解释概念</strong><span>用三句话讲清量子纠缠</span></button>
-                    <button type="button" class="gw-suggestion" data-chat-suggestion="用 Go 写一个按 API Key 限流的令牌桶，支持突发 20、每秒 5 个。"><strong>写代码</strong><span>Go 实现按 Key 限流的令牌桶</span></button>
-                    <button type="button" class="gw-suggestion" data-chat-suggestion="帮我起草一封邮件，礼貌地把周会改到周四下午三点。"><strong>写邮件</strong><span>礼貌地改约周会时间</span></button>
-                    <button type="button" class="gw-suggestion" data-chat-suggestion="总结今天 X 上关于 AI 的热门讨论，列出三个要点。"><strong>看热点</strong><span>总结 X 上的 AI 热门讨论</span></button>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div class="composer-shell">
-              <div class="composer-input">
-                <textarea id="grokPromptInput" class="composer-textarea" placeholder="给 Grok 发送消息…  Enter 发送，Shift+Enter 换行"></textarea>
-                <div>
-                  <label for="grokChatDocument">PDF 附件（Grok Web，每个会话最多 8 份、共 16 MiB）</label>
-                  <input id="grokChatDocument" type="file" accept=".pdf,application/pdf" multiple disabled>
-                </div>
-                <div class="composer-actions">
-                  <div class="model-chip" id="grokModelChip">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-                      <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
-                      <line x1="8" y1="21" x2="16" y2="21"></line>
-                      <line x1="12" y1="17" x2="12" y2="21"></line>
+                <div class="popover">
+                  <button id="grokSettingsToggle" class="icon-btn" type="button" title="设置" aria-haspopup="dialog" aria-expanded="false">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                      <circle cx="12" cy="12" r="3"></circle>
+                      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01A1.65 1.65 0 0 0 9 4.6V4a2 2 0 0 1 4 0v.09c0 .69.4 1.31 1.02 1.58.52.23 1.12.2 1.6-.07l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06c-.45.45-.58 1.12-.33 1.72.25.6.82 1 1.51 1H21a2 2 0 0 1 0 4h-.09c-.69 0-1.31.4-1.51 1Z"></path>
                     </svg>
-                    <span id="grokModelLabel" class="model-label">加载模型…</span>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <polyline points="6 9 12 15 18 9"></polyline>
-                    </svg>
-                    <div id="grokModelDropdown" class="model-dropdown"></div>
-                  </div>
-                  <div class="popover">
-                    <button id="grokSettingsToggle" class="icon-btn" type="button" title="设置" aria-haspopup="dialog" aria-expanded="false">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-                        <circle cx="12" cy="12" r="3"></circle>
-                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01A1.65 1.65 0 0 0 9 4.6V4a2 2 0 0 1 4 0v.09c0 .69.4 1.31 1.02 1.58.52.23 1.12.2 1.6-.07l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06c-.45.45-.58 1.12-.33 1.72.25.6.82 1 1.51 1H21a2 2 0 0 1 0 4h-.09c-.69 0-1.31.4-1.51 1Z"></path>
-                      </svg>
-                    </button>
-                    <div id="grokSettingsPanel" class="settings-panel chat-settings-panel" role="dialog" aria-label="Chat 设置" aria-hidden="true">
-                      <div class="settings-panel-head chat-settings-head">
-                        <h3 class="settings-panel-title">Chat 设置</h3>
-                        <button id="grokSettingsCloseBtn" class="icon-btn panel-close-btn" type="button" title="关闭">
-                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M18 6 6 18"></path>
-                            <path d="m6 6 12 12"></path>
-                          </svg>
-                        </button>
+                  </button>
+                  <div id="grokSettingsPanel" class="settings-panel chat-settings-panel" role="dialog" aria-label="Chat 设置" aria-hidden="true">
+                    <div class="settings-panel-head chat-settings-head">
+                      <h3 class="settings-panel-title">Chat 设置</h3>
+                      <button id="grokSettingsCloseBtn" class="icon-btn panel-close-btn" type="button" title="关闭">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <path d="M18 6 6 18"></path>
+                          <path d="m6 6 12 12"></path>
+                        </svg>
+                      </button>
+                    </div>
+                    <div class="settings-grid">
+                      <div class="chat-settings-ranges">
+                        <div class="settings-block">
+                          <label class="field-label" for="grokReasoningEffort">推理强度</label>
+                          <select id="grokReasoningEffort" class="form-input">
+                            <option value="">自动</option><option value="none">关闭</option><option value="low">低</option>
+                            <option value="medium">中</option><option value="high">高</option><option value="xhigh">极高</option>
+                          </select>
+                        </div>
+                        <div class="settings-block">
+                          <span class="field-label">联网工具</span>
+                          <div class="gw-switch-list">
+                            <label class="gw-switch"><span class="gw-switch-text">Web 搜索</span><input id="grokWebSearch" type="checkbox"><span class="gw-switch-track" aria-hidden="true"></span></label>
+                            <label class="gw-switch"><span class="gw-switch-text">X 搜索</span><input id="grokXSearch" type="checkbox"><span class="gw-switch-track" aria-hidden="true"></span></label>
+                          </div>
+                        </div>
                       </div>
-                      <div class="settings-grid">
-                        <div class="chat-settings-ranges">
-                          <div class="settings-block">
-                            <label class="field-label" for="grokReasoningEffort">推理强度</label>
-                            <select id="grokReasoningEffort" class="form-input">
-                              <option value="">自动</option><option value="none">关闭</option><option value="low">低</option>
-                              <option value="medium">中</option><option value="high">高</option><option value="xhigh">极高</option>
-                            </select>
-                          </div>
-                          <div class="settings-block">
-                            <span class="field-label">联网工具</span>
-                            <div class="gw-switch-list">
-                              <label class="gw-switch"><span class="gw-switch-text">Web 搜索</span><input id="grokWebSearch" type="checkbox"><span class="gw-switch-track" aria-hidden="true"></span></label>
-                              <label class="gw-switch"><span class="gw-switch-text">X 搜索</span><input id="grokXSearch" type="checkbox"><span class="gw-switch-track" aria-hidden="true"></span></label>
-                            </div>
-                          </div>
-                        </div>
-                        <div class="settings-block settings-block-full">
-                          <label class="field-label" for="grokSystemInput">系统提示词</label>
-                          <textarea id="grokSystemInput" class="form-input chat-input chat-system-input" rows="6" placeholder="设置系统提示词"></textarea>
-                        </div>
+                      <div class="settings-block settings-block-full">
+                        <label class="field-label" for="grokSystemInput">系统提示词</label>
+                        <textarea id="grokSystemInput" class="form-input chat-input chat-system-input" rows="6" placeholder="设置系统提示词"></textarea>
                       </div>
                     </div>
                   </div>
-                  <button id="grokSendBtn" class="send-btn" type="button" title="发送">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M22 2L11 13"></path>
-                      <path d="M22 2L15 22L11 13L2 9L22 2Z"></path>
-                    </svg>
-                  </button>
                 </div>
+                <button id="grokSendBtn" class="send-btn" type="button" title="发送">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 2L11 13"></path>
+                    <path d="M22 2L15 22L11 13L2 9L22 2Z"></path>
+                  </svg>
+                </button>
               </div>
             </div>
           </div>

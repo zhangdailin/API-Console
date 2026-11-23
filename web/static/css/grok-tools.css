@@ -171,7 +171,6 @@
 }
 
 .chat-shell,
-.chat-sidebar,
 .composer-shell,
 .settings-panel,
 .model-dropdown,
@@ -231,8 +230,7 @@
 }
 
 .function-title,
-.chat-title-text,
-.sidebar-title {
+.chat-title-text {
   margin: 0;
   color: var(--text-main);
   font-size: 1.05rem;
@@ -255,8 +253,7 @@
 }
 
 .function-header-row,
-.chat-title,
-.chat-sidebar .sidebar-header {
+.chat-title {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -267,7 +264,6 @@
 .inline-flex-row,
 .function-actions,
 .composer-actions,
-.sidebar-actions,
 .chat-title-actions,
 .selection-toolbar,
 .imagine-header-actions,
@@ -342,7 +338,6 @@
 
 .icon-btn,
 .send-btn,
-.sidebar-expand-btn,
 .action-btn {
   width: 36px;
   height: 36px;
@@ -361,7 +356,6 @@
 
 .icon-btn:hover,
 .send-btn:hover,
-.sidebar-expand-btn:hover,
 .action-btn:hover {
   color: var(--text-main);
   background: var(--grok-muted-bg);
@@ -500,117 +494,6 @@
   color: var(--text-secondary);
   font-size: 0.82rem;
   text-align: right;
-}
-
-.chat-layout {
-  display: grid;
-  grid-template-columns: 230px minmax(0, 1fr);
-  gap: 12px;
-  align-items: stretch;
-}
-
-.chat-layout.collapsed {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.chat-layout.collapsed .chat-sidebar,
-.chat-layout.collapsed .sidebar-overlay {
-  display: none;
-}
-
-.sidebar-expand-btn {
-  display: none;
-}
-
-.chat-sidebar {
-  position: sticky;
-  top: 72px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  max-height: calc(100vh - 160px);
-  padding: 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  background: var(--bg-elevated);
-  overflow: hidden;
-}
-
-.sidebar-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  overflow: auto;
-}
-
-.session-item {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  width: 100%;
-  padding: 9px 10px;
-  border: 1px solid transparent;
-  border-radius: 9px;
-  background: transparent;
-  color: var(--text-main);
-  text-align: left;
-  cursor: pointer;
-}
-
-.session-item:hover {
-  background: var(--grok-muted-bg);
-}
-
-.session-item.active {
-  border-color: var(--border-highlight);
-  background: var(--bg-surface);
-  box-shadow: inset 3px 0 0 var(--primary);
-}
-
-.session-delete {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  min-width: 22px;
-  padding: 0;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-.session-delete:hover {
-  background: var(--surface-3);
-  color: var(--text-main);
-}
-
-.session-rename-input {
-  width: calc(100% - 30px);
-  min-height: 24px;
-  padding: 2px 6px;
-  border: 1px solid var(--border-highlight);
-  border-radius: var(--radius-sm);
-  background: var(--surface-3);
-  color: var(--text-main);
-  font: inherit;
-  font-weight: 700;
-}
-
-.session-title {
-  color: var(--text-main);
-  font-weight: 700;
-}
-
-.session-meta {
-  color: var(--text-secondary);
-  font-size: 0.78rem;
 }
 
 .chat-shell {
@@ -1214,50 +1097,6 @@
   padding: 24px;
 }
 
-@media (max-width: 1080px) {
-  
-  .chat-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .chat-sidebar {
-    position: fixed;
-    inset: 0 auto 0 0;
-    z-index: 70;
-    width: min(320px, 86vw);
-    max-height: none;
-    border-radius: 0 10px 10px 0;
-    transform: translateX(-100%);
-    transition: transform 0.2s ease;
-  }
-
-  .chat-sidebar.open,
-  .chat-sidebar.show {
-    transform: translateX(0);
-  }
-
-  .chat-layout.collapsed .chat-sidebar {
-    display: flex;
-  }
-
-  .grok-tools-page .sidebar-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 65;
-    display: none;
-    background: rgba(0, 0, 0, 0.38);
-  }
-
-  .grok-tools-page .sidebar-overlay.open,
-  .grok-tools-page .sidebar-overlay.show {
-    display: block;
-  }
-
-  .sidebar-expand-btn {
-    display: none !important;
-  }
-}
-
 @media (max-width: 760px) {
   
 
@@ -1296,7 +1135,6 @@
 }
 
 .grok-section,
-.chat-sidebar,
 .chat-thread,
 .composer-input,
 .imagine-masonry-input-shell,
@@ -1864,10 +1702,6 @@
 
   .imagine-masonry-grid,
   #imagineGrid .imagine-masonry-grid { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: var(--space-4); }
-
-  /* The rail is fixed-width by design — a wider one just pushes the transcript
-     off centre on a 4K panel. */
-  .chat-layout { grid-template-columns: 260px minmax(0, 1fr); gap: 16px; }
 }
 
 @media (min-width: 3200px) {

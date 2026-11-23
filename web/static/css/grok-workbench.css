@@ -690,105 +690,6 @@
   overflow: hidden;
 }
 
-.grok-tools-page #grokChatSection .chat-layout {
-  grid-template-columns: 260px minmax(0, 1fr);
-  gap: 0;
-  min-height: calc(100vh - 260px);
-}
-
-.grok-tools-page #grokChatSection .chat-layout.collapsed { grid-template-columns: minmax(0, 1fr); }
-
-/* Sessions rail */
-.grok-tools-page #grokChatSection .chat-sidebar {
-  top: 0;
-  max-height: none;
-  padding: 16px 12px;
-  border: 0;
-  border-right: 1px solid var(--gw-line);
-  border-radius: 0;
-  background: var(--gw-soft);
-}
-
-.grok-tools-page #grokChatSection .sidebar-header {
-  padding: 0 4px 4px;
-  border: 0;
-}
-
-.grok-tools-page #grokChatSection .sidebar-title {
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
-}
-
-.grok-tools-page #grokChatSection .sidebar-action-btn {
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
-  background: var(--gw-card);
-  border: 1px solid var(--gw-line);
-}
-
-.grok-tools-page #grokChatSection .session-item {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  width: 100%;
-  padding: 10px 34px 10px 12px;
-  border: 0;
-  border-radius: 10px;
-  background: transparent;
-  text-align: left;
-  box-shadow: none;
-  transition: background var(--transition, 0.15s);
-}
-
-.grok-tools-page #grokChatSection .session-item:hover { background: color-mix(in srgb, var(--gw-card) 70%, transparent); }
-
-.grok-tools-page #grokChatSection .session-item.active {
-  background: var(--gw-card);
-  box-shadow: var(--shadow-xs);
-}
-
-.grok-tools-page #grokChatSection .session-item.active::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 10px;
-  bottom: 10px;
-  width: 3px;
-  border-radius: 3px;
-  background: var(--accent);
-}
-
-.grok-tools-page #grokChatSection .session-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.86rem;
-  font-weight: 600;
-}
-
-.grok-tools-page #grokChatSection .session-meta { color: var(--text-muted); font-size: 0.72rem; }
-
-.grok-tools-page #grokChatSection .session-delete {
-  position: absolute;
-  right: 8px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 22px;
-  height: 22px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-muted);
-  opacity: 0;
-}
-
-.grok-tools-page #grokChatSection .session-item:hover .session-delete { opacity: 1; }
-.grok-tools-page #grokChatSection .session-delete:hover { background: var(--bad-soft); color: var(--bad); }
-
 /* Conversation column */
 .grok-tools-page #grokChatSection .chat-shell {
   gap: 0;
@@ -797,6 +698,8 @@
 }
 
 .grok-tools-page #grokChatSection .chat-title {
+  position: relative;
+  z-index: 6;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -810,7 +713,72 @@
 .grok-tools-page #grokChatSection .chat-title-text { margin: 0; font-size: 0.98rem; font-weight: 700; }
 .grok-tools-page #grokChatSection .chat-subtitle { margin: 2px 0 0; color: var(--text-muted); font-size: 0.78rem; }
 .grok-tools-page #grokChatSection .chat-title-actions { display: flex; align-items: center; gap: var(--space-2); }
-.grok-tools-page #grokChatSection .chat-clear-btn { height: 32px; min-height: 32px; border-radius: 9px; font-size: 0.8rem; }
+.grok-tools-page #grokChatSection .chat-header-btn { height: 32px; min-height: 32px; border-radius: 9px; font-size: 0.8rem; }
+
+.grok-tools-page .chat-history > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.grok-tools-page .chat-history > summary::-webkit-details-marker { display: none; }
+
+.grok-tools-page .chat-history:not([open]) > .chat-history-list { display: none; }
+
+.grok-tools-page .chat-history-list {
+  position: absolute;
+  inset-block-start: calc(100% + 6px);
+  inset-inline-end: 14px;
+  display: grid;
+  gap: 4px;
+  width: min(320px, calc(100% - 28px));
+  max-height: min(360px, 45vh);
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--gw-line);
+  border-radius: 10px;
+  background: var(--gw-card);
+  box-shadow: var(--shadow-md);
+}
+
+.grok-tools-page .session-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 8px;
+}
+
+.grok-tools-page .session-item.active { background: var(--gw-soft); }
+
+.grok-tools-page .session-open,
+.grok-tools-page .session-action {
+  min-width: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-main);
+  font: inherit;
+  cursor: pointer;
+}
+
+.grok-tools-page .session-open { display: grid; gap: 2px; padding: 6px 8px; text-align: left; }
+.grok-tools-page .session-open:hover,
+.grok-tools-page .session-action:hover { background: var(--gw-soft); }
+.grok-tools-page .session-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.84rem; }
+.grok-tools-page .session-meta,
+.grok-tools-page .session-action { color: var(--text-muted); font-size: 0.74rem; }
+.grok-tools-page .session-action { min-height: 32px; padding: 2px 6px; }
+.grok-tools-page .session-delete:hover { background: var(--bad-soft); color: var(--bad); }
+.grok-tools-page .session-rename-input {
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--gw-line);
+  border-radius: 6px;
+  background: var(--gw-card);
+  color: var(--text-main);
+  font: inherit;
+}
 
 .grok-tools-page #grokChatSection #grokChatStatus {
   display: inline-flex;
@@ -1040,14 +1008,11 @@
 .grok-tools-page #grokChatSection .chat-settings-panel label.is-disabled { opacity: 0.5; cursor: not-allowed; }
 
 @media (max-width: 900px) {
-  .grok-tools-page #grokChatSection .chat-layout { grid-template-columns: minmax(0, 1fr); }
-  .grok-tools-page #grokChatSection .chat-sidebar { border-right: 0; }
+  .grok-tools-page #grokChatSection .chat-title { gap: 8px; padding: 10px 14px; }
   .grok-tools-page .gw-suggestions { grid-template-columns: minmax(0, 1fr); }
   .grok-tools-page #grokChatSection .chat-thread { padding: 20px 14px 8px; }
   .grok-tools-page #grokChatSection .composer-shell { padding: 8px 10px 12px; }
 }
-.grok-tools-page #grokChatSection .sidebar-toggle { display: none; }
-@media (max-width: 900px) { .grok-tools-page #grokChatSection .sidebar-toggle { display: inline-flex; } }
 
 /* ==== Studio pages (video, voice) =========================================== */
 

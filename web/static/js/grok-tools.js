@@ -56,7 +56,6 @@
     sending: false,
     abortController: null,
     renderFrame: 0,
-    sidebarOpen: false,
     model: "",
     models: [],
     capabilities: { chat: false, imagine: false, video: false, voice: false },
@@ -70,7 +69,6 @@
     counts: { build: 0, web: 0 },
   };
   const chatStorageKey = "grok_tools_chat_sessions_v1";
-  const chatSidebarStateKey = "grok_tools_chat_sidebar_collapsed";
   const grokToolsUIStorageKey = "grok_tools_ui_v1";
   const i18nMap = {
     "common.notConnected": "未连接",
@@ -308,96 +306,11 @@
     `;
   }
 
-  function setChatSidebarCollapsed(collapsed) {
-    const layout = document.querySelector("#grokChatSection .chat-layout");
-    if (!layout) return;
-    layout.classList.toggle("collapsed", collapsed);
-    try {
-      localStorage.setItem(chatSidebarStateKey, collapsed ? "1" : "0");
-    } catch (err) {
-      // ignore storage failures
-    }
-  }
-
-  function closeChatSidebar() {
-    if (isMobileChatSidebar()) {
-      chatState.sidebarOpen = false;
-      const sidebar = document.getElementById("grokChatSidebar");
-      const overlay = document.getElementById("grokChatSidebarOverlay");
-      sidebar?.classList.remove("open");
-      sidebar?.classList.remove("show");
-      overlay?.classList.remove("open");
-      overlay?.classList.remove("show");
-      return;
-    }
-    setChatSidebarCollapsed(true);
-    const expandBtn = document.getElementById("grokChatExpandBtn");
-    if (expandBtn) expandBtn.style.display = "inline-flex";
-  }
-
-  function openChatSidebar() {
-    if (isMobileChatSidebar()) {
-      chatState.sidebarOpen = true;
-      const sidebar = document.getElementById("grokChatSidebar");
-      const overlay = document.getElementById("grokChatSidebarOverlay");
-      sidebar?.classList.add("open");
-      sidebar?.classList.add("show");
-      overlay?.classList.add("open");
-      overlay?.classList.add("show");
-      return;
-    }
-    setChatSidebarCollapsed(false);
-    const expandBtn = document.getElementById("grokChatExpandBtn");
-    if (expandBtn) expandBtn.style.display = "none";
-  }
-
-  function toggleChatSidebar() {
-    if (isMobileChatSidebar()) {
-      const sidebar = document.getElementById("grokChatSidebar");
-      if (sidebar?.classList.contains("open") || sidebar?.classList.contains("show")) {
-        closeChatSidebar();
-      } else {
-        openChatSidebar();
-      }
-      return;
-    }
-    const layout = document.querySelector("#grokChatSection .chat-layout");
-    if (!layout) return;
-    if (layout.classList.contains("collapsed")) {
-      openChatSidebar();
-    } else {
-      closeChatSidebar();
-    }
-  }
-
-  function isMobileChatSidebar() {
-    return window.matchMedia("(max-width: 1024px)").matches;
-  }
-
-  function syncChatSidebarState() {
-    if (isMobileChatSidebar()) {
-      if (chatState.sidebarOpen) {
-        openChatSidebar();
-      } else {
-        closeChatSidebar();
-      }
-      return;
-    }
-    const sidebar = document.getElementById("grokChatSidebar");
-    const overlay = document.getElementById("grokChatSidebarOverlay");
-    sidebar?.classList.remove("open");
-    sidebar?.classList.remove("show");
-    overlay?.classList.remove("open");
-    overlay?.classList.remove("show");
-    let collapsed = false;
-    try {
-      collapsed = localStorage.getItem(chatSidebarStateKey) === "1";
-    } catch (err) {
-      collapsed = false;
-    }
-    setChatSidebarCollapsed(collapsed);
-    const expandBtn = document.getElementById("grokChatExpandBtn");
-    if (expandBtn) expandBtn.style.display = collapsed ? "inline-flex" : "none";
+  function closeChatHistory(restoreFocus = false) {
+    const history = document.getElementById("grokChatHistory");
+    if (!history?.open) return;
+    history.open = false;
+    if (restoreFocus) history.querySelector("summary")?.focus();
   }
 
   function createChatSession() {
@@ -1686,15 +1599,12 @@
     const log = document.getElementById("grokChatLog");
     const empty = document.getElementById("grokChatEmpty");
     if (!log) return;
-    log.innerHTML = "";
     const session = activeChatSession();
     const messages = Array.isArray(session?.messages) ? session.messages : [];
-    if (messages.length === 0) {
-      if (empty) {
-        empty.style.display = "block";
-        log.appendChild(empty);
-      }
-      return;
+    log.replaceChildren();
+    if (empty) {
+      empty.style.display = messages.length ? "none" : "block";
+      log.appendChild(empty);
     }
     messages.forEach((msg) => appendChatMessage(msg.role, msg.content, chatMessageAttachments(msg), msg));
   }
@@ -1704,41 +1614,41 @@
     if (!list) return;
     list.innerHTML = "";
     chatState.sessions.forEach((session) => {
-      const item = document.createElement("button");
-      item.type = "button";
+      const item = document.createElement("div");
+      const openBtn = document.createElement("button");
+      openBtn.type = "button";
+      openBtn.className = "session-open";
+      if (session.id === chatState.activeId) openBtn.setAttribute("aria-current", "true");
       item.className = `session-item${session.id === chatState.activeId ? " active" : ""}`;
       item.dataset.id = session.id;
 
       const title = document.createElement("span");
       title.className = "session-title";
       title.textContent = session.title || "新会话";
-      title.addEventListener("dblclick", (event) => {
-        event.stopPropagation();
-        startRenameChatSession(session.id, title);
-      });
 
       const meta = document.createElement("span");
       meta.className = "session-meta";
       meta.textContent = relativeTime(session.updatedAt);
 
+      const renameBtn = document.createElement("button");
+      renameBtn.type = "button";
+      renameBtn.className = "session-action";
+      renameBtn.textContent = "重命名";
+      renameBtn.addEventListener("click", () => startRenameChatSession(session.id, openBtn));
+
       const delBtn = document.createElement("button");
       delBtn.type = "button";
-      delBtn.className = "session-delete";
-      delBtn.title = "删除";
-      delBtn.textContent = "×";
-      delBtn.addEventListener("click", (event) => {
-        event.stopPropagation();
-        deleteChatSession(session.id);
-      });
+      delBtn.className = "session-action session-delete";
+      delBtn.textContent = "删除";
+      delBtn.addEventListener("click", () => deleteChatSession(session.id));
 
-      item.addEventListener("click", () => {
+      openBtn.addEventListener("click", () => {
         switchChatSession(session.id);
-        if (isMobileChatSidebar()) closeChatSidebar();
+        closeChatHistory(true);
       });
 
-      item.appendChild(title);
-      item.appendChild(meta);
-      item.appendChild(delBtn);
+      openBtn.append(title, meta);
+      item.append(openBtn, renameBtn, delBtn);
       list.appendChild(item);
     });
   }
@@ -1924,15 +1834,16 @@
     saveChatSessions();
   }
 
-  function startRenameChatSession(sessionId, titleEl) {
+  function startRenameChatSession(sessionId, openBtn) {
     const session = chatState.sessions.find((item) => item && item.id === sessionId);
-    if (!session || !titleEl || !titleEl.parentNode) return;
+    if (!session || !openBtn?.parentNode) return;
     const input = document.createElement("input");
     input.type = "text";
     input.className = "session-rename-input";
     input.value = String(session.title || "");
     input.maxLength = 40;
-    titleEl.replaceWith(input);
+    input.setAttribute("aria-label", "会话名称");
+    openBtn.replaceWith(input);
     input.focus();
     input.select();
     const commit = () => renameChatSession(sessionId, input.value);
@@ -1943,6 +1854,7 @@
         input.blur();
       }
       if (event.key === "Escape") {
+        event.preventDefault();
         input.value = session.title || "新会话";
         input.blur();
       }
@@ -2141,10 +2053,7 @@
     const settingsToggle = document.getElementById("grokSettingsToggle");
     const settingsPanel = document.getElementById("grokSettingsPanel");
     const settingsCloseBtn = document.getElementById("grokSettingsCloseBtn");
-    const sidebarToggle = document.getElementById("grokChatSidebarToggle");
-    const sidebarOverlay = document.getElementById("grokChatSidebarOverlay");
-    const collapseBtn = document.getElementById("grokChatCollapseBtn");
-    const expandBtn = document.getElementById("grokChatExpandBtn");
+    const history = document.getElementById("grokChatHistory");
     const reasoningEffort = document.getElementById("grokReasoningEffort");
     const webSearch = document.getElementById("grokWebSearch");
     const xSearch = document.getElementById("grokXSearch");
@@ -2159,11 +2068,9 @@
       input.focus();
     });
 
-    if (newBtn) newBtn.addEventListener("click", () => {
+    newBtn?.addEventListener("click", () => {
+      closeChatHistory();
       newChatSession();
-      if (isMobileChatSidebar()) {
-        closeChatSidebar();
-      }
     });
     if (clearBtn) clearBtn.addEventListener("click", clearCurrentChatSession);
     if (sendBtn) {
@@ -2195,11 +2102,12 @@
         }
       });
     }
-    if (sidebarToggle) sidebarToggle.addEventListener("click", () => toggleChatSidebar());
-    if (expandBtn) expandBtn.addEventListener("click", () => openChatSidebar());
-    if (collapseBtn) collapseBtn.addEventListener("click", () => closeChatSidebar());
-    if (sidebarOverlay) sidebarOverlay.addEventListener("click", () => closeChatSidebar());
-    window.addEventListener("resize", syncChatSidebarState);
+    history?.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !event.defaultPrevented) closeChatHistory(true);
+    });
+    document.addEventListener("click", (event) => {
+      if (history?.open && !history.contains(event.target)) closeChatHistory();
+    });
     if (modelChip && modelDropdown) {
       modelChip.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -2358,8 +2266,6 @@
     rerenderChatThread();
     setChatSendButtonState(false);
     bindChatEvents();
-    closeChatSidebar();
-    syncChatSidebarState();
   }
 
   function setVoiceStatus(text, type) {
@@ -3270,11 +3176,7 @@
     } catch (err) {
       showToast(`加载 ${nextTab} 失败: ${err.message || err}`, "error");
     }
-    if (nextTab !== "chat") {
-      closeChatSidebar();
-    } else if (!isMobileChatSidebar()) {
-      openChatSidebar();
-    }
+    if (nextTab !== "chat") closeChatHistory();
     const sections = {
       chat: document.getElementById("grokChatSection"),
       imagine: document.getElementById("grokImagineSection"),
