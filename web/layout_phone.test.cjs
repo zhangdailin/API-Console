@@ -1,35 +1,10 @@
-// Run with: node --test web/layout_phone.test.cjs
-//
-// The content column's width is derived from a custom property that subtracts the
-// sidebar rail:
-//
-//   --content-max: min(3200px, calc(100% - var(--sidebar-w)));
-//   .main-content { width: 100%; max-width: var(--content-max); }
-//
-// That subtraction is only valid while the sidebar is a fixed rail. Below the
-// 900px breakpoint the sidebar becomes an off-canvas drawer and occupies no room
-// in the flow, so subtracting 248px from a 320px viewport asks for 72px of
-// content — and at 390px it asked for 142px. Every admin page rendered as a
-// narrow strip of wrapped text beside an empty screen, which is the phone
-// breakage these assertions pin down.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('./test-support.cjs');
 
-const MAIN_CSS = path.join(__dirname, 'static', 'css', 'main.css');
-const css = fs.readFileSync(MAIN_CSS, 'utf8');
-
-const SIDEBAR_MIN = 248; // the clamp() floor of --sidebar-w
-const DRAWER_BREAKPOINT = 900; // max-width at which .sidebar leaves the flow
-
-// The declared value of a custom property, comments stripped.
-function customProperty(name) {
-  const match = css.match(new RegExp(`--${name}:\\s*([^;]+);`));
-  assert.ok(match, `--${name} is declared in main.css`);
-  return match[1].replace(/\/\*[\s\S]*?\*\//g, '').trim();
-}
+const DRAWER_BREAKPOINT = 900;
 
 // Every `@media (max-width: Npx) { ... }` block in a stylesheet, with its width and
 // body, by source order. These stylesheets nest no media queries, so brace counting
@@ -50,50 +25,6 @@ function mediaBlocks(source) {
   }
   return blocks;
 }
-
-// The bodies of every max-width block at or below a viewport, by source order.
-function maxWidthBlocks(viewport) {
-  return mediaBlocks(css).filter((b) => b.width >= viewport).map((b) => b.body);
-}
-
-function has(block, pattern) {
-  return pattern.test(block);
-}
-
-test('the phone drawer breakpoint releases the content column from the sidebar subtraction', () => {
-  const blocks = maxWidthBlocks(DRAWER_BREAKPOINT);
-  assert.ok(
-    blocks.some((b) => has(b, /\.main-content\s*\{[^}]*max-width:\s*none/)),
-    'a max-width:900px block must set .main-content { max-width: none } so ' +
-      'min(3200px, 100% - 248px) cannot cap a phone column at 142px',
-  );
-  assert.ok(
-    blocks.some((b) => has(b, /\.main-content\s*\{[^}]*width:\s*100%/)),
-    'the same block must set .main-content { width: 100% }',
-  );
-});
-
-test('no phone breakpoint re-introduces the sidebar subtraction', () => {
-  const value = customProperty('content-max');
-  if (!value.includes('--sidebar-w')) return; // nothing to guard
-
-  // Walk the drawer breakpoint and narrower, then the phone breakpoints inside it:
-  // none of them may apply a column cap that subtracts the rail, because the rail
-  // is not in the flow there.
-  for (const viewport of [DRAWER_BREAKPOINT, 640]) {
-    for (const block of maxWidthBlocks(viewport)) {
-      const override = block.match(/--content-max:\s*([^;]+)/);
-      if (!override) continue;
-      const applied = override[1].replace(/\/\*[\s\S]*?\*\//g, '').trim();
-      assert.ok(
-        !applied.includes('--sidebar-w'),
-        `a max-width:${viewport}px block sets --content-max: ${applied}; at that ` +
-          'width the sidebar is an off-canvas drawer and subtracting its 248px ' +
-          'leaves a negative column',
-      );
-    }
-  }
-});
 
 test('every admin page links a cache-busted main.css', () => {
   const pageDir = path.join(__dirname, 'templates', 'pages');

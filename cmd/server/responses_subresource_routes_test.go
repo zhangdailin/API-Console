@@ -35,15 +35,21 @@ func TestRegisterRoutes_ResponsesSubResources(t *testing.T) {
 		}
 		for _, prefix := range channel.PrefixesFor(definition.ID) {
 			t.Run(prefix, func(t *testing.T) {
-				for _, probe := range []struct {
+				type request struct {
 					method string
 					path   string
 					body   string
-				}{
+				}
+				probes := []request{
 					{http.MethodPost, prefix + "/responses/resp_absent/cancel", "{}"},
 					{http.MethodPost, prefix + "/responses/resp_absent/cancel", ""},
 					{http.MethodGet, prefix + "/responses/resp_absent/input_items", ""},
-				} {
+				}
+				// Build resolves unknown IDs through its account pool, which this fixture leaves empty.
+				if definition.ID != channel.Grok {
+					probes = append(probes, request{http.MethodGet, prefix + "/responses/resp_absent", ""})
+				}
+				for _, probe := range probes {
 					rec := httptest.NewRecorder()
 					req := httptest.NewRequest(probe.method, probe.path, strings.NewReader(probe.body))
 					req.Header.Set("Authorization", "Bearer "+e.managedKey)
@@ -69,11 +75,4 @@ func TestRegisterRoutes_ResponsesSubResources(t *testing.T) {
 		}
 	}
 
-	// The response id itself must keep working on the provider prefix: the
-	// explicit sibling routes must not shadow the /responses/ subtree.
-	rec := httptest.NewRecorder()
-	resourceReq := httptest.NewRequest(http.MethodGet, "/workbuddy/responses/resp_absent", nil)
-	resourceReq.Header.Set("Authorization", "Bearer "+e.managedKey)
-	e.mux.ServeHTTP(rec, resourceReq)
-	testutil.Falsef(t, rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "response_not_found"), "GET /v1/responses/resp_absent status = %d body = %s", rec.Code, rec.Body.String())
 }

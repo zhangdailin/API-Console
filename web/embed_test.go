@@ -2,67 +2,38 @@ package web
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
-	"fmt"
-	"io/fs"
 	"net/http"
 	"net/http/httptest"
-	"path"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
-// TestAssetVersionIsContentDerived pins the property that replaced the
-// hand-maintained ?v= strings: the version must come from the embedded bytes,
-// so a deployment that changes a script also changes the URL it is fetched
-// under. When the version was a literal, removing a provider from the UI left
-// every browser on the cached copy of the previous one.
 func TestAssetVersionIsContentDerived(t *testing.T) {
-	// Compute the expected version independently from the embedded assets, not
-	// from AssetVersion's cached value. WalkDir visits names in lexical order;
-	// each asset contributes its path, byte length and content to the digest.
-	sum := sha256.New()
-	assetCounts := map[string]int{}
-	err := fs.WalkDir(staticFS, "static", func(name string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+	const script, stylesheet = "static/js/example.js", "static/css/example.css"
+	fixture := func() fstest.MapFS {
+		return fstest.MapFS{
+			script:     {Data: []byte("let n = 1;")},
+			stylesheet: {Data: []byte("p { color: blue; }")},
 		}
-		if entry.IsDir() {
-			return nil
-		}
-		ext := strings.ToLower(path.Ext(name))
-		if ext != ".js" && ext != ".css" {
-			return nil
-		}
-		data, err := staticFS.ReadFile(name)
-		if err != nil {
-			return err
-		}
-		assetCounts[ext]++
-		fmt.Fprintf(sum, "%s\x00%d\x00", name, len(data))
-		_, _ = sum.Write(data)
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk embedded assets: %v", err)
 	}
-	if assetCounts[".js"] == 0 || assetCounts[".css"] == 0 {
-		t.Fatalf("expected embedded JavaScript and CSS assets, got %v", assetCounts)
+	base := assetVersionFor(fixture())
+	if again := assetVersionFor(fixture()); base == "" || again != base {
+		t.Fatalf("identical assets did not produce a stable version: %q, %q", base, again)
 	}
-	want := hex.EncodeToString(sum.Sum(nil))[:12]
-	version := AssetVersion()
-	if version != want {
-		t.Fatalf("AssetVersion() = %q, want embedded-content SHA-256 prefix %q", version, want)
+	for path, changed := range map[string]string{
+		script: "let n = 2;", stylesheet: "p { color: cyan; }",
+	} {
+		t.Run(path, func(t *testing.T) {
+			assets := fixture()
+			assets[path].Data = []byte(changed)
+			if got := assetVersionFor(assets); got == base {
+				t.Fatalf("editing %s did not invalidate the asset version %q", path, base)
+			}
+		})
 	}
-	if len(version) != 12 {
-		t.Fatalf("AssetVersion() = %q, want a 12-character hash", version)
-	}
-	if again := AssetVersion(); again != version {
-		t.Fatalf("AssetVersion() is not stable: %q then %q", version, again)
-	}
-	if version == assetVersionPlaceholder {
-		t.Fatalf("AssetVersion() returned the placeholder %q", version)
+	if got, want := AssetVersion(), assetVersionFor(staticFS); got != want {
+		t.Fatalf("embedded version = %q, want %q from the shipped assets", got, want)
 	}
 }
 

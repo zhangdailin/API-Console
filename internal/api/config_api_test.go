@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"encoding/json"
 
@@ -162,49 +163,43 @@ func TestHandleConfigSaveNotifiesRuntimeConsumers(t *testing.T) {
 func TestPersistConfigConcurrentReadersSeeCompleteSnapshots(t *testing.T) {
 	api, _, _ := setupConfigAPI(t)
 
-	const updates = 100
-	var readers sync.WaitGroup
-	errCh := make(chan error, 8)
+	checkSnapshot := func() {
+		snapshot := api.config.Load()
+		if snapshot != nil && snapshot.AdminUser != "admin" && snapshot.ProxyURL != "http://"+snapshot.AdminUser+".example" {
+			t.Errorf("torn snapshot: user=%q proxy=%q", snapshot.AdminUser, snapshot.ProxyURL)
+		}
+	}
+
+	// Keep readers active throughout the writes without starving the Redis fixture.
 	done := make(chan struct{})
+	var readers, started sync.WaitGroup
+	started.Add(8)
 	for range 8 {
 		readers.Go(func() {
+			ticker := time.NewTicker(time.Millisecond)
+			defer ticker.Stop()
+			checkSnapshot()
+			started.Done()
 			for {
 				select {
 				case <-done:
 					return
-				default:
-				}
-				snapshot := api.config.Load()
-				if snapshot == nil || snapshot.AdminUser == "admin" {
-					continue
-				}
-				if snapshot.ProxyURL != "http://"+snapshot.AdminUser+".example" {
-					select {
-					case errCh <- fmt.Errorf("torn snapshot: user=%q proxy=%q", snapshot.AdminUser, snapshot.ProxyURL):
-					default:
-					}
-					return
+				case <-ticker.C:
+					checkSnapshot()
 				}
 			}
 		})
 	}
-
-	for i := range updates {
+	defer func() { close(done); readers.Wait() }()
+	started.Wait()
+	for i := range 100 {
 		current := api.config.Load()
 		next := current.Clone()
 		next.AdminUser = fmt.Sprintf("admin-%d", i)
 		next.ProxyURL = "http://" + next.AdminUser + ".example"
-		if err := api.persistConfig(context.Background(), current, next); err != nil {
-			close(done)
-			readers.Wait()
-			t.Fatalf("persistConfig: %v", err)
-		}
-	}
-	close(done)
-	readers.Wait()
-	close(errCh)
-	for err := range errCh {
-		t.Fatal(err)
+		testutil.NoError(t, api.persistConfig(context.Background(), current, next))
+		testutil.Equal(t, api.config.Load().AdminUser, next.AdminUser)
+		checkSnapshot()
 	}
 }
 

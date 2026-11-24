@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"encoding/json"
@@ -60,16 +61,19 @@ func (m *recoveringRefusalUpstream) SendRequestWithPayload(_ context.Context, _ 
 }
 
 func TestSharedRefusalRecoversInsideSingleRequest(t *testing.T) {
-	cfg := &config.Config{RequestTimeout: 30, MaxRetries: 3, RetryDelay: 1}
-	h := NewWithLoadBalancer(cfg, nil)
-	stub := &recoveringRefusalUpstream{}
-	h.client = stub
-	payload := map[string]any{"model": "qwen3.8-flash", "messages": []map[string]any{{"role": "user", "content": "hi"}}, "stream": true}
-	body, _ := json.Marshal(payload)
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "http://x/workbuddy/v1/chat/completions", bytes.NewReader(body))
-	h.HandleMessages(rec, req)
-	testutil.Falsef(t, stub.calls != 3 || rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "ready"), "calls=%d status=%d body=%s", stub.calls, rec.Code, rec.Body.String())
+	synctest.Test(t, func(t *testing.T) {
+		cfg := &config.Config{RequestTimeout: 30, MaxRetries: 3, RetryDelay: 1}
+		h := NewWithLoadBalancer(cfg, nil)
+		defer h.Close()
+		stub := &recoveringRefusalUpstream{}
+		h.client = stub
+		payload := map[string]any{"model": "qwen3.8-flash", "messages": []map[string]any{{"role": "user", "content": "hi"}}, "stream": true}
+		body, _ := json.Marshal(payload)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "http://x/workbuddy/v1/chat/completions", bytes.NewReader(body)).WithContext(t.Context())
+		h.HandleMessages(rec, req)
+		testutil.Falsef(t, stub.calls != 3 || rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "ready"), "calls=%d status=%d body=%s", stub.calls, rec.Code, rec.Body.String())
+	})
 }
 
 // TestStreamOpensOnlyWhenThereIsSomethingToSend pins the deferral: a streaming
@@ -197,28 +201,31 @@ func TestTerminalOnlyResponseStillOpensTheStream(t *testing.T) {
 // retry hint, and never a 503 claiming the upstream service is down while the
 // same upstream answers most requests. Nothing is opened as an SSE stream.
 func TestSharedRefusalBeforeOutputUsesRetryWindow(t *testing.T) {
-	cfg := &config.Config{DebugEnabled: false, RequestTimeout: 30, MaxRetries: 3, RetryDelay: 1}
-	h := NewWithLoadBalancer(cfg, nil)
-	stub := &sharedRefusalUpstream{}
-	h.client = stub
+	synctest.Test(t, func(t *testing.T) {
+		cfg := &config.Config{DebugEnabled: false, RequestTimeout: 30, MaxRetries: 3, RetryDelay: 1}
+		h := NewWithLoadBalancer(cfg, nil)
+		defer h.Close()
+		stub := &sharedRefusalUpstream{}
+		h.client = stub
 
-	payload := map[string]any{
-		"model":    "qwen3.8-flash",
-		"messages": []map[string]any{{"role": "user", "content": "hi"}},
-		"stream":   true,
-	}
-	body, _ := json.Marshal(payload)
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "http://x/workbuddy/v1/chat/completions", bytes.NewReader(body))
+		payload := map[string]any{
+			"model":    "qwen3.8-flash",
+			"messages": []map[string]any{{"role": "user", "content": "hi"}},
+			"stream":   true,
+		}
+		body, _ := json.Marshal(payload)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "http://x/workbuddy/v1/chat/completions", bytes.NewReader(body)).WithContext(t.Context())
 
-	h.HandleMessages(rec, req)
+		h.HandleMessages(rec, req)
 
-	testutil.Equal(t, rec.Code, http.StatusTooManyRequests)
-	out := rec.Body.String()
-	testutil.MustNotContainAny(t, out, "event: error", "data:")
-	testutil.MustContain(t, out, "rate_limit")
-	// Initial request plus the three configured retry probes.
-	testutil.Equal(t, stub.calls, 4)
+		testutil.Equal(t, rec.Code, http.StatusTooManyRequests)
+		out := rec.Body.String()
+		testutil.MustNotContainAny(t, out, "event: error", "data:")
+		testutil.MustContain(t, out, "rate_limit")
+		// Initial request plus the three configured retry probes.
+		testutil.Equal(t, stub.calls, 4)
+	})
 }
 
 // TestSharedRefusalWaitBudgetIsBounded pins the bound on the shared-refusal

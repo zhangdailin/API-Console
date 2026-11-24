@@ -2,65 +2,8 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
-const vm=require('./test-support.cjs');
-
-// A minimal DOM: enough of an element for the log centre's row and detail builders,
-// with parent tracking so the placeholder row can be removed from the table body.
-function element(tag='div'){
-  const node={
-    tagName:String(tag).toUpperCase(),
-    children:[],textContent:'',className:'',hidden:false,dataset:{},parentNode:null,
-    classList:{add(){},remove(){},toggle(){}},
-    appendChild(child){child.parentNode=this;this.children.push(child);return child},
-    replaceChildren(){this.children.forEach((c)=>{c.parentNode=null});this.children=[]},
-    remove(){const parent=this.parentNode;if(!parent)return;const i=parent.children.indexOf(this);if(i>=0)parent.children.splice(i,1);this.parentNode=null},
-    listeners:{},setAttribute(){},removeAttribute(){},addEventListener(name,fn){this.listeners[name]=fn},
-    querySelectorAll(selector){
-      const wanted=String(selector).replace(/\s+/g,'');
-      const matches=(n)=>wanted==='tr'
-        ? n.tagName==='TR'
-        : wanted==='tr[data-index]'
-          ? n.tagName==='TR'&&n.dataset.index!==undefined
-          : false;
-      const out=[];
-      const walk=(n)=>{n.children.forEach((child)=>{if(matches(child))out.push(child);walk(child)})};
-      walk(this);
-      return out;
-    },
-  };
-  return node;
-}
-
-// load() runs the page script against the stub DOM and returns the internals the
-// assertions need. The startup block is replaced so no request is fired on load.
-function load(){
-  const ids={};
-  const body=element('tbody');
-  ids.logsRows=body;
-  ids.logsDetailBody=element('div');
-  ids.logsDetailTitle=element('div');
-  ids.logsDetailSub=element('div');
-  const context=vm.createContext({
-    console,URLSearchParams,Promise,
-    document:{
-      readyState:'complete',
-      createElement:(tag)=>element(tag),
-      getElementById:(id)=>ids[id]||null,
-      addEventListener(){},
-      querySelectorAll:()=>[],
-      body:element('body'),
-    },
-    window:{location:{search:''}},
-    fetch:async()=>{throw new Error('fetch was not stubbed for this test')},
-  });
-  let src=fs.readFileSync(path.join(__dirname,'static/js/logs.js'),'utf8');
-  src=src.replace(/  if \(document\.readyState === 'loading'\)[\s\S]*?\r?\n  \}\r?\n\}\)\(\);\s*$/,
-    'globalThis.review={state,load,renderRows,renderDetail,filters,bind,renderPager};\n})();');
-  vm.runInContext(src,context);
-  return {...context.review,context,ids};
-}
-
-const allText=(node)=>[node.textContent||'',...node.children.map(allText)].join(' ');
+const {allText, loadJournal} = require('./journal-test-support.cjs');
+const load = () => loadJournal(['state', 'load', 'renderRows', 'renderDetail', 'filters', 'bind']);
 
 const successResponse=(payload)=>({ok:true,status:200,json:async()=>payload});
 
@@ -83,7 +26,6 @@ test('a page replaces the "nothing matched" placeholder with its records',()=>{
 
 test('pages walk the journal cursor forward and back to the same windows',async()=>{
   const api=load();
-  ['logsPager','logsPageInfo','logsFirst','logsPrev','logsNext','logsPageNo'].forEach((id)=>{api.ids[id]=element(id==='logsPager'?'nav':'button');});
   const calls=[];
   // Three pages: cur-1 and cur-2 start pages 2 and 3; page 3 is the last.
   const pages={'':{next:'cur-1',action:'p1'},'cur-1':{next:'cur-2',action:'p2'},'cur-2':{next:'',action:'p3'}};

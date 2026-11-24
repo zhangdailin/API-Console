@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +17,8 @@ import (
 )
 
 const freeUsageRejectionFixture = `{"code":"subscription:free-usage-exhausted","error":"You've used all the included free usage for model grok-4.7 for now. Usage resets over a rolling 24-hour window; tokens (actual/limit): 609544/600000."}`
+
+var freeUsageTestRun atomic.Uint64
 
 func TestFreeUsageRejectionRequiresStructuredUpstreamEvidence(t *testing.T) {
 	for _, tc := range []struct {
@@ -42,12 +45,15 @@ func TestFreeUsageRejectionRequiresStructuredUpstreamEvidence(t *testing.T) {
 }
 
 func TestHostedToolFreeUsageRejectionSwitchesWithinBudget(t *testing.T) {
+	run := freeUsageTestRun.Add(1)
 	for _, endpoint := range []string{"responses", "chat"} {
 		for _, mode := range []string{"recover", "exhausted", "budget one", "generic 429", "server failure", "pinned", "previous response", "no spare"} {
 			if endpoint == "chat" && (mode == "pinned" || mode == "previous response") {
 				continue
 			}
 			t.Run(endpoint+"/"+mode, func(t *testing.T) {
+				// Each case owns its upstream server and Redis, so retry waits can overlap.
+				t.Parallel()
 				var authorizations []string
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					authorizations = append(authorizations, r.Header.Get("Authorization"))
@@ -86,7 +92,8 @@ func TestHostedToolFreeUsageRejectionSwitchesWithinBudget(t *testing.T) {
 					}
 					acc := *base
 					acc.ID = 0
-					acc.TeamID = fmt.Sprintf("%s-%s-%d", endpoint, mode, i)
+					// The process-wide cooldown registry outlives the test Redis.
+					acc.TeamID = fmt.Sprintf("free-usage-%d-%s-%s-%d", run, endpoint, mode, i)
 					acc.OAuthAccessToken = jwtWithClaims(t, fmt.Sprintf(`{"sub":%q}`, acc.TeamID))
 					acc.GrokModels, acc.GrokModelsSyncedAt = []string{"grok-4.7"}, time.Now()
 					if err := h.lb.Store.CreateAccount(ctx, &acc); err != nil {

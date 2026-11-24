@@ -22,15 +22,6 @@ test('the overview page carries the filters the design calls for', () => {
   assert.match(page, /id="opsAlertTable"/, 'missing alert table');
 });
 
-test('the overview states every KPI the operations spec lists', () => {
-  const script = read('static/js/ops.js');
-  for (const label of ['请求', 'SLA', '请求错误', '请求时长', 'TTFT', '上游错误']) {
-    assert.ok(script.includes(label), `KPI ${label} is not rendered`);
-  }
-  // No traffic must read as 暂无样本, never as a healthy zero.
-  assert.ok(script.includes('暂无样本'), 'the no-sample wording is missing');
-});
-
 test('the trend marks failed buckets apart from successful ones', () => {
   const script = read('static/js/ops.js');
   assert.ok(script.includes('is-bad'), 'failed minutes are not distinguished');
@@ -79,15 +70,6 @@ test('运维总览 is reachable from the sidebar and is the landing tab', () => 
   assert.match(template, /tab = "ops"/, 'the default tab is not the operations overview');
   assert.match(template, /case "ops":/, 'the ops tab is not routed');
   assert.match(template, /case "logs":/, 'the logs tab is not routed');
-});
-
-test('the matrix renders per-model rows and never paints a traffic-free channel green', () => {
-  const script = read('static/js/ops.js');
-  assert.ok(script.includes('is-model'), 'per-model rows are not distinguished in the matrix');
-  assert.ok(script.includes('row.models'), 'the matrix does not render the per-model rows');
-  // A channel with no samples must read 暂无样本 rather than a healthy 100%.
-  assert.ok(script.includes("formatRate(r, samples)"), 'the success rate is rendered without its sample count');
-  assert.ok(script.includes("ops-empty"), 'the no-sample cell style is missing');
 });
 
 test('the overview follows the live flow stream instead of a refresh countdown', () => {

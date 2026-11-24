@@ -1,28 +1,26 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const fs=require('node:fs');
-const path=require('node:path');
-const vm=require('./test-support.cjs');
-function element(tag='div'){
- return {tag,children:[],textContent:'',classList:{add(){},remove(){},toggle(){}},appendChild(n){n.parentNode=this;this.children.push(n);return n},replaceChildren(){this.children=[]},remove(){const parent=this.parentNode;if(parent)parent.children.splice(parent.children.indexOf(this),1);this.parentNode=null},listeners:{},addEventListener(event,fn){this.listeners[event]=fn},setAttribute(){}};
+const {element, allText, loadJournal} = require('./journal-test-support.cjs');
+
+function load(fetch = async () => { throw new Error('Unexpected diagnostics fetch'); }) {
+  const blobs = new Map(), downloads = [], timers = [];
+  class DownloadURL extends URL {
+    static createObjectURL(blob) { const id = 'blob:test-' + blobs.size; blobs.set(id, blob); return id; }
+    static revokeObjectURL(id) { blobs.delete(id); }
+  }
+  const api = loadJournal(['sectionLabel', 'renderBundle', 'renderDiagnosticsSection'], {
+    URL: DownloadURL, Blob, fetch, setTimeout: fn => timers.push(fn),
+  }, tag => {
+    const node = element(tag);
+    if (tag === 'a') node.click = () => {
+      assert.equal(node.parentNode, api.context.document.body, 'download anchor must be attached');
+      downloads.push({name: node.download, blob: blobs.get(node.href)});
+    };
+    return node;
+  });
+  return {...api, downloads, timers, blobs};
 }
-function load(fetch=async()=>{throw new Error('unexpected fetch')}){
- const blobs=new Map(),downloads=[],timers=[];
- class DownloadURL extends URL {
-  static createObjectURL(blob){const id='blob:test-'+blobs.size;blobs.set(id,blob);return id}
-  static revokeObjectURL(id){blobs.delete(id)}
- }
- const context=vm.createContext({console,URLSearchParams,URL:DownloadURL,Blob,fetch,setTimeout:(fn)=>timers.push(fn),document:{readyState:'loading',addEventListener(){},body:element('body')},window:{location:{}}});
- context.document.createElement=(tag)=>{
-  const n=element(tag);
-  n.click=()=>{assert.equal(n.parentNode,context.document.body,'download anchor must be attached');downloads.push({name:n.download,blob:blobs.get(n.href)})};
-  return n;
- };
- let src=fs.readFileSync(path.join(__dirname,'static/js/logs.js'),'utf8');
- src=src.replace(/\}\)\(\);\s*$/,'globalThis.review={sectionLabel,renderBundle,renderDiagnosticsSection};})();');
- vm.runInContext(src,context);return {...context.review,context,downloads,timers,blobs};
-}
-const allText=n=>[n.textContent,...n.children.map(allText)].join(' ');
+
 test('diagnostic attempt labels distinguish request, response, status and read failure',()=>{
  const api=load();
  for(const [name,label] of [['request.json','请求'],['response.txt','响应内容'],['result.json','HTTP 状态'],['read_error.json','响应读取错误']]){

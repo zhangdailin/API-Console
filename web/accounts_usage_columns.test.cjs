@@ -215,7 +215,7 @@ test('the creation time renders as a calendar date', () => {
 
 // --- 表格与卡片都带齐三列 ---------------------------------------------------
 
-test('the shared table headers and phone labels carry tokens and creation time', () => {
+test('Cline keeps token and creation columns and shows an unmetered quota only in the mixed table', () => {
   for (const viewport of [1440, 390]) {
     const { context, node } = loadUI(viewport);
     const account = { id: 1, account_type: 'cline', enabled: true, has_credential: true,
@@ -225,6 +225,7 @@ test('the shared table headers and phone labels carry tokens and creation time',
     const headers = table.querySelectorAll('thead th').map((th) => th.textContent);
     assert.ok(headers.includes('今日/累计 Tokens'));
     assert.ok(headers.includes('创建时间'));
+    assert.ok(!headers.includes('配额'));
     const row = table.querySelectorAll('tbody tr')[0];
     const tokens = row.children.find((cell) => cell.className === 'col-tokens');
     const created = row.children.find((cell) => cell.className === 'col-created');
@@ -232,6 +233,12 @@ test('the shared table headers and phone labels carry tokens and creation time',
     assert.equal(strip(tokens.innerHTML), '23.8K / 1.23M');
     assert.equal(created.dataset.label, '创建时间');
     assert.equal(strip(created.innerHTML), '2026-09-20');
+
+    vm.runInContext("currentPlatform = ''; renderAccounts();", context);
+    const mixed = node('accountsList').querySelector('table');
+    assert.ok(mixed.querySelectorAll('thead th').some(th => th.textContent === '配额'));
+    const quota = mixed.querySelectorAll('tbody tr')[0].children.find(cell => cell.className === 'col-quota');
+    assert.match(strip(quota.innerHTML), /未计量/);
   }
 });
 

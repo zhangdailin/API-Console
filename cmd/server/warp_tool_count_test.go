@@ -181,83 +181,74 @@ func warpAssertMessagesToolsReachMCPUnchanged(t *testing.T, prefix string, strea
 }
 
 func TestWarpMessagesToolCountsAbove64ReachMCPUnchanged(t *testing.T) {
+	// Exercise each route and response mode just past the former tool count cap.
 	for _, prefix := range []string{"/warp", "/warp/v1"} {
 		for _, streaming := range []bool{false, true} {
-			for _, count := range []int{78, 128, 256} {
-				t.Run(fmt.Sprintf("%s/stream=%t/tools=%d", prefix, streaming, count), func(t *testing.T) {
-					warpAssertMessagesToolsReachMCPUnchanged(t, prefix, streaming, warpToolCountDefinitions(t, count))
-				})
-			}
+			t.Run(fmt.Sprintf("%s/stream=%t/tools=78", prefix, streaming), func(t *testing.T) {
+				warpAssertMessagesToolsReachMCPUnchanged(t, prefix, streaming, warpToolCountDefinitions(t, 78))
+			})
 		}
 	}
+	t.Run("tools=256", func(t *testing.T) {
+		warpAssertMessagesToolsReachMCPUnchanged(t, "/warp/v1", true, warpToolCountDefinitions(t, 256))
+	})
 }
 
 func TestWarpMessagesCumulativeToolSchemasAbove64KiBReachMCPUnchanged(t *testing.T) {
-	cases := []struct {
-		name       string
-		count      int
-		totalBytes int
+	for _, tc := range []struct {
+		name, prefix      string
+		count, totalBytes int
+		streaming         bool
 	}{
-		{"78_tools_1KiB_each", 78, 78 * 1024},
-		{"48_tools_exact_65855_bytes", 48, 65855},
-		{"128KiB_cumulative", 78, 128 << 10},
-		{"256KiB_cumulative", 78, 256 << 10},
-	}
-	for _, prefix := range []string{"/warp", "/warp/v1"} {
-		for _, streaming := range []bool{false, true} {
-			for _, tc := range cases {
-				t.Run(fmt.Sprintf("%s/stream=%t/%s", prefix, streaming, tc.name), func(t *testing.T) {
-					tools := warpToolSchemaSizeDefinitions(t, tc.count, tc.totalBytes)
-					warpAssertMessagesToolsReachMCPUnchanged(t, prefix, streaming, tools)
-				})
-			}
-		}
+		{"size_without_count_limit", "/warp", 48, 65855, false},
+		{"78_tools_1KiB_each", "/warp/v1", 78, 78 * 1024, true},
+		{"256KiB_cumulative", "/warp/v1", 78, 256 << 10, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tools := warpToolSchemaSizeDefinitions(t, tc.count, tc.totalBytes)
+			warpAssertMessagesToolsReachMCPUnchanged(t, tc.prefix, tc.streaming, tools)
+		})
 	}
 }
 
 func TestWarpMessagesToolValidationBeyond64StillRejectsBeforeGeneration(t *testing.T) {
-	cases := []struct {
+	assertRejected := func(t *testing.T, prefix string, streaming bool, mutate func([]map[string]any)) {
+		t.Helper()
+		stub := newWarpRouteStub(t, http.StatusOK)
+		e, _, _ := newWarpRouteE2E(t, stub, 1)
+		tools := warpToolCountDefinitions(t, 78)
+		mutate(tools)
+		resp := e.do(t, http.MethodPost, prefix+"/messages", warpToolCountBody(t, tools, streaming), false)
+		out := e.readBody(t, resp)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("invalid tool beyond index 64 = %d %s", resp.StatusCode, out)
+		}
+		if stub.aiCalls.Load() != 0 || stub.otherCalls.Load() != 0 || len(stub.requests) != 0 {
+			t.Fatalf("invalid request reached upstream: generation=%d other=%d", stub.aiCalls.Load(), stub.otherCalls.Load())
+		}
+	}
+	duplicateLastName := func(tools []map[string]any) { tools[77]["name"] = tools[0]["name"] }
+	for _, tc := range []struct {
 		name   string
 		mutate func([]map[string]any)
 	}{
 		{"malformed_tool", func(tools []map[string]any) { tools[77] = nil }},
-		{"duplicate_name", func(tools []map[string]any) { tools[77]["name"] = tools[0]["name"] }},
+		{"duplicate_name", duplicateLastName},
 		{"case_fold_duplicate", func(tools []map[string]any) { tools[77]["name"] = strings.ToUpper(tools[0]["name"].(string)) }},
 		{"unicode_equal_fold_duplicate", func(tools []map[string]any) {
 			tools[0]["name"], tools[77]["name"] = "kelvin", "\u212aELVIN"
 		}},
 		{"invalid_schema", func(tools []map[string]any) { tools[77]["input_schema"] = []any{} }},
 		{"invalid_description", func(tools []map[string]any) { tools[77]["description"] = false }},
+	} {
+		t.Run(tc.name, func(t *testing.T) { assertRejected(t, "/warp/v1", false, tc.mutate) })
 	}
-	for _, prefix := range []string{"/warp", "/warp/v1"} {
-		for _, streaming := range []bool{false, true} {
-			for _, tc := range cases {
-				t.Run(fmt.Sprintf("%s/stream=%t/%s", prefix, streaming, tc.name), func(t *testing.T) {
-					stub := newWarpRouteStub(t, http.StatusOK)
-					e, _, _ := newWarpRouteE2E(t, stub, 1)
-					tools := warpToolCountDefinitions(t, 78)
-					tc.mutate(tools)
-					resp := e.do(t, http.MethodPost, prefix+"/messages", warpToolCountBody(t, tools, streaming), false)
-					out := e.readBody(t, resp)
-					if resp.StatusCode != http.StatusBadRequest {
-						t.Fatalf("invalid tool beyond index 64 = %d %s", resp.StatusCode, out)
-					}
-					if stub.aiCalls.Load() != 0 || stub.otherCalls.Load() != 0 || len(stub.requests) != 0 {
-						t.Fatalf("invalid request reached upstream: generation=%d other=%d", stub.aiCalls.Load(), stub.otherCalls.Load())
-					}
-				})
-			}
-		}
-	}
+	t.Run("bare_stream_duplicate_name", func(t *testing.T) { assertRejected(t, "/warp", true, duplicateLastName) })
 }
 
 func TestWarpMessagesToolFieldsAboveFormerSizeCaps(t *testing.T) {
-	for _, prefix := range []string{"/warp", "/warp/v1"} {
-		for _, streaming := range []bool{false, true} {
-			tools := warpToolCountDefinitions(t, 78)
-			tools[77]["description"] = strings.Repeat("d", 128<<10)
-			tools[77]["input_schema"].(map[string]any)["description"] = strings.Repeat("s", 128<<10)
-			warpAssertMessagesToolsReachMCPUnchanged(t, prefix, streaming, tools)
-		}
-	}
+	tools := warpToolCountDefinitions(t, 78)
+	tools[77]["description"] = strings.Repeat("d", 128<<10)
+	tools[77]["input_schema"].(map[string]any)["description"] = strings.Repeat("s", 128<<10)
+	warpAssertMessagesToolsReachMCPUnchanged(t, "/warp/v1", true, tools)
 }

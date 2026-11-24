@@ -23,10 +23,7 @@ var TemplateFS embed.FS
 // string belongs; LoginPage replaces it at serve time.
 const assetVersionPlaceholder = "__ASSET_VERSION__"
 
-var (
-	assetVersionOnce sync.Once
-	assetVersion     string
-)
+var embeddedAssetVersion = sync.OnceValue(func() string { return assetVersionFor(staticFS) })
 
 // AssetVersion returns a short content hash of the embedded stylesheets and
 // scripts.
@@ -39,28 +36,29 @@ var (
 // retired provider stayed visible in a browser that had already cached it.
 // Hashing the bytes makes the URL change whenever the bytes do.
 func AssetVersion() string {
-	assetVersionOnce.Do(func() {
-		sum := sha256.New()
-		_ = fs.WalkDir(staticFS, "static", func(name string, entry fs.DirEntry, err error) error {
-			if err != nil || entry.IsDir() {
-				return err
-			}
-			switch strings.ToLower(path.Ext(name)) {
-			case ".css", ".js":
-			default:
-				return nil
-			}
-			data, readErr := staticFS.ReadFile(name)
-			if readErr != nil {
-				return readErr
-			}
-			fmt.Fprintf(sum, "%s\x00%d\x00", name, len(data))
-			_, _ = sum.Write(data)
+	return embeddedAssetVersion()
+}
+
+func assetVersionFor(assets fs.FS) string {
+	sum := sha256.New()
+	_ = fs.WalkDir(assets, "static", func(name string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		switch strings.ToLower(path.Ext(name)) {
+		case ".css", ".js":
+		default:
 			return nil
-		})
-		assetVersion = hex.EncodeToString(sum.Sum(nil))[:12]
+		}
+		data, readErr := fs.ReadFile(assets, name)
+		if readErr != nil {
+			return readErr
+		}
+		fmt.Fprintf(sum, "%s\x00%d\x00", name, len(data))
+		_, _ = sum.Write(data)
+		return nil
 	})
-	return assetVersion
+	return hex.EncodeToString(sum.Sum(nil))[:12]
 }
 
 // LoginPage returns the embedded admin login page with the asset-version

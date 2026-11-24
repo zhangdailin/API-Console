@@ -283,82 +283,11 @@ func TestWarpAcceptsOneBoundedSystemMessage(t *testing.T) {
 	}
 }
 
-// Warp serves the Messages and Responses wire formats through the shared
-// bridges in routes.go, so those paths must authenticate before routing: an
-// unauthenticated request is a 401, never the "404 page not found" of an
-// unregistered route.
-func TestWarpProtocolRoutesExistAndAuthenticate(t *testing.T) {
+// Shared route tests cover provider authentication, method guards and resource paths.
+func TestWarpCatalogAndLoginIsolation(t *testing.T) {
 	stub := newWarpRouteStub(t, http.StatusOK)
 	e, _, _ := newWarpRouteE2E(t, stub, 1)
-	unauthorized := func(method, path string) (*http.Response, string) {
-		t.Helper()
-		req, err := http.NewRequest(method, e.server.URL+path, strings.NewReader(`{}`))
-		if err != nil {
-			t.Fatal(err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := e.client.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return resp, e.readBody(t, resp)
-	}
 	for _, prefix := range []string{"/warp", "/warp/v1"} {
-		for _, route := range []struct{ method, suffix string }{
-			{http.MethodPost, "/messages"},
-			{http.MethodPost, "/messages/count_tokens"},
-			{http.MethodPost, "/responses"},
-			{http.MethodPost, "/responses/compact"},
-			{http.MethodGet, "/responses/resp_test"},
-			{http.MethodPost, "/responses/resp_test/cancel"},
-			{http.MethodGet, "/responses/resp_test/input_items"},
-		} {
-			resp, out := unauthorized(route.method, prefix+route.suffix)
-			if resp.StatusCode != http.StatusUnauthorized {
-				t.Fatalf("%s%s without key = %d %s", prefix, route.suffix, resp.StatusCode, out)
-			}
-			if strings.Contains(out, "404 page not found") {
-				t.Fatalf("%s%s is still unrouted: %s", prefix, route.suffix, out)
-			}
-		}
-		// With a managed key the POST-only endpoints answer their method guard,
-		// which is the difference between "this endpoint rejects GET" and "this
-		// endpoint does not exist".
-		for _, suffix := range []string{"/messages", "/messages/count_tokens", "/responses", "/responses/compact"} {
-			resp := e.do(t, http.MethodGet, prefix+suffix, "", false)
-			out := e.readBody(t, resp)
-			if resp.StatusCode != http.StatusMethodNotAllowed {
-				t.Fatalf("%s%s method guard = %d %s", prefix, suffix, resp.StatusCode, out)
-			}
-		}
-		// Resource routes resolve from the shared store without an upstream call.
-		for _, route := range []struct{ method, suffix string }{
-			{http.MethodGet, "/responses/resp_absent"},
-			{http.MethodPost, "/responses/resp_absent/cancel"},
-			{http.MethodGet, "/responses/resp_absent/input_items"},
-		} {
-			resp := e.do(t, route.method, prefix+route.suffix, "", false)
-			out := e.readBody(t, resp)
-			if resp.StatusCode != http.StatusNotFound || !strings.Contains(out, "response_not_found") {
-				t.Fatalf("%s%s missing resource = %d %s", prefix, route.suffix, resp.StatusCode, out)
-			}
-		}
-		for _, auth := range []string{"", "Bearer admintoken"} {
-			req, err := http.NewRequest(http.MethodGet, e.server.URL+prefix+"/models", nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			req.Header.Set("Authorization", auth)
-			req.Header.Set("X-Admin-Token", "admintoken")
-			resp, err := e.client.Do(req)
-			if err != nil {
-				t.Fatal(err)
-			}
-			out := e.readBody(t, resp)
-			if resp.StatusCode != http.StatusUnauthorized {
-				t.Fatalf("models without managed key = %d %s", resp.StatusCode, out)
-			}
-		}
 		resp := e.do(t, http.MethodGet, prefix+"/models", "", false)
 		out := e.readBody(t, resp)
 		if resp.StatusCode != http.StatusOK {

@@ -38,6 +38,9 @@ go test -race -count=1 -p 1 -timeout 15m ./...
 | preview-flow.go | 仅监听 loopback 的实时拓扑模板预览，不连接 Redis 或上游 |
 | verify-flow-screen.cjs | Playwright 驱动真实浏览器，检查拓扑布局、交互和异常状态并输出截图 / 视频 |
 | flow-screen-fixture.cjs | 供浏览器验收与离线演示使用的显式模拟流量 |
+| probe-alpn.go | 手动诊断 HTTP 协议与 TLS ALPN；默认只请求本地 HTTP/2，外部目标须显式传入 `-url` |
+
+Run `go run ./scripts/probe-alpn.go` to inspect local protocol negotiation. The probe prints the observed protocol, ALPN and HTTP status, and exits nonzero on request failure. It is not a CI regression test. Keep temporary account diagnostics out of the default Go suite.
 
 上次仅评估了移出生产验证脚本的建议，当前文件仍在仓库。不能通过删整个 scripts 目录精简仓库而不同时修 CI / release 引用。
 

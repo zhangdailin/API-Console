@@ -218,7 +218,10 @@ test('the KPI cards render the figures and mark no-sample ones', async () => {
   await new Promise((resolve) => setImmediate(resolve));
 
   const cards = node('opsKpis').children;
-  assert.ok(cards.length >= 6, `expected KPI cards, got ${cards.length}`);
+  const headings = cards.map(card => card.children[0]?.children[0]?.textContent || '');
+  for (const label of ['请求', 'SLA', '请求错误', '请求时长', 'TTFT', '上游错误']) {
+    assert.ok(headings.some(heading => heading === label || heading.startsWith(label + '（')), `missing KPI: ${label}`);
+  }
   const values = cards.map((card) => (card.children[1] ? card.children[1].textContent : ''));
   assert.ok(values.includes('248'), `real request count missing from ${values.join(',')}`);
   assert.ok(values.some((value) => /90\.90*%/.test(value)), `success rate missing from ${values.join(',')}`);

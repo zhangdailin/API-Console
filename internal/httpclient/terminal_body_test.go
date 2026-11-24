@@ -8,21 +8,45 @@ import (
 	"net/http/httptrace"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
-func TestTerminalDrainBoundsSlowAndExcessiveTails(t *testing.T) {
-	read, write := io.Pipe()
-	defer write.Close()
-	resp := &http.Response{ProtoMajor: 1, Body: read}
-	start := time.Now()
-	DrainTerminalResponse(t.Context(), resp)
-	if time.Since(start) > 2*time.Second {
-		t.Fatal("terminal cleanup exceeded its independent budget")
+func TestTerminalDrainInterruptsBlockedReader(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		cancelIn   time.Duration
+		maxElapsed time.Duration
+	}{
+		{"cleanup_deadline", 0, 2 * time.Second},
+		{"request_cancelled_during_read", 20 * time.Millisecond, 200 * time.Millisecond},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				read, write := io.Pipe()
+				defer read.Close()
+				defer write.Close()
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				if tc.cancelIn > 0 {
+					timer := time.AfterFunc(tc.cancelIn, cancel)
+					defer timer.Stop()
+				}
+
+				start := time.Now()
+				DrainTerminalResponse(ctx, &http.Response{ProtoMajor: 1, Body: read})
+				if elapsed := time.Since(start); elapsed == 0 || elapsed > tc.maxElapsed {
+					t.Fatalf("blocked terminal read returned after %s, want a bounded wait", elapsed)
+				}
+				if _, err := write.Write([]byte("tail")); err == nil {
+					t.Fatal("blocked response body was not closed")
+				}
+			})
+		})
 	}
-	if _, err := write.Write([]byte("tail")); err == nil {
-		t.Fatal("slow body was not closed")
-	}
+}
+
+func TestTerminalDrainBoundsExcessiveTail(t *testing.T) {
 	body := &countedTerminalBody{Reader: strings.NewReader(strings.Repeat("x", 512<<10))}
 	DrainTerminalResponse(t.Context(), &http.Response{ProtoMajor: 1, Body: body})
 	if body.bytes > (256<<10)+1 || !body.closed {
@@ -68,26 +92,30 @@ func TestTerminalDrainPreservesHTTP1ConnectionReuse(t *testing.T) {
 	}
 }
 
-func TestTerminalDrainCancellationAndHTTP2Skip(t *testing.T) {
-	for _, protocol := range []int{1, 2} {
-		body := &countedTerminalBody{Reader: strings.NewReader("tail")}
-		ctx, cancel := context.WithCancel(t.Context())
-		cancel()
-		if protocol == 2 {
-			ctx = t.Context()
-		}
-		DrainTerminalResponse(ctx, &http.Response{ProtoMajor: protocol, Body: body})
-		if body.bytes != 0 {
-			t.Fatal("cancelled or HTTP/2 response was drained")
-		}
-	}
-	read, write := io.Pipe()
-	defer write.Close()
-	ctx, cancel := context.WithCancel(t.Context())
-	go func() { time.Sleep(20 * time.Millisecond); cancel() }()
-	start := time.Now()
-	DrainTerminalResponse(ctx, &http.Response{ProtoMajor: 1, Body: read})
-	if time.Since(start) > 200*time.Millisecond {
-		t.Fatal("cancellation did not interrupt terminal cleanup")
+func TestTerminalDrainReadRules(t *testing.T) {
+	const tail = 192 << 10
+	for _, tc := range []struct {
+		name             string
+		protocol         int
+		cancelled, close bool
+		wantBytes        int
+	}{
+		{"complete_http1_tail", 1, false, false, tail},
+		{"http2_stream", 2, false, false, 0},
+		{"already_cancelled", 1, true, false, 0},
+		{"connection_close", 1, false, true, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if tc.cancelled {
+				cancel()
+			}
+			body := &countedTerminalBody{Reader: strings.NewReader(strings.Repeat("x", tail))}
+			DrainTerminalResponse(ctx, &http.Response{ProtoMajor: tc.protocol, Close: tc.close, Body: body})
+			if body.bytes != tc.wantBytes {
+				t.Fatalf("read %d tail bytes, want %d", body.bytes, tc.wantBytes)
+			}
+		})
 	}
 }

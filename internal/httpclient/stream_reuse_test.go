@@ -13,7 +13,6 @@ import (
 	"orchids-api/internal/cline"
 	"orchids-api/internal/config"
 	"orchids-api/internal/debug"
-	"orchids-api/internal/httpclient"
 	"orchids-api/internal/prompt"
 	"orchids-api/internal/store"
 	"orchids-api/internal/upstream"
@@ -22,6 +21,15 @@ import (
 
 type generationClient interface {
 	SendRequestWithPayload(context.Context, upstream.UpstreamRequest, func(upstream.SSEMessage), *debug.Logger) error
+}
+
+func newStreamFixtureClient(channel, url string) generationClient {
+	cfg := &config.Config{WorkBuddyBaseURL: url, ClineAPIBaseURL: url}
+	expiry := time.Now().Add(time.Hour)
+	if channel == "workbuddy" {
+		return workbuddy.NewFromAccount(&store.Account{WorkBuddyAccessToken: "test-access", WorkBuddyExpiresAt: expiry}, cfg)
+	}
+	return cline.NewFromAccount(&store.Account{ClineAccessToken: "test-access", ClineExpiresAt: expiry, ClineModelIDs: []string{`{"id":"model-a"}`}}, cfg)
 }
 
 func TestTerminalTailHonorsOriginalRequestCancellation(t *testing.T) {
@@ -34,13 +42,7 @@ func TestTerminalTailHonorsOriginalRequestCancellation(t *testing.T) {
 				<-r.Context().Done()
 			}))
 			defer server.Close()
-			cfg := &config.Config{WorkBuddyBaseURL: server.URL, ClineAPIBaseURL: server.URL}
-			var client generationClient
-			if channel == "workbuddy" {
-				client = workbuddy.NewFromAccount(&store.Account{WorkBuddyAccessToken: "test-access", WorkBuddyExpiresAt: time.Now().Add(time.Hour)}, cfg)
-			} else {
-				client = cline.NewFromAccount(&store.Account{ClineAccessToken: "test-access", ClineExpiresAt: time.Now().Add(time.Hour), ClineModelIDs: []string{`{"id":"model-a"}`}}, cfg)
-			}
+			client := newStreamFixtureClient(channel, server.URL)
 			parent, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 			started := time.Now()
@@ -62,55 +64,13 @@ func TestTerminalTailHasIndependentDeadline(t *testing.T) {
 				<-r.Context().Done()
 			}))
 			defer server.Close()
-			cfg := &config.Config{WorkBuddyBaseURL: server.URL, ClineAPIBaseURL: server.URL}
-			var client generationClient
-			if channel == "workbuddy" {
-				client = workbuddy.NewFromAccount(&store.Account{WorkBuddyAccessToken: "test-access", WorkBuddyExpiresAt: time.Now().Add(time.Hour)}, cfg)
-			} else {
-				client = cline.NewFromAccount(&store.Account{ClineAccessToken: "test-access", ClineExpiresAt: time.Now().Add(time.Hour), ClineModelIDs: []string{`{"id":"model-a"}`}}, cfg)
-			}
+			client := newStreamFixtureClient(channel, server.URL)
 			parent, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			started := time.Now()
 			err := client.SendRequestWithPayload(parent, upstream.UpstreamRequest{Model: "model-a", Messages: []prompt.Message{{Role: "user", Content: prompt.MessageContent{Text: "hi"}}}}, nil, nil)
 			if err != nil || time.Since(started) > 2*time.Second || parent.Err() != nil {
 				t.Fatalf("terminal tail must stop within cleanup budget while preserving completion: error=%v elapsed=%v parent=%v", err, time.Since(started), parent.Err())
-			}
-		})
-	}
-}
-
-type countingTail struct{ bytes, remaining int }
-
-func (b *countingTail) Read(p []byte) (int, error) {
-	if b.remaining == 0 {
-		return 0, io.EOF
-	}
-	n := min(len(p), b.remaining)
-	b.bytes += n
-	b.remaining -= n
-	return n, nil
-}
-func (*countingTail) Close() error { return nil }
-
-func TestTerminalDrainReadsFullTailAndSkipsHTTP2OrCancelled(t *testing.T) {
-	for _, scenario := range []struct {
-		name      string
-		major     int
-		cancelled bool
-		close     bool
-		want      int
-	}{{"full HTTP1 tail", 1, false, false, 192 << 10}, {"HTTP2", 2, false, false, 0}, {"cancelled", 1, true, false, 0}, {"connection close", 1, false, true, 0}} {
-		t.Run(scenario.name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			if scenario.cancelled {
-				cancel()
-			}
-			body := &countingTail{remaining: 192 << 10}
-			httpclient.DrainTerminalResponse(ctx, &http.Response{ProtoMajor: scenario.major, Close: scenario.close, Body: body})
-			if body.bytes != scenario.want {
-				t.Fatalf("read %d tail bytes; want %d", body.bytes, scenario.want)
 			}
 		})
 	}
@@ -136,13 +96,7 @@ func TestSharedStreamsReuseHTTP1AfterDone(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			cfg := &config.Config{WorkBuddyBaseURL: server.URL, ClineAPIBaseURL: server.URL}
-			var client generationClient
-			if channel == "workbuddy" {
-				client = workbuddy.NewFromAccount(&store.Account{WorkBuddyAccessToken: "test-access", WorkBuddyExpiresAt: time.Now().Add(time.Hour)}, cfg)
-			} else {
-				client = cline.NewFromAccount(&store.Account{ClineAccessToken: "test-access", ClineExpiresAt: time.Now().Add(time.Hour), ClineModelIDs: []string{`{"id":"model-a"}`}}, cfg)
-			}
+			client := newStreamFixtureClient(channel, server.URL)
 			for i := range 2 {
 				text := ""
 				ctx, cancel := context.WithCancel(context.Background())

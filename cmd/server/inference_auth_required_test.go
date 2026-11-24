@@ -46,6 +46,9 @@ func TestInferenceRoutesRequireKeyRegardlessOfSourceAndLegacyConfig(t *testing.T
 					req.Header.Set("X-Forwarded-For", "192.0.2.1")
 					req.Header.Set("CF-Connecting-IP", "192.0.2.1")
 					req.Header.Set("X-Admin-Token", cfg.AdminToken)
+					if source == "127.0.0.1:1234" {
+						req.Header.Set("Authorization", "Bearer "+cfg.AdminToken)
+					}
 					rec := httptest.NewRecorder()
 					mux.ServeHTTP(rec, req)
 					testutil.Falsef(t, rec.Code != http.StatusUnauthorized, "%s from %s must require a managed key: %d", prefix+suffix, source, rec.Code)

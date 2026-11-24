@@ -19,6 +19,29 @@ function page(file) {
   return { context, node, notices };
 }
 
+test('refreshing Cline shows the catalog source returned by the server', async () => {
+  const { context, node } = page('models.js');
+  context.window.OrchidsProviderRegistry = { channels: ['Cline'] };
+  node('modelChannel').options = [];
+  const requests = [];
+  context.fetch = async (url, options) => {
+    requests.push(url);
+    if (url === '/api/models/refresh') {
+      assert.equal(JSON.parse(options.body).channel, 'Cline');
+      return { ok: true, json: async () => ({
+        channel: 'Cline', source: 'cline_recommended_models', discovered: 2, verified: 0,
+      }) };
+    }
+    assert.equal(url, '/api/models');
+    return { ok: true, json: async () => [] };
+  };
+  await context.refreshModelsForCurrentChannel();
+  assert.deepEqual(requests, ['/api/models/refresh', '/api/models']);
+  assert.equal(node('modelsRefreshSummary').hidden, false);
+  assert.match(node('modelsRefreshSummaryMeta').textContent, /来源：Cline 推荐模型目录/);
+  assert.match(node('modelsRefreshSummaryMeta').textContent, /未逐个验证模型可用性/);
+});
+
 test('model creation submits once and releases its lock after server failure', async () => {
   const { context, node } = page('models.js');
   node('modelChannel').value = 'Cline'; node('modelModelId').value = 'model-a';

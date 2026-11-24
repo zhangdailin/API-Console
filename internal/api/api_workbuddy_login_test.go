@@ -78,6 +78,11 @@ func testJWT(uid, email string) string {
 // it would be for an operator who never set a base URL.
 func stubWorkBuddyLoginClient(t *testing.T, baseURL string) {
 	t.Helper()
+	stubWorkBuddyLoginWithInterval(t, baseURL, 0)
+}
+
+func stubWorkBuddyLoginWithInterval(t *testing.T, baseURL string, interval time.Duration) {
+	t.Helper()
 	registered := registeredLoginFlow(channel.WorkBuddy)
 	testutil.True(t, registered != nil, "WorkBuddy must register a login flow")
 	redirect := func(cfg *config.Config) *config.Config {
@@ -90,7 +95,11 @@ func stubWorkBuddyLoginClient(t *testing.T, baseURL string) {
 	}
 	stub := *registered
 	stub.Start = func(ctx context.Context, cfg *config.Config) (provider.LoginChallenge, error) {
-		return registered.Start(ctx, redirect(cfg))
+		challenge, err := registered.Start(ctx, redirect(cfg))
+		if interval > 0 {
+			challenge.Interval = interval
+		}
+		return challenge, err
 	}
 	stub.Exchange = func(ctx context.Context, cfg *config.Config, challenge provider.LoginChallenge) (provider.LoginGrant, error) {
 		return registered.Exchange(ctx, redirect(cfg), challenge)
@@ -258,6 +267,37 @@ func TestHandleWorkBuddyLogin_StartReturnsOfficialLoginURL(t *testing.T) {
 	testutil.Falsef(t, !strings.HasPrefix(polled.VerificationURIComplete, "https://www.workbuddy.ai/login?"), "poll returned an unexpected login URL: %q", polled.VerificationURIComplete)
 }
 
+// Wait for the registry's terminal signal; a watchdog bounds failures without polling.
+func finishWorkBuddyTestLogin(t *testing.T, a *API) deviceLoginResponse {
+	t.Helper()
+	start := httptest.NewRecorder()
+	a.HandleWorkBuddyLogin(start, channelLoginRequest(t, http.MethodPost, "/api/workbuddy/login", ""))
+	testutil.Equal(t, start.Code, http.StatusOK)
+	var response deviceLoginResponse
+	testutil.NoError(t, json.Unmarshal(start.Body.Bytes(), &response))
+	testutil.NotEqual(t, response.ID, "")
+
+	registry := a.workbuddyLogins
+	registry.mu.Lock()
+	login := registry.logins[response.ID]
+	registry.mu.Unlock()
+	if login == nil {
+		t.Fatal("started login was not registered")
+	}
+	select {
+	case <-login.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("login worker did not complete")
+	}
+
+	poll := httptest.NewRecorder()
+	a.HandleWorkBuddyLogin(poll, channelLoginRequest(t, http.MethodGet, "/api/workbuddy/login/"+response.ID, ""))
+	testutil.Equal(t, poll.Code, http.StatusOK)
+	var final deviceLoginResponse
+	testutil.NoError(t, json.Unmarshal(poll.Body.Bytes(), &final))
+	return final
+}
+
 func TestHandleWorkBuddyLogin_CompletesAndPersistsAccount(t *testing.T) {
 	s, _ := newTestStore(t, "wb-login:")
 	auth := workbuddyAuthServer(t, []string{
@@ -265,30 +305,10 @@ func TestHandleWorkBuddyLogin_CompletesAndPersistsAccount(t *testing.T) {
 		`{"code":0,"data":{"accessToken":"` + testJWT("uid-abc", "operator@example.com") + `","refreshToken":"refresh-abc","expiresIn":31536000}}`,
 	}, workbuddyCatalogBody)
 	defer auth.Close()
-	stubWorkBuddyLoginClient(t, auth.URL)
+	stubWorkBuddyLoginWithInterval(t, auth.URL, time.Nanosecond)
 
 	a := New(s, "", "", &config.Config{})
-	rec := httptest.NewRecorder()
-	a.HandleWorkBuddyLogin(rec, channelLoginRequest(t, http.MethodPost, "/api/workbuddy/login", ""))
-
-	var started struct {
-		ID string `json:"id"`
-	}
-	err := json.Unmarshal(rec.Body.Bytes(), &started)
-	testutil.Falsef(t, err != nil || started.ID == "", "start response = %q", rec.Body.String())
-
-	deadline := time.Now().Add(10 * time.Second)
-	var final deviceLoginResponse
-	for time.Now().Before(deadline) {
-		pollRec := httptest.NewRecorder()
-		a.HandleWorkBuddyLogin(pollRec, channelLoginRequest(t, http.MethodGet, "/api/workbuddy/login/"+started.ID, ""))
-		testutil.Equal(t, pollRec.Code, http.StatusOK)
-		testutil.NoError(t, json.Unmarshal(pollRec.Body.Bytes(), &final), "decode poll: %v")
-		if final.Status != "pending" {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	final := finishWorkBuddyTestLogin(t, a)
 	testutil.Equal(t, final.Status, "complete")
 	testutil.NotEqual(t, final.AccountID, 0)
 
@@ -308,27 +328,9 @@ func TestHandleWorkBuddyLogin_CompletesAndPersistsAccount(t *testing.T) {
 		`{"code":0,"data":{"accessToken":"` + testJWT("uid-abc", "operator@example.com") + `","refreshToken":"refresh-abc","expiresIn":31536000}}`,
 	}, workbuddyCatalogBody)
 	defer auth2.Close()
-	stubWorkBuddyLoginClient(t, auth2.URL)
+	stubWorkBuddyLoginWithInterval(t, auth2.URL, time.Nanosecond)
 
-	rec3 := httptest.NewRecorder()
-	a.HandleWorkBuddyLogin(rec3, channelLoginRequest(t, http.MethodPost, "/api/workbuddy/login", ""))
-	var second struct {
-		ID string `json:"id"`
-	}
-	err = json.Unmarshal(rec3.Body.Bytes(), &second)
-	testutil.Falsef(t, err != nil || second.ID == "", "second start response = %q", rec3.Body.String())
-	deadline = time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		pollRec := httptest.NewRecorder()
-		a.HandleWorkBuddyLogin(pollRec, channelLoginRequest(t, http.MethodGet, "/api/workbuddy/login/"+second.ID, ""))
-		if err := json.Unmarshal(pollRec.Body.Bytes(), &final); err != nil {
-			break
-		}
-		if final.Status != "pending" {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	final = finishWorkBuddyTestLogin(t, a)
 	testutil.Equal(t, final.Status, "complete")
 	testutil.Equal(t, final.AccountID, acc.ID)
 	accounts, err := s.ListAccounts(context.Background())
@@ -349,28 +351,10 @@ func TestHandleWorkBuddyLogin_ReportsVerificationFailure(t *testing.T) {
 		`{"code":0,"data":{"accessToken":"` + testJWT("uid-abc", "operator@example.com") + `","refreshToken":"refresh-abc","expiresIn":3600}}`,
 	}, `{"code":6004,"msg":"6004:usage exceeds frequency limit"}`)
 	defer auth.Close()
-	stubWorkBuddyLoginClient(t, auth.URL)
+	stubWorkBuddyLoginWithInterval(t, auth.URL, time.Nanosecond)
 
 	a := New(s, "", "", &config.Config{})
-	rec := httptest.NewRecorder()
-	a.HandleWorkBuddyLogin(rec, channelLoginRequest(t, http.MethodPost, "/api/workbuddy/login", ""))
-	var started struct {
-		ID string `json:"id"`
-	}
-	err := json.Unmarshal(rec.Body.Bytes(), &started)
-	testutil.Falsef(t, err != nil || started.ID == "", "start response = %q", rec.Body.String())
-
-	var final deviceLoginResponse
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		pollRec := httptest.NewRecorder()
-		a.HandleWorkBuddyLogin(pollRec, channelLoginRequest(t, http.MethodGet, "/api/workbuddy/login/"+started.ID, ""))
-		testutil.NoError(t, json.Unmarshal(pollRec.Body.Bytes(), &final), "decode poll: %v")
-		if final.Status != "pending" {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	final := finishWorkBuddyTestLogin(t, a)
 	testutil.Equal(t, final.Status, "failed")
 	accounts, err := s.ListAccounts(context.Background())
 	testutil.NoError(t, err, "ListAccounts() error = %v")
