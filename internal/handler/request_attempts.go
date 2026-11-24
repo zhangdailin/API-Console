@@ -44,7 +44,7 @@ type messageExecution struct {
 	apiClient          UpstreamClient
 	currentAccount     *store.Account
 	releaseClient      func()
-	trackedAccountID   int64
+	releaseAccountSlot func()
 	failedAccountIDs   []int64
 	failedAccountSet   map[int64]struct{}
 	// blockedRefusal fingerprints the 403/404 this request last recorded on an
@@ -326,18 +326,18 @@ func (e *messageExecution) run() {
 			slog.Warn("Account request failed, switching account", "account", e.currentAccount.Name, "unsuccessful_attempts", len(e.failedAccountIDs))
 
 			// Release the old account's connection count
-			if e.trackedAccountID != 0 {
-				e.h.releaseTrackedAccount(e.trackedAccountID)
-				e.trackedAccountID = 0
+			if e.releaseAccountSlot != nil {
+				e.h.releaseTrackedAccount(e.releaseAccountSlot)
+				e.releaseAccountSlot = nil
 			}
 
-			nextClient, nextAccount, releaseNext, nextTrackedAccountID, retryErr := e.h.acquireReservedAccountSelection(e.r.Context(), e.targetChannel, true, e.failedAccountIDs, upstreamReq.Model)
+			nextClient, nextAccount, releaseNext, nextAccountSlot, retryErr := e.h.acquireReservedAccountSelection(e.r.Context(), e.targetChannel, true, e.failedAccountIDs, upstreamReq.Model)
 			if retryErr == nil {
 				previousRelease := e.releaseClient
 				e.apiClient = nextClient
 				e.currentAccount = nextAccount
 				e.releaseClient = releaseNext
-				e.trackedAccountID = nextTrackedAccountID
+				e.releaseAccountSlot = nextAccountSlot
 				previousRelease()
 				if e.verboseDiagnostics {
 					if e.currentAccount != nil {
@@ -348,7 +348,7 @@ func (e *messageExecution) run() {
 				}
 			} else {
 				if shouldRetryCurrentAccountWhenNoAlternative(errClass.Category) && prevAccount != nil {
-					reacquiredID, acquired := e.h.tryAcquireTrackedAccount(prevAccount)
+					reacquired, acquired := e.h.tryAcquireTrackedAccount(e.r.Context(), prevAccount)
 					if !acquired {
 						slog.Error("No account concurrency slot available for retry", "account_id", prevAccount.ID, "category", errClass.Category)
 						e.sh.InjectNoAvailableAccountError(errStr, retryErr)
@@ -357,7 +357,7 @@ func (e *messageExecution) run() {
 					}
 					e.apiClient = prevClient
 					e.currentAccount = prevAccount
-					e.trackedAccountID = reacquiredID
+					e.releaseAccountSlot = reacquired
 					slog.Warn(
 						"No alternate accounts available; retrying current account",
 						"trace_id", e.traceID,
@@ -417,9 +417,9 @@ func (e *messageExecution) run() {
 		// of the pool idled. Release it for the wait and take it back before the
 		// next attempt; if it is gone by then the account really is busy.
 		slotReleasedForWait := false
-		if retryDelayForAttempt > 0 && sharedRefusal && e.trackedAccountID != 0 {
-			e.h.releaseTrackedAccount(e.trackedAccountID)
-			e.trackedAccountID = 0
+		if retryDelayForAttempt > 0 && sharedRefusal && e.releaseAccountSlot != nil {
+			e.h.releaseTrackedAccount(e.releaseAccountSlot)
+			e.releaseAccountSlot = nil
 			slotReleasedForWait = true
 		}
 		waitStarted := time.Now()
@@ -438,7 +438,7 @@ func (e *messageExecution) run() {
 			sharedRefusalWaited += retryDelayForAttempt
 		}
 		if slotReleasedForWait && e.currentAccount != nil {
-			reacquiredID, acquired := e.h.tryAcquireTrackedAccount(e.currentAccount)
+			reacquired, acquired := e.h.tryAcquireTrackedAccount(e.r.Context(), e.currentAccount)
 			if !acquired {
 				// Another request took the slot while this one waited. Ending
 				// here is the honest answer: the account is at its limit, and
@@ -450,7 +450,7 @@ func (e *messageExecution) run() {
 					"rate_limit", apperrors.PoolBusyMessage, 0)
 				return
 			}
-			e.trackedAccountID = reacquiredID
+			e.releaseAccountSlot = reacquired
 		}
 		attempt++
 	}

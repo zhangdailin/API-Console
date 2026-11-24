@@ -86,14 +86,10 @@ func knownModelCooldownReason(reason ModelCooldownReason) ModelCooldownReason {
 // SetModelCooldown changes only the specified model on the credential generation
 // that saw the refusal. An in-flight request cannot restore operator settings.
 func (s *Store) SetModelCooldown(ctx context.Context, observed *Account, model string, until time.Time, reason ModelCooldownReason) error {
-	if s == nil || observed == nil {
+	if s == nil || s.client == nil || observed == nil {
 		return fmt.Errorf("model cooldown store is unavailable")
 	}
-	backend, ok := s.accounts.(*redisStore)
-	if !ok {
-		return fmt.Errorf("model cooldown store is unavailable")
-	}
-	return backend.updateAccountAtomic(ctx, observed.ID, func(current *Account) error {
+	return s.updateAccountAtomic(ctx, observed.ID, func(current *Account) error {
 		if !current.Enabled || !sameCooldownCredential(current, observed) {
 			return errAccountUnchanged
 		}

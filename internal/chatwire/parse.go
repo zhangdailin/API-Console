@@ -64,6 +64,10 @@ func ParseLooseBoolAny(value any) (bool, error) {
 	return ParseLooseBoolAnyForField(value, "stream")
 }
 
+// MatchRequestField mirrors encoding/json's case-insensitive struct field
+// matching for envelope readers that scan the top level without a struct.
+func MatchRequestField(key, wireName string) bool { return strings.EqualFold(key, wireName) }
+
 // ParseLooseIntAny reads an integer that a client may send as a number or a
 // numeric string.
 func ParseLooseIntAny(value any) (int, error) {

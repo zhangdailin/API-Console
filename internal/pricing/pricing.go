@@ -13,6 +13,8 @@ import (
 	"encoding/json"
 	"slices"
 	"strings"
+
+	"orchids-api/internal/chatwire"
 )
 
 const (
@@ -121,11 +123,10 @@ func EstimateCost(model string, inputTokens, cachedInputTokens, outputTokens, co
 	}, true
 }
 
-// EstimateTextReservationFromBody scans a JSON request once to obtain its model,
-// approximate input tokens and output cap. Unlike the legacy estimator it does
-// not build a map[string]any tree and then parse the same body again.
-func EstimateTextReservationFromBody(body []byte) (Result, bool) {
-	model, inputTokens, outputTokens, _ := scanReservationJSON(body)
+// EstimateTextReservationForOperation considers only output limits the route
+// actually understands. Fields from another API cannot lower the reservation.
+func EstimateTextReservationForOperation(body []byte, operation string) (Result, bool) {
+	model, inputTokens, outputTokens, _ := scanOperationReservation(body, operation)
 	if strings.TrimSpace(model) == "" {
 		return Result{}, false
 	}
@@ -135,106 +136,152 @@ func EstimateTextReservationFromBody(body []byte) (Result, bool) {
 	return EstimateCost(model, inputTokens, 0, outputTokens, inputTokens)
 }
 
-func scanReservationJSON(body []byte) (model string, inputTokens, outputTokens int64, ok bool) {
+func scanOperationReservation(body []byte, operation string) (model string, inputTokens, outputTokens int64, ok bool) {
 	const defaultOutputTokens int64 = 16_384
 	const maximumOutputTokens int64 = 131_072
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
+	outputFields := []string{"max_output_tokens", "max_completion_tokens", "max_tokens"}
+	switch operation {
+	case "chat/completions":
+		outputFields = outputFields[1:]
+	case "messages":
+		outputFields = outputFields[2:]
+	case "responses", "responses/compact":
+		outputFields = outputFields[:1]
+	}
 	var outputByPriority [3]int64
-	var walk func(bool) (int64, error)
-	walk = func(top bool) (int64, error) {
+	var outputPresent [3]bool
+	type tally struct {
+		tokens, fileSource int64
+		text               string
+	}
+	var walk func(top, input bool) (tally, error)
+	walk = func(top, input bool) (tally, error) {
 		token, err := decoder.Token()
 		if err != nil {
-			return 0, err
+			return tally{}, err
 		}
 		switch typed := token.(type) {
 		case json.Delim:
 			switch typed {
 			case '{':
-				var total int64
+				var total tally
+				var kind string
 				for decoder.More() {
 					keyToken, err := decoder.Token()
 					if err != nil {
-						return 0, err
+						return tally{}, err
 					}
 					key, _ := keyToken.(string)
-					total += int64((len(key)+2)/3) + 1
-					if top && key == "model" {
-						var value string
-						if err := decoder.Decode(&value); err != nil {
-							return 0, err
+					total.tokens += int64((len(key)+2)/3) + 1
+					if top && chatwire.MatchRequestField(key, "model") {
+						// Decode into the existing value: JSON null must not erase
+						// a string already assigned by an earlier field.
+						if err := decoder.Decode(&model); err != nil {
+							return tally{}, err
 						}
-						model = strings.TrimSpace(value)
-						total += max(1, int64((len(value)+2)/3))
+						total.tokens += max(1, int64((len(model)+2)/3))
 						continue
 					}
 					priority := -1
 					if top {
-						switch key {
-						case "max_output_tokens":
-							priority = 0
-						case "max_completion_tokens":
-							priority = 1
-						case "max_tokens":
-							priority = 2
+						for index, field := range outputFields {
+							if chatwire.MatchRequestField(key, field) {
+								priority = index
+								break
+							}
 						}
 					}
 					if priority >= 0 {
-						var number json.Number
-						if err := decoder.Decode(&number); err != nil {
-							return 0, err
+						var raw any
+						if err := decoder.Decode(&raw); err != nil {
+							return tally{}, err
 						}
-						if value, err := number.Int64(); err == nil && value > 0 {
-							outputByPriority[priority] = min(value, maximumOutputTokens)
+						if number, ok := raw.(json.Number); ok {
+							if n, err := number.Float64(); err == nil {
+								raw = min(n, float64(maximumOutputTokens))
+							}
 						}
-						total++
+						value, _ := chatwire.ParseLooseIntAny(raw)
+						outputByPriority[priority] = min(max(0, int64(value)), maximumOutputTokens)
+						outputPresent[priority] = true
+						total.tokens++
 						continue
 					}
-					child, err := walk(false)
+					childInput := (top && (key == "input" || key == "messages")) ||
+						(input && (key == "content" || key == "file" || key == "source"))
+					child, err := walk(false, childInput)
 					if err != nil {
-						return 0, err
+						return tally{}, err
 					}
-					total += child
+					total.tokens += child.tokens
+					if !input {
+						continue
+					}
+					switch key {
+					case "type":
+						kind = strings.ToLower(strings.TrimSpace(child.text))
+					case "file", "source":
+						total.fileSource += child.fileSource
+						if child.text != "" {
+							total.fileSource += child.tokens
+						}
+					case "file_data", "file_url", "file_id", "data", "url":
+						if child.text != "" {
+							total.fileSource += child.tokens
+						}
+					}
 				}
 				_, err = decoder.Token()
+				// Encoded document bytes and URLs are transport, not prompt text.
+				// No verified PDF token rate is available for admission; actual
+				// document usage is included when the upstream reports it.
+				switch kind {
+				case "input_file", "file", "document":
+					total.tokens -= total.fileSource
+					total.fileSource = 0
+				}
 				return total, err
 			case '[':
 				var total int64
 				for decoder.More() {
-					child, err := walk(false)
+					child, err := walk(false, input)
 					if err != nil {
-						return 0, err
+						return tally{}, err
 					}
-					total += 1 + child
+					total += 1 + child.tokens
 				}
 				_, err = decoder.Token()
-				return total, err
+				return tally{tokens: total}, err
 			}
 		case string:
 			trimmed := strings.TrimSpace(typed)
 			if strings.HasPrefix(trimmed, "data:image/") || strings.HasPrefix(trimmed, "data:video/") {
-				return 256, nil
+				return tally{tokens: 256, text: trimmed}, nil
 			}
-			return max(1, int64((len(typed)+2)/3)), nil
+			return tally{tokens: max(1, int64((len(typed)+2)/3)), text: trimmed}, nil
 		case json.Number, float64, bool:
-			return 1, nil
+			return tally{tokens: 1}, nil
 		case nil:
-			return 0, nil
+			return tally{}, nil
 		}
-		return 0, nil
+		return tally{}, nil
 	}
-	tokens, err := walk(true)
+	input, err := walk(true, false)
 	if err != nil {
 		return model, max(256, int64((len(body)+2)/3)), defaultOutputTokens, false
 	}
 	outputTokens = defaultOutputTokens
-	for _, value := range outputByPriority {
-		if value > 0 {
-			outputTokens = value
+	for index, value := range outputByPriority[:len(outputFields)] {
+		if outputPresent[index] {
+			if value > 0 {
+				outputTokens = value
+			}
 			break
 		}
 	}
-	return model, max(256, tokens+128), outputTokens, true
+	return model, max(256, input.tokens+128), outputTokens, true
 }
 
 // ── Media pricing (images, videos) ────────────────────────────────────────────

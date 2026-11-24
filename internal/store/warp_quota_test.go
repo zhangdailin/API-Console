@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"encoding/json"
 	"math"
 	"reflect"
@@ -258,29 +257,11 @@ func TestWarpQuotaConcurrentAttemptsKeepNewest(t *testing.T) {
 	testutil.False(t, got.Enabled, "concurrent quota update enabled account")
 }
 
-type warpQuotaBackendProbe struct {
-	accountStore
-	called bool
-	quota  WarpQuotaSnapshot
-}
-
-func (p *warpQuotaBackendProbe) UpdateWarpQuota(_ context.Context, _ int64, _ string, quota WarpQuotaSnapshot) error {
-	p.called, p.quota = true, quota
-	return nil
-}
-
-func TestWarpQuotaOptionalBackendAndConfiguration(t *testing.T) {
+func TestWarpQuotaRequiresConfiguredStore(t *testing.T) {
 	var absent *Store
-	for _, s := range []*Store{absent, {}, {accounts: &warpQuotaBackendWithoutMethod{}}} {
+	for _, s := range []*Store{absent, {}} {
 		testutil.Error(t, s.UpdateWarpQuota(t.Context(), 1, "", WarpQuotaSnapshot{}))
 	}
-	probe := &warpQuotaBackendProbe{}
-	s := &Store{accounts: probe}
-	quota := testWarpQuota(time.Date(2030, 1, 2, 0, 0, 0, 0, time.UTC))
-	testutil.NoError(t, s.UpdateWarpQuota(t.Context(), 42, "expected-refresh", quota))
-	testutil.True(t, probe.called && reflect.DeepEqual(probe.quota, quota), "optional backend did not receive snapshot")
 	redisStore, _ := newWarpTestStore(t)
 	testutil.Error(t, redisStore.UpdateWarpQuota(t.Context(), 1, "", WarpQuotaSnapshot{Status: "unknown"}))
 }
-
-type warpQuotaBackendWithoutMethod struct{ accountStore }

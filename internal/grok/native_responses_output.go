@@ -16,7 +16,7 @@ import (
 	"orchids-api/internal/util"
 )
 
-func copyNativeResponse(w http.ResponseWriter, body io.Reader, contentType, model string, namespaces responses.ToolNamespaces) (responseID string, captured []byte, result chatOutcome) {
+func copyNativeResponse(w http.ResponseWriter, body io.Reader, contentType, model string, namespaces responses.ToolNamespaces, httpStatus int, commit func(string) error) (responseID string, captured []byte, result chatOutcome) {
 	// Keep the complete delivered response for replay and usage recovery.
 	fullCapture := new(bytes.Buffer)
 	defer func() {
@@ -50,6 +50,12 @@ func copyNativeResponse(w http.ResponseWriter, body io.Reader, contentType, mode
 			result.UsageSource = audit.UsageSourceUpstream
 		}
 		result.Finish, result.Err = responses.TerminalFinish("", response)
+		if result.Err == nil && commit != nil {
+			if result.Err = commit(responseID); result.Err != nil {
+				writeResponsesAPIError(w, http.StatusServiceUnavailable, "response_storage_failed", "Could not store the response")
+				return
+			}
+		}
 		// Preserve JSON bytes unless restoring tool identities or masking errors.
 		// Partial SSE events also need strict-client supplementation below.
 		changed := responses.FilterInternalSearchCalls(response)
@@ -58,6 +64,9 @@ func copyNativeResponse(w http.ResponseWriter, body io.Reader, contentType, mode
 			raw, _ = json.Marshal(response)
 		}
 		_, _ = fullCapture.Write(raw)
+		if httpStatus != 0 {
+			w.WriteHeader(httpStatus)
+		}
 		written, writeErr := w.Write(raw)
 		if writeErr == nil && written != len(raw) {
 			writeErr = io.ErrShortWrite
@@ -110,7 +119,38 @@ func copyNativeResponse(w http.ResponseWriter, body io.Reader, contentType, mode
 		}
 		changed = namespaces.RestoreEnvelope(event) || changed
 		changed = supplementResponsesEvent(event, compat) || changed
-		if redactResponseError(event) || changed {
+		changed = redactResponseError(event) || changed
+		if model := responsesServedModel(event); model != "" {
+			result.ServedModel = model
+		}
+		if usage := responsesUsageFromStreamEvent(event); len(usage) > 0 {
+			result.Usage = usage
+			result.UsageSource = audit.UsageSourceUpstream
+		}
+		switch kind {
+		case "response.completed", "response.failed", "response.incomplete", "error":
+			response, _ := event["response"].(map[string]any)
+			if response == nil {
+				response = event
+			}
+			result.Finish, result.Err = responses.TerminalFinish(kind, response)
+			terminal = true
+			if result.Err == nil && commit != nil {
+				if result.Err = commit(responseID); result.Err != nil {
+					now := time.Now().Unix()
+					event["type"], frame.Event = "response.failed", "response.failed"
+					event["response"] = map[string]any{
+						"id": responseID, "object": "response", "status": "failed", "model": model,
+						"created_at": now, "completed_at": now,
+						"output": []any{}, "error": map[string]any{
+							"code": "response_storage_failed", "message": "Could not store the response",
+						},
+					}
+					changed = true
+				}
+			}
+		}
+		if changed {
 			raw, _ := json.Marshal(event)
 			// The compat layer changed the payload, so the frame cannot be relayed
 			// as the upstream sent it.
@@ -127,13 +167,6 @@ func copyNativeResponse(w http.ResponseWriter, body io.Reader, contentType, mode
 			result.Err = target.Err
 			return target.Err
 		}
-		if model := responsesServedModel(event); model != "" {
-			result.ServedModel = model
-		}
-		if usage := responsesUsageFromStreamEvent(event); len(usage) > 0 {
-			result.Usage = usage
-			result.UsageSource = audit.UsageSourceUpstream
-		}
 		item, _ := event["item"].(map[string]any)
 		meaningful := strings.HasSuffix(kind, ".delta") && responses.StreamString(event["delta"]) != ""
 		toolStart := false
@@ -148,14 +181,7 @@ func copyNativeResponse(w http.ResponseWriter, body io.Reader, contentType, mode
 		if result.FirstToken.IsZero() && (meaningful || toolStart) {
 			result.FirstToken = time.Now()
 		}
-		switch kind {
-		case "response.completed", "response.failed", "response.incomplete", "error":
-			response, _ := event["response"].(map[string]any)
-			if response == nil {
-				response = event
-			}
-			result.Finish, result.Err = responses.TerminalFinish(kind, response)
-			terminal = true
+		if terminal {
 			return io.EOF // A logical terminal must not wait for the socket to close.
 		}
 		return nil

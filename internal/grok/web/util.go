@@ -2,14 +2,13 @@ package web
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"orchids-api/internal/responses"
 	"path"
 	"regexp"
 	"strconv"
@@ -27,82 +26,6 @@ var (
 	reToolUsageCardIncomplete = regexp.MustCompile(`(?is)<?xai:tool_usage_card.*?(?:</xai:tool_usage_card>|\z)`)
 	reGrokRenderBlock         = regexp.MustCompile(`(?is)<?grok:render.*?</grok:render>`)
 
-	rateLimitFamilies = []rateLimitFieldFamily{
-		{
-			unit: "tokens",
-			limitKeys: []string{
-				"limit_tokens",
-				"limittokens",
-				"max_tokens",
-				"maxtokens",
-				"token_limit",
-				"tokenlimit",
-				"tokens_limit",
-				"tokenslimit",
-				"total_tokens",
-				"totaltokens",
-			},
-			remainingKeys: []string{
-				"remaining_tokens",
-				"remainingtokens",
-				"tokens_remaining",
-				"tokensremaining",
-			},
-		},
-		{
-			unit: "requests",
-			limitKeys: []string{
-				"max_queries",
-				"maxqueries",
-				"query_limit",
-				"querylimit",
-				"queries_limit",
-				"querieslimit",
-				"total_queries",
-				"totalqueries",
-				"request_limit",
-				"requestlimit",
-				"requests_limit",
-				"requestslimit",
-			},
-			remainingKeys: []string{
-				"remaining_queries",
-				"remainingqueries",
-				"queries_remaining",
-				"queriesremaining",
-				"remaining_requests",
-				"remainingrequests",
-			},
-		},
-		{
-			unit: "",
-			limitKeys: []string{
-				"limit",
-				"quota",
-				"quota_limit",
-				"quotalimit",
-			},
-			remainingKeys: []string{
-				"remaining",
-				"quota_remaining",
-				"quotaremaining",
-			},
-		},
-	}
-	rateLimitNumericKeys = buildRateLimitNumericKeySet(rateLimitFamilies)
-	rateLimitResetKeys   = map[string]struct{}{
-		"reset":           {},
-		"reset_at":        {},
-		"resetat":         {},
-		"reset_at_ms":     {},
-		"resetatms":       {},
-		"reset_time":      {},
-		"resettime":       {},
-		"reset_timestamp": {},
-		"resettimestamp":  {},
-		"next_reset":      {},
-		"nextreset":       {},
-	}
 	renderableImageExtensions = []string{".png", ".jpg", ".jpeg", ".webp", ".gif"}
 	videoAspectRatioMap       = map[string]string{
 		"1280x720":  "16:9",
@@ -119,33 +42,6 @@ var (
 		"1:1":       "1:1",
 	}
 )
-
-func randomHex(n int) string {
-	if n <= 0 {
-		return ""
-	}
-	buf := make([]byte, n)
-	if _, err := rand.Read(buf); err != nil {
-		return ""
-	}
-	return hex.EncodeToString(buf)
-}
-
-func randomUUID() string {
-	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
-		return ""
-	}
-	buf[6] = (buf[6] & 0x0f) | 0x40
-	buf[8] = (buf[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
-		buf[0:4],
-		buf[4:6],
-		buf[6:8],
-		buf[8:10],
-		buf[10:16],
-	)
-}
 
 func parseUpstreamLines(body io.Reader, onLine func(map[string]any) error) error {
 	decoder := json.NewDecoder(body)
@@ -223,23 +119,6 @@ func upstreamErrorValueMessage(raw any) string {
 		message = message[:512]
 	}
 	return message
-}
-
-// walkJSONStrings visits every string leaf in a nested JSON value (maps,
-// slices, or plain strings).
-func walkJSONStrings(value any, visit func(string)) {
-	switch x := value.(type) {
-	case map[string]any:
-		for _, item := range x {
-			walkJSONStrings(item, visit)
-		}
-	case []any:
-		for _, item := range x {
-			walkJSONStrings(item, visit)
-		}
-	case string:
-		visit(x)
-	}
 }
 
 func parseGrokJSONData(v any) any {
@@ -388,46 +267,62 @@ func fetchRemoteAttachment(ctx context.Context, rawURL string, timeout time.Dura
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	// The URL comes from the caller's message payload, so it is untrusted: the
-	// target must resolve to a public address before the gateway dials it.
+	data, contentType, err := fetchRemoteMedia(ctx, u, timeout, proxyFunc, maxBytes, accept, false)
+	if err != nil {
+		if errors.Is(err, errRemoteMediaTooLarge) {
+			err = fmt.Errorf("remote attachment exceeds the size limit")
+		}
+		return nil, "", err
+	}
+	mime, _, _ := strings.Cut(contentType, ";")
+	if mime = strings.TrimSpace(mime); mime == "" {
+		mime = mimeFromFilename(u)
+	}
+	return data, mime, err
+}
+
+var errRemoteMediaTooLarge = errors.New("remote media exceeds size limit")
+
+// Fetch only after validating the target, then keep the same guard on every
+// redirect. Staging requires a full 200; chat attachments accept all 2xx replies.
+func fetchRemoteMedia(ctx context.Context, rawURL string, timeout time.Duration, proxy func(*http.Request) (*url.URL, error), maxBytes int64, accept string, staging bool) ([]byte, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	target, err := checkRemoteFetchTarget(ctx, u, proxyFunc != nil)
+	target, err := checkRemoteFetchTarget(ctx, rawURL, proxy != nil)
+	if err != nil {
+		if staging {
+			err = fmt.Errorf("%w: %v", errAdminMediaBlocked, err)
+		}
+		return nil, "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {
 		return nil, "", err
 	}
-	client := newRemoteFetchClient(timeout, proxyFunc)
-	req, err := http.NewRequest(http.MethodGet, target.String(), nil)
-	if err != nil {
-		return nil, "", err
-	}
-	// Many image hosts and CDNs refuse Go's default client identity.
 	req.Header.Set("User-Agent", config.DefaultGrokWebUserAgent)
 	req.Header.Set("Accept", accept)
-	req = req.WithContext(ctx)
-	resp, err := client.Do(req)
+	resp, err := newRemoteFetchClient(timeout, proxy).Do(req)
 	if err != nil {
 		return nil, "", err
 	}
 	defer resp.Body.Close()
+	if staging && resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("remote server returned HTTP %d", resp.StatusCode)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, "", fmt.Errorf("fetch url status=%d", resp.StatusCode)
 	}
 	if resp.ContentLength > maxBytes {
-		return nil, "", fmt.Errorf("remote attachment exceeds the size limit")
+		return nil, "", errRemoteMediaTooLarge
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
 	if err != nil {
 		return nil, "", err
 	}
-	if int64(len(data)) > maxBytes {
-		return nil, "", fmt.Errorf("remote attachment exceeds the size limit")
+	if int64(len(raw)) > maxBytes {
+		return nil, "", errRemoteMediaTooLarge
 	}
-	mime := strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0])
-	if mime == "" {
-		mime = mimeFromFilename(u)
-	}
-	return data, mime, nil
+	return raw, resp.Header.Get("Content-Type"), nil
 }
 
 func mimeFromFilename(name string) string {
@@ -511,59 +406,30 @@ func truncateDiagnosticText(s string, max int) string {
 	return string(r[:max]) + "..."
 }
 
-func interfaceToInt(v any) int {
-	switch x := v.(type) {
-	case int:
-		return x
-	case int64:
-		return int(x)
-	case float64:
-		return int(x)
-	case json.Number:
-		if i, err := x.Int64(); err == nil {
-			return int(i)
-		}
-	case string:
-		if i, err := strconv.Atoi(strings.TrimSpace(x)); err == nil {
-			return i
-		}
-	}
-	return 0
-}
-
-func valueAtPath(root any, path ...string) any {
-	cur := root
-	for _, key := range path {
-		m, ok := cur.(map[string]any)
+// Paths are constant provider field names joined by dots, not user input.
+func valueAtPath(root any, path string) any {
+	for key := range strings.SplitSeq(path, ".") {
+		object, ok := root.(map[string]any)
 		if !ok {
 			return nil
 		}
-		cur, ok = m[key]
-		if !ok {
-			return nil
-		}
+		root = object[key]
 	}
-	return cur
+	return root
 }
 
-func mapAtAnyPath(root any, paths ...[]string) map[string]any {
+func mapAtAnyPath(root any, paths ...string) map[string]any {
 	for _, path := range paths {
-		if len(path) == 0 {
-			continue
-		}
-		if m, ok := valueAtPath(root, path...).(map[string]any); ok && len(m) > 0 {
+		if m, ok := valueAtPath(root, path).(map[string]any); ok && len(m) > 0 {
 			return m
 		}
 	}
 	return nil
 }
 
-func stringAtAnyPath(root any, paths ...[]string) string {
+func stringAtAnyPath(root any, paths ...string) string {
 	for _, path := range paths {
-		if len(path) == 0 {
-			continue
-		}
-		v := strings.TrimSpace(fmt.Sprint(valueAtPath(root, path...)))
+		v := strings.TrimSpace(fmt.Sprint(valueAtPath(root, path)))
 		if v != "" && v != "<nil>" {
 			return v
 		}
@@ -571,12 +437,9 @@ func stringAtAnyPath(root any, paths ...[]string) string {
 	return ""
 }
 
-func rawStringAtAnyPath(root any, paths ...[]string) string {
+func rawStringAtAnyPath(root any, paths ...string) string {
 	for _, path := range paths {
-		if len(path) == 0 {
-			continue
-		}
-		raw := valueAtPath(root, path...)
+		raw := valueAtPath(root, path)
 		if text, ok := raw.(string); ok {
 			if text != "" {
 				return text
@@ -591,12 +454,9 @@ func rawStringAtAnyPath(root any, paths ...[]string) string {
 	return ""
 }
 
-func intAtAnyPath(root any, paths ...[]string) int {
+func intAtAnyPath(root any, paths ...string) int {
 	for _, path := range paths {
-		if len(path) == 0 {
-			continue
-		}
-		if v := interfaceToInt(valueAtPath(root, path...)); v != 0 {
+		if v := responses.InterfaceToInt(valueAtPath(root, path)); v != 0 {
 			return v
 		}
 	}

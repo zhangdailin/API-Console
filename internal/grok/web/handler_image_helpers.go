@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"orchids-api/internal/httpserver"
+	"orchids-api/internal/responses"
 	"orchids-api/internal/util"
 	"os"
 	"path"
@@ -24,6 +25,23 @@ import (
 	"time"
 )
 
+func requireImageAspectRatio(w http.ResponseWriter, value string) bool {
+	if strings.TrimSpace(value) == "" || validImageAspectRatio(value) {
+		return true
+	}
+	httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_parameter", "aspect_ratio is not supported")
+	return false
+}
+
+func requireImageResolution(w http.ResponseWriter, value string) (string, bool) {
+	resolution, err := normalizeImageResolution(value)
+	if err != nil {
+		httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_parameter", err.Error())
+		return "", false
+	}
+	return resolution, true
+}
+
 func normalizeImageResponseFormat(format string) string {
 	switch strings.ToLower(strings.TrimSpace(format)) {
 	case "b64_json", "base64":
@@ -32,11 +50,14 @@ func normalizeImageResponseFormat(format string) string {
 	return "url"
 }
 
-func imageResponseField(format string) string {
-	if normalizeImageResponseFormat(format) == "b64_json" {
-		return "b64_json"
+func requireImageResponseFormat(w http.ResponseWriter, value string) (string, bool) {
+	switch value = strings.ToLower(strings.TrimSpace(value)); value {
+	case "", "url", "b64_json", "base64":
+		return normalizeImageResponseFormat(value), true
+	default:
+		httpserver.WriteError(w, http.StatusBadRequest, "response_format must be url or b64_json")
+		return "", false
 	}
-	return "url"
 }
 
 // imageMimeTypeForValue reports the media type of an image response entry.
@@ -254,7 +275,7 @@ func (h *Handler) imageOutputValue(ctx context.Context, token, url, format strin
 // writeImageResults writes the non-streaming image generation/edit response.
 // A failed conversion aborts the response instead of returning a partial result.
 func (h *Handler) writeImageResults(w http.ResponseWriter, ctx context.Context, token, prompt string, urls []string, format, publicBase string) {
-	field := imageResponseField(format)
+	field := normalizeImageResponseFormat(format)
 	data := make([]map[string]any, 0, len(urls))
 	for _, u := range urls {
 		val, err := h.imageOutputValue(ctx, token, u, format)
@@ -265,34 +286,37 @@ func (h *Handler) writeImageResults(w http.ResponseWriter, ctx context.Context, 
 			writeGrokUpstreamError(w, err)
 			return
 		}
-		if field == "url" {
-			if publicBase == "" {
-				httpserver.WriteErrorCode(w, http.StatusInternalServerError, "image_url_base_missing", "image URL base is not configured")
-				return
-			}
-			if strings.HasPrefix(val, "/") {
-				val = publicBase + val
-			}
+		item, ok := imageResult(w, field, val, publicBase)
+		if !ok {
+			return
 		}
-		data = append(data, map[string]any{
-			field: val,
-			// Both fields are always present in grok2api's response: an empty
-			// string (not null) for the unused revised prompt, and an explicit
-			// media type.
-			"revised_prompt": "",
-			"mime_type":      imageMimeTypeForValue(field, val),
-		})
+		data = append(data, item)
 	}
+	writeImageData(w, prompt, data)
+}
+
+func imageResult(w http.ResponseWriter, field, value, publicBase string) (map[string]any, bool) {
+	if field == "url" {
+		if publicBase == "" {
+			httpserver.WriteErrorCode(w, http.StatusInternalServerError, "image_url_base_missing", "image URL base is not configured")
+			return nil, false
+		}
+		if strings.HasPrefix(value, "/") {
+			value = publicBase + value
+		}
+	}
+	return map[string]any{
+		field: value, "revised_prompt": "", "mime_type": imageMimeTypeForValue(field, value),
+	}, true
+}
+
+func writeImageData(w http.ResponseWriter, prompt string, data []map[string]any) {
 	util.WriteJSON(w, map[string]any{
-		"created": time.Now().Unix(),
-		"data":    data,
-		"usage":   buildImageUsagePayload(prompt, len(data)),
+		"created": time.Now().Unix(), "data": data,
+		"usage": buildImageUsagePayload(prompt, len(data)),
 	})
 }
 
-// collectImageChatURLs runs the chat image edit/generation loop (n images from
-// ceil(n/2) calls) and returns the normalized URLs. On failure it writes the
-// error response and returns ok=false.
 // collectImageChatURLs runs image edit calls until n edited images are in hand.
 // One grok.com edit call produces one finished image (grok2api serves edits
 // with n=1 only); the other images its stream carries are the progressive
@@ -377,11 +401,7 @@ func appendImageEditResultURLs(urls []string, line map[string]any) []string {
 
 // imageEditPreviewFrame reports a progressive or moderated image frame.
 func imageEditPreviewFrame(line map[string]any) bool {
-	frame := mapAtAnyPath(line,
-		[]string{"streamingImageGenerationResponse"},
-		[]string{"streaming_image_generation_response"},
-		[]string{"modelResponse", "streamingImageGenerationResponse"},
-	)
+	frame := mapAtAnyPath(line, "streamingImageGenerationResponse", "streaming_image_generation_response", "modelResponse.streamingImageGenerationResponse")
 	if frame == nil {
 		return false
 	}
@@ -395,7 +415,7 @@ func imageEditPreviewFrame(line map[string]any) bool {
 	if !ok {
 		return false
 	}
-	return interfaceToInt(raw) < 100
+	return responses.InterfaceToInt(raw) < 100
 }
 
 // imageEditInputAssets returns the asset IDs an edit request uploaded.
@@ -466,7 +486,7 @@ func writeMediaCacheFile(kind string, data []byte, nameFor func(mediaType string
 	if info, statErr := os.Stat(fullPath); statErr == nil && info.Mode().IsRegular() && info.Size() > 0 {
 		return name, nil
 	}
-	tmp := fullPath + ".tmp-" + randomHex(4)
+	tmp := fullPath + ".tmp-" + util.RandomHex(4)
 	if writeErr := os.WriteFile(tmp, data, 0o644); writeErr != nil {
 		_ = os.Remove(tmp)
 		return "", writeErr

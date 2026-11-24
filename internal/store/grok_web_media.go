@@ -32,6 +32,7 @@ type StoredVideoJob struct {
 	Progress          int       `json:"progress"`
 	VideoURL          string    `json:"video_url,omitempty"`
 	ContentPath       string    `json:"content_path,omitempty"`
+	ContentName       string    `json:"content_name,omitempty"`
 	UpstreamRequestID string    `json:"upstream_request_id,omitempty"`
 	BuildFallback     bool      `json:"build_fallback,omitempty"`
 	RemixedFromID     string    `json:"remixed_from_id,omitempty"`
@@ -70,23 +71,47 @@ var (
 	`)
 )
 
-func (s *redisStore) storedVideoJobKey(id, ownerHash string) string {
+func (s *Store) storedVideoJobKey(id, ownerHash string) string {
 	return s.digestKey("videos:jobs:", strings.TrimSpace(ownerHash), strings.TrimSpace(id))
 }
 
-func (s *redisStore) storedVideoJobsIndexKey() string {
+func (s *Store) storedVideoJobsIndexKey() string {
 	return s.prefix + "videos:jobs:index"
 }
 
-func (s *redisStore) storedVideoJobLeaseKey(id, ownerHash string) string {
+func (s *Store) storedVideoJobLeaseKey(id, ownerHash string) string {
 	return s.digestKey("videos:leases:", strings.TrimSpace(ownerHash), strings.TrimSpace(id))
 }
 
-func (s *redisStore) storedMediaInputKey(id, ownerHash string) string {
+func (s *Store) storedMediaInputKey(id, ownerHash string) string {
 	return s.digestKey("media:inputs:", strings.TrimSpace(ownerHash), strings.TrimSpace(id))
 }
 
-func (s *redisStore) SaveStoredVideoJob(ctx context.Context, job *StoredVideoJob, ttl time.Duration) error {
+func (s *Store) SaveStoredVideoJob(ctx context.Context, job *StoredVideoJob, ttl time.Duration) error {
+	return s.saveVideoJob(ctx, job, ttl, "")
+}
+
+// TerminalVideoJobStatus reports whether a worker may still advance a video job.
+func TerminalVideoJobStatus(status string) bool {
+	switch status {
+	case "completed", "failed", "cancelled", "canceled", "expired":
+		return true
+	}
+	return false
+}
+
+var saveLeasedVideoJobScript = redis.NewScript(`
+	if redis.call("GET", KEYS[3]) ~= ARGV[1] then return 0 end
+	local current = redis.call("GET", KEYS[1])
+	if not current then return 0 end
+	local status = cjson.decode(current).status
+	if status == "completed" or status == "failed" or status == "cancelled" or status == "canceled" or status == "expired" then return 0 end
+	redis.call("SET", KEYS[1], ARGV[2], "PX", ARGV[3])
+	redis.call("ZADD", KEYS[2], ARGV[4], KEYS[1])
+	return 1
+`)
+
+func (s *Store) saveVideoJob(ctx context.Context, job *StoredVideoJob, ttl time.Duration, holder string) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis store not configured")
 	}
@@ -107,6 +132,15 @@ func (s *redisStore) SaveStoredVideoJob(ctx context.Context, job *StoredVideoJob
 		return err
 	}
 	key := s.storedVideoJobKey(stored.ID, stored.OwnerHash)
+	if holder != "" {
+		result, err := saveLeasedVideoJobScript.Run(ctx, s.client, []string{
+			key, s.storedVideoJobsIndexKey(), s.storedVideoJobLeaseKey(stored.ID, stored.OwnerHash),
+		}, holder, data, max(1, ttl.Milliseconds()), stored.ExpiresAt.Unix()).Int()
+		if err == nil && result == 0 {
+			return ErrVideoJobLeaseLost
+		}
+		return err
+	}
 	pipe := s.client.TxPipeline()
 	pipe.Set(ctx, key, data, ttl)
 	pipe.ZAdd(ctx, s.storedVideoJobsIndexKey(), redis.Z{Score: float64(stored.ExpiresAt.Unix()), Member: key})
@@ -114,7 +148,9 @@ func (s *redisStore) SaveStoredVideoJob(ctx context.Context, job *StoredVideoJob
 	return err
 }
 
-func (s *redisStore) GetStoredVideoJob(ctx context.Context, id, ownerHash string) (*StoredVideoJob, error) {
+var ErrVideoJobLeaseLost = fmt.Errorf("video job lease or active state no longer matches")
+
+func (s *Store) GetStoredVideoJob(ctx context.Context, id, ownerHash string) (*StoredVideoJob, error) {
 	if s == nil || s.client == nil {
 		return nil, fmt.Errorf("redis store not configured")
 	}
@@ -140,7 +176,7 @@ func (s *redisStore) GetStoredVideoJob(ctx context.Context, id, ownerHash string
 	return &job, nil
 }
 
-func (s *redisStore) ListStoredVideoJobs(ctx context.Context) ([]*StoredVideoJob, error) {
+func (s *Store) ListStoredVideoJobs(ctx context.Context) ([]*StoredVideoJob, error) {
 	if s == nil || s.client == nil {
 		return nil, fmt.Errorf("redis store not configured")
 	}
@@ -184,7 +220,7 @@ func (s *redisStore) ListStoredVideoJobs(ctx context.Context) ([]*StoredVideoJob
 	return jobs, nil
 }
 
-func (s *redisStore) DeleteStoredVideoJob(ctx context.Context, id, ownerHash string) error {
+func (s *Store) DeleteStoredVideoJob(ctx context.Context, id, ownerHash string) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis store not configured")
 	}
@@ -210,7 +246,7 @@ func validateVideoJobLeaseArgs(id, ownerHash, holder string, ttl time.Duration) 
 	return nil
 }
 
-func (s *redisStore) AcquireVideoJobLease(ctx context.Context, id, ownerHash, holder string, ttl time.Duration) (bool, error) {
+func (s *Store) AcquireVideoJobLease(ctx context.Context, id, ownerHash, holder string, ttl time.Duration) (bool, error) {
 	if s == nil || s.client == nil {
 		return false, fmt.Errorf("redis store not configured")
 	}
@@ -220,7 +256,7 @@ func (s *redisStore) AcquireVideoJobLease(ctx context.Context, id, ownerHash, ho
 	return s.client.SetNX(ctx, s.storedVideoJobLeaseKey(id, ownerHash), strings.TrimSpace(holder), ttl).Result()
 }
 
-func (s *redisStore) RefreshVideoJobLease(ctx context.Context, id, ownerHash, holder string, ttl time.Duration) (bool, error) {
+func (s *Store) RefreshVideoJobLease(ctx context.Context, id, ownerHash, holder string, ttl time.Duration) (bool, error) {
 	if s == nil || s.client == nil {
 		return false, fmt.Errorf("redis store not configured")
 	}
@@ -231,7 +267,7 @@ func (s *redisStore) RefreshVideoJobLease(ctx context.Context, id, ownerHash, ho
 	return value == 1, err
 }
 
-func (s *redisStore) ReleaseVideoJobLease(ctx context.Context, id, ownerHash, holder string) (bool, error) {
+func (s *Store) ReleaseVideoJobLease(ctx context.Context, id, ownerHash, holder string) (bool, error) {
 	if s == nil || s.client == nil {
 		return false, fmt.Errorf("redis store not configured")
 	}
@@ -242,7 +278,7 @@ func (s *redisStore) ReleaseVideoJobLease(ctx context.Context, id, ownerHash, ho
 	return value == 1, err
 }
 
-func (s *redisStore) SaveStoredMediaInput(ctx context.Context, input *StoredMediaInput, ttl time.Duration) error {
+func (s *Store) SaveStoredMediaInput(ctx context.Context, input *StoredMediaInput, ttl time.Duration) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis store not configured")
 	}
@@ -267,7 +303,7 @@ func (s *redisStore) SaveStoredMediaInput(ctx context.Context, input *StoredMedi
 	return s.client.Set(ctx, s.storedMediaInputKey(stored.ID, stored.OwnerHash), data, ttl).Err()
 }
 
-func (s *redisStore) GetStoredMediaInput(ctx context.Context, id, ownerHash string) (*StoredMediaInput, error) {
+func (s *Store) GetStoredMediaInput(ctx context.Context, id, ownerHash string) (*StoredMediaInput, error) {
 	if s == nil || s.client == nil {
 		return nil, fmt.Errorf("redis store not configured")
 	}
@@ -277,7 +313,7 @@ func (s *redisStore) GetStoredMediaInput(ctx context.Context, id, ownerHash stri
 	})
 }
 
-func (s *redisStore) DeleteStoredMediaInput(ctx context.Context, id, ownerHash string) error {
+func (s *Store) DeleteStoredMediaInput(ctx context.Context, id, ownerHash string) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis store not configured")
 	}
@@ -291,72 +327,11 @@ func (s *redisStore) DeleteStoredMediaInput(ctx context.Context, id, ownerHash s
 	return nil
 }
 
-func (s *Store) SaveStoredVideoJob(ctx context.Context, job *StoredVideoJob, ttl time.Duration) error {
-	if s == nil || s.webMedia == nil {
-		return fmt.Errorf("video job store not configured")
+// SaveLeasedVideoJob advances an existing nonterminal job only for the holder
+// of its current lease. A deleted job cannot be recreated by a late worker.
+func (s *Store) SaveLeasedVideoJob(ctx context.Context, job *StoredVideoJob, ttl time.Duration, holder string) error {
+	if s == nil || s.client == nil || strings.TrimSpace(holder) == "" {
+		return ErrVideoJobLeaseLost
 	}
-	return s.webMedia.SaveStoredVideoJob(ctx, job, ttl)
-}
-
-func (s *Store) GetStoredVideoJob(ctx context.Context, id, ownerHash string) (*StoredVideoJob, error) {
-	if s == nil || s.webMedia == nil {
-		return nil, fmt.Errorf("video job store not configured")
-	}
-	return s.webMedia.GetStoredVideoJob(ctx, id, ownerHash)
-}
-
-func (s *Store) ListStoredVideoJobs(ctx context.Context) ([]*StoredVideoJob, error) {
-	if s == nil || s.webMedia == nil {
-		return nil, fmt.Errorf("video job store not configured")
-	}
-	return s.webMedia.ListStoredVideoJobs(ctx)
-}
-
-func (s *Store) DeleteStoredVideoJob(ctx context.Context, id, ownerHash string) error {
-	if s == nil || s.webMedia == nil {
-		return fmt.Errorf("video job store not configured")
-	}
-	return s.webMedia.DeleteStoredVideoJob(ctx, id, ownerHash)
-}
-
-func (s *Store) AcquireVideoJobLease(ctx context.Context, id, ownerHash, holder string, ttl time.Duration) (bool, error) {
-	if s == nil || s.webMedia == nil {
-		return false, fmt.Errorf("video job store not configured")
-	}
-	return s.webMedia.AcquireVideoJobLease(ctx, id, ownerHash, holder, ttl)
-}
-
-func (s *Store) RefreshVideoJobLease(ctx context.Context, id, ownerHash, holder string, ttl time.Duration) (bool, error) {
-	if s == nil || s.webMedia == nil {
-		return false, fmt.Errorf("video job store not configured")
-	}
-	return s.webMedia.RefreshVideoJobLease(ctx, id, ownerHash, holder, ttl)
-}
-
-func (s *Store) ReleaseVideoJobLease(ctx context.Context, id, ownerHash, holder string) (bool, error) {
-	if s == nil || s.webMedia == nil {
-		return false, fmt.Errorf("video job store not configured")
-	}
-	return s.webMedia.ReleaseVideoJobLease(ctx, id, ownerHash, holder)
-}
-
-func (s *Store) SaveStoredMediaInput(ctx context.Context, input *StoredMediaInput, ttl time.Duration) error {
-	if s == nil || s.webMedia == nil {
-		return fmt.Errorf("media input store not configured")
-	}
-	return s.webMedia.SaveStoredMediaInput(ctx, input, ttl)
-}
-
-func (s *Store) GetStoredMediaInput(ctx context.Context, id, ownerHash string) (*StoredMediaInput, error) {
-	if s == nil || s.webMedia == nil {
-		return nil, fmt.Errorf("media input store not configured")
-	}
-	return s.webMedia.GetStoredMediaInput(ctx, id, ownerHash)
-}
-
-func (s *Store) DeleteStoredMediaInput(ctx context.Context, id, ownerHash string) error {
-	if s == nil || s.webMedia == nil {
-		return fmt.Errorf("media input store not configured")
-	}
-	return s.webMedia.DeleteStoredMediaInput(ctx, id, ownerHash)
+	return s.saveVideoJob(ctx, job, ttl, holder)
 }

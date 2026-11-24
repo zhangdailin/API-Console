@@ -67,16 +67,16 @@ func BenchmarkStreamRelayPipe(b *testing.B) {
 					if format == adapter.FormatOpenAI {
 						raw, _ := adapter.AppendOpenAIChunk(sh.openAIChunkScratch[:0], sh.msgID, sh.startTime.Unix(), "content_block_delta", data)
 						sh.openAIChunkScratch = raw[:0]
-						err = writeOpenAIFrame(sh.w, raw)
+						err = writeOpenAIFrameMultiWrite(sh.w, raw)
 					} else {
-						err = writeSSEFrameBytes(sh.w, "content_block_delta", data)
+						err = writeSSEFrameBytesMultiWrite(sh.w, "content_block_delta", data)
 					}
 					if err != nil {
 						b.Fatal(err)
 					}
-					sh.flushSSEWithLenLocked("content_block_delta", len(data), true, false)
+					sh.notifyStreamFlushLocked()
 				} else {
-					sh.emitSSEFrameLocked("content_block_delta", data, true, false)
+					sh.emitSSEFrameLocked("content_block_delta", data, false)
 				}
 				if _, ok := <-ack; !ok {
 					b.Fatal("pipe reader stopped")

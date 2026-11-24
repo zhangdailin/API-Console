@@ -69,6 +69,33 @@ globalThis.ConsoleUI = (() => {
     }
     return Object.freeze({ begin, cancel });
   }
+  // Coalesce live polls, defer hidden tabs, and use the first flow mark
+  // as a baseline. Page-specific read and visibility rules stay in callers.
+  function liveRefresh(run, { settle = 0, eligible = () => true, busy = () => false } = {}) {
+    const LIVE_MIN_GAP_MS = 2000;
+    let timer = null, pending = false, lastLoad = 0, mark = '';
+    const visible = () => !document.hidden;
+    function schedule() {
+      if (!eligible()) return;
+      if (!visible()) { pending = true; return; }
+      if (timer != null) return;
+      timer = window.setTimeout(() => {
+        timer = null;
+        if (busy() && settle > 0) return schedule();
+        if (visible() && eligible()) return run();
+        pending = !visible();
+      }, Math.max(settle, lastLoad + LIVE_MIN_GAP_MS - Date.now()));
+    }
+    return {
+      schedule,
+      read: () => { lastLoad = Date.now(); },
+      defer: () => { pending = true; },
+      flush: () => { if (pending && visible()) { pending = false; schedule(); } },
+      idle: () => { if (Date.now() - lastLoad >= 30000) schedule(); },
+      observe: next => { if (mark && mark !== next) schedule(); mark = next; },
+      reset: () => { mark = ''; },
+    };
+  }
   function submission() {
     let busy = false;
     async function run(operation, buttons = []) {
@@ -233,5 +260,20 @@ globalThis.ConsoleUI = (() => {
     });
     return table;
   }
-  return Object.freeze({ el, make, attach, emptyRow, setText, modal, pagination, responsiveTable, requestGate, submission, keyedSubmission });
+  function option(value, label = value) {
+    return Object.assign(make('option', '', label), { value });
+  }
+  function downloadBlob(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const link = Object.assign(make('a'), { href: url, download: name, hidden: true });
+    try {
+      document.body.appendChild(link);
+      link.click();
+    } finally {
+      link.remove();
+      // The browser can start reading the object URL after the click returns.
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    }
+  }
+  return Object.freeze({ el, make, attach, emptyRow, setText, modal, pagination, responsiveTable, option, downloadBlob, requestGate, liveRefresh, submission, keyedSubmission });
 })();

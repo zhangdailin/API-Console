@@ -1,15 +1,17 @@
 package responses
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"orchids-api/internal/chatwire"
 	"orchids-api/internal/util"
 	"strings"
-	"time"
 
 	"encoding/json"
 
+	"orchids-api/internal/config"
 	"orchids-api/internal/store"
 )
 
@@ -99,7 +101,7 @@ func CancelHandler(opts BridgeOptions) http.HandlerFunc {
 			return
 		}
 		st := opts.StoreFor()
-		record, err := st.GetStoredResponse(r.Context(), responseID, OwnerHash(r.Context()))
+		record, err := storedResponseMetadata(r.Context(), st, responseID, OwnerHash(r.Context()))
 		if err != nil {
 			WriteStoredLookupError(w, err, "response not found")
 			return
@@ -111,7 +113,7 @@ func CancelHandler(opts BridgeOptions) http.HandlerFunc {
 			writeSyntheticCancelledResponse(w, record)
 			return
 		}
-		writeCancelledRecord(w, r, st, record, opts.TTLOrDefault())
+		writeCancelledRecord(w, r, st, record)
 	}
 }
 
@@ -133,18 +135,20 @@ func InputItemsHandler(opts BridgeOptions) http.HandlerFunc {
 			WriteStoredLookupError(w, err, "response not found")
 			return
 		}
-		writeStoredInputItems(w, record)
+		items, more, err := storedInputHistory(r.Context(), st, record)
+		if err != nil {
+			WriteStoredLookupError(w, err, "response not found")
+			return
+		}
+		writeStoredInputItems(w, items, more)
 	}
 }
 
 // writeCancelledRecord flips a stored response to `cancelled` and echoes the
 // response object, which is what the Responses SDK expects from cancel.
 //
-// Every response the gateway stores is written once it is terminal, so a cancel
-// that arrives after the fact changes nothing and is answered with the record as
-// it stands. That is what makes the endpoint idempotent instead of an error: a
-// client that cancels defensively must not be told its response does not exist.
-func writeCancelledRecord(w http.ResponseWriter, r *http.Request, st Store, record *store.StoredResponse, fallbackTTL time.Duration) {
+// Only update the representation that was read; a concurrent delete wins.
+func writeCancelledRecord(w http.ResponseWriter, r *http.Request, st Store, record *store.StoredResponse) {
 	var response map[string]any
 	if err := json.Unmarshal(record.Body, &response); err != nil || response == nil {
 		WriteAPIError(w, http.StatusBadGateway, "invalid_stored_response", "stored response is not a JSON object")
@@ -158,14 +162,25 @@ func writeCancelledRecord(w http.ResponseWriter, r *http.Request, st Store, reco
 			WriteAPIError(w, http.StatusInternalServerError, "server_error", "failed to update response")
 			return
 		}
-		updated := *record
-		updated.Body = encoded
-		updated.ContentType = util.FirstNonEmpty(strings.TrimSpace(record.ContentType), "application/json")
-		ttl := time.Until(record.ExpiresAt)
-		if ttl <= 0 {
-			ttl = fallbackTTL
+		updater, ok := st.(interface {
+			UpdateStoredResponseBody(context.Context, *store.StoredResponse, []byte) error
+		})
+		if !ok {
+			WriteStoredLookupError(w, store.ErrStoredResponseChanged, "response not found")
+			return
 		}
-		if err := st.SaveStoredResponse(r.Context(), &updated, ttl); err != nil {
+		if err := updater.UpdateStoredResponseBody(r.Context(), record, encoded); err != nil {
+			if errors.Is(err, store.ErrStoredResponseChanged) {
+				fresh, readErr := storedResponseMetadata(r.Context(), st, record.ResponseID, record.OwnerHash)
+				if readErr != nil {
+					WriteStoredLookupError(w, readErr, "response not found")
+				} else if err := json.Unmarshal(fresh.Body, &response); err == nil && response["status"] == "cancelled" {
+					util.WriteJSON(w, response)
+				} else {
+					WriteAPIError(w, http.StatusConflict, "response_changed", "Response changed while cancelling")
+				}
+				return
+			}
 			WriteStoredLookupError(w, err, "response not found")
 			return
 		}
@@ -213,28 +228,70 @@ func markOutputItemsCancelled(response map[string]any) {
 // gateway persisted when it wrote the response. A record written before the
 // gateway persisted input items reports an empty list rather than failing: the
 // response exists, and the caller can still read its output.
-func writeStoredInputItems(w http.ResponseWriter, record *store.StoredResponse) {
-	items := []any{}
-	if len(record.InputItems) > 0 {
-		var decoded []any
-		if err := json.Unmarshal(record.InputItems, &decoded); err == nil {
-			items = decoded
-		}
-	}
+func writeStoredInputItems(w http.ResponseWriter, items []json.RawMessage, more bool) {
 	payload := map[string]any{
 		"object":   "list",
 		"data":     items,
-		"has_more": false,
+		"has_more": more,
 	}
 	if len(items) > 0 {
-		if first, ok := items[0].(map[string]any); ok {
-			payload["first_id"] = chatwire.ParseLooseStringAny(first["id"])
-		}
-		if last, ok := items[len(items)-1].(map[string]any); ok {
-			payload["last_id"] = chatwire.ParseLooseStringAny(last["id"])
+		for key, raw := range map[string]json.RawMessage{"first_id": items[0], "last_id": items[len(items)-1]} {
+			var item struct{ ID string }
+			if json.Unmarshal(raw, &item) == nil {
+				payload[key] = item.ID
+			}
 		}
 	}
 	util.WriteJSON(w, payload)
+}
+
+const maxInputHistoryTurns = 64
+
+// Legacy rows already contain a history snapshot. Include one such snapshot
+// when a delta chain reaches it, then stop rather than repeating its ancestors.
+func storedInputHistory(ctx context.Context, st Store, first *store.StoredResponse) ([]json.RawMessage, bool, error) {
+	var turns [][]json.RawMessage
+	seen := make(map[string]bool)
+	size, more := 0, false
+	for row := first; ; {
+		seen[row.ResponseID] = true
+		if len(row.InputItems) > config.InferenceJSONBodyLimit-size || len(turns) >= maxInputHistoryTurns {
+			more = true
+			break
+		}
+		var items []json.RawMessage
+		if len(row.InputItems) > 0 {
+			if err := json.Unmarshal(row.InputItems, &items); err != nil {
+				return nil, false, err
+			}
+		}
+		size += len(row.InputItems)
+		turns = append(turns, items)
+		parent := row.PreviousResponseID
+		if !row.InputItemsDelta || parent == "" || seen[parent] {
+			break
+		}
+		if len(turns) >= maxInputHistoryTurns {
+			more = true
+			break
+		}
+		next, err := st.GetStoredResponse(ctx, parent, first.OwnerHash)
+		if errors.Is(err, store.ErrNoRows) {
+			break
+		}
+		if err != nil {
+			return nil, false, err
+		}
+		if next.Provider != first.Provider || next.AccountID != first.AccountID {
+			break
+		}
+		row = next
+	}
+	result := []json.RawMessage{}
+	for i := len(turns) - 1; i >= 0; i-- {
+		result = append(result, turns[i]...)
+	}
+	return result, more, nil
 }
 
 // InputItemsJSON normalizes a Responses `input` into the item array the

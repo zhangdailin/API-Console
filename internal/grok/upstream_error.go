@@ -3,12 +3,10 @@ package grok
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/grok/ratelimit"
 	"orchids-api/internal/util"
-	"strings"
 	"time"
 )
 
@@ -55,13 +53,7 @@ type grokUpstreamError struct {
 func (e *grokUpstreamError) Error() string {
 	prefix := e.prefix
 	prefix = util.FirstNonEmptyUntrimmed(prefix, "grok upstream")
-	var b strings.Builder
-	b.WriteString(prefix)
-	fmt.Fprintf(&b, " status=%d", e.status)
-	if e.body != "" {
-		b.WriteString(" body=" + e.body)
-	}
-	return b.String()
+	return grokbase.UpstreamErrorText(prefix, e.status, e.body)
 }
 
 func (e *grokUpstreamError) RetryAfter() time.Duration {

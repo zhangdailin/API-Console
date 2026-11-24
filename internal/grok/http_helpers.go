@@ -1,18 +1,12 @@
 package grok
 
 import (
-	"context"
 	"errors"
-	"io"
-	"net"
 	"net/http"
-	"net/url"
-	"slices"
 	"strconv"
-	"strings"
 
+	"orchids-api/internal/config"
 	"orchids-api/internal/debug"
-	apperrors "orchids-api/internal/errors"
 	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/httpserver"
 )
@@ -40,12 +34,12 @@ func requirePost(w http.ResponseWriter, r *http.Request) bool {
 
 // decodeJSONBody decodes the request body into v under the shared size limit.
 func decodeJSONBody(w http.ResponseWriter, r *http.Request, v any) bool {
-	return httpserver.DecodeJSONBody(w, r, v)
+	return httpserver.DecodeJSONBodyLimit(w, r, v, config.InferenceJSONBodyLimit)
 }
 
 // readBoundedJSONBody reads a JSON request body under the shared limit.
 func readBoundedJSONBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
-	return httpserver.ReadBoundedJSONBody(w, r)
+	return httpserver.ReadJSONBodyLimit(w, r, config.InferenceJSONBodyLimit)
 }
 
 // requireAPIKeyModel rejects a model the caller's key is not allowed to use.
@@ -100,45 +94,17 @@ func writeGrokUpstreamError(w http.ResponseWriter, err error) {
 		writeGrokErrorCode(w, http.StatusTooManyRequests, "free_usage_exhausted", grokFreeUsageExhaustedMessage)
 		return
 	}
-	text := err.Error()
-	category := apperrors.ClassifyUpstreamError(text).Category
-	status := apperrors.StatusForCategory(category)
-	switch category {
-	case "auth", "auth_blocked", "configuration":
-		// The caller's own key is fine; the account pool needs operator action.
-		status = http.StatusServiceUnavailable
-	}
-	if retryAfter := upstreamRetryAfterSeconds(err); retryAfter > 0 {
-		w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
-	}
-	writeGrokErrorCode(w, status, category, apperrors.PublicMessage(text))
+	grokbase.WritePublicUpstreamError(w, err, upstreamRetryAfterSeconds(err), nil)
 }
 
-// isUpstreamFailure reports whether err came from an attempt against an upstream
-// service. Only those may carry upstream detail, so only those are sanitized;
-// everything else is a local error that can be returned as-is.
 func isUpstreamFailure(err error) bool {
-	if err == nil {
-		return false
-	}
-	var typed *grokUpstreamError
-	var synthetic *syntheticCooldownError
-	var oauth *cliOAuthError
-	if errors.As(err, &typed) || errors.As(err, &synthetic) || errors.As(err, &oauth) {
+	if _, ok := errors.AsType[*grokUpstreamError](err); ok {
 		return true
 	}
-	if _, ok := errors.AsType[*url.Error](err); ok {
+	if _, ok := errors.AsType[*cliOAuthError](err); ok {
 		return true
 	}
-	if _, ok := errors.AsType[net.Error](err); ok {
-		return true
-	}
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) ||
-		errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-		return true
-	}
-	text := strings.ToLower(err.Error())
-	return slices.ContainsFunc([]string{"upstream", "connection reset", "connection refused", "broken pipe", "no such host", "tls handshake"}, func(marker string) bool { return strings.Contains(text, marker) })
+	return grokbase.IsUpstreamTransportFailure(err)
 }
 
 // upstreamRetryAfterSeconds reads the backoff an upstream asked for. The typed

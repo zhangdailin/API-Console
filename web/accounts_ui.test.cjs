@@ -419,20 +419,25 @@ test('estimated and upstream-confirmed Grok Free windows retain distinct provena
 test('official-login cleanup stops each provider and hides its own status and link', () => {
   const { context, node } = loadUI();
   const calls = [];
-  for (const [provider, stop, status, link] of [
-    ['WorkBuddyLogin', 'stopWorkBuddyLogin', 'workbuddyLoginStatus', ''],
-    ['ClineLogin', 'stopClineLogin', 'clineLoginStatus', 'clineLoginLink'],
-  ]) {
-    context[provider] = { stop: () => calls.push(provider) };
-    node(status).hidden = false;
-    node(status).textContent = 'pending';
-    if (link) node(link).hidden = false;
-    context[stop]();
-    assert.equal(node(status).hidden, true);
-    assert.equal(node(status).textContent, '');
-    if (link) assert.equal(node(link).hidden, true);
+  const providers = [
+    ['WorkBuddyLogin', 'workbuddyLoginStatus', ''],
+    ['ClineLogin', 'clineLoginStatus', 'clineLoginLink'],
+  ];
+  for (const [provider] of providers) context[provider] = { stop: () => calls.push(provider) };
+  for (const action of ['openModal', 'closeModal']) {
+    for (const [, status, link] of providers) {
+      node(status).hidden = false;
+      node(status).textContent = 'pending';
+      if (link) node(link).hidden = false;
+    }
+    context[action]();
+    for (const [, status, link] of providers) {
+      assert.equal(node(status).hidden, true);
+      assert.equal(node(status).textContent, '');
+      if (link) assert.equal(node(link).hidden, true);
+    }
   }
-  assert.deepEqual(calls, ['WorkBuddyLogin', 'ClineLogin']);
+  assert.deepEqual(calls, ['WorkBuddyLogin', 'ClineLogin', 'WorkBuddyLogin', 'ClineLogin']);
 });
 
 test('shared login action only starts the provider shown in the account modal', () => {

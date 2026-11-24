@@ -400,15 +400,6 @@ func (a *API) mutateSavedConfig(ctx context.Context, patch func(*config.Config) 
 	return a.commitConfig(ctx, raw, session, next)
 }
 
-func (a *API) persistConfig(ctx context.Context, current, next *config.Config) error {
-	return a.mutateSavedConfig(ctx, func(base *config.Config) (*config.Config, error) {
-		if current != nil && !reflect.DeepEqual(base, current) {
-			return nil, store.ErrConfigConflict
-		}
-		return next, nil
-	})
-}
-
 func (a *API) syncSavedConfig(ctx context.Context) error {
 	a.configMu.Lock()
 	defer a.configMu.Unlock()

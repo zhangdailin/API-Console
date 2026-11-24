@@ -33,6 +33,8 @@ type chatResponseItem struct {
 type StreamOptions struct {
 	// Restore grouped function identities before any public item event.
 	ToolNamespaces ToolNamespaces
+	// PersistCompleted commits the resource before the completed event is emitted.
+	PersistCompleted func(map[string]any) error
 	// onComplete receives the terminal response object after it is built.
 	OnComplete func(map[string]any)
 }
@@ -408,6 +410,13 @@ func WriteStreamFromChatReader(w http.ResponseWriter, request CreateRequest, rea
 	v := response(status)
 	if details != nil {
 		v["incomplete_details"] = details
+	}
+	if status == "completed" && writer.Err == nil && opts.PersistCompleted != nil {
+		if err := opts.PersistCompleted(v); err != nil {
+			status = "failed"
+			v["status"] = status
+			v["error"] = map[string]any{"code": "response_storage_failed", "message": "Could not store the completed response"}
+		}
 	}
 	emit("response."+status, map[string]any{"response": v})
 	_, _ = io.WriteString(writer, "data: [DONE]\n\n")

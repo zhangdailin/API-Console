@@ -135,6 +135,43 @@ func TestResponsesInputItemsUnknownResponseIs404(t *testing.T) {
 	testutil.MustContain(t, rec.Body.String(), "response_not_found")
 }
 
+func TestInputHistoryReadsDeltasOnceAndStopsAtLegacySnapshot(t *testing.T) {
+	st := store.NewMemoryResponseStore(time.Hour)
+	save := func(id, parent, owner, text string, delta bool) {
+		t.Helper()
+		err := st.SaveStoredResponse(t.Context(), &store.StoredResponse{
+			ResponseID: id, OwnerHash: owner, Provider: "build", AccountID: 7,
+			InputItems: InputItemsJSON(text), InputItemsDelta: delta, PreviousResponseID: parent,
+		}, time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	save("other-owner", "", "other", "foreign", false)
+	save("legacy", "other-owner", "owner", "legacy-anchor", false)
+	save("first", "legacy", "owner", "first-turn", true)
+	save("second", "first", "owner", "second-turn", true)
+	first, err := st.GetStoredResponse(t.Context(), "second", "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, more, err := storedInputHistory(t.Context(), st, first)
+	if err != nil || more || len(items) != 3 {
+		t.Fatalf("history: %d, more=%v, %v", len(items), more, err)
+	}
+	for i, want := range []string{"legacy-anchor", "first-turn", "second-turn"} {
+		if !strings.Contains(string(items[i]), want) {
+			t.Fatalf("item %d lost %q: %s", i, want, items[i])
+		}
+	}
+	save("cycle-a", "cycle-b", "owner", "a", true)
+	save("cycle-b", "cycle-a", "owner", "b", true)
+	cycle, _ := st.GetStoredResponse(t.Context(), "cycle-a", "owner")
+	if items, _, err := storedInputHistory(t.Context(), st, cycle); err != nil || len(items) != 2 {
+		t.Fatalf("cycle: %d, %v", len(items), err)
+	}
+}
+
 func TestResponsesSubResourcesRejectWrongMethod(t *testing.T) {
 	t.Parallel()
 
@@ -197,6 +234,54 @@ func TestResponsesCancelUnknownResponseIs404(t *testing.T) {
 	rec := httptest.NewRecorder()
 	cancel(rec, httptest.NewRequest(http.MethodPost, "/v1/responses/resp_missing/cancel", nil))
 	testutil.Falsef(t, rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "response_not_found"), "status = %d body = %s", rec.Code, rec.Body.String())
+}
+
+type pausedCancelStore struct {
+	*store.MemoryResponseStore
+	loaded, resume chan struct{}
+}
+
+func (s pausedCancelStore) GetStoredResponseMetadata(ctx context.Context, id, owner string) (*store.StoredResponse, error) {
+	row, err := s.MemoryResponseStore.GetStoredResponseMetadata(ctx, id, owner)
+	close(s.loaded)
+	select {
+	case <-s.resume:
+		return row, err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func TestCancelCannotRecreateDeletedResponse(t *testing.T) {
+	memory := store.NewMemoryResponseStore(time.Hour)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	const id = "resp_cancel_race"
+	if err := memory.SaveStoredResponse(ctx, &store.StoredResponse{ResponseID: id, OwnerHash: "anonymous", Body: []byte(`{"status":"completed"}`)}, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	st := pausedCancelStore{memory, make(chan struct{}), make(chan struct{})}
+	rec := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		r := httptest.NewRequestWithContext(ctx, http.MethodPost, "/grok/v1/responses/"+id+"/cancel", nil)
+		CancelHandler(BridgeOptions{Store: st})(rec, r)
+	}()
+	select {
+	case <-st.loaded:
+	case <-ctx.Done():
+		t.Fatal("cancel did not load row")
+	}
+	deleteErr := memory.DeleteStoredResponse(ctx, id, "anonymous")
+	close(st.resume)
+	<-done
+	if deleteErr != nil || rec.Code != 404 {
+		t.Fatalf("delete=%v overlapping cancel=%d", deleteErr, rec.Code)
+	}
+	if _, err := memory.GetStoredResponse(ctx, id, "anonymous"); err != store.ErrNoRows {
+		t.Fatalf("cancel restored deleted response: %v", err)
+	}
 }
 
 // TestResponsesCancelAnswersBuildOwnershipRecords guards the build record case:

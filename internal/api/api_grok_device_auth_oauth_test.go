@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"orchids-api/internal/channel"
 	"orchids-api/internal/config"
 	"orchids-api/internal/provider"
 	"orchids-api/internal/store"
@@ -67,18 +68,15 @@ func TestGrokDeviceLogin_SecondLoginForSameAccountUpdatesInPlace(t *testing.T) {
 
 	pollCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	pollCancel := func() {}
-	a.grokLogins.admit("dup", &deviceLogin{
-		deviceCode: "device-code-1",
-		expiresAt:  time.Now().Add(time.Minute),
-		interval:   20 * time.Millisecond,
-		cancel:     pollCancel,
-		status:     "pending",
-	})
+	a.grokLogins.admit("dup", newDeviceLogin(cfg, loginFlow(channel.Grok), provider.LoginChallenge{
+		DeviceCode: "device-code-1",
+		ExpiresAt:  time.Now().Add(time.Minute),
+		Interval:   20 * time.Millisecond,
+	}))
 
 	done := make(chan struct{})
 	go func() {
-		a.pollGrokDeviceAuthorization(pollCtx, "dup", cfg, provider.LoginChallenge{})
+		a.pollGrokDeviceAuthorization(pollCtx, "dup")
 		close(done)
 	}()
 	select {

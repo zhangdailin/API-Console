@@ -14,9 +14,7 @@ type fixedConnTracker struct {
 	counts map[int64]int64
 }
 
-func (t *fixedConnTracker) Acquire(accountID int64) {}
-
-func (t *fixedConnTracker) Release(accountID int64) {}
+func (t *fixedConnTracker) Reserve(context.Context, int64, int64) (func(), bool) { return nil, true }
 
 func (t *fixedConnTracker) GetCount(accountID int64) int64 {
 	if t == nil {
@@ -88,7 +86,9 @@ func TestSelectAccount_ActiveConnections(t *testing.T) {
 	accounts := []*store.Account{acc1, acc2}
 
 	// Mock active connections
-	lb.AcquireConnection(acc1.ID) // acc1 has 1 conn, score 1/1 = 1
+	release, ok := lb.ReserveConnection(t.Context(), acc1.ID, 0) // acc1 has 1 conn, score 1/1 = 1
+	testutil.False(t, !ok, "failed to reserve a slot")
+	defer release()
 	// acc2 has 0 conns, score 0/1 = 0
 
 	// Should always pick acc2
@@ -169,12 +169,18 @@ func TestFilterReasonsDecideTheEmptyPoolAnswer(t *testing.T) {
 	}
 }
 
-func TestMemoryConnTrackerTryAcquireIsBounded(t *testing.T) {
+func TestMemoryConnTrackerReserveIsBounded(t *testing.T) {
 	tracker := NewMemoryConnTracker()
-	testutil.False(t, !tracker.TryAcquire(7, 1), "first reservation should succeed")
-	testutil.False(t, tracker.TryAcquire(7, 1), "second reservation should be rejected")
-	tracker.Release(7)
-	testutil.False(t, !tracker.TryAcquire(7, 1), "reservation should succeed after release")
+	release, ok := tracker.Reserve(t.Context(), 7, 1)
+	testutil.False(t, !ok, "first reservation should succeed")
+	_, ok = tracker.Reserve(t.Context(), 7, 1)
+	testutil.False(t, ok, "second reservation should be rejected")
+	release()
+	release()
+	release, ok = tracker.Reserve(t.Context(), 7, 1)
+	testutil.False(t, !ok, "reservation should succeed after release")
+	testutil.Equal(t, tracker.GetCount(7), 1)
+	release()
 }
 
 func TestPersistAppliedAccountStatus_DoesNotMutateVerdictAgain(t *testing.T) {

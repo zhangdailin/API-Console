@@ -4,10 +4,14 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"orchids-api/internal/util"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"orchids-api/internal/loadbalancer"
+	"orchids-api/internal/store"
 )
 
 // A video job runs in one process, but its record lives in Redis and is read
@@ -57,50 +61,51 @@ func videoLeaseOwner(job *videoJob) string {
 	return firstNonEmpty(strings.TrimSpace(job.OwnerHash), "anonymous")
 }
 
-// holdVideoLease takes the job's lease and keeps it fresh until the returned
-// release runs. Without a store there is nothing to share, and the job runs
-// unleased. ok is false only when another holder owns the lease.
-func (h *Handler) holdVideoLease(ctx context.Context, job *videoJob) (release func(), ok bool) {
-	markVideoRunning(job.ID, true)
+type videoLeaseContextKey struct{}
+
+// holdVideoLease gives each worker a distinct fence and cancels work on lease loss.
+func (h *Handler) holdVideoLease(ctx context.Context, job *videoJob) (context.Context, func(), bool) {
 	if h == nil || h.lb == nil || h.lb.Store == nil {
-		return func() { markVideoRunning(job.ID, false) }, true
+		markVideoRunning(job.ID, true)
+		return ctx, func() { markVideoRunning(job.ID, false) }, true
 	}
 	st := h.lb.Store
 	owner := videoLeaseOwner(job)
-	acquired, err := st.AcquireVideoJobLease(ctx, job.ID, owner, h.instanceID, videoLeaseTTL)
+	holder := h.instanceID + ":" + util.RandomHex(16)
+	acquired, err := st.AcquireVideoJobLease(ctx, job.ID, owner, holder, videoLeaseTTL)
 	if err != nil {
-		// The job record is in the same store; a lease that cannot be taken
-		// must not stop the job, only its recovery guarantee.
 		slog.Warn("video job lease unavailable", "video_id", job.ID, "error", err)
-		acquired = true
 	}
-	if !acquired {
-		markVideoRunning(job.ID, false)
-		return func() {}, false
+	if err != nil || !acquired {
+		return ctx, func() {}, false
 	}
-	stop := make(chan struct{})
+	markVideoRunning(job.ID, true)
+	worker, cancelWorker := context.WithCancel(context.WithValue(ctx, videoLeaseContextKey{}, holder))
 	go func() {
 		ticker := time.NewTicker(videoLeaseRefresh)
 		defer ticker.Stop()
 		for {
 			select {
-			case <-stop:
+			case <-worker.Done():
 				return
 			case <-ticker.C:
 				refreshCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				if held, err := st.RefreshVideoJobLease(refreshCtx, job.ID, owner, h.instanceID, videoLeaseTTL); err == nil && !held {
-					slog.Warn("video job lease lost", "video_id", job.ID)
-				}
+				held, err := st.RefreshVideoJobLease(refreshCtx, job.ID, owner, holder, videoLeaseTTL)
 				cancel()
+				if err != nil || !held {
+					slog.Warn("video job lease lost", "video_id", job.ID, "error", err)
+					cancelWorker()
+					return
+				}
 			}
 		}
 	}()
 	var once sync.Once
-	return func() {
+	return worker, func() {
 		once.Do(func() {
-			close(stop)
+			cancelWorker()
 			releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_, _ = st.ReleaseVideoJobLease(releaseCtx, job.ID, owner, h.instanceID)
+			_, _ = st.ReleaseVideoJobLease(releaseCtx, job.ID, owner, holder)
 			cancel()
 			markVideoRunning(job.ID, false)
 		})
@@ -126,14 +131,6 @@ func (h *Handler) StartVideoJobRecovery(ctx context.Context) {
 	}()
 }
 
-func videoJobFinished(status string) bool {
-	switch status {
-	case "completed", "failed", "cancelled", "canceled", "expired":
-		return true
-	}
-	return false
-}
-
 // RecoverVideoJobs runs one recovery sweep: it takes over every unfinished
 // job whose lease has lapsed. Resumed and failed jobs finish in the background.
 func (h *Handler) RecoverVideoJobs(ctx context.Context) {
@@ -149,26 +146,35 @@ func (h *Handler) RecoverVideoJobs(ctx context.Context) {
 		return
 	}
 	for _, record := range stored {
-		if record == nil || videoJobFinished(record.Status) || videoRunningHere(record.ID) {
+		if record == nil || store.TerminalVideoJobStatus(record.Status) || videoRunningHere(record.ID) {
 			continue
 		}
 		if record.CreatedAt > 0 && now.Sub(time.Unix(record.CreatedAt, 0)) < videoRecoveryGrace {
 			continue
 		}
-		job := runtimeVideoJobFromStored(record)
-		if job == nil {
-			continue
-		}
-		release, ok := h.holdVideoLease(ctx, job)
-		if !ok {
-			continue // a live process still runs it
-		}
-		putVideoJob(job)
-		go h.recoverVideoJob(context.WithoutCancel(ctx), job, release)
+		h.takeOverVideoJob(ctx, record)
 	}
 }
 
+func (h *Handler) takeOverVideoJob(ctx context.Context, record *store.StoredVideoJob) {
+	stale := runtimeVideoJobFromStored(record)
+	worker, release, ok := h.holdVideoLease(ctx, stale)
+	if !ok {
+		return
+	}
+	current, err := h.lb.Store.GetStoredVideoJob(worker, stale.ID, videoLeaseOwner(stale))
+	if err != nil || store.TerminalVideoJobStatus(current.Status) {
+		release()
+		return
+	}
+	job := runtimeVideoJobFromStored(current)
+	putVideoJob(job)
+	go h.recoverVideoJob(worker, job, release)
+}
+
 func (h *Handler) recoverVideoJob(ctx context.Context, job *videoJob, release func()) {
+	ctx, closeLeaseScope := loadbalancer.WithConnLeaseScope(ctx)
+	defer closeLeaseScope()
 	defer release()
 	resumer, canResume := h.videoBackend.(VideoResumer)
 	upstream := ""
@@ -179,7 +185,7 @@ func (h *Handler) recoverVideoJob(ctx context.Context, job *videoJob, release fu
 	}
 	if !canResume {
 		slog.Info("video job interrupted by a restart; failing it", "video_id", job.ID, "provider", job.Provider)
-		h.failVideoJobWithCode(job, "video_interrupted", errors.New("the video job was interrupted by a gateway restart; submit it again"))
+		h.failVideoJobWithCode(ctx, job, "video_interrupted", errors.New("the video job was interrupted by a gateway restart; submit it again"))
 		return
 	}
 	slog.Info("resuming an interrupted video job", "video_id", job.ID, "provider", job.Provider, "account_id", job.AccountID)
@@ -199,21 +205,21 @@ func (h *Handler) recoverVideoJob(ctx context.Context, job *videoJob, release fu
 		},
 	}, job.AccountID, job.UpstreamRequestID)
 	if err != nil {
-		h.failVideoJob(job, err)
+		h.failVideoJob(ctx, job, err)
 		return
 	}
-	h.completeBackendVideoJob(job, result, update)
+	h.completeBackendVideoJob(ctx, job, result, update)
 }
 
 // completeBackendVideoJob caches a finished backend video and marks the job.
-func (h *Handler) completeBackendVideoJob(job *videoJob, result VideoBackendResult, update func(func())) {
+func (h *Handler) completeBackendVideoJob(ctx context.Context, job *videoJob, result VideoBackendResult, update func(func())) {
 	if result.Body == nil {
-		h.failVideoJob(job, errors.New("video backend returned no content"))
+		h.failVideoJob(ctx, job, errors.New("video backend returned no content"))
 		return
 	}
 	name, err := cacheVideoStream(firstNonEmpty(result.URL, job.ID), result.Body, firstNonEmpty(result.MimeType, "video/mp4"))
 	if err != nil {
-		h.failVideoJob(job, err)
+		h.failVideoJob(ctx, job, err)
 		return
 	}
 	update(func() {

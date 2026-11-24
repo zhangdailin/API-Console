@@ -241,7 +241,7 @@ func TestNativeNamespaceStreamFailureDoesNotSaveOwnership(t *testing.T) {
 	check := middleware.APIKeyAuth(func(context.Context, string) (*middleware.APIKeyPrincipal, error) {
 		return &middleware.APIKeyPrincipal{}, nil
 	}, func(w http.ResponseWriter, r *http.Request) {
-		_, err := h.getStoredResponse(r, "resp_partial", responses.OwnerHash(r.Context()))
+		_, err := h.responseStore().GetStoredResponseMetadata(r.Context(), "resp_partial", responses.OwnerHash(r.Context()))
 		if err == nil {
 			lookupStatus = 200
 		} else {

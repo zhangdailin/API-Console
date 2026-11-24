@@ -4,11 +4,7 @@
 $ErrorActionPreference = 'Stop'
 $ceiling = 700
 $exempt = @(
-  'internal/grok/native_chat.go',
-  'internal/workbuddy/auth.go',
   'internal/loadbalancer/loadbalancer.go',
-  'internal/api/api_ops.go',
-  'internal/opsagg/opsagg.go'
 )
 function Get-LineCount([string]$p) {
   $b = [System.IO.File]::ReadAllBytes($p)

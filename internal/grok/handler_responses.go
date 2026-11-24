@@ -60,7 +60,7 @@ func (h *Handler) HandleResponses(w http.ResponseWriter, r *http.Request) {
 
 	spec, resolved := h.resolveConversationModel(r.Context(), req.Model)
 	if !resolved {
-		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", modelNotFoundMessage(req.Model))
+		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", grokbase.ModelNotFoundMessage(req.Model))
 		return
 	}
 	// Every resolvable Grok model uses Build CLI, so the native Responses path

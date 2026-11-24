@@ -276,39 +276,26 @@ func (f auditQueryFilter) matches(event audit.Event) bool {
 
 func (f auditQueryFilter) describe() map[string]any {
 	described := map[string]any{}
-	if f.kind != "" {
-		described["kind"] = f.kind
-	}
-	if f.channel != "" {
-		described["channel"] = f.channel
-	}
-	if f.status != "" {
-		described["status"] = f.status
-	}
-	if f.action != "" {
-		described["action"] = f.action
-	}
-	if f.actor != "" {
-		described["actor"] = f.actor
-	}
-	if f.model != "" {
-		described["model"] = f.model
+	for name, value := range map[string]string{
+		"kind": f.kind, "channel": f.channel, "status": f.status,
+		"action": f.action, "actor": f.actor, "model": f.model, "outcome": f.outcome,
+	} {
+		if value != "" {
+			described[name] = value
+		}
 	}
 	if f.outcome != "" {
-		described["outcome"] = f.outcome
 		described["outcome_label"] = auditOutcomeLabel(f.outcome)
 	}
-	if !f.since.IsZero() {
-		described["since"] = f.since.UTC().Format(time.RFC3339)
+	for name, instant := range map[string]time.Time{"since": f.since, "until": f.until} {
+		if !instant.IsZero() {
+			described[name] = instant.UTC().Format(time.RFC3339)
+		}
 	}
-	if !f.until.IsZero() {
-		described["until"] = f.until.UTC().Format(time.RFC3339)
-	}
-	if f.accountID != 0 {
-		described["account_id"] = f.accountID
-	}
-	if f.apiKeyID != 0 {
-		described["api_key_id"] = f.apiKeyID
+	for name, id := range map[string]int64{"account_id": f.accountID, "api_key_id": f.apiKeyID} {
+		if id != 0 {
+			described[name] = id
+		}
 	}
 	return described
 }

@@ -8,11 +8,11 @@ import (
 	"net/http"
 	"net/url"
 	"path"
-	"slices"
 	"strings"
 	"time"
 	"unicode"
 
+	"orchids-api/internal/chatwire"
 	"orchids-api/internal/httpclient"
 )
 
@@ -24,53 +24,30 @@ const (
 
 // Canonicalize user documents before the shared validator.
 func normalizeChatDocuments(messages []ChatMessage) error {
-	for i := range messages {
-		msg := &messages[i]
-		if !strings.EqualFold(strings.TrimSpace(msg.Role), "user") {
-			continue
+	return chatwire.MapUserFileParts(messages, func(_, _ int, block map[string]any) (map[string]any, error) {
+		source := block
+		if nested, ok := block["file"].(map[string]any); ok {
+			source = nested
 		}
-		parts, ok := msg.Content.([]any)
-		if !ok {
-			continue
+		id, _ := source["file_id"].(string)
+		if topID, _ := block["file_id"].(string); strings.TrimSpace(id) != "" || strings.TrimSpace(topID) != "" {
+			return nil, fmt.Errorf("Grok Web file_id is unsupported; use file_data or file_url")
 		}
-		var next []any
-		for j, part := range parts {
-			block, _ := part.(map[string]any)
-			kind, _ := block["type"].(string)
-			switch strings.ToLower(strings.TrimSpace(kind)) {
-			case "file", "input_file":
-				source := block
-				if nested, ok := block["file"].(map[string]any); ok {
-					source = nested
-				}
-				id, _ := source["file_id"].(string)
-				if topID, _ := block["file_id"].(string); strings.TrimSpace(id) != "" || strings.TrimSpace(topID) != "" {
-					return fmt.Errorf("Grok Web file_id is unsupported; use file_data or file_url")
-				}
-				data, _ := source["file_data"].(string)
-				url, _ := source["file_url"].(string)
-				data, url = strings.TrimSpace(data), strings.TrimSpace(url)
-				if (data == "") == (url == "") {
-					return fmt.Errorf("provide exactly one of file_data or file_url")
-				}
-				if url != "" {
-					if !isRemoteURL(url) {
-						return fmt.Errorf("file_url must be an HTTP or HTTPS URL")
-					}
-					data = url
-				}
-				name, _ := source["filename"].(string)
-				if next == nil {
-					next = slices.Clone(parts)
-				}
-				next[j] = map[string]any{"type": "file", "file": map[string]any{"file_data": data, "filename": name}}
+		data, _ := source["file_data"].(string)
+		url, _ := source["file_url"].(string)
+		data, url = strings.TrimSpace(data), strings.TrimSpace(url)
+		if (data == "") == (url == "") {
+			return nil, fmt.Errorf("provide exactly one of file_data or file_url")
+		}
+		if url != "" {
+			if !isRemoteURL(url) {
+				return nil, fmt.Errorf("file_url must be an HTTP or HTTPS URL")
 			}
+			data = url
 		}
-		if next != nil {
-			msg.Content = next
-		}
-	}
-	return nil
+		name, _ := source["filename"].(string)
+		return map[string]any{"type": "file", "file": map[string]any{"file_data": data, "filename": name}}, nil
+	})
 }
 
 type preparedChatAttachment struct {

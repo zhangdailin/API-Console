@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/config"
 	apperrors "orchids-api/internal/errors"
 	"orchids-api/internal/prompt"
 )
@@ -11,7 +12,7 @@ import (
 // HandleChatRequest enters the same auth, selection, accounting and streaming
 // pipeline as HTTP chat. raw retains the serialized size bound and fingerprint.
 func (h *Handler) HandleChatRequest(w http.ResponseWriter, r *http.Request, chat chatwire.Request, raw []byte) {
-	if len(raw) > maxRequestBytes {
+	if len(raw) > config.InferenceJSONBodyLimit {
 		apperrors.New("invalid_request_error", "Request body too large", http.StatusRequestEntityTooLarge).WriteResponse(w)
 		return
 	}

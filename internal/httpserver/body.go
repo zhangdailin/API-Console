@@ -8,14 +8,9 @@ import (
 	"net"
 	"net/http"
 	"strings"
-)
 
-// DecodeJSONBody decodes the request body into v and writes the standard error
-// response on failure: 415 for a non-JSON content type, 408 for a request-body
-// read timeout and 400 for malformed JSON. No default body size ceiling applies.
-func DecodeJSONBody(w http.ResponseWriter, r *http.Request, v any) bool {
-	return DecodeJSONBodyLimit(w, r, v, 0)
-}
+	"orchids-api/internal/middleware"
+)
 
 // DecodeJSONBodyLimit lets small public endpoints use a stricter allocation bound.
 func DecodeJSONBodyLimit(w http.ResponseWriter, r *http.Request, v any, limit int64) bool {
@@ -31,6 +26,18 @@ func DecodeJSONBodyLimit(w http.ResponseWriter, r *http.Request, v any, limit in
 		}
 	}
 	if limit > 0 {
+		if raw, ok := middleware.BufferedRequestBody(r); ok {
+			r.Body = http.NoBody
+			if int64(len(raw)) > limit {
+				writeJSONBodyError(w, &http.MaxBytesError{Limit: limit})
+				return false
+			}
+			if err := json.Unmarshal(raw, v); err != nil {
+				writeJSONBodyError(w, err)
+				return false
+			}
+			return true
+		}
 		r.Body = http.MaxBytesReader(w, r.Body, limit)
 	}
 	decoder := json.NewDecoder(r.Body)
@@ -48,14 +55,22 @@ func DecodeJSONBodyLimit(w http.ResponseWriter, r *http.Request, v any, limit in
 	return true
 }
 
-// ReadBoundedJSONBody retains its compatibility name but reads the complete body.
-// Read failures are returned and reported to the caller without partial input.
-func ReadBoundedJSONBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
+// ReadJSONBodyLimit reads the complete body within limit and reports read errors.
+func ReadJSONBodyLimit(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, error) {
 	if r == nil || r.Body == nil {
 		WriteError(w, http.StatusBadRequest, "invalid json")
 		return nil, errors.New("empty body")
 	}
-	body, err := io.ReadAll(r.Body)
+	if body, ok := middleware.BufferedRequestBody(r); ok {
+		r.Body = http.NoBody
+		if int64(len(body)) > limit {
+			err := &http.MaxBytesError{Limit: limit}
+			writeJSONBodyError(w, err)
+			return nil, err
+		}
+		return body, nil
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
 	if err != nil {
 		writeJSONBodyError(w, err)
 		return nil, err

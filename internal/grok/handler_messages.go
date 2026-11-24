@@ -97,7 +97,7 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 				writeAnthropicModelNotFound(w, req.Model)
 				return
 			}
-			writeAnthropicError(w, http.StatusBadRequest, modelValidationMessage(req.Model, err))
+			writeAnthropicError(w, http.StatusBadRequest, grokbase.ModelValidationMessage(req.Model, err))
 			return
 		}
 	}

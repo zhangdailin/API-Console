@@ -43,6 +43,37 @@ var billingTestTime = time.Now()
 
 func billingTestEvent(name string) string { return billingledger.EventID(billingTestTime, name) }
 
+func TestDeletedKeySettlementIsArchivedAndExistingReceiptRemainsIdempotent(t *testing.T) {
+	s, _ := newTestRedisStore(t, "billing-deleted:")
+	ctx := t.Context()
+	key := createBillingKey(t, s, 1_000_000)
+	event := billingledger.EventID(time.Now(), "already-settled")
+	if err := s.SettleApiKeyBilling(ctx, key.ID, event, 100); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteApiKey(ctx, key.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SettleApiKeyBilling(ctx, key.ID, event, 100); err != nil {
+		t.Fatalf("successful receipt was lost after deletion: %v", err)
+	}
+	l, err := billingledger.New(s, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	newEvent := billingledger.EventID(time.Now(), "unsettled")
+	if err := s.SettleApiKeyBilling(ctx, key.ID, newEvent, 50); !errors.Is(err, billingledger.ErrSettlementKeyMissing) {
+		t.Fatalf("missing key was not typed: %v", err)
+	}
+	if err := l.SettleApiKeyBilling(ctx, key.ID, newEvent, 50); err == nil {
+		t.Fatal("missing key was treated as settled")
+	}
+	l.Replay(ctx)
+	if l.ReadyForKey(key.ID) == nil || l.ReadyForKey(key.ID+1) != nil {
+		t.Fatal("deleted-key debt was not isolated")
+	}
+}
+
 func reserve(t *testing.T, s *Store, id int64, eventID string, amount int64, ttl time.Duration) bool {
 	t.Helper()
 	ok, err := s.ReserveApiKeyBilling(context.Background(), id, billingTestEvent(eventID), amount, time.Now().UTC().Add(ttl))
@@ -290,4 +321,33 @@ func TestResetApiKeyBillingKeepsTheLimit(t *testing.T) {
 	// succeeds.
 	ok, err := s.ReserveApiKeyBilling(ctx, key.ID, billingTestEvent("req_2"), 2_000_000, time.Now().Add(time.Minute))
 	testutil.Falsef(t, err != nil || !ok, "reserve after reset ok=%v err=%v", ok, err)
+}
+
+func TestBillingRenewalKeepsRequestReservedPastOriginalDeadline(t *testing.T) {
+	s, _ := newTestRedisStore(t, "renewal:")
+	key := createBillingKey(t, s, 100)
+	first, second := billingTestEvent("first"), billingTestEvent("second")
+	ctx := t.Context()
+	now := time.Now()
+	original := now.Add(30 * time.Minute)
+	if ok, err := s.ReserveApiKeyBilling(ctx, key.ID, first, 100, original); err != nil || !ok {
+		t.Fatalf("reserve: %v %v", ok, err)
+	}
+	if ok, err := s.RenewApiKeyBilling(ctx, key.ID, first, original.Add(10*time.Minute)); err != nil || !ok {
+		t.Fatalf("renew: %v %v", ok, err)
+	}
+	backend := s
+	afterOriginal := original.Add(time.Minute)
+	got, err := reserveApiKeyBillingScript.Run(ctx, backend.client,
+		[]string{backend.apiKeyBillingReservationsKey(key.ID), backend.apiKeyBillingUsedKey(key.ID), backend.apiKeyBillingLimitKey(key.ID)},
+		second, 100, afterOriginal.Unix(), afterOriginal.Add(30*time.Minute).Unix()).Int64()
+	if err != nil || got != 0 {
+		t.Fatalf("a second request obtained the active reservation: %d %v", got, err)
+	}
+	if err := s.SettleApiKeyBilling(ctx, key.ID, first, 100); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.RenewApiKeyBilling(ctx, key.ID, first, original.Add(time.Hour)); err != nil || ok {
+		t.Fatalf("renewal recreated a settled reservation: %v %v", ok, err)
+	}
 }

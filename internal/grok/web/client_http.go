@@ -7,27 +7,15 @@ import (
 	"log/slog"
 	"math/rand"
 	"net/http"
-	"net/url"
 	"orchids-api/internal/chatwire"
-	"orchids-api/internal/config"
 	"orchids-api/internal/debug"
 	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/grok/ratelimit"
-	"orchids-api/internal/httpclient"
 	"orchids-api/internal/util"
 	"strconv"
 	"strings"
 	"time"
 )
-
-func newHTTPClient(cfg *config.Config, timeout time.Duration, proxyFunc func(*http.Request) (*url.URL, error)) *http.Client {
-	proxyKey := "direct"
-	if cfg != nil {
-		proxyKey = httpclient.GenerateProxyKeyFromConfig(cfg)
-	}
-
-	return httpclient.GetSharedBrowserHTTPClientWithHeaderTimeout(proxyKey, timeout, 0, proxyFunc)
-}
 
 func parseRetryAfter(raw string) time.Duration {
 	return ratelimit.ParseRetryAfter(raw, time.Now())
@@ -146,11 +134,17 @@ func (c *Client) doRequestWithHTTPClient(ctx context.Context, httpClient *http.C
 			return nil, err
 		}
 		reqHeaders := cloneHeaderShallow(headers, 1)
-		reqHeaders.Set("x-xai-request-id", randomUUID())
+		reqHeaders.Set("x-xai-request-id", grokbase.RandomRequestID())
 		req.Header = reqHeaders
 
 		diagnosticAttempt := debug.BeginUpstream(ctx, method, reqURL, req.Header, body)
-		resp, err := doUpstreamHTTP(req, httpClient.Do, c.cfg.GrokWebStreamIdleTimeout())
+		resp, err := httpClient.Do(req)
+		if err == nil {
+			err = grokbase.PrepareUpstreamResponse(resp, c.cfg.GrokWebStreamIdleTimeout(), grokbase.WrapByteIdle)
+		}
+		if err != nil {
+			resp = nil
+		}
 		diagnosticAttempt.Response(resp, err)
 		if err != nil {
 			if attempt >= maxRetries {

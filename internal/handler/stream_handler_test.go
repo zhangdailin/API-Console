@@ -14,6 +14,7 @@ import (
 	"orchids-api/internal/adapter"
 	"orchids-api/internal/config"
 	"orchids-api/internal/debug"
+	"orchids-api/internal/httpserver"
 	"orchids-api/internal/testutil"
 
 	"orchids-api/internal/upstream"
@@ -219,7 +220,7 @@ func TestStreamHandler_TextFlow_AnthropicSSE(t *testing.T) {
 	// "message_start" the live writer deliberately skips ensureMessageStartLocked,
 	// so this writes exactly the one frame the retired writer wrote.
 	sh.mu.Lock()
-	sh.writeSSEBytesLockedWithHint("message_start", []byte(`{"type":"message_start"}`), true)
+	sh.writeSSEBytesLocked("message_start", []byte(`{"type":"message_start"}`))
 	sh.mu.Unlock()
 
 	sh.handleMessage(upstream.SSEMessage{Type: "model", Event: map[string]any{"type": "text-start"}})
@@ -243,7 +244,7 @@ func TestStreamHandler_OpenAI_SendsDONEOnStop(t *testing.T) {
 
 func TestWriteSSEFrameBytes_Output(t *testing.T) {
 	var buf bytes.Buffer
-	testutil.NoError(t, writeSSEFrameBytes(&buf, "content_block_delta", []byte("{\"type\":\"content_block_delta\"}")), "writeSSEFrameBytes: %v")
+	testutil.NoError(t, httpserver.WriteSSEFrame(&buf, "content_block_delta", []byte("{\"type\":\"content_block_delta\"}")), "writeSSEFrameBytes: %v")
 	got := buf.String()
 	want := "event: content_block_delta\ndata: {\"type\":\"content_block_delta\"}\n\n"
 	testutil.Equal(t, got, want)
@@ -251,7 +252,7 @@ func TestWriteSSEFrameBytes_Output(t *testing.T) {
 
 func TestWriteOpenAIFrame_Output(t *testing.T) {
 	var buf bytes.Buffer
-	testutil.NoError(t, writeOpenAIFrame(&buf, []byte("{\"id\":\"msg_1\"}")), "writeOpenAIFrame: %v")
+	testutil.NoError(t, httpserver.WriteSSEFrame(&buf, "", []byte("{\"id\":\"msg_1\"}")), "writeOpenAIFrame: %v")
 	got := buf.String()
 	want := "data: {\"id\":\"msg_1\"}\n\n"
 	testutil.Equal(t, got, want)
@@ -284,7 +285,7 @@ func TestStreamHandler_FirstReasoningDeltaFlushesWithoutNextEvent(t *testing.T) 
 		sh.handleMessage(upstream.SSEMessage{Type: "model", Event: map[string]any{"type": "reasoning-start"}})
 		before := rec.flushes
 		sh.handleMessage(upstream.SSEMessage{Type: "model", Event: map[string]any{"type": "reasoning-delta", "delta": "first thought"}})
-		if rec.flushes <= before || !strings.Contains(rec.buf.String(), "first thought") || !sh.firstContentDeltaFlushed {
+		if rec.flushes <= before || !strings.Contains(rec.buf.String(), "first thought") {
 			t.Fatalf("format %v did not flush first reasoning delta: %s", format, rec.buf.String())
 		}
 	}
@@ -300,7 +301,7 @@ func TestStreamHandler_FrameShortWriteCancelsUpstream(t *testing.T) {
 	sh.w = w
 	cancelled := false
 	sh.cancelUpstream = func() { cancelled = true }
-	sh.emitSSEFrameLocked("content_block_delta", []byte(`{"delta":"hello"}`), true, false)
+	sh.emitSSEFrameLocked("content_block_delta", []byte(`{"delta":"hello"}`), false)
 	if !cancelled {
 		t.Fatal("short write did not cancel upstream")
 	}

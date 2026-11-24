@@ -35,25 +35,16 @@ const (
 )
 
 var (
-	sseTextDeltaMarker  = []byte(`"type":"text_delta"`)
-	sseDoneLineBytes    = []byte(sseDoneLine)
-	sseKeepAliveBytes   = []byte(sseKeepAlive)
-	ssePingBytes        = []byte(ssePing)
-	sseEventPrefixBytes = []byte(sseEventPrefix)
-	sseDataPrefixBytes  = []byte(sseDataPrefix)
-	sseLineBreakBytes   = []byte(sseLineBreak)
-	sseDataJoinBytes    = []byte(sseDataJoin)
+	sseDoneLineBytes  = []byte(sseDoneLine)
+	sseKeepAliveBytes = []byte(sseKeepAlive)
+	ssePingBytes      = []byte(ssePing)
+
 	// Complete "event: <name>\ndata: " frame headers, one per event the relay
 	// emits. Folding the prefix, the name and the data join into a single slice
 	// makes a frame header one Write instead of three, and looking them up
 	// through the switch below compiles to length-and-bytes comparisons against
 	// the constants the callers pass — replacing a map hash on every frame.
-	ssePrefixMessageStart      = []byte(sseEventPrefix + "message_start" + sseDataJoin)
-	ssePrefixMessageDelta      = []byte(sseEventPrefix + "message_delta" + sseDataJoin)
-	ssePrefixMessageStop       = []byte(sseEventPrefix + "message_stop" + sseDataJoin)
-	ssePrefixContentBlockStart = []byte(sseEventPrefix + "content_block_start" + sseDataJoin)
-	ssePrefixContentBlockDelta = []byte(sseEventPrefix + "content_block_delta" + sseDataJoin)
-	ssePrefixContentBlockStop  = []byte(sseEventPrefix + "content_block_stop" + sseDataJoin)
+
 )
 
 type streamHandler struct {
@@ -121,16 +112,15 @@ type streamHandler struct {
 	// The position is exactly len(contentBlocks)-1 at creation, so the indices are
 	// dense and monotonic and a slice replaces the map the per-token delta paths
 	// used to hash into once per frame.
-	textBlockBuilders        []*strings.Builder
-	thinkingBlockBuilders    []*strings.Builder
-	thinkingBlockSigs        []string
-	contentBlocks            []map[string]any
-	pendingThinkingSig       string
-	hasTextOutput            bool
-	firstContentDeltaFlushed bool
-	openAIChunkScratch       []byte
-	sseFrameScratch          []byte
-	ssePayloadScratch        []byte
+	textBlockBuilders     []*strings.Builder
+	thinkingBlockBuilders []*strings.Builder
+	thinkingBlockSigs     []string
+	contentBlocks         []map[string]any
+	pendingThinkingSig    string
+	hasTextOutput         bool
+	openAIChunkScratch    []byte
+	sseFrameScratch       []byte
+	ssePayloadScratch     []byte
 
 	// Tool Handling (proxy mode only)
 	pendingToolCalls []toolCall
@@ -232,7 +222,7 @@ func (h *streamHandler) writeKeepAlive() {
 		h.markWriteErrorLocked("keep-alive", err)
 		return
 	}
-	h.flushSSEWithLenLocked("keep-alive", len(keepAlive), true, true)
+	h.notifyStreamFlushLocked()
 }
 
 func (h *streamHandler) resetRoundState() {
@@ -284,7 +274,6 @@ func (h *streamHandler) resetRoundState() {
 	h.useUpstreamUsage = false
 	h.finalStopReason = ""
 	h.hasTextOutput = false
-	h.firstContentDeltaFlushed = false
 }
 
 func (h *streamHandler) ensureBlock(blockType string) int {
@@ -328,7 +317,7 @@ func (h *streamHandler) ensureBlock(blockType string) int {
 		h.thinkingBlockSigs[internalIdx] = signature
 
 		raw, err := appendSSEContentBlockStartThinking(h.ssePayloadScratch[:0], sseIdx, signature)
-		h.writeEncodedSSELocked("content_block_start", raw, err, true, false)
+		h.writeEncodedSSELocked("content_block_start", raw, err, false)
 	case "text":
 		h.contentBlocks = append(h.contentBlocks, map[string]any{
 			"type": "text",

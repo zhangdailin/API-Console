@@ -514,7 +514,7 @@ func opsSeries(buckets []opsagg.Bucket) []map[string]any {
 			"requests":     bucket.Requests,
 			"success":      bucket.Success,
 			"failed":       bucket.Failed,
-			"input_tokens": bucket.Input, "output_tokens": bucket.Output, "usage_samples": bucket.UsageSamples, "attempt_failures": bucket.AttemptFailures, "account_switch_count": bucket.AccountSwitchCount, "account_switch_sum": bucket.AccountSwitchSum,
+			"input_tokens": bucket.InputTokens, "output_tokens": bucket.OutputTokens, "usage_samples": bucket.UsageSamples, "attempt_failures": bucket.AttemptFailures, "account_switch_count": bucket.AccountSwitchCount, "account_switch_sum": bucket.AccountSwitchSum,
 		})
 	}
 	return series

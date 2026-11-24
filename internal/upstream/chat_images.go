@@ -71,10 +71,8 @@ func (b *ChatImageBudget) imageURL(block prompt.ContentBlock) (string, bool) {
 			return "data:" + mime + ";base64," + data, true
 		}
 	}
-	if strings.HasPrefix(strings.ToLower(value), "data:") {
-		header, data, ok := strings.Cut(value[5:], ",")
-		mime, base64Header := strings.CutSuffix(strings.ToLower(header), ";base64")
-		if !ok || !base64Header || !b.takeInlineImage(mime, data) {
+	if mime, data, isDataURL := SplitInlineImageURL(value); isDataURL {
+		if !b.takeInlineImage(mime, data) {
 			return "", false
 		}
 	} else {
@@ -93,6 +91,22 @@ func (b *ChatImageBudget) imageURL(block prompt.ContentBlock) (string, bool) {
 	}
 	b.count++
 	return value, true
+}
+
+// SplitInlineImageURL splits a Base64 data URL without copying the payload.
+// The boolean identifies the scheme even if the header is invalid.
+func SplitInlineImageURL(value string) (mime, data string, isDataURL bool) {
+	const prefix, suffix = "data:", ";base64"
+	value = strings.TrimSpace(value)
+	if len(value) < len(prefix) || !strings.EqualFold(value[:len(prefix)], prefix) {
+		return "", "", false
+	}
+	header, data, ok := strings.Cut(value[len(prefix):], ",")
+	end := len(header) - len(suffix)
+	if !ok || end <= 0 || !strings.EqualFold(header[end:], suffix) {
+		return "", "", true
+	}
+	return strings.ToLower(header[:end]), data, true
 }
 
 func (b *ChatImageBudget) takeInlineImage(mime, data string) bool {

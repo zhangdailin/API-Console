@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"strings"
@@ -8,26 +9,12 @@ import (
 	"time"
 )
 
-// MemoryResponseTTL is the lifetime of an in-process stored response when the
-// caller asks for no particular TTL. It mirrors the Redis default so switching
-// backends never silently shortens a conversation.
-const MemoryResponseTTL = 30 * 24 * time.Hour
-
 // memoryResponseSweepThreshold bounds the map before an expired-entry sweep is
 // attempted. Without it a long-lived process that stores many short-lived
 // responses would only ever drop expired rows when they happen to be read again.
 const memoryResponseSweepThreshold = 256
 
-var (
-	ErrMemoryResponseStoreNotConfigured = errors.New("memory response store not configured")
-	ErrStoredResponseIdentityRequired   = errors.New("response id and owner are required")
-)
-
-// memoryStoredResponse is one entry of the in-process response store.
-type memoryStoredResponse struct {
-	record    StoredResponse
-	expiresAt time.Time
-}
+var ErrMemoryResponseStoreNotConfigured = errors.New("memory response store not configured")
 
 // MemoryResponseStore is an in-process implementation of the stored-response
 // contract, used when the gateway has no response backend to talk to.
@@ -45,20 +32,27 @@ type memoryStoredResponse struct {
 // expired row are both reported as ErrNoRows so callers keep the 404 they
 // already produce for Redis.
 type MemoryResponseStore struct {
-	mu      sync.Mutex
-	entries map[string]memoryStoredResponse
-	ttl     time.Duration
-	now     func() time.Time
+	mu           sync.Mutex
+	entries      map[string]StoredResponse
+	ttl          time.Duration
+	now          func() time.Time
+	files        map[string]memoryResponseFile
+	sweepFilesAt time.Time
+}
+
+type memoryResponseFile struct {
+	payload   string
+	expiresAt time.Time
 }
 
 // NewMemoryResponseStore returns a store whose records live for ttl. A
-// non-positive ttl selects MemoryResponseTTL.
+// non-positive ttl selects DefaultStoredResponseTTL.
 func NewMemoryResponseStore(ttl time.Duration) *MemoryResponseStore {
 	if ttl <= 0 {
-		ttl = MemoryResponseTTL
+		ttl = DefaultStoredResponseTTL
 	}
 	return &MemoryResponseStore{
-		entries: make(map[string]memoryStoredResponse),
+		entries: make(map[string]StoredResponse),
 		ttl:     ttl,
 		now:     time.Now,
 	}
@@ -83,7 +77,7 @@ func (s *MemoryResponseStore) timestamp() time.Time {
 // sweepLocked drops expired entries. The caller must hold s.mu.
 func (s *MemoryResponseStore) sweepLocked(now time.Time) {
 	for key, entry := range s.entries {
-		if !entry.expiresAt.IsZero() && !now.Before(entry.expiresAt) {
+		if !entry.ExpiresAt.IsZero() && !now.Before(entry.ExpiresAt) {
 			delete(s.entries, key)
 		}
 	}
@@ -94,38 +88,66 @@ func (s *MemoryResponseStore) SaveStoredResponse(_ context.Context, response *St
 	if s == nil {
 		return ErrMemoryResponseStoreNotConfigured
 	}
-	if response == nil {
-		return ErrStoredResponseIdentityRequired
-	}
-	responseID := strings.TrimSpace(response.ResponseID)
-	ownerHash := strings.TrimSpace(response.OwnerHash)
-	if responseID == "" || ownerHash == "" {
-		return ErrStoredResponseIdentityRequired
-	}
 	if ttl <= 0 {
 		ttl = s.ttl
 	}
 	now := s.timestamp().UTC()
-	stored := *response
-	stored.ResponseID = responseID
-	stored.OwnerHash = ownerHash
-	if stored.CreatedAt.IsZero() {
-		stored.CreatedAt = now
+	stored, files, err := prepareStoredResponse(response, now, ttl)
+	if err != nil {
+		return err
 	}
-	stored.UpdatedAt = now
-	stored.ExpiresAt = now.Add(ttl)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.entries) >= memoryResponseSweepThreshold {
 		s.sweepLocked(now)
 	}
-	s.entries[memoryResponseKey(responseID, ownerHash)] = memoryStoredResponse{record: stored, expiresAt: stored.ExpiresAt}
+	if !now.Before(s.sweepFilesAt) {
+		for key, file := range s.files {
+			if !file.expiresAt.After(now) {
+				delete(s.files, key)
+			}
+		}
+		s.sweepFilesAt = now.Add(time.Minute)
+	}
+	if len(files) > 0 && s.files == nil {
+		s.files = make(map[string]memoryResponseFile)
+	}
+	for digest, payload := range files {
+		key := memoryResponseKey(digest, stored.OwnerHash)
+		file := s.files[key]
+		if file.payload == "" {
+			file.payload = payload
+		}
+		if file.expiresAt.Before(stored.ExpiresAt) {
+			file.expiresAt = stored.ExpiresAt
+		}
+		s.files[key] = file
+	}
+	s.entries[memoryResponseKey(stored.ResponseID, stored.OwnerHash)] = stored
 	return nil
 }
 
-// GetStoredResponse implements the response-store contract.
-func (s *MemoryResponseStore) GetStoredResponse(_ context.Context, responseID, ownerHash string) (*StoredResponse, error) {
+func (s *MemoryResponseStore) GetStoredResponse(ctx context.Context, responseID, ownerHash string) (*StoredResponse, error) {
+	stored, err := s.GetStoredResponseMetadata(ctx, responseID, ownerHash)
+	if err != nil {
+		return nil, err
+	}
+	if err := restoreResponseInputFiles(stored, func(digest string) (string, error) {
+		s.mu.Lock()
+		file := s.files[memoryResponseKey(digest, stored.OwnerHash)]
+		s.mu.Unlock()
+		if file.payload == "" {
+			return "", errInvalidResponseInputFile
+		}
+		return file.payload, nil
+	}); err != nil {
+		return nil, err
+	}
+	return stored, nil
+}
+
+func (s *MemoryResponseStore) GetStoredResponseMetadata(_ context.Context, responseID, ownerHash string) (*StoredResponse, error) {
 	if s == nil {
 		return nil, ErrMemoryResponseStoreNotConfigured
 	}
@@ -138,17 +160,39 @@ func (s *MemoryResponseStore) GetStoredResponse(_ context.Context, responseID, o
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	entry, ok := s.entries[key]
+	stored, ok := s.entries[key]
 	if !ok {
 		return nil, ErrNoRows
 	}
 	now := s.timestamp().UTC()
-	if !entry.expiresAt.IsZero() && !now.Before(entry.expiresAt) {
+	if !stored.ExpiresAt.IsZero() && !now.Before(stored.ExpiresAt) {
 		delete(s.entries, key)
 		return nil, ErrNoRows
 	}
-	stored := entry.record
 	return &stored, nil
+}
+
+func (s *MemoryResponseStore) UpdateStoredResponseBody(_ context.Context, previous *StoredResponse, body []byte) error {
+	if s == nil {
+		return ErrMemoryResponseStoreNotConfigured
+	}
+	if previous == nil {
+		return ErrNoRows
+	}
+	key := memoryResponseKey(previous.ResponseID, previous.OwnerHash)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stored, ok := s.entries[key]
+	now := s.timestamp().UTC()
+	if !ok || !stored.ExpiresAt.After(now) {
+		return ErrNoRows
+	}
+	if !stored.bodyMatches(previous) {
+		return ErrStoredResponseChanged
+	}
+	stored.Body, stored.UpdatedAt = bytes.Clone(body), now
+	s.entries[key] = stored
+	return nil
 }
 
 // DeleteStoredResponse implements the response-store contract.

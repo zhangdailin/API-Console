@@ -29,7 +29,7 @@ func nativeAuditRequest(model string, payload map[string]any) *chatwire.Request 
 // serveNativeResponses shares one physical-call budget across transport
 // retries and reasoning recovery. Every account starts from immutable input
 // and rejected output never establishes response ownership or replay.
-func (h *Handler) serveNativeResponses(w http.ResponseWriter, r *http.Request, sess *chatAccountSession, pinned bool, spec ModelSpec, payload map[string]any, path string, namespaces responses.ToolNamespaces) (responseID string, captured []byte, result chatOutcome) {
+func (h *Handler) serveNativeResponses(w http.ResponseWriter, r *http.Request, sess *chatAccountSession, pinned bool, spec ModelSpec, payload map[string]any, path string, namespaces responses.ToolNamespaces, commit func(string) error) (responseID string, captured []byte, result chatOutcome) {
 	ctx := withClientTurnIndex(r.Context(), r)
 	ctx, attempts := upstream.WithAttemptBudget(ctx, config.GenerationMaxAttempts)
 	immutable, err := cloneBuildPayload(payload)
@@ -131,8 +131,10 @@ func (h *Handler) serveNativeResponses(w http.ResponseWriter, r *http.Request, s
 			}()
 		}
 		defer resp.Body.Close()
-		delivery.WriteHeader(resp.StatusCode)
-		responseID, captured, result = copyNativeResponse(delivery, resp.Body, resp.Header.Get("Content-Type"), spec.ID, namespaces)
+		if keepalive != nil {
+			delivery.WriteHeader(resp.StatusCode)
+		}
+		responseID, captured, result = copyNativeResponse(delivery, resp.Body, resp.Header.Get("Content-Type"), spec.ID, namespaces, resp.StatusCode, commit)
 	}()
 	h.auditChatOutcome(ctx, sess.acc, req, result)
 	return

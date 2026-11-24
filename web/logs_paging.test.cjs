@@ -55,7 +55,7 @@ function load(){
   });
   let src=fs.readFileSync(path.join(__dirname,'static/js/logs.js'),'utf8');
   src=src.replace(/  if \(document\.readyState === 'loading'\)[\s\S]*?\r?\n  \}\r?\n\}\)\(\);\s*$/,
-    'globalThis.review={state,load,renderRows,renderDetail,filters,bind,scopeNote,renderPager};\n})();');
+    'globalThis.review={state,load,renderRows,renderDetail,filters,bind,renderPager};\n})();');
   vm.runInContext(src,context);
   return {...context.review,context,ids};
 }

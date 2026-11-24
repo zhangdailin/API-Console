@@ -542,14 +542,7 @@ function updateModelChannelOptions() {
   if (!select) return;
 
   const previous = select.value;
-  select.innerHTML = "";
-  modelChannels().forEach((channel) => {
-    const option = document.createElement("option");
-    option.value = channel;
-    option.textContent = channel;
-    select.appendChild(option);
-  });
-
+  select.replaceChildren(...modelChannels().map(channel => ConsoleUI.option(channel)));
   if (previous && Array.from(select.options).some((option) => option.value === previous)) {
     select.value = previous;
   } else if (currentModelChannel && Array.from(select.options).some((option) => option.value === currentModelChannel)) { select.value = currentModelChannel; }

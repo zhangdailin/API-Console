@@ -10,16 +10,6 @@
     window: 180,
     channel: '',
     model: '',
-    // Set when new data arrives while the tab is hidden or a read is in flight;
-    // the read happens as soon as the operator can see it.
-    refreshPending: false,
-    // The live-update bookkeeping: the request counters last seen on the flow
-    // stream, when the last read started, and the timer of a deferred one.
-    flowMark: '',
-    lastLoadAt: 0,
-    liveTimer: null,
-    // Prevent slow overview/runtime requests from overlapping on each refresh
-    // tick and multiplying server aggregation plus SVG rendering work.
     loading: false,
     overview: null,
     // outcome selects which cohort the latency cards describe: every request, the
@@ -119,18 +109,6 @@
     const outcome = params.get('outcome');
     if (outcome && OUTCOME_TABS.some((tab) => tab.key === outcome)) state.outcome = outcome;
   }
-
-
-
-
-
-  // --- element builders ------------------------------------------------------
-  // Nearly every element this page draws is the same three statements (create,
-  // class, text). These own that shape so the render functions read as WHAT they
-  // draw instead of how, and so a class name is written once.
-
-
-
 
   // An empty box and a broken one look alike, so both say which they are. Every
   // empty chart, table and resource row goes through these two.
@@ -274,15 +252,12 @@
   // polyPath turns coordinates into a path. A gap — a minute with no sample —
   // breaks the line instead of bridging it with a straight segment that reads as
   // a measured value: every null restarts the path with M.
-  function polyPath(coords, values) {
-    const parts = [];
-    coords.forEach((coord, index) => {
-      const value = values ? values[index] : coord.value;
-      if (value === null || value === undefined) return;
-      const command = parts.length === 0 || (values && values[index - 1] == null) ? 'M' : 'L';
-      parts.push(`${command}${coord.x.toFixed(1)},${coord.y.toFixed(1)}`);
-    });
-    return parts.join(' ');
+  function polyPath(coords) {
+    return coords.flatMap((coord, index) => {
+      if (coord.value == null) return [];
+      const command = coords[index - 1]?.value == null ? 'M' : 'L';
+      return `${command}${coord.x.toFixed(1)},${coord.y.toFixed(1)}`;
+    }).join(' ');
   }
 
   // timeAxis prints at most six minute labels plus the last one: forty labels for
@@ -319,17 +294,21 @@
     axisLabels(svg, box, maxValue, 4, options.axisFormat);
 
     const step = box.plotW / Math.max(points.length - 1, 1);
-    const coords = points.map((point, index) => ({ x: points.length === 1 ? box.left + box.plotW / 2 : box.left + step * index, y: box.top + box.plotH - (point.value / maxValue) * box.plotH }));
+    const xOf = index => points.length === 1 ? box.left + box.plotW / 2 : box.left + step * index;
+    const coordinates = (series, max) => series.map(({ value }, index) => ({
+      x: xOf(index), y: box.top + box.plotH - (value / max) * box.plotH, value,
+    }));
+    const coords = coordinates(points, maxValue);
+    const path = polyPath(coords);
 
     if (options.area) {
       const baseline = (box.top + box.plotH).toFixed(1);
       svg.appendChild(svgEl('path', {
-        d: `${polyPath(coords, points.map((point) => point.value))} L${coords[coords.length - 1].x.toFixed(1)},${baseline} L${coords[0].x.toFixed(1)},${baseline} Z`,
+        d: `${path} L${coords.at(-1).x.toFixed(1)},${baseline} L${coords[0].x.toFixed(1)},${baseline} Z`,
         class: 'series-area',
       }));
     }
-
-    svg.appendChild(svgEl('path', { d: polyPath(coords, points.map((point) => point.value)), class: options.className || 'series-qps' }));
+    svg.appendChild(svgEl('path', { d: path, class: options.className || 'series-qps' }));
     // A sample alone in a gap would be invisible without a dot: a one-point path
     // has no segment to draw.
     coords.forEach((coord, index) => {
@@ -345,17 +324,12 @@
     // so sharing one axis would flatten one of them into the baseline.
     if (options.secondaryPoints && options.secondaryPoints.length === points.length) {
       const secondaryMax = Math.max(options.secondaryMax || 0, ...options.secondaryPoints.map((p) => p.value), 0.0001);
-      const secondaryCoords = options.secondaryPoints.map((point, index) => ({
-        x: points.length === 1 ? box.left + box.plotW / 2 : box.left + step * index,
-        y: box.top + box.plotH - (point.value / secondaryMax) * box.plotH,
-      }));
-      svg.appendChild(svgEl('path', { d: polyPath(secondaryCoords, options.secondaryPoints.map((point) => point.value)), class: 'series-tps' }));
+      svg.appendChild(svgEl('path', { d: polyPath(coordinates(options.secondaryPoints, secondaryMax)), class: 'series-tps' }));
       axisLabels(svg, box, secondaryMax, box.right + 4);
     }
 
     timeAxis(svg, box, points, (index) => coords[index].x);
-    container.replaceChildren();
-    container.appendChild(svg);
+    container.replaceChildren(svg);
   }
 
   // barChart renders a per-minute bar series (errors, sparkline ticks). An optional
@@ -394,8 +368,7 @@
       svg.appendChild(svgEl('polyline', { points: coords.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' '), class: 'series-alt' }));
     }
     timeAxis(svg, box, points, (index) => box.left + barStep * index + barW / 2);
-    container.replaceChildren();
-    container.appendChild(svg);
+    container.replaceChildren(svg);
   }
 
   // --- KPI cards -------------------------------------------------------------
@@ -1060,7 +1033,6 @@
     return { model: '', requests, success, failed: requests - success, success_rate: success / requests, samples: requests };
   }
 
-
   // fillOptions rebuilds a <select> of one "all" entry plus the given values. The
   // options come from the payload, so they are rewritten on every refresh; the
   // selection is restored afterwards because rewriting clears it.
@@ -1114,13 +1086,14 @@
 
   const overviewLoads = ConsoleUI.requestGate();
   const alertLoads = ConsoleUI.requestGate();
+  const refresh = ConsoleUI.liveRefresh(() => load({ live: true }));
   // load reads the overview. A live update (a request started or ended) keeps the
   // page as it is until the new figures arrive and never cancels a read in
   // flight; an operator's action (a filter, the refresh button) supersedes it.
   async function load(options) {
     const live = Boolean(options && options.live);
     if (state.loading) {
-      state.refreshPending = true;
+      refresh.defer();
       if (!live) {
         overviewLoads.cancel();
         alertLoads.cancel();
@@ -1128,7 +1101,7 @@
       return;
     }
     state.loading = true;
-    state.lastLoadAt = Date.now();
+    refresh.read();
     const ticket = overviewLoads.begin();
     const scope = { window: state.window, channel: state.channel };
     if (!state.overview) renderSkeletons();
@@ -1184,12 +1157,7 @@
       await loadAlertEvents();
     } finally {
       state.loading = false;
-      // Coalesce every refresh requested while this one was in flight into one
-      // follow-up pass, rather than losing a filter change or starting N passes.
-      if (state.refreshPending && (typeof document === 'undefined' || !document.hidden)) {
-        state.refreshPending = false;
-        scheduleLiveRefresh();
-      }
+      refresh.flush();
     }
   }
 
@@ -1245,14 +1213,7 @@
         point.input_tokens || 0, point.output_tokens || 0,
       ].join(',')).join('\n');
       const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `orchids-ops-${state.window}min.csv`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      ConsoleUI.downloadBlob(blob, `orchids-ops-${state.window}min.csv`);
     });
 
     attachHandler('opsAlertReload', 'click', loadAlertEvents);
@@ -1269,46 +1230,8 @@
     });
   }
 
-  // The overview follows the live flow stream instead of a countdown: a request
-  // that starts or finishes changes the aggregates, so it triggers a read. Reads
-  // are spaced at least LIVE_MIN_GAP_MS apart so a busy gateway costs one read
-  // per gap, not one per request. LIVE_IDLE_MS re-reads a quiet page so the
-  // resource gauges and alert events still move with no traffic at all.
-  const LIVE_MIN_GAP_MS = 2000;
-  const LIVE_IDLE_MS = 30000;
-
-  function scheduleLiveRefresh() {
-    if (typeof document !== 'undefined' && document.hidden) {
-      state.refreshPending = true;
-      return;
-    }
-    if (state.liveTimer != null) return;
-    const wait = Math.max(0, state.lastLoadAt + LIVE_MIN_GAP_MS - Date.now());
-    state.liveTimer = window.setTimeout(() => {
-      state.liveTimer = null;
-      return load({ live: true });
-    }, wait);
-  }
-
-  function onFlow(event) {
-    const detail = (event && event.detail) || {};
-    const mark = [detail.instance, detail.started, detail.completed].join(':');
-    if (mark === state.flowMark) return;
-    const first = state.flowMark === '';
-    state.flowMark = mark;
-    if (!first) scheduleLiveRefresh();
-  }
-
-  function idleRefresh() {
-    if (Date.now() - state.lastLoadAt >= LIVE_IDLE_MS) scheduleLiveRefresh();
-  }
-
-  // Returning to the tab catches up at once with whatever arrived while hidden.
-  function flushPendingRefresh() {
-    if (typeof document !== 'undefined' && document.hidden) return;
-    if (!state.refreshPending) return;
-    state.refreshPending = false;
-    scheduleLiveRefresh();
+  function onFlow({ detail }) {
+    refresh.observe([detail?.instance, detail?.started, detail?.completed].join(':'));
   }
 
   // applyUrlState puts the page back where the URL says it should be: the filters
@@ -1338,7 +1261,7 @@
     bind();
     load();
   }
-  if (typeof document.addEventListener === 'function') { document.addEventListener('visibilitychange', flushPendingRefresh); }
+  if (typeof document.addEventListener === 'function') { document.addEventListener('visibilitychange', refresh.flush); }
   if (typeof window.addEventListener === 'function') window.addEventListener('ops:flow', onFlow);
-  setInterval(idleRefresh, 5000);
+  setInterval(refresh.idle, 5000);
 })();

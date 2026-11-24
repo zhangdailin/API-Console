@@ -117,12 +117,16 @@
 /* ---- Tabs and capability --------------------------------------------------- */
 
 .grok-tools-page .grok-tools-workspace {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: var(--gw-gap);
 }
 
 .grok-tools-page .gw-tabs {
+  min-width: 0;
+  flex-wrap: nowrap;
+  overscroll-behavior-inline: contain;
   display: flex;
   width: 100%;
   gap: 4px;
@@ -179,6 +183,8 @@
 .grok-tools-page .gw-tab-dot.is-unavailable { background: var(--warn); opacity: 1; }
 
 .grok-tools-page .gw-capability {
+  flex-wrap: wrap;
+  min-height: var(--control-h-lg);
   display: flex;
   align-items: center;
   gap: var(--space-3);
@@ -200,9 +206,6 @@
 
 .grok-tools-page .gw-capability .capability-copy strong { font-size: 0.88rem; }
 .grok-tools-page .gw-capability .capability-copy .hint { font-size: 0.8rem; }
-
-/* The tab dots carry the per-feature verdict now; the badge row repeated it. */
-.grok-tools-page .gw-capability .capability-badges { display: none; }
 
 .grok-tools-page .gw-capability.is-warning {
   border-color: color-mix(in srgb, var(--warn) 45%, var(--gw-line));

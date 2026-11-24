@@ -16,15 +16,45 @@ type rateLimitFieldFamily struct {
 	remainingKeys []string
 }
 
-func buildRateLimitNumericKeySet(families []rateLimitFieldFamily) map[string]struct{} {
-	out := make(map[string]struct{})
-	for _, family := range families {
-		for _, key := range family.limitKeys {
-			out[key] = struct{}{}
+// Each snake-case field is tried before its compact spelling. Keep the
+// documented priority when both spellings occur in the same upstream reply.
+func rateLimitAliases(keys ...string) []string {
+	out := make([]string, 0, 2*len(keys))
+	for _, key := range keys {
+		out = append(out, key)
+		if compact := strings.ReplaceAll(key, "_", ""); compact != key {
+			out = append(out, compact)
 		}
-		for _, key := range family.remainingKeys {
-			out[key] = struct{}{}
+	}
+	return out
+}
+
+var rateLimitFamilies = []rateLimitFieldFamily{
+	{"tokens", rateLimitAliases("limit_tokens", "max_tokens", "token_limit", "tokens_limit", "total_tokens"),
+		rateLimitAliases("remaining_tokens", "tokens_remaining")},
+	{"requests", rateLimitAliases("max_queries", "query_limit", "queries_limit", "total_queries", "request_limit", "requests_limit"),
+		rateLimitAliases("remaining_queries", "queries_remaining", "remaining_requests")},
+	{"", rateLimitAliases("limit", "quota", "quota_limit"), rateLimitAliases("remaining", "quota_remaining")},
+}
+
+var rateLimitResetOrder = rateLimitAliases("reset", "reset_at", "reset_at_ms", "reset_time", "reset_timestamp", "next_reset")
+var rateLimitResetKeys = stringKeySet(rateLimitResetOrder)
+var rateLimitNumericKeys = func() map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, family := range rateLimitFamilies {
+		for _, keys := range [][]string{family.limitKeys, family.remainingKeys} {
+			for _, key := range keys {
+				out[key] = struct{}{}
+			}
 		}
+	}
+	return out
+}()
+
+func stringKeySet(keys []string) map[string]struct{} {
+	out := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		out[key] = struct{}{}
 	}
 	return out
 }
@@ -85,37 +115,16 @@ func collectRateLimitPayloadFields(value any, numericFields map[string]int64, re
 }
 
 func buildRateLimitInfoFromFields(numericFields map[string]int64, resetFields map[string]time.Time) *RateLimitInfo {
-	var (
-		best         *RateLimitInfo
-		bestRank     = -1
-		bestComplete bool
-	)
-
-	for idx, family := range rateLimitFamilies {
+	var best *RateLimitInfo
+	for _, family := range rateLimitFamilies {
 		limit, hasLimit := firstRateLimitNumeric(numericFields, family.limitKeys)
 		remaining, hasRemaining := firstRateLimitNumeric(numericFields, family.remainingKeys)
-		if !hasLimit && !hasRemaining {
+		complete := hasLimit && hasRemaining
+		if !complete && (best != nil || (!hasLimit && !hasRemaining)) {
 			continue
 		}
-		complete := hasLimit && hasRemaining
-		if best != nil {
-			if bestComplete && !complete {
-				continue
-			}
-			if bestComplete == complete && bestRank <= idx {
-				continue
-			}
-		}
-		best = &RateLimitInfo{
-			Limit:        limit,
-			HasLimit:     hasLimit,
-			Remaining:    remaining,
-			HasRemaining: hasRemaining,
-			Unit:         family.unit,
-		}
-		bestRank = idx
-		bestComplete = complete
-		if complete && idx == 0 {
+		best = &RateLimitInfo{Limit: limit, HasLimit: hasLimit, Remaining: remaining, HasRemaining: hasRemaining, Unit: family.unit}
+		if complete {
 			break
 		}
 	}
@@ -143,19 +152,7 @@ func firstRateLimitNumeric(fields map[string]int64, keys []string) (int64, bool)
 }
 
 func firstRateLimitReset(fields map[string]time.Time) (time.Time, bool) {
-	for _, key := range []string{
-		"reset",
-		"reset_at",
-		"resetat",
-		"reset_at_ms",
-		"resetatms",
-		"reset_time",
-		"resettime",
-		"reset_timestamp",
-		"resettimestamp",
-		"next_reset",
-		"nextreset",
-	} {
+	for _, key := range rateLimitResetOrder {
 		if t, ok := fields[key]; ok && !t.IsZero() {
 			return t, true
 		}

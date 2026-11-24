@@ -638,10 +638,9 @@
     ]);
   }
 
-  function factsGrid(facts) {
-    const grid = make('div', 'logs-facts');
-    (facts || []).forEach((node) => grid.appendChild(node));
-    return grid;
+  function appendFacts(panel, title, rows) {
+    const facts = rows.filter(Boolean).map(([label, value, options]) => fact(label, value, options));
+    if (facts.length) attach(panel, [sectionTitle(title), attach(make('div', 'logs-facts'), facts)]);
   }
 
   function sectionTitle(text_) { return make('div', 'logs-detail-section-title', text_); }
@@ -695,122 +694,89 @@
     if (title) title.textContent = text(ACTION_LABELS[event.action] || actionLabel(event.action), '详情');
     if (sub) sub.textContent = formatAbsoluteTime(event.timestamp) + ' · ' + text(event.request_id, '无请求 ID');
 
-    // --- outcome first: a failing request is the usual reason this panel is open ---
-    const outcomeRow = make('div', 'logs-detail-outcome');
-    outcomeRow.appendChild(resultBadge(record));
-    // The journal's own status is worth printing when it says something the class
-    // does not (an upstream finish reason like "length"). For records written with
-    // the class in that field it would just repeat the badge in another language,
-    // and an operation's ok/error has nothing to do with an upstream.
-    const rawStatus = String(event.status || '');
-    const classToken = String(record.outcome_class || '');
-    const isInferenceRecord = String(event.kind || '') === 'request';
-    if (isInferenceRecord && rawStatus && rawStatus !== classToken && rawStatus !== outcome?.label) { outcomeRow.appendChild(make('span', 'logs-detail-raw', '上游状态：' + rawStatus)); }
-    // The HTTP status and the first-token latency are not columns of a journal row:
-    // the request middleware keeps them in metadata (http_status, first_token_ms),
-    // which is where the attempt list below reads them from too. Reading only the
-    // top-level fields meant a recorded 429 and a measured 135 ms were both dropped.
     const meta = event.metadata || {};
+    const isRequest = event.kind === 'request';
+    const rawStatus = String(event.status || '');
     const httpStatus = event.http_status || meta.http_status;
-    if (httpStatus) outcomeRow.appendChild(make('span', 'logs-detail-raw', 'HTTP ' + httpStatus));
-    panel.appendChild(outcomeRow);
+    // Report the provider's finish reason when the outcome badge doesn't cover it.
+    attach(panel, [attach(make('div', 'logs-detail-outcome'), [
+      resultBadge(record),
+      isRequest && rawStatus && rawStatus !== String(record.outcome_class || '') && rawStatus !== outcome?.label
+        ? make('span', 'logs-detail-raw', '上游状态：' + rawStatus) : null,
+      httpStatus ? make('span', 'logs-detail-raw', 'HTTP ' + httpStatus) : null,
+    ])]);
 
     if (event.error) {
       panel.appendChild(sectionTitle('失败原因'));
       panel.appendChild(make('pre', 'logs-detail-error', event.error));
     }
 
-    // --- actions: what you do next with a record you are looking at ---------------
-    const actions = make('div', 'logs-detail-actions');
-    if (event.request_id) { actions.appendChild(detailAction('复制请求 ID', () => copyToClipboard(event.request_id), event.request_id)); }
-    actions.appendChild(detailAction('复制摘要', () => copyToClipboard(summarizeRecord(record)), summarizeRecord(record)));
-    if (!probe && (event.channel || event.model)) {
-      // Narrowing the list to this channel/model is the next question after "what
-      // happened here" — answer it in place instead of retyping the filters.
-      actions.appendChild(detailAction('只看这个渠道/模型', () => applyRecordScope(event), '用该记录的渠道与模型筛选列表'));
-    }
-    if (actions.childElementCount) panel.appendChild(actions);
+    const summary = summarizeRecord(record);
+    panel.appendChild(attach(make('div', 'logs-detail-actions'), [
+      event.request_id ? detailAction('复制请求 ID', () => copyToClipboard(event.request_id), event.request_id) : null,
+      detailAction('复制摘要', () => copyToClipboard(summary), summary),
+      !probe && (event.channel || event.model)
+        ? detailAction('只看这个渠道/模型', () => applyRecordScope(event), '用该记录的渠道与模型筛选列表') : null,
+    ]));
 
-    // --- request facts ------------------------------------------------------------
-    // Which facts matter depends on the journal: 渠道 / 模型 / Token belong to
-    // inference traffic, while an operation is described by what it did and to
-    // which object. Printing 模型 未标注 for an account creation is noise.
-    const isRequest = String(event.kind || '') === 'request';
-    panel.appendChild(sectionTitle(probe ? '探测目标' : (isRequest ? '请求' : '记录')));
-    const requestFacts = [];
-    if (probe) {
-      requestFacts.push(fact('记录渠道', 'probe（合成探测）', { title: '合成流量：不代表某个渠道的用户请求' }));
-      requestFacts.push(fact('被探测渠道', text(event.provider, '未标注渠道')));
-      requestFacts.push(fact('模型', '探测请求不携带真实模型', { empty: true }));
-    } else if (isRequest) {
-      const route = requestRoute(event);
-      requestFacts.push(fact('渠道', text(event.channel, '未标注'), { empty: !event.channel }));
-      requestFacts.push(fact('请求模型', text(event.model, '未标注'), { empty: !event.model }));
-      requestFacts.push(fact('上游实际模型', route.served || unknownServedModel(route), { empty: !route.served }));
-      requestFacts.push(fact('模型信息来源', modelSourceLabel(route)));
-      if (route.fallbackKnown) requestFacts.push(fact('上游模型回退', route.fallback ? '是' : '否'));
-      if (route.sent) requestFacts.push(fact('发送模型', route.sent));
-      if (!route.provider) requestFacts.push(fact('上游服务商', '未知（上游未报告）', { empty: true }));
-      if (route.provider) {
-        requestFacts.push(fact('上游服务商', route.provider, { title: '上游网关报告的最终服务商' }));
-        if (route.providerAttempts > 0) requestFacts.push(fact('服务商尝试', route.providerAttempts + ' 次'));
-      }
-      if (route.inbound) requestFacts.push(fact('入站端点', route.inbound));
-      if (route.endpoint) requestFacts.push(fact('上游端点', route.endpoint, { title: route.host ? route.host + route.endpoint : '' }));
-    } else {
-      requestFacts.push(fact('动作', text(ACTION_LABELS[event.action] || actionLabel(event.action), '—'), { wide: true, title: String(event.action || '') }));
-      const objectName = targetLabel(event.target, event.action);
-      if (objectName || event.account_id) { requestFacts.push(fact('对象', objectName || ('账号 #' + event.account_id), { title: String(event.target || '') })); }
-    }
-    // The 对象 row already names the row this operation touched; a second 账号
-    // 未指定账号 next to it only contradicts it.
-    if (event.account_id) {
-      requestFacts.push(fact('账号', String(event.account_id)));
-    } else if (isRequest) {
-      requestFacts.push(fact('账号', '未指定账号', { empty: true }));
-    }
-    requestFacts.push(fact('记录类型', text(KIND_LABELS[event.kind] || event.kind, '—')));
-    if (event.request_id) requestFacts.push(fact('请求 ID', event.request_id, { title: event.request_id }));
-    if (event.actor) requestFacts.push(fact('操作者', event.actor));
-    if (event.client_ip) requestFacts.push(fact('来源 IP', event.client_ip));
-    panel.appendChild(factsGrid(requestFacts));
+    const route = isRequest && !probe ? requestRoute(event) : null;
+    const object = !probe && !isRequest ? targetLabel(event.target, event.action) : '';
+    const requestFacts = probe ? [
+      ['记录渠道', 'probe（合成探测）', { title: '合成流量：不代表某个渠道的用户请求' }],
+      ['被探测渠道', text(event.provider, '未标注渠道')],
+      ['模型', '探测请求不携带真实模型', { empty: true }],
+    ] : route ? [
+      ['渠道', text(event.channel, '未标注'), { empty: !event.channel }],
+      ['请求模型', text(event.model, '未标注'), { empty: !event.model }],
+      ['上游实际模型', route.served || unknownServedModel(route), { empty: !route.served }],
+      ['模型信息来源', modelSourceLabel(route)],
+      route.fallbackKnown && ['上游模型回退', route.fallback ? '是' : '否'],
+      route.sent && ['发送模型', route.sent],
+      ['上游服务商', route.provider || '未知（上游未报告）', route.provider
+        ? { title: '上游网关报告的最终服务商' } : { empty: true }],
+      route.provider && route.providerAttempts > 0 && ['服务商尝试', route.providerAttempts + ' 次'],
+      route.inbound && ['入站端点', route.inbound],
+      route.endpoint && ['上游端点', route.endpoint, { title: route.host ? route.host + route.endpoint : '' }],
+    ] : [
+      ['动作', text(ACTION_LABELS[event.action] || actionLabel(event.action), '—'), { wide: true, title: String(event.action || '') }],
+      (object || event.account_id) && ['对象', object || '账号 #' + event.account_id, { title: String(event.target || '') }],
+    ];
+    requestFacts.push(
+      event.account_id ? ['账号', String(event.account_id)] : isRequest && ['账号', '未指定账号', { empty: true }],
+      ['记录类型', text(KIND_LABELS[event.kind] || event.kind, '—')],
+      event.request_id && ['请求 ID', event.request_id, { title: event.request_id }],
+      event.actor && ['操作者', event.actor],
+      event.client_ip && ['来源 IP', event.client_ip],
+    );
+    appendFacts(panel, probe ? '探测目标' : isRequest ? '请求' : '记录', requestFacts);
 
-    // --- usage and latency --------------------------------------------------------
-    const usageFacts = [];
-    if (event.duration_ms) usageFacts.push(fact('总耗时', event.duration_ms + ' ms'));
     const speed = outputSpeed(event);
-    if (speed) usageFacts.push(fact('输出速度', formatSpeed(speed), { title: speed.overall ? '没有可用的生成时段，按整个请求时长计算' : '' }));
     const cost = formatCost(event.cost_in_usd_ticks);
-    if (cost) usageFacts.push(fact('费用', cost, { title: event.pricing_model ? '计价模型：' + event.pricing_model : '' }));
-    // Same metadata contract as http_status above: the measured first-token latency
-    // lives in metadata, so the row has to look there or the figure is never shown.
     const firstTokenMS = event.first_token_ms || meta.first_token_ms;
-    if (firstTokenMS != null) usageFacts.push(fact(meta.first_token_kind === 'body_ttfb' ? '非流式 TTFB' : '首生成（含推理）', firstTokenMS + ' ms'));
-    if (meta.first_visible_token_ms != null) usageFacts.push(fact('首字', meta.first_visible_token_ms + ' ms'));
-    if (meta.finish_reason) usageFacts.push(fact('结束原因', meta.finish_reason));
-    if (meta.output_truncated) usageFacts.push(fact('输出预算', '耗尽 / 输出截断'));
-    if (meta.reasoning_only) usageFacts.push(fact('可见答案', '仅推理输出'));
-    if (meta.retry_wait_ms != null) usageFacts.push(fact('重试等待', meta.retry_wait_ms + ' ms'));
-    if (meta.upstream_attempts != null) usageFacts.push(fact('上游尝试', String(meta.upstream_attempts)));
+    const elapsed = (label, value) => value != null && [label, value + ' ms'];
+    const usageFacts = [
+      event.duration_ms && elapsed('总耗时', event.duration_ms),
+      speed && ['输出速度', formatSpeed(speed), { title: speed.overall ? '没有可用的生成时段，按整个请求时长计算' : '' }],
+      cost && ['费用', cost, { title: event.pricing_model ? '计价模型：' + event.pricing_model : '' }],
+      elapsed(meta.first_token_kind === 'body_ttfb' ? '非流式 TTFB' : '首生成（含推理）', firstTokenMS),
+      elapsed('首字', meta.first_visible_token_ms),
+      meta.finish_reason && ['结束原因', meta.finish_reason],
+      meta.output_truncated && ['输出预算', '耗尽 / 输出截断'],
+      meta.reasoning_only && ['可见答案', '仅推理输出'],
+      elapsed('重试等待', meta.retry_wait_ms),
+      meta.upstream_attempts != null && ['上游尝试', String(meta.upstream_attempts)],
+    ];
     if (meta.upstream_http_phase_samples > 0) {
       const labels = { dns_ms: '上游 DNS', tcp_ms: '上游 TCP', tls_ms: '上游 TLS', connection_wait_ms: '上游取连接', response_headers_ms: '上游响应头' };
-      Object.entries(labels).forEach(([key,label]) => {
-        if (meta.upstream_http_phases_sum?.[key] != null) usageFacts.push(fact(label + '（尝试累计）', meta.upstream_http_phases_sum[key] + ' ms'));
-      });
+      for (const [key, label] of Object.entries(labels)) {
+        usageFacts.push(elapsed(label + '（尝试累计）', meta.upstream_http_phases_sum?.[key]));
+      }
     }
-    const reportedTokens = (event.input_tokens || 0) + (event.output_tokens || 0);
-    if (reportedTokens > 0) {
-      usageFacts.push(fact('Token', (event.input_tokens || 0) + ' in / ' + (event.output_tokens || 0) + ' out'));
-    } else if (isRequest && !probe) {
-      // Zero tokens and "this channel does not report usage" are different facts;
-      // the row used to print "0 in / 0 out" for both. An operation has no tokens
-      // at all, so it says nothing rather than something misleading.
-      usageFacts.push(fact('Token', '该请求未上报用量', { empty: true }));
-    }
-    if (usageFacts.length) {
-      panel.appendChild(sectionTitle('用量与耗时'));
-      panel.appendChild(factsGrid(usageFacts));
-    }
+    const input = event.input_tokens || 0;
+    const output = event.output_tokens || 0;
+    usageFacts.push(input + output > 0 ? ['Token', input + ' in / ' + output + ' out']
+      : isRequest && !probe && ['Token', '该请求未上报用量', { empty: true }]);
+    appendFacts(panel, '用量与耗时', usageFacts);
 
     if (event.details) {
       panel.appendChild(sectionTitle(String(event.kind || '') === DIAGNOSTIC_INDEX_KIND ? '诊断内容摘要' : '变更摘要（凭据已脱敏）'));
@@ -918,19 +884,7 @@
   }
 
   function downloadDiagnosticText(name, content, type = 'text/plain;charset=utf-8') {
-    const url = URL.createObjectURL(new Blob([content], { type }));
-    const link = make('a');
-    link.href = url;
-    link.download = name.replace(/[\\/:*?"<>|\x00-\x1f]/g, '_');
-    link.hidden = true;
-    try {
-      document.body.appendChild(link);
-      link.click();
-    } finally {
-      link.remove();
-      // Keep the URL alive while the browser starts consuming the download.
-      setTimeout(() => URL.revokeObjectURL(url), 30000);
-    }
+    ConsoleUI.downloadBlob(new Blob([content], { type }), name.replace(/[\\/:*?"<>|\x00-\x1f]/g, '_'));
   }
 
   function diagnosticDownloadButton(container, label, download) {
@@ -1048,34 +1002,16 @@
     if (table) table.classList.toggle('is-request', state.kind === 'request');
   }
 
-  function scopeNote() {
-    renderHead();
+  function setDrawer(open) {
+    const drawer = el('logsDetail');
+    drawer?.classList.toggle('is-open', open);
+    if (open) drawer?.removeAttribute('aria-hidden');
+    else drawer?.setAttribute('aria-hidden', 'true');
+    el('logsDetailBackdrop')?.classList.toggle('is-open', open);
+    document.body.classList.toggle('drawer-open', open);
   }
 
-  function openDrawer() {
-    const drawer = el('logsDetail');
-    const backdrop = el('logsDetailBackdrop');
-    if (drawer) {
-      drawer.classList.add('is-open');
-      drawer.removeAttribute('aria-hidden');
-    }
-    if (backdrop) backdrop.classList.add('is-open');
-    // On a phone the panel covers the list, so the page behind it must not scroll
-    // under the finger reading the detail.
-    document.body.classList.add('drawer-open');
-  }
-
-  function closeDrawer() {
-    const drawer = el('logsDetail');
-    const backdrop = el('logsDetailBackdrop');
-    if (drawer) {
-      drawer.classList.remove('is-open');
-      // Kept out of the accessibility tree while it is off-screen.
-      drawer.setAttribute('aria-hidden', 'true');
-    }
-    if (backdrop) backdrop.classList.remove('is-open');
-    document.body.classList.remove('drawer-open');
-  }
+  const closeDrawer = () => setDrawer(false);
 
   // recordKey identifies a journal row across reads, so a live refresh can keep
   // the open detail and mark the rows that are new.
@@ -1094,7 +1030,7 @@
     renderDetail(record);
     const body = el('logsDetailBody');
     if (body) body.scrollTop = 0;
-    openDrawer();
+    setDrawer(true);
   }
 
   // load reads page `page` (0-based) of the current tab and filters. Page 0, or
@@ -1102,7 +1038,7 @@
   // A live read (options.live) re-reads the first page in place: it keeps the
   // scroll position and the open detail, and highlights the rows that are new.
   async function load(page, options) {
-    const live = Boolean(options && options.live);
+    const refresh = Boolean(options && options.live);
     let index = Number(page) || 0;
     if (index < 0 || index >= state.pageStarts.length) index = 0;
     if (index === 0) state.pageStarts = [''];
@@ -1114,10 +1050,10 @@
     // This load owns the list from here on. Anything still in flight answers an older
     // question (a previous tab, or a previous filter) and is dropped when it lands.
     const ticket = listLoads.begin();
-    live_.lastLoadAt = Date.now();
+    live.read();
     // An operator's read (a page, a tab, a filter) must not be superseded by a
     // live read of page one that fires while it is in flight.
-    if (!live) live_.userTicket = ticket;
+    if (!refresh) userTicket = ticket;
     try {
       const payload = await ConsoleAPI.journal(params, { signal: ticket.signal });
       if (!ticket.isCurrent()) return;
@@ -1128,7 +1064,7 @@
       state.pageStarts = state.pageStarts.slice(0, index + 1);
       if (state.cursor) state.pageStarts.push(state.cursor);
       state.records = payload.data || [];
-      if (live) {
+      if (refresh) {
         // The open detail stays as it is; only its row index moves with the list.
         const found = selectedKey ? state.records.findIndex((record) => recordKey(record) === selectedKey) : -1;
         state.selected = found >= 0 ? found : null;
@@ -1146,20 +1082,11 @@
     } catch (error) {
       // A failure that belongs to a superseded load must not replace the newer list
       // with an error row either. A failed live read keeps the list it had.
-      if (!ticket.accepts(error) || live) return;
+      if (!ticket.accepts(error) || refresh) return;
       const body = el('logsRows');
-      if (body) {
-        body.replaceChildren();
-        const tr = document.createElement('tr');
-        const td = document.createElement('td');
-        td.colSpan = tableColumns().length;
-        td.className = 'table-empty-cell';
-        td.textContent = '读取日志失败：' + (error.message || error);
-        tr.appendChild(td);
-        body.appendChild(tr);
-      }
+      if (body) emptyRow(body, tableColumns().length, '读取日志失败：' + (error.message || error));
     } finally {
-      if (live_.userTicket === ticket) live_.userTicket = null;
+      if (userTicket === ticket) userTicket = null;
     }
   }
 
@@ -1219,7 +1146,7 @@
     // A drill-down arrives with filters in force: show the form open so the scope
     // is editable, and show the scope bar so it is visible.
     toggleFilters(applied > 0);
-    scopeNote();
+    renderHead();
     document.querySelectorAll('.logs-tab').forEach((tab) => {
       tab.addEventListener('click', () => {
         document.querySelectorAll('.logs-tab').forEach((other) => {
@@ -1229,36 +1156,29 @@
         tab.classList.add('is-active');
         tab.setAttribute('aria-selected', 'true');
         state.kind = tab.getAttribute('data-kind') || 'request';
-        scopeNote();
+        renderHead();
         closeDrawer();
         syncUrl();
         restart();
       });
     });
-    const toggle = el('logsFiltersToggle');
-    if (toggle) toggle.addEventListener('click', () => toggleFilters());
-    const form = el('logsFilters');
-    if (form) form.addEventListener('submit', (event) => { event.preventDefault(); syncUrl(); restart(); });
-    // 刷新 re-reads the page in view; page 1 therefore picks up new records.
-    const reload = el('logsReload');
-    if (reload) reload.addEventListener('click', () => load(state.page));
-    const clear = el('logsClear');
-    if (clear) clear.addEventListener('click', clearFilters);
-    const scopeClear = el('logsScopeClear');
-    if (scopeClear) scopeClear.addEventListener('click', clearFilters);
-    const scopeBack = el('logsScopeBack');
-    if (scopeBack) {
-      scopeBack.addEventListener('click', () => {
-        // The overview's own scope travelled with the drill-down, so the way back
-        // lands on the chart that was clicked, not on a default view.
+    const pageAction = page => () => { closeDrawer(); load(page()); };
+    const clicks = {
+      logsFiltersToggle: () => toggleFilters(),
+      logsReload: () => load(state.page),
+      logsClear: clearFilters,
+      logsScopeClear: clearFilters,
+      logsScopeBack: () => {
         window.location.href = state.back || (window.location.pathname + '?tab=ops');
-      });
-    }
-    const pageActions = { logsFirst: () => load(0), logsPrev: () => load(state.page - 1), logsNext: () => load(state.page + 1) };
-    Object.entries(pageActions).forEach(([id, action]) => {
-      const button = el(id);
-      if (button) button.addEventListener('click', () => { closeDrawer(); action(); });
-    });
+      },
+      logsFirst: pageAction(() => 0),
+      logsPrev: pageAction(() => state.page - 1),
+      logsNext: pageAction(() => state.page + 1),
+      logsDetailClose: closeDrawer,
+      logsDetailBackdrop: closeDrawer,
+    };
+    Object.entries(clicks).forEach(([id, action]) => el(id)?.addEventListener('click', action));
+    el('logsFilters')?.addEventListener('submit', (event) => { event.preventDefault(); syncUrl(); restart(); });
     const sizeSelect = el('logsPageSize');
     if (sizeSelect) {
       sizeSelect.addEventListener('change', () => {
@@ -1268,10 +1188,6 @@
         restart();
       });
     }
-    const close = el('logsDetailClose');
-    if (close) close.addEventListener('click', closeDrawer);
-    const backdrop = el('logsDetailBackdrop');
-    if (backdrop) backdrop.addEventListener('click', closeDrawer);
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') closeDrawer();
     });
@@ -1304,78 +1220,36 @@
     button.disabled = false;
   }
 
-  // --- live updates ----------------------------------------------------------
-  // The first page follows new records as they are written. The trigger is the
-  // flow stream the overview's topology uses: it pushes whenever a request
-  // starts or finishes on this gateway, so a finished request is the cue to
-  // re-read page one. Reads wait LIVE_SETTLE_MS for the journal write that
-  // follows completion and are spaced LIVE_MIN_GAP_MS apart; LIVE_IDLE_MS
-  // re-reads anyway, for operation and system records no request produces.
-  // Later pages never move under the reader.
-  const LIVE_SETTLE_MS = 800;
-  const LIVE_MIN_GAP_MS = 2000;
-  const LIVE_IDLE_MS = 30000;
-  const live_ = { source: null, mark: '', timer: null, lastLoadAt: 0, pending: false, userTicket: null };
-
-  function liveEligible() {
-    return state.page === 0 && !(typeof document !== 'undefined' && document.hidden);
-  }
-
-  function scheduleLiveLoad() {
-    if (state.page !== 0) return;
-    if (typeof document !== 'undefined' && document.hidden) {
-      live_.pending = true;
-      return;
-    }
-    if (live_.timer != null) return;
-    const wait = Math.max(LIVE_SETTLE_MS, live_.lastLoadAt + LIVE_MIN_GAP_MS - Date.now());
-    live_.timer = window.setTimeout(() => {
-      live_.timer = null;
-      if (live_.userTicket) { scheduleLiveLoad(); return undefined; }
-      if (liveEligible()) return load(0, { live: true });
-      return undefined;
-    }, wait);
-  }
+  let source, userTicket;
+  const live = ConsoleUI.liveRefresh(() => load(0, { live: true }), {
+    settle: 800, eligible: () => state.page === 0, busy: () => Boolean(userTicket),
+  });
 
   function connectLive() {
-    if (live_.source || typeof EventSource === 'undefined') return;
-    if (typeof document !== 'undefined' && document.hidden) return;
-    const source = new EventSource('/api/ops/flow');
-    live_.source = source;
+    if (source || typeof EventSource === 'undefined' || document.hidden) return;
+    source = new EventSource('/api/ops/flow');
     source.addEventListener('flow', (event) => {
-      let mark = '';
       try {
         const payload = JSON.parse(event.data);
         const completed = (payload.routes || []).reduce((sum, route) => sum + (Number(route.completed) || 0), 0);
-        mark = String(payload.instance_started || '') + ':' + completed;
-      } catch (_) { return; }
-      const first = live_.mark === '';
-      if (mark === live_.mark) return;
-      live_.mark = mark;
-      if (!first) scheduleLiveLoad();
+        live.observe(String(payload.instance_started || '') + ':' + completed);
+      } catch (_) {}
     });
-  }
-
-  function disconnectLive() {
-    if (live_.source) live_.source.close();
-    live_.source = null;
-    live_.mark = '';
   }
 
   function startLive() {
     connectLive();
-    if (typeof document.addEventListener === 'function') {
-      document.addEventListener('visibilitychange', () => {
-        if (document.hidden) { disconnectLive(); return; }
+    document.addEventListener?.('visibilitychange', () => {
+      if (document.hidden) {
+        source?.close();
+        source = null;
+        live.reset();
+      } else {
         connectLive();
-        if (live_.pending) { live_.pending = false; scheduleLiveLoad(); }
-      });
-    }
-    if (typeof window.setInterval === 'function') {
-      window.setInterval(() => {
-        if (Date.now() - live_.lastLoadAt >= LIVE_IDLE_MS) scheduleLiveLoad();
-      }, 5000);
-    }
+        live.flush();
+      }
+    });
+    window.setInterval?.(live.idle, 5000);
   }
 
   if (document.readyState === 'loading') {

@@ -166,15 +166,15 @@ func TestCatalogMultiplierActiveFilteringAndSnapshotIsolation(t *testing.T) {
 		{"id":"computer-use-agent","usageMetadata":{"creditMultiplier":1}},
 		{"id":"invalid id","usageMetadata":{"creditMultiplier":1}}
 	`))
-	ids, err := client.FetchModels(t.Context())
-	if err != nil || !slices.Equal(ids, []string{"a-model", "z-model"}) {
-		t.Fatalf("FetchModels compatibility or active filtering changed: %v, %v", ids, err)
-	}
 	acc := testAccount()
 	original := acc.Clone()
 	observation, err := catalogPort().Observe(t.Context(), provider.Env{Config: testConfig(client.base)}, acc)
 	if err != nil || len(observation.Models) != 2 {
 		t.Fatalf("fresh observation failed: %v", err)
+	}
+	ids := []string{"a-model", "z-model"}
+	if observation.Models[0].ID != ids[0] || observation.Models[1].ID != ids[1] {
+		t.Fatalf("active model filtering or order changed: %+v", observation.Models)
 	}
 	zero := 0.0
 	if observation.Models[0].UpstreamUsage == nil {

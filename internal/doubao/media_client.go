@@ -1,7 +1,6 @@
 package doubao
 
 import (
-	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -153,21 +152,16 @@ func videoQuotaMessage(s string) bool {
 }
 
 func consumeMediaStream(r io.Reader, video bool) ([]generatedMedia, string, error) {
-	scanner := bufio.NewScanner(io.LimitReader(r, 16<<20))
-	scanner.Buffer(make([]byte, 4096), 2<<20)
-	var data strings.Builder
 	var media []generatedMedia
 	seen := map[string]bool{}
 	var task string
 	var quota bool
-	flush := func() error {
-		if data.Len() == 0 {
+	err := readDoubaoEvents(r, true, func(_ string, data []byte) error {
+		if len(data) == 0 {
 			return nil
 		}
 		var event map[string]any
-		err := json.Unmarshal([]byte(data.String()), &event)
-		data.Reset()
-		if err != nil {
+		if err := json.Unmarshal(data, &event); err != nil {
 			return errNoMedia
 		}
 		if event["code"] != nil && event["event_type"] == nil {
@@ -212,31 +206,8 @@ func consumeMediaStream(r io.Reader, video bool) ([]generatedMedia, string, erro
 			}
 		}
 		return nil
-	}
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			if err := flush(); err != nil {
-				return nil, "", err
-			}
-			continue
-		}
-		if value, ok := strings.CutPrefix(line, "data:"); ok {
-			if data.Len() > 0 {
-				data.WriteByte('\n')
-			}
-			data.WriteString(strings.TrimSpace(value))
-		} else if strings.HasPrefix(line, "{") && data.Len() == 0 {
-			data.WriteString(line)
-		}
-		if data.Len() > 2<<20 {
-			return nil, "", errNoMedia
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, "", err
-	}
-	if err := flush(); err != nil {
+	})
+	if err != nil {
 		return nil, "", err
 	}
 	if video && quota && len(media) == 0 && task == "" {

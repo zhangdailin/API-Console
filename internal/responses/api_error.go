@@ -3,14 +3,9 @@ package responses
 import (
 	"net/http"
 	"strings"
-	"time"
 
 	"orchids-api/internal/util"
 )
-
-// DefaultStoredResponseTTL is how long a stored response survives when the
-// deployment has not configured one.
-const DefaultStoredResponseTTL = 30 * 24 * time.Hour
 
 func WriteAPIError(w http.ResponseWriter, status int, code, message string) {
 	WriteAPIErrorWithParam(w, status, code, message, "")

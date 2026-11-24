@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -11,8 +13,8 @@ import (
 	"net/url"
 	"orchids-api/internal/chatwire"
 	"orchids-api/internal/httpserver"
+	"orchids-api/internal/store"
 	"orchids-api/internal/util"
-	"os"
 	"sort"
 	"strings"
 )
@@ -220,9 +222,9 @@ func (h *Handler) HandleVideosRetrieve(w http.ResponseWriter, r *http.Request) {
 	if idx := strings.Index(videoID, "/"); idx >= 0 {
 		videoID = videoID[:idx]
 	}
-	job, ok := h.lookupVideoJob(r.Context(), videoID, videoRequestOwner(r))
-	if !ok {
-		httpserver.WriteError(w, http.StatusNotFound, "video not found")
+	job, err := h.lookupVideoJob(r.Context(), videoID, videoRequestOwner(r))
+	if err != nil {
+		writeVideoLookupError(w, err)
 		return
 	}
 	util.WriteJSON(w, job.toMap())
@@ -233,16 +235,16 @@ func (h *Handler) HandleVideosContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	videoID := videoIDFromPath(r.URL.Path)
-	job, ok := h.lookupVideoJob(r.Context(), videoID, videoRequestOwner(r))
-	if !ok {
-		httpserver.WriteError(w, http.StatusNotFound, "video not found")
+	job, err := h.lookupVideoJob(r.Context(), videoID, videoRequestOwner(r))
+	if err != nil {
+		writeVideoLookupError(w, err)
 		return
 	}
-	if job.Status != "completed" || strings.TrimSpace(job.ContentPath) == "" {
+	if job.Status != "completed" {
 		httpserver.WriteError(w, http.StatusConflict, "video content is not ready yet")
 		return
 	}
-	file, err := os.Open(job.ContentPath)
+	file, err := h.openVideoJobFile(r.Context(), job)
 	if err != nil {
 		httpserver.WriteError(w, http.StatusNotFound, "video content not found")
 		return
@@ -261,6 +263,16 @@ func (h *Handler) HandleVideosContent(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", `inline; filename="`+sanitizeCachedFilename(videoID)+`.mp4"`)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	http.ServeContent(w, r, videoID+".mp4", info.ModTime(), file)
+}
+
+func writeVideoLookupError(w http.ResponseWriter, err error) {
+	if errors.Is(err, store.ErrNoRows) {
+		httpserver.WriteError(w, http.StatusNotFound, "video not found")
+		return
+	}
+	w.Header().Set("Retry-After", "1")
+	w.Header().Set("Cache-Control", "no-store")
+	httpserver.WriteErrorCode(w, http.StatusServiceUnavailable, "video_store_unavailable", "Video status is temporarily unavailable")
 }
 
 func videoIDFromPath(path string) string {

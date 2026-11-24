@@ -1,4 +1,5 @@
 (() => {
+  const { make, attach } = ConsoleUI;
   const batchSize = () => Math.max(1, Math.min(6, Number(document.getElementById("imagineCount")?.value) || 6));
   const STORAGE_KEY = "grok_tools_ui_v1";
   let imageModels = [];
@@ -194,32 +195,6 @@
     }
   }
 
-  async function requestImageEdit(prompt, ratio, signal, count) {
-    const inputs = state.editFileIDs.map((file_id) => ({ file_id }));
-    for (const url of editURLInputs()) inputs.push({ url });
-    if (!inputs.length) throw new Error("请上传或填写至少一张编辑素材");
-    if (inputs.length > 7) throw new Error("编辑素材不能超过 7 张");
-    const res = await fetch(`${inferencePrefix()}/images/edits`, {
-      method: "POST",
-      headers: inferenceHeaders({ "Content-Type": "application/json" }),
-      signal,
-      body: JSON.stringify({
-        // Edits are served by the dedicated edit route whatever tier is picked.
-        model: "grok-imagine-image-edit",
-        prompt,
-        images: inputs,
-        n: Math.max(1, Math.min(2, count)),
-        aspect_ratio: ratio,
-        size: sizeForRatio(ratio),
-        response_format: "url",
-      }),
-    });
-    if (!res.ok) throw new Error(await res.text());
-    const images = extractImageValues(await res.json());
-    if (!images.length) throw new Error("no image generated");
-    return images;
-  }
-
   function resizePrompt() {
     const input = $("imaginePrompt");
     if (!input) return;
@@ -272,16 +247,11 @@
   function createBatch(prompt, ratio, quality, round) {
     const grid = $("imagineGrid");
     if (!grid) return null;
-    const batch = document.createElement("section");
-    batch.className = "imagine-masonry-batch";
+    const batch = make("section", "imagine-masonry-batch");
 
-    const head = document.createElement("header");
-    head.className = "imagine-masonry-batch-head";
-    const promptEl = document.createElement("div");
-    promptEl.className = "imagine-masonry-batch-prompt";
-    promptEl.textContent = prompt;
-    const meta = document.createElement("div");
-    meta.className = "imagine-masonry-batch-meta";
+    const head = make("header", "imagine-masonry-batch-head");
+    const promptEl = make("div", "imagine-masonry-batch-prompt", prompt);
+    const meta = make("div", "imagine-masonry-batch-meta");
     [
       ["is-round", `第 ${round} 轮`],
       ["is-param", ratio],
@@ -289,40 +259,28 @@
       ["is-count", `0/${batchSize()}`],
       ["is-state", "正在生成"],
     ].forEach(([cls, text]) => {
-      const chip = document.createElement("span");
-      chip.className = `imagine-masonry-batch-chip ${cls}`;
-      chip.textContent = text;
+      const chip = make("span", `imagine-masonry-batch-chip ${cls}`, text);
       if (cls === "is-state") chip.dataset.state = "generating";
       meta.appendChild(chip);
     });
-    head.appendChild(promptEl);
-    head.appendChild(meta);
+    attach(head, [promptEl, meta]);
 
-    const slotGrid = document.createElement("div");
-    slotGrid.className = "imagine-masonry-grid";
+    const slotGrid = make("div", "imagine-masonry-grid");
     slotGrid.style.setProperty("--tile-aspect", aspectRatioCss(ratio));
 
     const slots = Array.from({ length: batchSize() }, (_, index) => {
-      const tile = document.createElement("article");
-      tile.className = "imagine-masonry-tile waterfall-item is-pending";
+      const tile = make("article", "imagine-masonry-tile waterfall-item is-pending");
       tile.dataset.prompt = prompt;
-      const checkbox = document.createElement("div");
-      checkbox.className = "image-checkbox";
-      const badge = document.createElement("div");
-      badge.className = "imagine-masonry-tile-badge";
-      badge.textContent = String(index + 1);
-      const body = document.createElement("div");
-      body.className = "imagine-masonry-tile-body";
+      const checkbox = make("div", "image-checkbox");
+      const badge = make("div", "imagine-masonry-tile-badge", String(index + 1));
+      const body = make("div", "imagine-masonry-tile-body");
       body.innerHTML = '<div class="imagine-masonry-tile-progress"><div class="imagine-masonry-tile-progress-value">排队中</div><div class="imagine-masonry-tile-progress-track"><div class="imagine-masonry-tile-progress-fill"></div></div></div>';
-      tile.appendChild(checkbox);
-      tile.appendChild(badge);
-      tile.appendChild(body);
+      attach(tile, [checkbox, badge, body]);
       slotGrid.appendChild(tile);
       return { tile, body, status: "pending", progress: 0, url: "" };
     });
 
-    batch.appendChild(head);
-    batch.appendChild(slotGrid);
+    attach(batch, [head, slotGrid]);
     grid.prepend(batch);
     setEmptyState();
     return {
@@ -366,9 +324,7 @@
     slot.status = "failed";
     slot.tile.classList.remove("is-pending", "is-ready");
     slot.tile.classList.add("is-filtered");
-    const message = document.createElement("div");
-    message.className = "imagine-masonry-tile-label";
-    message.textContent = label || "失败";
+    const message = make("div", "imagine-masonry-tile-label", label || "失败");
     slot.body.replaceChildren(message);
   }
 
@@ -386,8 +342,7 @@
     slot.tile.dataset.prompt = String(meta?.prompt || "");
     if (state.selectionMode) slot.tile.classList.add("selection-mode");
 
-    const link = document.createElement("div");
-    link.className = "imagine-masonry-tile-link";
+    const link = make("div", "imagine-masonry-tile-link");
     const img = document.createElement("img");
     img.loading = "lazy";
     img.decoding = "async";
@@ -403,25 +358,24 @@
       .filter(Boolean);
   }
 
-  // Every tier goes through /images/generations, where the server picks an
-  // account that still has the tier's allowance. Edits go to /images/edits.
+  // Both routes return image values, but edits use a dedicated model and
+  // generation-only controls must not leak into that request.
   async function requestImages(prompt, ratio, model, nsfw, signal, count) {
-    if (imageOperation() === "edit") return requestImageEdit(prompt, ratio, signal, count);
-    const chosen = String(model || "").trim() || "grok-imagine-image";
-    const res = await fetch(`${inferencePrefix()}/images/generations`, {
-      method: "POST",
-      headers: inferenceHeaders({ "Content-Type": "application/json" }),
-      signal,
-      body: JSON.stringify({
-        model: chosen,
-        prompt,
-        n: Math.max(1, Math.min(2, count)),
-        aspect_ratio: ratio,
-        size: sizeForRatio(ratio),
-        response_format: "url",
-        nsfw,
-        resolution: document.getElementById("imagineResolution")?.value || "1k",
-      }),
+    const edit = imageOperation() === "edit";
+    const payload = { prompt, n: Math.max(1, Math.min(2, count)), aspect_ratio: ratio,
+      size: sizeForRatio(ratio), response_format: "url" };
+    if (edit) {
+      const images = [...state.editFileIDs.map(file_id => ({ file_id })), ...editURLInputs().map(url => ({ url }))];
+      if (!images.length) throw new Error("请上传或填写至少一张编辑素材");
+      if (images.length > 7) throw new Error("编辑素材不能超过 7 张");
+      Object.assign(payload, { model: "grok-imagine-image-edit", images });
+    } else {
+      Object.assign(payload, { model: String(model || "").trim() || "grok-imagine-image", nsfw,
+        resolution: $("imagineResolution")?.value || "1k" });
+    }
+    const res = await fetch(`${inferencePrefix()}/images/${edit ? "edits" : "generations"}`, {
+      method: "POST", headers: inferenceHeaders({ "Content-Type": "application/json" }),
+      signal, body: JSON.stringify(payload),
     });
     if (!res.ok) throw new Error(await res.text());
     const images = extractImageValues(await res.json());
@@ -758,11 +712,7 @@
         return;
       }
       const content = await zip.generateAsync({ type: "blob" });
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(content);
-      link.download = `imagine_${new Date().toISOString().slice(0, 10)}_${Date.now()}.zip`;
-      link.click();
-      URL.revokeObjectURL(link.href);
+      ConsoleUI.downloadBlob(content, `imagine_${new Date().toISOString().slice(0, 10)}_${Date.now()}.zip`);
       toast(`已打包 ${processed} 张图片`, "success");
       exitSelection();
     } catch (err) {
@@ -790,27 +740,20 @@
   }
 
   function bindEvents() {
-    document.querySelectorAll("[data-imagine-operation]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const value = btn.dataset.imagineOperation === "edit" ? "edit" : "generate";
-        setToggle("#imagineOperationToggle", "imagineOperation", value);
-        saveState({ imagineOperation: value });
-        syncEditUI();
-      });
-    });
-    document.querySelectorAll("[data-imagine-run-mode]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const value = String(btn.dataset.imagineRunMode || "single");
-        setToggle("#imagineRunModeToggle", "imagineRunMode", value);
-        saveState({ imagineRunMode: value });
-      });
-    });
-    document.querySelectorAll("[data-imagine-quality]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const value = normalizeQuality(btn.dataset.imagineQuality);
-        setToggle("#imagineQualityToggle", "imagineQuality", value);
-        syncResolution(value);
-        saveState({ imagineQuality: value });
+    const toggles = [
+      ["operation", "Operation", value => value === "edit" ? "edit" : "generate", syncEditUI],
+      ["run-mode", "RunMode", value => String(value || "single")],
+      ["quality", "Quality", normalizeQuality, syncResolution],
+    ];
+    toggles.forEach(([attribute, suffix, normalize, sync]) => {
+      const key = "imagine" + suffix;
+      document.querySelectorAll(`[data-imagine-${attribute}]`).forEach(btn => {
+        btn.addEventListener("click", () => {
+          const value = normalize(btn.dataset[key]);
+          setToggle("#" + key + "Toggle", key, value);
+          saveState({ [key]: value });
+          sync?.(value);
+        });
       });
     });
     const prompt = $("imaginePrompt");

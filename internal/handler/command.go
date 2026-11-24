@@ -10,6 +10,7 @@ import (
 
 	"orchids-api/internal/adapter"
 	"orchids-api/internal/debug"
+	"orchids-api/internal/httpserver"
 	"orchids-api/internal/tiktoken"
 	"orchids-api/internal/util"
 
@@ -93,43 +94,36 @@ func writeLocalTextResponse(w http.ResponseWriter, req ClaudeRequest, responseFo
 			return
 		}
 
-		if responseFormat == adapter.FormatOpenAI {
-			w.Header().Set("Content-Type", "text/event-stream")
-
-			startChunk := newLocalOpenAIChunk(msgID, req.Model, localOpenAIDelta{Role: "assistant"}, nil)
-			stopReason := "stop"
-			stopChunk := newLocalOpenAIChunk(msgID, req.Model, localOpenAIDelta{}, &stopReason)
-			rawStart, _ := json.Marshal(startChunk)
-			_ = writeOpenAIFrame(w, rawStart)
-			if logger != nil {
-				logger.LogOutputSSE("message_start", string(rawStart))
-			}
-			if text != "" {
-				contentChunk := newLocalOpenAIChunk(msgID, req.Model, localOpenAIDelta{Content: text}, nil)
-				rawContent, _ := json.Marshal(contentChunk)
-				_ = writeOpenAIFrame(w, rawContent)
-				if logger != nil {
-					logger.LogOutputSSE("content_block_delta", string(rawContent))
-				}
-			}
-			rawStop, _ := json.Marshal(stopChunk)
-			_ = writeOpenAIFrame(w, rawStop)
-			_, _ = w.Write(sseDoneLineBytes)
-			flusher.Flush()
-			if logger != nil {
-				logger.LogOutputSSE("message_stop", string(rawStop))
-				logger.LogSummary(inputTokens, outputTokens, time.Since(startTime), "end_turn")
-			}
-			return
-		}
-
 		w.Header().Set("Content-Type", "text/event-stream")
 		write := func(event string, data []byte) {
-			_ = writeSSEFrameBytes(w, event, data)
-			flusher.Flush()
+			wireEvent := event
+			if responseFormat == adapter.FormatOpenAI {
+				wireEvent = ""
+			}
+			_ = httpserver.WriteSSEFrame(w, wireEvent, data)
+			if responseFormat != adapter.FormatOpenAI {
+				flusher.Flush()
+			}
 			if logger != nil {
 				logger.LogOutputSSE(event, string(data))
 			}
+		}
+		if logger != nil {
+			defer func() { logger.LogSummary(inputTokens, outputTokens, time.Since(startTime), "end_turn") }()
+		}
+		if responseFormat == adapter.FormatOpenAI {
+			emit := func(event string, delta localOpenAIDelta, finish *string) {
+				raw, _ := json.Marshal(newLocalOpenAIChunk(msgID, req.Model, delta, finish))
+				write(event, raw)
+			}
+			emit("message_start", localOpenAIDelta{Role: "assistant"}, nil)
+			if text != "" {
+				emit("content_block_delta", localOpenAIDelta{Content: text}, nil)
+			}
+			emit("message_stop", localOpenAIDelta{}, new("stop"))
+			_, _ = w.Write(sseDoneLineBytes)
+			flusher.Flush()
+			return
 		}
 
 		startData, _ := marshalSSEMessageStartBytes(msgID, req.Model, inputTokens, 0)
@@ -143,9 +137,6 @@ func writeLocalTextResponse(w http.ResponseWriter, req ClaudeRequest, responseFo
 		write("content_block_stop", blockStop)
 		write("message_delta", msgDelta)
 		write("message_stop", sseMessageStopBytes)
-		if logger != nil {
-			logger.LogSummary(inputTokens, outputTokens, time.Since(startTime), "end_turn")
-		}
 		return
 	}
 

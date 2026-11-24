@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"orchids-api/internal/channel"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/config"
 	"orchids-api/internal/httpserver"
 
 	"strings"
@@ -94,7 +95,7 @@ func ResponsesBridgeCompactHandler(chat http.HandlerFunc, opts BridgeOptions) ht
 		if !httpserver.RequireMethod(w, r, http.MethodPost) {
 			return
 		}
-		body, err := httpserver.ReadBoundedJSONBody(w, r)
+		body, err := httpserver.ReadJSONBodyLimit(w, r, config.InferenceJSONBodyLimit)
 		if err != nil {
 			return
 		}

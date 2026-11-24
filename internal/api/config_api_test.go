@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -293,4 +294,13 @@ func TestHandleConfigSaveRejectsProxyWithoutPublishingOrPersisting(t *testing.T)
 			testutil.Equal(t, saved, "unchanged")
 		})
 	}
+}
+
+func (a *API) persistConfig(ctx context.Context, current, next *config.Config) error {
+	return a.mutateSavedConfig(ctx, func(base *config.Config) (*config.Config, error) {
+		if current != nil && !reflect.DeepEqual(base, current) {
+			return nil, store.ErrConfigConflict
+		}
+		return next, nil
+	})
 }

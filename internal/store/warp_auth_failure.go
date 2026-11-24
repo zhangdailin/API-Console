@@ -18,17 +18,9 @@ type WarpAuthFailurePatch struct {
 }
 
 func (s *Store) UpdateWarpAuthFailure(ctx context.Context, id int64, patch WarpAuthFailurePatch) error {
-	if s != nil && s.accounts != nil {
-		if backend, ok := s.accounts.(interface {
-			UpdateWarpAuthFailure(context.Context, int64, WarpAuthFailurePatch) error
-		}); ok {
-			return backend.UpdateWarpAuthFailure(ctx, id, patch)
-		}
+	if s == nil || s.client == nil {
+		return fmt.Errorf("warp auth state store not configured")
 	}
-	return fmt.Errorf("warp auth state store not configured")
-}
-
-func (s *redisStore) UpdateWarpAuthFailure(ctx context.Context, id int64, patch WarpAuthFailurePatch) error {
 	if patch.ExpectedRefreshToken == "" || patch.ObservedAt.IsZero() {
 		return fmt.Errorf("invalid warp auth failure patch")
 	}

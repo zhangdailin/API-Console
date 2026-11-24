@@ -53,21 +53,17 @@ func APIKeyConcurrencyWithTracker(next http.HandlerFunc, tracker loadbalancer.Co
 			return
 		}
 		if tracker != nil {
-			trackerID := -principal.ID
-			acquired := false
-			if limiter, ok := tracker.(loadbalancer.LimitedConnTracker); ok {
-				acquired = limiter.TryAcquire(trackerID, int64(principal.MaxConcurrent))
-			} else if tracker.GetCount(trackerID) < int64(principal.MaxConcurrent) {
-				tracker.Acquire(trackerID)
-				acquired = true
-			}
+			ctx, closeLeaseScope := loadbalancer.WithConnLeaseScope(r.Context())
+			defer closeLeaseScope()
+			// Negative IDs separate client key slots from provider account slots.
+			release, acquired := loadbalancer.ReserveConnection(ctx, tracker, -principal.ID, int64(principal.MaxConcurrent))
 			if !acquired {
 				w.Header().Set("Retry-After", "1")
 				writeAPIKeyError(w, http.StatusTooManyRequests, "API key concurrency limit exceeded", "concurrency_limit_exceeded")
 				return
 			}
-			defer tracker.Release(trackerID)
-			next(w, r)
+			defer release()
+			next(w, r.WithContext(ctx))
 			return
 		}
 		mu.Lock()

@@ -1,6 +1,7 @@
 package responses
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -26,6 +27,62 @@ func (w *frameShortWriter) Write(p []byte) (int, error) { w.calls++; return len(
 type terminalFlushWriter struct {
 	*httptest.ResponseRecorder
 	failure error
+}
+
+type responseCommitWriter struct {
+	*httptest.ResponseRecorder
+	onComplete func()
+	seen       bool
+}
+
+func (w *responseCommitWriter) Flush() {
+	w.ResponseRecorder.Flush()
+	if !w.seen && strings.Contains(w.Body.String(), "event: response.completed") {
+		w.seen = true
+		w.onComplete()
+	}
+}
+
+type bridgeCommitStore struct {
+	*store.MemoryResponseStore
+	saved string
+	err   error
+}
+
+func (s *bridgeCommitStore) SaveStoredResponse(ctx context.Context, row *store.StoredResponse, ttl time.Duration) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.saved = row.ResponseID
+	return s.MemoryResponseStore.SaveStoredResponse(ctx, row, ttl)
+}
+
+func TestBridgeCommitsBeforeCompletedEvent(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		st := &bridgeCommitStore{MemoryResponseStore: store.NewMemoryResponseStore(time.Hour)}
+		if fail {
+			st.err = errors.New("local fixture store unavailable")
+		}
+		bridge := ResponsesBridgeHandler(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+			w.(http.Flusher).Flush()
+		}, BridgeOptions{Store: st})
+		writer := &responseCommitWriter{ResponseRecorder: httptest.NewRecorder(), onComplete: func() {
+			if _, err := st.GetStoredResponse(t.Context(), st.saved, "anonymous"); err != nil {
+				t.Errorf("completed event arrived before response was readable: %v", err)
+			}
+		}}
+		req := httptest.NewRequest(http.MethodPost, "/grok/v1/responses", strings.NewReader(`{"model":"grok-chat-auto","stream":true,"input":"Hello"}`))
+		bridge(writer, req)
+		if fail {
+			if writer.seen || !strings.Contains(writer.Body.String(), "response_storage_failed") {
+				t.Fatalf("storage failure looked successful: %s", writer.Body.String())
+			}
+		} else if !writer.seen || !strings.Contains(writer.Body.String(), "data: [DONE]") {
+			t.Fatalf("did not send a completed stream: %s", writer.Body.String())
+		}
+	}
 }
 
 func (w terminalFlushWriter) FlushError() error {

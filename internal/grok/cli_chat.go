@@ -74,7 +74,7 @@ func (h *Handler) openCLIAccountSessionByID(ctx context.Context, accountID int64
 	if err := scopedRateLimitCooldown(withRateLimitAccount(ctx, acc), ProviderBuild, token, modelID); err != nil {
 		return nil, err
 	}
-	release, reserved := h.reserveAccount(acc)
+	release, reserved := h.reserveAccount(ctx, acc)
 	if !reserved {
 		return nil, fmt.Errorf("stored response account is at its concurrency limit")
 	}
@@ -140,7 +140,7 @@ func (h *Handler) openCLIAccountSession(ctx context.Context, excludeIDs []int64,
 		return nil, fmt.Errorf("grok cli account token is empty")
 	}
 	h.bindAffinity(ctx, ProviderBuild, acc.ID)
-	release, reserved := h.reserveAccount(acc)
+	release, reserved := h.reserveAccount(ctx, acc)
 	if !reserved {
 		return h.openCLIAccountSession(ctx, append(excludeIDs, acc.ID), modelID)
 	}

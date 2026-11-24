@@ -5,24 +5,8 @@ package grok
 import (
 	"crypto/sha256"
 	"fmt"
-	"net/http"
-	"net/url"
-	"orchids-api/internal/httpclient"
 	"strings"
-	"time"
-
-	"orchids-api/internal/config"
 )
-
-// newHTTPClient builds the shared browser-fingerprinted HTTP client.
-func newHTTPClient(cfg *config.Config, timeout time.Duration, proxyFunc func(*http.Request) (*url.URL, error)) *http.Client {
-	proxyKey := "direct"
-	if cfg != nil {
-		proxyKey = httpclient.GenerateProxyKeyFromConfig(cfg)
-	}
-
-	return httpclient.GetSharedBrowserHTTPClientWithHeaderTimeout(proxyKey, timeout, 0, proxyFunc)
-}
 
 // TokenFingerprint is a short, non-reversible digest of a credential, used in
 // logs and refresh bookkeeping so a token itself never reaches a log line.

@@ -24,10 +24,10 @@ func TestJSONBodyReadTimeoutIsNotInvalidJSON(t *testing.T) {
 				server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if decode {
 						var value map[string]any
-						if !DecodeJSONBody(w, r, &value) {
+						if !DecodeJSONBodyLimit(w, r, &value, 0) {
 							return
 						}
-					} else if _, err := ReadBoundedJSONBody(w, r); err != nil {
+					} else if _, err := ReadJSONBodyLimit(w, r, 50<<20); err != nil {
 						return
 					}
 					generations.Add(1)

@@ -74,8 +74,14 @@ func TestExpiredOutboxRequiresReconciliation(t *testing.T) {
 	backend.fail = false
 	ledger.Replay(context.Background())
 	testutil.Equal(t, backend.used, int64(0))
-	testutil.Error(t, ledger.Ready())
-	testutil.Equal(t, len(ledger.pending), 1)
+	testutil.Error(t, ledger.ReadyForKey(1))
+	testutil.NoError(t, ledger.ReadyForKey(2))
+	testutil.Equal(t, len(ledger.pending), 0)
+	testutil.Equal(t, len(ledger.review), 1)
+	reloaded, err := New(backend, ledger.dir)
+	testutil.NoError(t, err)
+	testutil.Error(t, reloaded.ReadyForKey(1))
+	testutil.NoError(t, reloaded.ReadyForKey(2))
 }
 func TestOutboxDiskFailureDoesNotClaimSettlement(t *testing.T) {
 	backend := &testStore{seen: map[string]int64{}}
@@ -86,7 +92,7 @@ func TestOutboxDiskFailureDoesNotClaimSettlement(t *testing.T) {
 	testutil.NoError(t, os.WriteFile(dir, []byte("not a directory"), 0600))
 	testutil.Error(t, ledger.SettleApiKeyBilling(context.Background(), 1, EventID(time.Now(), "request"), 20))
 	testutil.Equal(t, backend.used, int64(0))
-	testutil.Error(t, ledger.Ready())
+	testutil.Error(t, ledger.ReadyForKey(1))
 }
 
 func TestHealthyOutboxSettlementLeavesNoDebt(t *testing.T) {
@@ -96,7 +102,7 @@ func TestHealthyOutboxSettlementLeavesNoDebt(t *testing.T) {
 	testutil.NoError(t, err)
 	testutil.NoError(t, ledger.SettleApiKeyBilling(t.Context(), 1, EventID(time.Now(), "healthy"), 20))
 	testutil.Equal(t, backend.used, int64(20))
-	testutil.NoError(t, ledger.Ready())
+	testutil.NoError(t, ledger.ReadyForKey(1))
 	files, err := os.ReadDir(dir)
 	testutil.NoError(t, err)
 	testutil.Equal(t, len(files), 0)

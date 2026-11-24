@@ -6,6 +6,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"orchids-api/internal/grok/grokbase"
 	"regexp"
 	"strconv"
 	"strings"
@@ -91,58 +92,15 @@ func replaceImageEditPlaceholders(prompt string, refs []imageEditReference) stri
 	})
 }
 
-func (h *Handler) handleChatImageEdit(
-	ctx context.Context,
-	w http.ResponseWriter,
-	req ChatCompletionsRequest,
-	spec ModelSpec,
-	prompt string,
-	imageURLs []string,
-	publicBase string,
-) {
-	if len(imageURLs) == 0 {
-		httpserver.WriteError(w, http.StatusBadRequest, "image_url is required for image edits")
-		return
-	}
-	if len(imageURLs) > 7 {
-		imageURLs = imageURLs[len(imageURLs)-7:]
-	}
+type imageEditOptions struct {
+	model, prompt, ratio, resolution, quality, format, publicBase string
+	n                                                             int
+	stream                                                        bool
+}
 
-	imageCfg := req.ImageConfig
-	if imageCfg == nil {
-		imageCfg = &ImageConfig{}
-	}
-	imageCfg.Normalize()
-	n := max(imageCfg.N, 1)
-	if n > 2 {
-		httpserver.WriteError(w, http.StatusBadRequest, "image_config.n must be between 1 and 2 for image edit")
-		return
-	}
-	// One edit call produces one image, and a stream relays one call.
-	if req.Stream && n > 1 {
-		httpserver.WriteError(w, http.StatusBadRequest, "streaming image edits support image_config.n=1 only")
-		return
-	}
-	responseFormat := normalizeImageResponseFormat(imageCfg.ResponseFormat)
-	if _, err := normalizeImageEditSize(imageCfg.Size); err != nil {
-		writeGrokUpstreamError(w, err)
-		return
-	}
-	// grok2api validates these at the transport layer before the provider maps a
-	// size to a ratio, so a caller cannot smuggle a pixel string through
-	// aspect_ratio and an unsupported resolution is a parameter error.
-	// Transport-layer validation, as grok2api performs it before the provider
-	// maps a size to a ratio.
-	if edgeAspect := strings.TrimSpace(imageCfg.AspectRatio); edgeAspect != "" && !validImageAspectRatio(edgeAspect) {
-		httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_parameter", "aspect_ratio is not supported")
-		return
-	}
-	if _, err := normalizeImageResolution(imageCfg.Resolution); err != nil {
-		httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_parameter", err.Error())
-		return
-	}
-	ratio, _ := normalizeImageAspectRatio(imageCfg.AspectRatio, imageCfg.Size)
-
+// serveImageEdit runs a validated edit from either Chat or the images endpoint.
+// The selected account owns its uploaded IDs, so retries rebuild the payload.
+func (h *Handler) serveImageEdit(ctx context.Context, w http.ResponseWriter, spec ModelSpec, opts imageEditOptions, inputValues []string, uploads []imageEditUploadInput) {
 	sess, err := h.openChatAccountSessionForModel(ctx, spec)
 	if err != nil {
 		writeGrokNoAccountError(w, err)
@@ -150,7 +108,13 @@ func (h *Handler) handleChatImageEdit(
 	}
 	defer sess.Close()
 
-	rawPayload, err := h.buildImageEditPayloadFromInputs(ctx, sess.token, spec, prompt, imageURLs, ratio)
+	buildPayload := func(token string) (map[string]any, error) {
+		if len(uploads) > 0 {
+			return h.buildImageEditRequestPayload(ctx, token, spec, opts.prompt, uploads, opts.ratio)
+		}
+		return h.buildImageEditPayloadFromInputs(ctx, token, spec, opts.prompt, inputValues, opts.ratio)
+	}
+	rawPayload, err := buildPayload(sess.token)
 	if err != nil {
 		if skipExternalAttachmentFetchGrokAccountStatus(err) {
 			h.markAccountStatus(ctx, sess.acc, err)
@@ -158,33 +122,27 @@ func (h *Handler) handleChatImageEdit(
 		writeGrokUpstreamError(w, err)
 		return
 	}
-	rebuildPayload := func(token string) (map[string]any, error) {
-		return h.buildImageEditPayloadFromInputs(ctx, token, spec, prompt, imageURLs, ratio)
-	}
-
-	if req.Stream {
-		resp, err := h.doChatWithAutoSwitchRebuild(ctx, sess, &rawPayload, rebuildPayload)
+	if opts.stream {
+		resp, err := h.doChatWithAutoSwitchRebuild(ctx, sess, &rawPayload, buildPayload)
 		if err != nil {
 			writeGrokUpstreamError(w, err)
 			return
 		}
 		defer resp.Body.Close()
 		h.syncGrokQuota(sess.acc, resp.Header)
-		h.streamImageResults(ctx, w, resp.Body, sess.token, prompt, responseFormat, 1, publicBase, nonNilStrings(imageEditInputAssets(rawPayload)))
-		if cost, priced := pricing.EstimateImageEditCost(spec.UpstreamModel, imageCfg.Resolution, "", n, len(imageURLs)); priced {
-			h.settleMediaBilling(ctx, req.Model, cost, map[string]any{
-				"plane": "web", "stream": true, "images": n, "input_images": len(imageURLs),
+		h.streamImageResults(ctx, w, resp.Body, sess.token, opts.prompt, opts.format, 1, opts.publicBase, nonNilStrings(imageEditInputAssets(rawPayload)))
+		inputs := len(inputValues) + len(uploads)
+		if cost, priced := pricing.EstimateImageEditCost(spec.UpstreamModel, opts.resolution, opts.quality, opts.n, inputs); priced {
+			h.settleMediaBilling(ctx, opts.model, cost, map[string]any{
+				"plane": "web", "stream": true, "images": opts.n, "input_images": inputs,
 			})
 		}
 		return
 	}
 
-	urls, ok := h.collectImageChatURLs(ctx, w, sess, &rawPayload, rebuildPayload, n)
-	if !ok {
-		return
+	if urls, ok := h.collectImageChatURLs(ctx, w, sess, &rawPayload, buildPayload, opts.n); ok {
+		h.writeImageResults(w, ctx, sess.token, opts.prompt, urls, opts.format, opts.publicBase)
 	}
-
-	h.writeImageResults(w, ctx, sess.token, prompt, urls, responseFormat, publicBase)
 }
 
 func isAllowedEditImageMime(mime string) bool {
@@ -281,46 +239,36 @@ func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mediaType, _, _ := mime.ParseMediaType(strings.TrimSpace(r.Header.Get("Content-Type")))
-	jsonRequest := (*imageEditJSONRequest)(nil)
-	if strings.EqualFold(mediaType, "application/json") {
+	isJSON := strings.EqualFold(mediaType, "application/json")
+	var input *imageEditJSONRequest
+	if isJSON {
 		var ok bool
-		jsonRequest, ok = decodeImageEditJSON(w, r)
+		input, ok = decodeImageEditJSON(w, r)
 		if !ok {
 			return
 		}
-	} else if err := r.ParseMultipartForm(80 << 20); err != nil {
-		httpserver.WriteError(w, http.StatusBadRequest, "invalid multipart form")
-		return
-	}
-	formValue := func(name string) string {
-		if jsonRequest == nil {
-			return r.FormValue(name)
+		if input.N == 0 {
+			input.N = 1
 		}
-		switch name {
-		case "model":
-			return jsonRequest.Model
-		case "prompt":
-			return jsonRequest.Prompt
-		case "size":
-			return jsonRequest.Size
-		case "aspect_ratio":
-			return jsonRequest.AspectRatio
-		case "resolution":
-			return jsonRequest.Resolution
-		case "quality":
-			return jsonRequest.Quality
-		case "response_format":
-			return jsonRequest.ResponseFormat
+	} else {
+		if err := r.ParseMultipartForm(80 << 20); err != nil {
+			httpserver.WriteError(w, http.StatusBadRequest, "invalid multipart form")
+			return
 		}
-		return ""
+		input = &imageEditJSONRequest{
+			Model: r.FormValue("model"), Prompt: r.FormValue("prompt"), Size: r.FormValue("size"),
+			AspectRatio: r.FormValue("aspect_ratio"), Resolution: r.FormValue("resolution"), Quality: r.FormValue("quality"),
+			ResponseFormat: r.FormValue("response_format"), N: parseIntLoose(r.FormValue("n"), 1),
+			Stream: parseBoolLoose(r.FormValue("stream"), false),
+		}
 	}
 
-	prompt := strings.TrimSpace(formValue("prompt"))
+	prompt := strings.TrimSpace(input.Prompt)
 	if prompt == "" {
 		httpserver.WriteError(w, http.StatusBadRequest, "prompt is required")
 		return
 	}
-	model := strings.TrimSpace(formValue("model"))
+	model := strings.TrimSpace(input.Model)
 	if model == "" {
 		model = "grok-imagine-image-edit"
 	}
@@ -339,50 +287,42 @@ func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteError(w, http.StatusBadRequest, "image edit model must be grok-imagine-image-edit")
 		return
 	}
-	if jsonRequest == nil && r.MultipartForm != nil && len(r.MultipartForm.File["mask"]) > 0 {
+	if !isJSON && r.MultipartForm != nil && len(r.MultipartForm.File["mask"]) > 0 {
 		httpserver.WriteError(w, http.StatusBadRequest, "mask is not supported yet")
 		return
 	}
-	n := parseIntLoose(formValue("n"), 1)
-	if jsonRequest != nil && jsonRequest.N != 0 {
-		n = jsonRequest.N
-	}
+	n := input.N
 	maxN := 2
 	if n < 1 || n > maxN {
 		httpserver.WriteError(w, http.StatusBadRequest, fmt.Sprintf("n must be between 1 and %d for image edit", maxN))
 		return
 	}
-	if edgeAspect := strings.TrimSpace(formValue("aspect_ratio")); edgeAspect != "" && !validImageAspectRatio(edgeAspect) {
-		httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_parameter", "aspect_ratio is not supported")
+	if !requireImageAspectRatio(w, input.AspectRatio) {
 		return
 	}
-	if _, err := normalizeImageResolution(formValue("resolution")); err != nil {
-		httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_parameter", err.Error())
+	resolution, okResolution := requireImageResolution(w, input.Resolution)
+	if !okResolution {
 		return
 	}
-	if _, err := normalizeImageEditSize(formValue("size")); err != nil {
+	if _, err := normalizeImageEditSize(input.Size); err != nil {
 		writeGrokUpstreamError(w, err)
 		return
 	}
-	if _, err := normalizeImageAspectRatio(formValue("aspect_ratio"), formValue("size")); err != nil {
+	ratio, err := normalizeImageAspectRatio(input.AspectRatio, input.Size)
+	if err != nil {
 		writeGrokUpstreamError(w, err)
 		return
 	}
-	stream := parseBoolLoose(formValue("stream"), false)
-	if jsonRequest != nil {
-		stream = jsonRequest.Stream
-	}
+	stream := input.Stream
 	// One edit call produces one image, and a stream relays one call.
 	if stream && n > 1 {
 		httpserver.WriteError(w, http.StatusBadRequest, "streaming image edits support n=1 only")
 		return
 	}
-	rawResponseFormat := strings.ToLower(strings.TrimSpace(formValue("response_format")))
-	if rawResponseFormat != "" && rawResponseFormat != "url" && rawResponseFormat != "b64_json" && rawResponseFormat != "base64" {
-		httpserver.WriteError(w, http.StatusBadRequest, "response_format must be url or b64_json")
+	responseFormat, okFormat := requireImageResponseFormat(w, input.ResponseFormat)
+	if !okFormat {
 		return
 	}
-	responseFormat := normalizeImageResponseFormat(rawResponseFormat)
 	publicBase := detectPublicBaseURL(r)
 
 	if !ok || !spec.IsImage || !isImageEditModel(spec.ID) {
@@ -391,14 +331,14 @@ func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
 	}
 	spec = h.applyPersistedRoute(r.Context(), spec)
 	if err := h.ensureModelCapability(r.Context(), model, store.CapabilityImageEdit); err != nil {
-		httpserver.WriteError(w, http.StatusBadRequest, modelValidationMessage(model, err))
+		httpserver.WriteError(w, http.StatusBadRequest, grokbase.ModelValidationMessage(model, err))
 		return
 	}
 
 	var uploads []imageEditUploadInput
 	var inputValues []string
-	if jsonRequest != nil {
-		jsonInputs, err := imageEditJSONInputs(jsonRequest)
+	if isJSON {
+		jsonInputs, err := imageEditJSONInputs(input)
 		if err != nil {
 			httpserver.WriteError(w, http.StatusBadRequest, err.Error())
 			return
@@ -467,59 +407,8 @@ func (h *Handler) HandleImagesEdits(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	sess, err := h.openChatAccountSessionForModel(r.Context(), spec)
-	if err != nil {
-		writeGrokNoAccountError(w, err)
-		return
-	}
-	defer sess.Close()
-
-	ratio, _ := normalizeImageAspectRatio(formValue("aspect_ratio"), formValue("size"))
-	var rawPayload map[string]any
-	if jsonRequest != nil {
-		rawPayload, err = h.buildImageEditPayloadFromInputs(r.Context(), sess.token, spec, prompt, inputValues, ratio)
-	} else {
-		rawPayload, err = h.buildImageEditRequestPayload(r.Context(), sess.token, spec, prompt, uploads, ratio)
-	}
-	if err != nil {
-		if skipExternalAttachmentFetchGrokAccountStatus(err) {
-			h.markAccountStatus(r.Context(), sess.acc, err)
-		}
-		writeGrokUpstreamError(w, err)
-		return
-	}
-	rebuildPayload := func(token string) (map[string]any, error) {
-		if jsonRequest != nil {
-			return h.buildImageEditPayloadFromInputs(r.Context(), token, spec, prompt, inputValues, ratio)
-		}
-		return h.buildImageEditRequestPayload(r.Context(), token, spec, prompt, uploads, ratio)
-	}
-
-	if stream {
-		resp, err := h.doChatWithAutoSwitchRebuild(r.Context(), sess, &rawPayload, rebuildPayload)
-		if err != nil {
-			writeGrokUpstreamError(w, err)
-			return
-		}
-		defer resp.Body.Close()
-		h.syncGrokQuota(sess.acc, resp.Header)
-		h.streamImageResults(r.Context(), w, resp.Body, sess.token, prompt, responseFormat, 1, publicBase, nonNilStrings(imageEditInputAssets(rawPayload)))
-		inputs := len(inputValues)
-		if inputs == 0 {
-			inputs = len(uploads)
-		}
-		if cost, priced := pricing.EstimateImageEditCost(spec.UpstreamModel, formValue("resolution"), formValue("quality"), n, inputs); priced {
-			h.settleMediaBilling(r.Context(), model, cost, map[string]any{
-				"plane": "web", "stream": true, "images": n, "input_images": inputs,
-			})
-		}
-		return
-	}
-
-	urls, ok := h.collectImageChatURLs(r.Context(), w, sess, &rawPayload, rebuildPayload, n)
-	if !ok {
-		return
-	}
-
-	h.writeImageResults(w, r.Context(), sess.token, prompt, urls, responseFormat, publicBase)
+	h.serveImageEdit(r.Context(), w, spec, imageEditOptions{
+		model: model, prompt: prompt, ratio: ratio, resolution: resolution, quality: input.Quality,
+		format: responseFormat, publicBase: publicBase, n: n, stream: stream,
+	}, inputValues, uploads)
 }

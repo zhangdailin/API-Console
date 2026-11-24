@@ -46,7 +46,7 @@ func (h *Handler) acquireAccountSelection(ctx context.Context, targetChannel str
 // account selection and connection tracking. A candidate is not returned until
 // its per-account slot has been atomically reserved; if another request wins the
 // last slot, selection continues with the remaining accounts.
-func (h *Handler) acquireReservedAccountSelection(ctx context.Context, targetChannel string, channelRequired bool, failedAccountIDs []int64, modelID string) (UpstreamClient, *store.Account, func(), int64, error) {
+func (h *Handler) acquireReservedAccountSelection(ctx context.Context, targetChannel string, channelRequired bool, failedAccountIDs []int64, modelID string) (UpstreamClient, *store.Account, func(), func(), error) {
 	excluded := append([]int64(nil), failedAccountIDs...)
 	full := make(map[int64]struct{})
 	waitBudget := h.configSnapshot().ReservationWaitBudget()
@@ -71,26 +71,26 @@ func (h *Handler) acquireReservedAccountSelection(ctx context.Context, targetCha
 						default:
 						}
 					}
-					return nil, nil, func() {}, 0, ctx.Err()
+					return nil, nil, func() {}, nil, ctx.Err()
 				case <-timer.C:
 				}
 				continue
 			}
 			if len(full) > 0 {
-				return nil, nil, func() {}, 0, fmt.Errorf("no enabled accounts available for channel: %s (all matching accounts are at their concurrency limit)", targetChannel)
+				return nil, nil, func() {}, nil, fmt.Errorf("no enabled accounts available for channel: %s (all matching accounts are at their concurrency limit)", targetChannel)
 			}
-			return nil, nil, func() {}, 0, err
+			return nil, nil, func() {}, nil, err
 		}
-		accountID, acquired := h.tryAcquireTrackedAccount(account)
+		releaseSlot, acquired := h.tryAcquireTrackedAccount(ctx, account)
 		if acquired {
-			return client, account, release, accountID, nil
+			return client, account, release, releaseSlot, nil
 		}
 		release()
 		if account == nil || account.ID == 0 {
-			return nil, nil, func() {}, 0, fmt.Errorf("failed to reserve an account concurrency slot")
+			return nil, nil, func() {}, nil, fmt.Errorf("failed to reserve an account concurrency slot")
 		}
 		if _, seen := full[account.ID]; seen {
-			return nil, nil, func() {}, 0, fmt.Errorf("no enabled accounts available for channel: %s (all matching accounts are at their concurrency limit)", targetChannel)
+			return nil, nil, func() {}, nil, fmt.Errorf("no enabled accounts available for channel: %s (all matching accounts are at their concurrency limit)", targetChannel)
 		}
 		full[account.ID] = struct{}{}
 		excluded = append(excluded, account.ID)
@@ -198,42 +198,22 @@ func effectiveAccountConcurrencyLimit(acc *store.Account) int64 {
 	return loadbalancer.EffectiveAccountConcurrencyLimit(acc)
 }
 
-func (h *Handler) tryAcquireTrackedAccount(acc *store.Account) (int64, bool) {
+func (h *Handler) tryAcquireTrackedAccount(ctx context.Context, acc *store.Account) (func(), bool) {
 	if acc == nil || acc.ID == 0 {
-		return 0, true
+		return nil, true
 	}
 	limit := effectiveAccountConcurrencyLimit(acc)
 	if h != nil && h.connTracker != nil {
-		if limited, ok := h.connTracker.(loadbalancer.LimitedConnTracker); ok && limit > 0 {
-			if !limited.TryAcquire(acc.ID, limit) {
-				return 0, false
-			}
-			return acc.ID, true
-		}
-		if limit > 0 && h.connTracker.GetCount(acc.ID) >= limit {
-			return 0, false
-		}
-		h.connTracker.Acquire(acc.ID)
-		return acc.ID, true
+		return loadbalancer.ReserveConnection(ctx, h.connTracker, acc.ID, limit)
 	}
 	if h != nil && h.loadBalancer != nil {
-		// The load balancer's built-in tracker is only a compatibility fallback;
-		// production wires a shared tracker directly onto the handler.
-		h.loadBalancer.AcquireConnection(acc.ID)
-		return acc.ID, true
+		return h.loadBalancer.ReserveConnection(ctx, acc.ID, limit)
 	}
-	return 0, true
+	return nil, true
 }
 
-func (h *Handler) releaseTrackedAccount(accountID int64) {
-	if accountID == 0 {
-		return
-	}
-	if h != nil && h.connTracker != nil {
-		h.connTracker.Release(accountID)
-		return
-	}
-	if h != nil && h.loadBalancer != nil {
-		h.loadBalancer.ReleaseConnection(accountID)
+func (h *Handler) releaseTrackedAccount(release func()) {
+	if release != nil {
+		release()
 	}
 }

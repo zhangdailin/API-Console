@@ -15,5 +15,5 @@ func copyNativeCLIResponseAndCaptureModel(w http.ResponseWriter, body io.Reader,
 	if len(mappings) > 0 {
 		namespaces = mappings[0]
 	}
-	return copyNativeResponse(w, body, contentType, model, namespaces)
+	return copyNativeResponse(w, body, contentType, model, namespaces, 0, nil)
 }

@@ -4,7 +4,6 @@ import (
 	"orchids-api/internal/testutil"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -22,18 +21,11 @@ func readConsoleScript(name string) (string, error) {
 	return string(raw), nil
 }
 
-// TestAccountsJSPinsClineOfficialLoginLifecycle covers Cline-specific cleanup and
-// official-only account creation, not the shared registry contract.
-func TestAccountsJSPinsClineOfficialLoginLifecycle(t *testing.T) {
+// The browser suite exercises the official login lifecycle on modal open/close.
+func TestAccountsJSPinsOfficialLoginCreation(t *testing.T) {
 	source, err := readConsoleScript("accounts.js")
 	testutil.NoError(t, err, "read accounts.js: %v")
 	testutil.CheckContain(t, source, `OrchidsProviderRegistry?.get(key)`)
-	// The login lifecycle must be stopped with the others: a transaction left
-	// polling after the modal closes keeps exchanging a live device code.
-	testutil.CheckContain(t, source, `function stopClineLogin()`)
-	if calls := strings.Count(source, "stopClineLogin();"); calls < 2 {
-		t.Errorf("stopClineLogin is called %d times, want at least 2 (open + close)", calls)
-	}
 	// All supported channels use official login for creation; only existing
 	// accounts may submit their settings through this form.
 	testutil.CheckContainAll(t, source, `if (!id) {`, `官方网页登录`)

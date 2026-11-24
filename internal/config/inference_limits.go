@@ -5,6 +5,8 @@ import "time"
 // Fixed generation policy. Client-specified output controls remain protocol data.
 const (
 	InferenceRequestTimeout = 2 * time.Hour
+	// InferenceJSONBodyLimit caps the wire body before model dispatch and billing.
+	InferenceJSONBodyLimit  = 50 << 20
 	SharedStreamIdleTimeout = 300 * time.Second
 	// GrokBuildResponseHeaderTimeout bounds the wait for Build response headers.
 	// Once headers arrive, only GrokStreamIdleTimeout (semantic idleness) ends a

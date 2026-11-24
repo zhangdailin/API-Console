@@ -170,17 +170,15 @@ func isThinkingResponse(resp map[string]any) bool {
 	if resp == nil {
 		return false
 	}
-	for _, path := range [][]string{
-		{"isThinking"}, {"is_thinking"},
-		{"response", "isThinking"}, {"response", "is_thinking"},
-		{"result", "isThinking"}, {"result", "is_thinking"},
-		{"result", "response", "isThinking"}, {"result", "response", "is_thinking"},
+	for _, path := range []string{
+		"isThinking", "is_thinking", "response.isThinking", "response.is_thinking",
+		"result.isThinking", "result.is_thinking", "result.response.isThinking", "result.response.is_thinking",
 	} {
-		raw := valueAtPath(resp, path...)
+		raw := valueAtPath(resp, path)
 		if raw == nil {
 			continue
 		}
-		val, err := chatwire.ParseLooseBoolAnyForField(raw, path[len(path)-1])
+		val, err := chatwire.ParseLooseBoolAnyForField(raw, path[strings.LastIndexByte(path, '.')+1:])
 		if err == nil {
 			return val
 		}
@@ -224,9 +222,6 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 	// Publish the resolved model so the per-minute aggregation can attribute this
 	// request to a model: the latency middleware cannot read the body itself.
 	r = r.WithContext(middleware.WithRequestModel(r.Context(), req.Model))
-	if req.ImageConfig != nil {
-		req.ImageConfig.Normalize()
-	}
 	h.applyDefaultChatStream(&req)
 	if err := req.Validate(); err != nil {
 		writeGrokUpstreamError(w, err)
@@ -251,15 +246,15 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 	}
 	spec, ok := h.resolveConversationModel(r.Context(), req.Model)
 	if !ok {
-		httpserver.WriteErrorCode(w, http.StatusNotFound, "model_not_found", modelNotFoundMessage(req.Model))
+		httpserver.WriteErrorCode(w, http.StatusNotFound, "model_not_found", grokbase.ModelNotFoundMessage(req.Model))
 		return
 	}
 	if err := h.ensureModelCapability(r.Context(), spec.ID, store.CapabilityChat); err != nil {
 		if strings.EqualFold(strings.TrimSpace(err.Error()), "model not found") {
-			httpserver.WriteErrorCode(w, http.StatusNotFound, "model_not_found", modelNotFoundMessage(req.Model))
+			httpserver.WriteErrorCode(w, http.StatusNotFound, "model_not_found", grokbase.ModelNotFoundMessage(req.Model))
 			return
 		}
-		httpserver.WriteError(w, http.StatusBadRequest, modelValidationMessage(req.Model, err))
+		httpserver.WriteError(w, http.StatusBadRequest, grokbase.ModelValidationMessage(req.Model, err))
 		return
 	}
 	if !spec.SupportsConversation() {
@@ -280,50 +275,11 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 			imageCfg = &ImageConfig{}
 			imageCfg.Normalize()
 		}
-		if imageCfg.N < 1 || imageCfg.N > 10 {
-			httpserver.WriteError(w, http.StatusBadRequest, "image_config.n must be between 1 and 10")
+		if !requireImageAspectRatio(w, imageCfg.AspectRatio) {
 			return
 		}
-		// The same transport-layer rules the image endpoints apply: a ratio is a
-		// ratio, and a resolution tier is 1k or 2k.
-		if edgeAspect := strings.TrimSpace(imageCfg.AspectRatio); edgeAspect != "" && !validImageAspectRatio(edgeAspect) {
-			httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_parameter", "aspect_ratio is not supported")
+		if _, ok := requireImageResolution(w, imageCfg.Resolution); !ok {
 			return
-		}
-		if _, err := normalizeImageResolution(imageCfg.Resolution); err != nil {
-			httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_parameter", err.Error())
-			return
-		}
-		if isImageGenerationModel(req.Model) && normalizeModelID(req.Model) == "grok-imagine-image-lite" && imageCfg.N > 4 {
-			httpserver.WriteError(w, http.StatusBadRequest, "image_config.n must be between 1 and 4 for grok-imagine-image-lite")
-			return
-		}
-		if isImageEditModel(req.Model) && imageCfg.N > 2 {
-			httpserver.WriteError(w, http.StatusBadRequest, "image_config.n must be between 1 and 2 for image edit")
-			return
-		}
-		if req.Stream && imageCfg.N > 2 {
-			httpserver.WriteError(w, http.StatusBadRequest, "streaming is only supported when image_config.n=1 or n=2")
-			return
-		}
-		imageCfg.ResponseFormat = normalizeImageResponseFormat(imageCfg.ResponseFormat)
-		if imageCfg.Size != "" {
-			var (
-				size string
-				err  error
-			)
-			if isImageEditModel(req.Model) {
-				size, err = normalizeImageEditSize(imageCfg.Size)
-			} else {
-				size, err = normalizeImageSize(imageCfg.Size)
-			}
-			if err != nil {
-				writeGrokUpstreamError(w, err)
-				return
-			}
-			imageCfg.Size = size
-		} else {
-			imageCfg.Size = "1024x1024"
 		}
 
 		if isImageEditModel(spec.ID) {
@@ -331,11 +287,19 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 				httpserver.WriteError(w, http.StatusBadRequest, "image_url is required for image edits")
 				return
 			}
-			editInputs := imageURLs
-			if len(editInputs) > 7 {
-				editInputs = editInputs[len(editInputs)-7:]
+			// One edit call produces one image, and a stream relays one call.
+			if req.Stream && imageCfg.N > 1 {
+				httpserver.WriteError(w, http.StatusBadRequest, "streaming image edits support image_config.n=1 only")
+				return
 			}
-			h.handleChatImageEdit(r.Context(), w, req, spec, prompt, editInputs, publicBase)
+			if len(imageURLs) > 7 {
+				imageURLs = imageURLs[len(imageURLs)-7:]
+			}
+			ratio, _ := normalizeImageAspectRatio(imageCfg.AspectRatio, imageCfg.Size)
+			h.serveImageEdit(r.Context(), w, spec, imageEditOptions{
+				model: req.Model, prompt: prompt, ratio: ratio, resolution: imageCfg.Resolution,
+				format: imageCfg.ResponseFormat, publicBase: publicBase, n: imageCfg.N, stream: req.Stream,
+			}, imageURLs, nil)
 			return
 		}
 
@@ -356,7 +320,7 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if err := validateWebToolDefinitions(req.Tools); err != nil {
+	if err := validateWebToolLimits(req.Tools); err != nil {
 		writeGrokUpstreamError(w, err)
 		return
 	}

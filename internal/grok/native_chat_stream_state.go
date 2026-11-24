@@ -231,7 +231,7 @@ func (s *buildChatStream) onEvent(event, data string) error {
 	if s.terminal {
 		return nil
 	}
-	s.annotations = appendUniqueResponsesAnnotations(s.annotations, responsesFlatAnnotations(ev))
+	s.annotations = appendResponsesAnnotations(s.annotations, ev)
 	if model := responsesServedModel(ev); model != "" {
 		s.outcome.ServedModel = model
 	}
@@ -309,7 +309,7 @@ func (s *buildChatStream) onOutputItem(kind string, item, ev map[string]any) err
 		}
 		state := s.thought(key)
 		if done && state.text.Len() == 0 {
-			value := responsesExtractReasoningText(map[string]any{"output": []any{item}})
+			value := responseReasoningText(item)
 			if err := s.emitThought(key, "snapshot", value); err != nil {
 				return err
 			}
@@ -398,7 +398,7 @@ func (s *buildChatStream) onFinalOutput(entry map[string]any) error {
 			s.lastSignature = signature
 		}
 		if state.text.Len() == 0 {
-			if err := s.emitThought(key, "snapshot", responsesExtractReasoningText(map[string]any{"output": []any{entry}})); err != nil {
+			if err := s.emitThought(key, "snapshot", responseReasoningText(entry)); err != nil {
 				return err
 			}
 		}

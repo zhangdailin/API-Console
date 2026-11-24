@@ -107,17 +107,9 @@ func validWarpQuotaDate(value time.Time) bool {
 // UpdateWarpQuota atomically updates only the display snapshot observed with the
 // expected refresh credential. Older or duplicate attempts have no effect.
 func (s *Store) UpdateWarpQuota(ctx context.Context, id int64, expectedRefresh string, quota WarpQuotaSnapshot) error {
-	if s != nil && s.accounts != nil {
-		if backend, ok := s.accounts.(interface {
-			UpdateWarpQuota(context.Context, int64, string, WarpQuotaSnapshot) error
-		}); ok {
-			return backend.UpdateWarpQuota(ctx, id, expectedRefresh, quota)
-		}
+	if s == nil || s.client == nil {
+		return fmt.Errorf("warp quota store not configured")
 	}
-	return fmt.Errorf("warp quota store not configured")
-}
-
-func (s *redisStore) UpdateWarpQuota(ctx context.Context, id int64, expectedRefresh string, quota WarpQuotaSnapshot) error {
 	if err := quota.Validate(); err != nil {
 		return err
 	}

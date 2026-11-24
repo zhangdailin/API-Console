@@ -46,17 +46,9 @@ func DoubaoSessionVersion(acc *Account) [sha256.Size]byte {
 }
 
 func (s *Store) UpdateDoubaoSession(ctx context.Context, id int64, patch DoubaoSessionPatch) error {
-	if s != nil && s.accounts != nil {
-		if backend, ok := s.accounts.(interface {
-			UpdateDoubaoSession(context.Context, int64, DoubaoSessionPatch) error
-		}); ok {
-			return backend.UpdateDoubaoSession(ctx, id, patch)
-		}
+	if s == nil || s.client == nil {
+		return fmt.Errorf("doubao session store not configured")
 	}
-	return fmt.Errorf("doubao session store not configured")
-}
-
-func (s *redisStore) UpdateDoubaoSession(ctx context.Context, id int64, patch DoubaoSessionPatch) error {
 	if patch.Expected == ([sha256.Size]byte{}) || (patch.Healthy && patch.Rejected) || ((patch.Healthy || patch.Rejected) && patch.ObservedAt.IsZero()) {
 		return fmt.Errorf("invalid doubao session patch")
 	}

@@ -101,16 +101,10 @@ func (lb *LoadBalancer) rotateScanCursor(size int) int {
 // SetConnTracker replaces the default in-memory connection tracker.
 func (lb *LoadBalancer) SetConnTracker(ct ConnTracker) { lb.connTracker = ct }
 
-// AccountFilter decides whether one candidate may serve the request. A nil error
-// accepts it; a non-nil one withholds it and says why, because the reason is what
-// an emptied pool has to report. A throttle means "come back later" and a plan
-// that does not cover the model means "this will never work here"; the pool
-// cannot tell those apart from the outside, and only the filter knows. The
-// candidate is a read-only snapshot and must not be retained for mutation.
+// AccountFilter accepts a read-only candidate or explains why it was withheld.
 type AccountFilter func(*store.Account) error
 
-// The model-cooldown verdicts a filter can hand back. They are not failures:
-// they are the reason a candidate was withheld.
+// A filter can report model cooldown, plan mismatch, or other ineligibility.
 var (
 	// ErrModelThrottled withholds a candidate that is cooling down for this
 	// model after the upstream asked for a pause.
@@ -163,28 +157,15 @@ func (lb *LoadBalancer) getNextAccountWithFilter(ctx context.Context, excludeIDs
 
 	var filtered []*store.Account
 	excludeSet := make(map[int64]bool)
-	// Counted per scan pass (see scan below), so the reasons reported for an empty
-	// pool describe one pass rather than a window and its fallback added together.
-	channelCandidates := 0
-	channelMatched := 0
-	rateLimitedUnavailable := 0
-	allowanceParked := 0
-	// Among the candidates the caller's filter withheld, what did it say? The
-	// answer decides whether an empty pool invites a retry or reports a model no
-	// matching account can serve.
-	filterWithheld := 0
-	restrictedUnavailable := 0
-	filterThrottled := 0
-	filterUnavailable := 0
+	type scanCounts struct {
+		candidates, matched, throttled, spent, restricted, noModel, modelCooldown int
+	}
+	var counts scanCounts
 	for _, id := range excludeIDs {
 		excludeSet[id] = true
 	}
 
-	// A large pool is examined in rotating windows rather than in full. Every
-	// request paying for a scan and availability check of thousands of accounts
-	// is what made the pool expensive to grow; the window wraps, so every
-	// account is still reachable, and a window that yields nothing falls back to
-	// the full list so correctness never depends on the window size.
+	// Rotate bounded scan windows and fall back to the full pool if necessary.
 	scanned := accounts
 	if len(accounts) > accountScanWindow {
 		start := lb.rotateScanCursor(len(accounts))
@@ -206,13 +187,7 @@ func (lb *LoadBalancer) getNextAccountWithFilter(ctx context.Context, excludeIDs
 				return false
 			}
 		}
-		// Reset per pass: the whole-pool fallback re-scans accounts the window
-		// already counted, and doubling the counters would let one pool look like
-		// two (and flip which reason is reported for an empty one).
-		channelCandidates, channelMatched = 0, 0
-		rateLimitedUnavailable, allowanceParked = 0, 0
-		restrictedUnavailable = 0
-		filterWithheld, filterThrottled, filterUnavailable = 0, 0, 0
+		counts = scanCounts{}
 		for _, acc := range candidates {
 			if ctx.Err() != nil {
 				scanErr = context.Cause(ctx)
@@ -230,34 +205,29 @@ func (lb *LoadBalancer) getNextAccountWithFilter(ctx context.Context, excludeIDs
 					continue
 				}
 			}
-			// Counted before the caller's filter: the difference between "this
-			// channel has no accounts" and "this channel has accounts and the
-			// request's model filter rejected all of them" is the whole reason the
-			// pool is empty, and it is reported below.
-			channelCandidates++
+			counts.candidates++
 			if filter != nil {
 				if rejectErr := filter(acc); rejectErr != nil {
-					filterWithheld++
 					switch {
 					case errors.Is(rejectErr, ErrModelUnavailable):
-						filterUnavailable++
+						counts.noModel++
 					case errors.Is(rejectErr, ErrModelThrottled):
-						filterThrottled++
+						counts.modelCooldown++
 					}
 					continue
 				}
 			}
-			channelMatched++
+			counts.matched++
 			available := lb.availableAccount(ctx, acc)
 			if available == nil {
 				if store.WorkBuddyRestrictionUntil(acc).After(time.Now()) {
-					restrictedUnavailable++
+					counts.restricted++
 				}
 				switch strings.TrimSpace(acc.StatusCode) {
 				case "429":
-					rateLimitedUnavailable++
+					counts.throttled++
 				case "402":
-					allowanceParked++
+					counts.spent++
 				}
 				continue
 			}
@@ -272,67 +242,36 @@ func (lb *LoadBalancer) getNextAccountWithFilter(ctx context.Context, excludeIDs
 	if scanErr != nil {
 		return nil, scanErr
 	}
-	accounts = filtered
-
-	if len(accounts) == 0 {
-		// An empty pool has four different causes and they need four different
-		// answers: a request whose model is cooling down on every account, a pool
-		// that is rate-limited, a pool whose allowance is spent, and a pool that is
-		// partly one and partly the other. The first three used to arrive as the
-		// bare sentence below, so "every account is cooling down for this model"
-		// reached the operator as "no enabled accounts available for channel",
-		// which reads like the channel has no accounts at all — and the caller
-		// answered it with a 503 instead of a retryable 429.
-		//
-		// The mixed case is not a formality: WorkBuddy's outage was three accounts
-		// rate-limited and four parked for a spent allowance at once. Each
-		// group-only rule failed, the bare sentence was reported, the client got a
-		// 503 "server fault" with no capacity cause to retry on, and the operator
-		// could see neither the reason nor the split.
+	if len(filtered) == 0 {
+		errorPrefix := "no enabled accounts available for channel: " + channel
+		var detail string
 		switch {
-		case channel != "" && channelCandidates > 0 && channelMatched == 0:
-			// The caller's filter withheld every candidate, and the reason it gave
-			// decides the answer. "Cooling down" invites a retry; a plan that does
-			// not cover the model never becomes true by waiting. Reporting the
-			// second as the first is what answered a plan refusal with "the
-			// requested model is temporarily rate-limited".
+		case channel != "" && counts.candidates > 0 && counts.matched == 0:
+			// Model rejection and cooldown have different retry semantics.
 			switch {
-			case filterUnavailable > 0 && filterThrottled == 0 && filterUnavailable == filterWithheld:
-				return nil, fmt.Errorf("no enabled accounts available for channel: %s (the requested model is not covered by any matching account's plan)", channel)
-			case filterThrottled > 0 && filterUnavailable > 0:
-				return nil, fmt.Errorf("no enabled accounts available for channel: %s (the requested model is cooling down on some matching accounts and not covered by the plans of the rest)", channel)
+			case counts.noModel == counts.candidates:
+				detail = "the requested model is not covered by any matching account's plan"
+			case counts.modelCooldown > 0 && counts.noModel > 0:
+				detail = "the requested model is cooling down on some matching accounts and not covered by the plans of the rest"
+			default:
+				detail = "all matching accounts are cooling down for the requested model"
 			}
-			// The caller's filter (a per-model cooldown) rejected every candidate.
-			return nil, fmt.Errorf("no enabled accounts available for channel: %s (all matching accounts are cooling down for the requested model)", channel)
-		case channel == "workbuddy" && channelMatched > 0 && restrictedUnavailable == channelMatched:
-			return nil, fmt.Errorf("no enabled accounts available for channel: %s (workbuddy API error: status=403, code=11140, message=all matching accounts are restricted)", channel)
-		case channel != "" && channelMatched > 0 && rateLimitedUnavailable == channelMatched:
-			return nil, fmt.Errorf("no enabled accounts available for channel: %s (all matching accounts are rate-limited or cooling down)", channel)
-		case channel != "" && channelMatched > 0 && allowanceParked == channelMatched:
-			return nil, fmt.Errorf("no enabled accounts available for channel: %s (all matching accounts have exhausted their allowance)", channel)
-		case channel != "" && allowanceParked > 0 && rateLimitedUnavailable > 0:
-			// A mixed pool: some accounts are cooling down from a throttle, the rest
-			// are parked for a spent allowance. Neither group-only rule above can
-			// describe it, and falling through to the bare sentence is what let the
-			// WorkBuddy outage reach its callers as an unexplained 503.
-			//
-			// The answer leads with the rate limit on purpose. A throttle clears on
-			// its own, so "retry after the cooldown" is the one instruction that can
-			// actually succeed; the parked group is reported beside it so the
-			// operator sees the split without opening the account table.
-			//
-			// The wording is chosen so the shared pool-exhaustion rule reads the
-			// mixed pool as a capacity problem: "exhausted their allowance" would
-			// classify it as a permanent quota verdict, and "out of credits"
-			// (IsCreditExhaustion) would do the same on the entrances that pass the
-			// selector error as the last upstream error. "Parked for a spent
-			// allowance" describes the same accounts without tripping either rule.
-			return nil, fmt.Errorf("no enabled accounts available for channel: %s (all matching accounts are rate-limited or cooling down: %d rate-limited, %d parked for a spent allowance)", channel, rateLimitedUnavailable, allowanceParked)
+		case channel == "workbuddy" && counts.matched > 0 && counts.restricted == counts.matched:
+			detail = "workbuddy API error: status=403, code=11140, message=all matching accounts are restricted"
+		case channel != "" && counts.matched > 0 && counts.throttled == counts.matched:
+			detail = "all matching accounts are rate-limited or cooling down"
+		case channel != "" && counts.matched > 0 && counts.spent == counts.matched:
+			detail = "all matching accounts have exhausted their allowance"
+		case channel != "" && counts.spent > 0 && counts.throttled > 0:
+			// A mixed pool remains retryable; preserve its rate-limit classification.
+			detail = fmt.Sprintf("all matching accounts are rate-limited or cooling down: %d rate-limited, %d parked for a spent allowance", counts.throttled, counts.spent)
 		}
-		return nil, fmt.Errorf("no enabled accounts available for channel: %s", channel)
+		if detail != "" {
+			return nil, fmt.Errorf("%s (%s)", errorPrefix, detail)
+		}
+		return nil, errors.New(errorPrefix)
 	}
-
-	account := lb.selectAccountWithTracker(accounts, tracker)
+	account := lb.selectAccountWithTracker(filtered, tracker)
 	if account == nil {
 		return nil, fmt.Errorf("no enabled accounts available for channel: %s (all matching accounts are at their concurrency limit)", channel)
 	}
@@ -342,13 +281,7 @@ func (lb *LoadBalancer) getNextAccountWithFilter(ctx context.Context, excludeIDs
 	return account.Clone(), nil
 }
 
-// InvalidateAccounts drops the cached snapshot entries for the given accounts so
-// the next selection reads their current state.
-//
-// This replaces the old "wait for the five-second TTL" behaviour: a change that
-// has been persisted must be visible to the next request, not to the request
-// after next. The whole snapshot is re-read on the next miss, so a removed
-// account cannot linger in the pool.
+// InvalidateAccounts forces the next selection to reread changed account rows.
 func (lb *LoadBalancer) InvalidateAccounts(ids []int64) {
 	if lb == nil || len(ids) == 0 {
 		return
@@ -498,45 +431,16 @@ func indexAccountsByChannel(accounts []*store.Account) map[string][]*store.Accou
 	return byChannel
 }
 
-// selectionScratch holds the per-call working slices of one account selection.
-// Selection runs on every request that has to be routed, and it used to allocate
-// an id slice plus three account slices per call; keeping the buffers in a pool
-// makes the steady state allocation-free.
+// The bounded scan reuses ID and tie buffers on the hot path.
 type selectionScratch struct {
-	ids     []int64
-	best    []int
-	unseen  []int
-	coldest []int
+	ids  []int64
+	best []int
 }
 
 var selectionScratchPool = sync.Pool{
 	New: func() any {
-		return &selectionScratch{
-			ids:     make([]int64, 0, 64),
-			best:    make([]int, 0, 16),
-			unseen:  make([]int, 0, 16),
-			coldest: make([]int, 0, 16),
-		}
+		return &selectionScratch{ids: make([]int64, 0, 64), best: make([]int, 0, 16)}
 	},
-}
-
-func acquireSelectionScratch() *selectionScratch {
-	return selectionScratchPool.Get().(*selectionScratch)
-}
-
-func releaseSelectionScratch(s *selectionScratch) {
-	if s == nil {
-		return
-	}
-	// Drop oversized buffers rather than park them for the process lifetime.
-	if cap(s.ids) > 1<<14 || cap(s.best) > 1<<10 || cap(s.unseen) > 1<<10 || cap(s.coldest) > 1<<10 {
-		return
-	}
-	s.ids = s.ids[:0]
-	s.best = s.best[:0]
-	s.unseen = s.unseen[:0]
-	s.coldest = s.coldest[:0]
-	selectionScratchPool.Put(s)
 }
 
 func (lb *LoadBalancer) selectAccountWithTracker(accounts []*store.Account, tracker ConnTracker) *store.Account {
@@ -566,8 +470,8 @@ func (lb *LoadBalancer) selectAccountWithTracker(accounts []*store.Account, trac
 		tracker = NewMemoryConnTracker()
 	}
 
-	scratch := acquireSelectionScratch()
-	defer releaseSelectionScratch(scratch)
+	scratch := selectionScratchPool.Get().(*selectionScratch)
+	defer selectionScratchPool.Put(scratch)
 
 	// Batch-fetch connection counts. The slice is borrowed from the pool and
 	// reused; GetCounts reads it synchronously and does not retain it.
@@ -617,59 +521,34 @@ func (lb *LoadBalancer) selectAccountWithTracker(accounts []*store.Account, trac
 		// A LoadBalancer built as a struct literal (tests, embedders) has no map.
 		lb.lastSelected = make(map[int64]time.Time)
 	}
-	unseen := scratch.unseen[:0]
-	coldest := scratch.coldest[:0]
-	var oldest time.Time
+	// Filter the tie set in place. Unseen accounts beat any seen account;
+	// otherwise keep only the oldest selection timestamp.
+	oldest := time.Time{}
+	unseen := false
+	pool := best[:0]
 	for _, i := range best {
 		last, seen := lb.lastSelected[accounts[i].ID]
-		if !seen {
-			unseen = append(unseen, i)
+		if seen && unseen {
 			continue
 		}
-		switch {
-		case len(coldest) == 0 || last.Before(oldest):
-			oldest = last
-			coldest = append(coldest[:0], i)
-		case last.Equal(oldest):
-			coldest = append(coldest, i)
+		if len(pool) == 0 || (!seen && !unseen) || (seen && last.Before(oldest)) {
+			pool, oldest, unseen = pool[:0], last, !seen
 		}
-	}
-	scratch.unseen, scratch.coldest = unseen, coldest
-
-	pool := best
-	switch {
-	case len(unseen) > 0:
-		pool = unseen
-	case len(coldest) > 0:
-		pool = coldest
+		if !seen || last.Equal(oldest) {
+			pool = append(pool, i)
+		}
 	}
 	picked := accounts[pool[rand.IntN(len(pool))]]
 	lb.lastSelected[picked.ID] = time.Now()
 	return picked
 }
 
-func (lb *LoadBalancer) AcquireConnection(accountID int64) { lb.connTracker.Acquire(accountID) }
-
-func (lb *LoadBalancer) ReleaseConnection(accountID int64) { lb.connTracker.Release(accountID) }
-
-const (
-	// The account-state policy owns these windows; the aliases keep the pool's
-	// existing call sites and tests readable while giving every other entrance
-	// (scheduler, admin API, account table) the same numbers.
-	//
-	// 401 cooldown: the token may already have been refreshed, so retry after a
-	// short interval.
-	retry401Default = accountpolicy.CooldownAuth
-	// 402 usually means the balance/credits are gone. It cools for a day by
-	// default so the pool stops hammering an account with no allowance.
-	retry402Default = accountpolicy.CooldownPayment
-	// 403/404 cooldown: the account may be banned or misconfigured, so retry
-	// after a longer interval.
-	retry403Default = accountpolicy.CooldownBlocked
-	// Many Grok 403s are a transient upstream denial or a temporary risk-control
-	// decision, so the account must not be blacklisted for long.
-	retry403Grok = accountpolicy.CooldownBlockedGro
-)
+func (lb *LoadBalancer) ReserveConnection(ctx context.Context, accountID, limit int64) (func(), bool) {
+	if lb == nil {
+		return nil, true
+	}
+	return ReserveConnection(ctx, lb.connTracker, accountID, limit)
+}
 
 func (lb *LoadBalancer) availableAccount(ctx context.Context, acc *store.Account) *store.Account {
 	if !store.AccountAuthActive(acc) {
@@ -726,37 +605,30 @@ func (lb *LoadBalancer) availableAccount(ctx context.Context, acc *store.Account
 		}
 		return nil
 	case "402":
-		// Paid Build exhaustion recovers at the billing period boundary rather
-		// than after an arbitrary 24-hour probe window.
+		reset := acc.QuotaResetAt
+		reason := "402 冷却完成，自动恢复尝试"
 		if isPaidGrokBuildAccount(acc) {
 			if periodEnd := acc.GrokBilling.PeriodEnd(); !periodEnd.IsZero() {
-				if !now.Before(periodEnd) {
-					return lb.clearAccountStatus(ctx, acc, "402 账期已结束，恢复尝试")
-				}
+				reset, reason = periodEnd, "402 账期已结束，恢复尝试"
+			}
+		}
+		if reset.IsZero() {
+			if acc.LastAttempt.IsZero() {
 				return nil
 			}
+			reset = acc.LastAttempt.Add(accountpolicy.CooldownPayment)
 		}
-		// 402 usually means the balance/credits are gone. A reset time from the
-		// upstream takes precedence when it gives one; otherwise the longer
-		// cooldown applies, so the scheduler does not keep hitting the same
-		// account that has no allowance.
-		if !acc.QuotaResetAt.IsZero() {
-			if !now.Before(acc.QuotaResetAt) {
-				return lb.clearAccountStatus(ctx, acc, "402 冷却完成，自动恢复尝试")
-			}
-			return nil
-		}
-		if cooldownElapsed(acc.LastAttempt, retry402Default, now) {
-			return lb.clearAccountStatus(ctx, acc, "402 冷却完成，自动恢复尝试")
+		if !now.Before(reset) {
+			return lb.clearAccountStatus(ctx, acc, reason)
 		}
 		return nil
 	case "403", "404":
 		// 403/404 can be a temporary ban or a configuration problem.
 		// For Grok, a 403 is often a transient upstream denial, so the account
 		// must not be blacklisted for long.
-		cooldown := retry403Default
+		cooldown := accountpolicy.CooldownBlocked
 		if strings.EqualFold(acc.AccountType, "grok") {
-			cooldown = retry403Grok
+			cooldown = accountpolicy.CooldownBlockedGro
 		}
 		if cooldownElapsed(acc.LastAttempt, cooldown, now) {
 			return lb.clearAccountStatus(ctx, acc, status+" 冷却完成，自动恢复尝试")
@@ -765,7 +637,7 @@ func (lb *LoadBalancer) availableAccount(ctx context.Context, acc *store.Account
 	default:
 		// Unknown status codes are treated as transient errors with a short cooldown
 		// to prevent permanent account exclusion.
-		if cooldownElapsed(acc.LastAttempt, retry401Default, now) {
+		if cooldownElapsed(acc.LastAttempt, accountpolicy.CooldownAuth, now) {
 			return lb.clearAccountStatus(ctx, acc, status+" 未知状态冷却完成，自动恢复尝试")
 		}
 		return nil

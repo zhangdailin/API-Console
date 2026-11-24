@@ -103,35 +103,26 @@ func responsesExtractText(v any) string {
 	case string:
 		return x
 	case map[string]any:
-		if t := strings.TrimSpace(fmt.Sprint(x["type"])); t == "output_text" || t == "text" || t == "message" {
-			if raw := x["text"]; raw != nil {
-				if s := strings.TrimSpace(fmt.Sprint(raw)); s != "" && s != "<nil>" {
-					return s
+		kind := strings.TrimSpace(fmt.Sprint(x["type"]))
+		fields := []string{"output_text", "content", "output", "text", "message"}
+		switch kind {
+		case "output_text", "text", "message":
+			if text := strings.TrimSpace(fmt.Sprint(x["text"])); text != "" && text != "<nil>" {
+				return text
+			}
+			for _, key := range []string{"content", "summary"} {
+				if text := strings.TrimSpace(responsesExtractText(x[key])); text != "" {
+					return text
 				}
 			}
-			if raw := x["content"]; raw != nil {
-				if s := strings.TrimSpace(responsesExtractText(raw)); s != "" {
-					return s
-				}
-			}
-			if raw := x["summary"]; raw != nil {
-				if s := strings.TrimSpace(responsesExtractText(raw)); s != "" {
-					return s
-				}
-			}
-		}
-		if t := strings.TrimSpace(fmt.Sprint(x["type"])); t == "message" || t == "response.output_message" {
-			if raw := x["content"]; raw != nil {
-				if s := strings.TrimSpace(responsesExtractText(raw)); s != "" {
-					return s
-				}
+		case "response.output_message":
+			if text := strings.TrimSpace(responsesExtractText(x["content"])); text != "" {
+				return text
 			}
 		}
-		for _, key := range []string{"output_text", "content", "output", "text", "message"} {
-			if raw := x[key]; raw != nil {
-				if s := responsesExtractText(raw); strings.TrimSpace(s) != "" {
-					return s
-				}
+		for _, key := range fields {
+			if text := responsesExtractText(x[key]); strings.TrimSpace(text) != "" {
+				return text
 			}
 		}
 	case []any:
@@ -175,22 +166,27 @@ func responsesExtractMessageText(v any) string {
 	return strings.TrimSpace(responsesExtractText(v))
 }
 
-func responsesFlatAnnotations(v any) []map[string]any {
-	seen := map[string]struct{}{}
-	out := make([]map[string]any, 0)
+func appendResponsesAnnotations(out []map[string]any, v any) []map[string]any {
+	keyFor := func(url, title any, start, end any) string {
+		return fmt.Sprintf("%v\x00%v\x00%v:%v", url, title, start, end)
+	}
+	seen := make(map[string]struct{}, len(out))
+	for _, ann := range out {
+		seen[keyFor(ann["url"], ann["title"], ann["start_index"], ann["end_index"])] = struct{}{}
+	}
 	add := func(url, title string, start, end int) {
-		url = strings.TrimSpace(url)
+		url, title = strings.TrimSpace(url), strings.TrimSpace(title)
 		if url == "" {
 			return
 		}
-		key := fmt.Sprintf("%s\x00%s\x00%d:%d", url, title, start, end)
+		key := keyFor(url, title, start, end)
 		if _, ok := seen[key]; ok {
 			return
 		}
 		seen[key] = struct{}{}
 		out = append(out, map[string]any{
 			"url":         url,
-			"title":       strings.TrimSpace(title),
+			"title":       title,
 			"start_index": start,
 			"end_index":   end,
 		})
@@ -231,41 +227,11 @@ func responsesFlatAnnotations(v any) []map[string]any {
 }
 
 func responsesChatAnnotations(flat []map[string]any) []any {
-	if len(flat) == 0 {
-		return []any{}
-	}
 	out := make([]any, 0, len(flat))
-	for _, ann := range flat {
-		out = append(out, map[string]any{
-			"type": "url_citation",
-			"url_citation": map[string]any{
-				"url":         ann["url"],
-				"title":       ann["title"],
-				"start_index": ann["start_index"],
-				"end_index":   ann["end_index"],
-			},
-		})
+	for _, annotation := range flat {
+		out = append(out, map[string]any{"type": "url_citation", "url_citation": annotation})
 	}
 	return out
-}
-
-func appendUniqueResponsesAnnotations(dst []map[string]any, src []map[string]any) []map[string]any {
-	if len(src) == 0 {
-		return dst
-	}
-	seen := make(map[string]struct{}, len(dst)+len(src))
-	for _, ann := range dst {
-		seen[fmt.Sprintf("%v\x00%v\x00%v:%v", ann["url"], ann["title"], ann["start_index"], ann["end_index"])] = struct{}{}
-	}
-	for _, ann := range src {
-		key := fmt.Sprintf("%v\x00%v\x00%v:%v", ann["url"], ann["title"], ann["start_index"], ann["end_index"])
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		dst = append(dst, ann)
-	}
-	return dst
 }
 
 func responsesUsage(v map[string]any) map[string]any {
@@ -315,10 +281,7 @@ func responsesUsage(v map[string]any) map[string]any {
 			"reasoning_tokens": reasoning,
 		},
 	}
-	// Rebuilding the usage object used to drop everything outside the four
-	// counts. The upstream also reports what the request cost and how much
-	// context it used; the gateway passes those through, and they are the only
-	// source for those figures downstream.
+	// Cost and hosted-tool usage are authoritative only when reported.
 	for _, key := range []string{
 		"cost_in_usd_ticks", "num_sources_used", "num_server_side_tools_used", "context_details",
 	} {
@@ -327,47 +290,6 @@ func responsesUsage(v map[string]any) map[string]any {
 		}
 	}
 	return normalized
-}
-
-// finishUpstreamChat completes a chat response after an upstream call: error
-// reporting, quota sync, then streaming or collection. Used by the Build chat
-// path; url is used for both error and request logging and headers is
-// evaluated lazily so it is only built on the success path.
-func (h *Handler) finishUpstreamChat(ctx context.Context, w http.ResponseWriter, req *chatwire.Request, sess *chatAccountSession, logger *debug.Logger, name, url string, headers func() http.Header, payload map[string]any, resp *http.Response, err error) {
-	if err != nil {
-		h.auditChatOutcome(ctx, sess.acc, req, chatOutcome{Finish: "error", Err: err})
-		slog.Error(name+" chat upstream failed", "url", url, "status", upstreamStatus(err), "error", err)
-		if logger != nil {
-			logger.LogUpstreamHTTPError(url, upstreamStatus(err), "", err)
-		}
-		if markAllGrokAccountStatuses(err) {
-			h.markAccountStatus(ctx, sess.acc, err)
-		}
-		writeGrokUpstreamError(w, err)
-		return
-	}
-	defer resp.Body.Close()
-	if recovery := resp.Header.Get("X-Grok2API-Reasoning-Recovery"); recovery != "" {
-		w.Header().Set("X-Grok2API-Reasoning-Recovery", recovery)
-	}
-	if logger != nil {
-		if !logger.Capturing() {
-			logger.LogUpstreamRequest(url, debugHeaderMap(headers()), payload)
-		}
-	}
-	h.syncGrokQuota(sess.acc, resp.Header)
-
-	if req.Stream {
-		keepalive := httpserver.NewSSEKeepalive(w, httpserver.SSEKeepaliveInterval, func() { _ = resp.Body.Close() })
-		defer keepalive.Close()
-		result := h.streamBuildChat(keepalive, req, resp.Body)
-		if err := keepalive.Close(); err != nil && result.Err == nil {
-			result.Err, result.Finish = err, "error"
-		}
-		h.auditChatOutcome(ctx, sess.acc, req, result)
-		return
-	}
-	h.auditChatOutcome(ctx, sess.acc, req, h.collectBuildChat(w, req, resp.Body))
 }
 
 func (h *Handler) serveNativeChat(ctx context.Context, w http.ResponseWriter, req *chatwire.Request, spec ModelSpec, sess *chatAccountSession, logger *debug.Logger) {
@@ -433,9 +355,38 @@ func (h *Handler) serveNativeChat(ctx context.Context, w http.ResponseWriter, re
 		return canCall() && (!replayUnsafe || isFreeUsageExhaustedError(err))
 	}
 	resp, err := h.retryWithAccountSwitch(ctx, sess, 1500*time.Millisecond, request, openNext, nil, 0, allowSwitch)
-	h.finishUpstreamChat(ctx, w, req, sess, logger, provider, endpoint, func() http.Header {
-		return h.cliHeaders(sess.acc, sess.token)
-	}, payload, resp, err)
+	if err != nil {
+		h.auditChatOutcome(ctx, sess.acc, req, chatOutcome{Finish: "error", Err: err})
+		slog.Error(provider+" chat upstream failed", "url", endpoint, "status", upstreamStatus(err), "error", err)
+		if logger != nil {
+			logger.LogUpstreamHTTPError(endpoint, upstreamStatus(err), "", err)
+		}
+		if markAllGrokAccountStatuses(err) {
+			h.markAccountStatus(ctx, sess.acc, err)
+		}
+		writeGrokUpstreamError(w, err)
+		return
+	}
+	defer resp.Body.Close()
+	if recovery := resp.Header.Get("X-Grok2API-Reasoning-Recovery"); recovery != "" {
+		w.Header().Set("X-Grok2API-Reasoning-Recovery", recovery)
+	}
+	if logger != nil && !logger.Capturing() {
+		logger.LogUpstreamRequest(endpoint, debugHeaderMap(h.cliHeaders(sess.acc, sess.token)), payload)
+	}
+	h.syncGrokQuota(sess.acc, resp.Header)
+
+	if req.Stream {
+		keepalive := httpserver.NewSSEKeepalive(w, httpserver.SSEKeepaliveInterval, func() { _ = resp.Body.Close() })
+		defer keepalive.Close()
+		result := h.streamBuildChat(keepalive, req, resp.Body)
+		if err := keepalive.Close(); err != nil && result.Err == nil {
+			result.Err, result.Finish = err, "error"
+		}
+		h.auditChatOutcome(ctx, sess.acc, req, result)
+		return
+	}
+	h.auditChatOutcome(ctx, sess.acc, req, h.collectBuildChat(w, req, resp.Body))
 }
 
 const (
@@ -506,13 +457,9 @@ func (h *Handler) collectBuildChat(w http.ResponseWriter, req *chatwire.Request,
 	refusal := responses.ExtractRefusal(raw)
 	filter := stopFilter{sequences: req.Stop}
 	text = filter.push(text, true)
-	reasoning := responsesExtractReasoningText(raw)
-	encryptedReasoning := responsesExtractEncryptedReasoning(raw)
-	annotations := responsesChatAnnotations(responsesFlatAnnotations(raw))
-	// A single pass over the upstream output collects the tool calls, the
-	// searches and the reasoning items; each of them used to walk the same slice
-	// again. A malformed function_call is recorded and reported after the
-	// accounting below, exactly where the old validation loop returned.
+	reasoning, encryptedReasoning := responsesReasoning(raw)
+	annotations := responsesChatAnnotations(appendResponsesAnnotations(nil, raw))
+	// Preserve usage and observed model even when tool validation fails.
 	seen := map[string]bool{}
 	var toolCalls []map[string]any
 	var searches, reasoningItems []any
@@ -601,8 +548,6 @@ func (h *Handler) collectBuildChat(w http.ResponseWriter, req *chatwire.Request,
 	}
 	outcome.Finish = finishReason
 	outcome.FirstToken = time.Now()
-	// The streaming path marks this as text arrives. Without it every
-	// non-streaming answer was journaled with visible_output=false.
 	outcome.SawText = text != ""
 	resp := map[string]any{
 		"id":                 util.FirstNonEmpty(chatwire.ParseLooseStringAny(raw["id"]), "chatcmpl_"+util.RandomHex(8)),
@@ -650,40 +595,34 @@ func responsesReasoningField(item map[string]any, field, partType string) string
 	return out.String()
 }
 
-func responsesExtractReasoningText(raw map[string]any) string {
-	if raw == nil {
-		return ""
+func responseReasoningText(item map[string]any) string {
+	if text := responsesReasoningField(item, "content", "reasoning_text"); text != "" {
+		return text
 	}
-	var result strings.Builder
-	for _, value := range responses.InterfaceSlice(raw["output"]) {
-		item, _ := value.(map[string]any)
-		if item == nil || !strings.EqualFold(strings.TrimSpace(fmt.Sprint(item["type"])), "reasoning") {
-			continue
-		}
-		text := responsesReasoningField(item, "content", "reasoning_text")
-		if text == "" {
-			text = responsesReasoningField(item, "summary", "")
-		}
-		result.WriteString(text)
-	}
-	return result.String()
+	return responsesReasoningField(item, "summary", "")
 }
 
-func responsesExtractEncryptedReasoning(raw map[string]any) string {
-	if raw == nil {
-		return ""
+func responseReasoningSignature(item map[string]any) string {
+	if value := strings.TrimSpace(fmt.Sprint(item["encrypted_content"])); value != "<nil>" {
+		return value
 	}
-	latest := ""
+	return ""
+}
+
+func responsesReasoning(raw map[string]any) (string, string) {
+	var text strings.Builder
+	var signature string
 	for _, value := range responses.InterfaceSlice(raw["output"]) {
 		item, _ := value.(map[string]any)
-		if item == nil || !strings.EqualFold(strings.TrimSpace(fmt.Sprint(item["type"])), "reasoning") {
+		if !strings.EqualFold(chatwire.ParseLooseStringAny(item["type"]), "reasoning") {
 			continue
 		}
-		if encrypted := strings.TrimSpace(fmt.Sprint(item["encrypted_content"])); encrypted != "" && encrypted != "<nil>" {
-			latest = encrypted
+		text.WriteString(responseReasoningText(item))
+		if value := responseReasoningSignature(item); value != "" {
+			signature = value
 		}
 	}
-	return latest
+	return text.String(), signature
 }
 
 func responsesToolCallFromItem(raw any) map[string]any {
@@ -691,37 +630,33 @@ func responsesToolCallFromItem(raw any) map[string]any {
 	if item == nil || !strings.EqualFold(strings.TrimSpace(fmt.Sprint(item["type"])), "function_call") {
 		return nil
 	}
-	name := strings.TrimSpace(fmt.Sprint(item["name"]))
+	name := chatwire.ParseLooseStringAny(item["name"])
 	if name == "" || name == "<nil>" {
 		return nil
 	}
-	callID := strings.TrimSpace(fmt.Sprint(item["call_id"]))
-	if callID == "" || callID == "<nil>" {
-		callID = strings.TrimSpace(fmt.Sprint(item["id"]))
+	callID := ""
+	for _, key := range []string{"call_id", "id"} {
+		if value := chatwire.ParseLooseStringAny(item[key]); value != "" && value != "<nil>" {
+			callID = value
+			break
+		}
 	}
-	if callID == "" || callID == "<nil>" {
+	if callID == "" {
 		callID = "call_" + util.RandomHex(12)
 	}
 	arguments := "{}"
-	if rawArgs, ok := item["arguments"]; ok && rawArgs != nil {
-		switch v := rawArgs.(type) {
-		case string:
-			if strings.TrimSpace(v) != "" {
-				arguments = strings.TrimSpace(v)
-			}
-		default:
-			if buf, err := json.Marshal(v); err == nil {
-				arguments = string(buf)
-			}
+	switch value := item["arguments"].(type) {
+	case nil:
+	case string:
+		arguments = util.FirstNonEmpty(value, arguments)
+	default:
+		if raw, err := json.Marshal(value); err == nil {
+			arguments = string(raw)
 		}
 	}
 	return map[string]any{
-		"id":   callID,
-		"type": "function",
-		"function": map[string]any{
-			"name":      name,
-			"arguments": arguments,
-		},
+		"id": callID, "type": "function",
+		"function": map[string]any{"name": name, "arguments": arguments},
 	}
 }
 

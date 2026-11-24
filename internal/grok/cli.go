@@ -87,7 +87,7 @@ func (c *CLIClient) cliHeaders(acc *store.Account, accessToken string) http.Head
 	h.Set("Accept", "application/json")
 	h.Set("Accept-Encoding", "gzip")
 	h.Set("User-Agent", c.userAgent())
-	h.Set("x-xai-request-id", randomUUID())
+	h.Set("x-xai-request-id", grokbase.RandomRequestID())
 	if acc != nil {
 		if teamID := strings.TrimSpace(acc.TeamID); teamID != "" {
 			h.Set("x-grok-team-id", teamID)

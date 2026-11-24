@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"orchids-api/internal/testutil"
@@ -65,4 +66,35 @@ func TestWebChatRequestRejectsMalformedLooseFields(t *testing.T) {
 	var req ChatCompletionsRequest
 	testutil.Error(t, json.Unmarshal([]byte(`{"model":"m","messages":[],"max_tokens":"lots"}`), &req))
 	testutil.Error(t, json.Unmarshal([]byte(`{"model":"m","messages":[],"image_config":{"n":"many"}}`), &req))
+}
+
+func TestChatToolPoliciesKeepBuildAndWebContracts(t *testing.T) {
+	for _, tc := range []struct {
+		name, tools                       string
+		buildError, wireError, limitError string
+	}{
+		{name: "hosted search with required choice", tools: `[{"type":"web_search_preview"}]`},
+		{name: "hosted aliases collide", tools: `[{"type":"web_search"},{"type":"web_search_preview"}]`, buildError: `tools.1.type duplicates "web_search"`, wireError: `tools.1.type duplicates "web_search"`},
+		{name: "Build keeps loose names", tools: `[{"type":"function","function":{"name":42}}]`, wireError: "function.name must be a non-empty string"},
+		{name: "Web prompt limits run after wire checks", tools: `[{"type":"function","function":{"name":"some.tool"}}]`, limitError: "function.name must match"},
+		{name: "unexpected hosted function does not panic", tools: `[{"type":"x_search","function":{}},{"type":"function","function":{"name":"lookup"}}]`, limitError: "function.name must match"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			check := func(stage string, err error, want string) {
+				t.Helper()
+				if want == "" && err != nil || want != "" && (err == nil || !strings.Contains(err.Error(), want)) {
+					t.Errorf("%s error = %v, want %q", stage, err, want)
+				}
+			}
+			var req ChatCompletionsRequest
+			body := `{"model":"m","messages":[{"role":"user","content":"search"}],"tool_choice":"required","tools":` + tc.tools + `}`
+			testutil.NoError(t, json.Unmarshal([]byte(body), &req))
+			check("Build", req.Request.Validate(), tc.buildError)
+			err := req.Validate()
+			check("Web wire", err, tc.wireError)
+			if err == nil {
+				check("Web prompt limits", validateWebToolLimits(req.Tools), tc.limitError)
+			}
+		})
+	}
 }

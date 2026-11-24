@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"orchids-api/internal/channel"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/config"
 	"orchids-api/internal/httpserver"
 	"orchids-api/internal/util"
 	"strings"
@@ -55,7 +56,11 @@ func ResponsesBridgeHandler(chat http.HandlerFunc, opts BridgeOptions) http.Hand
 		if !httpserver.RequireMethod(w, r, http.MethodPost) {
 			return
 		}
-		body, err := httpserver.ReadBoundedJSONBody(w, r)
+		bodyLimit := int64(config.InferenceJSONBodyLimit)
+		if opts.StoredInputReplayLimit > 0 {
+			bodyLimit = min(bodyLimit, int64(opts.StoredInputReplayLimit))
+		}
+		body, err := httpserver.ReadJSONBodyLimit(w, r, bodyLimit)
 		if err != nil {
 			return
 		}
@@ -183,8 +188,8 @@ func ResponsesBridgeHandler(chat http.HandlerFunc, opts BridgeOptions) http.Hand
 					return
 				}
 				WriteStreamFromChatReader(w, req, reader, StreamOptions{
-					OnComplete:     bridgedResponseRecorder(r, storedRequest, opts),
-					ToolNamespaces: namespaces,
+					PersistCompleted: bridgedResponseRecorder(r, storedRequest, opts),
+					ToolNamespaces:   namespaces,
 				})
 			})
 			return
@@ -259,30 +264,26 @@ func saveBridgedResponse(r *http.Request, req CreateRequest, response map[string
 		return err
 	}
 	return opts.StoreFor().SaveStoredResponse(r.Context(), &store.StoredResponse{
-		ResponseID:  chatwire.ParseLooseStringAny(response["id"]),
-		OwnerHash:   OwnerHash(r.Context()),
-		Model:       req.Model,
-		Provider:    bridgedResponseProvider,
-		ContentType: "application/json",
-		Body:        encoded,
-		InputItems:  InputItemsJSON(req.Input),
+		ResponseID:            chatwire.ParseLooseStringAny(response["id"]),
+		OwnerHash:             OwnerHash(r.Context()),
+		Model:                 req.Model,
+		Provider:              bridgedResponseProvider,
+		ContentType:           "application/json",
+		Body:                  encoded,
+		InputItems:            InputItemsJSON(req.Input),
+		ExternalizeInputFiles: opts.StoredInputReplayLimit > 0,
 	}, opts.TTLOrDefault())
 }
 
-// bridgedResponseRecorder persists the response the stream just finished with.
-// A stream cannot report a storage failure to the client any more, so the
-// failure is logged and the next turn sees response_not_found.
-func bridgedResponseRecorder(r *http.Request, req CreateRequest, opts BridgeOptions) func(map[string]any) {
-	return func(response map[string]any) {
-		// Only a completed response is a resource a client can continue from; a
-		// failed or partial one has no id worth owning.
-		if !strings.EqualFold(chatwire.ParseLooseStringAny(response["status"]), "completed") {
-			return
-		}
+// bridgedResponseRecorder makes a completed response readable before publishing its ID as completed.
+func bridgedResponseRecorder(r *http.Request, req CreateRequest, opts BridgeOptions) func(map[string]any) error {
+	return func(response map[string]any) error {
 		applyBridgedResponseExtras(response, req)
-		if err := saveBridgedResponse(r, req, response, opts); err != nil {
+		err := saveBridgedResponse(r, req, response, opts)
+		if err != nil {
 			slog.Warn("Failed to store bridged response", "model", req.Model, "error", err)
 		}
+		return err
 	}
 }
 

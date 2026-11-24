@@ -59,7 +59,7 @@ func TestOpenAIMessageDeltaUsageIsFinalSnapshot(t *testing.T) {
 	for _, raw := range [][]byte{data, bytes.Replace(data, []byte(`"usage":`), []byte(`"usage" : `), 1)} {
 		for _, project := range []func() ([]byte, bool){
 			func() ([]byte, bool) { return appendOpenAIChunkFast(nil, "msg_1", 123, "message_delta", raw) },
-			func() ([]byte, bool) { return buildOpenAIChunkSlow("msg_1", 123, "message_delta", raw) },
+			func() ([]byte, bool) { return appendOpenAIChunkSlow(nil, "msg_1", 123, "message_delta", raw) },
 			func() ([]byte, bool) { return AppendOpenAIChunk([]byte("prefix"), "msg_1", 123, "message_delta", raw) },
 		} {
 			for range 2 {

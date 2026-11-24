@@ -1,14 +1,9 @@
 package web
 
 import (
-	"context"
 	"errors"
-	"io"
 	"log/slog"
-	"net"
 	"net/http"
-	"net/url"
-	"strconv"
 	"strings"
 
 	"orchids-api/internal/debug"
@@ -41,72 +36,14 @@ func writeGrokUpstreamError(w http.ResponseWriter, err error) {
 		httpserver.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	text := err.Error()
-	category := apperrors.ClassifyUpstreamError(text).Category
-	status := apperrors.StatusForCategory(category)
-	switch category {
-	case "auth", "auth_blocked", "configuration":
-		// The caller's own key is fine; the account pool needs operator action.
-		status = http.StatusServiceUnavailable
-	}
-	// The client only gets the category sentence, so the cause has to be in
-	// the log (the Build plane logs the same line). Upstream errors carry
-	// sanitized headers and a bounded body, never a credential.
-	slog.Warn("Reporting an upstream failure to the client", "error", err, "status", status, "category", category)
-	if retryAfter := upstreamRetryAfterSeconds(err); retryAfter > 0 {
-		w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
-	}
-	httpserver.WriteErrorCode(w, status, category, apperrors.PublicMessage(text))
+	grokbase.WritePublicUpstreamError(w, err, upstreamRetryAfterSeconds(err), func(err error, status int, category string) {
+		slog.Warn("Reporting an upstream failure to the client", "error", err, "status", status, "category", category)
+	})
 }
 
-// upstreamStatusMarker is the stamp this codebase puts on an error that really
-// came from an upstream HTTP response (see grokUpstreamError.Error).
-//
-// Matching the whole marker rather than a bare "status=" is what keeps a local
-// error out of the upstream branch. An error that merely mentions a status —
-// "job status=404 not found in store", "account status=402 parked" — is a local
-// condition, and classifying it as upstream both answers 4xx as 5xx and replaces
-// the operator's message with a generic sentence.
-const upstreamStatusMarker = "upstream status="
-
-// isUpstreamFailure reports whether err came from an attempt against an upstream
-// service. Only those may carry upstream detail, so only those are sanitized;
-// everything else is a local error that can be returned as-is.
 func isUpstreamFailure(err error) bool {
-	if err == nil {
-		return false
-	}
-	if _, ok := errors.AsType[*grokUpstreamError](err); ok {
-		return true
-	}
-	if strings.Contains(strings.ToLower(err.Error()), upstreamStatusMarker) && parseUpstreamStatus(err) > 0 {
-		return true
-	}
-	// Both transports in this channel render the same failure: the CLI/Build
-	// client prefixes "grok cli upstream status=…", the chat relay "grok upstream
-	// status=…". A bare "status=" without either prefix is a local condition and
-	// must stay local.
-	if text := strings.ToLower(err.Error()); parseUpstreamStatus(err) > 0 &&
-		(strings.HasPrefix(strings.TrimSpace(text), "grok cli upstream") || strings.HasPrefix(strings.TrimSpace(text), "grok upstream")) {
-		return true
-	}
-	if _, ok := errors.AsType[*url.Error](err); ok {
-		return true
-	}
-	if _, ok := errors.AsType[net.Error](err); ok {
-		return true
-	}
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) ||
-		errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-		return true
-	}
-	text := strings.ToLower(err.Error())
-	for _, marker := range []string{"upstream", "connection reset", "connection refused", "broken pipe", "no such host", "tls handshake"} {
-		if strings.Contains(text, marker) {
-			return true
-		}
-	}
-	return false
+	_, typed := errors.AsType[*grokUpstreamError](err)
+	return typed || grokbase.IsUpstreamTransportFailure(err)
 }
 
 // upstreamRetryAfterSeconds reads the backoff an upstream asked for. The typed

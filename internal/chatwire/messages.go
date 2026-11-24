@@ -3,6 +3,7 @@ package chatwire
 import (
 	"encoding/base64"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -31,6 +32,44 @@ var (
 	}
 )
 
+// ContentPartType reads the normalized type of a content block.
+func ContentPartType(part map[string]any) string {
+	kind, _ := part["type"].(string)
+	return strings.ToLower(strings.TrimSpace(kind))
+}
+
+// MapUserFileParts replaces file blocks in user messages without changing the
+// other parts or their positions. Each plane supplies its own file conversion.
+func MapUserFileParts(messages []Message, convert func(messageIndex, partIndex int, part map[string]any) (map[string]any, error)) error {
+	for i := range messages {
+		msg := &messages[i]
+		parts, ok := msg.Content.([]any)
+		if !ok || !strings.EqualFold(strings.TrimSpace(msg.Role), "user") {
+			continue
+		}
+		var next []any
+		for j, raw := range parts {
+			part, _ := raw.(map[string]any)
+			kind := ContentPartType(part)
+			if kind != "file" && kind != "input_file" {
+				continue
+			}
+			file, err := convert(i, j, part)
+			if err != nil {
+				return err
+			}
+			if next == nil {
+				next = slices.Clone(parts)
+			}
+			next[j] = file
+		}
+		if next != nil {
+			msg.Content = next
+		}
+	}
+	return nil
+}
+
 // DropBlankUserTextParts removes whitespace-only text placeholders from mixed
 // user content. Leave all-blank arrays and malformed parts for validation.
 func DropBlankUserTextParts(messages []Message) {
@@ -42,10 +81,9 @@ func DropBlankUserTextParts(messages []Message) {
 		var kept []any
 		for j, part := range parts {
 			block, _ := part.(map[string]any)
-			kind, _ := block["type"].(string)
-			kind = strings.TrimSpace(kind)
+			kind := ContentPartType(block)
 			if text, ok := block["text"].(string); ok && strings.TrimSpace(text) == "" &&
-				(strings.EqualFold(kind, "text") || strings.EqualFold(kind, "input_text")) {
+				(kind == "text" || kind == "input_text") {
 				if kept == nil {
 					kept = append(make([]any, 0, len(parts)-1), parts[:j]...)
 				}

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -42,98 +43,114 @@ var (
 const maxAdminMediaImportURLBytes = 8192
 
 func (h *Handler) HandleMediaInputs(w http.ResponseWriter, r *http.Request) {
+	h.handleMediaUpload(w, r, false)
+}
+
+func (h *Handler) handleMediaUpload(w http.ResponseWriter, r *http.Request, admin bool) {
 	if !httpserver.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 	if h == nil || h.lb == nil || h.lb.Store == nil {
-		responses.WriteAPIError(w, http.StatusServiceUnavailable, "service_unavailable", "media input store is not configured")
+		writeMediaInputError(w, admin, http.StatusServiceUnavailable, "service_unavailable", "service_unavailable", "media input store is not configured")
 		return
 	}
-	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type"))), "multipart/form-data") {
-		responses.WriteAPIError(w, http.StatusUnsupportedMediaType, "invalid_request", "media input upload requires multipart/form-data")
+	contentType := strings.TrimSpace(r.Header.Get("Content-Type"))
+	multipartForm := strings.HasPrefix(strings.ToLower(contentType), "multipart/form-data")
+	if admin {
+		mediaType, _, err := mime.ParseMediaType(contentType)
+		multipartForm = err == nil && strings.EqualFold(mediaType, "multipart/form-data")
+	}
+	if !multipartForm {
+		writeMediaInputError(w, admin, http.StatusUnsupportedMediaType, "invalid_request", "invalid_request", "media input upload requires multipart/form-data")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxMediaInputRequestBytes)
 	if err := r.ParseMultipartForm(maxMediaInputRequestBytes); err != nil {
 		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-			responses.WriteAPIError(w, http.StatusRequestEntityTooLarge, "media_too_large", "media input exceeds 20 MiB")
+			writeMediaInputError(w, admin, http.StatusRequestEntityTooLarge, "media_too_large", "media_too_large", errAdminMediaTooLarge.Error())
 			return
 		}
-		responses.WriteAPIError(w, http.StatusBadRequest, "invalid_request", "invalid media input upload")
+		writeMediaInputError(w, admin, http.StatusBadRequest, "invalid_request", "invalid_request", "invalid media input upload")
 		return
 	}
 	defer r.MultipartForm.RemoveAll()
 	files := r.MultipartForm.File["file"]
 	if len(files) != 1 {
-		responses.WriteAPIError(w, http.StatusBadRequest, "invalid_request", "exactly one file is required")
+		writeMediaInputError(w, admin, http.StatusBadRequest, "invalid_request", "invalid_request", "exactly one file is required")
 		return
 	}
-	fileHeader := files[0]
-	if fileHeader.Size <= 0 {
-		responses.WriteAPIError(w, http.StatusBadRequest, "invalid_media", "media input cannot be empty")
+	part := files[0]
+	if part.Size <= 0 {
+		writeMediaInputError(w, admin, http.StatusBadRequest, "invalid_media", "invalidMedia", "media input cannot be empty")
 		return
 	}
-	if fileHeader.Size > maxMediaInputBytes {
-		responses.WriteAPIError(w, http.StatusRequestEntityTooLarge, "media_too_large", "media input exceeds 20 MiB")
+	if part.Size > maxMediaInputBytes {
+		writeMediaInputError(w, admin, http.StatusRequestEntityTooLarge, "media_too_large", "mediaTooLarge", errAdminMediaTooLarge.Error())
 		return
 	}
-	file, err := fileHeader.Open()
+	file, err := part.Open()
 	if err != nil {
-		responses.WriteAPIError(w, http.StatusBadRequest, "invalid_media", "failed to read media input")
+		writeMediaInputError(w, admin, http.StatusBadRequest, "invalid_media", "invalid_media", "failed to read media input")
 		return
 	}
 	defer file.Close()
 	data, err := io.ReadAll(io.LimitReader(file, maxMediaInputBytes+1))
 	if err != nil {
-		responses.WriteAPIError(w, http.StatusBadRequest, "invalid_media", "failed to read media input")
+		writeMediaInputError(w, admin, http.StatusBadRequest, "invalid_media", "invalidMedia", "failed to read media input")
 		return
 	}
-	if len(data) > maxMediaInputBytes {
-		responses.WriteAPIError(w, http.StatusRequestEntityTooLarge, "media_too_large", "media input exceeds 20 MiB")
-		return
+	h.saveRequestMediaInput(w, r, data, part.Header.Get("Content-Type"), admin, true)
+}
+
+func (h *Handler) saveRequestMediaInput(w http.ResponseWriter, r *http.Request, data []byte, declared string, admin, upload bool) {
+	owner := mediaInputAdminOwner
+	if !admin {
+		owner = videoRequestOwner(r)
 	}
-	kind, mimeType, err := detectMediaInput(data, fileHeader.Header.Get("Content-Type"))
+	input, err := h.saveMediaInput(r.Context(), data, declared, owner)
 	if err != nil {
-		responses.WriteAPIError(w, http.StatusBadRequest, "invalid_media", err.Error())
-		return
-	}
-	if !reserveMediaInputBytes(int64(len(data))) {
-		responses.WriteAPIError(w, http.StatusInsufficientStorage, "media_storage_full",
-			"media input storage is full; retry after the expired inputs are reclaimed")
-		return
-	}
-	reserved := true
-	defer func() {
-		if reserved {
-			releaseMediaInputBytes(int64(len(data)))
+		status, adminCode, message := adminMediaSaveError(err)
+		code := strings.ToLower(adminCode)
+		if !admin && upload {
+			switch status {
+			case http.StatusRequestEntityTooLarge:
+				code = "media_too_large"
+			case http.StatusBadRequest:
+				code = "invalid_media"
+			case http.StatusServiceUnavailable:
+				code = "service_unavailable"
+			case http.StatusInsufficientStorage:
+				code, message = "media_storage_full", "media input storage is full; retry after the expired inputs are reclaimed"
+			default:
+				code, message = "internal_error", "failed to cache media input"
+				if strings.HasPrefix(err.Error(), "allocate media input:") {
+					message = "failed to allocate media input"
+				}
+			}
 		}
-	}()
-	id, err := newMediaInputID()
-	if err != nil {
-		responses.WriteAPIError(w, http.StatusInternalServerError, "internal_error", "failed to allocate media input")
+		writeMediaInputError(w, admin, status, code, adminCode, message)
 		return
 	}
-	name, err := h.cacheMediaInputBytes(id, kind, data, mimeType)
-	if err != nil {
-		responses.WriteAPIError(w, http.StatusInternalServerError, "internal_error", "failed to cache media input")
+	if admin {
+		util.WriteJSONStatus(w, http.StatusCreated, map[string]any{"data": adminMediaInputJSON(input)})
 		return
 	}
-	contentPath := filepath.Join(cacheBaseDir, kind, name)
-	now := time.Now().UTC()
-	input := &store.StoredMediaInput{
-		ID: id, OwnerHash: videoRequestOwner(r), Kind: kind, MIMEType: mimeType,
-		ContentPath: contentPath, SizeBytes: int64(len(data)), CreatedAt: now,
+	util.WriteJSONStatus(w, http.StatusCreated, mediaInputJSON(input))
+}
+
+func writeMediaInputError(w http.ResponseWriter, admin bool, status int, code, adminCode, message string) {
+	if admin {
+		util.WriteJSONStatus(w, status, adminMediaError(adminCode, message))
+	} else {
+		responses.WriteAPIError(w, status, code, message)
 	}
-	if err := h.lb.Store.SaveStoredMediaInput(r.Context(), input, mediaInputTTL); err != nil {
-		_ = os.Remove(contentPath)
-		responses.WriteAPIError(w, http.StatusServiceUnavailable, "service_unavailable", "failed to persist media input")
-		return
+}
+
+func mediaInputJSON(input *store.StoredMediaInput) map[string]any {
+	return map[string]any{
+		"file_id": input.ID, "object": "file", "kind": input.Kind, "mime_type": input.MIMEType,
+		"bytes": input.SizeBytes, "created_at": input.CreatedAt.Unix(), "expires_at": input.ExpiresAt.Format(time.RFC3339),
 	}
-	reserved = false
-	util.WriteJSONStatus(w, http.StatusCreated, map[string]any{
-		"file_id": id, "object": "file", "kind": kind, "mime_type": mimeType,
-		"bytes": len(data), "created_at": now.Unix(), "expires_at": now.Add(mediaInputTTL).Format(time.RFC3339),
-	})
 }
 
 // mediaInputFilePrefix namespaces uploaded media inputs inside the shared image
@@ -208,38 +225,59 @@ func (h *Handler) cacheMediaInputBytes(id, kind string, data []byte, mimeType st
 }
 
 func (h *Handler) HandleMediaInputResource(w http.ResponseWriter, r *http.Request) {
+	h.handleMediaInputResource(w, r, false)
+}
+
+func (h *Handler) handleMediaInputResource(w http.ResponseWriter, r *http.Request, admin bool) {
 	if h == nil || h.lb == nil || h.lb.Store == nil {
-		responses.WriteAPIError(w, http.StatusServiceUnavailable, "service_unavailable", "media input store is not configured")
+		writeMediaInputError(w, admin, http.StatusServiceUnavailable, "service_unavailable", "service_unavailable", "media input store is not configured")
 		return
 	}
-	id := mediaInputIDFromPath(r.URL.Path)
-	if !validMediaInputID(id) {
-		httpserver.WriteError(w, http.StatusNotFound, "media input not found")
-		return
+	fail := func(status int, code, message string) {
+		if admin {
+			util.WriteJSONStatus(w, status, adminMediaError(code, message))
+		} else {
+			httpserver.WriteError(w, status, message)
+		}
 	}
-	owner := videoRequestOwner(r)
-	input, err := h.loadMediaInput(r.Context(), id, owner)
-	if err != nil {
-		httpserver.WriteError(w, http.StatusNotFound, "media input not found")
+	id, owner := mediaInputIDFromPath(r.URL.Path), videoRequestOwner(r)
+	if admin {
+		id = strings.Trim(strings.TrimPrefix(strings.TrimSpace(r.URL.Path), "/api/media/inputs/"), "/")
+		owner = mediaInputAdminOwner
+	}
+	var input *store.StoredMediaInput
+	var err error
+	if validMediaInputID(id) {
+		input, err = h.loadMediaInput(r.Context(), id, owner)
+	}
+	if err != nil || input == nil {
+		fail(http.StatusNotFound, "not_found", "media input not found")
 		return
 	}
 	switch r.Method {
 	case http.MethodGet:
-		util.WriteJSON(w, map[string]any{
-			"file_id": input.ID, "object": "file", "kind": input.Kind, "mime_type": input.MIMEType,
-			"bytes": input.SizeBytes, "created_at": input.CreatedAt.Unix(), "expires_at": input.ExpiresAt.Format(time.RFC3339),
-		})
+		if admin {
+			util.WriteJSON(w, map[string]any{"data": adminMediaInputJSON(input)})
+		} else {
+			util.WriteJSON(w, mediaInputJSON(input))
+		}
 	case http.MethodDelete:
+		// A public request may read an admin-owned input, but deletes only
+		// from the requesting owner's namespace.
 		if err := h.lb.Store.DeleteStoredMediaInput(r.Context(), id, owner); err != nil {
-			httpserver.WriteError(w, http.StatusNotFound, "media input not found")
+			fail(http.StatusNotFound, "not_found", "media input not found")
 			return
 		}
 		if validCachedMediaContentPath(input.ContentPath, input.Kind) {
 			_ = os.Remove(input.ContentPath)
 		}
-		util.WriteJSON(w, map[string]any{"id": id, "object": "file", "deleted": true})
+		if admin {
+			w.WriteHeader(http.StatusNoContent)
+		} else {
+			util.WriteJSON(w, map[string]any{"id": id, "object": "file", "deleted": true})
+		}
 	default:
-		httpserver.WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
+		fail(http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 	}
 }
 

@@ -14,26 +14,6 @@ import (
 	"orchids-api/internal/logutil"
 )
 
-// sseFramePrefix returns the complete header bytes for a known wire event, or nil
-// for anything the relay does not emit on the Anthropic event stream.
-func sseFramePrefix(event string) []byte {
-	switch event {
-	case "message_start":
-		return ssePrefixMessageStart
-	case "message_delta":
-		return ssePrefixMessageDelta
-	case "message_stop":
-		return ssePrefixMessageStop
-	case "content_block_start":
-		return ssePrefixContentBlockStart
-	case "content_block_delta":
-		return ssePrefixContentBlockDelta
-	case "content_block_stop":
-		return ssePrefixContentBlockStop
-	}
-	return nil
-}
-
 func mapKeys(m map[string]any) []string {
 	if m == nil {
 		return nil
@@ -41,88 +21,17 @@ func mapKeys(m map[string]any) []string {
 	return slices.Collect(maps.Keys(m))
 }
 
-func writeOpenAIFrame(w io.Writer, payload []byte) error {
-	if _, err := w.Write(sseDataPrefixBytes); err != nil {
-		return err
+// CoalesceStreamFlush owns the batching timer, so signal it after every frame.
+func (h *streamHandler) notifyStreamFlushLocked() {
+	if h.flusher != nil {
+		h.flushStreamLocked()
 	}
-	if _, err := w.Write(payload); err != nil {
-		return err
-	}
-	_, err := w.Write(sseLineBreakBytes)
-	return err
-}
-
-// writeSSEEventName writes the event name alone, for the rare frame whose event
-// is not one of the relay's own framed types.
-func writeSSEEventName(w io.Writer, event string) error {
-	if sw, ok := w.(io.StringWriter); ok {
-		_, err := sw.WriteString(event)
-		return err
-	}
-	_, err := w.Write([]byte(event))
-	return err
-}
-
-func writeSSEFrameBytes(w io.Writer, event string, data []byte) error {
-	if prefix := sseFramePrefix(event); prefix != nil {
-		if _, err := w.Write(prefix); err != nil {
-			return err
-		}
-		if _, err := w.Write(data); err != nil {
-			return err
-		}
-		_, err := w.Write(sseLineBreakBytes)
-		return err
-	}
-	// An event the relay does not frame itself (error, a vendor extension): spell
-	// the header out field by field.
-	if _, err := w.Write(sseEventPrefixBytes); err != nil {
-		return err
-	}
-	if err := writeSSEEventName(w, event); err != nil {
-		return err
-	}
-	if _, err := w.Write(sseDataJoinBytes); err != nil {
-		return err
-	}
-	if _, err := w.Write(data); err != nil {
-		return err
-	}
-	_, err := w.Write(sseLineBreakBytes)
-	return err
-}
-
-func (h *streamHandler) flushSSEWithLenLocked(event string, dataLen int, immediate bool, force bool) {
-	if h.flusher == nil {
-		return
-	}
-	// The outer CoalesceStreamFlush owns the bounded batching timer. Always
-	// signal it, including sparse reasoning deltas, so no frame waits for
-	// another upstream event merely to reach the downstream client.
-	if event == "content_block_delta" {
-		h.firstContentDeltaFlushed = true
-	}
-	h.flushStreamLocked()
 }
 
 func (h *streamHandler) flushStreamLocked() {
 	if err := http.NewResponseController(h.w).Flush(); err != nil && err != http.ErrNotSupported {
 		h.markWriteErrorLocked("flush", err)
 	}
-}
-
-// shouldFlushSSEImmediately reports whether a frame must reach the client at
-// once. Text deltas are the streaming payload a user is waiting on; every other
-// frame is either a boundary the client needs immediately or small enough to
-// ride out in the next batch.
-func shouldFlushSSEImmediately(event string, data []byte) bool {
-	switch event {
-	case "message_start", "message_delta", "message_stop", "content_block_start", "content_block_stop":
-		return true
-	case "content_block_delta":
-		return bytes.Contains(data, sseTextDeltaMarker)
-	}
-	return true
 }
 
 func (h *streamHandler) writeOpenAISSEBytes(event string, data []byte) (bool, error) {
@@ -141,20 +50,7 @@ func (h *streamHandler) writeOpenAISSEBytes(event string, data []byte) (bool, er
 // when Chat is translated into Responses. The buffer belongs to this handler
 // and is reused only after Write returns; callers hold h.mu.
 func (h *streamHandler) writeStreamFrameLocked(event string, data []byte) error {
-	frame := h.sseFrameScratch[:0]
-	if event != "" {
-		if prefix := sseFramePrefix(event); prefix != nil {
-			frame = append(frame, prefix...)
-		} else {
-			frame = append(frame, sseEventPrefixBytes...)
-			frame = append(frame, event...)
-			frame = append(frame, sseDataJoinBytes...)
-		}
-	} else {
-		frame = append(frame, sseDataPrefixBytes...)
-	}
-	frame = append(frame, data...)
-	frame = append(frame, sseLineBreakBytes...)
+	frame := httpserver.AppendSSEFrame(h.sseFrameScratch[:0], event, data)
 	h.sseFrameScratch = frame[:0]
 	n, err := (httpserver.DeadlineResponseWriter{ResponseWriter: h.w}).Write(frame)
 	if err == nil && n != len(frame) {
@@ -163,14 +59,8 @@ func (h *streamHandler) writeStreamFrameLocked(event string, data []byte) error 
 	return err
 }
 
-// emitSSEFrameLocked writes one frame the caller has already serialized, in the
-// wire shape the response format asks for, and flushes it.
-//
-// It is the single place that knows the three differences between the writers
-// the relay used to spell out per event: the OpenAI chunk adapter instead of an
-// SSE frame, whether a completed response must flush immediately, and whether a
-// per-frame diagnostics line follows.
-func (h *streamHandler) emitSSEFrameLocked(event string, data []byte, immediate, final bool) {
+// emitSSEFrameLocked writes and flushes a serialized frame in the requested dialect.
+func (h *streamHandler) emitSSEFrameLocked(event string, data []byte, final bool) {
 	if !h.isStream || h.requestFailed {
 		return
 	}
@@ -181,14 +71,14 @@ func (h *streamHandler) emitSSEFrameLocked(event string, data []byte, immediate,
 			return
 		}
 		if written {
-			h.flushSSEWithLenLocked(event, len(data), immediate, final)
+			h.notifyStreamFlushLocked()
 		}
 		if final && event == "message_stop" && !h.requestFailed {
 			if _, err := (httpserver.DeadlineResponseWriter{ResponseWriter: h.w}).Write(sseDoneLineBytes); err != nil {
 				h.markWriteErrorLocked(event, err)
 				return
 			}
-			h.flushSSEWithLenLocked(event, len(sseDoneLine), true, true)
+			h.notifyStreamFlushLocked()
 		}
 		return
 	}
@@ -196,7 +86,7 @@ func (h *streamHandler) emitSSEFrameLocked(event string, data []byte, immediate,
 		h.markWriteErrorLocked(event, err)
 		return
 	}
-	h.flushSSEWithLenLocked(event, len(data), immediate, final)
+	h.notifyStreamFlushLocked()
 	if h.config != nil && h.config.DebugEnabled && h.config.DebugLogSSE {
 		h.logger.LogOutputSSE(event, string(data))
 	}
@@ -208,10 +98,10 @@ func (h *streamHandler) writeFinalSSEBytes(event string, data []byte) {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.emitSSEFrameLocked(event, data, false, true)
+	h.emitSSEFrameLocked(event, data, true)
 }
 
-func (h *streamHandler) writeSSEBytesLockedWithHint(event string, data []byte, immediate bool) {
+func (h *streamHandler) writeSSEBytesLocked(event string, data []byte) {
 	if !h.isStream || h.hasReturn {
 		return
 	}
@@ -220,53 +110,53 @@ func (h *streamHandler) writeSSEBytesLockedWithHint(event string, data []byte, i
 	if event != "message_start" && !h.ensureMessageStartLocked() {
 		return
 	}
-	h.emitSSEFrameLocked(event, data, immediate, false)
+	h.emitSSEFrameLocked(event, data, false)
 	if logutil.VerboseDiagnosticsEnabled() {
 		slog.Debug("SSE Out", "event", event, "data_len", len(data))
 	}
 }
 
-func (h *streamHandler) writeEncodedSSELocked(event string, raw []byte, err error, immediate, final bool) {
+func (h *streamHandler) writeEncodedSSELocked(event string, raw []byte, err error, final bool) {
 	if err != nil {
 		h.markWriteErrorLocked(event, err)
 		return
 	}
 	h.ssePayloadScratch = raw[:0]
 	if final {
-		h.emitSSEFrameLocked(event, raw, immediate, true)
+		h.emitSSEFrameLocked(event, raw, true)
 		return
 	}
-	h.writeSSEBytesLockedWithHint(event, raw, immediate)
+	h.writeSSEBytesLocked(event, raw)
 }
 
 func (h *streamHandler) writeSSEContentBlockStartToolUseLocked(index int, id, name string, final bool) {
 	raw, err := appendSSEContentBlockStartToolUse(h.ssePayloadScratch[:0], index, id, name)
-	h.writeEncodedSSELocked("content_block_start", raw, err, true, final)
+	h.writeEncodedSSELocked("content_block_start", raw, err, final)
 }
 
 func (h *streamHandler) writeSSEContentBlockStartTextLocked(index int) {
 	raw, err := appendSSEContentBlockStartText(h.ssePayloadScratch[:0], index)
-	h.writeEncodedSSELocked("content_block_start", raw, err, true, false)
+	h.writeEncodedSSELocked("content_block_start", raw, err, false)
 }
 
 func (h *streamHandler) writeSSEContentBlockDeltaInputJSONLocked(index int, partialJSON string, final bool) {
 	raw, err := appendSSEContentBlockDeltaInputJSON(h.ssePayloadScratch[:0], index, partialJSON)
-	h.writeEncodedSSELocked("content_block_delta", raw, err, false, final)
+	h.writeEncodedSSELocked("content_block_delta", raw, err, final)
 }
 
 func (h *streamHandler) writeSSEContentBlockDeltaTextLocked(index int, text string) {
 	raw, err := appendSSEContentBlockDeltaText(h.ssePayloadScratch[:0], index, text)
-	h.writeEncodedSSELocked("content_block_delta", raw, err, true, false)
+	h.writeEncodedSSELocked("content_block_delta", raw, err, false)
 }
 
 func (h *streamHandler) writeSSEContentBlockDeltaThinkingLocked(index int, thinking string) {
 	raw, err := appendSSEContentBlockDeltaThinking(h.ssePayloadScratch[:0], index, thinking)
-	h.writeEncodedSSELocked("content_block_delta", raw, err, false, false)
+	h.writeEncodedSSELocked("content_block_delta", raw, err, false)
 }
 
 func (h *streamHandler) writeSSEContentBlockStopLocked(index int, final bool) {
 	raw, err := appendSSEContentBlockStop(h.ssePayloadScratch[:0], index)
-	h.writeEncodedSSELocked("content_block_stop", raw, err, true, final)
+	h.writeEncodedSSELocked("content_block_stop", raw, err, final)
 }
 
 func (h *streamHandler) writeSSEMessageDeltaLocked(stopReason string, outputTokens int) {
@@ -293,7 +183,7 @@ func (h *streamHandler) writeSSEMessageDeltaLocked(stopReason string, outputToke
 		raw = strconv.AppendInt(raw, int64(h.cacheWriteTokens), 10)
 		raw = append(raw, '}', '}')
 	}
-	h.writeEncodedSSELocked("message_delta", raw, err, true, true)
+	h.writeEncodedSSELocked("message_delta", raw, err, true)
 }
 
 // writeMessageStartLocked emits the opening frame. It takes the lock as held.
@@ -312,7 +202,7 @@ func (h *streamHandler) writeMessageStartLocked(model string, inputTokens, outpu
 		return
 	}
 	h.messageStartWritten = true
-	h.writeSSEBytesLockedWithHint("message_start", raw, true)
+	h.writeSSEBytesLocked("message_start", raw)
 }
 
 // ensureMessageStartLocked opens the stream if it has not been opened yet.
@@ -335,16 +225,4 @@ func (h *streamHandler) ensureMessageStartLocked() bool {
 	}
 	h.writeMessageStartLocked(h.pendingModel, h.inputTokens, 0)
 	return h.messageStartWritten
-}
-
-// writeSSEBytesLocked writes one frame the caller has already serialized and
-// lets the shared writer decide whether it must reach the client at once.
-func (h *streamHandler) writeSSEBytesLocked(event string, data []byte) {
-	if !h.isStream || h.hasReturn {
-		return
-	}
-	h.emitSSEFrameLocked(event, data, shouldFlushSSEImmediately(event, data), false)
-	if logutil.VerboseDiagnosticsEnabled() {
-		slog.Debug("SSE Out", "event", event, "data_len", len(data))
-	}
 }

@@ -13,7 +13,7 @@ func TestModelDefaultFailurePreservesPrevious(t *testing.T) {
 	s, mini := newTestRedisStore(t, "atomic-default:")
 	old := &Model{Channel: "workbuddy", ModelID: "old", IsDefault: true}
 	testutil.NoError(t, s.CreateModel(t.Context(), old))
-	backend := s.models.(*redisStore)
+	backend := s
 	// A bad index would cause partial writes in an ordinary pipeline.
 	mini.Del(backend.modelsChannelModelIDMapKey())
 	mini.Set(backend.modelsChannelModelIDMapKey(), "wrong-type")

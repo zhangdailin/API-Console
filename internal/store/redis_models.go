@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,9 +14,24 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// Model wrappers
+func checkModelWrite(m *Model) error {
+	if unsupportedGrokRoute(m) {
+		return fmt.Errorf("unsupported Grok route")
+	}
+	if m != nil {
+		m.NormalizeRoute()
+	}
+	return nil
+}
 
-func (s *redisStore) CreateModel(ctx context.Context, m *Model) error {
+func (s *Store) CreateModel(ctx context.Context, m *Model) error {
+	if err := checkModelWrite(m); err != nil {
+		return err
+	}
+	return s.createModel(ctx, m)
+}
+
+func (s *Store) createModel(ctx context.Context, m *Model) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis store not configured")
 	}
@@ -36,7 +52,10 @@ func (s *redisStore) CreateModel(ctx context.Context, m *Model) error {
 	return s.saveModelAtomic(ctx, m)
 }
 
-func (s *redisStore) UpdateModel(ctx context.Context, m *Model) error {
+func (s *Store) UpdateModel(ctx context.Context, m *Model) error {
+	if err := checkModelWrite(m); err != nil {
+		return err
+	}
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis store not configured")
 	}
@@ -49,7 +68,7 @@ func (s *redisStore) UpdateModel(ctx context.Context, m *Model) error {
 	return s.saveModelAtomic(ctx, m)
 }
 
-func (s *redisStore) DeleteModel(ctx context.Context, id string) error {
+func (s *Store) DeleteModel(ctx context.Context, id string) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis store not configured")
 	}
@@ -58,7 +77,7 @@ func (s *redisStore) DeleteModel(ctx context.Context, id string) error {
 	}
 
 	// Fetch model to get ModelID for index cleanup
-	m, _ := s.GetModel(ctx, id)
+	m, _ := s.readModel(ctx, id)
 
 	pipe := s.client.Pipeline()
 	pipe.Del(ctx, s.modelsKey(id))
@@ -71,7 +90,18 @@ func (s *redisStore) DeleteModel(ctx context.Context, id string) error {
 	return err
 }
 
-func (s *redisStore) GetModel(ctx context.Context, id string) (*Model, error) {
+func (s *Store) GetModel(ctx context.Context, id string) (*Model, error) {
+	return visibleModel(s.readModel(ctx, id))
+}
+
+func visibleModel(m *Model, err error) (*Model, error) {
+	if err == nil && unsupportedGrokRoute(m) {
+		return nil, ErrNoRows
+	}
+	return m, err
+}
+
+func (s *Store) readModel(ctx context.Context, id string) (*Model, error) {
 	if s == nil || s.client == nil {
 		return nil, fmt.Errorf("redis store not configured")
 	}
@@ -90,7 +120,12 @@ func (s *redisStore) GetModel(ctx context.Context, id string) (*Model, error) {
 	return &m, nil
 }
 
-func (s *redisStore) ListModels(ctx context.Context) ([]*Model, error) {
+func (s *Store) ListModels(ctx context.Context) ([]*Model, error) {
+	models, err := s.listModels(ctx)
+	return slices.DeleteFunc(models, unsupportedGrokRoute), err
+}
+
+func (s *Store) listModels(ctx context.Context) ([]*Model, error) {
 	if s == nil || s.client == nil {
 		return nil, fmt.Errorf("redis store not configured")
 	}
@@ -121,9 +156,14 @@ func (s *redisStore) ListModels(ctx context.Context) ([]*Model, error) {
 	return models, nil
 }
 
-func (s *redisStore) ReconcileDiscoveredModels(ctx context.Context, channel string, models []*Model, options ModelReconcileOptions) (*ModelReconcileResult, error) {
+func (s *Store) ReconcileDiscoveredModels(ctx context.Context, channel string, models []*Model, options ModelReconcileOptions) (*ModelReconcileResult, error) {
 	if s == nil || s.client == nil {
 		return nil, fmt.Errorf("redis store not configured")
+	}
+	for _, model := range models {
+		if model != nil && isUnsupportedModelRoute(channel, model.Provider, model.ModelID) {
+			return nil, fmt.Errorf("unsupported Grok route")
+		}
 	}
 	channelKey := normalizeModelChannelKey(channel)
 	if channelKey == "" {
@@ -205,13 +245,13 @@ func (s *redisStore) ReconcileDiscoveredModels(ctx context.Context, channel stri
 
 // Helpers
 
-func (s *redisStore) modelsKey(id string) string { return s.prefix + "models:id:" + id }
+func (s *Store) modelsKey(id string) string { return s.prefix + "models:id:" + id }
 
-func (s *redisStore) modelsIDsKey() string { return s.prefix + "models:ids" }
+func (s *Store) modelsIDsKey() string { return s.prefix + "models:ids" }
 
-func (s *redisStore) modelsNextIDKey() string { return s.prefix + "models:next_id" }
+func (s *Store) modelsNextIDKey() string { return s.prefix + "models:next_id" }
 
-func (s *redisStore) modelsChannelModelIDMapKey() string {
+func (s *Store) modelsChannelModelIDMapKey() string {
 	return s.prefix + "models:channel_model_id_map"
 }
 
@@ -229,7 +269,7 @@ func modelChannelIndexKey(channel, modelID string) string {
 	return normalizeModelChannelKey(channel) + "|" + strings.TrimSpace(modelID)
 }
 
-func (s *redisStore) GetModelByChannelAndModelID(ctx context.Context, channel, modelID string) (*Model, error) {
+func (s *Store) GetModelByChannelAndModelID(ctx context.Context, channel, modelID string) (*Model, error) {
 	if s == nil || s.client == nil {
 		return nil, fmt.Errorf("redis store not configured")
 	}
@@ -241,14 +281,14 @@ func (s *redisStore) GetModelByChannelAndModelID(ctx context.Context, channel, m
 	channelKey := modelChannelIndexKey(channel, modelID)
 	id, err := s.client.HGet(ctx, s.modelsChannelModelIDMapKey(), channelKey).Result()
 	if err == nil && id != "" {
-		m, err := s.GetModel(ctx, id)
+		m, err := s.readModel(ctx, id)
 		if err == nil && m != nil && strings.TrimSpace(m.ModelID) == modelID && normalizeModelChannelKey(m.Channel) == normalizeModelChannelKey(channel) {
-			return m, nil
+			return visibleModel(m, nil)
 		}
 		// Index stale or points to a different channel/model, fall through to scan.
 	}
 
-	models, err := s.ListModels(ctx)
+	models, err := s.listModels(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -256,7 +296,7 @@ func (s *redisStore) GetModelByChannelAndModelID(ctx context.Context, channel, m
 	for _, m := range models {
 		if normalizeModelChannelKey(m.Channel) == wantChannel && m.ModelID == modelID {
 			s.client.HSet(ctx, s.modelsChannelModelIDMapKey(), channelKey, m.ID)
-			return m, nil
+			return visibleModel(m, nil)
 		}
 	}
 	return nil, fmt.Errorf("model not found")

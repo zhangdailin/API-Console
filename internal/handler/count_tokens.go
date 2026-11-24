@@ -9,6 +9,7 @@ import (
 	"orchids-api/internal/config"
 	"orchids-api/internal/debug"
 	apperrors "orchids-api/internal/errors"
+	"orchids-api/internal/httpserver"
 	"orchids-api/internal/middleware"
 )
 
@@ -20,8 +21,7 @@ func (h *Handler) HandleCountTokens(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req ClaudeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if !httpserver.DecodeJSONBodyLimit(w, r, &req, config.InferenceJSONBodyLimit) {
 		return
 	}
 	if !middleware.APIKeyAllowsModel(r.Context(), req.Model) {

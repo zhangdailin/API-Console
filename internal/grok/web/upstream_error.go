@@ -1,7 +1,6 @@
 package web
 
 import (
-	"fmt"
 	"net/http"
 	"orchids-api/internal/grok/grokbase"
 	"strings"
@@ -24,13 +23,7 @@ func (e *grokUpstreamError) Error() string {
 	if prefix == "" {
 		prefix = "grok upstream"
 	}
-	var b strings.Builder
-	b.WriteString(prefix)
-	fmt.Fprintf(&b, " status=%d", e.status)
-	if e.body != "" {
-		b.WriteString(" body=" + e.body)
-	}
-	return b.String()
+	return grokbase.UpstreamErrorText(prefix, e.status, e.body)
 }
 
 func (e *grokUpstreamError) AttemptFailure() (grokbase.UpstreamFailure, bool) {

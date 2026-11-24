@@ -8,13 +8,14 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"orchids-api/internal/billingledger"
 	"strings"
 	"sync"
 	"time"
 
 	"orchids-api/internal/audit"
+	"orchids-api/internal/billingledger"
 	"orchids-api/internal/channel"
+	"orchids-api/internal/config"
 	"orchids-api/internal/pricing"
 )
 
@@ -60,6 +61,12 @@ func (r *BillingReservation) Pending() bool {
 	return r.pending
 }
 
+func (r *BillingReservation) stoppedRenewing() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.settled || r.pending
+}
+
 type apiKeyBillingReservationContextKey struct{}
 
 // WithBillingReservation attaches a hold to the request context so the handler
@@ -93,6 +100,7 @@ type APIKeyBillingStore interface {
 // APIKeyBillingReservation before a request is handed to its handler.
 type APIKeyBillingReserver interface {
 	ReserveApiKeyBilling(ctx context.Context, id int64, eventID string, amount int64, expiresAt time.Time) (bool, error)
+	RenewApiKeyBilling(ctx context.Context, id int64, eventID string, expiresAt time.Time) (bool, error)
 	ReleaseApiKeyBilling(ctx context.Context, id int64, eventID string) (bool, error)
 }
 
@@ -236,25 +244,40 @@ func SettleAPIKeyBillingResult(ctx context.Context, settler APIKeyBillingStore, 
 // reservation answers 402 and never reaches the handler; a reservation that
 // nothing settled is released when the request ends.
 func APIKeyBillingReservation(next http.HandlerFunc, reserver APIKeyBillingReserver, ttl time.Duration) http.HandlerFunc {
+	return apiKeyBillingReservation(next, reserver, ttl, config.InferenceJSONBodyLimit)
+}
+
+func apiKeyBillingReservation(next http.HandlerFunc, reserver APIKeyBillingReserver, ttl time.Duration, bodyLimit int64) http.HandlerFunc {
 	if ttl <= 0 {
 		ttl = DefaultBillingReservationTTL
 	}
+	// Redis stores expiration timestamps in seconds. Keep the cancellation
+	// deadline aligned with the same instant.
+	ttl = max(ttl, 2*time.Second)
 	return func(w http.ResponseWriter, r *http.Request) {
+		operation := billingRequestOperation(r.URL.Path)
+		if (r.Method != http.MethodPost && r.Method != http.MethodPut) || operation == "" {
+			next(w, r)
+			return
+		}
+		if r.ContentLength > bodyLimit {
+			writeAPIKeyError(w, http.StatusRequestEntityTooLarge, "Request body too large", "request_too_large")
+			return
+		}
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, bodyLimit)
+		}
 		principal, _ := r.Context().Value(apiKeyPrincipalContextKey{}).(*APIKeyPrincipal)
 		if principal == nil || principal.ID == 0 || principal.BillingLimitUSDTicks <= 0 || reserver == nil {
 			next(w, r)
 			return
 		}
-		if r.Method != http.MethodPost && r.Method != http.MethodPut {
-			next(w, r)
-			return
-		}
-		if !billingRequestPath(r.URL.Path) {
-			next(w, r)
-			return
-		}
 		body, err := readBillingBody(r)
 		if err != nil {
+			if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+				writeAPIKeyError(w, http.StatusRequestEntityTooLarge, "Request body too large", "request_too_large")
+				return
+			}
 			writeAPIKeyError(w, http.StatusBadRequest, "Could not read request body", "invalid_request_body")
 			return
 		}
@@ -266,7 +289,7 @@ func APIKeyBillingReservation(next http.HandlerFunc, reserver APIKeyBillingReser
 			writeAPIKeyError(w, http.StatusBadRequest, "Invalid JSON request body", "invalid_request_body")
 			return
 		}
-		reservation, priced := pricing.EstimateTextReservationFromBody(body)
+		reservation, priced := pricing.EstimateTextReservationForOperation(body, operation)
 		if !priced {
 			// An unpriced model cannot be estimated, and guessing a rate would be
 			// worse than not holding a budget for it.
@@ -278,14 +301,15 @@ func APIKeyBillingReservation(next http.HandlerFunc, reserver APIKeyBillingReser
 			requestID = GenerateTraceID()
 		}
 		eventID := billingledger.EventID(time.Now(), requestID)
-		if durable, ok := apiKeyBillingStore.(interface{ Ready() error }); ok {
-			if err := durable.Ready(); err != nil {
+		if durable, ok := apiKeyBillingStore.(interface{ ReadyForKey(int64) error }); ok {
+			if err := durable.ReadyForKey(principal.ID); err != nil {
 				slog.Error("Billing admission unavailable", "error", err)
 				writeAPIKeyError(w, http.StatusServiceUnavailable, "API key billing check unavailable", "billing_unavailable")
 				return
 			}
 		}
-		allowed, err := reserver.ReserveApiKeyBilling(r.Context(), principal.ID, eventID, reservation.CostInUSDTicks, time.Now().UTC().Add(ttl))
+		expiry := time.Now().Add(ttl).Truncate(time.Second)
+		allowed, err := reserver.ReserveApiKeyBilling(r.Context(), principal.ID, eventID, reservation.CostInUSDTicks, expiry)
 		if err != nil {
 			// Failing closed matches APIKeyAuth: a key that asked for a budget is
 			// never allowed to spend blindly when the ledger cannot be consulted.
@@ -298,9 +322,10 @@ func APIKeyBillingReservation(next http.HandlerFunc, reserver APIKeyBillingReser
 			return
 		}
 		held := &BillingReservation{KeyID: principal.ID, EventID: eventID, Amount: reservation.CostInUSDTicks}
-		ctx := WithBillingReservation(r.Context(), held)
+		ctx, cancelRequest := context.WithCancelCause(WithBillingReservation(r.Context(), held))
 		defer func() {
-			if held.Settled() || held.Pending() {
+			cancelRequest(nil)
+			if held.stoppedRenewing() {
 				return
 			}
 			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), billingReleaseTimeout)
@@ -310,32 +335,80 @@ func APIKeyBillingReservation(next http.HandlerFunc, reserver APIKeyBillingReser
 					"error", err, "key_id", held.KeyID, "event_id", held.EventID)
 			}
 		}()
+		stop := renewBillingWhileActive(ctx, cancelRequest, reserver, held, ttl, expiry)
+		defer stop()
 		next(w, r.WithContext(ctx))
 	}
 }
 
-// billingRequestPath reports whether this path is an inference endpoint whose
-// body carries a model and a prompt.
-// billingRequestPath selects the inference paths whose usage can be settled.
+var errBillingHoldLost = errors.New("billing reservation expired or was removed")
+
+func renewBillingWhileActive(ctx context.Context, cancelRequest context.CancelCauseFunc, reserver APIKeyBillingReserver, hold *BillingReservation, ttl time.Duration, expiry time.Time) func() {
+	ctx, stop := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		interval := ttl / 3
+		if interval <= 0 {
+			interval = time.Nanosecond
+		}
+		delay := interval
+		for {
+			timer := time.NewTimer(min(delay, time.Until(expiry)))
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			if hold.stoppedRenewing() {
+				return
+			}
+			if !time.Now().Before(expiry) {
+				cancelRequest(errBillingHoldLost)
+				return
+			}
+			nextExpiry := time.Now().Add(ttl).Truncate(time.Second)
+			renewCtx, cancel := context.WithTimeout(ctx, min(billingReleaseTimeout, time.Until(expiry)))
+			renewed, err := reserver.RenewApiKeyBilling(renewCtx, hold.KeyID, hold.EventID, nextExpiry)
+			cancel()
+			if ctx.Err() != nil {
+				return
+			}
+			if err == nil {
+				if !renewed {
+					if !hold.stoppedRenewing() {
+						cancelRequest(errBillingHoldLost)
+					}
+					return
+				}
+				expiry, delay = nextExpiry, interval
+			} else {
+				delay = min(interval, 5*time.Second)
+			}
+		}
+	}()
+	return func() { stop(); <-done }
+}
+
+// billingRequestOperation selects the inference paths whose usage can be settled.
 //
 // /messages/count_tokens shares the /messages prefix but produces no completion
 // and therefore never settles: holding a reservation for it would refuse a
 // counting request from a key that is already at its ceiling without ever
 // charging for it.
-func billingRequestPath(path string) bool {
+func billingRequestOperation(path string) string {
 	_, endpoint, ok := channel.EndpointFromPath(path)
 	if !ok {
-		return false
+		return ""
 	}
-	switch strings.TrimRight(endpoint, "/") {
+	switch operation := strings.TrimRight(endpoint, "/"); operation {
 	case "messages", "chat/completions", "responses", "responses/compact":
-		return true
+		return operation
+	default:
+		return ""
 	}
-	return false
 }
-
-// errBillingBodyUnreadable reports a request body that could not be read in full.
-var errBillingBodyUnreadable = errors.New("could not read request body")
 
 // readBillingBody restores accepted bytes and rejects incomplete estimation.
 func readBillingBody(r *http.Request) ([]byte, error) {
@@ -346,9 +419,30 @@ func readBillingBody(r *http.Request) ([]byte, error) {
 	defer original.Close()
 	raw, err := io.ReadAll(original)
 	if err != nil {
-		return nil, errBillingBodyUnreadable
+		return nil, err
 	}
-	r.Body = io.NopCloser(bytes.NewReader(raw))
-	r.ContentLength = int64(len(raw))
+	RestoreRequestBody(r, raw)
 	return raw, nil
+}
+
+type bufferedRequestBody struct {
+	*bytes.Reader
+	data []byte
+}
+
+func (*bufferedRequestBody) Close() error { return nil }
+
+// RestoreRequestBody makes a fully read body available to downstream parsers.
+func RestoreRequestBody(r *http.Request, raw []byte) {
+	r.Body = &bufferedRequestBody{Reader: bytes.NewReader(raw), data: raw}
+	r.ContentLength = int64(len(raw))
+}
+
+// BufferedRequestBody returns the existing bytes if the body has not been consumed.
+func BufferedRequestBody(r *http.Request) ([]byte, bool) {
+	body, ok := r.Body.(*bufferedRequestBody)
+	if !ok || body.Len() != len(body.data) {
+		return nil, false
+	}
+	return body.data, true
 }

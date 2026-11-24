@@ -88,6 +88,9 @@ type Client struct {
 	creds   Credentials
 	updater *tokenUpdater
 	mu      sync.Mutex
+
+	outputBudgetsOnce sync.Once
+	outputBudgets     map[string]int
 }
 
 // NewFromAccount builds a client for the given account. cfg supplies proxy and
@@ -299,10 +302,12 @@ func (c *Client) buildBody(req upstream.UpstreamRequest) ([]byte, error) {
 	if req.MaxTokens != nil {
 		body["max_tokens"] = *req.MaxTokens
 	} else if c.account != nil {
-		// Reasoning shares this budget with the answer. Default to the selected
-		// account's observed model limit for their combined output.
-		_, output := CatalogContextWindows(c.account.WorkBuddyModelIDs)
-		if observed := output[strings.ToLower(model)]; observed > 0 {
+		// Reasoning and answers share the observed output limit. Each cached
+		// client owns a catalog snapshot; a changed catalog creates a new client.
+		c.outputBudgetsOnce.Do(func() {
+			_, c.outputBudgets = CatalogContextWindows(c.account.WorkBuddyModelIDs)
+		})
+		if observed := c.outputBudgets[strings.ToLower(model)]; observed > 0 {
 			body["max_tokens"] = observed
 		}
 	}

@@ -9,6 +9,40 @@ import (
 	"encoding/json"
 )
 
+type openAIChunk struct {
+	ID      string         `json:"id"`
+	Object  string         `json:"object"`
+	Created int64          `json:"created"`
+	Model   string         `json:"model"`
+	Choices []openAIChoice `json:"choices"`
+	Usage   map[string]any `json:"usage,omitempty"`
+}
+
+type openAIChoice struct {
+	Index        int         `json:"index"`
+	Delta        openAIDelta `json:"delta"`
+	FinishReason *string     `json:"finish_reason,omitempty"`
+}
+
+type openAIDelta struct {
+	Role             *string          `json:"role,omitempty"`
+	Content          *string          `json:"content,omitempty"`
+	ReasoningContent *string          `json:"reasoning_content,omitempty"`
+	ToolCalls        []openAIToolCall `json:"tool_calls,omitempty"`
+}
+
+type openAIToolCall struct {
+	Index    int            `json:"index"`
+	ID       string         `json:"id,omitempty"`
+	Type     string         `json:"type,omitempty"`
+	Function openAIFunction `json:"function"`
+}
+
+type openAIFunction struct {
+	Name      *string `json:"name,omitempty"`
+	Arguments string  `json:"arguments"`
+}
+
 func TestBuildOpenAIChunk(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -223,7 +257,7 @@ func TestBuildOpenAIChunkFastMatchesSlow(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fastRaw, fastOK := appendOpenAIChunkFast(nil, "msg_1", 123, tt.event, tt.data)
-			slowRaw, slowOK := buildOpenAIChunkSlow("msg_1", 123, tt.event, tt.data)
+			slowRaw, slowOK := appendOpenAIChunkSlow(nil, "msg_1", 123, tt.event, tt.data)
 			testutil.Equal(t, fastOK, slowOK)
 			if !fastOK {
 				return
@@ -278,6 +312,23 @@ func TestAppendOpenAIChunkMatchesBuild(t *testing.T) {
 			testutil.Falsef(t, !bytes.Equal(got, want), "got=%s want=%s", got, want)
 			buf = got[:0]
 		})
+	}
+}
+
+func TestOpenAIChunkNonCompactToolStartKeepsIndexAndOmission(t *testing.T) {
+	data := []byte(`{"index": 4, "content_block": {"type": "tool_use", "name": "search"}}`)
+	raw, ok := AppendOpenAIChunk([]byte("prefix"), "msg_1", 123, "content_block_start", data)
+	if !ok || !bytes.HasPrefix(raw, []byte("prefix")) {
+		t.Fatalf("fallback did not append a chunk: %s", raw)
+	}
+	var chunk openAIChunk
+	if err := json.Unmarshal(raw[len("prefix"):], &chunk); err != nil {
+		t.Fatal(err)
+	}
+	calls := chunk.Choices[0].Delta.ToolCalls
+	if len(calls) != 1 || calls[0].Index != 4 || calls[0].Function.Name == nil ||
+		*calls[0].Function.Name != "search" || bytes.Contains(raw[len("prefix"):], []byte(`"id":""`)) {
+		t.Fatalf("unexpected fallback tool chunk: %s", raw)
 	}
 }
 

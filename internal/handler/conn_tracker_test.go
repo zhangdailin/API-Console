@@ -39,20 +39,20 @@ func newSpyConnTracker(counts map[int64]int64) *spyConnTracker {
 	return &spyConnTracker{counts: cloned}
 }
 
-func (t *spyConnTracker) Acquire(accountID int64) {
+func (t *spyConnTracker) Reserve(_ context.Context, accountID, limit int64) (func(), bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if limit > 0 && t.counts[accountID] >= limit {
+		return nil, false
+	}
 	t.acquireCalls++
 	t.counts[accountID]++
-}
-
-func (t *spyConnTracker) Release(accountID int64) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.releaseCalls++
-	if current := t.counts[accountID]; current > 0 {
-		t.counts[accountID] = current - 1
-	}
+	return sync.OnceFunc(func() {
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		t.releaseCalls++
+		t.counts[accountID]--
+	}), true
 }
 
 func (t *spyConnTracker) GetCount(accountID int64) int64 {
@@ -204,7 +204,9 @@ func TestAcquireReservedAccountSelection_WaitsForShortLease(t *testing.T) {
 	}
 	testutil.NoError(t, err, "acquireReservedAccountSelection() error = %v")
 	testutil.Falsef(t, chosen == nil || chosen.ID != acc.ID, "selected account = %#v, want account %d", chosen, acc.ID)
-	testutil.Equal(t, trackedID, acc.ID)
+	if trackedID == nil {
+		t.Fatal("missing account slot release")
+	}
 	testutil.Equal(t, tracker.GetCount(acc.ID), 1)
 	h.releaseTrackedAccount(trackedID)
 	release() // The client cache lease is separate from the concurrency slot.
@@ -263,7 +265,9 @@ func TestAcquireReservedAccountSelection_WaitsForBusyAccountLease(t *testing.T) 
 	}
 	testutil.NoError(t, err, "acquireReservedAccountSelection() error = %v")
 	testutil.Falsef(t, chosen == nil || chosen.ID != acc.ID, "selected account = %#v, want account %d", chosen, acc.ID)
-	testutil.Equal(t, trackedID, acc.ID)
+	if trackedID == nil {
+		t.Fatal("missing account slot release")
+	}
 	testutil.Equal(t, tracker.GetCount(acc.ID), 1)
 	h.releaseTrackedAccount(trackedID)
 	release() // The client cache lease is separate from the concurrency slot.
@@ -350,15 +354,17 @@ func TestTryAcquireTrackedAccount_DoesNotAdmitRequestPastLimit(t *testing.T) {
 	tracker := loadbalancer.NewMemoryConnTracker()
 	h := &Handler{connTracker: tracker}
 	acc := &store.Account{ID: 42, AccountType: "workbuddy"}
+	var releases []func()
 	for i := range limit {
-		_, ok := h.tryAcquireTrackedAccount(acc)
+		release, ok := h.tryAcquireTrackedAccount(t.Context(), acc)
 		testutil.Falsef(t, !ok, "acquire %d unexpectedly rejected", i+1)
+		releases = append(releases, release)
 	}
-	_, ok := h.tryAcquireTrackedAccount(acc)
+	_, ok := h.tryAcquireTrackedAccount(t.Context(), acc)
 	testutil.Falsef(t, ok, "request %d was admitted past the %d-slot limit", limit+1, limit)
 	testutil.Equal(t, tracker.GetCount(acc.ID), limit)
-	for range limit {
-		h.releaseTrackedAccount(acc.ID)
+	for _, release := range releases {
+		h.releaseTrackedAccount(release)
 	}
 	testutil.Equal(t, tracker.GetCount(acc.ID), 0)
 }

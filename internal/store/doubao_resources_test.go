@@ -9,7 +9,7 @@ import (
 
 func TestDoubaoFileMetadataStaysSmallAndUsesTheSameLifetime(t *testing.T) {
 	s, _ := newDoubaoIdentityTestStore(t)
-	rs := s.accounts.(*redisStore)
+	rs := s
 	ctx := context.Background()
 	owner, id := "fixture-owner", "fixture-file"
 	file := DoubaoFile{ID: id, Name: "notes.txt", CreatedAt: 123, Data: bytes.Repeat([]byte("x"), 16384)}

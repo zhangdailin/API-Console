@@ -1,6 +1,8 @@
 package pricing
 
 import (
+	"encoding/json"
+	"orchids-api/internal/chatwire"
 	"orchids-api/internal/testutil"
 	"strings"
 	"testing"
@@ -96,10 +98,10 @@ func TestEstimateTextReservationFromBodyMatchesLegacyEstimator(t *testing.T) {
 		[]byte(`{"model":"build/grok-4.6","max_output_tokens":7,"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]}`),
 	}
 	for _, body := range bodies {
-		got, ok := EstimateTextReservationFromBody(body)
+		got, ok := EstimateTextReservationForOperation(body, "")
 		testutil.Falsef(t, !ok || got.Model == "" || got.CostInUSDTicks <= 0, "body=%s got=%#v ok=%v", body, got, ok)
 	}
-	malformed, ok := EstimateTextReservationFromBody([]byte(`{"model":"grok-4.6"`))
+	malformed, ok := EstimateTextReservationForOperation([]byte(`{"model":"grok-4.6"`), "")
 	testutil.False(t, !ok || malformed.CostInUSDTicks <= 0, "a truncated body with a complete model must use the conservative fallback")
 }
 
@@ -108,7 +110,28 @@ func BenchmarkEstimateTextReservationFromBody(b *testing.B) {
 	b.ReportAllocs()
 	b.SetBytes(int64(len(body)))
 	for i := 0; i < b.N; i++ {
-		_, _ = EstimateTextReservationFromBody(body)
+		_, _ = EstimateTextReservationForOperation(body, "")
+	}
+}
+
+func TestPDFTransportDoesNotCountAsTextForReservation(t *testing.T) {
+	inline := "data:application/pdf;base64," + strings.Repeat("A", 1<<20)
+	for name, input := range map[string]string{
+		"responses URL":     `"input":[{"type":"input_file","file_url":"https://example.test/report.pdf"}]`,
+		"responses inline":  `"input":[{"type":"input_file","file_data":"` + inline + `"}]`,
+		"messages document": `"messages":[{"role":"user","content":[{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"` + inline + `"}}]}]`,
+		"chat file":         `"messages":[{"role":"user","content":[{"type":"file","file":{"filename":"report.pdf","file_data":"` + inline + `"}}]}]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, tokens, _, ok := scanOperationReservation([]byte(`{"model":"grok-4.6","max_tokens":256,`+input+`}`), "")
+			if !ok || tokens != 256 {
+				t.Fatalf("document transport changed estimated text tokens: %d (valid: %v)", tokens, ok)
+			}
+		})
+	}
+	_, tokens, _, ok := scanOperationReservation([]byte(`{"model":"grok-4.6","input":"`+inline+`"}`), "")
+	if !ok || tokens < 1<<18 {
+		t.Fatalf("plain text that resembles a data URL must still be metered: %d", tokens)
 	}
 }
 
@@ -138,4 +161,25 @@ func TestReconstructBreakdownExplainsAStoredCost(t *testing.T) {
 		testutil.Falsef(t, component.Kind == ComponentUncachedInput && component.UnitPriceInUSDTicks != 40_000, "long-context input price=%d", component.UnitPriceInUSDTicks)
 	}
 
+}
+
+func TestReservationUsesSameModelAndLimitSemanticsAsChat(t *testing.T) {
+	for _, body := range []string{
+		`{"Model":"grok-4.5","Max_Completion_Tokens":"42"}`,
+		`{"model":"grok-4.5","MODEL":null,"max_completion_tokens":42.9}`,
+		`{"model":"not-priced","Model":"grok-4.5","max_completion_tokens":12,"MAX_COMPLETION_TOKENS":42}`,
+		`{"model":"grok-4.5","max_output_tokens":1,"max_completion_tokens":42}`,
+	} {
+		var request chatwire.Request
+		if err := json.Unmarshal([]byte(body), &request); err != nil {
+			t.Fatal(err)
+		}
+		model, _, output, valid := scanOperationReservation([]byte(body), "chat/completions")
+		if !valid || model != request.Model || request.MaxCompletionTokens == nil || output != int64(*request.MaxCompletionTokens) || output != 42 {
+			t.Fatalf("reservation and Chat disagree: model=%q output=%d", model, output)
+		}
+		if _, priced := EstimateTextReservationForOperation([]byte(body), "chat/completions"); !priced {
+			t.Fatal("a model accepted by Chat lost its pricing during admission")
+		}
+	}
 }

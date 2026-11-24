@@ -4,15 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"orchids-api/internal/accountpolicy"
 	"orchids-api/internal/audit"
 	"orchids-api/internal/config"
 	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/grok/ratelimit"
 	"orchids-api/internal/loadbalancer"
-	"orchids-api/internal/middleware"
-	"orchids-api/internal/modelpolicy"
-	"orchids-api/internal/pricing"
 	"orchids-api/internal/store"
 	"orchids-api/internal/util"
 	"path/filepath"
@@ -74,7 +70,7 @@ func NewHandler(cfg *config.Config, lb *loadbalancer.LoadBalancer) *Handler {
 	if lb != nil && lb.Store != nil {
 		ratelimit.ConfigureRedis(lb.Store.RedisClient(), lb.Store.RedisPrefix())
 	}
-	instanceID := "grok-web-" + randomHex(16)
+	instanceID := "grok-web-" + util.RandomHex(16)
 	if cfg != nil && strings.TrimSpace(cfg.DeploymentInstance) != "" {
 		instanceID = strings.TrimSpace(cfg.DeploymentInstance)
 	}
@@ -181,55 +177,10 @@ func (h *Handler) auditChatOutcome(ctx context.Context, acc *store.Account, req 
 	if logger == nil {
 		return
 	}
-	status, message := result.Finish, ""
-	if result.Err != nil {
-		status = "error"
-		message = result.Err.Error()
-	}
-	usage := result.Usage
-	prompt, _ := usage["prompt_tokens_details"].(map[string]any)
-	completion, _ := usage["completion_tokens_details"].(map[string]any)
-	metadata := map[string]any{"finish_reason": result.Finish}
-	grokbase.AddReasoningDiagnostics(ctx, metadata)
-	duration := int64(0)
-	if !req.StartedAt.IsZero() {
-		duration = time.Since(req.StartedAt).Milliseconds()
-		if !result.FirstToken.IsZero() {
-			metadata["first_token_ms"] = result.FirstToken.Sub(req.StartedAt).Milliseconds()
-		}
-	}
-	accountID := int64(0)
-	if acc != nil {
-		accountID = acc.ID
-	}
-	usageSource := result.UsageSource
-	if usageSource == "" {
-		if result.Err != nil || len(usage) == 0 {
-			usageSource = audit.UsageSourceNone
-		} else {
-			usageSource = audit.UsageSourceEstimated
-		}
-	}
-	event := audit.Event{Kind: audit.KindRequest, RequestID: middleware.GetRequestID(ctx), Action: "grok_request", APIKeyID: middleware.APIKeyID(ctx),
-		AccountID: accountID, Model: req.Model, Channel: "grok", Provider: ProviderWeb, Status: status, Error: message, Duration: duration, Metadata: metadata,
-		InputTokens: interfaceToInt(usage["prompt_tokens"]), OutputTokens: interfaceToInt(usage["completion_tokens"]), TotalTokens: interfaceToInt(usage["total_tokens"]), UsageSource: usageSource,
-		CachedInputTokens: interfaceToInt(prompt["cached_tokens"]), ReasoningTokens: interfaceToInt(completion["reasoning_tokens"])}
-	// Only upstream-reported usage is billed: an estimated count is this
-	// gateway's own guess and must never turn into money owed.
-	if cost, _ := middleware.SettleAPIKeyBilling(ctx, nil, req.Model, usageSource,
-		int64(event.InputTokens), int64(event.CachedInputTokens), int64(event.OutputTokens)); cost.Model != "" {
-		event.CostInUSDTicks = cost.CostInUSDTicks
-		event.PricingModel = cost.Model
-		event.PricingVersion = pricing.Version
-	}
-	logger.Log(ctx, event)
-	if acc != nil && acc.ID != 0 && event.TotalTokens > 0 && h != nil && h.lb != nil && h.lb.Store != nil {
-		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		if err := h.lb.Store.IncrementAccountStats(persistCtx, acc.ID, float64(event.TotalTokens), 0); err != nil {
-			slog.Warn("grok web token usage persistence failed", "account_id", acc.ID, "tokens", event.TotalTokens, "error", err)
-		}
-	}
+	grokbase.LogChatOutcome(ctx, logger, h.affinityStore(), acc, &req.Request, grokbase.ChatAudit{
+		Provider: ProviderWeb, Finish: result.Finish, Err: result.Err, FirstToken: result.FirstToken,
+		Usage: result.Usage, UsageSource: result.UsageSource,
+	})
 }
 
 // SetConnTracker lets the Grok selectors share the deployment-wide tracker
@@ -287,16 +238,13 @@ func (h *Handler) selectAccount(ctx context.Context) (*store.Account, string, er
 // ensureModelCapability checks visibility, status and capability on the same
 // persisted route, so a model taken offline stops serving immediately.
 func (h *Handler) ensureModelCapability(ctx context.Context, modelID, capability string) error {
-	if h == nil || h.lb == nil || h.lb.Store == nil {
+	if h == nil {
 		return fmt.Errorf("model not found")
 	}
 	id := normalizeModelID(modelID)
-	m, err := h.lb.Store.GetModelByChannelAndModelID(ctx, "grok", id)
-	if err != nil || m == nil || !modelpolicy.IsVisibleGrokModel(id, m.Verified) {
-		return fmt.Errorf("model not found")
-	}
-	if !m.Status.Enabled() {
-		return fmt.Errorf("model not available")
+	m, err := grokbase.EnabledModel(ctx, h.affinityStore(), id)
+	if err != nil {
+		return err
 	}
 	if !m.SupportsCapability(capability) {
 		return fmt.Errorf("model %s does not support %s", id, capability)
@@ -317,54 +265,29 @@ func (h *Handler) resolveConversationModel(ctx context.Context, modelID string) 
 // applyPersistedRoute overlays the control-plane upstream model on the static
 // route shape. Media flags remain table-owned.
 func (h *Handler) applyPersistedRoute(ctx context.Context, spec ModelSpec) ModelSpec {
-	if h == nil || h.lb == nil || h.lb.Store == nil || strings.TrimSpace(spec.ID) == "" {
-		return spec
-	}
-	model, err := h.lb.Store.GetModelByChannelAndModelID(ctx, "grok", normalizeModelID(spec.ID))
-	if err != nil || model == nil || !strings.EqualFold(strings.TrimSpace(model.Provider), ProviderWeb) {
-		return spec
-	}
-	if upstream := strings.TrimSpace(model.UpstreamModel); upstream != "" {
-		spec.UpstreamModel = upstream
+	if h != nil {
+		spec.UpstreamModel = grokbase.UpstreamRoute(ctx, h.affinityStore(), normalizeModelID(spec.ID), ProviderWeb, spec.UpstreamModel)
 	}
 	return spec
-}
-
-func modelNotFoundMessage(modelID string) string {
-	modelID = strings.TrimSpace(modelID)
-	if modelID == "" {
-		return "The model does not exist or you do not have access to it."
-	}
-	return fmt.Sprintf("The model `%s` does not exist or you do not have access to it.", modelID)
-}
-
-func modelValidationMessage(modelID string, err error) string {
-	if err == nil {
-		return ""
-	}
-	msg := strings.TrimSpace(err.Error())
-	if strings.EqualFold(msg, "model not found") {
-		return modelNotFoundMessage(modelID)
-	}
-	return msg
 }
 
 func (h *Handler) accountCapacityAvailable(acc *store.Account) bool {
 	return grokbase.AccountCapacityAvailable(h.connTrackerSnapshot(), acc)
 }
 
-func (h *Handler) reserveAccount(acc *store.Account) (func(), bool) {
+func (h *Handler) reserveAccount(ctx context.Context, acc *store.Account) (func(), bool) {
 	var base *grokbase.AccountTracker
 	if h != nil {
 		base = h.base
 	}
-	return base.Reserve(h.connTrackerSnapshot(), acc)
+	return base.Reserve(ctx, h.connTrackerSnapshot(), acc)
 }
 
 func (h *Handler) markAccountStatus(ctx context.Context, acc *store.Account, err error) {
 	// Invalid parameters and missing resources are request errors, not evidence
 	// that the credential is unusable. Do not poison account routing with them.
-	if status := parseUpstreamStatus(err); status >= 400 && status < 500 && status != 401 && status != 402 && status != 403 && status != 429 {
+	status := parseUpstreamStatus(err)
+	if grokbase.RequestErrorOnly(status) {
 		return
 	}
 	// Cloudflare / DPoP challenges are egress problems, not account problems.
@@ -372,92 +295,19 @@ func (h *Handler) markAccountStatus(ctx context.Context, acc *store.Account, err
 	if isEgressChallengeError(err) {
 		return
 	}
-	// Team-level resource-exhausted 429: the rate limit is on the token/session,
-	// not the account. Set a cooldown so the RPM window can reset. Without this,
-	// unmarked sibling accounts sharing the same token immediately hit the same
-	// team limit. Prefer the precise reset parsed from the 429 body (team+model
-	// granularity), falling back to a 60s blanket cooldown.
-	if err != nil && isResourceExhaustedError(err) && acc != nil {
-		cooldown := accountpolicy.CooldownRateLimitBase
-		if meta := ratelimit.ParseMetadata([]byte(err.Error())); meta != nil {
-			identity := acc.GrokPlane() + ":" + rateLimitIdentity(withRateLimitAccount(ctx, acc), "")
-			if remaining := ratelimit.Cooldowns.RetryAfterFor(meta.Scope, identity, meta.Model); remaining > 0 {
-				cooldown = accountpolicy.BoundRateLimitCooldown(remaining)
-			} else if meta.RetryAfter > 0 {
-				cooldown = accountpolicy.BoundRateLimitCooldown(meta.RetryAfter)
-			}
-		}
-		failureCooldown := accountpolicy.RateLimitCooldown(acc.RateLimitFailures + 1)
-		if failureCooldown > cooldown {
-			cooldown = failureCooldown
-		}
-		acc.QuotaResetAt = time.Now().Add(cooldown)
+	if acc == nil {
+		return
 	}
-	// A refusal that names one model ("access to the chat endpoint is denied",
-	// "not available for model X") is a capability problem for that model only.
-	// Cooling the whole credential took every other model out of the pool for
-	// ten minutes; the model cooldown map exists for exactly this case
-	// (grok2api marks the model, not the account).
-	// A 5xx is the upstream's own trouble, not the credential's: a short hold
-	// keeps the next request from immediately re-selecting the same account
-	// while the upstream recovers, without marking the credential as broken.
-	if acc != nil {
-		if status := parseUpstreamStatus(err); status >= 500 {
-			acc.QuotaResetAt = time.Now().Add(serverFaultHold)
-		}
+	var message string
+	if err != nil {
+		message = err.Error()
 	}
-	if acc != nil && isModelScopedRefusal(err) {
-		if model := requestModelFromContext(ctx); model != "" {
-			if h.lb != nil && h.lb.Store != nil {
-				_ = h.lb.Store.SetModelCooldown(ctx, acc, model, time.Now().Add(modelScopedRefusalCooldown), store.ModelCooldownThrottled)
-			}
-			h.unbindAffinity(ctx, acc.GrokPlane(), acc.ID)
-			return
-		}
+	provider := acc.GrokPlane()
+	modelOnly := grokbase.ApplyAccountHold(ctx, h.affinityStore(), acc, status, message, requestModelFromContext(ctx), func() string {
+		return provider + ":" + rateLimitIdentity(withRateLimitAccount(ctx, acc), "")
+	})
+	h.unbindAffinity(ctx, provider, acc.ID)
+	if !modelOnly {
+		h.base.MarkAccountStatus(ctx, acc, err)
 	}
-	// The credential cannot serve this session any more: drop the affinity so the
-	// next turn picks a different account instead of coming back here.
-	h.unbindAffinity(ctx, acc.GrokPlane(), acc.ID)
-	h.base.MarkAccountStatus(ctx, acc, err)
-}
-
-// modelScopedRefusalCooldown is how long one model stays out of rotation after
-// the upstream refused it for this credential.
-const modelScopedRefusalCooldown = 5 * time.Minute
-
-// serverFaultHold is the short pause applied after an upstream 5xx.
-const serverFaultHold = 5 * time.Second
-
-// isModelScopedRefusal reports whether an upstream failure refused one model
-// rather than the credential itself.
-func isModelScopedRefusal(err error) bool {
-	if err == nil {
-		return false
-	}
-	if parseUpstreamStatus(err) != 403 {
-		return false
-	}
-	lower := strings.ToLower(err.Error())
-	for _, marker := range []string{
-		"access to the chat endpoint is denied",
-		"for model",
-		"model is not available",
-		"not available for model",
-		"model_not_available",
-	} {
-		if strings.Contains(lower, marker) {
-			return true
-		}
-	}
-	return false
-}
-
-func isResourceExhaustedError(err error) bool {
-	if err == nil {
-		return false
-	}
-	lower := strings.ToLower(err.Error())
-	return strings.Contains(lower, "resource-exhausted") ||
-		strings.Contains(lower, "resource_exhausted") ||
-		strings.Contains(lower, "too many requests for team")
 }

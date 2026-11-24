@@ -14,7 +14,7 @@ import (
 
 	"encoding/json"
 
-	"orchids-api/internal/config"
+	"orchids-api/internal/provider"
 	"orchids-api/internal/store"
 )
 
@@ -68,7 +68,7 @@ func writeAuthorizationStartFailure(w http.ResponseWriter, err error, f authoriz
 // Both checks are security-relevant and belong to the flow rather than to any
 // channel: an unconfigured store cannot persist a credential, and a login started
 // from another origin is a cross-site request the console must not honour.
-func beginBrowserLogin[T any](w http.ResponseWriter, r *http.Request, a *API, channel string, registry *deviceLoginRegistry[T]) (enabled, ok bool) {
+func beginBrowserLogin(w http.ResponseWriter, r *http.Request, a *API, channel string, registry *deviceLoginRegistry) (enabled, ok bool) {
 	if a == nil || a.store == nil {
 		writeLoginError(w, http.StatusServiceUnavailable, "store_unavailable",
 			"account store is not configured")
@@ -91,150 +91,62 @@ func beginBrowserLogin[T any](w http.ResponseWriter, r *http.Request, a *API, ch
 	return enabled, true
 }
 
-// loginSeed is what a channel learned from its upstream about the transaction it
-// just opened, together with the operator's intent for the resulting account.
-type loginSeed struct {
-	// deviceCode is the value the poll call exchanges.
-	deviceCode string
-	// verifyURI is the human-facing page and verifyFull the single-use challenge
-	// embedded in it. A channel with no separate page leaves verifyURI empty.
-	verifyURI  string
-	verifyFull string
-	// userCode is the short code the operator confirms on that page. It is safe
-	// to show: it cannot be exchanged without the device code.
-	userCode  string
-	expiresAt time.Time
-	interval  time.Duration
-	qrCode    string
-	// message is the console's "waiting" line while the browser step is pending.
-	message string
-	enabled bool
-	cfg     *config.Config
-}
-
-// admitBrowserLogin registers a transaction and starts its poll loop.
-//
-// It owns the lifecycle both channels shared: allocate an id, derive the poll
-// context and its cancel, build the channel's transaction around the common
-// state, admit it under the limit, and start the loop that the cancel path waits
-// on. attach embeds the shared state into the channel's own type; poll is that
-// channel's loop.
-func admitBrowserLogin[T any](
-	w http.ResponseWriter,
-	registry *deviceLoginRegistry[T],
-	channel string,
-	seed loginSeed,
-	attach func(deviceLogin) *T,
-	poll func(context.Context, string),
-) bool {
-	id, err := newDeviceLoginID()
-	if err != nil {
-		writeLoginError(w, http.StatusInternalServerError, "transaction_failed",
-			"failed to create login transaction")
-		return false
+// pollChannelLogin uses the same provider and configuration snapshot from
+// challenge issuance through exchange and account creation.
+func (a *API) pollChannelLogin(ctx context.Context, id, channel string, registry *deviceLoginRegistry) {
+	isGrok := registry == a.grokLogins
+	expired := channel + " authorization timed out; start again"
+	failed := channel + " authorization failed; start again"
+	timeout := 30 * time.Second
+	if isGrok {
+		expired, failed, timeout = "Grok authorization expired", "Grok authorization failed", 20*time.Second
 	}
-	pollContext, pollCancel := context.WithCancel(context.Background())
-	login := attach(deviceLogin{
-		deviceCode:     seed.deviceCode,
-		userCode:       seed.userCode,
-		verifyURI:      seed.verifyURI,
-		verifyFull:     seed.verifyFull,
-		expiresAt:      seed.expiresAt,
-		interval:       seed.interval,
-		qrCode:         seed.qrCode,
-		cancel:         pollCancel,
-		done:           make(chan struct{}),
-		configSnapshot: seed.cfg,
-		status:         "pending",
-		message:        seed.message,
-		enabled:        seed.enabled,
-		// The caller always declares the intended state, so the completed
-		// account must honour it instead of defaulting to enabled.
-		enabledKnown: true,
-	})
-
-	if !registry.admit(id, login) {
-		pollCancel()
-		writeLoginError(w, http.StatusTooManyRequests, "too_many_logins",
-			"too many pending "+channel+" logins; finish or cancel one first")
-		return false
-	}
-
-	go func() {
-		defer close(registry.shared(login).done)
-		poll(pollContext, id)
-	}()
-
-	util.WriteJSON(w, newDeviceLoginResponse(id, registry.shared(login)))
-	return true
-}
-
-// awaitLoginPoll waits for the next poll tick and returns the transaction to
-// poll.
-//
-// It reports false when the loop must stop: the transaction is gone, the caller
-// cancelled it, or it outlived its expiry — in which case the transaction is
-// finished with the channel's timeout reason so the console stops saying
-// "waiting" for a login nobody is going to complete.
-func awaitLoginPoll[T any](ctx context.Context, registry *deviceLoginRegistry[T], id, channel string) (*T, bool) {
-	login, ok := registry.pollable(id)
-	if !ok {
-		return nil, false
-	}
-	shared := registry.shared(login)
-	if time.Now().After(shared.expiresAt) {
-		registry.finish(id, "expired", channel+" authorization timed out; start again", 0)
-		return nil, false
-	}
-	select {
-	case <-ctx.Done():
-		return nil, false
-	case <-time.After(shared.interval):
-	}
-	return login, true
-}
-
-// pollBrowserLogin owns the exchange/verify/persist state machine. Provider
-// adapters keep private grants out of the response and preserve their builders.
-//
-// buildVerifies says that building the account already proved the credential,
-// so a failed build is reported as a failed verification rather than a failed
-// save.
-func pollBrowserLogin[T, C any](a *API, ctx context.Context, registry *deviceLoginRegistry[T], id, channel string, pending error, buildVerifies bool,
-	exchange func(context.Context, *T) (C, error), build func(*T, C) (*store.Account, error), markReplace func(*store.Account), merge ...func(existing, fresh *store.Account)) {
 	for {
-		login, ok := awaitLoginPoll(ctx, registry, id, channel)
-		if !ok {
+		login := registry.awaitPoll(ctx, id, expired)
+		if login == nil {
 			return
 		}
-		reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		creds, err := exchange(reqCtx, login)
+
+		flow, cfg := login.flow, login.configSnapshot
+		if flow == nil || flow.Exchange == nil || flow.Build == nil {
+			registry.finish(id, "failed", failed, 0)
+			return
+		}
+		reqCtx, cancel := context.WithTimeout(ctx, timeout)
+		grant, err := flow.Exchange(reqCtx, cfg, login.challenge)
 		cancel()
 		if err != nil {
-			if errors.Is(err, pending) {
-				if updater, ok := any(login).(interface {
-					loginPayload() (string, string, time.Time)
-				}); ok {
-					qrCode, verifyURL, expiresAt := updater.loginPayload()
-					registry.update(id, func(stored *T) {
-						shared := registry.shared(stored)
-						shared.qrCode, shared.verifyURI, shared.verifyFull, shared.expiresAt = qrCode, verifyURL, verifyURL, expiresAt
-					})
-				}
+			if errors.Is(err, flow.ErrPending) {
+				registry.update(id, func(stored *deviceLogin) {
+					if stored.status != "pending" {
+						return
+					}
+					if isGrok {
+						if flow.SlowDown != nil && flow.SlowDown(err) {
+							stored.interval += 5 * time.Second
+						}
+					} else {
+						qr, url, expires := login.loginPayload()
+						stored.qrCode, stored.verifyURI, stored.verifyFull, stored.expiresAt = qr, url, url, expires
+					}
+				})
 				continue
 			}
 			if ctx.Err() != nil {
 				return
 			}
 			slog.Warn(channel+" authorization failed", "login_id", id, "error", err)
-			registry.finish(id, "failed", channel+" authorization failed; start again", 0)
+			registry.finish(id, "failed", failed, 0)
 			return
 		}
-		account, err := build(login, creds)
+
+		account, err := flow.Build(ctx, cfg, id, login.challenge, grant)
 		if err != nil {
 			logMessage := channel + " authorization succeeded but the account could not be stored"
 			message := channel + " authorization succeeded but the account could not be saved: " + truncateLoginReason(err)
-			if buildVerifies {
+			if isGrok {
+				message = failed
+			} else if flow.BuildVerifies {
 				logMessage = channel + " authorization succeeded but verification failed"
 				message = channel + " authorization succeeded but the account could not be verified"
 			}
@@ -245,54 +157,53 @@ func pollBrowserLogin[T, C any](a *API, ctx context.Context, registry *deviceLog
 		if ctx.Err() != nil || !registry.pending(id) {
 			return
 		}
-		shared := registry.shared(login)
-		if shared.enabledKnown {
-			account.Enabled = shared.enabled
-		}
-		finishBrowserLogin(a, ctx, registry, id, channel, account, markReplace, merge...)
+		account.Enabled = login.enabled
+		finishBrowserLogin(a, ctx, registry, id, channel, account, flow)
 		return
 	}
 }
 
-// finishBrowserLogin persists the account a completed browser login produced.
-//
-// A channel may hand out a second grant for an account this gateway already has:
-// the operator signs in again, or an earlier transaction completed after the
-// console stopped watching it. Storing that as a new row would give the scheduler
-// two rows for one allowance, so a row that already carries the credential is
-// updated in place, and the operator is told whether the login added an account
-// or refreshed one.
-//
-// markReplace tells the edit path that the submitted credential supersedes the
-// stored one. When supplied, merge applies the fresh login onto an isolated copy
-// of the existing row, preserving operator settings and runtime state. A nil or
-// omitted merge keeps the legacy fresh-account replacement behavior.
-func finishBrowserLogin[T any](
+// Persist a matching identity in place. Providers with a merge keep the
+// existing row's operator and runtime state while applying the fresh grant.
+func finishBrowserLogin(
 	a *API,
 	ctx context.Context,
-	registry *deviceLoginRegistry[T],
+	registry *deviceLoginRegistry,
 	id, channel string,
 	account *store.Account,
-	markReplace func(*store.Account),
-	merge ...func(existing, fresh *store.Account),
+	flow *provider.Login,
 ) {
+	isGrok := registry == a.grokLogins
+	message := channel + " authorization succeeded but the account could not be "
+	if isGrok {
+		message = channel + " authorization succeeded but account could not be "
+	}
 	existing, err := a.saveNewAccountUnlessDuplicate(ctx, account)
 	if err != nil {
-		registry.finish(id, "failed", channel+" authorization succeeded but the account could not be saved", 0)
+		slog.Warn(channel+" authorization could not save account", "login_id", id, "error", err)
+		registry.finish(id, "failed", message+"saved", 0)
 		return
 	}
 	if existing != nil {
-		if len(merge) > 0 && merge[0] != nil {
+		if flow.Merge != nil {
 			fresh := account
 			account = existing.Clone()
-			merge[0](account, fresh)
+			flow.Merge(account, fresh)
+		} else if isGrok {
+			account = existing
 		}
 		account.ID = existing.ID
-		if markReplace != nil {
-			markReplace(account)
+		if flow.MarkReplace != nil {
+			flow.MarkReplace(account)
+		}
+		if isGrok {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, 20*time.Second)
+			defer cancel()
 		}
 		if err := a.store.UpdateAccount(ctx, account); err != nil {
-			registry.finish(id, "failed", channel+" authorization succeeded but the account could not be updated", 0)
+			slog.Warn(channel+" authorization could not update account", "login_id", id, "account_id", account.ID, "error", err)
+			registry.finish(id, "failed", message+"updated", 0)
 			return
 		}
 		registry.finish(id, "complete", channel+" account credentials refreshed", account.ID)
@@ -372,7 +283,7 @@ func routeBrowserLogin(
 // channel names the flow in the operator-facing message, and is the same string
 // the start and cancel paths use, so the three endpoints cannot describe the same
 // transaction differently.
-func respondLoginStatus[T any](w http.ResponseWriter, registry *deviceLoginRegistry[T], id, channel string) {
+func respondLoginStatus(w http.ResponseWriter, registry *deviceLoginRegistry, id, channel string) {
 	registry.cleanup(time.Now())
 	response, ok := registry.response(id)
 	if !ok {
@@ -388,7 +299,7 @@ func respondLoginStatus[T any](w http.ResponseWriter, registry *deviceLoginRegis
 // The wait is the point: the response is the operator's confirmation that the
 // transaction is gone, and a poll loop still running could otherwise persist an
 // account for a login that was just abandoned.
-func abandonLogin[T any](w http.ResponseWriter, registry *deviceLoginRegistry[T], id, channel string) {
+func abandonLogin(w http.ResponseWriter, registry *deviceLoginRegistry, id, channel string) {
 	done, ok := registry.cancel(id, channel+" authorization cancelled")
 	if !ok {
 		writeLoginError(w, http.StatusNotFound, "login_not_found",

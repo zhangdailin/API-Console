@@ -9,40 +9,6 @@ import (
 	"encoding/json"
 )
 
-type openAIChunk struct {
-	ID      string         `json:"id"`
-	Object  string         `json:"object"`
-	Created int64          `json:"created"`
-	Model   string         `json:"model"`
-	Choices []openAIChoice `json:"choices"`
-	Usage   map[string]any `json:"usage,omitempty"`
-}
-
-type openAIChoice struct {
-	Index        int         `json:"index"`
-	Delta        openAIDelta `json:"delta"`
-	FinishReason *string     `json:"finish_reason,omitempty"`
-}
-
-type openAIDelta struct {
-	Role             *string          `json:"role,omitempty"`
-	Content          *string          `json:"content,omitempty"`
-	ReasoningContent *string          `json:"reasoning_content,omitempty"`
-	ToolCalls        []openAIToolCall `json:"tool_calls,omitempty"`
-}
-
-type openAIToolCall struct {
-	Index    int            `json:"index"`
-	ID       string         `json:"id,omitempty"`
-	Type     string         `json:"type,omitempty"`
-	Function openAIFunction `json:"function"`
-}
-
-type openAIFunction struct {
-	Name      *string `json:"name,omitempty"`
-	Arguments string  `json:"arguments"`
-}
-
 type openAIMessageStartPayload struct {
 	Message *struct {
 		Model string `json:"model"`
@@ -94,35 +60,18 @@ const (
 	openAIMessageDeltaSuffix   = "}]}"
 )
 
-func newOpenAIChunk(msgID string, created int64) openAIChunk {
-	return openAIChunk{
-		ID:      msgID,
-		Object:  "chat.completion.chunk",
-		Created: created,
-		Model:   "",
-		Choices: []openAIChoice{{Index: 0, Delta: openAIDelta{}}},
-	}
-}
-
-func (d openAIDelta) empty() bool {
-	return d.Role == nil && d.Content == nil && d.ReasoningContent == nil && len(d.ToolCalls) == 0
-}
-
-func appendOpenAIJSONString(dst []byte, value string) ([]byte, bool) {
+func appendOpenAIJSONString(dst []byte, value string) []byte {
 	for i := 0; i < len(value); i++ {
 		b := value[i]
 		if b < 0x20 || b == '\\' || b == '"' || b >= utf8.RuneSelf {
-			quoted, err := json.Marshal(value)
-			if err != nil {
-				return nil, false
-			}
-			return append(dst, quoted...), true
+			quoted, _ := json.Marshal(value)
+			return append(dst, quoted...)
 		}
 	}
 	dst = append(dst, '"')
 	dst = append(dst, value...)
 	dst = append(dst, '"')
-	return dst, true
+	return dst
 }
 
 func ensureOpenAIChunkCapacity(dst []byte, extra int) []byte {
@@ -257,13 +206,8 @@ func estimatedOpenAIChunkPrefixLen(msgID string, created int64, quotedModel []by
 		len(openAIChunkChoicesPrefix)
 }
 
-func appendOpenAIChunkPrefix(dst []byte, msgID string, created int64, quotedModel []byte) ([]byte, bool) {
-	dst = append(dst, openAIChunkIDPrefix...)
-	var ok bool
-	dst, ok = appendOpenAIJSONString(dst, msgID)
-	if !ok {
-		return nil, false
-	}
+func appendOpenAIChunkPrefix(dst []byte, msgID string, created int64, quotedModel []byte) []byte {
+	dst = appendOpenAIJSONString(append(dst, openAIChunkIDPrefix...), msgID)
 	dst = append(dst, openAIChunkObjectCreated...)
 	dst = strconv.AppendInt(dst, created, 10)
 	dst = append(dst, openAIChunkModelPrefix...)
@@ -272,50 +216,27 @@ func appendOpenAIChunkPrefix(dst []byte, msgID string, created int64, quotedMode
 	} else {
 		dst = append(dst, '"', '"')
 	}
-	dst = append(dst, openAIChunkChoicesPrefix...)
-	return dst, true
+	return append(dst, openAIChunkChoicesPrefix...)
 }
 
 func appendOpenAIChunkMessageStart(dst []byte, msgID string, created int64, quotedModel []byte) ([]byte, bool) {
 	dst = ensureOpenAIChunkCapacity(dst, estimatedOpenAIChunkPrefixLen(msgID, created, quotedModel)+len(openAIMessageStartSuffix))
-	dst, ok := appendOpenAIChunkPrefix(dst, msgID, created, quotedModel)
-	if !ok {
-		return nil, false
-	}
+	dst = appendOpenAIChunkPrefix(dst, msgID, created, quotedModel)
 	dst = append(dst, openAIMessageStartSuffix...)
 	return dst, true
 }
 
-func appendOpenAIChunkText(dst []byte, msgID string, created int64, quotedText []byte) ([]byte, bool) {
-	dst = ensureOpenAIChunkCapacity(dst, estimatedOpenAIChunkPrefixLen(msgID, created, nil)+len(openAITextDeltaPrefix)+len(quotedText)+len(openAIContentDeltaSuffix))
-	dst, ok := appendOpenAIChunkPrefix(dst, msgID, created, nil)
-	if !ok {
-		return nil, false
-	}
-	dst = append(dst, openAITextDeltaPrefix...)
-	dst = append(dst, quotedText...)
-	dst = append(dst, openAIContentDeltaSuffix...)
-	return dst, true
-}
-
-func appendOpenAIChunkThinking(dst []byte, msgID string, created int64, quotedThinking []byte) ([]byte, bool) {
-	dst = ensureOpenAIChunkCapacity(dst, estimatedOpenAIChunkPrefixLen(msgID, created, nil)+len(openAIThinkingDeltaPrefix)+len(quotedThinking)+len(openAIContentDeltaSuffix))
-	dst, ok := appendOpenAIChunkPrefix(dst, msgID, created, nil)
-	if !ok {
-		return nil, false
-	}
-	dst = append(dst, openAIThinkingDeltaPrefix...)
-	dst = append(dst, quotedThinking...)
-	dst = append(dst, openAIContentDeltaSuffix...)
-	return dst, true
+func appendOpenAIChunkField(dst []byte, msgID string, created int64, field, suffix string, quoted []byte) ([]byte, bool) {
+	dst = ensureOpenAIChunkCapacity(dst, estimatedOpenAIChunkPrefixLen(msgID, created, nil)+len(field)+len(quoted)+len(suffix))
+	dst = appendOpenAIChunkPrefix(dst, msgID, created, nil)
+	dst = append(dst, field...)
+	dst = append(dst, quoted...)
+	return append(dst, suffix...), true
 }
 
 func appendOpenAIChunkToolArgs(dst []byte, msgID string, created int64, index int, quotedArgs []byte) ([]byte, bool) {
 	dst = ensureOpenAIChunkCapacity(dst, estimatedOpenAIChunkPrefixLen(msgID, created, nil)+len(openAIToolIndexPrefix)+decimalLenInt64(int64(index))+len(openAIToolArgsDeltaPrefix)+len(quotedArgs)+len(openAIToolArgsDeltaSuffix))
-	dst, ok := appendOpenAIChunkPrefix(dst, msgID, created, nil)
-	if !ok {
-		return nil, false
-	}
+	dst = appendOpenAIChunkPrefix(dst, msgID, created, nil)
 	dst = append(dst, openAIToolIndexPrefix...)
 	dst = strconv.AppendInt(dst, int64(index), 10)
 	dst = append(dst, openAIToolArgsDeltaPrefix...)
@@ -326,30 +247,22 @@ func appendOpenAIChunkToolArgs(dst []byte, msgID string, created int64, index in
 
 func appendOpenAIChunkToolStart(dst []byte, msgID string, created int64, index int, quotedID []byte, quotedName []byte) ([]byte, bool) {
 	dst = ensureOpenAIChunkCapacity(dst, estimatedOpenAIChunkPrefixLen(msgID, created, nil)+len(openAIToolIndexPrefix)+decimalLenInt64(int64(index))+len(openAIToolStartDeltaPrefix)+len(quotedID)+len(openAIToolStartNamePrefix)+len(quotedName)+len(openAIToolStartDeltaSuffix))
-	dst, ok := appendOpenAIChunkPrefix(dst, msgID, created, nil)
-	if !ok {
-		return nil, false
-	}
+	dst = appendOpenAIChunkPrefix(dst, msgID, created, nil)
 	dst = append(dst, openAIToolIndexPrefix...)
 	dst = strconv.AppendInt(dst, int64(index), 10)
-	dst = append(dst, openAIToolStartDeltaPrefix...)
-	dst = append(dst, quotedID...)
+	if len(quotedID) != 0 {
+		dst = append(dst, openAIToolStartDeltaPrefix...)
+		dst = append(dst, quotedID...)
+	}
 	dst = append(dst, openAIToolStartNamePrefix...)
 	dst = append(dst, quotedName...)
 	dst = append(dst, openAIToolStartDeltaSuffix...)
 	return dst, true
 }
 
-func appendOpenAIChunkMessageDelta(dst []byte, msgID string, created int64, quotedStopReason []byte) ([]byte, bool) {
-	dst = ensureOpenAIChunkCapacity(dst, estimatedOpenAIChunkPrefixLen(msgID, created, nil)+len(openAIMessageDeltaPrefix)+len(quotedStopReason)+len(openAIMessageDeltaSuffix))
-	dst, ok := appendOpenAIChunkPrefix(dst, msgID, created, nil)
-	if !ok {
-		return nil, false
-	}
-	dst = append(dst, openAIMessageDeltaPrefix...)
-	dst = append(dst, quotedStopReason...)
-	dst = append(dst, openAIMessageDeltaSuffix...)
-	return dst, true
+func appendOpenAIChunkMessageDelta(dst []byte, msgID string, created int64, quotedStopReason []byte, usage map[string]any) ([]byte, bool) {
+	raw, _ := appendOpenAIChunkField(dst, msgID, created, openAIMessageDeltaPrefix, openAIMessageDeltaSuffix, quotedStopReason)
+	return appendOpenAIChunkUsage(raw, usage), true
 }
 
 func appendOpenAIChunkFast(dst []byte, msgID string, created int64, event string, data []byte) ([]byte, bool) {
@@ -372,14 +285,14 @@ func appendOpenAIChunkFast(dst []byte, msgID string, created int64, event string
 		}
 		if bytes.Contains(data, openAITextContentTypeMarker) {
 			if quotedText, ok := extractJSONStringValueAfter(data, openAITextMarker); ok && len(quotedText) > 2 {
-				return appendOpenAIChunkText(dst, msgID, created, quotedText)
+				return appendOpenAIChunkField(dst, msgID, created, openAITextDeltaPrefix, openAIContentDeltaSuffix, quotedText)
 			}
 		}
 	case "content_block_delta":
 		switch {
 		case bytes.Contains(data, openAITextDeltaMarker):
 			if quotedText, ok := extractJSONStringValueAfter(data, openAITextMarker); ok {
-				return appendOpenAIChunkText(dst, msgID, created, quotedText)
+				return appendOpenAIChunkField(dst, msgID, created, openAITextDeltaPrefix, openAIContentDeltaSuffix, quotedText)
 			}
 		case bytes.Contains(data, openAIInputJSONMarker):
 			if quotedArgs, ok := extractJSONStringValueAfter(data, openAIPartialJSONMarker); ok {
@@ -391,16 +304,16 @@ func appendOpenAIChunkFast(dst []byte, msgID string, created int64, event string
 			}
 		case bytes.Contains(data, openAIThinkingDeltaMarker):
 			if quotedThinking, ok := extractJSONStringValueAfter(data, openAIThinkingMarker); ok {
-				return appendOpenAIChunkThinking(dst, msgID, created, quotedThinking)
+				return appendOpenAIChunkField(dst, msgID, created, openAIThinkingDeltaPrefix, openAIContentDeltaSuffix, quotedThinking)
 			}
 		}
 	case "message_delta":
 		if quotedStopReason, ok := extractJSONStringValueAfter(data, openAIStopReasonMarker); ok {
-			raw, ok := appendOpenAIChunkMessageDelta(dst, msgID, created, normalizeOpenAIStopReasonQuoted(quotedStopReason))
-			if !ok || !bytes.Contains(data, []byte(`"usage"`)) {
-				return raw, ok
+			var usage map[string]any
+			if bytes.Contains(data, []byte(`"usage"`)) {
+				usage = messageDeltaChatUsage(data)
 			}
-			return appendOpenAIChunkUsage(raw, messageDeltaChatUsage(data)), true
+			return appendOpenAIChunkMessageDelta(dst, msgID, created, normalizeOpenAIStopReasonQuoted(quotedStopReason), usage)
 		}
 	case "message_stop":
 		return nil, false
@@ -418,105 +331,61 @@ func openAIToolIndex(data []byte) (int, bool) {
 	return payload.Index, true
 }
 
-func buildOpenAIChunkSlow(msgID string, created int64, event string, data []byte) ([]byte, bool) {
-	chunk := newOpenAIChunk(msgID, created)
-	choice := &chunk.Choices[0]
-
+// appendOpenAIChunkSlow handles valid JSON that does not have the gateway's
+// compact field spelling. Both decoders use the same output encoder.
+func appendOpenAIChunkSlow(dst []byte, msgID string, created int64, event string, data []byte) ([]byte, bool) {
+	quote := func(value string) []byte {
+		raw, _ := json.Marshal(value)
+		return raw
+	}
 	switch event {
 	case "message_start":
 		var payload openAIMessageStartPayload
-		if err := json.Unmarshal(data, &payload); err != nil || payload.Message == nil {
-			return nil, false
+		if json.Unmarshal(data, &payload) == nil && payload.Message != nil {
+			return appendOpenAIChunkMessageStart(dst, msgID, created, quote(payload.Message.Model))
 		}
-		choice.Delta.Role = new("assistant")
-		chunk.Model = payload.Message.Model
 	case "content_block_start":
 		var payload openAIContentBlockStartPayload
-		if err := json.Unmarshal(data, &payload); err != nil || payload.ContentBlock == nil || payload.Index < 0 {
+		if json.Unmarshal(data, &payload) != nil || payload.ContentBlock == nil || payload.Index < 0 {
 			return nil, false
 		}
-		switch payload.ContentBlock.Type {
-		case "text":
-			if payload.ContentBlock.Text != "" {
-				choice.Delta.Content = new(payload.ContentBlock.Text)
+		block := payload.ContentBlock
+		if block.Type == "text" && block.Text != "" {
+			return appendOpenAIChunkField(dst, msgID, created, openAITextDeltaPrefix, openAIContentDeltaSuffix, quote(block.Text))
+		}
+		if block.Type == "tool_use" {
+			var id []byte
+			if block.ID != "" {
+				id = quote(block.ID)
 			}
-		case "tool_use":
-			choice.Delta.ToolCalls = []openAIToolCall{{
-				Index: payload.Index,
-				ID:    payload.ContentBlock.ID,
-				Type:  "function",
-				Function: openAIFunction{
-					Name:      new(payload.ContentBlock.Name),
-					Arguments: "",
-				},
-			}}
-		default:
-			return nil, false
+			return appendOpenAIChunkToolStart(dst, msgID, created, payload.Index, id, quote(block.Name))
 		}
 	case "content_block_delta":
 		var payload openAIContentBlockDeltaPayload
-		if err := json.Unmarshal(data, &payload); err != nil || payload.Delta == nil || payload.Index < 0 {
+		if json.Unmarshal(data, &payload) != nil || payload.Delta == nil || payload.Index < 0 {
 			return nil, false
 		}
-		switch payload.Delta.Type {
-		case "text_delta":
-			if payload.Delta.Text == nil {
-				return nil, false
-			}
-			choice.Delta.Content = payload.Delta.Text
-		case "input_json_delta":
-			if payload.Delta.PartialJSON == nil {
-				return nil, false
-			}
-			choice.Delta.ToolCalls = []openAIToolCall{{
-				Index:    payload.Index,
-				Function: openAIFunction{Arguments: *payload.Delta.PartialJSON},
-			}}
-		case "thinking_delta":
-			if payload.Delta.Thinking == nil {
-				return nil, false
-			}
-			choice.Delta.ReasoningContent = payload.Delta.Thinking
-		default:
-			return nil, false
+		delta := payload.Delta
+		switch {
+		case delta.Type == "text_delta" && delta.Text != nil:
+			return appendOpenAIChunkField(dst, msgID, created, openAITextDeltaPrefix, openAIContentDeltaSuffix, quote(*delta.Text))
+		case delta.Type == "thinking_delta" && delta.Thinking != nil:
+			return appendOpenAIChunkField(dst, msgID, created, openAIThinkingDeltaPrefix, openAIContentDeltaSuffix, quote(*delta.Thinking))
+		case delta.Type == "input_json_delta" && delta.PartialJSON != nil:
+			return appendOpenAIChunkToolArgs(dst, msgID, created, payload.Index, quote(*delta.PartialJSON))
 		}
 	case "message_delta":
 		var payload openAIMessageDeltaPayload
-		if err := json.Unmarshal(data, &payload); err != nil || payload.Delta == nil || payload.Delta.StopReason == nil {
-			return nil, false
+		if json.Unmarshal(data, &payload) == nil && payload.Delta != nil && payload.Delta.StopReason != nil {
+			return appendOpenAIChunkMessageDelta(dst, msgID, created, quote(normalizeOpenAIStopReason(*payload.Delta.StopReason)), messageDeltaChatUsage(data))
 		}
-		mapped := normalizeOpenAIStopReason(*payload.Delta.StopReason)
-		choice.FinishReason = new(mapped)
-		chunk.Usage = messageDeltaChatUsage(data)
-	case "message_stop", "content_block_stop":
-		return nil, false
-	default:
-		return nil, false
 	}
-
-	if choice.Delta.empty() && choice.FinishReason == nil {
-		return nil, false
-	}
-
-	bytes, err := json.Marshal(chunk)
-	if err != nil {
-		return nil, false
-	}
-	return bytes, true
+	return nil, false
 }
 
 func AppendOpenAIChunk(dst []byte, msgID string, created int64, event string, data []byte) ([]byte, bool) {
 	if raw, ok := appendOpenAIChunkFast(dst, msgID, created, event, data); ok {
 		return raw, true
 	}
-
-	raw, ok := buildOpenAIChunkSlow(msgID, created, event, data)
-	if !ok {
-		return nil, false
-	}
-	if len(dst) == 0 && cap(dst) == 0 {
-		return raw, true
-	}
-	dst = ensureOpenAIChunkCapacity(dst, len(raw))
-	return append(dst, raw...), true
+	return appendOpenAIChunkSlow(dst, msgID, created, event, data)
 }

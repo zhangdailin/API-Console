@@ -23,16 +23,14 @@ type DoubaoVerificationChallenge struct {
 	RecordedAt, ParkUntil                        time.Time
 }
 
-func (s *Store) doubaoVerificationStore(id int64) (*redisStore, string, error) {
-	if s != nil && id > 0 {
-		if rs, ok := s.accounts.(*redisStore); ok {
-			return rs, rs.prefix + "doubao:verification:" + strconv.FormatInt(id, 10), nil
-		}
+func (s *Store) doubaoVerificationKey(id int64) (string, error) {
+	if s == nil || s.client == nil || id <= 0 {
+		return "", fmt.Errorf("Doubao verification store is unavailable")
 	}
-	return nil, "", fmt.Errorf("Doubao verification store is unavailable")
+	return s.prefix + "doubao:verification:" + strconv.FormatInt(id, 10), nil
 }
 
-func (s *redisStore) readDoubaoVerification(ctx context.Context, cmd redis.Cmdable, key string) (DoubaoVerificationChallenge, error) {
+func (s *Store) readDoubaoVerification(ctx context.Context, cmd redis.Cmdable, key string) (DoubaoVerificationChallenge, error) {
 	var challenge DoubaoVerificationChallenge
 	wire, err := cmd.Get(ctx, key).Result()
 	if err == redis.Nil {
@@ -50,11 +48,11 @@ func (s *redisStore) readDoubaoVerification(ctx context.Context, cmd redis.Cmdab
 }
 
 func (s *Store) SaveDoubaoVerification(ctx context.Context, id int64, challenge DoubaoVerificationChallenge) error {
-	rs, key, err := s.doubaoVerificationStore(id)
+	key, err := s.doubaoVerificationKey(id)
 	if err != nil {
 		return err
 	}
-	if rs.credentials == nil {
+	if s.credentials == nil {
 		return fmt.Errorf("Doubao verification encryption is unavailable")
 	}
 	if challenge.ID == "" || challenge.Decision == "" || len(challenge.Decision) > 64<<10 || challenge.RecordedAt.IsZero() {
@@ -64,15 +62,15 @@ func (s *Store) SaveDoubaoVerification(ctx context.Context, id int64, challenge 
 	if err != nil {
 		return err
 	}
-	sealed, err := rs.credentials.encrypt(string(payload))
+	sealed, err := s.credentials.encrypt(string(payload))
 	if err != nil {
 		return err
 	}
-	return rs.updateAccountAndRelated(ctx, id, true, []string{key}, func(acc *Account, tx *redis.Tx) (func(redis.Pipeliner), error) {
+	return s.updateAccountAndRelated(ctx, id, true, []string{key}, func(acc *Account, tx *redis.Tx) (func(redis.Pipeliner), error) {
 		if acc.AccountType != "doubao" || !acc.Enabled || !AccountAuthActive(acc) || DoubaoSessionVersion(acc) != challenge.AccountVersion {
 			return nil, ErrDoubaoVerificationChanged
 		}
-		prev, readErr := rs.readDoubaoVerification(ctx, tx, key)
+		prev, readErr := s.readDoubaoVerification(ctx, tx, key)
 		if readErr == nil && !challenge.RecordedAt.After(prev.RecordedAt) {
 			return nil, ErrDoubaoVerificationChanged
 		}
@@ -91,11 +89,11 @@ func (s *Store) GetDoubaoVerification(ctx context.Context, acc *Account) (Doubao
 	if acc == nil {
 		return DoubaoVerificationChallenge{}, ErrNoRows
 	}
-	rs, key, err := s.doubaoVerificationStore(acc.ID)
+	key, err := s.doubaoVerificationKey(acc.ID)
 	if err != nil {
 		return DoubaoVerificationChallenge{}, err
 	}
-	challenge, err := rs.readDoubaoVerification(ctx, rs.client, key)
+	challenge, err := s.readDoubaoVerification(ctx, s.client, key)
 	if err == nil && challenge.AccountVersion != DoubaoSessionVersion(acc) {
 		err = ErrNoRows
 	}
@@ -108,12 +106,12 @@ func (s *Store) AcknowledgeDoubaoVerification(ctx context.Context, observed *Acc
 	if observed == nil || version == "" {
 		return ErrDoubaoVerificationChanged
 	}
-	rs, key, err := s.doubaoVerificationStore(observed.ID)
+	key, err := s.doubaoVerificationKey(observed.ID)
 	if err != nil {
 		return err
 	}
-	return rs.updateAccountAndRelated(ctx, observed.ID, true, []string{key}, func(acc *Account, tx *redis.Tx) (func(redis.Pipeliner), error) {
-		challenge, err := rs.readDoubaoVerification(ctx, tx, key)
+	return s.updateAccountAndRelated(ctx, observed.ID, true, []string{key}, func(acc *Account, tx *redis.Tx) (func(redis.Pipeliner), error) {
+		challenge, err := s.readDoubaoVerification(ctx, tx, key)
 		if errors.Is(err, ErrNoRows) {
 			return nil, ErrDoubaoVerificationChanged
 		}

@@ -1,13 +1,11 @@
 package cline
 
 import (
-	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
-
-	"encoding/json"
 
 	"orchids-api/internal/upstream"
 	"orchids-api/internal/util"
@@ -46,46 +44,32 @@ func (r streamResult) FinishReason() string {
 	}
 }
 
-// newThinkingSignature mints the per-stream thinking signature the Anthropic
-// surface attaches to a thinking block. The prefix names the channel so a
-// signature can be attributed when it round-trips in history replay.
-func newThinkingSignature() string { return util.NewThinkingSignature("cline-v1") }
+type streamChoice struct {
+	FinishReason string `json:"finish_reason"`
+	Delta        struct {
+		Content          string `json:"content"`
+		ReasoningContent string `json:"reasoning_content"`
+		// GLM-compatible gateways have emitted the same channel under
+		// `reasoning` or `thinking`; keep all aliases so the reasoning block
+		// is not silently lost at the Cline boundary.
+		Reasoning string `json:"reasoning"`
+		Thinking  string `json:"thinking"`
+		ToolCalls []struct {
+			Index    int    `json:"index"`
+			ID       string `json:"id"`
+			Function struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			} `json:"function"`
+		} `json:"tool_calls"`
+	} `json:"delta"`
+}
 
-// streamChunk is one `data:` line of the SSE response.
 type streamChunk struct {
-	Data json.RawMessage `json:"data"`
-	// The gateway's routing block is kept raw and read leniently: a field of an
-	// unexpected type must never fail the whole chunk.
+	upstream.ChatStreamChunk[streamChoice]
+	Data                  json.RawMessage `json:"data"`
 	ProviderMetadata      json.RawMessage `json:"provider_metadata"`
 	ProviderMetadataCamel json.RawMessage `json:"providerMetadata"`
-	ID                    string          `json:"id"`
-	Object                string          `json:"object"`
-	Model                 string          `json:"model"`
-	Choices               []struct {
-		FinishReason string `json:"finish_reason"`
-		Delta        struct {
-			Content          string `json:"content"`
-			ReasoningContent string `json:"reasoning_content"`
-			// GLM-compatible gateways have emitted the same channel under
-			// `reasoning` or `thinking`; keep all aliases so the reasoning block
-			// is not silently lost at the Cline boundary.
-			Reasoning string `json:"reasoning"`
-			Thinking  string `json:"thinking"`
-			ToolCalls []struct {
-				Index    int    `json:"index"`
-				ID       string `json:"id"`
-				Function struct {
-					Name      string `json:"name"`
-					Arguments string `json:"arguments"`
-				} `json:"function"`
-			} `json:"tool_calls"`
-		} `json:"delta"`
-	} `json:"choices"`
-	Usage map[string]any `json:"usage"`
-	Error struct {
-		Message string          `json:"message"`
-		Code    json.RawMessage `json:"code"`
-	} `json:"error"`
 }
 
 // clineThinkingSplitter separates GLM-style in-content <think> blocks from
@@ -132,10 +116,6 @@ func (s *clineThinkingSplitter) feed(content string, final bool, emitReasoning, 
 // consumeStreamWithToolNames parses SSE and restores the request's shortened
 // tool names (upstream name -> client name) on every tool call.
 func consumeStreamWithToolNames(body io.Reader, toolsEnabled bool, toolNames map[string]string, onMessage func(upstream.SSEMessage), streamToolDeltas bool) (streamResult, error) {
-	scanner := bufio.NewScanner(body)
-	buffer := util.AcquireStreamBuffer()
-	defer util.ReleaseStreamBuffer(buffer)
-	scanner.Buffer(buffer[:], 8*1024*1024)
 	result := streamResult{}
 	tools := util.NewToolCallAccumulator()
 	var thinkingSplitter clineThinkingSplitter
@@ -150,20 +130,7 @@ func consumeStreamWithToolNames(body io.Reader, toolsEnabled bool, toolNames map
 	}
 
 	emitReasoning := func(reasoning string) {
-		if reasoning == "" {
-			return
-		}
-		result.SawMeaningfulEvent = true
-		if onMessage != nil {
-			// One signature per stream also covers reasoning embedded in content.
-			if result.ThinkingSignature == "" {
-				result.ThinkingSignature = newThinkingSignature()
-			}
-			onMessage(upstream.SSEMessage{Type: "model.reasoning-delta", Event: map[string]any{
-				"delta":     reasoning,
-				"signature": result.ThinkingSignature,
-			}})
-		}
+		upstream.EmitReasoningDelta(onMessage, reasoning, "cline-v1", &result.SawMeaningfulEvent, &result.ThinkingSignature)
 	}
 
 	emitTools := func() error {
@@ -172,29 +139,17 @@ func consumeStreamWithToolNames(body io.Reader, toolsEnabled bool, toolNames map
 			return err
 		}
 		upstream.EmitTextDelta(onMessage, text, &result.SawMeaningfulEvent)
-		calls := tools.CompleteAll()
-		if err := upstream.ValidateStreamedTools(calls); err != nil {
-			return err
-		}
-		upstream.EmitToolCalls(onMessage, calls, &result.SawMeaningfulEvent, &result.ToolCallCount)
-		return nil
+		return upstream.FinishStreamedTools(onMessage, tools, &result.SawMeaningfulEvent, &result.ToolCallCount)
 	}
 
-	for scanner.Scan() {
-		line := bytes.TrimSpace(scanner.Bytes())
-		if len(line) == 0 || bytes.HasPrefix(line, []byte(":")) {
+	var scanErr error
+	for payload, data := range upstream.ScanChatStream(body, &scanErr) {
+		if !data {
 			continue
 		}
-		if !bytes.HasPrefix(line, []byte("data:")) {
-			continue
-		}
-		payload := bytes.TrimSpace(line[len("data:"):])
 		if bytes.Equal(payload, []byte("[DONE]")) {
 			sawFinish = true
 			break
-		}
-		if len(payload) == 0 {
-			continue
 		}
 		// The gateway reports a request it refused while initializing the stream
 		// as a 200 whose first frame is an error, in shapes that do not always
@@ -242,15 +197,11 @@ func consumeStreamWithToolNames(body io.Reader, toolsEnabled bool, toolNames map
 
 		// Providers are not consistent about the GLM reasoning field name.
 		// Normalize aliases before emitting the shared reasoning event.
-		reasoning := delta.ReasoningContent
-		if reasoning == "" {
-			reasoning = delta.Reasoning
-		}
-		if reasoning == "" {
-			reasoning = delta.Thinking
-		}
-		if reasoning != "" {
-			emitReasoning(reasoning)
+		for _, reasoning := range [...]string{delta.ReasoningContent, delta.Reasoning, delta.Thinking} {
+			if reasoning != "" {
+				emitReasoning(reasoning)
+				break
+			}
 		}
 		for _, call := range delta.ToolCalls {
 			result.SawMeaningfulEvent = true
@@ -278,8 +229,8 @@ func consumeStreamWithToolNames(body io.Reader, toolsEnabled bool, toolNames map
 			}
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		return result, fmt.Errorf("failed to read cline stream: %w", err)
+	if scanErr != nil {
+		return result, fmt.Errorf("failed to read cline stream: %w", scanErr)
 	}
 	if !sawFinish {
 		// EOF before either an explicit finish_reason or [DONE] is a truncated

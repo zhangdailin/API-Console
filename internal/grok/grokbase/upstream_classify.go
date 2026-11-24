@@ -32,23 +32,25 @@ func IsAccountBlockText(value string) bool {
 // error and message fields are inspected, not just the top level.
 func JSONStrings(value any) []string {
 	var out []string
-	var walk func(any)
-	walk = func(current any) {
-		switch typed := current.(type) {
-		case map[string]any:
-			for _, child := range typed {
-				walk(child)
-			}
-		case []any:
-			for _, child := range typed {
-				walk(child)
-			}
-		case string:
-			out = append(out, typed)
-		}
-	}
-	walk(value)
+	WalkJSONStrings(value, func(text string) { out = append(out, text) })
 	return out
+}
+
+// WalkJSONStrings visits every string leaf in a nested JSON value (maps,
+// slices, or plain strings).
+func WalkJSONStrings(value any, visit func(string)) {
+	switch x := value.(type) {
+	case map[string]any:
+		for _, item := range x {
+			WalkJSONStrings(item, visit)
+		}
+	case []any:
+		for _, item := range x {
+			WalkJSONStrings(item, visit)
+		}
+	case string:
+		visit(x)
+	}
 }
 
 type rateLimitAccountKey struct{}

@@ -21,17 +21,9 @@ type DoubaoIdentityPatch struct {
 // RotateDoubaoIdentity atomically replaces the three Doubao browser identifiers
 // without changing credentials, verification, routing status, quota, or usage.
 func (s *Store) RotateDoubaoIdentity(ctx context.Context, id int64, patch DoubaoIdentityPatch) error {
-	if s != nil && s.accounts != nil {
-		if backend, ok := s.accounts.(interface {
-			RotateDoubaoIdentity(context.Context, int64, DoubaoIdentityPatch) error
-		}); ok {
-			return backend.RotateDoubaoIdentity(ctx, id, patch)
-		}
+	if s == nil || s.client == nil {
+		return fmt.Errorf("doubao identity store not configured")
 	}
-	return fmt.Errorf("doubao identity store not configured")
-}
-
-func (s *redisStore) RotateDoubaoIdentity(ctx context.Context, id int64, patch DoubaoIdentityPatch) error {
 	if err := patch.validate(); err != nil {
 		return err
 	}

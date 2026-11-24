@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/util"
 	"regexp"
 	"strings"
 )
@@ -227,7 +228,7 @@ func (p toolCallParser) parseBlock(rawJSON string) map[string]any {
 		}
 	}
 	return map[string]any{
-		"id":   "call_" + randomHex(12),
+		"id":   "call_" + util.RandomHex(12),
 		"type": "function",
 		"function": map[string]any{
 			"name":      name,

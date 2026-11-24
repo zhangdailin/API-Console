@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -19,16 +20,39 @@ import (
 
 // ConnTracker tracks active connections per account for weighted least-connections selection.
 type ConnTracker interface {
-	Acquire(accountID int64)
-	Release(accountID int64)
+	Reserve(ctx context.Context, accountID, limit int64) (release func(), ok bool)
 	GetCount(accountID int64) int64
 	GetCounts(accountIDs []int64) map[int64]int64
 }
 
-// LimitedConnTracker atomically reserves a slot when a hard per-account limit
-// is configured. It is optional so existing custom trackers remain compatible.
-type LimitedConnTracker interface {
-	TryAcquire(accountID int64, limit int64) bool
+// ErrConnectionLeaseLost means Redis no longer accounts for a live request.
+var ErrConnectionLeaseLost = errors.New("connection reservation expired or was removed")
+
+type connLeaseScopeKey struct{}
+type connLeaseScope struct {
+	ctx    context.Context
+	cancel context.CancelCauseFunc
+}
+
+// WithConnLeaseScope allows losing any tracked slot to cancel the logical
+// request. Releasing an account normally (including before a retry) does not
+// cancel the request. Nested callers share the original scope.
+func WithConnLeaseScope(ctx context.Context) (context.Context, func()) {
+	if scope, ok := ctx.Value(connLeaseScopeKey{}).(connLeaseScope); ok &&
+		ctx.Done() != nil && (scope.ctx.Err() == nil || ctx.Err() != nil) {
+		return ctx, func() {}
+	}
+	ctx, cancel := context.WithCancelCause(ctx)
+	return context.WithValue(ctx, connLeaseScopeKey{}, connLeaseScope{ctx, cancel}), func() { cancel(nil) }
+}
+
+// ReserveConnection returns a release tied to this slot, never to another
+// request using the same account.
+func ReserveConnection(ctx context.Context, tracker ConnTracker, id, limit int64) (func(), bool) {
+	if tracker == nil || id == 0 {
+		return nil, true
+	}
+	return tracker.Reserve(ctx, id, limit)
 }
 
 // --- Memory Implementation ---
@@ -40,36 +64,19 @@ type MemoryConnTracker struct {
 
 func NewMemoryConnTracker() *MemoryConnTracker { return &MemoryConnTracker{} }
 
-func (t *MemoryConnTracker) Acquire(accountID int64) {
-	val, _ := t.conns.LoadOrStore(accountID, &atomic.Int64{})
-	val.(*atomic.Int64).Add(1)
-}
-
-func (t *MemoryConnTracker) TryAcquire(accountID int64, limit int64) bool {
+func (t *MemoryConnTracker) Reserve(ctx context.Context, accountID, limit int64) (func(), bool) {
+	if ctx.Err() != nil || accountID == 0 {
+		return nil, false
+	}
 	val, _ := t.conns.LoadOrStore(accountID, &atomic.Int64{})
 	counter := val.(*atomic.Int64)
 	for {
 		current := counter.Load()
 		if limit > 0 && current >= limit {
-			return false
+			return nil, false
 		}
 		if counter.CompareAndSwap(current, current+1) {
-			return true
-		}
-	}
-}
-
-func (t *MemoryConnTracker) Release(accountID int64) {
-	if val, ok := t.conns.Load(accountID); ok {
-		counter := val.(*atomic.Int64)
-		for {
-			current := counter.Load()
-			if current <= 0 {
-				break
-			}
-			if counter.CompareAndSwap(current, current-1) {
-				break
-			}
+			return sync.OnceFunc(func() { counter.Add(-1) }), true
 		}
 	}
 }
@@ -91,13 +98,12 @@ func (t *MemoryConnTracker) GetCounts(accountIDs []int64) map[int64]int64 {
 
 // --- Redis Implementation ---
 
-// RedisConnTracker uses Redis INCR/DECR for distributed connection counting.
+// RedisConnTracker holds one expiring Redis sorted-set member per request.
 type RedisConnTracker struct {
 	client        *redis.Client
 	prefix        string
 	releaseScript *redis.Script
 	acquireScript *redis.Script
-	refreshScript *redis.Script
 	countScript   *redis.Script
 	mu            sync.Mutex
 	held          map[int64][]*redisConnLease
@@ -117,16 +123,10 @@ type cachedConnCount struct {
 const redisConnLeaseTTL = 2 * time.Minute
 
 type redisConnLease struct {
-	id   string
-	stop chan struct{}
-	done chan struct{}
-	once sync.Once
-}
-
-// stopRenewal ends the heartbeat goroutine. It is idempotent because a lease can
-// be released by its own request while a shutdown is releasing every lease.
-func (l *redisConnLease) stopRenewal() {
-	l.once.Do(func() { close(l.stop) })
+	id      string
+	expires time.Time
+	timer   *time.Timer
+	lost    context.CancelCauseFunc
 }
 
 func NewRedisConnTracker(client *redis.Client, prefix string) *RedisConnTracker {
@@ -148,18 +148,13 @@ func NewRedisConnTracker(client *redis.Client, prefix string) *RedisConnTracker 
 		local kind = redis.call("TYPE", key).ok
 		if kind ~= "none" and kind ~= "zset" then redis.call("DEL", key) end
 		redis.call("ZREMRANGEBYSCORE", key, "-inf", ARGV[2])
+		if redis.call("ZSCORE", key, ARGV[4]) ~= false then return 1 end
 		local current = redis.call("ZCARD", key)
 		if limit > 0 and current >= limit then
 			return 0
 		end
 		redis.call("ZADD", key, ARGV[3], ARGV[4])
 		redis.call("PEXPIRE", key, ARGV[5])
-		return 1
-	`)
-	t.refreshScript = redis.NewScript(`
-		if redis.call("ZSCORE", KEYS[1], ARGV[1]) == false then return 0 end
-		redis.call("ZADD", KEYS[1], "XX", ARGV[2], ARGV[1])
-		redis.call("PEXPIRE", KEYS[1], ARGV[3])
 		return 1
 	`)
 	// The count read drops expired members and discards a legacy non-sorted-set
@@ -178,36 +173,69 @@ func (t *RedisConnTracker) key(accountID int64) string {
 	return fmt.Sprintf("%s%d", t.prefix, accountID)
 }
 
-func (t *RedisConnTracker) Acquire(accountID int64) { t.acquire(accountID, 0) }
-
-func (t *RedisConnTracker) TryAcquire(accountID int64, limit int64) bool {
-	return t.acquire(accountID, limit)
+func (t *RedisConnTracker) Reserve(ctx context.Context, accountID, limit int64) (func(), bool) {
+	lease := t.acquire(ctx, accountID, limit)
+	if lease == nil {
+		return nil, false
+	}
+	return sync.OnceFunc(func() {
+		t.mu.Lock()
+		removed := t.removeLeaseLocked(accountID, lease)
+		t.mu.Unlock()
+		if removed {
+			t.releaseMember(accountID, lease.id)
+		}
+	}), true
 }
 
-func (t *RedisConnTracker) Release(accountID int64) {
-	if t == nil || t.client == nil || accountID == 0 {
-		return
+func (t *RedisConnTracker) removeLeaseLocked(accountID int64, lease *redisConnLease) bool {
+	leases := t.held[accountID]
+	i := slices.Index(leases, lease)
+	if i < 0 {
+		return false
 	}
+	if lease.timer != nil {
+		lease.timer.Stop()
+	}
+	leases = slices.Delete(leases, i, i+1)
+	if len(leases) == 0 {
+		delete(t.held, accountID)
+	} else {
+		t.held[accountID] = leases
+	}
+	return true
+}
+
+func (t *RedisConnTracker) releaseMember(accountID int64, member string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if n, err := t.releaseScript.Run(ctx, t.client, []string{t.key(accountID)}, member).Int64(); err == nil && n > 0 {
+		t.adjustCachedCount(accountID, -1)
+	}
+}
+
+func (t *RedisConnTracker) expireLease(accountID int64, lease *redisConnLease, confirmed bool) {
 	t.mu.Lock()
-	list := t.held[accountID]
-	if len(list) == 0 {
+	if !confirmed && time.Now().Before(lease.expires) {
+		if slices.Contains(t.held[accountID], lease) {
+			lease.timer.Reset(time.Until(lease.expires))
+		}
 		t.mu.Unlock()
 		return
 	}
-	lease := list[len(list)-1]
-	list = list[:len(list)-1]
-	if len(list) == 0 {
-		delete(t.held, accountID)
-	} else {
-		t.held[accountID] = list
-	}
+	removed := t.removeLeaseLocked(accountID, lease)
 	t.mu.Unlock()
-	lease.stopRenewal()
-	<-lease.done
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if err := t.releaseScript.Run(ctx, t.client, []string{t.key(accountID)}, lease.id).Err(); err == nil {
+	if removed {
 		t.adjustCachedCount(accountID, -1)
+		if lease.lost != nil {
+			lease.lost(ErrConnectionLeaseLost)
+		}
+		if !confirmed {
+			// If a renewal reply was lost, Redis may still have the member.
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = t.releaseScript.Run(ctx, t.client, []string{t.key(accountID)}, lease.id).Err()
+		}
 	}
 }
 
@@ -230,17 +258,15 @@ func (t *RedisConnTracker) Close() {
 	t.mu.Unlock()
 	<-t.renewDone
 
-	for _, leases := range held {
-		for _, lease := range leases {
-			lease.stopRenewal()
-		}
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	pipe := t.client.Pipeline()
 	for accountID, leases := range held {
 		for _, lease := range leases {
-			<-lease.done
+			lease.timer.Stop()
+			if lease.lost != nil {
+				lease.lost(ErrConnectionLeaseLost)
+			}
 			pipe.ZRem(ctx, t.key(accountID), lease.id)
 		}
 	}
@@ -359,47 +385,44 @@ func (t *RedisConnTracker) fetchCounts(accountIDs []int64) map[int64]int64 {
 	return result
 }
 
-func (t *RedisConnTracker) acquire(accountID, limit int64) bool {
-	if t == nil || t.client == nil || accountID == 0 {
-		return false
+func (t *RedisConnTracker) acquire(ctx context.Context, accountID, limit int64) *redisConnLease {
+	if t == nil || t.client == nil || accountID == 0 || ctx.Err() != nil {
+		return nil
 	}
-	// A newly started process can briefly race Redis connection establishment or
-	// script loading. Retry one time so a transport hiccup is not misreported as
-	// a hard account concurrency rejection. A limit rejection (result == 0) is
-	// returned immediately and remains subject to the real per-account limit.
-	var lease *redisConnLease
+	scope, _ := ctx.Value(connLeaseScopeKey{}).(connLeaseScope)
+	start := time.Now()
+	lease := &redisConnLease{id: newRedisConnLeaseID(), lost: scope.cancel, expires: start.Add(redisConnLeaseTTL)}
 	var result int64
 	var err error
+	// A timeout may hide a committed acquisition. Retries use the same member.
 	for range 2 {
-		lease = &redisConnLease{id: newRedisConnLeaseID(), stop: make(chan struct{}), done: make(chan struct{})}
 		now := time.Now()
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		result, err = t.acquireScript.Run(ctx, t.client, []string{t.key(accountID)},
-			limit, now.UnixMilli(), now.Add(redisConnLeaseTTL).UnixMilli(), lease.id, (redisConnLeaseTTL * 2).Milliseconds()).Int64()
+		call, cancel := context.WithTimeout(ctx, 2*time.Second)
+		result, err = t.acquireScript.Run(call, t.client, []string{t.key(accountID)},
+			limit, now.UnixMilli(), lease.expires.UnixMilli(), lease.id, (redisConnLeaseTTL * 2).Milliseconds()).Int64()
 		cancel()
-		if err == nil || result == 0 {
+		if err == nil || ctx.Err() != nil {
 			break
 		}
-		time.Sleep(25 * time.Millisecond)
 	}
-	if err != nil || result != 1 {
-		return false
+	if err != nil || (result == 1 && ctx.Err() != nil) {
+		t.releaseMember(accountID, lease.id)
+		return nil
+	}
+	if result != 1 {
+		return nil
 	}
 	t.mu.Lock()
 	if t.closed {
 		t.mu.Unlock()
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		_ = t.releaseScript.Run(ctx, t.client, []string{t.key(accountID)}, lease.id).Err()
-		return false
+		t.releaseMember(accountID, lease.id)
+		return nil
 	}
 	t.held[accountID] = append(t.held[accountID], lease)
+	lease.timer = time.AfterFunc(time.Until(lease.expires), func() { t.expireLease(accountID, lease, false) })
 	t.mu.Unlock()
-	// One process-wide scheduler renews leases; a request owns no heartbeat
-	// goroutine or ticker. done remains the release/shutdown lifecycle barrier.
-	close(lease.done)
 	t.adjustCachedCount(accountID, 1)
-	return true
+	return lease
 }
 
 func (t *RedisConnTracker) renewLoop() {
@@ -417,31 +440,31 @@ func (t *RedisConnTracker) renewLoop() {
 }
 
 var renewConnBatchScript = redis.NewScript(`
- local renewed = 0
- for i = 3, #ARGV do
-  if redis.call("ZSCORE", KEYS[1], ARGV[i]) ~= false then
+ local missing = {}
+ local now = tonumber(ARGV[3])
+ for i = 4, #ARGV do
+  local score = redis.call("ZSCORE", KEYS[1], ARGV[i])
+  if score and tonumber(score) > now then
    redis.call("ZADD", KEYS[1], "XX", ARGV[1], ARGV[i])
-   renewed = renewed + 1
+  else
+   table.insert(missing, ARGV[i])
   end
  end
- if renewed > 0 then redis.call("PEXPIRE", KEYS[1], ARGV[2]) end
- return renewed
+ if #missing < #ARGV - 3 then redis.call("PEXPIRE", KEYS[1], ARGV[2]) end
+ return missing
 `)
 
 func (t *RedisConnTracker) renewBatch() {
 	type batch struct {
 		accountID int64
-		ids       []string
+		leases    []*redisConnLease
+		cmd       *redis.Cmd
 	}
 	t.mu.Lock()
 	batches := make([]batch, 0, len(t.held))
 	for id, leases := range t.held {
 		for start := 0; start < len(leases); start += 256 {
-			ids := make([]string, 0, min(256, len(leases)-start))
-			for _, lease := range leases[start:min(start+256, len(leases))] {
-				ids = append(ids, lease.id)
-			}
-			batches = append(batches, batch{id, ids})
+			batches = append(batches, batch{accountID: id, leases: slices.Clone(leases[start:min(start+256, len(leases))])})
 		}
 	}
 	t.mu.Unlock()
@@ -453,17 +476,38 @@ func (t *RedisConnTracker) renewBatch() {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		pipe := t.client.Pipeline()
-		for _, b := range batches[start:min(start+128, len(batches))] {
-			args := make([]any, 0, len(b.ids)+2)
-			args = append(args, time.Now().Add(redisConnLeaseTTL).UnixMilli(), (redisConnLeaseTTL * 2).Milliseconds())
-			for _, id := range b.ids {
-				args = append(args, id)
+		now := time.Now()
+		expiry := now.Add(redisConnLeaseTTL)
+		active := batches[start:min(start+128, len(batches))]
+		for i := range active {
+			b := &active[i]
+			args := make([]any, 0, len(b.leases)+3)
+			args = append(args, expiry.UnixMilli(), (redisConnLeaseTTL * 2).Milliseconds(), now.UnixMilli())
+			for _, lease := range b.leases {
+				args = append(args, lease.id)
 			}
-			// XX plus ZSCORE prevents a concurrent Release from resurrecting a lease.
-			renewConnBatchScript.Eval(ctx, pipe, []string{t.key(b.accountID)}, args...)
+			b.cmd = renewConnBatchScript.Eval(ctx, pipe, []string{t.key(b.accountID)}, args...)
 		}
 		_, _ = pipe.Exec(ctx)
 		cancel()
+		for _, b := range active {
+			missing, err := b.cmd.StringSlice()
+			if err != nil {
+				continue // Keep the last proven deadline on transient failures.
+			}
+			for _, lease := range b.leases {
+				if slices.Contains(missing, lease.id) {
+					t.expireLease(b.accountID, lease, true)
+					continue
+				}
+				t.mu.Lock()
+				if time.Now().Before(lease.expires) && slices.Contains(t.held[b.accountID], lease) && expiry.After(lease.expires) {
+					lease.expires = expiry
+					lease.timer.Reset(time.Until(expiry))
+				}
+				t.mu.Unlock()
+			}
+		}
 	}
 }
 

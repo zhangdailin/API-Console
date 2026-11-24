@@ -5,12 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"time"
 
 	"orchids-api/internal/modelcatalog"
-
-	"github.com/redis/go-redis/v9"
 )
 
 var (
@@ -272,18 +269,6 @@ func AccountAuthActive(acc *Account) bool {
 	return status == "" || strings.EqualFold(status, AccountAuthStatusActive)
 }
 
-type Store struct {
-	accounts   accountStore
-	settings   settingsStore
-	apiKeys    apiKeyStore
-	models     modelStore
-	responses  responseStore
-	reasoning  reasoningReplayStore
-	webMedia   *redisStore
-	keyTouchMu sync.Mutex
-	keyTouches map[int64]time.Time
-}
-
 type Options struct {
 	RedisAddr               string
 	RedisPassword           string
@@ -325,68 +310,17 @@ type ClineCredentialPatch struct {
 	ModelIDs             []string
 }
 
-type accountStore interface {
-	CreateAccount(ctx context.Context, acc *Account) error
-	UpdateAccount(ctx context.Context, acc *Account) error
-	UpdateWorkBuddyCredentials(ctx context.Context, id int64, patch WorkBuddyCredentialPatch) error
-	UpdateClineCredentials(ctx context.Context, id int64, patch ClineCredentialPatch) error
-	UpdateWarpCredentials(ctx context.Context, id int64, patch WarpCredentialPatch) error
-	UpdateGrokCredentials(ctx context.Context, id int64, patch GrokCredentialPatch) error
-	DeleteAccount(ctx context.Context, id int64) error
-	GetAccount(ctx context.Context, id int64) (*Account, error)
-	ListAccounts(ctx context.Context) ([]*Account, error)
-	GetEnabledAccounts(ctx context.Context) ([]*Account, error)
-	IncrementAccountStats(ctx context.Context, id int64, usage float64, count int64) error
-	IncrementAccountStatsOperation(ctx context.Context, id int64, usage float64, count int64, operationID string, completedAt time.Time) error
-	ConsumeGrokQuota(ctx context.Context, id int64, provider string, amount float64) (bool, error)
-	ClaimGrokPaidQuotaProbe(ctx context.Context, id int64, now time.Time) (bool, error)
-}
-
-type settingsStore interface {
-	GetSetting(ctx context.Context, key string) (string, error)
-	SetSetting(ctx context.Context, key, value string) error
-}
-
-type modelStore interface {
-	CreateModel(ctx context.Context, m *Model) error
-	UpdateModel(ctx context.Context, m *Model) error
-	DeleteModel(ctx context.Context, id string) error
-	GetModel(ctx context.Context, id string) (*Model, error)
-	ListModels(ctx context.Context) ([]*Model, error)
-	GetModelByChannelAndModelID(ctx context.Context, channel, modelID string) (*Model, error)
-	ReconcileDiscoveredModels(ctx context.Context, channel string, models []*Model, options ModelReconcileOptions) (*ModelReconcileResult, error)
-}
-
-// SetChangeEmitter wires account-change notifications. Passing nil disables
-// them, which keeps a store used only by tests silent.
-func (s *Store) SetChangeEmitter(emitter ChangeEmitter) {
-	if s == nil {
-		return
-	}
-	if redis, ok := s.accounts.(*redisStore); ok {
-		redis.SetChangeEmitter(emitter)
-	}
-}
-
 func New(opts Options) (*Store, error) {
-	store := &Store{}
-	redisStore, err := newRedisStore(opts.RedisAddr, opts.RedisPassword, opts.RedisDB, opts.RedisPrefix, opts.CredentialEncryptionKey, opts.RedisPoolSize)
+	rs, err := newRedisStore(opts.RedisAddr, opts.RedisPassword, opts.RedisDB, opts.RedisPrefix, opts.CredentialEncryptionKey, opts.RedisPoolSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init redis store: %w", err)
 	}
-	store.accounts = redisStore
-	store.settings = redisStore
-	store.apiKeys = redisStore
-	store.models = redisStore
-	store.responses = redisStore
-	store.reasoning = redisStore
-	store.webMedia = redisStore
-	if err := redisStore.validateAccountCredentials(context.Background()); err != nil {
-		_ = redisStore.Close()
+	if err := rs.validateAccountCredentials(context.Background()); err != nil {
+		_ = rs.Close()
 		return nil, fmt.Errorf("failed to validate account credentials: %w", err)
 	}
-	store.prepareModels()
-	return store, nil
+	rs.prepareModels()
+	return rs, nil
 }
 
 // prepareModels performs the startup maintenance model management needs.
@@ -481,156 +415,3 @@ func ApplyGrokWebRouteDefaults(model *Model) { applyGrokWebRouteDefaults(model) 
 // ApplyGrokRouteDefaults initializes route metadata for catalog/discovery
 // records while allowing callers to override Origin afterwards.
 func ApplyGrokRouteDefaults(model *Model) { applyGrokRouteDefaults(model) }
-
-func (s *Store) Close() error {
-	if rs, ok := s.accounts.(*redisStore); ok {
-		return rs.Close()
-	}
-	return nil
-}
-
-// RedisClient returns the underlying Redis client, or nil if not using Redis.
-func (s *Store) RedisClient() *redis.Client {
-	if rs, ok := s.accounts.(*redisStore); ok {
-		return rs.Client()
-	}
-	return nil
-}
-
-// RedisPrefix returns the configured key prefix.
-func (s *Store) RedisPrefix() string {
-	if s.accounts != nil {
-		if rs, ok := s.accounts.(*redisStore); ok {
-			return rs.prefix
-		}
-	}
-	return "orchids:"
-}
-
-func (s *Store) CreateAccount(ctx context.Context, acc *Account) error {
-	if s.accounts != nil {
-		return s.accounts.CreateAccount(ctx, acc)
-	}
-	return fmt.Errorf("store not configured")
-}
-
-func (s *Store) UpdateAccount(ctx context.Context, acc *Account) error {
-	if acc != nil && acc.DoubaoSessionUpdate != nil {
-		observation := acc.DoubaoSessionUpdate
-		patch := DoubaoSessionPatch{Expected: observation.Expected, Healthy: observation.Healthy, Rejected: observation.Rejected, UserID: observation.UserID, ObservedAt: observation.ObservedAt}
-		if err := s.UpdateDoubaoSession(ctx, acc.ID, patch); err != nil {
-			return err
-		}
-		current, err := s.GetAccount(ctx, acc.ID)
-		if err != nil {
-			return err
-		}
-		if current == nil {
-			return ErrNoRows
-		}
-		*acc = *current
-		return nil
-	}
-	if s.accounts != nil {
-		return s.accounts.UpdateAccount(ctx, acc)
-	}
-	return fmt.Errorf("store not configured")
-}
-
-func (s *Store) UpdateWorkBuddyCredentials(ctx context.Context, id int64, patch WorkBuddyCredentialPatch) error {
-	if s.accounts != nil {
-		return s.accounts.UpdateWorkBuddyCredentials(ctx, id, patch)
-	}
-	return fmt.Errorf("store not configured")
-}
-
-// UpdateClineCredentials persists a rotated Cline credential atomically.
-func (s *Store) UpdateClineCredentials(ctx context.Context, id int64, patch ClineCredentialPatch) error {
-	if s.accounts != nil {
-		return s.accounts.UpdateClineCredentials(ctx, id, patch)
-	}
-	return fmt.Errorf("store not configured")
-}
-
-func (s *Store) UpdateGrokCredentials(ctx context.Context, id int64, patch GrokCredentialPatch) error {
-	if s != nil && s.accounts != nil {
-		return s.accounts.UpdateGrokCredentials(ctx, id, patch)
-	}
-	return fmt.Errorf("store not configured")
-}
-
-func (s *Store) DeleteAccount(ctx context.Context, id int64) error {
-	if s.accounts != nil {
-		return s.accounts.DeleteAccount(ctx, id)
-	}
-	return fmt.Errorf("store not configured")
-}
-
-func (s *Store) GetAccount(ctx context.Context, id int64) (*Account, error) {
-	if s.accounts != nil {
-		return s.accounts.GetAccount(ctx, id)
-	}
-	return nil, fmt.Errorf("store not configured")
-}
-
-func (s *Store) ListAccounts(ctx context.Context) ([]*Account, error) {
-	if s.accounts != nil {
-		return s.accounts.ListAccounts(ctx)
-	}
-	return nil, fmt.Errorf("store not configured")
-}
-
-func (s *Store) GetEnabledAccounts(ctx context.Context) ([]*Account, error) {
-	if s.accounts != nil {
-		return s.accounts.GetEnabledAccounts(ctx)
-	}
-	return nil, fmt.Errorf("store not configured")
-}
-
-func (s *Store) IncrementAccountStats(ctx context.Context, id int64, usage float64, count int64) error {
-	return s.IncrementAccountStatsOperation(ctx, id, usage, count, "", time.Now().UTC())
-}
-
-// IncrementAccountStatsOperation applies one completed request's counters. A
-// non-empty operationID makes retries durable and idempotent within the
-// retention window; completedAt determines the fixed UTC daily bucket rather
-// than retry time. A deleted account returns ErrNoRows.
-func (s *Store) IncrementAccountStatsOperation(ctx context.Context, id int64, usage float64, count int64, operationID string, completedAt time.Time) error {
-	if s.accounts != nil {
-		return s.accounts.IncrementAccountStatsOperation(ctx, id, usage, count, operationID, completedAt)
-	}
-	return fmt.Errorf("store not configured")
-}
-
-// ConsumeGrokQuota atomically applies successful request units to an observed
-// local quota snapshot. It returns false when the provider has no compatible
-// request-unit window, deliberately leaving weekly percentage billing alone.
-func (s *Store) ConsumeGrokQuota(ctx context.Context, id int64, provider string, amount float64) (bool, error) {
-	if s.accounts != nil {
-		return s.accounts.ConsumeGrokQuota(ctx, id, provider, amount)
-	}
-	return false, fmt.Errorf("store not configured")
-}
-
-// ClaimGrokPaidQuotaProbe atomically admits at most one paid-billing probe per
-// interval once the known billing period has ended.
-func (s *Store) ClaimGrokPaidQuotaProbe(ctx context.Context, id int64, now time.Time) (bool, error) {
-	if s.accounts != nil {
-		return s.accounts.ClaimGrokPaidQuotaProbe(ctx, id, now)
-	}
-	return false, fmt.Errorf("store not configured")
-}
-
-func (s *Store) GetSetting(ctx context.Context, key string) (string, error) {
-	if s.settings != nil {
-		return s.settings.GetSetting(ctx, key)
-	}
-	return "", fmt.Errorf("settings store not configured")
-}
-
-func (s *Store) SetSetting(ctx context.Context, key, value string) error {
-	if s.settings != nil {
-		return s.settings.SetSetting(ctx, key, value)
-	}
-	return fmt.Errorf("settings store not configured")
-}

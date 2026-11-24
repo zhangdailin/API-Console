@@ -54,19 +54,19 @@ func TestDecodeJSONBodyRequiresOneCompleteValue(t *testing.T) {
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest("POST", "/", strings.NewReader(body))
 			var value map[string]any
-			if DecodeJSONBody(rec, req, &value) || rec.Code != 400 {
+			if DecodeJSONBodyLimit(rec, req, &value, 0) || rec.Code != 400 {
 				t.Fatalf("invalid body accepted: %d", rec.Code)
 			}
 		})
 	}
 	var value map[string]any
 	rec := httptest.NewRecorder()
-	if !DecodeJSONBody(rec, httptest.NewRequest("POST", "/", strings.NewReader("{\"a\":1} \r\n\t")), &value) {
+	if !DecodeJSONBodyLimit(rec, httptest.NewRequest("POST", "/", strings.NewReader("{\"a\":1} \r\n\t")), &value, 0) {
 		t.Fatal("trailing whitespace rejected")
 	}
 	req := httptest.NewRequest("POST", "/", nil)
 	req.Body = nil
-	if DecodeJSONBody(httptest.NewRecorder(), req, &value) {
+	if DecodeJSONBodyLimit(httptest.NewRecorder(), req, &value, 0) {
 		t.Fatal("nil body accepted")
 	}
 }
@@ -201,7 +201,7 @@ func TestDecodeJSONBodyRejectsNonJSONContentType(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(`{"a":1}`))
 	req.Header.Set("Content-Type", "text/plain")
 	var payload map[string]any
-	testutil.False(t, DecodeJSONBody(rec, req, &payload), "DecodeJSONBody accepted a non-JSON content type")
+	testutil.False(t, DecodeJSONBodyLimit(rec, req, &payload, 0), "DecodeJSONBody accepted a non-JSON content type")
 	testutil.Equal(t, rec.Code, http.StatusUnsupportedMediaType)
 }
 
@@ -218,10 +218,10 @@ func BenchmarkWriteSSE_Bytes(b *testing.B) {
 func TestJSONBodyAcceptsBeyondFormerLimit(t *testing.T) {
 	body := "{}" + strings.Repeat(" ", 33<<20)
 	var value map[string]any
-	if !DecodeJSONBody(httptest.NewRecorder(), httptest.NewRequest("POST", "/", strings.NewReader(body)), &value) {
+	if !DecodeJSONBodyLimit(httptest.NewRecorder(), httptest.NewRequest("POST", "/", strings.NewReader(body)), &value, 0) {
 		t.Fatal("large JSON rejected")
 	}
-	got, err := ReadBoundedJSONBody(httptest.NewRecorder(), httptest.NewRequest("POST", "/", strings.NewReader(body)))
+	got, err := ReadJSONBodyLimit(httptest.NewRecorder(), httptest.NewRequest("POST", "/", strings.NewReader(body)), 50<<20)
 	if err != nil || string(got) != body {
 		t.Fatal("large JSON changed", err)
 	}

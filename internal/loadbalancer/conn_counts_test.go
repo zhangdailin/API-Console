@@ -15,9 +15,11 @@ func TestMonitoringCountsReturnErrorsInsteadOfZeroLoad(t *testing.T) {
 	defer client.Close()
 	tracker := NewRedisConnTracker(client, "monitor:")
 	defer tracker.Close()
-	if !tracker.TryAcquire(1, 2) {
+	release, ok := tracker.Reserve(t.Context(), 1, 2)
+	if !ok {
 		t.Fatal("could not acquire test slot")
 	}
+	defer release()
 	counts, err := tracker.GetCountsChecked(context.Background(), []int64{1, 2})
 	if err != nil || counts[1] != 1 || counts[2] != 0 {
 		t.Fatalf("counts=%v err=%v", counts, err)

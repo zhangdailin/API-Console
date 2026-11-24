@@ -1,11 +1,14 @@
 package store
 
 import (
-	"context"
+	"bytes"
 	"encoding/json"
-	"fmt"
+	"errors"
+	"strings"
 	"time"
 )
+
+const DefaultStoredResponseTTL = 30 * 24 * time.Hour
 
 // StoredResponse records the ownership needed to continue or manage an
 // upstream Responses resource without retaining the request or response body.
@@ -24,16 +27,48 @@ type StoredResponse struct {
 	// list rather than failing, and previous_response_id expansion is unaffected
 	// because it reads Body.
 	InputItems json.RawMessage `json:"input_items,omitempty"`
+	// InputFileRefs is an internal storage sidecar; reads restore InputItems.
+	InputFileRefs         []responseInputFileRef `json:"input_file_refs,omitempty"`
+	ExternalizeInputFiles bool                   `json:"-"`
 	// ToolNamespaces restores client tool identities from native upstream names.
 	// It shares the response's owner and TTL, including across gateway replicas.
 	ToolNamespaces json.RawMessage `json:"tool_namespaces,omitempty"`
 	// PreviousResponseID links a continuation to the response it continued, so
 	// the stored input list can report the whole conversation instead of only
 	// the last turn.
-	PreviousResponseID string    `json:"previous_response_id,omitempty"`
-	ExpiresAt          time.Time `json:"expires_at"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	PreviousResponseID string `json:"previous_response_id,omitempty"`
+	// InputItemsDelta distinguishes Build turn-only input from historical snapshots.
+	InputItemsDelta bool      `json:"input_items_delta,omitempty"`
+	ExpiresAt       time.Time `json:"expires_at"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+var (
+	ErrStoredResponseIdentityRequired = errors.New("response id and owner are required")
+	ErrStoredResponseChanged          = errors.New("stored response changed")
+)
+
+// prepareStoredResponse normalizes the identity, timestamps, and stored inputs.
+func prepareStoredResponse(response *StoredResponse, now time.Time, ttl time.Duration) (StoredResponse, map[string]string, error) {
+	if response == nil {
+		return StoredResponse{}, nil, ErrStoredResponseIdentityRequired
+	}
+	row := *response
+	row.ResponseID, row.OwnerHash = strings.TrimSpace(row.ResponseID), strings.TrimSpace(row.OwnerHash)
+	if row.ResponseID == "" || row.OwnerHash == "" {
+		return StoredResponse{}, nil, ErrStoredResponseIdentityRequired
+	}
+	if row.CreatedAt.IsZero() {
+		row.CreatedAt = now
+	}
+	row.UpdatedAt, row.ExpiresAt = now, now.Add(ttl)
+	files, err := detachResponseInputFiles(&row)
+	return row, files, err
+}
+
+func (r *StoredResponse) bodyMatches(previous *StoredResponse) bool {
+	return r.UpdatedAt.Equal(previous.UpdatedAt) && bytes.Equal(r.Body, previous.Body)
 }
 
 // StoredReasoningReplay contains normalized portable replay items. The key
@@ -53,74 +88,4 @@ type StoredSessionAffinity struct {
 	SessionKey string    `json:"session_key"`
 	AccountID  int64     `json:"account_id"`
 	ExpiresAt  time.Time `json:"expires_at"`
-}
-
-type responseStore interface {
-	SaveStoredResponse(ctx context.Context, response *StoredResponse, ttl time.Duration) error
-	GetStoredResponse(ctx context.Context, responseID, ownerHash string) (*StoredResponse, error)
-	DeleteStoredResponse(ctx context.Context, responseID, ownerHash string) error
-}
-
-type reasoningReplayStore interface {
-	DeleteReasoningReplay(ctx context.Context, model, sessionKey string) error
-	SaveReasoningReplay(ctx context.Context, replay *StoredReasoningReplay, ttl time.Duration) error
-	GetReasoningReplay(ctx context.Context, model, sessionKey string) (*StoredReasoningReplay, error)
-	SaveSessionAffinity(ctx context.Context, affinity *StoredSessionAffinity, ttl time.Duration) error
-	GetSessionAffinity(ctx context.Context, provider, model, sessionKey string) (*StoredSessionAffinity, error)
-}
-
-func (s *Store) SaveStoredResponse(ctx context.Context, response *StoredResponse, ttl time.Duration) error {
-	if s == nil || s.responses == nil {
-		return fmt.Errorf("response store not configured")
-	}
-	return s.responses.SaveStoredResponse(ctx, response, ttl)
-}
-
-func (s *Store) GetStoredResponse(ctx context.Context, responseID, ownerHash string) (*StoredResponse, error) {
-	if s == nil || s.responses == nil {
-		return nil, fmt.Errorf("response store not configured")
-	}
-	return s.responses.GetStoredResponse(ctx, responseID, ownerHash)
-}
-
-func (s *Store) DeleteStoredResponse(ctx context.Context, responseID, ownerHash string) error {
-	if s == nil || s.responses == nil {
-		return fmt.Errorf("response store not configured")
-	}
-	return s.responses.DeleteStoredResponse(ctx, responseID, ownerHash)
-}
-
-func (s *Store) DeleteReasoningReplay(ctx context.Context, model, key string) error {
-	if s == nil || s.reasoning == nil {
-		return nil
-	}
-	return s.reasoning.DeleteReasoningReplay(ctx, model, key)
-}
-
-func (s *Store) SaveReasoningReplay(ctx context.Context, replay *StoredReasoningReplay, ttl time.Duration) error {
-	if s == nil || s.reasoning == nil {
-		return fmt.Errorf("reasoning replay store not configured")
-	}
-	return s.reasoning.SaveReasoningReplay(ctx, replay, ttl)
-}
-
-func (s *Store) GetReasoningReplay(ctx context.Context, model, sessionKey string) (*StoredReasoningReplay, error) {
-	if s == nil || s.reasoning == nil {
-		return nil, fmt.Errorf("reasoning replay store not configured")
-	}
-	return s.reasoning.GetReasoningReplay(ctx, model, sessionKey)
-}
-
-func (s *Store) SaveSessionAffinity(ctx context.Context, affinity *StoredSessionAffinity, ttl time.Duration) error {
-	if s == nil || s.reasoning == nil {
-		return fmt.Errorf("session affinity store not configured")
-	}
-	return s.reasoning.SaveSessionAffinity(ctx, affinity, ttl)
-}
-
-func (s *Store) GetSessionAffinity(ctx context.Context, provider, model, sessionKey string) (*StoredSessionAffinity, error) {
-	if s == nil || s.reasoning == nil {
-		return nil, fmt.Errorf("session affinity store not configured")
-	}
-	return s.reasoning.GetSessionAffinity(ctx, provider, model, sessionKey)
 }

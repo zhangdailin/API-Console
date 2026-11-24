@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"orchids-api/internal/grok/grokbase"
 	"slices"
 	"strings"
 	"time"
@@ -23,7 +24,7 @@ import (
 func (h *Handler) streamImageResults(ctx context.Context, w http.ResponseWriter, body io.Reader, token, prompt, format string, n int, publicBase string, editInputs []string) {
 	flusher := httpserver.StreamResponseHeaders(w)
 
-	field := imageResponseField(format)
+	field := normalizeImageResponseFormat(format)
 	var urls []string
 	targetIndex := -1
 
@@ -134,26 +135,22 @@ func (h *Handler) HandleImagesGenerations(w http.ResponseWriter, r *http.Request
 	// Transport-layer validation, exactly as the reference performs it: a ratio is
 	// a ratio, a size is one of the four accepted edit sizes, and a resolution is
 	// 1k or 2k.
-	if strings.TrimSpace(req.AspectRatio) != "" && !validImageAspectRatio(req.AspectRatio) {
-		httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_parameter", "aspect_ratio is not supported")
+	if !requireImageAspectRatio(w, req.AspectRatio) {
 		return
 	}
 	if strings.TrimSpace(req.Size) != "" && !validImageEditSize(req.Size) {
 		httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_parameter", "size must be auto, 1024x1024, 1024x1536 or 1536x1024")
 		return
 	}
-	resolution, resolutionErr := normalizeImageResolution(req.Resolution)
-	if resolutionErr != nil {
-		httpserver.WriteErrorCode(w, http.StatusBadRequest, "invalid_parameter", resolutionErr.Error())
+	resolution, ok := requireImageResolution(w, req.Resolution)
+	if !ok {
 		return
 	}
 	req.Resolution = resolution
-	rawResponseFormat := strings.ToLower(strings.TrimSpace(req.ResponseFormat))
-	if rawResponseFormat != "" && rawResponseFormat != "url" && rawResponseFormat != "b64_json" && rawResponseFormat != "base64" {
-		httpserver.WriteError(w, http.StatusBadRequest, "response_format must be url or b64_json")
+	req.ResponseFormat, ok = requireImageResponseFormat(w, req.ResponseFormat)
+	if !ok {
 		return
 	}
-	req.ResponseFormat = normalizeImageResponseFormat(req.ResponseFormat)
 	if !isImageGenerationModel(req.Model) {
 		httpserver.WriteError(w, http.StatusBadRequest, "image generation model must be one of [grok-imagine-image-lite, grok-imagine-image, grok-imagine-image-2.0]")
 		return
@@ -207,7 +204,7 @@ func (h *Handler) HandleImagesGenerations(w http.ResponseWriter, r *http.Request
 
 func (h *Handler) serveImagesGenerations(ctx context.Context, w http.ResponseWriter, req ImagesGenerationsRequest, publicBase string) {
 	if err := h.ensureModelCapability(ctx, req.Model, store.CapabilityImage); err != nil {
-		httpserver.WriteError(w, http.StatusBadRequest, modelValidationMessage(req.Model, err))
+		httpserver.WriteError(w, http.StatusBadRequest, grokbase.ModelValidationMessage(req.Model, err))
 		return
 	}
 
@@ -229,16 +226,12 @@ func (h *Handler) serveImagesGenerations(ctx context.Context, w http.ResponseWri
 		sess.Close()
 	}()
 
-	if req.Stream {
-		if normalizeModelID(spec.ID) == "grok-imagine-image-lite" {
-			h.streamAppChatImagesGeneration(ctx, w, sess, spec, req, publicBase)
-			return
-		}
-		h.streamImagineWSGeneration(ctx, w, sess, spec, req)
+	if normalizeModelID(spec.ID) != "grok-imagine-image-lite" {
+		h.serveImagineWSGeneration(ctx, w, sess, spec, req, publicBase)
 		return
 	}
-	if normalizeModelID(spec.ID) != "grok-imagine-image-lite" {
-		h.collectImagineWSGeneration(ctx, w, sess, spec, req, publicBase)
+	if req.Stream {
+		h.streamAppChatImagesGeneration(ctx, w, sess, spec, req, publicBase)
 		return
 	}
 	urls, err := h.collectAppChatImageURLs(ctx, sess, spec, req, true)
@@ -289,116 +282,89 @@ func (h *Handler) imagineNSFWAllowed(requested *bool) bool {
 	return h.configSnapshot().PublicImagineNSFW()
 }
 
-func (h *Handler) streamImagineWSGeneration(ctx context.Context, w http.ResponseWriter, sess *chatAccountSession, spec ModelSpec, req ImagesGenerationsRequest) {
+func (h *Handler) serveImagineWSGeneration(ctx context.Context, w http.ResponseWriter, sess *chatAccountSession, spec ModelSpec, req ImagesGenerationsRequest, publicBase string) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	flusher := httpserver.StreamResponseHeaders(w)
-	nsfw := h.imagineNSFWAllowed(req.NSFW)
-	events, errs := h.streamImagineWSImages(ctx, sess, spec, req.Prompt, req.AspectRatio, req.N, nsfw)
-	partialLimit := imagePartialCount(req)
-	partialIndex := 0
-	completed := 0
-	for ev := range events {
-		if ev.Type == "progress" && partialIndex < partialLimit && (strings.TrimSpace(ev.Blob) != "" || strings.TrimSpace(ev.URL) != "") {
-			value, err := h.imagineImageOutputValue(ctx, sess.token, ev, "b64_json")
-			if err == nil && strings.TrimSpace(value) != "" {
-				outputFormat := imageOutputFormatFromBase64(value)
-				writeSSE(w, flusher, "image_generation.partial_image", util.EncodeJSONBytes(map[string]any{
-					"type": "image_generation.partial_image", "b64_json": value,
-					"created_at": time.Now().Unix(), "size": imageEventSize("b64_json", value), "quality": "auto",
-					"background": "auto", "output_format": outputFormat, "partial_image_index": partialIndex,
-				}))
-				partialIndex++
-			}
+	var flusher http.Flusher
+	format := req.ResponseFormat
+	partialLimit, partialIndex, completed := 0, 0, 0
+	var data []map[string]any
+	if req.Stream {
+		flusher = httpserver.StreamResponseHeaders(w)
+		format, partialLimit = "b64_json", imagePartialCount(req)
+	} else {
+		data = make([]map[string]any, 0, req.N)
+	}
+	field := normalizeImageResponseFormat(format)
+	emit := func(event, value string, partial bool) {
+		payload := map[string]any{
+			"type": event, "b64_json": value,
+			"created_at": time.Now().Unix(), "size": imageEventSize("b64_json", value),
+			"quality": "auto", "background": "auto", "output_format": imageOutputFormatFromBase64(value),
 		}
-		if !ev.Final || (strings.TrimSpace(ev.Blob) == "" && strings.TrimSpace(ev.URL) == "") {
+		if partial {
+			payload["partial_image_index"] = partialIndex
+			partialIndex++
+		}
+		writeSSE(w, flusher, event, util.EncodeJSONBytes(payload))
+	}
+	fail := func(err error, prefix string) {
+		if req.Stream {
+			httpserver.WriteSSEStreamError(w, flusher, nil, prefix+err.Error())
+		} else {
+			writeGrokUpstreamError(w, err)
+		}
+	}
+	events, errs := h.streamImagineWSImages(ctx, sess, spec, req.Prompt, req.AspectRatio, req.N, h.imagineNSFWAllowed(req.NSFW))
+	for ev := range events {
+		if strings.TrimSpace(ev.Blob) == "" && strings.TrimSpace(ev.URL) == "" {
 			continue
 		}
-		value, err := h.imagineImageOutputValue(ctx, sess.token, ev, "b64_json")
+		if ev.Type == "progress" && partialIndex < partialLimit {
+			if value, err := h.imagineImageOutputValue(ctx, sess.token, ev, format); err == nil && strings.TrimSpace(value) != "" {
+				emit("image_generation.partial_image", value, true)
+			}
+		}
+		if !ev.Final {
+			continue
+		}
+		value, err := h.imagineImageOutputValue(ctx, sess.token, ev, format)
 		if err != nil {
-			httpserver.WriteSSEStreamError(w, flusher, nil, "image download failed: "+err.Error())
+			fail(err, "image download failed: ")
 			return
 		}
-		outputFormat := imageOutputFormatFromBase64(value)
-		writeSSE(w, flusher, "image_generation.completed", util.EncodeJSONBytes(map[string]any{
-			"type": "image_generation.completed", "b64_json": value,
-			"created_at": time.Now().Unix(), "size": imageEventSize("b64_json", value), "quality": "auto",
-			"background": "auto", "output_format": outputFormat,
-		}))
+		if req.Stream {
+			emit("image_generation.completed", value, false)
+		} else if item, ok := imageResult(w, field, value, publicBase); ok {
+			data = append(data, item)
+		} else {
+			return
+		}
 		completed++
 	}
 	err := <-errs
-	if _, ok := errors.AsType[*imagineIncompleteError](err); ok {
-		err = nil
-	}
-	if err != nil {
-		httpserver.WriteSSEStreamError(w, flusher, nil, err.Error())
+	if _, incomplete := errors.AsType[*imagineIncompleteError](err); err != nil && !incomplete {
+		fail(err, "")
 		return
 	}
-	if completed == 0 {
-		writeSSECodedError(w, flusher, "no image generated", "no_image_generated")
-		return
-	}
-	if completed < req.N {
-		// The delivered images stay delivered; the stream still has to say
-		// that the request was not fulfilled.
-		writeSSECodedError(w, flusher, (&imagineIncompleteError{got: completed, want: req.N}).Error(), "image_generation_incomplete")
-		return
-	}
-	writeSSE(w, flusher, "", []byte("[DONE]"))
-}
-
-func (h *Handler) collectImagineWSGeneration(ctx context.Context, w http.ResponseWriter, sess *chatAccountSession, spec ModelSpec, req ImagesGenerationsRequest, publicBase string) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	nsfw := h.imagineNSFWAllowed(req.NSFW)
-	events, errs := h.streamImagineWSImages(ctx, sess, spec, req.Prompt, req.AspectRatio, req.N, nsfw)
-	field := imageResponseField(req.ResponseFormat)
-	data := make([]map[string]any, 0, req.N)
-	for ev := range events {
-		if !ev.Final || (strings.TrimSpace(ev.Blob) == "" && strings.TrimSpace(ev.URL) == "") {
-			continue
-		}
-		value, err := h.imagineImageOutputValue(ctx, sess.token, ev, req.ResponseFormat)
-		if err != nil {
-			writeGrokUpstreamError(w, err)
-			return
-		}
-		if field == "url" {
-			if publicBase == "" {
-				httpserver.WriteErrorCode(w, http.StatusInternalServerError, "image_url_base_missing", "image URL base is not configured")
-				return
-			}
-			if strings.HasPrefix(value, "/") {
-				value = publicBase + value
-			}
-		}
-		data = append(data, map[string]any{
-			field:            value,
-			"revised_prompt": "",
-			"mime_type":      imageMimeTypeForValue(field, value),
-		})
-	}
-	err := <-errs
-	if _, ok := errors.AsType[*imagineIncompleteError](err); ok {
-		err = nil
-	}
-	if err != nil {
-		writeGrokUpstreamError(w, err)
-		return
-	}
-	if len(data) == 0 {
+	switch {
+	case completed == 0 && !req.Stream:
 		httpserver.WriteError(w, http.StatusBadGateway, "no image generated")
-		return
+	case completed < req.N || completed == 0:
+		code, message := "image_generation_incomplete", (&imagineIncompleteError{got: completed, want: req.N}).Error()
+		if completed == 0 {
+			code, message = "no_image_generated", "no image generated"
+		}
+		if req.Stream {
+			writeSSECodedError(w, flusher, message, code)
+		} else {
+			httpserver.WriteErrorCode(w, http.StatusBadGateway, code, message)
+		}
+	case req.Stream:
+		writeSSE(w, flusher, "", []byte("[DONE]"))
+	default:
+		writeImageData(w, req.Prompt, data)
 	}
-	if len(data) < req.N {
-		httpserver.WriteErrorCode(w, http.StatusBadGateway, "image_generation_incomplete", (&imagineIncompleteError{got: len(data), want: req.N}).Error())
-		return
-	}
-	util.WriteJSON(w, map[string]any{
-		"created": time.Now().Unix(), "data": data,
-		"usage": buildImageUsagePayload(req.Prompt, len(data)),
-	})
 }
 
 func (h *Handler) streamAppChatImagesGeneration(ctx context.Context, w http.ResponseWriter, sess *chatAccountSession, spec ModelSpec, req ImagesGenerationsRequest, publicBase string) {

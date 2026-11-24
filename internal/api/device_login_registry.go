@@ -1,52 +1,54 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"sync"
 	"time"
+
+	"orchids-api/internal/channel"
 )
 
-// deviceLoginRegistry holds the in-flight device-authorization transactions for
-// one channel.
-//
-// Every channel's login is the same machine: an id→transaction map guarded by a
-// mutex, an admission limit, expiry cleanup, and get/cancel/finish accessors.
-// Only the transaction type differs, so the storage and the bookkeeping live
-// here once, and each channel supplies its element type plus the offset of the
-// shared deviceLogin inside it. Before this existed each channel carried its own
-// map, mutex and four accessors — the same forty lines four times.
-type deviceLoginRegistry[T any] struct {
-	mu     sync.Mutex
-	logins map[string]*T
-	// shared returns the embedded state the common bookkeeping operates on.
-	shared func(*T) *deviceLogin
-	// ready reports whether a transaction can still be polled.
-	ready func(*deviceLogin) bool
-	// expiredMessage is the operator-facing reason a transaction timed out.
+// deviceLoginRegistry owns the in-flight transactions for one channel.
+type deviceLoginRegistry struct {
+	mu             sync.Mutex
+	logins         map[string]*deviceLogin
 	expiredMessage string
 }
 
-func newDeviceLoginRegistry[T any](shared func(*T) *deviceLogin, ready func(*deviceLogin) bool, expiredMessage string) *deviceLoginRegistry[T] {
-	if ready == nil {
-		ready = deviceLoginReady
-	}
-	return &deviceLoginRegistry[T]{
-		logins:         map[string]*T{},
-		shared:         shared,
-		ready:          ready,
-		expiredMessage: expiredMessage,
+func newDeviceLoginRegistry(id channel.ID) *deviceLoginRegistry {
+	return &deviceLoginRegistry{
+		logins:         make(map[string]*deviceLogin),
+		expiredMessage: channelLabel(id) + " authorization expired",
 	}
 }
 
-// deviceLoginReady is the default readiness test: the browser step is still
-// outstanding and a device code has been issued.
-func deviceLoginReady(login *deviceLogin) bool {
-	return login != nil && login.status == "pending" && strings.TrimSpace(login.deviceCode) != ""
+var errDeviceLoginLimit = errors.New("too many pending device logins")
+
+// start snapshots the public response before polling can mutate the transaction.
+func (r *deviceLoginRegistry) start(login *deviceLogin, poll func(context.Context, string)) (deviceLoginResponse, error) {
+	id, err := newDeviceLoginID()
+	if err != nil {
+		return deviceLoginResponse{}, err
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	login.cancel, login.done = cancel, make(chan struct{})
+	response := newDeviceLoginResponse(id, login)
+	if !r.admit(id, login) {
+		cancel()
+		return deviceLoginResponse{}, errDeviceLoginLimit
+	}
+	go func() {
+		defer close(login.done)
+		poll(ctx, id)
+	}()
+	return response, nil
 }
 
 // admit stores a new transaction unless the admission limit is reached. A refused
 // transaction is not stored, so the caller owns cancelling it.
-func (r *deviceLoginRegistry[T]) admit(id string, txn *T) bool {
+func (r *deviceLoginRegistry) admit(id string, login *deviceLogin) bool {
 	if r == nil {
 		return false
 	}
@@ -55,119 +57,120 @@ func (r *deviceLoginRegistry[T]) admit(id string, txn *T) bool {
 	if len(r.logins) >= maxDeviceLogins {
 		return false
 	}
-	r.logins[id] = txn
+	r.logins[id] = login
 	return true
 }
 
 // response renders the wire response for one transaction, and reports whether it
 // exists. It reads the state under the lock so a concurrent finish cannot be
 // observed half-applied.
-func (r *deviceLoginRegistry[T]) response(id string) (deviceLoginResponse, bool) {
+func (r *deviceLoginRegistry) response(id string) (deviceLoginResponse, bool) {
 	if r == nil {
 		return deviceLoginResponse{}, false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	txn := r.logins[id]
-	if txn == nil {
+	login := r.logins[id]
+	if login == nil {
 		return deviceLoginResponse{}, false
 	}
-	return newDeviceLoginResponse(id, r.shared(txn)), true
+	return newDeviceLoginResponse(id, login), true
 }
 
 // cancel removes a transaction and marks it cancelled. It returns the channel the
 // transaction's poll loop closes when it stops, so the caller can wait for that
 // loop to finish before answering the request.
-func (r *deviceLoginRegistry[T]) cancel(id, message string) (<-chan struct{}, bool) {
+func (r *deviceLoginRegistry) cancel(id, message string) (<-chan struct{}, bool) {
 	if r == nil {
 		return nil, false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	txn := r.logins[id]
-	if txn == nil {
+	login := r.logins[id]
+	if login == nil {
 		return nil, false
 	}
-	login := r.shared(txn)
 	delete(r.logins, id)
 	finishDeviceLogin(login, "cancelled", message, 0)
-	if login == nil {
-		return nil, true
-	}
 	return login.done, true
 }
 
 // pollable returns a copy of the transaction while it is still pollable. The copy
 // is deliberate: the poll loop reads several fields after the lock is released,
 // and a shared pointer would let a concurrent cancel mutate them underneath it.
-func (r *deviceLoginRegistry[T]) pollable(id string) (*T, bool) {
+func (r *deviceLoginRegistry) pollable(id string) *deviceLogin {
 	if r == nil {
-		return nil, false
+		return nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	txn := r.logins[id]
-	if txn == nil || !r.ready(r.shared(txn)) {
-		return nil, false
+	login := r.logins[id]
+	if login == nil || login.status != "pending" || strings.TrimSpace(login.challenge.DeviceCode) == "" {
+		return nil
 	}
-	copied := *txn
-	return &copied, true
+	snapshot := *login
+	return &snapshot
+}
+
+func (r *deviceLoginRegistry) awaitPoll(ctx context.Context, id, expiredMessage string) *deviceLogin {
+	login := r.pollable(id)
+	if login == nil {
+		return nil
+	}
+	if time.Now().After(login.expiresAt) {
+		r.finish(id, "expired", expiredMessage, 0)
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return nil
+	case <-time.After(login.interval):
+		return login
+	}
 }
 
 // pending reports whether the transaction is still awaiting the browser step.
-func (r *deviceLoginRegistry[T]) pending(id string) bool {
+func (r *deviceLoginRegistry) pending(id string) bool {
 	if r == nil {
 		return false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	txn := r.logins[id]
-	if txn == nil {
-		return false
-	}
-	login := r.shared(txn)
+	login := r.logins[id]
 	return login != nil && login.status == "pending"
 }
 
 // update runs fn on the stored transaction under the lock, for channel state that
 // is not part of the shared bookkeeping. Grok widens its poll interval here when
 // the upstream asks it to slow down.
-func (r *deviceLoginRegistry[T]) update(id string, fn func(*T)) {
+func (r *deviceLoginRegistry) update(id string, fn func(*deviceLogin)) {
 	if r == nil {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if txn := r.logins[id]; txn != nil {
-		fn(txn)
+	if login := r.logins[id]; login != nil {
+		fn(login)
 	}
 }
 
 // finish records a transaction's outcome without removing it, so the console can
 // still read the result.
-func (r *deviceLoginRegistry[T]) finish(id, status, message string, accountID int64) {
-	if r == nil {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	txn := r.logins[id]
-	if txn == nil {
-		return
-	}
-	finishDeviceLogin(r.shared(txn), status, message, accountID)
+func (r *deviceLoginRegistry) finish(id, status, message string, accountID int64) {
+	r.update(id, func(login *deviceLogin) {
+		finishDeviceLogin(login, status, message, accountID)
+	})
 }
 
 // cleanup expires timed-out transactions and drops entries that are long past
 // their expiry, so a stalled flow cannot hold a slot of the admission limit.
-func (r *deviceLoginRegistry[T]) cleanup(now time.Time) {
+func (r *deviceLoginRegistry) cleanup(now time.Time) {
 	if r == nil {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for id, txn := range r.logins {
-		login := r.shared(txn)
+	for id, login := range r.logins {
 		if login == nil {
 			delete(r.logins, id)
 			continue
@@ -180,7 +183,3 @@ func (r *deviceLoginRegistry[T]) cleanup(now time.Time) {
 		}
 	}
 }
-
-// identityDeviceLogin is the shared accessor for a registry whose element *is* a
-// deviceLogin (the Grok alias).
-func identityDeviceLogin(login *deviceLogin) *deviceLogin { return login }

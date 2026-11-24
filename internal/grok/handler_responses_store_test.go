@@ -2,22 +2,110 @@ package grok
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"orchids-api/internal/chatwire"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"encoding/json"
 
+	"orchids-api/internal/audit"
 	"orchids-api/internal/config"
 	"orchids-api/internal/middleware"
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
 )
+
+type nativeCompletionWriter struct {
+	*httptest.ResponseRecorder
+	commitVisible func()
+	seen          bool
+}
+
+func (w *nativeCompletionWriter) Flush() {
+	w.ResponseRecorder.Flush()
+	if !w.seen && strings.Contains(w.Body.String(), "event: response.completed") {
+		w.seen = true
+		w.commitVisible()
+	}
+}
+
+func TestBuildPersistsOneTurnBeforeCompletionAndReconstructsHistory(t *testing.T) {
+	var requestCount atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		id := requestCount.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_turn_%d\",\"status\":\"completed\",\"output\":[]}}\n\n", id)
+	}))
+	defer upstream.Close()
+	h, st, _ := setupValidationHandler(t)
+	configureStoredResponseTestHandler(t, h, st, upstream)
+	var owner string
+	auth := func(next http.HandlerFunc) http.HandlerFunc {
+		return middleware.APIKeyAuth(func(context.Context, string) (*middleware.APIKeyPrincipal, error) {
+			return &middleware.APIKeyPrincipal{}, nil
+		}, func(w http.ResponseWriter, r *http.Request) {
+			owner = middleware.APIKeyFingerprint(r.Context())
+			next(w, r)
+		})
+	}
+	previousID := ""
+	for turn := 1; turn <= 10; turn++ {
+		id := fmt.Sprintf("resp_turn_%d", turn)
+		input, err := json.Marshal(map[string]any{"model": "grok-4.6", "stream": true, "input": fmt.Sprintf("turn-%02d", turn), "previous_response_id": previousID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(string(input)))
+		req.Header.Set("Authorization", "Bearer local-fixture")
+		rec := &nativeCompletionWriter{ResponseRecorder: httptest.NewRecorder(), commitVisible: func() {
+			row, err := st.GetStoredResponse(t.Context(), id, owner)
+			if err != nil {
+				t.Fatalf("completion escaped before binding: %v", err)
+			}
+			var items []json.RawMessage
+			if err := json.Unmarshal(row.InputItems, &items); err != nil || len(items) != 1 || !row.InputItemsDelta || row.PreviousResponseID != previousID {
+				t.Fatalf("turn %d was not stored as a single linked input: %s, %v", turn, row.InputItems, err)
+			}
+		}}
+		auth(h.HandleResponses)(rec, req)
+		if !rec.seen {
+			t.Fatalf("turn %d did not complete: %d %s", turn, rec.Code, rec.Body.String())
+		}
+		previousID = id
+	}
+	req := httptest.NewRequest(http.MethodGet, "/v1/responses/"+previousID+"/input_items", nil)
+	req.Header.Set("Authorization", "Bearer local-fixture")
+	rec := httptest.NewRecorder()
+	auth(h.HandleResponseResource)(rec, req)
+	var list struct{ Data []json.RawMessage }
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil || rec.Code != 200 || len(list.Data) != 10 {
+		t.Fatalf("history list: %d, %d items, %v", rec.Code, len(list.Data), err)
+	}
+	for i, item := range list.Data {
+		if !strings.Contains(string(item), fmt.Sprintf("turn-%02d", i+1)) {
+			t.Fatalf("history item %d was out of order: %s", i, item)
+		}
+	}
+}
+
+func TestNativeStorageFailureKeepsMeasuredUsage(t *testing.T) {
+	wire := "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_fixture\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":3,\"output_tokens\":5,\"total_tokens\":8}}}\n\n"
+	rec := httptest.NewRecorder()
+	_, _, result := copyNativeResponse(rec, strings.NewReader(wire), "text/event-stream", "grok-4.6", nil, 200, func(string) error {
+		return errors.New("fixture store offline")
+	})
+	if result.Err == nil || result.UsageSource != audit.UsageSourceUpstream || result.Usage["total_tokens"] == nil ||
+		!strings.Contains(rec.Body.String(), "response_storage_failed") || strings.Contains(rec.Body.String(), "event: response.completed") {
+		t.Fatalf("storage failure lost usage or reported success: %+v %s", result, rec.Body.String())
+	}
+}
 
 func TestBuildStoredResponseLifecycleAndOwnerIsolation(t *testing.T) {
 	var calls []string

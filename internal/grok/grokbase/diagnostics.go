@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -13,7 +14,9 @@ import (
 
 	"encoding/json"
 	"orchids-api/internal/audit"
+	"orchids-api/internal/chatwire"
 	"orchids-api/internal/middleware"
+	"orchids-api/internal/pricing"
 	"orchids-api/internal/responses"
 	"orchids-api/internal/store"
 )
@@ -225,4 +228,71 @@ func attemptEvent(ctx context.Context, a Attempt, kind string) audit.Event {
 	}
 	return audit.Event{Kind: audit.KindRequest, RequestID: middleware.GetRequestID(ctx), APIKeyID: middleware.APIKeyID(ctx), AccountID: accountID, Action: "grok_upstream_attempt", Channel: "grok", Provider: provider, Attempt: attempt, Duration: time.Since(started).Milliseconds(), Status: status, Metadata: metadata,
 		InputTokens: responses.InterfaceToInt(usage["input_tokens"]), OutputTokens: responses.InterfaceToInt(usage["output_tokens"]), CachedInputTokens: responses.InterfaceToInt(inputDetails["cached_tokens"]), ReasoningTokens: responses.InterfaceToInt(outputDetails["reasoning_tokens"]), TotalTokens: responses.InterfaceToInt(usage["total_tokens"]), UsageSource: usageSource}
+}
+
+// ChatAudit is the outcome shared by the Build and Web chat journals.
+type ChatAudit struct {
+	Provider, Finish string
+	UsageSource      audit.UsageSource
+	Usage            map[string]any
+	FirstToken       time.Time
+	Err              error
+	VisibleOutput    *bool
+}
+
+// LogChatOutcome prices reported usage, journals the request, and updates the
+// account counters even when the caller disconnects before the write.
+func LogChatOutcome(ctx context.Context, logger audit.Logger, s *store.Store, acc *store.Account, req *chatwire.Request, result ChatAudit) {
+	if logger == nil {
+		return
+	}
+	status, message := result.Finish, ""
+	if result.Err != nil {
+		status, message = "error", result.Err.Error()
+	}
+	usage := result.Usage
+	input, _ := usage["prompt_tokens_details"].(map[string]any)
+	output, _ := usage["completion_tokens_details"].(map[string]any)
+	metadata := map[string]any{"finish_reason": result.Finish}
+	if result.VisibleOutput != nil {
+		metadata["visible_output"] = *result.VisibleOutput
+	}
+	AddReasoningDiagnostics(ctx, metadata)
+	duration := int64(0)
+	if !req.StartedAt.IsZero() {
+		duration = time.Since(req.StartedAt).Milliseconds()
+		if !result.FirstToken.IsZero() {
+			metadata["first_token_ms"] = result.FirstToken.Sub(req.StartedAt).Milliseconds()
+		}
+	}
+	usageSource := result.UsageSource
+	if usageSource == "" {
+		usageSource = audit.UsageSourceNone
+		if result.Err == nil && len(usage) != 0 {
+			usageSource = audit.UsageSourceEstimated
+		}
+	}
+	event := audit.Event{Kind: audit.KindRequest, RequestID: middleware.GetRequestID(ctx), Action: "grok_request",
+		APIKeyID: middleware.APIKeyID(ctx), Model: req.Model, Channel: "grok", Provider: result.Provider,
+		Status: status, Error: message, Duration: duration, Metadata: metadata, UsageSource: usageSource,
+		InputTokens: responses.InterfaceToInt(usage["prompt_tokens"]), OutputTokens: responses.InterfaceToInt(usage["completion_tokens"]),
+		TotalTokens: responses.InterfaceToInt(usage["total_tokens"]), CachedInputTokens: responses.InterfaceToInt(input["cached_tokens"]),
+		ReasoningTokens: responses.InterfaceToInt(output["reasoning_tokens"]),
+	}
+	if acc != nil {
+		event.AccountID = acc.ID
+	}
+	if cost, _ := middleware.SettleAPIKeyBilling(ctx, nil, req.Model, usageSource,
+		int64(event.InputTokens), int64(event.CachedInputTokens), int64(event.OutputTokens)); cost.Model != "" {
+		event.CostInUSDTicks, event.PricingModel, event.PricingVersion = cost.CostInUSDTicks, cost.Model, pricing.Version
+	}
+	logger.Log(ctx, event)
+	if event.AccountID == 0 || event.TotalTokens <= 0 || s == nil {
+		return
+	}
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := s.IncrementAccountStats(persistCtx, event.AccountID, float64(event.TotalTokens), 0); err != nil {
+		slog.Warn("grok token usage persistence failed", "provider", result.Provider, "account_id", event.AccountID, "tokens", event.TotalTokens, "error", err)
+	}
 }

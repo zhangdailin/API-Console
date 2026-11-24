@@ -31,12 +31,13 @@ func TestResponsesBridgeRejectsInvalidFileSourceBeforeChat(t *testing.T) {
 }
 
 func TestResponsesBridgeReplaysStoredFileOnLaterTurns(t *testing.T) {
-	const fileURL = "https://example.com/report.pdf"
+	const fileData = "data:application/pdf;base64,JVBERi0xLjc="
 	turn := 0
+	st := store.NewMemoryResponseStore(time.Hour)
 	bridge := ResponsesBridgeHandler(func(w http.ResponseWriter, r *http.Request) {
 		turn++
 		body, err := io.ReadAll(r.Body)
-		if err != nil || strings.Count(string(body), fileURL) != 1 {
+		if err != nil || strings.Count(string(body), fileData) != 1 {
 			t.Fatalf("turn %d did not forward the original file exactly once: %s (%v)", turn, body, err)
 		}
 		if turn == 3 && !strings.Contains(string(body), "Second question") {
@@ -44,7 +45,7 @@ func TestResponsesBridgeReplaysStoredFileOnLaterTurns(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"object":"chat.completion","choices":[{"message":{"role":"assistant","content":"Reply"},"finish_reason":"stop"}]}`)
-	}, BridgeOptions{Store: store.NewMemoryResponseStore(time.Hour), StoredInputReplayLimit: 4096})
+	}, BridgeOptions{Store: st, StoredInputReplayLimit: 4096})
 	call := func(body string) string {
 		t.Helper()
 		rec := httptest.NewRecorder()
@@ -55,7 +56,10 @@ func TestResponsesBridgeReplaysStoredFileOnLaterTurns(t *testing.T) {
 		}
 		return result.ID
 	}
-	first := call(`{"model":"grok-chat-auto","store":true,"input":[{"role":"user","content":[{"type":"input_file","file_url":"` + fileURL + `"}]}]}`)
+	first := call(`{"model":"grok-chat-auto","store":true,"input":[{"role":"user","content":[{"type":"input_file","file_data":"` + fileData + `"}]}]}`)
 	second := call(`{"model":"grok-chat-auto","store":true,"previous_response_id":"` + first + `","input":"Second question"}`)
+	if err := st.DeleteStoredResponse(t.Context(), first, "anonymous"); err != nil {
+		t.Fatal(err)
+	}
 	call(`{"model":"grok-chat-auto","store":false,"previous_response_id":"` + second + `","input":"Third question"}`)
 }

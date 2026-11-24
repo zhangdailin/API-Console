@@ -1,6 +1,13 @@
 package upstream
 
-import "orchids-api/internal/util"
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"io"
+
+	"orchids-api/internal/util"
+)
 
 // reasoningUsage resolves the reasoning-token count of an upstream usage
 // object, reading every alias the gateways have shipped:
@@ -128,4 +135,64 @@ func NormalizeUsageMap(raw map[string]any) map[string]any {
 		out["reasoning_tokens"] = reasoning
 	}
 	return out
+}
+
+// ChatStreamChunk holds the common fields of a Chat Completions SSE frame.
+type ChatStreamChunk[Choice any] struct {
+	ID      string         `json:"id"`
+	Object  string         `json:"object"`
+	Model   string         `json:"model"`
+	Choices []Choice       `json:"choices"`
+	Usage   map[string]any `json:"usage"`
+	Error   struct {
+		Message string          `json:"message"`
+		Code    json.RawMessage `json:"code"`
+	} `json:"error"`
+}
+
+// ScanChatStream yields nonempty data payloads and plain JSON lines. The
+// latter can carry an upstream business error even when HTTP returned 200.
+// Payloads borrow the scanner buffer until yield returns.
+func ScanChatStream(body io.Reader, scanErr *error) func(func(payload []byte, data bool) bool) {
+	return func(yield func([]byte, bool) bool) {
+		scanner := bufio.NewScanner(body)
+		buffer := util.AcquireStreamBuffer()
+		defer util.ReleaseStreamBuffer(buffer)
+		scanner.Buffer(buffer[:], 8*1024*1024)
+		for scanner.Scan() {
+			line := bytes.TrimSpace(scanner.Bytes())
+			if payload, ok := bytes.CutPrefix(line, []byte("data:")); ok {
+				if payload = bytes.TrimSpace(payload); len(payload) != 0 && !yield(payload, true) {
+					return
+				}
+			} else if len(line) != 0 && line[0] == '{' && !yield(line, false) {
+				return
+			}
+		}
+		*scanErr = scanner.Err()
+	}
+}
+
+func EmitReasoningDelta(onMessage func(SSEMessage), text, prefix string, saw *bool, signature *string) {
+	if text == "" {
+		return
+	}
+	*saw = true
+	if onMessage != nil {
+		if *signature == "" {
+			*signature = util.NewThinkingSignature(prefix)
+		}
+		onMessage(SSEMessage{Type: "model.reasoning-delta", Event: map[string]any{
+			"delta": text, "signature": *signature,
+		}})
+	}
+}
+
+func FinishStreamedTools(onMessage func(SSEMessage), tools *util.ToolCallAccumulator, saw *bool, count *int) error {
+	calls := tools.CompleteAll()
+	if err := ValidateStreamedTools(calls); err != nil {
+		return err
+	}
+	EmitToolCalls(onMessage, calls, saw, count)
+	return nil
 }

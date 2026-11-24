@@ -1,9 +1,16 @@
 package grokbase
 
 import (
+	"context"
+	"errors"
 	"io"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
+
+	apperrors "orchids-api/internal/errors"
+	"orchids-api/internal/httpserver"
 )
 
 // MaxUpstreamBodyBytes bounds the upstream error body kept on a typed failure
@@ -59,4 +66,54 @@ func ReadBoundedResponse(resp *http.Response) ([]byte, http.Header) {
 	headerCopy := resp.Header.Clone()
 	_ = resp.Body.Close()
 	return raw, headerCopy
+}
+
+// UpstreamErrorText preserves the text used by Grok's classifiers and audit.
+func UpstreamErrorText(prefix string, status int, body string) string {
+	text := prefix + " status=" + strconv.Itoa(status)
+	if body != "" {
+		text += " body=" + body
+	}
+	return text
+}
+
+// IsUpstreamTransportFailure recognizes shared network and legacy upstream
+// failures. Each plane still decides which of its own typed errors count.
+func IsUpstreamTransportFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	if _, ok := errors.AsType[net.Error](err); ok {
+		return true
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) ||
+		errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	text := strings.ToLower(err.Error())
+	for _, marker := range []string{"upstream", "connection reset", "connection refused", "broken pipe", "no such host", "tls handshake"} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// WritePublicUpstreamError exposes the shared, redacted Chat error projection.
+// A credential error belongs to the operator's account pool, not the caller.
+func WritePublicUpstreamError(w http.ResponseWriter, err error, retryAfter int, report func(error, int, string)) {
+	text := err.Error()
+	category := apperrors.ClassifyUpstreamError(text).Category
+	status := apperrors.StatusForCategory(category)
+	switch category {
+	case "auth", "auth_blocked", "configuration":
+		status = http.StatusServiceUnavailable
+	}
+	if report != nil {
+		report(err, status, category)
+	}
+	if retryAfter > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+	}
+	httpserver.WriteErrorCode(w, status, category, apperrors.PublicMessage(text))
 }

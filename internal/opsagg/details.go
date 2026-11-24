@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -101,27 +102,23 @@ func distribution(values []int64) Distribution {
 		}
 	}
 	d.Avg /= float64(len(values))
-	d.P50 = percentile(values, .5)
-	d.P90 = percentile(values, .9)
-	d.P95 = percentile(values, .95)
-	d.P99 = percentile(values, .99)
+	sorted := slices.Clone(values)
+	slices.Sort(sorted)
+	d.P50, d.P90 = rankedPercentile(sorted, .5), rankedPercentile(sorted, .9)
+	d.P95, d.P99 = rankedPercentile(sorted, .95), rankedPercentile(sorted, .99)
 	return d
 }
 func histogram(values []int64) []HistogramBin {
 	out := []HistogramBin{{Label: "<1s"}, {Label: "1–5s"}, {Label: "5–15s"}, {Label: "15–60s"}, {Label: "≥60s"}}
 	for _, v := range values {
-		switch {
-		case v < 1000:
-			out[0].Count++
-		case v < 5000:
-			out[1].Count++
-		case v < 15000:
-			out[2].Count++
-		case v < 60000:
-			out[3].Count++
-		default:
-			out[4].Count++
+		index := 0
+		for _, upper := range []int64{1000, 5000, 15000, 60000} {
+			if v < upper {
+				break
+			}
+			index++
 		}
+		out[index].Count++
 	}
 	return out
 }
@@ -185,20 +182,29 @@ func (a *Aggregator) observeDetails(ctx context.Context, pipe redis.Pipeliner, k
 			name  string
 			value int64
 		}{{"dur", o.DurationMS}, {"ttft", o.FirstTokenMS}} {
-			if metric.value <= 0 {
-				continue
-			}
-			k := key + ":" + metric.name + "_" + cohort.name
-			pipe.RPush(ctx, k, metric.value)
-			pipe.LTrim(ctx, k, -5000, -1)
-			pipe.Expire(ctx, k, BucketRetention)
+			observeSample(ctx, pipe, key+":"+metric.name+"_"+cohort.name, metric.value, 5000, false)
 		}
 	}
 }
 
+// Missing samples can still renew an existing channel or model-duration
+// list. Cohort and model TTFT lists only renew when receiving a new sample.
+func observeSample(ctx context.Context, pipe redis.Pipeliner, key string, value, limit int64, renew bool) {
+	if value > 0 {
+		pipe.RPush(ctx, key, value)
+	} else if !renew {
+		return
+	}
+	pipe.Expire(ctx, key, BucketRetention)
+	pipe.LTrim(ctx, key, -limit, -1)
+}
+
 // Keep discovery on the request hashes; side lists are not channels.
 func isDetailSuffix(channel string) bool {
-	return slices.ContainsFunc([]string{":dur_failed", ":ttft_failed", ":dur_attempt", ":ttft_attempt"}, func(suffix string) bool {
-		return len(channel) >= len(suffix) && channel[len(channel)-len(suffix):] == suffix
-	})
+	for _, suffix := range []string{":dur_failed", ":ttft_failed", ":dur_attempt", ":ttft_attempt"} {
+		if strings.HasSuffix(channel, suffix) {
+			return true
+		}
+	}
+	return false
 }

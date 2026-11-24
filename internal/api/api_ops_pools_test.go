@@ -30,8 +30,13 @@ func TestOpsPoolsReadOnlyScopeAndCapacity(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	tracker.Acquire(accounts[0].ID)
-	tracker.Acquire(accounts[1].ID)
+	for _, account := range accounts[:2] {
+		release, ok := tracker.Reserve(t.Context(), account.ID, 0)
+		if !ok {
+			t.Fatal("failed to reserve a slot")
+		}
+		defer release()
+	}
 	read := func(path string) map[string]any {
 		t.Helper()
 		rec := httptest.NewRecorder()

@@ -20,6 +20,12 @@ func (c *testCachedClient) SendRequestWithPayload(ctx context.Context, req upstr
 	return nil
 }
 
+func (h *Handler) getOrCreateAccountClient(acc *store.Account) UpstreamClient {
+	client, release := h.acquireAccountClient(acc)
+	release()
+	return client
+}
+
 func TestGetOrCreateAccountClient_ReusesClientAcrossStatsOnlyAccountUpdates(t *testing.T) {
 	t.Parallel()
 

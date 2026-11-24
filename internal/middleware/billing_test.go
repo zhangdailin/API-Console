@@ -32,6 +32,11 @@ type stubBillingLedger struct {
 	ctx context.Context
 }
 
+func (s *stubBillingLedger) RenewApiKeyBilling(_ context.Context, _ int64, eventID string, _ time.Time) (bool, error) {
+	_, ok := s.held[eventID]
+	return ok, nil
+}
+
 func (s *stubBillingLedger) ReserveApiKeyBilling(_ context.Context, _ int64, eventID string, amount int64, _ time.Time) (bool, error) {
 	if s.reserveErr != nil {
 		return false, s.reserveErr
@@ -267,6 +272,24 @@ func TestAPIKeyBillingReservationEnforcesBudgetForLargeBody(t *testing.T) {
 	}
 }
 
+func TestInferenceBodyLimitPrecedesBilling(t *testing.T) {
+	for _, size := range []int64{-1, int64(len(billingChatBody))} {
+		t.Run(map[bool]string{true: "chunked", false: "content length"}[size < 0], func(t *testing.T) {
+			ledger := &stubBillingLedger{limit: 1}
+			h := apiKeyBillingReservation(func(http.ResponseWriter, *http.Request) {
+				t.Fatal("oversized body reached inference")
+			}, ledger, time.Minute, int64(len(billingChatBody)-1))
+			req := billingRequest(http.MethodPost, "/grok/v1/responses", billingChatBody, &APIKeyPrincipal{ID: 1, BillingLimitUSDTicks: 1}, "body-limit")
+			req.ContentLength = size
+			rec := httptest.NewRecorder()
+			h(rec, req)
+			if rec.Code != http.StatusRequestEntityTooLarge || len(ledger.held) != 0 {
+				t.Fatalf("oversized request: status %d, reserves %d", rec.Code, len(ledger.held))
+			}
+		})
+	}
+}
+
 // TestSettleAPIKeyBillingRules pins the pricing policy in one place.
 func TestSettleAPIKeyBillingRules(t *testing.T) {
 	principal := &APIKeyPrincipal{ID: 41, BillingLimitUSDTicks: 1_000_000_000_000}
@@ -360,5 +383,50 @@ func TestBillingBodyPreservesLargeInput(t *testing.T) {
 	restored, err := io.ReadAll(req.Body)
 	if err != nil || string(restored) != body {
 		t.Fatal("billing body not restored", err)
+	}
+}
+
+type renewalProbe struct {
+	stubBillingLedger
+	observed chan string
+}
+
+func (p *renewalProbe) RenewApiKeyBilling(_ context.Context, _ int64, event string, _ time.Time) (bool, error) {
+	p.observed <- event
+	return false, nil
+}
+
+func TestBillingReservationCancelsWhenRenewalLosesHold(t *testing.T) {
+	ledger := &renewalProbe{observed: make(chan string, 1)}
+	const limit = 1_000_000_000
+	var cancellation error
+	var reservedID string
+	handler := APIKeyBillingReservation(func(w http.ResponseWriter, r *http.Request) {
+		held := BillingReservationFrom(r.Context())
+		if held == nil {
+			t.Error("priced request did not receive a hold")
+			return
+		}
+		reservedID = held.EventID
+		select {
+		case <-r.Context().Done():
+			cancellation = context.Cause(r.Context())
+		case <-time.After(3 * time.Second):
+			t.Error("generation context was not canceled")
+		}
+	}, ledger, 2*time.Second)
+	r := httptest.NewRequest(http.MethodPost, "/grok/v1/chat/completions", strings.NewReader(`{"model":"grok-4.5","max_tokens":5}`))
+	ctx := context.WithValue(r.Context(), apiKeyPrincipalContextKey{}, &APIKeyPrincipal{ID: 87, BillingLimitUSDTicks: limit})
+	handler(httptest.NewRecorder(), r.WithContext(ctx))
+	if cancellation != errBillingHoldLost {
+		t.Fatalf("wrong billing cancellation: %v", cancellation)
+	}
+	select {
+	case event := <-ledger.observed:
+		if event != reservedID || len(ledger.releases) != 1 || ledger.releases[0] != event {
+			t.Fatal("renewal or cleanup used an event other than the original hold")
+		}
+	default:
+		t.Fatal("the active hold was not renewed")
 	}
 }

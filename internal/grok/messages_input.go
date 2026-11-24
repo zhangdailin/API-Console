@@ -163,7 +163,7 @@ func anthropicResponsesInput(messages []anthropicMessage) ([]any, error) {
 		hasDocument := false
 		for _, raw := range blocks {
 			block, _ := raw.(map[string]any)
-			if kind := buildContentType(block); role == "user" && kind == "document" {
+			if role == "user" && chatwire.ContentPartType(block) == "document" {
 				hasDocument = true
 				break
 			}

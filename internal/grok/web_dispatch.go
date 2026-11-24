@@ -1,14 +1,14 @@
 package grok
 
 import (
-	"bytes"
 	"encoding/json"
-	"io"
 	"net/http"
 	"time"
 
+	"orchids-api/internal/config"
 	"orchids-api/internal/grok/web"
 	"orchids-api/internal/httpserver"
+	"orchids-api/internal/middleware"
 	"orchids-api/internal/responses"
 )
 
@@ -26,11 +26,11 @@ func peekWebModel(w http.ResponseWriter, r *http.Request) (isWeb, handled bool) 
 	if r == nil || r.Body == nil || r.Method != http.MethodPost {
 		return false, false
 	}
-	body, err := httpserver.ReadBoundedJSONBody(w, r)
+	body, err := httpserver.ReadJSONBodyLimit(w, r, config.InferenceJSONBodyLimit)
 	if err != nil {
 		return false, true
 	}
-	r.Body = io.NopCloser(bytes.NewReader(body))
+	middleware.RestoreRequestBody(r, body)
 	var probe struct {
 		Model string `json:"model"`
 	}

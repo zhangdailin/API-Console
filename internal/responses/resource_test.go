@@ -18,8 +18,8 @@ func (deleteFailureStore) DeleteStoredResponse(context.Context, string, string) 
 }
 
 func TestResourceDeleteFailureDoesNotReportSuccess(t *testing.T) {
-	s := deleteFailureStore{store.NewMemoryResponseStore(DefaultStoredResponseTTL)}
-	if err := s.SaveStoredResponse(context.Background(), &store.StoredResponse{ResponseID: "resp_1", OwnerHash: "anonymous", Body: []byte(`{"id":"resp_1"}`)}, DefaultStoredResponseTTL); err != nil {
+	s := deleteFailureStore{store.NewMemoryResponseStore(0)}
+	if err := s.SaveStoredResponse(context.Background(), &store.StoredResponse{ResponseID: "resp_1", OwnerHash: "anonymous", Body: []byte(`{"id":"resp_1"}`)}, 0); err != nil {
 		t.Fatal(err)
 	}
 	resource := ResourceHandler(BridgeOptions{Store: s})

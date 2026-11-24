@@ -6,6 +6,7 @@ import (
 	"maps"
 	"net/http"
 	"orchids-api/internal/chatwire"
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/httpserver"
 	"orchids-api/internal/responses"
 	"orchids-api/internal/util"
@@ -32,8 +33,8 @@ func anthropicResponseFromChat(model string, chat map[string]any) map[string]any
 		signature := strings.TrimSpace(fmt.Sprint(message["reasoning_encrypted_content"]))
 		if items := responses.InterfaceSlice(message["x_grok_reasoning"]); len(items) > 0 {
 			for _, item := range items {
-				wrapper := map[string]any{"output": []any{item}}
-				content = append(content, map[string]any{"type": "thinking", "thinking": responsesExtractReasoningText(wrapper), "signature": responsesExtractEncryptedReasoning(wrapper)})
+				reasoning, _ := item.(map[string]any)
+				content = append(content, map[string]any{"type": "thinking", "thinking": responseReasoningText(reasoning), "signature": responseReasoningSignature(reasoning)})
 			}
 			thinking = ""
 			signature = ""
@@ -482,7 +483,7 @@ func writeAnthropicSSE(w io.Writer, event string, payload any) {
 
 func writeAnthropicModelNotFound(w http.ResponseWriter, model string) {
 	util.WriteJSONStatus(w, http.StatusNotFound, map[string]any{
-		"type": "error", "error": map[string]any{"type": "not_found_error", "message": modelNotFoundMessage(model)},
+		"type": "error", "error": map[string]any{"type": "not_found_error", "message": grokbase.ModelNotFoundMessage(model)},
 	})
 }
 

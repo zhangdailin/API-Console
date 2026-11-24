@@ -12,10 +12,10 @@ import (
 // newBatchReadStore returns a store over an in-process Redis. The account read
 // path is one MGET, so it needs no live server and no credential cipher: the
 // seeded rows below carry plaintext markers only.
-func newBatchReadStore(t *testing.T) *redisStore {
+func newBatchReadStore(t *testing.T) *Store {
 	t.Helper()
 	mini := miniredis.RunT(t)
-	s := &redisStore{
+	s := &Store{
 		client: redis.NewClient(&redis.Options{Addr: mini.Addr()}),
 		prefix: "test:",
 	}
@@ -69,7 +69,7 @@ func TestGetAccountsByIDsSkipsMissingAndDisabledRows(t *testing.T) {
 // TestGetAccountsByIDsEmptySelectionDoesNotReachRedis proves the empty and
 // unparseable selections short-circuit instead of issuing a batch of zero keys.
 func TestGetAccountsByIDsEmptySelectionDoesNotReachRedis(t *testing.T) {
-	s := &redisStore{
+	s := &Store{
 		client: redis.NewClient(&redis.Options{Addr: "localhost:9999"}),
 		prefix: "test:",
 	}
@@ -86,7 +86,7 @@ func TestGetAccountsByIDsEmptySelectionDoesNotReachRedis(t *testing.T) {
 // TestGetAccountsByIDsReportsTransportFailure keeps the failure contract: an
 // unreachable Redis is reported, never silently read as an empty pool.
 func TestGetAccountsByIDsReportsTransportFailure(t *testing.T) {
-	s := &redisStore{
+	s := &Store{
 		client: redis.NewClient(&redis.Options{Addr: "localhost:9999"}),
 		prefix: "test:",
 	}

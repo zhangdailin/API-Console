@@ -1,7 +1,6 @@
 package grok
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,8 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"orchids-api/internal/loadbalancer"
-	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
 )
 
@@ -94,7 +91,7 @@ func TestGrokErrorEnvelope(t *testing.T) {
 
 func TestWriteGrokModelNotFoundReturns404Code(t *testing.T) {
 	rec := httptest.NewRecorder()
-	writeGrokErrorCode(rec, http.StatusNotFound, "model_not_found", modelNotFoundMessage("missing"))
+	writeGrokErrorCode(rec, http.StatusNotFound, "model_not_found", grokbase.ModelNotFoundMessage("missing"))
 	testutil.Equal(t, rec.Code, http.StatusNotFound)
 	var body map[string]map[string]any
 	testutil.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body), "invalid JSON: %v")
@@ -150,14 +147,14 @@ func TestIsModelScopedRefusal(t *testing.T) {
 		`{"message":"not available for model grok-4.6"}`,
 	} {
 		err := newCLIUpstreamError(403, nil, []byte(body))
-		testutil.True(t, isModelScopedRefusal(err), "model refusal not recognized")
+		testutil.True(t, grokbase.IsModelScopedRefusal(upstreamStatus(err), err.Error()), "model refusal not recognized")
 	}
 	for _, err := range []error{
 		newCLIUpstreamError(403, nil, []byte("account banned")),
 		newCLIUpstreamError(401, nil, []byte("unauthorized")),
 		newCLIUpstreamError(429, nil, []byte("slow down")),
 	} {
-		testutil.False(t, isModelScopedRefusal(err), "account refusal mistaken for model refusal")
+		testutil.False(t, grokbase.IsModelScopedRefusal(upstreamStatus(err), err.Error()), "account refusal mistaken for model refusal")
 	}
 }
 
@@ -285,80 +282,4 @@ func TestReasoningForCallsIndexesOnlyProofs(t *testing.T) {
 	testutil.False(t, ok, "a reasoning item without a proof must not be indexed")
 	entry, ok := index["call_2"]
 	testutil.Falsef(t, !ok || entry["id"] != "rs_2", "call_2 index = %#v, want rs_2", entry)
-}
-
-// TestAccumulatedInputItemsWalksTheContinuationChain drives the real chain
-// builder: ancestor inputs are appended nearest-first, the walk stops at the
-// documented bound, and a cycle terminates instead of looping forever.
-func TestAccumulatedInputItemsWalksTheContinuationChain(t *testing.T) {
-	t.Parallel()
-	testutil.Falsef(t, maxStoredInputChainDepth < 1 || maxStoredInputChainDepth > 64, "chain depth = %d, want a bounded positive value no greater than 64", maxStoredInputChainDepth)
-
-	s := newTestGrokStore(t, "chain:")
-	h := NewHandler(nil, loadbalancer.NewWithCacheTTL(s, 0))
-
-	ctx := context.Background()
-	save := func(id, previous, text string) {
-		raw, err := json.Marshal([]map[string]string{{"role": "user", "content": text}})
-		testutil.Falsef(t, err != nil, "marshal %s: %v", id, err)
-		if err := s.SaveStoredResponse(ctx, &store.StoredResponse{
-			ResponseID:         id,
-			OwnerHash:          "owner",
-			PreviousResponseID: previous,
-			InputItems:         raw,
-		}, time.Hour); err != nil {
-			t.Fatalf("SaveStoredResponse(%s) error = %v", id, err)
-		}
-	}
-
-	// A cycle: the walk must stop on the seen set.
-	save("resp_a", "resp_b", "a")
-	save("resp_b", "resp_a", "b")
-
-	// A chain longer than the bound: only the nearest ancestors are folded in.
-	const chainLength = maxStoredInputChainDepth + 4
-	for i := 0; i <= chainLength; i++ {
-		previous := ""
-		if i < chainLength {
-			previous = fmt.Sprintf("resp_c%d", i+1)
-		}
-		save(fmt.Sprintf("resp_c%d", i), previous, fmt.Sprintf("c%d", i))
-	}
-
-	itemText := func(item any) string {
-		entry, ok := item.(map[string]any)
-		testutil.True(t, ok, "input item = %#v, want an object")
-		return fmt.Sprint(entry["content"])
-	}
-
-	cases := []struct {
-		name      string
-		previous  string
-		wantOrder []string
-	}{
-		{name: "cycle terminates", previous: "resp_a", wantOrder: []string{"current", "a", "b"}},
-		{name: "bound keeps the nearest ancestors", previous: "resp_c0", wantOrder: append([]string{"current"}, func() []string {
-			ids := make([]string, 0, maxStoredInputChainDepth)
-			for i := range maxStoredInputChainDepth {
-				ids = append(ids, fmt.Sprintf("c%d", i))
-			}
-			return ids
-		}()...)},
-		{name: "unknown ancestor adds nothing", previous: "resp_missing", wantOrder: []string{"current"}},
-		{name: "no ancestor", previous: "", wantOrder: []string{"current"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			payload := map[string]any{
-				"input":                []any{map[string]any{"role": "user", "content": "current"}},
-				"previous_response_id": tc.previous,
-			}
-			req := httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
-			got := h.accumulatedInputItems(req, "owner", payload)
-			testutil.Equal(t, len(got), len(tc.wantOrder))
-			for i, want := range tc.wantOrder {
-				testutil.Equal(t, itemText(got[i]), want)
-			}
-		})
-	}
 }

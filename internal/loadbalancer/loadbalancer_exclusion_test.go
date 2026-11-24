@@ -109,7 +109,9 @@ func TestGetNextAccountExcludingByChannelWithTracker_MixedPoolNamesTheSplit(t *t
 
 func TestGetNextAccountExcludingByChannelWithTracker_RejectsSingleAccountAtLimit(t *testing.T) {
 	tracker := NewMemoryConnTracker()
-	tracker.Acquire(1)
+	release, ok := tracker.Reserve(t.Context(), 1, 0)
+	testutil.False(t, !ok, "failed to reserve a slot")
+	defer release()
 	now := time.Now()
 	lb := &LoadBalancer{
 		connTracker: tracker,

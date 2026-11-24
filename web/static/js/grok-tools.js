@@ -1,4 +1,5 @@
 (() => {
+  const { make, attach } = ConsoleUI;
   const LIVEKIT_CLIENT_VERSIONS = {
     stable: {
       label: "2.7.3",
@@ -235,20 +236,13 @@
     window.GrokAvailability = Object.freeze({ webPlans: grokCapabilityState.webPlans || null, media: grokCapabilityState.media || null });
     window.dispatchEvent(new CustomEvent("grok-availability", { detail: window.GrokAvailability }));
     ["chat", "imagine", "video", "voice", "cache"].forEach((tab) => {
-      const badge = document.querySelector(`[data-capability="${tab}"]`);
-      if (!badge) return;
-      const ready = tab === "cache" || hasGrokCapability(tab);
-      badge.textContent = grokCapabilityState.failed ? "未知" : tab === "cache" ? "本地" : ready ? "可用" : "需账号";
-      badge.classList.toggle("is-ready", ready && !grokCapabilityState.failed);
-      badge.classList.toggle("is-unavailable", !ready || grokCapabilityState.failed);
-      // The tab carries the same verdict as a dot, so a missing capability is
-      // visible before the tab is opened.
       const dot = document.querySelector(`[data-capability-dot="${tab}"]`);
-      if (dot) {
-        dot.classList.toggle("is-ready", ready && !grokCapabilityState.failed);
-        dot.classList.toggle("is-unavailable", !ready || grokCapabilityState.failed);
-        dot.title = badge.textContent;
-      }
+      if (!dot) return;
+      const failed = grokCapabilityState.failed;
+      const ready = tab === "cache" || hasGrokCapability(tab);
+      dot.classList.toggle("is-ready", ready && !failed);
+      dot.classList.toggle("is-unavailable", !ready || failed);
+      dot.title = failed ? "未知" : tab === "cache" ? "本地" : ready ? "可用" : "需账号";
     });
     applyGrokCapabilityControls();
     updateGrokCapabilityPresentation(currentGrokToolTab());
@@ -478,14 +472,17 @@
     return chatState.sessions.find((item) => item && item.id === chatState.activeId) || null;
   }
 
-  function updateChatStatus(text, type) {
-    const el = document.getElementById("grokChatStatus");
-    if (!el) return;
-    el.textContent = String(text || "");
-    el.classList.remove("connected", "connecting", "error");
-    if (type === "ok") el.classList.add("connected");
-    if (type === "connecting") el.classList.add("connecting");
-    if (type === "error") el.classList.add("error");
+  function updateChatStatus(text, type) { setToolStatus("grokChatStatus", text, type); }
+  function setVoiceStatus(text, type) { setToolStatus("voiceStatus", text, type === "warn" ? "connecting" : type); }
+  function setVideoStatus(text, type) { setToolStatus("videoStatus", text, type === "warn" ? "connecting" : type); }
+
+  function setToolStatus(id, text, type) {
+    const node = document.getElementById(id);
+    if (!node) return;
+    node.textContent = String(text || "");
+    node.classList.toggle("connected", type === "ok");
+    node.classList.toggle("connecting", type === "connecting");
+    node.classList.toggle("error", type === "error");
   }
 
   const escapeHTML = escapeHtml;
@@ -562,22 +559,13 @@
 
     const lines = fenced.split(/\r?\n/);
     const htmlParts = [];
-    let inUl = false;
-    let inTaskUl = false;
-    let inOl = false;
+    let list = "";
     let inTable = false;
     let paragraphLines = [];
 
     const closeLists = () => {
-      if (inUl) {
-        htmlParts.push("</ul>");
-        inUl = false;
-        inTaskUl = false;
-      }
-      if (inOl) {
-        htmlParts.push("</ol>");
-        inOl = false;
-      }
+      if (list) htmlParts.push(list === "ol" ? "</ol>" : "</ul>");
+      list = "";
     };
     const closeTable = () => {
       if (inTable) {
@@ -590,6 +578,19 @@
       htmlParts.push(`<p>${renderInline(paragraphLines.join("<br>"))}</p>`);
       paragraphLines = [];
     };
+    const closeBlocks = () => {
+      flushParagraph();
+      closeLists();
+      closeTable();
+    };
+    const openList = (kind) => {
+      flushParagraph();
+      if (list === kind || (list === "task" && kind === "ul")) return;
+      closeLists();
+      closeTable();
+      htmlParts.push(kind === "task" ? '<ul class="task-list">' : `<${kind}>`);
+      list = kind;
+    };
     const isTableSeparator = (line) => /^\s*\|?(?:\s*:?-+:?\s*\|)+\s*$/.test(line);
     const splitTableRow = (line) => line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
 
@@ -597,43 +598,33 @@
       const line = lines[i];
       const trimmed = line.trim();
       if (!trimmed) {
-        flushParagraph();
-        closeLists();
-        closeTable();
+        closeBlocks();
         continue;
       }
 
       const codeTokenMatch = trimmed.match(/^@@CODEBLOCK_(\d+)@@$/);
       if (codeTokenMatch) {
-        flushParagraph();
-        closeLists();
-        closeTable();
+        closeBlocks();
         htmlParts.push(trimmed);
         continue;
       }
 
       const headingMatch = trimmed.match(/^(#{1,6})\s+(.*)$/);
       if (headingMatch) {
-        flushParagraph();
-        closeLists();
-        closeTable();
+        closeBlocks();
         const level = headingMatch[1].length;
         htmlParts.push(`<h${level}>${renderInline(headingMatch[2])}</h${level}>`);
         continue;
       }
 
       if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
-        flushParagraph();
-        closeLists();
-        closeTable();
+        closeBlocks();
         htmlParts.push("<hr>");
         continue;
       }
 
       if (/^\s*>/.test(line)) {
-        flushParagraph();
-        closeLists();
-        closeTable();
+        closeBlocks();
         const quoteLines = [];
         let j = i;
         for (; j < lines.length; j += 1) {
@@ -670,53 +661,22 @@
 
       const taskMatch = trimmed.match(/^[-*+•·]\s+\[([ xX])\]\s+(.*)$/);
       if (taskMatch) {
-        flushParagraph();
-        if (inUl && !inTaskUl) closeLists();
-        if (!inUl) {
-          closeLists();
-          closeTable();
-          htmlParts.push('<ul class="task-list">');
-          inUl = true;
-          inTaskUl = true;
-        }
+        openList("task");
         const checked = taskMatch[1].toLowerCase() === "x";
         htmlParts.push(`<li class="task-item"><input type="checkbox" disabled${checked ? " checked" : ""}>${renderInline(taskMatch[2])}</li>`);
         continue;
       }
-
-      const ulMatch = trimmed.match(/^[-*+•·]\s+(.*)$/);
-      if (ulMatch) {
-        flushParagraph();
-        if (!inUl) {
-          closeLists();
-          closeTable();
-          htmlParts.push("<ul>");
-          inUl = true;
-          inTaskUl = false;
-        }
-        htmlParts.push(`<li>${renderInline(ulMatch[1])}</li>`);
-        continue;
-      }
-
-      const olMatch = trimmed.match(/^\d+[.)、]\s+(.*)$/);
-      if (olMatch) {
-        flushParagraph();
-        if (!inOl) {
-          closeLists();
-          closeTable();
-          htmlParts.push("<ol>");
-          inOl = true;
-        }
-        htmlParts.push(`<li>${renderInline(olMatch[1])}</li>`);
+      const item = trimmed.match(/^([-*+•·]|\d+[.)、])\s+(.*)$/);
+      if (item) {
+        openList(/^\d/.test(item[1]) ? "ol" : "ul");
+        htmlParts.push(`<li>${renderInline(item[2])}</li>`);
         continue;
       }
 
       paragraphLines.push(trimmed);
     }
 
-    flushParagraph();
-    closeLists();
-    closeTable();
+    closeBlocks();
 
     let output = htmlParts.join("");
     codeBlocks.forEach((html, index) => {
@@ -943,8 +903,7 @@
           removeNodes = [];
           return;
         }
-        const wrapper = document.createElement("div");
-        wrapper.className = "img-grid";
+        const wrapper = make("div", "img-grid");
         const cols = Math.min(4, group.length);
         wrapper.style.setProperty("--cols", String(cols));
         if (groupStart) {
@@ -1040,17 +999,20 @@
 
   function renderUserContent(content, attachments) {
     const wrapper = document.createElement("div");
-    const text = document.createElement("div");
-    text.className = "message-content";
-    text.textContent = String(content || "");
+    const text = make("div", "message-content", String(content || ""));
     wrapper.appendChild(text);
     for (const attachment of attachments || []) {
-      const badge = document.createElement("div");
-      badge.className = "message-attachment";
-      badge.textContent = `附件: ${attachment.name}${attachment.dataUrl ? "" : "（需重新选择）"}`;
+      const badge = make("div", "message-attachment", `附件: ${attachment.name}${attachment.dataUrl ? "" : "（需重新选择）"}`);
       wrapper.appendChild(badge);
     }
     return wrapper;
+  }
+
+  function actionButton(label, classes, click) {
+    const button = make("button", classes, label);
+    button.type = "button";
+    button.addEventListener("click", click);
+    return button;
   }
 
   function appendChatMessage(role, content, attachments, message) {
@@ -1058,10 +1020,8 @@
     const empty = document.getElementById("grokChatEmpty");
     if (!log) return null;
     if (empty) empty.style.display = "none";
-    const row = document.createElement("div");
-    row.className = `message-row ${role}`;
-    const bubble = document.createElement("div");
-    bubble.className = "message-bubble";
+    const row = make("div", `message-row ${role}`);
+    const bubble = make("div", "message-bubble");
     let contentEl = document.createElement("div");
     contentEl.className = role === "assistant" ? "message-content rendered" : "message-content";
     if (role === "assistant") {
@@ -1077,47 +1037,19 @@
       bubble.appendChild(contentEl);
     }
     row.appendChild(bubble);
-    const actions = document.createElement("div");
-    actions.className = "message-actions";
-    const copyBtn = document.createElement("button");
-    copyBtn.type = "button";
-    copyBtn.className = "action-btn";
-    copyBtn.textContent = "复制";
-    copyBtn.title = "复制这条消息";
-    copyBtn.addEventListener("click", () => {
-      const text = role === "assistant"
-        ? String(bubble.innerText || "").trim()
-        : String(content || "");
-      copyToClipboard(text);
+    const actions = make("div", "message-actions");
+    const copy = () => copyToClipboard(role === "assistant"
+      ? String(bubble.innerText || "").trim() : String(content || ""));
+    [
+      ["复制", copy, "", "复制这条消息"],
+      ...(role === "assistant" ? [["重试", () => retryAssistantMessage(row)]] : []),
+      ["编辑", () => startEditMessage(row)],
+      ["删除", () => deleteChatMessage(row), " action-btn-danger"],
+    ].forEach(([label, action, extra = "", title]) => {
+      const button = actionButton(label, "action-btn" + extra, action);
+      if (title) button.title = title;
+      actions.appendChild(button);
     });
-    actions.appendChild(copyBtn);
-    if (role === "user") {
-      const editBtn = document.createElement("button");
-      editBtn.type = "button";
-      editBtn.className = "action-btn";
-      editBtn.textContent = "编辑";
-      editBtn.addEventListener("click", () => startEditChatMessage(row, content));
-      actions.appendChild(editBtn);
-    } else {
-      const retryBtn = document.createElement("button");
-      retryBtn.type = "button";
-      retryBtn.className = "action-btn";
-      retryBtn.textContent = "重试";
-      retryBtn.addEventListener("click", () => retryAssistantMessage(row));
-      const editBtn = document.createElement("button");
-      editBtn.type = "button";
-      editBtn.className = "action-btn";
-      editBtn.textContent = "编辑";
-      editBtn.addEventListener("click", () => startEditAssistantMessage(row));
-      actions.appendChild(retryBtn);
-      actions.appendChild(editBtn);
-    }
-    const deleteBtn = document.createElement("button");
-    deleteBtn.type = "button";
-    deleteBtn.className = "action-btn action-btn-danger";
-    deleteBtn.textContent = "删除";
-    deleteBtn.addEventListener("click", () => deleteChatMessage(row));
-    actions.appendChild(deleteBtn);
     row.appendChild(actions);
     log.appendChild(row);
     log.scrollTop = log.scrollHeight;
@@ -1159,141 +1091,52 @@
     truncateChatBranch(session, targetIndex);
   }
 
-  function startEditChatMessage(row, content) {
+  function startEditMessage(row) {
     if (chatState.sending) return;
     const session = activeChatSession();
-    if (!row || !session) return;
-    const messages = Array.isArray(session.messages) ? session.messages : [];
-    const targetIndex = chatMessageIndex(row);
-    if (targetIndex < 0) return;
+    const index = chatMessageIndex(row);
+    const message = session?.messages?.[index];
+    if (!message) return;
 
+    const assistant = message.role === "assistant";
     const bubble = row.querySelector(".message-bubble");
     const actions = row.querySelector(".message-actions");
     if (!bubble || !actions) return;
     bubble.innerHTML = "";
-    actions.innerHTML = "";
+    if (assistant) actions.classList.add("hidden");
+    else actions.innerHTML = "";
 
-    const textarea = document.createElement("textarea");
-    textarea.className = "edit-msg-input";
-    textarea.value = String(content || "");
-    const actionWrap = document.createElement("div");
-    actionWrap.className = "edit-msg-actions";
-    const saveBtn = document.createElement("button");
-    saveBtn.type = "button";
-    saveBtn.className = "btn btn-primary";
-    saveBtn.textContent = "保存";
-    const cancelBtn = document.createElement("button");
-    cancelBtn.type = "button";
-    cancelBtn.className = "btn btn-outline";
-    cancelBtn.textContent = "取消";
-
-    const cancel = () => rerenderChatThread();
-    saveBtn.addEventListener("click", async () => {
-      const next = String(textarea.value || "").trim();
+    const textarea = make("textarea", "edit-msg-input");
+    textarea.value = String(message.content || "");
+    const buttons = make("div", "edit-msg-actions");
+    const cancel = actionButton("取消", "btn btn-outline", rerenderChatThread);
+    const save = actionButton("保存", "btn btn-primary", async () => {
+      const next = textarea.value.trim();
       if (!next) {
         showToast("消息不能为空", "info");
         return;
       }
-      const trailingCount = messages.length - targetIndex - 1;
-      if (!confirmTrailingMessages("编辑这条消息", trailingCount)) return;
-      const edited = { ...messages[targetIndex], content: next };
-      session.messages = messages.slice(0, targetIndex).concat(edited);
-      session.promptCacheKey = createPromptCacheKey();
-      session.updatedAt = Date.now();
-      saveChatSessions();
-      renderChatSessions();
-      rerenderChatThread();
-      const contentEl = appendChatMessage("assistant", "");
-      await requestChatCompletion(session, contentEl);
+      const action = assistant ? "编辑这条回复" : "编辑这条消息";
+      if (!confirmTrailingMessages(action, session.messages.length - index - 1)) return;
+      message.content = next;
+      if (assistant) {
+        message.reasoning = "";
+        message.tools = [];
+      }
+      truncateChatBranch(session, index + 1);
+      if (!assistant) await requestChatCompletion(session, appendChatMessage("assistant", ""));
     });
-    cancelBtn.addEventListener("click", cancel);
     textarea.addEventListener("keydown", (event) => {
       if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
         event.preventDefault();
-        saveBtn.click();
+        save.click();
       } else if (event.key === "Escape") {
         event.preventDefault();
-        cancel();
+        rerenderChatThread();
       }
     });
-
-    bubble.appendChild(textarea);
-    actionWrap.appendChild(saveBtn);
-    actionWrap.appendChild(cancelBtn);
-    bubble.appendChild(actionWrap);
-    textarea.focus();
-    textarea.select();
-  }
-
-  function startEditAssistantMessage(row) {
-    if (chatState.sending) return;
-    const session = activeChatSession();
-    if (!row || !session) return;
-    const messages = Array.isArray(session.messages) ? session.messages : [];
-    const rowIndex = chatMessageIndex(row);
-    if (rowIndex < 0 || rowIndex >= messages.length) return;
-    const msg = messages[rowIndex];
-    if (!msg || msg.role !== "assistant") return;
-
-    const bubble = row.querySelector(".message-bubble");
-    const actions = row.querySelector(".message-actions");
-    if (!bubble || !actions) return;
-    bubble.innerHTML = "";
-    actions.classList.add("hidden");
-
-    const textarea = document.createElement("textarea");
-    textarea.className = "edit-msg-input";
-    textarea.value = String(msg.content || "");
-    const actionWrap = document.createElement("div");
-    actionWrap.className = "edit-msg-actions";
-    const saveBtn = document.createElement("button");
-    saveBtn.type = "button";
-    saveBtn.className = "btn btn-primary";
-    saveBtn.textContent = "保存";
-    const cancelBtn = document.createElement("button");
-    cancelBtn.type = "button";
-    cancelBtn.className = "btn btn-outline";
-    cancelBtn.textContent = "取消";
-    const cancel = () => rerenderChatThread();
-    saveBtn.addEventListener("click", () => {
-      const next = String(textarea.value || "").trim();
-      if (!next) {
-        showToast("消息不能为空", "info");
-        return;
-      }
-      // Editing a historical answer changes the branch's premise, so the
-      // descendants that answered the old text must not survive it. Only the
-      // edited message itself is kept.
-      const trailing = messages.length - (rowIndex + 1);
-      if (!confirmTrailingMessages("编辑这条回复", trailing)) {
-        return;
-      }
-      msg.content = next;
-      msg.reasoning = "";
-      msg.tools = [];
-      session.promptCacheKey = createPromptCacheKey();
-      session.updatedAt = Date.now();
-      if (trailing > 0) {
-        session.messages = messages.slice(0, rowIndex + 1);
-      }
-      saveChatSessions();
-      renderChatSessions();
-      rerenderChatThread();
-    });
-    cancelBtn.addEventListener("click", cancel);
-    textarea.addEventListener("keydown", (event) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-        event.preventDefault();
-        saveBtn.click();
-      } else if (event.key === "Escape") {
-        event.preventDefault();
-        cancel();
-      }
-    });
-    bubble.appendChild(textarea);
-    actionWrap.appendChild(saveBtn);
-    actionWrap.appendChild(cancelBtn);
-    bubble.appendChild(actionWrap);
+    buttons.append(save, cancel);
+    bubble.append(textarea, buttons);
     textarea.focus();
     textarea.select();
   }
@@ -1312,6 +1155,7 @@
     let answerText = "";
     let reasoningText = "";
     const toolActivities = new Map();
+    const getToolActivity = id => toolActivities.get(id) || { id, name: "工具", detail: "", status: "in_progress" };
     let saved = false;
     let streamCompleted = false;
     const persistAssistant = () => {
@@ -1440,7 +1284,7 @@
             toolActivities.set(id, { id, name: itemType, status, detail: item.action?.query || "" });
           } else if (itemType === "function_call") {
             const id = String(item.call_id || item.id || "tool");
-            const previous = toolActivities.get(id) || { id, name: "工具", detail: "", status: "in_progress" };
+            const previous = getToolActivity(id);
             if (item.name) previous.name = item.name;
             if (typeof item.arguments === "string" && item.arguments) previous.detail = item.arguments;
             if (done) previous.status = "awaiting_result";
@@ -1451,7 +1295,7 @@
         }
         if (kind === "response.function_call_arguments.delta" && typeof event.delta === "string") {
           const id = String(event.item_id || "tool");
-          const previous = toolActivities.get(id) || { id, name: "工具", detail: "", status: "in_progress" };
+          const previous = getToolActivity(id);
           previous.detail += event.delta;
           toolActivities.set(id, previous);
           scheduleAssistantView();
@@ -1571,13 +1415,7 @@
     if (rowIndex < 0 || rowIndex >= messages.length) return;
     if (messages[rowIndex]?.role !== "assistant") return;
 
-    let lastUserIndex = -1;
-    for (let i = rowIndex - 1; i >= 0; i -= 1) {
-      if (messages[i]?.role === "user") {
-        lastUserIndex = i;
-        break;
-      }
-    }
+    const lastUserIndex = messages.findLastIndex((message, index) => index < rowIndex && message?.role === "user");
     if (lastUserIndex < 0) {
       showToast("没有可重试的上文", "info");
       return;
@@ -1585,12 +1423,7 @@
 
     const trailingCount = messages.length - rowIndex - 1;
     if (!confirmTrailingMessages("重试这条回复", trailingCount)) return;
-    session.messages = messages.slice(0, lastUserIndex + 1);
-    session.promptCacheKey = createPromptCacheKey();
-    session.updatedAt = Date.now();
-    saveChatSessions();
-    renderChatSessions();
-    rerenderChatThread();
+    truncateChatBranch(session, lastUserIndex + 1);
     const contentEl = appendChatMessage("assistant", "");
     await requestChatCompletion(session, contentEl);
   }
@@ -1613,43 +1446,24 @@
     const list = document.getElementById("grokSessionList");
     if (!list) return;
     list.innerHTML = "";
-    chatState.sessions.forEach((session) => {
-      const item = document.createElement("div");
-      const openBtn = document.createElement("button");
-      openBtn.type = "button";
-      openBtn.className = "session-open";
-      if (session.id === chatState.activeId) openBtn.setAttribute("aria-current", "true");
-      item.className = `session-item${session.id === chatState.activeId ? " active" : ""}`;
-      item.dataset.id = session.id;
-
-      const title = document.createElement("span");
-      title.className = "session-title";
-      title.textContent = session.title || "新会话";
-
-      const meta = document.createElement("span");
-      meta.className = "session-meta";
-      meta.textContent = relativeTime(session.updatedAt);
-
-      const renameBtn = document.createElement("button");
-      renameBtn.type = "button";
-      renameBtn.className = "session-action";
-      renameBtn.textContent = "重命名";
-      renameBtn.addEventListener("click", () => startRenameChatSession(session.id, openBtn));
-
-      const delBtn = document.createElement("button");
-      delBtn.type = "button";
-      delBtn.className = "session-action session-delete";
-      delBtn.textContent = "删除";
-      delBtn.addEventListener("click", () => deleteChatSession(session.id));
-
-      openBtn.addEventListener("click", () => {
+    chatState.sessions.forEach(session => {
+      const active = session.id === chatState.activeId;
+      const item = make("div", active ? "session-item active" : "session-item");
+      const open = actionButton("", "session-open", () => {
         switchChatSession(session.id);
         closeChatHistory(true);
       });
-
-      openBtn.append(title, meta);
-      item.append(openBtn, renameBtn, delBtn);
-      list.appendChild(item);
+      if (active) open.setAttribute("aria-current", "true");
+      item.dataset.id = session.id;
+      attach(open, [
+        make("span", "session-title", session.title || "新会话"),
+        make("span", "session-meta", relativeTime(session.updatedAt)),
+      ]);
+      list.appendChild(attach(item, [
+        open,
+        actionButton("重命名", "session-action", () => startRenameChatSession(session.id, open)),
+        actionButton("删除", "session-action session-delete", () => deleteChatSession(session.id)),
+      ]));
     });
   }
 
@@ -1669,17 +1483,8 @@
         : null;
       const efforts = advertised || ["none", "low", "medium", "high", "xhigh"];
       const previous = String(session?.reasoningEffort || effortControl.value || "");
-      effortControl.replaceChildren();
-      const automatic = document.createElement("option");
-      automatic.value = "";
-      automatic.textContent = "自动";
-      effortControl.appendChild(automatic);
-      efforts.forEach((value) => {
-        const option = document.createElement("option");
-        option.value = value;
-        option.textContent = labels[value] || value;
-        effortControl.appendChild(option);
-      });
+      const { option } = ConsoleUI;
+      effortControl.replaceChildren(option("", "自动"), ...efforts.map(value => option(value, labels[value] || value)));
       effortControl.disabled = route?.supports_reasoning_effort === false;
       const fallback = efforts.includes(String(route?.default_reasoning_effort || "")) ? String(route.default_reasoning_effort) : "";
       effortControl.value = efforts.includes(previous) ? previous : fallback;
@@ -1699,30 +1504,19 @@
         if (session) session[key] = false;
       }
     });
-    const label = document.getElementById("grokModelLabel");
-    if (label) label.textContent = chatState.model;
-    if (session) {
-      session.model = chatState.model;
-    }
+    ConsoleUI.setText("grokModelLabel", chatState.model);
+    if (session) session.model = chatState.model;
   }
 
   function renderChatModelDropdown() {
     const dropdown = document.getElementById("grokModelDropdown");
     if (!dropdown) return;
-    dropdown.innerHTML = "";
-    chatState.models.forEach((model) => {
-      const btn = document.createElement("button");
+    dropdown.replaceChildren(...chatState.models.map(model => {
+      const btn = ConsoleUI.make("button", `model-option${model === chatState.model ? " active" : ""}`, model);
       btn.type = "button";
-      btn.className = `model-option${model === chatState.model ? " active" : ""}`;
-      btn.textContent = model;
       btn.dataset.model = model;
-      dropdown.appendChild(btn);
-    });
-  }
-
-  function preferredAppChatModel(models) {
-    const list = Array.isArray(models) ? models : [];
-    return list[0] || "";
+      return btn;
+    }));
   }
 
   async function loadChatModels() {
@@ -1760,10 +1554,7 @@
       chatState.routes = routes;
       const videoSelect = document.getElementById("videoModel");
       if (videoSelect) {
-        videoSelect.replaceChildren();
-        routes.filter((item) => supports(item, "video")).forEach((item) => {
-          const option = document.createElement("option"); option.value = item.id; option.textContent = item.id; videoSelect.appendChild(option);
-        });
+        videoSelect.replaceChildren(...routes.filter(item => supports(item, "video")).map(item => ConsoleUI.option(item.id)));
         videoSelect.addEventListener("change", syncVideoRouteControls);
         syncVideoRouteControls();
       }
@@ -1782,7 +1573,7 @@
       if (models.length === 0) throw new Error("模型目录为空");
       chatState.models = models;
       if (!models.includes(chatState.model)) {
-        chatState.model = preferredAppChatModel(models);
+        chatState.model = models[0];
       }
     } catch (err) {
       chatState.modelsLoaded = false;
@@ -1869,7 +1660,11 @@
     if (session && session.model) {
       chatState.model = session.model;
     }
-    syncChatSessionSettings(session);
+    refreshChatSession();
+  }
+
+  function refreshChatSession() {
+    syncChatSessionSettings(activeChatSession());
     syncChatModelUI();
     renderChatModelDropdown();
     renderChatSessions();
@@ -1882,12 +1677,7 @@
     const session = activeChatSession();
     if (!session || !Array.isArray(session.messages) || session.messages.length === 0) return;
     if (!window.confirm(`确认清空当前会话的 ${session.messages.length} 条消息？`)) return;
-    session.messages = [];
-    session.promptCacheKey = createPromptCacheKey();
-    session.updatedAt = Date.now();
-    saveChatSessions();
-    renderChatSessions();
-    rerenderChatThread();
+    truncateChatBranch(session, 0);
     updateChatStatus("当前会话已清空", "ok");
   }
 
@@ -1896,12 +1686,7 @@
     const session = createChatSession();
     chatState.sessions.unshift(session);
     chatState.activeId = session.id;
-    syncChatSessionSettings(session);
-    syncChatModelUI();
-    renderChatModelDropdown();
-    renderChatSessions();
-    rerenderChatThread();
-    saveChatSessions();
+    refreshChatSession();
     updateChatStatus("就绪");
   }
 
@@ -2072,36 +1857,24 @@
       closeChatHistory();
       newChatSession();
     });
-    if (clearBtn) clearBtn.addEventListener("click", clearCurrentChatSession);
-    if (sendBtn) {
-      sendBtn.addEventListener("click", () => {
-        if (chatState.sending && chatState.abortController) {
-          chatState.abortController.abort();
-          return;
-        }
-        sendChatMessage().catch(() => {});
-      });
-    }
-    if (input) {
-      let composing = false;
-      input.addEventListener("compositionstart", () => {
-        composing = true;
-      });
-      input.addEventListener("compositionend", () => {
-        composing = false;
-      });
-      input.addEventListener("input", () => {
-        input.style.height = "40px";
-        input.style.height = `${Math.min(input.scrollHeight, 160)}px`;
-      });
-      input.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" && !event.shiftKey) {
-          if (composing || event.isComposing) return;
-          event.preventDefault();
-          sendChatMessage().catch(() => {});
-        }
-      });
-    }
+    const send = () => sendChatMessage().catch(() => {});
+    clearBtn?.addEventListener("click", clearCurrentChatSession);
+    sendBtn?.addEventListener("click", () => {
+      if (chatState.sending && chatState.abortController) chatState.abortController.abort();
+      else send();
+    });
+    let composing = false;
+    input?.addEventListener("compositionstart", () => { composing = true; });
+    input?.addEventListener("compositionend", () => { composing = false; });
+    input?.addEventListener("input", () => {
+      input.style.height = "40px";
+      input.style.height = `${Math.min(input.scrollHeight, 160)}px`;
+    });
+    input?.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" || event.shiftKey || composing || event.isComposing) return;
+      event.preventDefault();
+      send();
+    });
     history?.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && !event.defaultPrevented) closeChatHistory(true);
     });
@@ -2111,7 +1884,7 @@
     if (modelChip && modelDropdown) {
       modelChip.addEventListener("click", (event) => {
         event.stopPropagation();
-        closeChatSettingsPanel(settingsToggle, settingsPanel);
+        setChatSettingsPanel(settingsToggle, settingsPanel);
         modelDropdown.classList.toggle("show");
       });
       modelDropdown.addEventListener("click", (event) => {
@@ -2129,31 +1902,26 @@
         modelDropdown.classList.remove("show");
       });
     }
-    if (settingsToggle && settingsPanel) {
-      settingsToggle.addEventListener("click", (event) => {
+    if (settingsPanel) {
+      settingsToggle?.addEventListener("click", (event) => {
         event.stopPropagation();
         modelDropdown?.classList.remove("show");
-        toggleChatSettingsPanel(settingsToggle, settingsPanel);
+        setChatSettingsPanel(settingsToggle, settingsPanel, !settingsPanel.classList.contains("show"));
       });
-      settingsPanel.addEventListener("click", (event) => {
-        event.stopPropagation();
-      });
+      settingsPanel.addEventListener("click", (event) => event.stopPropagation());
     }
-    if (settingsCloseBtn) {
-      settingsCloseBtn.addEventListener("click", (event) => {
-        event.stopPropagation();
-        closeChatSettingsPanel(settingsToggle, settingsPanel);
-        settingsToggle?.focus();
-      });
-    }
-    document.addEventListener("click", () => {
-      modelDropdown?.classList.remove("show");
-      closeChatSettingsPanel(settingsToggle, settingsPanel);
+    settingsCloseBtn?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      setChatSettingsPanel(settingsToggle, settingsPanel);
+      settingsToggle?.focus();
     });
-    document.addEventListener("keydown", (event) => {
-      if (event.key !== "Escape") return;
+    const closeSettings = () => {
       modelDropdown?.classList.remove("show");
-      closeChatSettingsPanel(settingsToggle, settingsPanel);
+      setChatSettingsPanel(settingsToggle, settingsPanel);
+    };
+    document.addEventListener("click", closeSettings);
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeSettings();
     });
     [reasoningEffort, webSearch, xSearch].forEach((control) => {
       if (!control) return;
@@ -2168,30 +1936,16 @@
       });
     });
     const systemInput = document.getElementById("grokSystemInput");
-    if (systemInput) {
-      systemInput.addEventListener("input", () => {
-        saveGrokToolsUIState({ chatSystemPrompt: String(systemInput.value || "") });
-      });
-    }
+    systemInput?.addEventListener("input", () => {
+      saveGrokToolsUIState({ chatSystemPrompt: String(systemInput.value || "") });
+    });
   }
 
-  function toggleChatSettingsPanel(toggle, panel) {
+  function setChatSettingsPanel(toggle, panel, open = false) {
     if (!panel) return;
-    const willShow = !panel.classList.contains("show");
-    panel.classList.toggle("show", willShow);
-    panel.setAttribute("aria-hidden", willShow ? "false" : "true");
-    if (toggle) {
-      toggle.setAttribute("aria-expanded", willShow ? "true" : "false");
-    }
-  }
-
-  function closeChatSettingsPanel(toggle, panel) {
-    if (!panel) return;
-    panel.classList.remove("show");
-    panel.setAttribute("aria-hidden", "true");
-    if (toggle) {
-      toggle.setAttribute("aria-expanded", "false");
-    }
+    panel.classList.toggle("show", open);
+    panel.setAttribute("aria-hidden", String(!open));
+    toggle?.setAttribute("aria-expanded", String(open));
   }
 
   async function applyToolRequestMode() {
@@ -2268,16 +2022,6 @@
     bindChatEvents();
   }
 
-  function setVoiceStatus(text, type) {
-    const el = document.getElementById("voiceStatus");
-    if (!el) return;
-    el.textContent = String(text || "");
-    el.classList.remove("connected", "connecting", "error");
-    if (type === "ok") el.classList.add("connected");
-    if (type === "warn" || type === "connecting") el.classList.add("connecting");
-    if (type === "error") el.classList.add("error");
-  }
-
   function appendVoiceLog(line) {
     const el = document.getElementById("voiceLogOutput");
     if (!el) return;
@@ -2291,18 +2035,16 @@
     if (el) el.textContent = "";
   }
 
-  function setVoiceButtons(running) {
-    const start = document.getElementById("voiceStartBtn");
-    const stop = document.getElementById("voiceStopBtn");
-    if (start) {
-      start.disabled = false;
-      start.classList.toggle("hidden", !!running);
-    }
-    if (stop) {
-      stop.disabled = false;
-      stop.classList.toggle("hidden", !running);
-    }
+  function setToolButtons(prefix, running) {
+    [["Start", !!running], ["Stop", !running]].forEach(([action, hidden]) => {
+      const button = document.getElementById(`${prefix}${action}Btn`);
+      if (!button) return;
+      button.disabled = false;
+      button.classList.toggle("hidden", hidden);
+    });
   }
+
+  function setVoiceButtons(running) { setToolButtons("voice", running); }
 
   function updateVoiceMeta() {
     const voiceSelect = String(document.getElementById("voiceName")?.value || "ara").trim() || "ara";
@@ -2310,16 +2052,10 @@
     const voice = voiceSelect === "custom" ? (customVoice || "custom") : voiceSelect;
     const personality = String(document.getElementById("voicePersonality")?.value || "assistant").trim() || "assistant";
     const speed = Math.max(0.1, Number(document.getElementById("voiceSpeed")?.value || 1));
-    const customBlock = document.getElementById("voiceCustomBlock");
-    const statusVoice = document.getElementById("voiceStatusVoice");
-    const statusPersonality = document.getElementById("voiceStatusPersonality");
-    const statusSpeed = document.getElementById("voiceStatusSpeed");
-    const speedValue = document.getElementById("voiceSpeedValue");
-    if (customBlock) customBlock.classList.toggle("hidden", voiceSelect !== "custom");
-    if (statusVoice) statusVoice.textContent = voice;
-    if (statusPersonality) statusPersonality.textContent = personality;
-    if (statusSpeed) statusSpeed.textContent = `${speed}x`;
-    if (speedValue) speedValue.textContent = speed.toFixed(1);
+    document.getElementById("voiceCustomBlock")?.classList.toggle("hidden", voiceSelect !== "custom");
+    Object.entries({ voiceStatusVoice: voice, voiceStatusPersonality: personality,
+      voiceStatusSpeed: `${speed}x`, voiceSpeedValue: speed.toFixed(1) })
+      .forEach(([id, value]) => ConsoleUI.setText(id, value));
     updateVoiceRangeProgress();
   }
 
@@ -2339,8 +2075,7 @@
     root.innerHTML = "";
     const targetCount = Math.max(36, Math.floor(root.offsetWidth / 7));
     for (let i = 0; i < targetCount; i += 1) {
-      const bar = document.createElement("div");
-      bar.className = "bar";
+      const bar = make("div", "bar");
       root.appendChild(bar);
     }
   }
@@ -2719,58 +2454,29 @@
     }
   }
 
-  function setVideoStatus(text, type) {
-    const el = document.getElementById("videoStatus");
-    if (!el) return;
-    el.textContent = String(text || "");
-    el.classList.remove("connected", "connecting", "error");
-    if (type === "ok") el.classList.add("connected");
-    if (type === "warn" || type === "connecting") el.classList.add("connecting");
-    if (type === "error") el.classList.add("error");
-  }
-
-  function setVideoButtons(running) {
-    const start = document.getElementById("videoStartBtn");
-    const stop = document.getElementById("videoStopBtn");
-    if (start) {
-      start.disabled = false;
-      start.classList.toggle("hidden", !!running);
-    }
-    if (stop) {
-      stop.disabled = false;
-      stop.classList.toggle("hidden", !running);
-    }
-  }
+  function setVideoButtons(running) { setToolButtons("video", running); }
 
   function updateVideoMeta() {
-    const aspectValue = document.getElementById("videoAspectValue");
-    const lengthValue = document.getElementById("videoLengthValue");
-    const resolutionValue = document.getElementById("videoResolutionValue");
-    const presetValue = document.getElementById("videoPresetValue");
-    const ratioInput = document.getElementById("videoRatio");
-    const lengthInput = document.getElementById("videoLength");
-    const resolutionInput = document.getElementById("videoResolution");
-    const presetInput = document.getElementById("videoPreset");
-    if (aspectValue && ratioInput) aspectValue.textContent = ratioInput.value || "-";
-    if (lengthValue && lengthInput) lengthValue.textContent = `${lengthInput.value || "-"}s`;
-    if (resolutionValue && resolutionInput) resolutionValue.textContent = resolutionInput.value || "-";
-    // The tile repeats what the select shows, so it reads the option's label
-    // ("自定义"), not its wire value ("custom").
-    if (presetValue && presetInput) presetValue.textContent = presetInput.selectedOptions?.[0]?.textContent || presetInput.value || "-";
+    [
+      ["videoAspectValue", "videoRatio"],
+      ["videoLengthValue", "videoLength", node => `${node.value || "-"}s`],
+      ["videoResolutionValue", "videoResolution"],
+      ["videoPresetValue", "videoPreset", node => node.selectedOptions?.[0]?.textContent || node.value || "-"],
+    ].forEach(([id, source, format = node => node.value || "-"]) => {
+      const control = document.getElementById(source);
+      if (control) ConsoleUI.setText(id, format(control));
+    });
   }
 
   function setVideoProgress(value) {
     const safe = Math.max(0, Math.min(100, Number(value) || 0));
     const fill = document.getElementById("videoProgressFill");
-    const text = document.getElementById("videoProgressText");
     if (fill) fill.style.width = `${safe}%`;
-    if (text) text.textContent = `${safe}%`;
+    ConsoleUI.setText("videoProgressText", `${safe}%`);
   }
 
   function setVideoIndeterminate(active) {
-    const bar = document.getElementById("videoProgressBar");
-    if (!bar) return;
-    bar.classList.toggle("indeterminate", !!active);
+    document.getElementById("videoProgressBar")?.classList.toggle("indeterminate", Boolean(active));
   }
 
   function stopVideoElapsedTimer() {
@@ -2857,22 +2563,16 @@
     const stage = document.getElementById("videoStage");
     if (!stage) return;
     videoState.previewCount += 1;
-    const item = document.createElement("div");
-    item.className = "video-item is-pending";
+    const item = make("div", "video-item is-pending");
     item.dataset.index = String(videoState.previewCount);
 
-    const header = document.createElement("div");
-    header.className = "video-item-bar";
+    const header = make("div", "video-item-bar");
 
-    const title = document.createElement("div");
-    title.className = "video-item-title";
-    title.textContent = `Video #${videoState.previewCount}`;
+    const title = make("div", "video-item-title", `Video #${videoState.previewCount}`);
 
-    const actions = document.createElement("div");
-    actions.className = "video-item-actions";
+    const actions = make("div", "video-item-actions");
 
-    const openBtn = document.createElement("a");
-    openBtn.className = "btn btn-outline video-open hidden";
+    const openBtn = make("a", "btn btn-outline video-open hidden");
     openBtn.target = "_blank";
     openBtn.rel = "noopener";
     openBtn.textContent = "打开";
@@ -2883,21 +2583,15 @@
     downloadBtn.textContent = "下载";
     downloadBtn.disabled = true;
 
-    actions.appendChild(openBtn);
-    actions.appendChild(downloadBtn);
-    header.appendChild(title);
-    header.appendChild(actions);
+    attach(actions, [openBtn, downloadBtn]);
+    attach(header, [title, actions]);
 
-    const body = document.createElement("div");
-    body.className = "video-item-body";
+    const body = make("div", "video-item-body");
     body.innerHTML = `<div class="video-item-placeholder">${t("video.generatingPlaceholder")}</div>`;
 
-    const link = document.createElement("div");
-    link.className = "video-item-link";
+    const link = make("div", "video-item-link");
 
-    item.appendChild(header);
-    item.appendChild(body);
-    item.appendChild(link);
+    attach(item, [header, body, link]);
     stage.appendChild(item);
     stage.classList.remove("hidden");
     const empty = document.getElementById("videoEmpty");
@@ -3234,157 +2928,96 @@
     });
   }
 
+  const videoSettings = ["videoRatio", "videoLength", "videoResolution", "videoPreset"];
+  const voiceDefaults = {
+    voiceName: "ara", voiceCustomID: "", voicePersonality: "assistant", voiceSpeed: 1, voiceInstruction: "",
+  };
+
+  function restoreSetting(id, value) {
+    const control = document.getElementById(id);
+    if (control) control.value = String(value);
+  }
+
   function bindEvents() {
     bindGrokTabs();
 
-    const videoStartBtn = document.getElementById("videoStartBtn");
-    if (videoStartBtn) {
-      videoStartBtn.addEventListener("click", async () => {
-        try {
-          await startVideo();
-        } catch (err) {
-          showToast(`启动失败: ${err.message || err}`, "error");
-        }
-      });
-    }
-    const videoStopBtn = document.getElementById("videoStopBtn");
-    if (videoStopBtn) {
-      videoStopBtn.addEventListener("click", async () => {
-        try {
-          await stopVideo();
-        } catch (err) {
-          showToast(`停止失败: ${err.message || err}`, "error");
-        }
-      });
-    }
-    const videoClearBtn = document.getElementById("videoClearBtn");
-    if (videoClearBtn) {
-      videoClearBtn.addEventListener("click", () => {
-        resetVideoOutput();
-        setVideoStatus(t("common.idle"));
-      });
-    }
-    const videoStage = document.getElementById("videoStage");
-    if (videoStage) {
-      videoStage.addEventListener("click", async (event) => {
-        const target = event.target.closest(".video-download");
-        if (!target || !videoStage.contains(target)) return;
+    const listen = (id, event, handler) => document.getElementById(id)?.addEventListener(event, handler);
+    const run = (action, label, onError) => async () => {
+      try {
+        await action();
+      } catch (err) {
+        onError?.(err);
+        showToast(`${label}: ${err.message || err}`, "error");
+      }
+    };
+    const start = run(startVideo, "启动失败");
+    listen("videoStartBtn", "click", start);
+    listen("videoStopBtn", "click", run(stopVideo, "停止失败"));
+    listen("videoClearBtn", "click", () => {
+      resetVideoOutput();
+      setVideoStatus(t("common.idle"));
+    });
+    document.getElementById("videoStage")?.addEventListener("click", async (event) => {
+      const videoStage = event.currentTarget;
+      const target = event.target.closest(".video-download");
+      if (!target || !videoStage.contains(target)) return;
+      event.preventDefault();
+      const item = target.closest(".video-item");
+      if (!item) return;
+      const url = item.dataset.url || target.dataset.url || "";
+      if (!url) return;
+      try {
+        const blobUrl = await fetchVideoBlobURL(url);
+        const anchor = document.createElement("a");
+        anchor.href = blobUrl;
+        const index = item.dataset.index || "";
+        anchor.download = index ? `grok_video_${index}.mp4` : "grok_video.mp4";
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        revokeVideoObjectURL(blobUrl);
+      } catch (err) {
+        showToast(t("video.downloadFailed"), "error");
+      }
+    });
+    listen("videoPrompt", "keydown", (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
         event.preventDefault();
-        const item = target.closest(".video-item");
-        if (!item) return;
-        const url = item.dataset.url || target.dataset.url || "";
-        if (!url) return;
-        try {
-          const blobUrl = await fetchVideoBlobURL(url);
-          const anchor = document.createElement("a");
-          anchor.href = blobUrl;
-          const index = item.dataset.index || "";
-          anchor.download = index ? `grok_video_${index}.mp4` : "grok_video.mp4";
-          document.body.appendChild(anchor);
-          anchor.click();
-          anchor.remove();
-          revokeVideoObjectURL(blobUrl);
-        } catch (err) {
-          showToast(t("video.downloadFailed"), "error");
-        }
-      });
-    }
-    const videoPrompt = document.getElementById("videoPrompt");
-    if (videoPrompt) {
-      videoPrompt.addEventListener("keydown", async (event) => {
-        if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-          event.preventDefault();
-          try {
-            await startVideo();
-          } catch (err) {
-            showToast(`启动失败: ${err.message || err}`, "error");
-          }
-        }
-      });
-    }
-    [
-      ["videoRatio", "videoRatio"],
-      ["videoLength", "videoLength"],
-      ["videoResolution", "videoResolution"],
-      ["videoPreset", "videoPreset"],
-    ].forEach(([id, key]) => {
-      const input = document.getElementById(id);
-      if (!input) return;
-      const sync = () => {
-        saveGrokToolsUIState({ [key]: String(input.value || "") });
-        updateVideoMeta();
-      };
-      input.addEventListener("change", sync);
-      input.addEventListener("input", sync);
+        return start();
+      }
     });
-
-    const voiceStartBtn = document.getElementById("voiceStartBtn");
-    if (voiceStartBtn) {
-      voiceStartBtn.addEventListener("click", async () => {
-        try {
-          await startVoiceSession();
-        } catch (err) {
-          if (!err?._voiceLogged) {
-            appendVoiceLog(err.message || "Voice start failed");
-          }
-          showToast(`Voice 启动失败: ${err.message || err}`, "error");
-        }
+    function bindSettings(keys, sync) {
+      keys.forEach(key => {
+        listen(key, "change", sync);
+        listen(key, "input", sync);
       });
     }
-    const voiceStopBtn = document.getElementById("voiceStopBtn");
-    if (voiceStopBtn) {
-      voiceStopBtn.addEventListener("click", async () => {
-        try {
-          await stopVoiceSession();
-        } catch (err) {
-          showToast(`Voice 停止失败: ${err.message || err}`, "error");
-        }
-      });
-    }
-    const voiceClearLogBtn = document.getElementById("voiceClearLogBtn");
-    if (voiceClearLogBtn) {
-      voiceClearLogBtn.addEventListener("click", () => clearVoiceLog());
-    }
-    const voiceCopyLogBtn = document.getElementById("voiceCopyLogBtn");
-    if (voiceCopyLogBtn) {
-      voiceCopyLogBtn.addEventListener("click", () => {
-        const content = String(document.getElementById("voiceLogOutput")?.textContent || "").trim();
-        if (!content) {
-          showToast("暂无可复制日志", "info");
-          return;
-        }
-        copyToClipboard(content);
-      });
-    }
-    const voiceName = document.getElementById("voiceName");
-    const voiceCustomID = document.getElementById("voiceCustomID");
-    const voicePersonality = document.getElementById("voicePersonality");
-    const voiceSpeed = document.getElementById("voiceSpeed");
-    const voiceInstruction = document.getElementById("voiceInstruction");
-    const voiceTransportSelect = document.getElementById("voiceTransport");
-    voiceTransportSelect?.addEventListener("change", () => saveGrokToolsUIState({ voiceTransport: voiceTransport() }));
-    [voiceName, voiceCustomID, voicePersonality, voiceSpeed, voiceInstruction].forEach((input) => {
-      if (!input) return;
-      const sync = () => {
-        updateVoiceMeta();
-        saveGrokToolsUIState({
-          voiceName: String(document.getElementById("voiceName")?.value || "ara"),
-          voiceCustomID: String(document.getElementById("voiceCustomID")?.value || ""),
-          voicePersonality: String(document.getElementById("voicePersonality")?.value || "assistant"),
-          voiceSpeed: Number(document.getElementById("voiceSpeed")?.value || 1),
-          voiceInstruction: String(document.getElementById("voiceInstruction")?.value || ""),
-        });
-      };
-      input.addEventListener("change", sync);
-      input.addEventListener("input", sync);
+    bindSettings(videoSettings, event => {
+      saveGrokToolsUIState({ [event.currentTarget.id]: String(event.currentTarget.value || "") });
+      updateVideoMeta();
     });
-    const voiceMuteOutputBtn = document.getElementById("voiceMuteOutputBtn");
-    if (voiceMuteOutputBtn) {
-      voiceMuteOutputBtn.addEventListener("click", () => {
-        voiceState.outputMuted = !voiceState.outputMuted;
-        syncVoiceOutputMute();
-      });
-    }
+    listen("voiceStartBtn", "click", run(startVoiceSession, "Voice 启动失败", err => {
+      if (!err?._voiceLogged) appendVoiceLog(err.message || "Voice start failed");
+    }));
+    listen("voiceStopBtn", "click", run(stopVoiceSession, "Voice 停止失败"));
+    listen("voiceClearLogBtn", "click", clearVoiceLog);
+    listen("voiceCopyLogBtn", "click", () => {
+      const content = String(document.getElementById("voiceLogOutput")?.textContent || "").trim();
+      if (content) copyToClipboard(content);
+      else showToast("暂无可复制日志", "info");
+    });
+    listen("voiceTransport", "change", () => saveGrokToolsUIState({ voiceTransport: voiceTransport() }));
+    bindSettings(Object.keys(voiceDefaults), () => {
+      updateVoiceMeta();
+      saveGrokToolsUIState(Object.fromEntries(Object.entries(voiceDefaults).map(([key, fallback]) => {
+        const value = document.getElementById(key)?.value || fallback;
+        return [key, key === "voiceSpeed" ? Number(value) : String(value)];
+      })));
+    });
+    listen("voiceMuteOutputBtn", "click", () => {
+      voiceState.outputMuted = !voiceState.outputMuted;
+      syncVoiceOutputMute();
+    });
   }
 
   // The image panel hides its batch actions while no batch has been rendered.
@@ -3405,28 +3038,19 @@
     await initChat();
     bindEvents();
     window.addEventListener("beforeunload", () => {
-      if (window.GrokImagine && typeof window.GrokImagine.stop === "function") {
-        window.GrokImagine.stop({ silent: true });
-      }
-        stopVideoElapsedTimer();
+      window.GrokImagine?.stop?.({ silent: true });
+      stopVideoElapsedTimer();
       revokeVideoObjectURLs();
       stopVoiceSession().catch(() => {});
       persistChatSessionsNow();
     });
     const uiState = loadGrokToolsUIState();
     await switchGrokToolTab(String(uiState.activeToolTab || "imagine"));
-    if (window.GrokImagine && typeof window.GrokImagine.init === "function") {
-      window.GrokImagine.init({ uiState, saveState: saveGrokToolsUIState, showToast });
-    }
+    window.GrokImagine?.init?.({ uiState, saveState: saveGrokToolsUIState, showToast });
     watchImagineResultActions();
-    const videoRatio = document.getElementById("videoRatio");
-    const videoLength = document.getElementById("videoLength");
-    const videoResolution = document.getElementById("videoResolution");
-    const videoPreset = document.getElementById("videoPreset");
-    if (videoRatio && typeof uiState.videoRatio === "string") videoRatio.value = uiState.videoRatio;
-    if (videoLength && typeof uiState.videoLength === "string") videoLength.value = uiState.videoLength;
-    if (videoResolution && typeof uiState.videoResolution === "string") videoResolution.value = uiState.videoResolution;
-    if (videoPreset && typeof uiState.videoPreset === "string") videoPreset.value = uiState.videoPreset;
+    videoSettings.forEach(key => {
+      if (typeof uiState[key] === "string") restoreSetting(key, uiState[key]);
+    });
     // Video has no reasoning effort. A choice saved by the control this page
     // used to show made every video request fail; forget it.
     if (typeof uiState.videoEffort === "string") saveGrokToolsUIState({ videoEffort: undefined });
@@ -3434,18 +3058,12 @@
     updateVideoMeta();
     setVideoButtons(false);
     setVideoStatus(t("common.idle"));
-    const voiceName = document.getElementById("voiceName");
-    const voiceCustomID = document.getElementById("voiceCustomID");
-    const voicePersonality = document.getElementById("voicePersonality");
-    const voiceSpeed = document.getElementById("voiceSpeed");
-    const voiceInstruction = document.getElementById("voiceInstruction");
-    if (voiceName && typeof uiState.voiceName === "string" && uiState.voiceName) voiceName.value = uiState.voiceName;
-    if (voiceCustomID && typeof uiState.voiceCustomID === "string") voiceCustomID.value = uiState.voiceCustomID;
-    if (voicePersonality && typeof uiState.voicePersonality === "string" && uiState.voicePersonality) voicePersonality.value = uiState.voicePersonality;
-    const voiceTransportSelect = document.getElementById("voiceTransport");
-    if (voiceTransportSelect && (uiState.voiceTransport === "direct" || uiState.voiceTransport === "relay")) voiceTransportSelect.value = uiState.voiceTransport;
-    if (voiceSpeed && typeof uiState.voiceSpeed === "number" && Number.isFinite(uiState.voiceSpeed)) voiceSpeed.value = String(uiState.voiceSpeed);
-    if (voiceInstruction && typeof uiState.voiceInstruction === "string") voiceInstruction.value = uiState.voiceInstruction;
+    Object.entries(voiceDefaults).forEach(([key, fallback]) => {
+      const value = uiState[key];
+      if (typeof fallback === "number" ? Number.isFinite(value)
+        : typeof value === "string" && (value || !fallback)) restoreSetting(key, value);
+    });
+    if (["direct", "relay"].includes(uiState.voiceTransport)) restoreSetting("voiceTransport", uiState.voiceTransport);
     updateVoiceMeta();
     startVoiceVisualizer();
     stopVoiceVisualizer();

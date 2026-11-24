@@ -8,6 +8,18 @@ import (
 	"orchids-api/internal/util"
 )
 
+func hasRequestField(fields map[string]json.RawMessage, wireName string) bool {
+	if _, ok := fields[wireName]; ok {
+		return true
+	}
+	for key := range fields {
+		if MatchRequestField(key, wireName) {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *Request) UnmarshalJSON(data []byte) error {
 	type rawRequest struct {
 		Model               string           `json:"model"`
@@ -89,10 +101,10 @@ func (r *Request) UnmarshalJSON(data []byte) error {
 	r.ReasoningSummary = raw.ReasoningSummary
 	r.Temperature = temp
 	r.TopP = topP
-	if _, ok := rawMap["max_tokens"]; ok {
+	if hasRequestField(rawMap, "max_tokens") {
 		r.MaxTokens = &maxTokens
 	}
-	if _, ok := rawMap["max_completion_tokens"]; ok {
+	if hasRequestField(rawMap, "max_completion_tokens") {
 		r.MaxCompletionTokens = &maxCompletionTokens
 		// max_tokens is deprecated in favour of max_completion_tokens, so when a
 		// caller sends both the newer field decides the output budget.

@@ -116,13 +116,6 @@ func TestFetchModelChoicesReadsAllPlanesAndDedupes(t *testing.T) {
 		slices.Contains(gotIDs, "model-disabled") || slices.Contains(gotIDs, "bad model") {
 		t.Fatalf("excluded catalog identity was published: %v", gotIDs)
 	}
-	ids, err := client.FetchModels(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(ids, gotIDs) {
-		t.Fatalf("FetchModels and FetchModelChoices disagree: %v vs %v", ids, gotIDs)
-	}
 }
 
 func floatPtr(value float64) *float64 { return &value }

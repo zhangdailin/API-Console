@@ -37,7 +37,7 @@ type apiKeyRecord struct {
 	CreatedAt              time.Time  `json:"created_at"`
 }
 
-func (s *redisStore) CreateApiKey(ctx context.Context, key *ApiKey) error {
+func (s *Store) CreateApiKey(ctx context.Context, key *ApiKey) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis store not configured")
 	}
@@ -83,7 +83,7 @@ func (s *redisStore) CreateApiKey(ctx context.Context, key *ApiKey) error {
 	return err
 }
 
-func (s *redisStore) ListApiKeys(ctx context.Context) ([]*ApiKey, error) {
+func (s *Store) ListApiKeys(ctx context.Context) ([]*ApiKey, error) {
 	if s == nil || s.client == nil {
 		return nil, fmt.Errorf("redis store not configured")
 	}
@@ -94,7 +94,7 @@ func (s *redisStore) ListApiKeys(ctx context.Context) ([]*ApiKey, error) {
 	return s.getApiKeysByIDs(ctx, ids)
 }
 
-func (s *redisStore) UpdateApiKey(ctx context.Context, key *ApiKey) error {
+func (s *Store) UpdateApiKey(ctx context.Context, key *ApiKey) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis store not configured")
 	}
@@ -114,7 +114,7 @@ func (s *redisStore) UpdateApiKey(ctx context.Context, key *ApiKey) error {
 	})
 }
 
-func (s *redisStore) DeleteApiKey(ctx context.Context, id int64) error {
+func (s *Store) DeleteApiKey(ctx context.Context, id int64) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis store not configured")
 	}
@@ -137,14 +137,14 @@ func (s *redisStore) DeleteApiKey(ctx context.Context, id int64) error {
 	return err
 }
 
-func (s *redisStore) GetApiKeyByID(ctx context.Context, id int64) (*ApiKey, error) {
+func (s *Store) GetApiKeyByID(ctx context.Context, id int64) (*ApiKey, error) {
 	if s == nil || s.client == nil {
 		return nil, fmt.Errorf("redis store not configured")
 	}
 	return s.getApiKeyByID(ctx, id)
 }
 
-func (s *redisStore) GetApiKeyByHash(ctx context.Context, hash string) (*ApiKey, error) {
+func (s *Store) getApiKeyByHash(ctx context.Context, hash string) (*ApiKey, error) {
 	if s == nil || s.client == nil {
 		return nil, fmt.Errorf("redis store not configured")
 	}
@@ -190,7 +190,7 @@ func (s *redisStore) GetApiKeyByHash(ctx context.Context, hash string) (*ApiKey,
 	return key, nil
 }
 
-func (s *redisStore) ConsumeApiKeyRPM(ctx context.Context, id int64, limit int, now time.Time) (bool, error) {
+func (s *Store) consumeApiKeyRPM(ctx context.Context, id int64, limit int, now time.Time) (bool, error) {
 	if s == nil || s.client == nil {
 		return false, fmt.Errorf("redis store not configured")
 	}
@@ -213,7 +213,7 @@ func (s *redisStore) ConsumeApiKeyRPM(ctx context.Context, id int64, limit int, 
 	return count <= int64(limit), nil
 }
 
-func (s *redisStore) TouchApiKeyLastUsed(ctx context.Context, id int64, now time.Time) error {
+func (s *Store) touchApiKeyLastUsed(ctx context.Context, id int64, now time.Time) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis store not configured")
 	}
@@ -226,7 +226,7 @@ func (s *redisStore) TouchApiKeyLastUsed(ctx context.Context, id int64, now time
 // ReserveApiKeyBilling holds amount ticks of a key's spending limit until
 // expiresAt. The check and the insert are one Lua script so two replicas cannot
 // both admit a request that the limit only covers once.
-func (s *redisStore) ReserveApiKeyBilling(ctx context.Context, id int64, eventID string, amount int64, expiresAt time.Time) (bool, error) {
+func (s *Store) ReserveApiKeyBilling(ctx context.Context, id int64, eventID string, amount int64, expiresAt time.Time) (bool, error) {
 	if s == nil || s.client == nil {
 		return false, fmt.Errorf("redis store not configured")
 	}
@@ -255,10 +255,23 @@ func (s *redisStore) ReserveApiKeyBilling(ctx context.Context, id int64, eventID
 	return reserved == 1, nil
 }
 
+func (s *Store) RenewApiKeyBilling(ctx context.Context, id int64, eventID string, expiresAt time.Time) (bool, error) {
+	if s == nil || s.client == nil {
+		return false, fmt.Errorf("redis store not configured")
+	}
+	now := time.Now()
+	if id == 0 || strings.TrimSpace(eventID) == "" || expiresAt.Unix() <= now.Unix() {
+		return false, fmt.Errorf("invalid billing renewal")
+	}
+	result, err := renewApiKeyBillingScript.Run(ctx, s.client,
+		[]string{s.apiKeyBillingReservationsKey(id)}, eventID, now.UnixMilli(), expiresAt.Unix()).Int64()
+	return result == 1, err
+}
+
 // SettleApiKeyBilling charges actual usage: the hold for eventID is dropped and
 // amount ticks are added to the settled counter. An unknown event id is still
 // charged, because the request really ran and an expired hold must not erase it.
-func (s *redisStore) SettleApiKeyBilling(ctx context.Context, id int64, eventID string, amount int64) error {
+func (s *Store) SettleApiKeyBilling(ctx context.Context, id int64, eventID string, amount int64) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis store not configured")
 	}
@@ -280,6 +293,9 @@ func (s *redisStore) SettleApiKeyBilling(ctx context.Context, id int64, eventID 
 	if err != nil {
 		return err
 	}
+	if result == -2 {
+		return billingledger.ErrSettlementKeyMissing
+	}
 	if result < 0 {
 		return fmt.Errorf("billing event %q was already settled with a different amount", eventID)
 	}
@@ -288,7 +304,7 @@ func (s *redisStore) SettleApiKeyBilling(ctx context.Context, id int64, eventID 
 
 // ReleaseApiKeyBilling drops a hold without charging it and reports whether one
 // was held, which is what stops a settling request from being charged twice.
-func (s *redisStore) ReleaseApiKeyBilling(ctx context.Context, id int64, eventID string) (bool, error) {
+func (s *Store) ReleaseApiKeyBilling(ctx context.Context, id int64, eventID string) (bool, error) {
 	if s == nil || s.client == nil {
 		return false, fmt.Errorf("redis store not configured")
 	}
@@ -309,7 +325,7 @@ func (s *redisStore) ReleaseApiKeyBilling(ctx context.Context, id int64, eventID
 
 // ResetApiKeyBilling zeroes the settled counter and drops every pending hold.
 // The configured limit itself is untouched.
-func (s *redisStore) ResetApiKeyBilling(ctx context.Context, id int64) error {
+func (s *Store) ResetApiKeyBilling(ctx context.Context, id int64) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis store not configured")
 	}
@@ -324,7 +340,7 @@ func (s *redisStore) ResetApiKeyBilling(ctx context.Context, id int64) error {
 	return err
 }
 
-func (s *redisStore) RolloverApiKeyBilling(ctx context.Context, key *ApiKey, now time.Time) (bool, error) {
+func (s *Store) advanceApiKeyBillingPeriod(ctx context.Context, key *ApiKey, now time.Time) (bool, error) {
 	if s == nil || s.client == nil {
 		return false, fmt.Errorf("redis store not configured")
 	}
@@ -357,7 +373,7 @@ func (s *redisStore) RolloverApiKeyBilling(ctx context.Context, key *ApiKey, now
 	return result == 1, nil
 }
 
-func (s *redisStore) getApiKeyByID(ctx context.Context, id int64) (*ApiKey, error) {
+func (s *Store) getApiKeyByID(ctx context.Context, id int64) (*ApiKey, error) {
 	if id == 0 {
 		return nil, ErrNoRows
 	}
@@ -390,26 +406,15 @@ func (s *redisStore) getApiKeyByID(ctx context.Context, id int64) (*ApiKey, erro
 	return key, nil
 }
 
-func (s *redisStore) getApiKeysByIDs(ctx context.Context, ids []string) ([]*ApiKey, error) {
-	if len(ids) == 0 {
-		return nil, nil
-	}
-
+func (s *Store) getApiKeysByIDs(ctx context.Context, ids []string) ([]*ApiKey, error) {
 	idNums := parseSortedInt64s(ids)
 	if len(idNums) == 0 {
 		return nil, nil
 	}
 
-	keys := make([]string, 0, len(idNums))
-	usedKeys := make([]string, 0, len(idNums))
-	for _, id := range idNums {
-		keys = append(keys, s.apiKeysKey(id))
-		usedKeys = append(usedKeys, s.apiKeyBillingUsedKey(id))
-	}
-
 	pipe := s.client.Pipeline()
-	recordsCmd := pipe.MGet(ctx, keys...)
-	usedCmd := pipe.MGet(ctx, usedKeys...)
+	recordsCmd := pipe.MGet(ctx, redisBatchKeys(idNums, s.apiKeysKey)...)
+	usedCmd := pipe.MGet(ctx, redisBatchKeys(idNums, s.apiKeyBillingUsedKey)...)
 	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
 		return nil, err
 	}
@@ -419,18 +424,10 @@ func (s *redisStore) getApiKeysByIDs(ctx context.Context, ids []string) ([]*ApiK
 	}
 	usedValues, _ := usedCmd.Result()
 
-	results := make([]*ApiKey, len(values))
-	decode := func(i int) error {
-		if values[i] == nil {
-			return nil
-		}
-		strVal, ok := values[i].(string)
-		if !ok || strVal == "" {
-			return fmt.Errorf("invalid API key record #%d", idNums[i])
-		}
+	return decodeRedisRows(values, idNums, "API key", func(i int, raw string) (*ApiKey, error) {
 		var record apiKeyRecord
-		if err := json.Unmarshal([]byte(strVal), &record); err != nil {
-			return fmt.Errorf("decode API key #%d: %w", idNums[i], err)
+		if err := json.Unmarshal([]byte(raw), &record); err != nil {
+			return nil, fmt.Errorf("decode API key #%d: %w", idNums[i], err)
 		}
 		key := record.toApiKey()
 		if key.ID == 0 {
@@ -439,58 +436,52 @@ func (s *redisStore) getApiKeysByIDs(ctx context.Context, ids []string) ([]*ApiK
 		if i < len(usedValues) && usedValues[i] != nil {
 			raw, ok := usedValues[i].(string)
 			if !ok {
-				return fmt.Errorf("invalid API key usage #%d", key.ID)
+				return nil, fmt.Errorf("invalid API key usage #%d", key.ID)
 			}
 			used, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
 			if err != nil {
-				return fmt.Errorf("decode API key usage #%d: %w", key.ID, err)
+				return nil, fmt.Errorf("decode API key usage #%d: %w", key.ID, err)
 			}
 			key.BillingUsedUSDTicks = used
 		}
-		results[i] = key
-		return nil
-	}
-	if err := forEachIndex(len(values), decode); err != nil {
-		return nil, err
-	}
-
-	return compactNonNil(results), nil
+		return key, nil
+	})
 }
 
-func (s *redisStore) apiKeysKey(id int64) string {
+func (s *Store) apiKeysKey(id int64) string {
 	return s.prefix + "api_keys:id:" + strconv.FormatInt(id, 10)
 }
 
-func (s *redisStore) apiKeysIDsKey() string { return s.prefix + "api_keys:ids" }
+func (s *Store) apiKeysIDsKey() string { return s.prefix + "api_keys:ids" }
 
-func (s *redisStore) apiKeysNextIDKey() string { return s.prefix + "api_keys:next_id" }
+func (s *Store) apiKeysNextIDKey() string { return s.prefix + "api_keys:next_id" }
 
-func (s *redisStore) apiKeysHashKey(hash string) string { return s.prefix + "api_keys:hash:" + hash }
+func (s *Store) apiKeysHashKey(hash string) string { return s.prefix + "api_keys:hash:" + hash }
 
-func (s *redisStore) apiKeyRPMKey(id, minute int64) string {
+func (s *Store) apiKeyRPMKey(id, minute int64) string {
 	return s.prefix + "api_keys:rpm:" + strconv.FormatInt(id, 10) + ":" + strconv.FormatInt(minute, 10)
 }
 
 // apiKeyBillingReservationsKey holds the live holds of one key as a hash of
 // "eventID -> <amount ticks>:<expiry unix seconds>". Expired fields are pruned
 // by the reserve script, and the hash itself expires shortly after its last hold.
-func (s *redisStore) apiKeyBillingReservationsKey(id int64) string {
+func (s *Store) apiKeyBillingReservationsKey(id int64) string {
 	return s.prefix + "keybilling:res:" + strconv.FormatInt(id, 10)
 }
 
 // apiKeyBillingUsedKey is the settled usage counter in ticks. It is the source
 // of truth for how much a key has spent.
-func (s *redisStore) apiKeyBillingUsedKey(id int64) string {
+func (s *Store) apiKeyBillingUsedKey(id int64) string {
 	return s.prefix + "keybilling:used:" + strconv.FormatInt(id, 10)
 }
 
-func (s *redisStore) apiKeyBillingSettledKey(id int64) string {
+func (s *Store) apiKeyBillingSettledKey(id int64) string {
 	return s.prefix + "keybilling:settled:" + strconv.FormatInt(id, 10)
 }
 
 // apiKeyBillingLimitKey mirrors the key's billing limit so the reserve script
 // can decide without loading and parsing the key record.
-func (s *redisStore) apiKeyBillingLimitKey(id int64) string {
+func (s *Store) apiKeyBillingLimitKey(id int64) string {
 	return s.prefix + "keybilling:limit:" + strconv.FormatInt(id, 10)
 }
 

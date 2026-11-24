@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -43,32 +42,6 @@ type ApiKey struct {
 	CreatedAt              time.Time  `json:"created_at"`
 }
 
-type apiKeyStore interface {
-	GetApiKeySecret(context.Context, int64) (string, error)
-	RotateApiKey(context.Context, int64, string) (*ApiKey, error)
-	PatchApiKey(context.Context, int64, map[string]json.RawMessage) error
-	CreateApiKey(ctx context.Context, key *ApiKey) error
-	ListApiKeys(ctx context.Context) ([]*ApiKey, error)
-	UpdateApiKey(ctx context.Context, key *ApiKey) error
-	DeleteApiKey(ctx context.Context, id int64) error
-	GetApiKeyByID(ctx context.Context, id int64) (*ApiKey, error)
-	GetApiKeyByHash(ctx context.Context, hash string) (*ApiKey, error)
-	ConsumeApiKeyRPM(ctx context.Context, id int64, limit int, now time.Time) (bool, error)
-	TouchApiKeyLastUsed(ctx context.Context, id int64, now time.Time) error
-	ReserveApiKeyBilling(ctx context.Context, id int64, eventID string, amount int64, expiresAt time.Time) (bool, error)
-	SettleApiKeyBilling(ctx context.Context, id int64, eventID string, amount int64) error
-	ReleaseApiKeyBilling(ctx context.Context, id int64, eventID string) (bool, error)
-	ResetApiKeyBilling(ctx context.Context, id int64) error
-	RolloverApiKeyBilling(ctx context.Context, key *ApiKey, now time.Time) (bool, error)
-}
-
-func (s *Store) CreateApiKey(ctx context.Context, key *ApiKey) error {
-	if s.apiKeys != nil {
-		return s.apiKeys.CreateApiKey(ctx, key)
-	}
-	return fmt.Errorf("api keys store not configured")
-}
-
 // rolloverApiKeyBilling atomically advances an elapsed billing period in the
 // durable store. The Redis transaction updates the period record and resets only
 // settled usage/idempotency state; live holds remain attached to running requests.
@@ -76,7 +49,7 @@ func (s *Store) rolloverApiKeyBilling(ctx context.Context, key *ApiKey, now time
 	if key == nil || key.BillingPeriodDays <= 0 {
 		return
 	}
-	rolled, err := s.apiKeys.RolloverApiKeyBilling(ctx, key, now.UTC())
+	rolled, err := s.advanceApiKeyBillingPeriod(ctx, key, now.UTC())
 	if err != nil {
 		slog.Warn("failed to roll the billing period over", "key_id", key.ID, "error", err)
 		return
@@ -90,7 +63,7 @@ func (s *Store) rolloverApiKeyBilling(ctx context.Context, key *ApiKey, now time
 // AuthorizeApiKey authenticates a raw client key and atomically applies its
 // optional per-minute request limit. Raw keys are never persisted by this path.
 func (s *Store) AuthorizeApiKey(ctx context.Context, raw string) (*ApiKey, error) {
-	if s == nil || s.apiKeys == nil {
+	if s == nil || s.client == nil {
 		return nil, fmt.Errorf("api key store not configured")
 	}
 	raw = strings.TrimSpace(raw)
@@ -98,7 +71,7 @@ func (s *Store) AuthorizeApiKey(ctx context.Context, raw string) (*ApiKey, error
 		return nil, ErrNoRows
 	}
 	digest := sha256.Sum256([]byte(raw))
-	key, err := s.apiKeys.GetApiKeyByHash(ctx, hex.EncodeToString(digest[:]))
+	key, err := s.getApiKeyByHash(ctx, hex.EncodeToString(digest[:]))
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +86,7 @@ func (s *Store) AuthorizeApiKey(ctx context.Context, raw string) (*ApiKey, error
 	// default throttled a caller that never asked for a limit; the deployment's
 	// admission control is what protects the gateway.
 	if rpm := key.RPMLimit; rpm > 0 {
-		allowed, err := s.apiKeys.ConsumeApiKeyRPM(ctx, key.ID, rpm, now)
+		allowed, err := s.consumeApiKeyRPM(ctx, key.ID, rpm, now)
 		if err != nil {
 			return nil, err
 		}
@@ -147,7 +120,7 @@ func (s *Store) touchApiKeyCoalesced(ctx context.Context, id int64, now time.Tim
 	}
 	s.keyTouches[id] = now
 	s.keyTouchMu.Unlock()
-	if err := s.apiKeys.TouchApiKeyLastUsed(ctx, id, now); err != nil {
+	if err := s.touchApiKeyLastUsed(ctx, id, now); err != nil {
 		s.keyTouchMu.Lock()
 		if s.keyTouches[id].Equal(now) {
 			delete(s.keyTouches, id)
@@ -156,71 +129,4 @@ func (s *Store) touchApiKeyCoalesced(ctx context.Context, id int64, now time.Tim
 		return err
 	}
 	return nil
-}
-
-func (s *Store) ListApiKeys(ctx context.Context) ([]*ApiKey, error) {
-	if s.apiKeys != nil {
-		return s.apiKeys.ListApiKeys(ctx)
-	}
-	return nil, fmt.Errorf("api keys store not configured")
-}
-
-func (s *Store) UpdateApiKey(ctx context.Context, key *ApiKey) error {
-	if s != nil && s.apiKeys != nil {
-		return s.apiKeys.UpdateApiKey(ctx, key)
-	}
-	return fmt.Errorf("api keys store not configured")
-}
-
-func (s *Store) DeleteApiKey(ctx context.Context, id int64) error {
-	if s.apiKeys != nil {
-		return s.apiKeys.DeleteApiKey(ctx, id)
-	}
-	return fmt.Errorf("api keys store not configured")
-}
-
-func (s *Store) GetApiKeyByID(ctx context.Context, id int64) (*ApiKey, error) {
-	if s.apiKeys != nil {
-		return s.apiKeys.GetApiKeyByID(ctx, id)
-	}
-	return nil, fmt.Errorf("api keys store not configured")
-}
-
-// ReserveApiKeyBilling atomically holds amount ticks of a key's billing limit
-// for one in-flight request. It returns false (with no error) when the limit
-// does not cover the request, and true when the hold already existed for the
-// same event id — retrying a request must not double reserve.
-func (s *Store) ReserveApiKeyBilling(ctx context.Context, id int64, eventID string, amount int64, expiresAt time.Time) (bool, error) {
-	if s == nil || s.apiKeys == nil {
-		return false, fmt.Errorf("api key store not configured")
-	}
-	return s.apiKeys.ReserveApiKeyBilling(ctx, id, eventID, amount, expiresAt)
-}
-
-// SettleApiKeyBilling converts a hold into settled usage: the reservation is
-// dropped and amount ticks are added to the key's used counter. Actual usage is
-// authoritative, so settling an event whose hold already expired still charges.
-func (s *Store) SettleApiKeyBilling(ctx context.Context, id int64, eventID string, amount int64) error {
-	if s == nil || s.apiKeys == nil {
-		return fmt.Errorf("api key store not configured")
-	}
-	return s.apiKeys.SettleApiKeyBilling(ctx, id, eventID, amount)
-}
-
-// ReleaseApiKeyBilling drops a hold without charging it and reports whether one
-// was actually held, so a settling path cannot be charged twice.
-func (s *Store) ReleaseApiKeyBilling(ctx context.Context, id int64, eventID string) (bool, error) {
-	if s == nil || s.apiKeys == nil {
-		return false, fmt.Errorf("api key store not configured")
-	}
-	return s.apiKeys.ReleaseApiKeyBilling(ctx, id, eventID)
-}
-
-// ResetApiKeyBilling zeroes the settled usage counter and drops every
-// outstanding reservation for the key. The configured limit is left in place.
-func (s *Store) ResetApiKeyBilling(ctx context.Context, id int64) error {
-	if s == nil || s.apiKeys == nil {
-		return fmt.Errorf("api key store not configured")
-	}
-	return s.apiKeys.ResetApiKeyBilling(ctx, id)
 }

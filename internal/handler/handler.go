@@ -115,8 +115,6 @@ const nonStreamOpenAfter = 60 * time.Second
 // actually reach the edge.
 var nonStreamOpenPadding = []byte(strings.Repeat(" ", 1023) + "\n")
 
-const maxRequestBytes = 50 * 1024 * 1024 // 50MB
-
 func NewWithLoadBalancer(cfg *config.Config, lb *loadbalancer.LoadBalancer) *Handler {
 	h := &Handler{
 		config:       cfg,
@@ -233,6 +231,9 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request, prepared *ClaudeRequest, bodyBytes []byte) {
+	ctx, closeLeaseScope := loadbalancer.WithConnLeaseScope(r.Context())
+	defer closeLeaseScope()
+	r = r.WithContext(ctx)
 	forcedChannel := channelFromPath(r.URL.Path)
 	if forcedChannel == "" {
 		apperrors.New("not_found_error", "Provider route not found", http.StatusNotFound).WriteResponse(w)
@@ -279,16 +280,16 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request, prepare
 
 	var req ClaudeRequest
 	if prepared == nil {
-		if maxRequestBytes > 0 {
-			r.Body = http.MaxBytesReader(w, r.Body, maxRequestBytes)
+		if raw, ok := middleware.BufferedRequestBody(r); ok {
+			bodyBytes = raw
+		} else {
+			r.Body = http.MaxBytesReader(w, r.Body, config.InferenceJSONBodyLimit)
+			bodyBytes, err = io.ReadAll(r.Body)
 		}
-		bodyBytes, err = io.ReadAll(r.Body)
 		if err != nil {
-			if maxRequestBytes > 0 {
-				if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-					apperrors.New("invalid_request_error", "Request body too large", http.StatusRequestEntityTooLarge).WriteResponse(w)
-					return
-				}
+			if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+				apperrors.New("invalid_request_error", "Request body too large", http.StatusRequestEntityTooLarge).WriteResponse(w)
+				return
 			}
 			apperrors.New("invalid_request_error", "Invalid request body", http.StatusBadRequest).WriteResponse(w)
 			return
@@ -481,7 +482,7 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request, prepare
 	failedAccountSet := make(map[int64]struct{})
 
 	var e *messageExecution
-	apiClient, currentAccount, releaseClient, trackedAccountID, err := h.acquireInitialAccount(r.Context(), targetChannel, strings.TrimSpace(req.Model), dialogID)
+	apiClient, currentAccount, releaseClient, releaseAccountSlot, err := h.acquireInitialAccount(r.Context(), targetChannel, strings.TrimSpace(req.Model), dialogID)
 	// The client is held for the whole request: a credential change during it
 	// retires the client and closes it here, after the request finished.
 	defer func() {
@@ -493,9 +494,9 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request, prepare
 	}()
 	defer func() {
 		if e != nil {
-			h.releaseTrackedAccount(e.trackedAccountID)
+			h.releaseTrackedAccount(e.releaseAccountSlot)
 		} else {
-			h.releaseTrackedAccount(trackedAccountID)
+			h.releaseTrackedAccount(releaseAccountSlot)
 		}
 	}()
 	if err != nil {
@@ -662,9 +663,9 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request, prepare
 		}()
 	}
 
-	e = &messageExecution{h: h, r: r, cfg: cfg, sh: sh, req: req, mappedModel: mappedModel, targetChannel: targetChannel, forcedChannel: forcedChannel, traceID: traceID, conversationKey: conversationKey, builtPrompt: builtPrompt, effort: effort, verboseDiagnostics: verboseDiagnostics, gateNoTools: gateNoTools, upstreamMessages: upstreamMessages, effectiveTools: effectiveTools, structured: structured, logger: logger, apiClient: apiClient, currentAccount: currentAccount, releaseClient: releaseClient, trackedAccountID: trackedAccountID, failedAccountIDs: failedAccountIDs, failedAccountSet: failedAccountSet}
+	e = &messageExecution{h: h, r: r, cfg: cfg, sh: sh, req: req, mappedModel: mappedModel, targetChannel: targetChannel, forcedChannel: forcedChannel, traceID: traceID, conversationKey: conversationKey, builtPrompt: builtPrompt, effort: effort, verboseDiagnostics: verboseDiagnostics, gateNoTools: gateNoTools, upstreamMessages: upstreamMessages, effectiveTools: effectiveTools, structured: structured, logger: logger, apiClient: apiClient, currentAccount: currentAccount, releaseClient: releaseClient, releaseAccountSlot: releaseAccountSlot, failedAccountIDs: failedAccountIDs, failedAccountSet: failedAccountSet}
 	e.run()
-	r, currentAccount, releaseClient, trackedAccountID = e.r, e.currentAccount, e.releaseClient, e.trackedAccountID
+	r, currentAccount, releaseClient, releaseAccountSlot = e.r, e.currentAccount, e.releaseClient, e.releaseAccountSlot
 
 	h.finishMessages(w, r, sh, req, currentAccount, forcedChannel, isStream, responseFormat, startTime)
 }

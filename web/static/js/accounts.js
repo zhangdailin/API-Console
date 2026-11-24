@@ -482,292 +482,133 @@ function deleteAccountBatch(ids, prompt) {
   }, [document.getElementById('batchDeleteBtn'), document.getElementById('clearAbnormalBtn')]).finally(updateSelectedCount);
 }
 
-// Render accounts table
 function renderAccounts() {
   globalThis.GrokSSO?.syncToolbar?.();
+  const { make, attach } = ConsoleUI;
   const container = domCache.accountsList || document.getElementById("accountsList");
   const filtered = accounts.filter(matchesCurrentPlatform).filter(matchesAccountStatusFilter).filter(matchesAccountSearch);
-  const panel = container.closest?.(".accounts-panel");
-  if (panel) panel.classList.toggle("is-card-view", accountView === "cards");
+  container.closest?.(".accounts-panel")?.classList.toggle("is-card-view", accountView === "cards");
 
   const total = filtered.length;
   const totalPages = Math.ceil(total / pageSize) || 1;
-  if (currentPage > totalPages) currentPage = totalPages;
-  if (currentPage < 1) currentPage = 1;
-
+  currentPage = Math.min(totalPages, Math.max(1, currentPage));
   const start = (currentPage - 1) * pageSize;
-  const end = start + pageSize;
-  const pageItems = filtered.slice(start, end);
-
-  if (pageItems.length === 0) {
-    container.innerHTML = "";
-    const empty = document.createElement("div");
-    empty.className = "empty-state empty-state-panel";
-    const icon = document.createElement("span");
-    icon.className = "empty-state-mark";
-    icon.textContent = "EMPTY";
-    const text = document.createElement("p");
-    const narrowed = accountStatusFilter || accountSearchQuery.trim();
-    text.textContent = narrowed ? "没有符合筛选条件的账号"
-      : currentPlatformLabel() ? `暂无 ${currentPlatformLabel()} 账号数据` : "暂无账号数据";
-    empty.appendChild(icon);
-    empty.appendChild(text);
-    container.appendChild(empty);
-    const paginationInfo = domCache.paginationInfo || document.getElementById("paginationInfo");
-    paginationInfo.textContent = `共 0 条记录，第 1/1 页`;
-    renderPagination(1, 1);
-    return;
-  }
-
-  container.innerHTML = "";
-  const wrap = document.createElement("div");
-  wrap.className = "table-wrap";
-  const table = document.createElement("table");
-  table.className = "accounts-table";
-  const thead = document.createElement("thead");
-  const headRow = document.createElement("tr");
-  // Cline has no numeric allowance, so its 配额 cell could only ever read
-  // "未计量" — a column of noise. It is dropped on the Cline page only: the
-  // other five channels report a real balance and keep theirs. The whole page
-  // renders one channel at a time, so one filter decision covers every row.
-  const quotaColumnVisible = !clinePageOnly();
-  const headers = [
-    { label: "", className: "col-check" },
-    { label: "ID", className: "col-id" },
-    { label: "账号", className: "col-token" },
-    { label: "等级", className: "col-tier" },
-    ...(quotaColumnVisible ? [{ label: "配额", className: "col-quota" }] : []),
-    { label: "状态", className: "col-status" },
-    // 今日/累计 Tokens is the only spend figure an unmetered channel can
-    // offer, and the only one that answers "how close is this account to the
-    // upstream rate limit right now".
-    { label: "今日/累计 Tokens", className: "col-tokens", title: "本网关本地统计，不代表官方额度" },
-    { label: "调用", className: "col-usage" },
-    { label: "创建时间", className: "col-created" },
-    { label: "操作", className: "col-actions" },
-  ];
-  headers.forEach((h, idx) => {
-    const th = document.createElement("th");
-    if (h.className) th.className = h.className;
-    if (h.title) th.title = h.title;
-    if (idx === 0) {
-      const selectAll = document.createElement("input");
-      selectAll.type = "checkbox";
-      selectAll.dataset.action = "select-all";
-      th.appendChild(selectAll);
-    } else { th.textContent = h.label; }
-    headRow.appendChild(th);
-  });
-  thead.appendChild(headRow);
-  table.appendChild(thead);
-
-  const tbody = document.createElement("tbody");
-
-  // 使用 DocumentFragment 批量构建表格行
-  const fragment = document.createDocumentFragment();
-  pageItems.forEach((acc) => {
-    const badge = statusBadge(acc);
-    const tokenDisplay = formatTokenDisplay(acc);
-    const identity = accountIdentityPrimary(acc);
-    const tr = document.createElement("tr");
-
-    const tdCheck = document.createElement("td");
-    tdCheck.className = "col-check";
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.className = "row-checkbox";
-    cb.dataset.action = "row-select";
-    cb.dataset.id = encodeData(acc.id);
-    tdCheck.appendChild(cb);
-    tr.appendChild(tdCheck);
-
-    const tdID = document.createElement("td");
-    tdID.className = "col-id";
-    tdID.textContent = acc.id === null || acc.id === undefined ? "" : String(acc.id);
-    tr.appendChild(tdID);
-
-    // The identity cell leads with the address/identifier and keeps the
-    // credential summary as secondary text: a truncated token used to be the
-    // most prominent thing in the row.
-    const tdToken = document.createElement("td");
-    tdToken.className = "col-token";
-    const identityWrap = document.createElement("div");
-    identityWrap.className = "account-identity";
-    const primary = document.createElement("span");
-    primary.className = "account-identity-primary";
-    primary.textContent = identity;
-    primary.title = identity;
-    identityWrap.appendChild(primary);
-    const sub = document.createElement("span");
-    sub.className = "account-identity-sub";
-    const typeBadge = document.createElement("span");
-    typeBadge.className = "badge badge-" + normalizeAccountType(acc);
-    // The models table and account table use the same display names.
-    typeBadge.textContent = ACCOUNT_TYPE_NAMES[normalizeAccountType(acc)] || normalizeAccountType(acc) || "unknown";
-    sub.appendChild(typeBadge);
-    if (isSidebarGrokWebAccount(acc)) {
-      const pool = String(acc.grok_pool || "").trim();
-      if (pool) {
-        const poolBadge = document.createElement("span");
-        poolBadge.className = "badge badge-grok-pool";
-        poolBadge.textContent = pool;
-        poolBadge.title = "Grok Web 账号池";
-        sub.appendChild(poolBadge);
-      }
-      if (acc.nsfw_enabled === true) {
-        const nsfw = document.createElement("span");
-        nsfw.className = "badge badge-grok-nsfw";
-        nsfw.textContent = "NSFW";
-        nsfw.title = "已在 grok.com 开启 NSFW";
-        sub.appendChild(nsfw);
-      }
-    }
-    if (tokenDisplay && tokenDisplay !== identity && tokenDisplay !== "-") {
-      const credential = document.createElement("span");
-      credential.className = "account-identity-token";
-      credential.textContent = tokenDisplay;
-      credential.title = tokenDisplay;
-      sub.appendChild(credential);
-    }
-    identityWrap.appendChild(sub);
-    tdToken.appendChild(identityWrap);
-    tr.appendChild(tdToken);
-
-    const tdTier = document.createElement("td");
-    tdTier.className = "col-tier";
-    tdTier.innerHTML = buildSubscriptionMarkup(acc);
-    tr.appendChild(tdTier);
-
-    // Dropped on the Cline page for the same reason the header is: a column that
-    // can only ever say "未计量" is not worth a column.
-    if (quotaColumnVisible) {
-      const tdQuota = document.createElement("td");
-      tdQuota.className = "col-quota";
-      // One shared renderer for the desktop table and the mobile cards.
-      const quota = getQuotaStats(acc);
-      tdQuota.innerHTML = buildQuotaMarkup(acc, quota);
-      if (normalizeAccountType(acc) === "workbuddy") {
-        if (quota && quota.workbuddy) {
-          tdQuota.title = [
-            quota.plan ? `计量包: ${quota.plan}` : "",
-            `单位: ${quota.unit || "credit"}`,
-            "口径: 当前周期剩余 / 周期上限",
-            quota.resetAt ? `重置: ${new Date(quota.resetAt).toLocaleString()}` : "",
-          ].filter(Boolean).join(" · ");
-        } else { tdQuota.title = "尚未读取到 WorkBuddy 计量额度；点刷新立即同步"; }
-      } else if (quota && (quota.estimated || quota.quotaUnavailable)) {
-        // Every number in this cell carries its provenance, so an estimate is never
-        // mistaken for a reported balance.
-        tdQuota.title = quotaTooltip(acc, quota);
-      }
-      tr.appendChild(tdQuota);
-    }
-
-    const tdStatus = document.createElement("td");
-    tdStatus.className = "col-status";
-    const statusSpan = document.createElement("span");
-    statusSpan.className = "tag tag-status-normal";
-    statusSpan.title = badge.tip || "";
-    statusSpan.style.background = badge.bg;
-    statusSpan.style.color = badge.color;
-    statusSpan.style.border = "none";
-    statusSpan.textContent = badge.text;
-    tdStatus.appendChild(statusSpan);
-    // A cooled account without a stated recovery time reads as broken forever.
-    // The scheduler always writes a deadline when it cools one, so the line
-    // appears exactly when the account is held and says when to come back.
-    const cooldown = document.createElement("div");
-    cooldown.innerHTML = buildCooldownMarkup(acc);
-    if (cooldown.innerHTML) tdStatus.appendChild(cooldown);
-    tr.appendChild(tdStatus);
-
-    const tdTokens = document.createElement("td");
-    tdTokens.className = "col-tokens";
-    tdTokens.innerHTML = buildTokensMarkup(acc);
-    tr.appendChild(tdTokens);
-
-    // One usage cell: the count carries the meaning, the last-use time is a
-    // sub-line instead of a column of its own.
-    const tdUsage = document.createElement("td");
-    tdUsage.className = "col-usage";
-    const count = document.createElement("div");
-    count.className = "account-usage-count";
-    count.textContent = String(accountUsageCounter(acc));
-    if (normalizeAccountType(acc) === "workbuddy") { count.title = "WorkBuddy 按计量口径统计的已消耗额度（点刷新同步）"; }
-    const when = document.createElement("div");
-    when.className = "account-usage-when";
-    when.textContent = acc.last_used_at && !acc.last_used_at.startsWith('0001') ? formatTime(acc.last_used_at) : "未调用";
-    tdUsage.appendChild(count);
-    tdUsage.appendChild(when);
-    tr.appendChild(tdUsage);
-
-    const tdCreated = document.createElement("td");
-    tdCreated.className = "col-created";
-    tdCreated.innerHTML = buildCreatedMarkup(acc);
-    tr.appendChild(tdCreated);
-
-    const tdActions = document.createElement("td");
-    tdActions.className = "col-actions";
-    const actionWrap = document.createElement("div");
-    actionWrap.className = "accounts-row-actions";
-
-    const edit = document.createElement("button");
-    edit.type = "button";
-    edit.className = "action-icon";
-    edit.dataset.action = "edit";
-    edit.dataset.id = encodeData(acc.id);
-    edit.title = "编辑账号设置与凭据";
-    setActionContent(edit, "edit", "编辑");
-
-    const refresh = document.createElement("button");
-    refresh.type = "button";
-    refresh.className = "action-icon";
-    refresh.dataset.action = "refresh";
-    refresh.dataset.id = encodeData(acc.id);
-    refresh.title = "立即同步状态与额度";
-    if (normalizeAccountType(acc) === "doubao") refresh.title = "同步账号状态；设备标识按对话自动管理";
-    setActionContent(refresh, "refresh", "刷新");
-
-    const del = document.createElement("button");
-    del.type = "button";
-    del.className = "action-icon is-danger";
-    del.dataset.action = "delete";
-    del.dataset.id = encodeData(acc.id);
-    del.title = "删除该账号";
-    setActionContent(del, "delete", "删除");
-
-    actionWrap.appendChild(edit);
-    if (needsHumanVerification(acc)) {
-      const verify = document.createElement("button");
-      verify.type = "button";
-      verify.className = "action-icon";
-      verify.dataset.action = "verify";
-      verify.dataset.id = encodeData(acc.id);
-      verify.title = "完成豆包官方人机验证";
-      setActionContent(verify, "verify", "验证");
-      actionWrap.appendChild(verify);
-    }
-    actionWrap.appendChild(refresh);
-    actionWrap.appendChild(del);
-    tdActions.appendChild(actionWrap);
-    tr.appendChild(tdActions);
-
-    // 将行添加到 fragment 而不是直接添加到 tbody
-    fragment.appendChild(tr);
-  });
-
-  // 一次性将所有行插入到 tbody
-  tbody.appendChild(fragment);
-  table.appendChild(tbody);
-  wrap.appendChild(ConsoleUI.responsiveTable(table));
-  container.appendChild(wrap);
-
   const paginationInfo = domCache.paginationInfo || document.getElementById("paginationInfo");
   paginationInfo.textContent = `共 ${total} 条记录，第 ${currentPage}/${totalPages} 页`;
   renderPagination(currentPage, totalPages);
-  updateSelectedCount();
+  container.innerHTML = "";
 
+  if (!total) {
+    const narrowed = accountStatusFilter || accountSearchQuery.trim();
+    const label = currentPlatformLabel();
+    const text = narrowed ? "没有符合筛选条件的账号" : label ? `暂无 ${label} 账号数据` : "暂无账号数据";
+    container.appendChild(attach(make("div", "empty-state empty-state-panel"), [
+      make("span", "empty-state-mark", "EMPTY"), make("p", "", text),
+    ]));
+    return;
+  }
+
+  // Cline has no numeric allowance; its local token statistics remain visible.
+  const showQuota = !clinePageOnly();
+  const headers = [
+    ["check", ""], ["id", "ID"], ["token", "账号"], ["tier", "等级"],
+    ...(showQuota ? [["quota", "配额"]] : []),
+    ["status", "状态"], ["tokens", "今日/累计 Tokens", "本网关本地统计，不代表官方额度"],
+    ["usage", "调用"], ["created", "创建时间"], ["actions", "操作"],
+  ];
+  const head = attach(make("tr"), headers.map(([column, label, title]) => {
+    const th = make("th", "col-" + column, label);
+    if (title) th.title = title;
+    if (column === "check") {
+      const input = make("input");
+      input.type = "checkbox";
+      input.dataset.action = "select-all";
+      th.appendChild(input);
+    }
+    return th;
+  }));
+  const body = attach(make("tbody"), filtered.slice(start, start + pageSize).map(acc => accountRow(acc, showQuota)));
+  const table = attach(make("table", "accounts-table"), [attach(make("thead"), [head]), body]);
+  container.appendChild(attach(make("div", "table-wrap"), [ConsoleUI.responsiveTable(table)]));
+  updateSelectedCount();
   bindAccountActions(container);
+}
+
+function accountRow(acc, showQuota) {
+  const { make, attach } = ConsoleUI;
+  const type = normalizeAccountType(acc);
+  const id = encodeData(acc.id);
+  const title = (node, text) => Object.assign(node, { title: text });
+  const markup = (column, html) => Object.assign(make("td", "col-" + column), { innerHTML: html });
+  const cell = (column, ...children) => attach(make("td", "col-" + column), children);
+
+  const check = make("input", "row-checkbox");
+  check.type = "checkbox";
+  Object.assign(check.dataset, { action: "row-select", id });
+
+  const identity = accountIdentityPrimary(acc);
+  const tokenDisplay = formatTokenDisplay(acc);
+  const secondary = make("span", "account-identity-sub");
+  secondary.appendChild(make("span", "badge badge-" + type, ACCOUNT_TYPE_NAMES[type] || type || "unknown"));
+  if (isSidebarGrokWebAccount(acc)) {
+    const pool = String(acc.grok_pool || "").trim();
+    if (pool) secondary.appendChild(title(make("span", "badge badge-grok-pool", pool), "Grok Web 账号池"));
+    if (acc.nsfw_enabled === true) secondary.appendChild(title(make("span", "badge badge-grok-nsfw", "NSFW"), "已在 grok.com 开启 NSFW"));
+  }
+  if (tokenDisplay && tokenDisplay !== identity && tokenDisplay !== "-") {
+    secondary.appendChild(title(make("span", "account-identity-token", tokenDisplay), tokenDisplay));
+  }
+  const identityWrap = attach(make("div", "account-identity"), [
+    title(make("span", "account-identity-primary", identity), identity), secondary,
+  ]);
+
+  const badge = statusBadge(acc);
+  const status = title(make("span", "tag tag-status-normal", badge.text), badge.tip || "");
+  Object.assign(status.style, { background: badge.bg, color: badge.color, border: "none" });
+  const cooldown = Object.assign(make("div"), { innerHTML: buildCooldownMarkup(acc) });
+  const count = make("div", "account-usage-count", String(accountUsageCounter(acc)));
+  if (type === "workbuddy") count.title = "WorkBuddy 按计量口径统计的已消耗额度（点刷新同步）";
+  const when = acc.last_used_at && !acc.last_used_at.startsWith("0001") ? formatTime(acc.last_used_at) : "未调用";
+
+  const actions = [
+    ["edit", "编辑", "编辑账号设置与凭据"],
+    ...(needsHumanVerification(acc) ? [["verify", "验证", "完成豆包官方人机验证"]] : []),
+    ["refresh", "刷新", type === "doubao" ? "同步账号状态；设备标识按对话自动管理" : "立即同步状态与额度"],
+    ["delete", "删除", "删除该账号"],
+  ].map(([action, label, tooltip]) => {
+    const button = title(make("button", action === "delete" ? "action-icon is-danger" : "action-icon"), tooltip);
+    button.type = "button";
+    Object.assign(button.dataset, { action, id });
+    setActionContent(button, action, label);
+    return button;
+  });
+
+  return attach(make("tr"), [
+    cell("check", check), make("td", "col-id", acc.id == null ? "" : String(acc.id)),
+    cell("token", identityWrap), markup("tier", buildSubscriptionMarkup(acc)),
+    showQuota && accountQuotaCell(acc, type, markup),
+    cell("status", status, cooldown.innerHTML && cooldown),
+    markup("tokens", buildTokensMarkup(acc)),
+    cell("usage", count, make("div", "account-usage-when", when)),
+    markup("created", buildCreatedMarkup(acc)),
+    cell("actions", attach(make("div", "accounts-row-actions"), actions)),
+  ]);
+}
+
+function accountQuotaCell(acc, type, markup) {
+  const quota = getQuotaStats(acc);
+  const cell = markup("quota", buildQuotaMarkup(acc, quota));
+  if (type === "workbuddy") {
+    cell.title = quota?.workbuddy ? [
+      quota.plan ? `计量包: ${quota.plan}` : "",
+      `单位: ${quota.unit || "credit"}`,
+      "口径: 当前周期剩余 / 周期上限",
+      quota.resetAt ? `重置: ${new Date(quota.resetAt).toLocaleString()}` : "",
+    ].filter(Boolean).join(" · ") : "尚未读取到 WorkBuddy 计量额度；点刷新立即同步";
+  } else if (quota?.estimated || quota?.quotaUnavailable) {
+    cell.title = quotaTooltip(acc, quota);
+  }
+  return cell;
 }
 
 const ACTION_ICONS = {
@@ -937,9 +778,6 @@ function accountUsageCounter(acc) {
   return Number(acc?.request_count || 0);
 }
 
-// buildMobileEmailMarkup surfaces the signed-in address, which is how operators
-// actually recognise a WorkBuddy account (the nickname is the email).
-
 // accountIdentityPrimary is the row's subject: the address for channels that
 // report one (WorkBuddy's nickname is the email), otherwise the credential
 // summary.
@@ -957,7 +795,6 @@ function accountIdentityPrimary(acc) {
   return identity;
 }
 
-// buildQuotaMarkup renders the remaining allowance for every channel.
 // grokWebMediaMarkup summarizes the per-product Imagine allowance: what the
 // account can still spend on images, edits and videos.
 function grokWebMediaMarkup(imagine) {
@@ -1016,6 +853,7 @@ function warpQuotaMarkup(quota) {
   </div>`;
 }
 
+// buildQuotaMarkup renders the remaining allowance for every channel.
 function buildQuotaMarkup(acc, quota = getQuotaStats(acc)) {
   if (quota?.warpPools) return warpQuotaMarkup(quota);
   if (quota && quota.grokWeb) {
@@ -1175,18 +1013,14 @@ function toggleSelectAll(checked) {
 // Open modal
 function openModal(account = null) {
   if (accountSave.busy) return;
-  stopWorkBuddyLogin();
-  stopClineLogin();
-  stopWarpLogin();
-	globalThis.DoubaoLogin?.reset?.();
+  resetAccountLogin();
+  globalThis.DoubaoLogin?.reset?.();
   const title = document.getElementById("modalTitle");
-  const form = document.getElementById("accountForm");
   const typeEl = document.getElementById("accountType");
-  stopGrokDeviceLogin(true);
-  resetGrokDeviceLoginStatus();
-
-  if (!account) form.reset();
-  if (!account) globalThis.GrokSSO?.resetForNewAccount?.();
+  if (!account) {
+    document.getElementById("accountForm").reset();
+    globalThis.GrokSSO?.resetForNewAccount?.();
+  }
   title.textContent = account ? "编辑账号" : "添加账号";
   document.getElementById("accountId").value = account ? account.id : "";
   document.getElementById("enabled").checked = account ? account.enabled : true;
@@ -1229,14 +1063,17 @@ function stopWarpLogin() {
 }
 function stopDoubaoLogin() { globalThis.DoubaoLogin?.stop?.(); }
 
-// Close modal
-function closeModal() {
+function resetAccountLogin() {
   stopGrokDeviceLogin(true);
   resetGrokDeviceLoginStatus();
   stopWorkBuddyLogin();
   stopClineLogin();
   stopWarpLogin();
-	stopDoubaoLogin();
+}
+
+function closeModal() {
+  resetAccountLogin();
+  stopDoubaoLogin();
   ConsoleUI.modal("accountModal", false);
 }
 

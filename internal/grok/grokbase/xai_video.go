@@ -166,16 +166,26 @@ func TrustedVideoURL(rawURL string) bool {
 // OpenVideo fetches a finished video from xAI's CDN without credentials. The
 // caller owns the response body and must enforce MaxVideoAssetBytes while copying.
 func OpenVideo(ctx context.Context, httpClient *http.Client, rawURL string) (io.ReadCloser, string, error) {
+	return OpenVideoWithOriginCookie(ctx, httpClient, rawURL, "")
+}
+
+// OpenVideoWithOriginCookie authenticates a Web asset only at its initial
+// trusted origin. Redirects to different hosts carry no account cookie.
+func OpenVideoWithOriginCookie(ctx context.Context, httpClient *http.Client, rawURL, cookie string) (io.ReadCloser, string, error) {
 	if httpClient == nil || !TrustedVideoURL(rawURL) {
 		return nil, "", errors.New("xAI video content URL is not trusted")
 	}
 	client := *httpClient
+	client.Jar = nil
 	client.CheckRedirect = func(request *http.Request, via []*http.Request) error {
 		if !TrustedVideoURL(request.URL.String()) {
 			return errors.New("xAI video redirected to an untrusted URL")
 		}
 		if len(via) >= 10 {
 			return errors.New("too many Build video redirects")
+		}
+		if len(via) == 0 || !strings.EqualFold(request.URL.Host, via[0].URL.Host) {
+			request.Header.Del("Cookie")
 		}
 		return nil
 	}
@@ -184,6 +194,9 @@ func OpenVideo(ctx context.Context, httpClient *http.Client, rawURL string) (io.
 		return nil, "", err
 	}
 	request.Header.Set("Accept", "video/*,*/*;q=0.8")
+	if cookie != "" {
+		request.Header.Set("Cookie", cookie)
+	}
 	response, err := client.Do(request)
 	if err != nil {
 		return nil, "", err

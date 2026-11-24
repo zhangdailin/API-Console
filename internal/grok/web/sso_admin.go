@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"orchids-api/internal/grok/grokbase"
@@ -257,6 +256,23 @@ type ssoAccountResult struct {
 	Error     string `json:"error,omitempty"`
 }
 
+// SSOBatchAccounts validates the shared management request before selecting accounts.
+func (h *Handler) SSOBatchAccounts(w http.ResponseWriter, r *http.Request) ([]*store.Account, bool) {
+	if !httpserver.RequireMethod(w, r, http.MethodPost) {
+		return nil, false
+	}
+	if h == nil || h.lb == nil || h.lb.Store == nil {
+		httpserver.WriteError(w, http.StatusServiceUnavailable, "store not configured")
+		return nil, false
+	}
+	accounts, err := h.ResolveSSOAccounts(r)
+	if err != nil {
+		httpserver.WriteError(w, http.StatusBadRequest, err.Error())
+		return nil, false
+	}
+	return accounts, true
+}
+
 // ResolveSSOAccounts returns the Web accounts the request names, or every Web
 // account when it names none.
 func (h *Handler) ResolveSSOAccounts(r *http.Request) ([]*store.Account, error) {
@@ -291,52 +307,41 @@ func (h *Handler) ResolveSSOAccounts(r *http.Request) ([]*store.Account, error) 
 // refreshAccounts verifies each account against grok.com, persists the
 // observation and republishes the Web routes once at the end.
 func (h *Handler) refreshAccounts(ctx context.Context, accounts []*store.Account) []ssoAccountResult {
-	results := make([]ssoAccountResult, len(accounts))
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, ssoRefreshWorkers)
 	cfg := h.configSnapshot()
-	for i, acc := range accounts {
-		wg.Add(1)
-		go func(i int, acc *store.Account) {
-			defer wg.Done()
-			select {
-			case sem <- struct{}{}:
-			case <-ctx.Done():
-				results[i] = ssoAccountResult{AccountID: acc.ID, Name: acc.Name, Error: ctx.Err().Error()}
-				return
+	results := grokbase.MapAccounts(ctx, accounts, ssoRefreshWorkers, func(acc *store.Account) ssoAccountResult {
+		updated := *acc
+		status, err := VerifyAccount(ctx, cfg, &updated)
+		now := time.Now()
+		result := ssoAccountResult{AccountID: acc.ID, Name: acc.Name, Success: err == nil, Status: status}
+		switch {
+		case status == "401":
+			updated.StatusCode = "401"
+			updated.AuthStatus = store.AccountAuthStatusReauthRequired
+			updated.StatusMessage = "grok.com 已不接受该 SSO Cookie，需要重新导入"
+			updated.LastAttempt = now
+			result.Error = "sso cookie rejected"
+		case err != nil:
+			result.Error = redactSSOError(err, acc)
+		default:
+			if code := strings.TrimSpace(updated.StatusCode); code == "401" || code == "403" {
+				updated.StatusCode = ""
+				updated.StatusMessage = ""
 			}
-			defer func() { <-sem }()
-			updated := *acc
-			status, err := VerifyAccount(ctx, cfg, &updated)
-			now := time.Now()
-			result := ssoAccountResult{AccountID: acc.ID, Name: acc.Name, Success: err == nil, Status: status}
-			switch {
-			case status == "401":
-				updated.StatusCode = "401"
-				updated.AuthStatus = store.AccountAuthStatusReauthRequired
-				updated.StatusMessage = "grok.com 已不接受该 SSO Cookie，需要重新导入"
-				updated.LastAttempt = now
-				result.Error = "sso cookie rejected"
-			case err != nil:
-				result.Error = redactSSOError(err, acc)
-			default:
-				if code := strings.TrimSpace(updated.StatusCode); code == "401" || code == "403" {
-					updated.StatusCode = ""
-					updated.StatusMessage = ""
-				}
-				updated.VerifiedAt = now
-			}
-			if err := h.lb.Store.UpdateAccount(ctx, &updated); err != nil {
-				slog.Warn("grok sso refresh: update failed", "account_id", acc.ID, "error", err)
-			}
-			results[i] = result
-		}(i, acc)
-	}
-	wg.Wait()
+			updated.VerifiedAt = now
+		}
+		if err := h.lb.Store.UpdateAccount(ctx, &updated); err != nil {
+			slog.Warn("grok sso refresh: update failed", "account_id", acc.ID, "error", err)
+		}
+		return result
+	}, ssoFailedAccount)
 	if err := PublishRoutes(ctx, h.lb.Store); err != nil {
 		slog.Warn("grok web route publication failed", "error", err)
 	}
 	return results
+}
+
+func ssoFailedAccount(acc *store.Account, err error) ssoAccountResult {
+	return ssoAccountResult{AccountID: acc.ID, Name: acc.Name, Error: redactSSOError(err, acc)}
 }
 
 func redactSSOError(err error, acc *store.Account) string {
@@ -352,28 +357,14 @@ func redactSSOError(err error, acc *store.Account) string {
 // HandleSSORefresh re-reads identity and quota for the named Web accounts.
 // POST /api/grok/sso/refresh {"account_ids":[...]}
 func (h *Handler) HandleSSORefresh(w http.ResponseWriter, r *http.Request) {
-	if !httpserver.RequireMethod(w, r, http.MethodPost) {
-		return
-	}
-	if h == nil || h.lb == nil || h.lb.Store == nil {
-		httpserver.WriteError(w, http.StatusServiceUnavailable, "store not configured")
-		return
-	}
-	accounts, err := h.ResolveSSOAccounts(r)
-	if err != nil {
-		httpserver.WriteError(w, http.StatusBadRequest, err.Error())
+	accounts, ok := h.SSOBatchAccounts(w, r)
+	if !ok {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Minute)
 	defer cancel()
 	results := h.refreshAccounts(ctx, accounts)
-	ok := 0
-	for _, result := range results {
-		if result.Success {
-			ok++
-		}
-	}
-	util.WriteJSON(w, map[string]any{"status": "success", "total": len(results), "ok": ok, "failed": len(results) - ok, "results": results})
+	grokbase.WriteAccountBatch(w, results, func(result ssoAccountResult) bool { return result.Success })
 }
 
 // enableNSFWForAccount switches the grok.com NSFW preference on for one
@@ -401,44 +392,19 @@ func (h *Handler) enableNSFWForAccount(ctx context.Context, acc *store.Account) 
 // HandleSSONSFW enables NSFW on the named Web accounts.
 // POST /api/grok/sso/nsfw {"account_ids":[...]}
 func (h *Handler) HandleSSONSFW(w http.ResponseWriter, r *http.Request) {
-	if !httpserver.RequireMethod(w, r, http.MethodPost) {
-		return
-	}
-	if h == nil || h.lb == nil || h.lb.Store == nil {
-		httpserver.WriteError(w, http.StatusServiceUnavailable, "store not configured")
-		return
-	}
-	accounts, err := h.ResolveSSOAccounts(r)
-	if err != nil {
-		httpserver.WriteError(w, http.StatusBadRequest, err.Error())
+	accounts, ok := h.SSOBatchAccounts(w, r)
+	if !ok {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Minute)
 	defer cancel()
-	results := make([]ssoAccountResult, len(accounts))
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, ssoRefreshWorkers)
-	for i, acc := range accounts {
-		wg.Add(1)
-		go func(i int, acc *store.Account) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			_, err := h.enableNSFWForAccount(ctx, acc)
-			results[i] = ssoAccountResult{AccountID: acc.ID, Name: acc.Name, Success: err == nil}
-			if err != nil {
-				results[i].Error = redactSSOError(err, acc)
-			}
-		}(i, acc)
-	}
-	wg.Wait()
-	ok := 0
-	for _, result := range results {
-		if result.Success {
-			ok++
+	results := grokbase.MapAccounts(ctx, accounts, ssoRefreshWorkers, func(acc *store.Account) ssoAccountResult {
+		if _, err := h.enableNSFWForAccount(ctx, acc); err != nil {
+			return ssoFailedAccount(acc, err)
 		}
-	}
-	util.WriteJSON(w, map[string]any{"status": "success", "total": len(results), "ok": ok, "failed": len(results) - ok, "results": results})
+		return ssoAccountResult{AccountID: acc.ID, Name: acc.Name, Success: true}
+	}, ssoFailedAccount)
+	grokbase.WriteAccountBatch(w, results, func(result ssoAccountResult) bool { return result.Success })
 }
 
 // HandleAvailability reports how many usable accounts each Grok plane has, so

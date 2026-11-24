@@ -7,6 +7,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"orchids-api/internal/grok/grokbase"
 	"strconv"
 	"strings"
 	"sync"
@@ -134,23 +135,13 @@ var baseHeaders = http.Header{
 	"Sec-Fetch-Site":     []string{"same-origin"},
 }
 
-var appChatHeaders = http.Header{
-	"Accept":             []string{"*/*"},
-	"Accept-Encoding":    []string{"gzip, deflate, br, zstd"},
-	"Accept-Language":    []string{"zh-CN,zh;q=0.9,en;q=0.8,en-US;q=0.7"},
-	"Cache-Control":      []string{"no-cache"},
-	"Content-Type":       []string{"application/json"},
-	"Origin":             []string{"https://grok.com"},
-	"Pragma":             []string{"no-cache"},
-	"Priority":           []string{"u=1, i"},
-	"Referer":            []string{"https://grok.com/"},
-	"Sec-Ch-Ua":          []string{defaultAppChatSecCHUA},
-	"Sec-Ch-Ua-Mobile":   []string{"?0"},
-	"Sec-Ch-Ua-Platform": []string{`"macOS"`},
-	"Sec-Fetch-Dest":     []string{"empty"},
-	"Sec-Fetch-Mode":     []string{"cors"},
-	"Sec-Fetch-Site":     []string{"same-origin"},
-}
+var appChatHeaders = func() http.Header {
+	h := baseHeaders.Clone()
+	h.Del("Baggage")
+	h.Set("Accept-Encoding", "gzip, deflate, br, zstd")
+	h.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8,en-US;q=0.7")
+	return h
+}()
 
 func cloneHeaderShallow(src http.Header, extraCapacity int) http.Header {
 	if extraCapacity < 0 {
@@ -313,46 +304,24 @@ func applyChromiumClientHints(header http.Header, userAgent string) {
 	header.Set("Sec-Ch-Ua-Platform", strconv.Quote(platform))
 }
 
-// headersFor is headers with the statsig id resolved for one request. The plain
-// headers method keeps the manual-only behaviour for callers without a context.
+// headersFor resolves the statsig ID for one general API request.
 func (c *Client) headersFor(ctx context.Context, token, method, reqURL string) http.Header {
-	h := c.headers(token)
-	if statsig := c.statsigIDForRequest(ctx, token, method, reqURL); statsig != "" {
-		h.Set("x-statsig-id", statsig)
-	} else {
-		h.Del("x-statsig-id")
-	}
-	return h
+	return c.withRequestStatsig(ctx, c.headers(token), token, method, reqURL)
 }
 
 func (c *Client) headers(token string) http.Header {
-	// 从预分配的模板浅克隆请求头；固定值切片复用，动态字段再覆盖。
-	h := cloneHeaderShallow(baseHeaders, 4)
-
-	// 添加动态请求头
-	h.Set("User-Agent", c.userAgent())
-	applyChromiumClientHints(h, c.userAgent())
-	if statsig := c.statsigID(); statsig != "" {
-		h.Set("x-statsig-id", statsig)
-	}
-	h.Set("x-xai-request-id", randomUUID())
-
-	// 构建 Cookie
-	cfClearance, cfBM := c.cloudflareCookies()
-	if cookie := buildGrokCookie(token, cfClearance, cfBM); cookie != "" {
-		h.Set("Cookie", cookie)
-	}
-
-	return h
+	return c.browserHeaders(baseHeaders, token)
 }
 
 func (c *Client) appChatHeaders(token string) http.Header {
 	return c.appChatHeadersWithReferer(token, "")
 }
 
-// appChatHeadersFor resolves the statsig id for one app-chat request.
 func (c *Client) appChatHeadersFor(ctx context.Context, token, method, reqURL string) http.Header {
-	h := c.appChatHeaders(token)
+	return c.withRequestStatsig(ctx, c.appChatHeaders(token), token, method, reqURL)
+}
+
+func (c *Client) withRequestStatsig(ctx context.Context, h http.Header, token, method, reqURL string) http.Header {
 	if statsig := c.statsigIDForRequest(ctx, token, method, reqURL); statsig != "" {
 		h.Set("x-statsig-id", statsig)
 	} else {
@@ -362,17 +331,22 @@ func (c *Client) appChatHeadersFor(ctx context.Context, token, method, reqURL st
 }
 
 func (c *Client) appChatHeadersWithReferer(token, referer string) http.Header {
-	h := cloneHeaderShallow(appChatHeaders, 4)
-	h.Set("User-Agent", c.userAgent())
-	applyChromiumClientHints(h, c.userAgent())
+	h := c.browserHeaders(appChatHeaders, token)
 	if referer = strings.TrimSpace(referer); referer != "" {
 		h.Set("Referer", referer)
 	}
+	return h
+}
+
+func (c *Client) browserHeaders(template http.Header, token string) http.Header {
+	h := cloneHeaderShallow(template, 4)
+	ua := c.userAgent()
+	h.Set("User-Agent", ua)
+	applyChromiumClientHints(h, ua)
 	if statsig := c.statsigID(); statsig != "" {
 		h.Set("x-statsig-id", statsig)
 	}
-	h.Set("x-xai-request-id", randomUUID())
-
+	h.Set("x-xai-request-id", grokbase.RandomRequestID())
 	cfClearance, cfBM := c.cloudflareCookies()
 	if cookie := buildGrokCookie(token, cfClearance, cfBM); cookie != "" {
 		h.Set("Cookie", cookie)

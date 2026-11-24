@@ -68,25 +68,50 @@ func suffixPrefixOverlap(text, tag string) int {
 	return 0
 }
 
+type chatUpstreamFrame struct {
+	raw, model    map[string]any
+	delta, answer string
+	thinking      bool
+}
+
+type chatResponseIdentity struct{ id, fingerprint string }
+
+func newChatResponseIdentity() chatResponseIdentity {
+	return chatResponseIdentity{id: "chatcmpl_" + util.RandomHex(8)}
+}
+
+func (i *chatResponseIdentity) observe(frame chatUpstreamFrame) {
+	if i.fingerprint == "" {
+		i.fingerprint = extractUpstreamFingerprint(frame.raw, frame.model)
+	}
+	if id := extractUpstreamResponseID(frame.raw, frame.model); id != "" {
+		i.id = id
+	}
+}
+
+func logChatMarkup(text string) {
+	if strings.Contains(text, "<grok:render") || strings.Contains(text, "tool_usage_card") {
+		slog.Debug("grok message contains render/tool markup", "has_modelResponse", true)
+	}
+}
+
 var errIncompleteWebChat = errors.New("upstream conversation ended before a final answer")
 
 // parseChatUpstream requires an answer snapshot or an explicit stop. A clean
 // transport EOF can also follow a prefix of a syntactically valid NDJSON body.
-func parseChatUpstream(body io.Reader, hasAttachments bool, handle func(map[string]any) error) error {
+func parseChatUpstream(body io.Reader, hasAttachments bool, handle func(chatUpstreamFrame) error) error {
 	var complete, answer bool
-	err := parseUpstreamLines(body, func(frame map[string]any) error {
-		if !isThinkingResponse(frame) {
-			model := extractUpstreamModelResponse(frame)
-			if strings.TrimSpace(extractUpstreamTokenDelta(frame, model)) != "" {
+	err := parseUpstreamLines(body, func(raw map[string]any) error {
+		model := extractUpstreamModelResponse(raw)
+		frame := chatUpstreamFrame{raw: raw, model: model, delta: extractUpstreamTokenDelta(raw, model), answer: extractUpstreamMessage(model), thinking: isThinkingResponse(raw)}
+		if !frame.thinking {
+			if strings.TrimSpace(frame.delta) != "" {
 				complete, answer = false, true
 			}
-			if strings.TrimSpace(extractUpstreamMessage(model)) != "" {
+			if strings.TrimSpace(frame.answer) != "" || (hasAttachments && (len(extractImageURLs(model)) > 0 || len(extractAppChatImageURLs(raw)) > 0)) {
 				complete, answer = true, true
 			}
-			if hasAttachments && ((model != nil && len(extractImageURLs(model)) > 0) || len(extractAppChatImageURLs(frame)) > 0) {
-				complete, answer = true, true
-			}
-			if stopped, _ := frame["isSoftStop"].(bool); stopped && answer {
+			if stopped, _ := raw["isSoftStop"].(bool); stopped && answer {
 				complete = true
 			}
 		}
@@ -121,9 +146,8 @@ func (h *Handler) streamChat(ctx context.Context, w http.ResponseWriter, req *Ch
 }
 
 func (h *Handler) collectChat(ctx context.Context, w http.ResponseWriter, req *ChatCompletionsRequest, token, publicBase string, hasAttachments bool, body io.Reader, logger *debug.Logger) {
-	id := "chatcmpl_" + randomHex(8)
+	identity := newChatResponseIdentity()
 	lastMessage := ""
-	fingerprint := ""
 	imageCandidates := make([]string, 0, 8)
 	imageCandidateSet := map[string]struct{}{}
 	var tokenContent strings.Builder
@@ -141,47 +165,27 @@ func (h *Handler) collectChat(ctx context.Context, w http.ResponseWriter, req *C
 		imageCandidates = append(imageCandidates, u)
 	}
 
-	err := parseChatUpstream(body, hasAttachments, func(resp map[string]any) error {
+	err := parseChatUpstream(body, hasAttachments, func(frame chatUpstreamFrame) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		logger.LogOutputSSEJSON("response", resp)
-		mr := extractUpstreamModelResponse(resp)
-		if fingerprint == "" {
-			fingerprint = extractUpstreamFingerprint(resp, mr)
-		}
-		if rid := extractUpstreamResponseID(resp, mr); rid != "" {
-			id = rid
-		}
-		isThinking := isThinkingResponse(resp)
-		tokenDelta := extractUpstreamTokenDelta(resp, mr)
-		if isThinking {
-			if tokenDelta != "" {
-				reasoningTokens.WriteString(tokenDelta)
-			}
-			if mr != nil {
-				if snapshot := extractUpstreamMessage(mr); strings.TrimSpace(snapshot) != "" {
-					reasoningSnapshot = snapshot
-				}
+		logger.LogOutputSSEJSON("response", frame.raw)
+		identity.observe(frame)
+		if frame.thinking {
+			reasoningTokens.WriteString(frame.delta)
+			if strings.TrimSpace(frame.answer) != "" {
+				reasoningSnapshot = frame.answer
 			}
 			return nil
 		}
-		if tokenDelta != "" {
-			tokenContent.WriteString(tokenDelta)
-		}
-		if mr != nil {
-			if msg := extractUpstreamMessage(mr); strings.TrimSpace(msg) != "" && msg != lastMessage {
-				lastMessage = msg
-				if strings.Contains(msg, "<grok:render") || strings.Contains(msg, "tool_usage_card") {
-					slog.Debug("grok message contains render/tool markup", "has_modelResponse", true)
-				}
-			}
-			if hasAttachments {
-				forEachImageCandidateFromValue(mr, true, false, 0, addImageCandidate)
-			}
+		tokenContent.WriteString(frame.delta)
+		if strings.TrimSpace(frame.answer) != "" && frame.answer != lastMessage {
+			lastMessage = frame.answer
+			logChatMarkup(lastMessage)
 		}
 		if hasAttachments {
-			forEachImageCandidateFromValue(resp, false, false, 0, addImageCandidate)
+			forEachImageCandidateFromValue(frame.model, true, false, 0, addImageCandidate)
+			forEachImageCandidateFromValue(frame.raw, false, false, 0, addImageCandidate)
 		}
 		return nil
 	})
@@ -201,17 +205,8 @@ func (h *Handler) collectChat(ctx context.Context, w http.ResponseWriter, req *C
 		return
 	}
 
-	tokenClean := sanitizeUpstreamText(tokenContent.String())
-	modelClean := sanitizeUpstreamText(lastMessage)
-
-	finalContent := modelClean
-	if strings.TrimSpace(finalContent) == "" {
-		finalContent = tokenClean
-	}
-	reasoningContent := sanitizeUpstreamText(reasoningSnapshot)
-	if strings.TrimSpace(reasoningContent) == "" {
-		reasoningContent = sanitizeUpstreamText(reasoningTokens.String())
-	}
+	finalContent := preferredChatText(lastMessage, &tokenContent)
+	reasoningContent := preferredChatText(reasoningSnapshot, &reasoningTokens)
 
 	var toolCalls []map[string]any
 	if toolCallsEnabled(req.Tools, req.ToolChoice) {
@@ -224,17 +219,10 @@ func (h *Handler) collectChat(ctx context.Context, w http.ResponseWriter, req *C
 	if hasAttachments {
 		imgs := normalizeImageURLs(imageCandidates, 8)
 		for _, u := range imgs {
-			val, errV := h.imageOutputValue(ctx, token, u, "url")
+			finalContent += h.chatImageMarkdown(ctx, token, publicBase, u)
 			if ctx.Err() != nil {
 				return
 			}
-			if errV != nil || strings.TrimSpace(val) == "" {
-				val = u
-			}
-			if publicBase != "" && strings.HasPrefix(val, "/") {
-				val = publicBase + val
-			}
-			finalContent += formatImageMarkdown(val)
 		}
 	}
 	if ctx.Err() != nil {
@@ -250,31 +238,47 @@ func (h *Handler) collectChat(ctx context.Context, w http.ResponseWriter, req *C
 		message["reasoning_content"] = reasoningContent
 	}
 	usage := grokbase.AddReasoningUsage(buildChatUsagePayload(req, finalContent, toolCalls), reasoningContent)
-	resp := map[string]any{
-		"id":                 id,
-		"object":             "chat.completion",
-		"created":            time.Now().Unix(),
-		"model":              req.Model,
-		"service_tier":       nil,
-		"system_fingerprint": fingerprint,
-		"choices": []map[string]any{
-			{
-				"index":         0,
-				"message":       message,
-				"finish_reason": "stop",
-			},
-		},
-		"usage": usage,
-	}
+	finish := "stop"
 	if len(toolCalls) > 0 {
-		choice := resp["choices"].([]map[string]any)[0]
-		message := choice["message"].(map[string]any)
+		finish = "tool_calls"
 		message["tool_calls"] = toolCalls
 		if strings.TrimSpace(finalContent) == "" {
 			message["content"] = nil
 		}
-		choice["finish_reason"] = "tool_calls"
+	}
+	resp := map[string]any{
+		"id":                 identity.id,
+		"object":             "chat.completion",
+		"created":            time.Now().Unix(),
+		"model":              req.Model,
+		"service_tier":       nil,
+		"system_fingerprint": identity.fingerprint,
+		"choices":            []map[string]any{{"index": 0, "message": message, "finish_reason": finish}},
+		"usage":              usage,
 	}
 	util.WriteJSON(w, resp)
 	h.auditChatOutcome(context.WithoutCancel(ctx), req.account, req, chatOutcome{Finish: "stop", Usage: usage, UsageSource: audit.UsageSourceEstimated})
+}
+
+// Prefer a usable sanitized snapshot over the assembled token deltas.
+func preferredChatText(snapshot string, tokens *strings.Builder) string {
+	if clean := sanitizeUpstreamText(snapshot); strings.TrimSpace(clean) != "" {
+		return clean
+	}
+	return sanitizeUpstreamText(tokens.String())
+}
+
+func (h *Handler) chatImageMarkdown(ctx context.Context, token, publicBase, raw string) string {
+	value, err := h.imageOutputValue(ctx, token, raw, "url")
+	if err != nil || strings.TrimSpace(value) == "" {
+		value = raw
+	}
+	return chatImageLink(value, publicBase)
+}
+
+func chatImageLink(value, publicBase string) string {
+	if strings.HasPrefix(value, "/") {
+		value = publicBase + value
+	}
+	return formatImageMarkdown(value)
 }

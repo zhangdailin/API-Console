@@ -66,7 +66,7 @@ func TestNativeReasoningRecoverySpendsOnePhysicalCall(t *testing.T) {
 	defer sess.Close()
 	payload := map[string]any{"reasoning": map[string]any{"effort": "high"}, "input": []any{map[string]any{"type": "reasoning", "encrypted_content": "bad-proof", "summary": []any{map[string]any{"text": "old plan"}}}}}
 	rec := httptest.NewRecorder()
-	_, _, result := h.serveNativeResponses(rec, httptest.NewRequest("POST", "/grok/v1/responses", nil), sess, false, ModelSpec{ID: "grok-4.7", UpstreamModel: "grok-4.7"}, payload, "/responses", nil)
+	_, _, result := h.serveNativeResponses(rec, httptest.NewRequest("POST", "/grok/v1/responses", nil), sess, false, ModelSpec{ID: "grok-4.7", UpstreamModel: "grok-4.7"}, payload, "/responses", nil, nil)
 	if result.Err != nil || calls.Load() != 2 {
 		t.Fatalf("recovery did not complete in one extra call: calls=%d result=%+v", calls.Load(), result)
 	}
@@ -109,7 +109,7 @@ func TestNativeRecoveryExhaustionDoesNotSelectAnotherAccount(t *testing.T) {
 	originalAccountID := sess.acc.ID
 	payload := map[string]any{"reasoning": map[string]any{"effort": "high"}, "input": []any{map[string]any{"type": "reasoning", "encrypted_content": "bad-proof", "summary": []any{map[string]any{"text": "old plan"}}}}}
 	rec := httptest.NewRecorder()
-	_, _, result := h.serveNativeResponses(rec, httptest.NewRequest("POST", "/grok/v1/responses", nil), sess, false, ModelSpec{ID: "grok-4.7", UpstreamModel: "grok-4.7"}, payload, "/responses", nil)
+	_, _, result := h.serveNativeResponses(rec, httptest.NewRequest("POST", "/grok/v1/responses", nil), sess, false, ModelSpec{ID: "grok-4.7", UpstreamModel: "grok-4.7"}, payload, "/responses", nil, nil)
 	if calls.Load() != 2 {
 		t.Fatalf("synthetic upstream received %d HTTP calls; want 2", calls.Load())
 	}

@@ -75,7 +75,7 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 	}
 	spec, ok := h.resolveConversationModel(r.Context(), req.Model)
 	if !ok {
-		writeGrokErrorCode(w, http.StatusNotFound, "model_not_found", modelNotFoundMessage(req.Model))
+		writeGrokErrorCode(w, http.StatusNotFound, "model_not_found", grokbase.ModelNotFoundMessage(req.Model))
 		return
 	}
 	if spec.AliasReasoningEffort != "" {
@@ -84,10 +84,10 @@ func (h *Handler) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 	}
 	if err := h.ensureResolvedModelCapability(r.Context(), spec.ID, spec, store.CapabilityChat); err != nil {
 		if strings.EqualFold(strings.TrimSpace(err.Error()), "model not found") {
-			writeGrokErrorCode(w, http.StatusNotFound, "model_not_found", modelNotFoundMessage(req.Model))
+			writeGrokErrorCode(w, http.StatusNotFound, "model_not_found", grokbase.ModelNotFoundMessage(req.Model))
 			return
 		}
-		writeGrokError(w, http.StatusBadRequest, modelValidationMessage(req.Model, err))
+		writeGrokError(w, http.StatusBadRequest, grokbase.ModelValidationMessage(req.Model, err))
 		return
 	}
 	// The request's model travels on the context so account selection can skip an

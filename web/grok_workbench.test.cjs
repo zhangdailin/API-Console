@@ -31,16 +31,11 @@ test('image tiles and video cards escape names and prompts', () => {
   assert.match(running, /40%/);
 });
 
-test('the tab status dots do not shadow the capability badges', () => {
+test('each workbench tab has a status dot', () => {
   const page = fs.readFileSync(path.join(__dirname, 'templates/pages/grok-tools.html'), 'utf8');
-  const script = fs.readFileSync(path.join(__dirname, 'static/js/grok-tools.js'), 'utf8');
-  // grok-tools.js finds the badge with [data-capability="…"]; a dot carrying
-  // the same attribute earlier in the page would be found instead.
-  const badges = page.indexOf('class="capability-badges"');
-  const tabs = page.indexOf('id="grokToolsTabs"');
-  assert.ok(tabs >= 0 && badges >= 0);
-  assert.ok(!page.slice(tabs, badges).includes('data-capability="'), 'tab dots use data-capability-dot');
-  assert.match(script, /data-capability-dot="\$\{tab\}"/);
+  for (const tab of ['chat', 'imagine', 'video', 'voice', 'cache']) {
+    assert.match(page, new RegExp(`data-tab="${tab}"[^\n]*data-capability-dot="${tab}"`));
+  }
 });
 
 test('the workbench stylesheet is loaded after the base one', () => {

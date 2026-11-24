@@ -10,7 +10,7 @@ import (
 
 // saveModelAtomic publishes the row, indexes and channel default in one commit.
 // Watching all rows also coordinates with catalog reconciliation and deletes.
-func (s *redisStore) saveModelAtomic(ctx context.Context, m *Model) error {
+func (s *Store) saveModelAtomic(ctx context.Context, m *Model) error {
 	data, err := json.Marshal(m)
 	if err != nil {
 		return err

@@ -106,7 +106,7 @@ func TestHostedToolFreeUsageRejectionSwitchesWithinBudget(t *testing.T) {
 				}
 				rec := httptest.NewRecorder()
 				if endpoint == "responses" {
-					_, _, _ = h.serveNativeResponses(rec, httptest.NewRequest("POST", "/grok/v1/responses", nil).WithContext(ctx), sess, mode == "pinned", ModelSpec{ID: "grok-4.7", UpstreamModel: "grok-4.7"}, payload, "/responses", nil)
+					_, _, _ = h.serveNativeResponses(rec, httptest.NewRequest("POST", "/grok/v1/responses", nil).WithContext(ctx), sess, mode == "pinned", ModelSpec{ID: "grok-4.7", UpstreamModel: "grok-4.7"}, payload, "/responses", nil, nil)
 				} else {
 					req := &chatwire.Request{Model: "grok-4.7", Messages: []chatwire.Message{{Role: "user", Content: "hello"}}, ResponsesTools: tools}
 					h.serveNativeChat(ctx, rec, req, ModelSpec{ID: "grok-4.7", UpstreamModel: "grok-4.7"}, sess, nil)

@@ -3,33 +3,18 @@ package web
 import (
 	"fmt"
 	"net/url"
+	"orchids-api/internal/responses"
 	"sort"
 	"strings"
 )
 
 func extractImageProgress(resp map[string]any) (index int, progress int, ok bool) {
-	raw := mapAtAnyPath(resp,
-		[]string{"streamingImageGenerationResponse"},
-		[]string{"streaming_image_generation_response"},
-		[]string{"imageGenerationProgress"},
-		[]string{"image_generation_progress"},
-		[]string{"modelResponse", "streamingImageGenerationResponse"},
-		[]string{"modelResponse", "streaming_image_generation_response"},
-	)
+	raw := mapAtAnyPath(resp, "streamingImageGenerationResponse", "streaming_image_generation_response", "imageGenerationProgress", "image_generation_progress", "modelResponse.streamingImageGenerationResponse", "modelResponse.streaming_image_generation_response")
 	if raw == nil {
 		return 0, 0, false
 	}
-	return intAtAnyPath(raw,
-			[]string{"imageIndex"},
-			[]string{"image_index"},
-			[]string{"index"},
-		),
-		intAtAnyPath(raw,
-			[]string{"progress"},
-			[]string{"percent"},
-			[]string{"percentage"},
-			[]string{"completedPercentage"},
-		), true
+	return intAtAnyPath(raw, "imageIndex", "image_index", "index"),
+		intAtAnyPath(raw, "progress", "percent", "percentage", "completedPercentage"), true
 }
 
 func imageChunkValuesFromAttachment(attachment map[string]any) []map[string]any {
@@ -67,7 +52,7 @@ func appChatImageChunkValues(resp map[string]any) []map[string]any {
 		}
 	}
 	response := resp
-	if nested := mapAtAnyPath(resp, []string{"result", "response"}); nested != nil {
+	if nested := mapAtAnyPath(resp, "result.response"); nested != nil {
 		response = nested
 	}
 	if mr := extractUpstreamModelResponse(response); mr != nil {
@@ -118,9 +103,9 @@ func extractAppChatImageURLs(resp map[string]any) []string {
 		urls = append(urls, u)
 	}
 	for _, chunk := range appChatImageChunkValues(resp) {
-		progress := interfaceToInt(chunk["progress"])
+		progress := responses.InterfaceToInt(chunk["progress"])
 		if progress == 0 {
-			progress = interfaceToInt(chunk["percentage"])
+			progress = responses.InterfaceToInt(chunk["percentage"])
 		}
 		if progress > 0 && progress < 100 {
 			continue
@@ -133,19 +118,10 @@ func extractAppChatImageURLs(resp map[string]any) []string {
 				addURL(raw)
 			}
 		}
-		firstChunkString := func(keys ...string) string {
-			for _, key := range keys {
-				raw := strings.TrimSpace(fmt.Sprint(chunk[key]))
-				if raw != "" && raw != "<nil>" {
-					return raw
-				}
-			}
-			return ""
-		}
-		assetID := firstChunkString("assetId", "asset_id", "fileId", "file_id")
-		userID := firstChunkString("userId", "user_id")
-		if assetID != "" && assetID != "<nil>" {
-			if userID != "" && userID != "<nil>" {
+		assetID := stringAtAnyPath(chunk, "assetId", "asset_id", "fileId", "file_id")
+		userID := stringAtAnyPath(chunk, "userId", "user_id")
+		if assetID != "" {
+			if userID != "" {
 				addURL("users/" + strings.Trim(userID, "/") + "/" + strings.Trim(assetID, "/") + "/content")
 			} else if strings.Contains(assetID, "/") {
 				addURL(assetID)
@@ -171,27 +147,22 @@ func appChatImageNoImageDiagnostics(resp map[string]any) []string {
 		return nil
 	}
 	response := resp
-	if nested := mapAtAnyPath(resp, []string{"result", "response"}); nested != nil {
+	if nested := mapAtAnyPath(resp, "result.response"); nested != nil {
 		response = nested
 	}
 	var out []string
-	if msg := stringAtAnyPath(response,
-		[]string{"userResponse", "message"},
-		[]string{"modelResponse", "message"},
-		[]string{"message"},
-		[]string{"error", "message"},
-	); msg != "" {
+	if msg := stringAtAnyPath(response, "userResponse.message", "modelResponse.message", "message", "error.message"); msg != "" {
 		out = append(out, "message="+truncateDiagnosticText(msg, 220))
 	}
-	for _, path := range [][]string{
-		{"userResponse", "streamErrors"},
-		{"modelResponse", "streamErrors"},
-		{"streamErrors"},
-		{"errors"},
+	for _, path := range []string{
+		"userResponse.streamErrors",
+		"modelResponse.streamErrors",
+		"streamErrors",
+		"errors",
 	} {
-		if v := valueAtPath(response, path...); v != nil {
+		if v := valueAtPath(response, path); v != nil {
 			if s := diagnosticValueSummary(v); s != "" {
-				out = append(out, strings.Join(path, ".")+"="+s)
+				out = append(out, path+"="+s)
 			}
 		}
 	}
@@ -203,23 +174,23 @@ func isAppChatImageLimitResponse(resp map[string]any) bool {
 		return false
 	}
 	response := resp
-	if nested := mapAtAnyPath(resp, []string{"result", "response"}); nested != nil {
+	if nested := mapAtAnyPath(resp, "result.response"); nested != nil {
 		response = nested
 	}
-	for _, path := range [][]string{
-		{"error", "renderToolRateLimited"},
-		{"userResponse", "streamErrors"},
-		{"modelResponse", "streamErrors"},
-		{"streamErrors"},
-		{"errors"},
+	for _, path := range []string{
+		"error.renderToolRateLimited",
+		"userResponse.streamErrors",
+		"modelResponse.streamErrors",
+		"streamErrors",
+		"errors",
 	} {
-		if strings.Contains(strings.ToLower(diagnosticValueSummary(valueAtPath(response, path...))), "rendertoolratelimited") {
+		if strings.Contains(strings.ToLower(diagnosticValueSummary(valueAtPath(response, path))), "rendertoolratelimited") {
 			return true
 		}
 	}
 	for _, msg := range []string{
-		stringAtAnyPath(response, []string{"error", "message"}),
-		stringAtAnyPath(response, []string{"modelResponse", "message"}),
+		stringAtAnyPath(response, "error.message"),
+		stringAtAnyPath(response, "modelResponse.message"),
 	} {
 		lower := strings.ToLower(msg)
 		if strings.Contains(lower, "image generation limit") || strings.Contains(lower, "try again later") ||
@@ -231,49 +202,24 @@ func isAppChatImageLimitResponse(resp map[string]any) bool {
 }
 
 func extractVideoProgress(resp map[string]any) (progress int, videoURL string, ok bool) {
-	raw := mapAtAnyPath(resp,
-		[]string{"streamingVideoGenerationResponse"},
-		[]string{"streaming_video_generation_response"},
-		[]string{"videoGenerationProgress"},
-		[]string{"video_generation_progress"},
-		[]string{"modelResponse", "streamingVideoGenerationResponse"},
-		[]string{"modelResponse", "streaming_video_generation_response"},
-	)
+	raw := videoProgressObject(resp)
 	if raw == nil {
 		return 0, "", false
 	}
-	return intAtAnyPath(raw,
-			[]string{"progress"},
-			[]string{"percent"},
-			[]string{"percentage"},
-			[]string{"completedPercentage"},
-		),
-		stringAtAnyPath(raw,
-			[]string{"videoUrl"},
-			[]string{"videoURL"},
-			[]string{"video_url"},
-			[]string{"resultUrl"},
-			[]string{"result_url"},
-			[]string{"url"},
-		), true
+	return intAtAnyPath(raw, "progress", "percent", "percentage", "completedPercentage"),
+		stringAtAnyPath(raw, "videoUrl", "videoURL", "video_url", "resultUrl", "result_url", "url"), true
 }
 
 func extractVideoPostID(resp map[string]any) string {
-	raw := mapAtAnyPath(resp,
-		[]string{"streamingVideoGenerationResponse"},
-		[]string{"streaming_video_generation_response"},
-		[]string{"videoGenerationProgress"},
-		[]string{"video_generation_progress"},
-		[]string{"modelResponse", "streamingVideoGenerationResponse"},
-		[]string{"modelResponse", "streaming_video_generation_response"},
-	)
+	raw := videoProgressObject(resp)
 	if raw == nil {
 		return ""
 	}
-	return stringAtAnyPath(raw,
-		[]string{"videoPostId"},
-		[]string{"video_post_id"},
-	)
+	return stringAtAnyPath(raw, "videoPostId", "video_post_id")
+}
+
+func videoProgressObject(resp map[string]any) map[string]any {
+	return mapAtAnyPath(resp, "streamingVideoGenerationResponse", "streaming_video_generation_response", "videoGenerationProgress", "video_generation_progress", "modelResponse.streamingVideoGenerationResponse", "modelResponse.streaming_video_generation_response")
 }
 
 func extractAssetIDs(resp map[string]any) []string {
@@ -435,94 +381,41 @@ func imageDebugShape(resp map[string]any) string {
 }
 
 func extractUpstreamModelResponse(resp map[string]any) map[string]any {
-	return mapAtAnyPath(resp,
-		[]string{"modelResponse"},
-		[]string{"model_response"},
-		[]string{"userResponse"},
-		[]string{"user_response"},
-		[]string{"messageResponse"},
-		[]string{"message_response"},
-		[]string{"output"},
-	)
+	return mapAtAnyPath(resp, "modelResponse", "model_response", "userResponse", "user_response", "messageResponse", "message_response", "output")
 }
 
 func extractUpstreamFingerprint(resp map[string]any, modelResp map[string]any) string {
-	if fp := stringAtAnyPath(resp,
-		[]string{"llmInfo", "modelHash"},
-		[]string{"llm_info", "modelHash"},
-		[]string{"llm_info", "model_hash"},
-		[]string{"metadata", "llm_info", "modelHash"},
-		[]string{"metadata", "llm_info", "model_hash"},
-	); fp != "" {
+	if fp := stringAtAnyPath(resp, "llmInfo.modelHash", "llm_info.modelHash", "llm_info.model_hash", "metadata.llm_info.modelHash", "metadata.llm_info.model_hash"); fp != "" {
 		return fp
 	}
-	return stringAtAnyPath(modelResp,
-		[]string{"metadata", "llm_info", "modelHash"},
-		[]string{"metadata", "llm_info", "model_hash"},
-		[]string{"metadata", "llmInfo", "modelHash"},
-		[]string{"llmInfo", "modelHash"},
-	)
+	return stringAtAnyPath(modelResp, "metadata.llm_info.modelHash", "metadata.llm_info.model_hash", "metadata.llmInfo.modelHash", "llmInfo.modelHash")
 }
 
 func extractUpstreamResponseID(resp map[string]any, modelResp map[string]any) string {
-	if rid := stringAtAnyPath(resp,
-		[]string{"responseId"},
-		[]string{"response_id"},
-		[]string{"id"},
-		[]string{"messageId"},
-		[]string{"message_id"},
-	); rid != "" {
-		return rid
+	for _, object := range []map[string]any{resp, modelResp} {
+		if id := stringAtAnyPath(object, "responseId", "response_id", "id", "messageId", "message_id"); id != "" {
+			return id
+		}
 	}
-	return stringAtAnyPath(modelResp,
-		[]string{"responseId"},
-		[]string{"response_id"},
-		[]string{"id"},
-		[]string{"messageId"},
-		[]string{"message_id"},
-	)
+	return ""
 }
 
 func extractUpstreamMessage(modelResp map[string]any) string {
 	if modelResp == nil {
 		return ""
 	}
-	if msg := stringAtAnyPath(modelResp,
-		[]string{"message"},
-		[]string{"content"},
-		[]string{"text"},
-		[]string{"outputText"},
-		[]string{"output_text"},
-	); msg != "" {
+	if msg := stringAtAnyPath(modelResp, "message", "content", "text", "outputText", "output_text"); msg != "" {
 		return msg
 	}
-	if raw := mapAtAnyPath(modelResp, []string{"message"}, []string{"content"}, []string{"text"}); raw != nil {
-		return stringAtAnyPath(raw,
-			[]string{"text"},
-			[]string{"content"},
-			[]string{"value"},
-			[]string{"body"},
-		)
+	if raw := mapAtAnyPath(modelResp, "message", "content", "text"); raw != nil {
+		return stringAtAnyPath(raw, "text", "content", "value", "body")
 	}
 	return ""
 }
 
 func extractUpstreamTokenDelta(resp map[string]any, modelResp map[string]any) string {
-	if token := rawStringAtAnyPath(resp,
-		[]string{"token"},
-		[]string{"delta"},
-		[]string{"text"},
-		[]string{"contentDelta"},
-		[]string{"content_delta"},
-		[]string{"messageDelta"},
-		[]string{"message_delta"},
-	); token != "" {
+	if token := rawStringAtAnyPath(resp, "token", "delta", "text", "contentDelta", "content_delta", "messageDelta", "message_delta"); token != "" {
 		return token
 	}
-	return rawStringAtAnyPath(modelResp,
-		[]string{"token"},
-		[]string{"delta"},
-		[]string{"textDelta"},
-		[]string{"text_delta"},
-	)
+	return rawStringAtAnyPath(modelResp, "token", "delta", "textDelta", "text_delta")
 }

@@ -24,14 +24,10 @@ var ErrDoubaoVideoCooldown = errors.New("Doubao video accounts are cooling down"
 // SetDoubaoVideoCooldown records a quota rejection against the observed
 // identity without rewriting account status, configuration, or credentials.
 func (s *Store) SetDoubaoVideoCooldown(ctx context.Context, observed *Account, model string, until time.Time) error {
-	if s == nil {
+	if s == nil || s.client == nil || observed == nil {
 		return fmt.Errorf("Doubao quota store is unavailable")
 	}
-	rs, ok := s.accounts.(*redisStore)
-	if !ok || observed == nil {
-		return fmt.Errorf("Doubao quota store is unavailable")
-	}
-	return rs.updateAccountAtomic(ctx, observed.ID, func(current *Account) error {
+	return s.updateAccountAtomic(ctx, observed.ID, func(current *Account) error {
 		if current.AccountType != "doubao" || current.UserID != observed.UserID ||
 			current.DoubaoDeviceID != observed.DoubaoDeviceID || current.DoubaoWebID != observed.DoubaoWebID {
 			return fmt.Errorf("Doubao account identity changed during media generation")
@@ -46,14 +42,10 @@ func (s *Store) SetDoubaoVideoCooldown(ctx context.Context, observed *Account, m
 // SetDoubaoVerificationPark exposes a real media challenge to the same
 // administrator workflow used for chat. A newer session or verdict wins.
 func (s *Store) SetDoubaoVerificationPark(ctx context.Context, observed *Account, message string, at, until time.Time) error {
-	if s == nil || observed == nil {
+	if s == nil || s.client == nil || observed == nil {
 		return fmt.Errorf("Doubao verification store is unavailable")
 	}
-	rs, ok := s.accounts.(*redisStore)
-	if !ok {
-		return fmt.Errorf("Doubao verification store is unavailable")
-	}
-	return rs.updateAccountAtomic(ctx, observed.ID, func(current *Account) error {
+	return s.updateAccountAtomic(ctx, observed.ID, func(current *Account) error {
 		if current.AccountType != "doubao" || !AccountAuthActive(current) ||
 			DoubaoSessionVersion(current) != DoubaoSessionVersion(observed) ||
 			current.LastAttempt.After(at) || current.QuotaResetAt.After(until) {
@@ -101,8 +93,7 @@ var readDoubaoFileMetadata = redis.NewScript(`
 `)
 
 func (s *Store) SaveDoubaoFile(ctx context.Context, owner string, file DoubaoFile) error {
-	rs, err := s.doubaoResourceStore(owner)
-	if err != nil {
+	if err := s.requireDoubaoResourceOwner(owner); err != nil {
 		return err
 	}
 	if file.ID == "" || len(file.Data) == 0 || len(file.Data) > DoubaoFileLimit {
@@ -112,7 +103,7 @@ func (s *Store) SaveDoubaoFile(ctx context.Context, owner string, file DoubaoFil
 	if err != nil {
 		return err
 	}
-	encoded, err := rs.credentials.encrypt(string(raw))
+	encoded, err := s.credentials.encrypt(string(raw))
 	if err != nil {
 		return err
 	}
@@ -120,14 +111,14 @@ func (s *Store) SaveDoubaoFile(ctx context.Context, owner string, file DoubaoFil
 	if err != nil {
 		return err
 	}
-	metadata, err := rs.credentials.encrypt(string(small))
+	metadata, err := s.credentials.encrypt(string(small))
 	if err != nil {
 		return err
 	}
-	key := rs.digestKey("doubao:file:", owner, file.ID)
-	index := rs.digestKey("doubao:file-index:", owner)
+	key := s.digestKey("doubao:file:", owner, file.ID)
+	index := s.digestKey("doubao:file-index:", owner)
 	now := time.Now()
-	n, err := saveDoubaoFile.Run(ctx, rs.client, []string{key, index, key + ":meta"}, now.UnixMilli(), doubaoFilesPerOwner,
+	n, err := saveDoubaoFile.Run(ctx, s.client, []string{key, index, key + ":meta"}, now.UnixMilli(), doubaoFilesPerOwner,
 		encoded, int(DoubaoFileTTL.Seconds()), now.Add(DoubaoFileTTL).UnixMilli(), metadata).Int()
 	if err != nil {
 		return err
@@ -143,12 +134,11 @@ func (s *Store) SaveDoubaoFile(ctx context.Context, owner string, file DoubaoFil
 
 func (s *Store) GetDoubaoFileMetadata(ctx context.Context, owner, id string) (DoubaoFileMetadata, error) {
 	var metadata DoubaoFileMetadata
-	rs, err := s.doubaoResourceStore(owner)
-	if err != nil {
+	if err := s.requireDoubaoResourceOwner(owner); err != nil {
 		return metadata, err
 	}
-	key := rs.digestKey("doubao:file:", owner, id)
-	raw, err := readDoubaoFileMetadata.Run(ctx, rs.client, []string{key, key + ":meta"}).Text()
+	key := s.digestKey("doubao:file:", owner, id)
+	raw, err := readDoubaoFileMetadata.Run(ctx, s.client, []string{key, key + ":meta"}).Text()
 	if errors.Is(err, redis.Nil) {
 		// Uploads made by an older binary still work until their short TTL ends.
 		file, err := s.GetDoubaoFile(ctx, owner, id)
@@ -160,7 +150,7 @@ func (s *Store) GetDoubaoFileMetadata(ctx context.Context, owner, id string) (Do
 	if err != nil {
 		return metadata, err
 	}
-	plain, err := rs.credentials.decrypt(raw)
+	plain, err := s.credentials.decrypt(raw)
 	if err != nil {
 		return metadata, err
 	}
@@ -171,18 +161,17 @@ func (s *Store) GetDoubaoFileMetadata(ctx context.Context, owner, id string) (Do
 }
 
 func (s *Store) GetDoubaoFile(ctx context.Context, owner, id string) (*DoubaoFile, error) {
-	rs, err := s.doubaoResourceStore(owner)
-	if err != nil {
+	if err := s.requireDoubaoResourceOwner(owner); err != nil {
 		return nil, err
 	}
-	raw, err := rs.client.Get(ctx, rs.digestKey("doubao:file:", owner, id)).Result()
+	raw, err := s.client.Get(ctx, s.digestKey("doubao:file:", owner, id)).Result()
 	if errors.Is(err, redis.Nil) {
 		return nil, ErrNoRows
 	}
 	if err != nil {
 		return nil, err
 	}
-	plain, err := rs.credentials.decrypt(raw)
+	plain, err := s.credentials.decrypt(raw)
 	if err != nil {
 		return nil, err
 	}
@@ -194,15 +183,14 @@ func (s *Store) GetDoubaoFile(ctx context.Context, owner, id string) (*DoubaoFil
 }
 
 func (s *Store) DeleteDoubaoFile(ctx context.Context, owner, id string) error {
-	rs, err := s.doubaoResourceStore(owner)
-	if err != nil {
+	if err := s.requireDoubaoResourceOwner(owner); err != nil {
 		return err
 	}
-	key := rs.digestKey("doubao:file:", owner, id)
-	tx := rs.client.TxPipeline()
+	key := s.digestKey("doubao:file:", owner, id)
+	tx := s.client.TxPipeline()
 	deleted := tx.Del(ctx, key)
 	tx.Del(ctx, key+":meta")
-	tx.ZRem(ctx, rs.digestKey("doubao:file-index:", owner), key)
+	tx.ZRem(ctx, s.digestKey("doubao:file-index:", owner), key)
 	if _, err := tx.Exec(ctx); err != nil {
 		return err
 	}
@@ -212,21 +200,18 @@ func (s *Store) DeleteDoubaoFile(ctx context.Context, owner, id string) error {
 	return nil
 }
 
-func (s *Store) doubaoResourceStore(owner string) (*redisStore, error) {
-	if s != nil && owner != "" {
-		if rs, ok := s.accounts.(*redisStore); ok && rs.client != nil {
-			return rs, nil
-		}
+func (s *Store) requireDoubaoResourceOwner(owner string) error {
+	if owner == "" || s == nil || s.client == nil {
+		return fmt.Errorf("Doubao resource storage or owner is unavailable")
 	}
-	return nil, fmt.Errorf("Doubao resource storage or owner is unavailable")
+	return nil
 }
 
 func (s *Store) DoubaoConversationAccount(ctx context.Context, owner, dialog string) (int64, error) {
-	rs, err := s.doubaoResourceStore(owner)
-	if err != nil {
+	if err := s.requireDoubaoResourceOwner(owner); err != nil {
 		return 0, err
 	}
-	account, err := rs.client.Get(ctx, rs.digestKey("doubao:dialog:", owner, dialog)).Int64()
+	account, err := s.client.Get(ctx, s.digestKey("doubao:dialog:", owner, dialog)).Int64()
 	if errors.Is(err, redis.Nil) {
 		return 0, nil
 	}
@@ -244,14 +229,13 @@ var bindDoubaoConversation = redis.NewScript(`
 `)
 
 func (s *Store) BindDoubaoConversation(ctx context.Context, owner, dialog string, account int64) (int64, error) {
-	rs, err := s.doubaoResourceStore(owner)
-	if err != nil {
+	if err := s.requireDoubaoResourceOwner(owner); err != nil {
 		return 0, err
 	}
 	if account <= 0 {
 		return 0, fmt.Errorf("invalid Doubao conversation account")
 	}
-	result, err := bindDoubaoConversation.Run(ctx, rs.client, []string{rs.digestKey("doubao:dialog:", owner, dialog)},
+	result, err := bindDoubaoConversation.Run(ctx, s.client, []string{s.digestKey("doubao:dialog:", owner, dialog)},
 		strconv.FormatInt(account, 10), int(doubaoConversationTTL.Seconds())).Text()
 	if err != nil {
 		return 0, err

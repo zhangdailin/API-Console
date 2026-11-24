@@ -146,7 +146,7 @@ func (h *Handler) streamVideoChatCompletion(
 	logger *debug.Logger,
 ) {
 	flusher := httpserver.StreamResponseHeaders(w)
-	id := "chatcmpl_" + randomHex(8)
+	id := "chatcmpl_" + util.RandomHex(8)
 	chunkScratch := make([]byte, 0, 256)
 	emit := func(content string, finish string, hasFinish bool, usage map[string]any) {
 		raw := appendChatCompletionChunkWithUsage(chunkScratch[:0], id, time.Now().Unix(), req.Model, "", "", content, finish, hasFinish, usage)
@@ -210,7 +210,7 @@ func (h *Handler) collectVideoChatCompletion(
 		return
 	}
 	resp := map[string]any{
-		"id":                 "chatcmpl_" + randomHex(8),
+		"id":                 "chatcmpl_" + util.RandomHex(8),
 		"object":             "chat.completion",
 		"created":            time.Now().Unix(),
 		"model":              req.Model,

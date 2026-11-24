@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"orchids-api/internal/grok/grokbase"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -15,6 +16,7 @@ import (
 
 	apperrors "orchids-api/internal/errors"
 	"orchids-api/internal/httpserver"
+	"orchids-api/internal/loadbalancer"
 	"orchids-api/internal/middleware"
 	"orchids-api/internal/pricing"
 	"orchids-api/internal/store"
@@ -67,7 +69,7 @@ func (j *videoJob) toMap() map[string]any {
 	if strings.TrimSpace(j.VideoURL) != "" {
 		out["video_url"] = j.VideoURL
 	}
-	if j.Status == "completed" && strings.TrimSpace(j.ID) != "" && strings.TrimSpace(j.ContentPath) != "" {
+	if j.Status == "completed" && strings.TrimSpace(j.ID) != "" && (j.ContentPath != "" || videoOrigin(j) != "") {
 		out["content_url"] = "/grok/v1/videos/" + j.ID + "/content"
 	}
 	if j.Error != nil {
@@ -116,10 +118,10 @@ func (j *videoJob) toStandardMap() map[string]any {
 		message := "video operation failed"
 		code := "internal_error"
 		if j.Error != nil {
-			if value := strings.TrimSpace(fmt.Sprint(j.Error["message"])); value != "" && value != "<nil>" {
+			if value := videoJobErrorField(j.Error, "message"); value != "" {
 				message = value
 			}
-			if value := strings.TrimSpace(fmt.Sprint(j.Error["code"])); value != "" && value != "<nil>" {
+			if value := videoJobErrorField(j.Error, "code"); value != "" {
 				code = value
 			}
 		}
@@ -152,32 +154,21 @@ func storedVideoJobFromRuntime(job *videoJob) *store.StoredVideoJob {
 	if job == nil {
 		return nil
 	}
-	owner := strings.TrimSpace(job.OwnerHash)
-	if owner == "" {
-		owner = "anonymous"
+	stored := job.StoredVideoJob
+	stored.OwnerHash = firstNonEmpty(stored.OwnerHash, "anonymous")
+	stored.Prompt = truncateVideoJobText(stored.Prompt, 64<<10)
+	stored.ContentName = videoContentName(stored.ContentPath)
+	stored.ErrorCode = truncateVideoJobText(videoJobErrorField(job.Error, "code"), 256)
+	stored.ErrorMessage = truncateVideoJobText(videoJobErrorField(job.Error, "message"), 4<<10)
+	return &stored
+}
+
+func videoJobErrorField(fields map[string]any, key string) string {
+	value := strings.TrimSpace(fmt.Sprint(fields[key]))
+	if value == "<nil>" {
+		return ""
 	}
-	errorCode := ""
-	errorMessage := ""
-	if job.Error != nil {
-		errorCode = strings.TrimSpace(fmt.Sprint(job.Error["code"]))
-		errorMessage = strings.TrimSpace(fmt.Sprint(job.Error["message"]))
-		if errorCode == "<nil>" {
-			errorCode = ""
-		}
-		if errorMessage == "<nil>" {
-			errorMessage = ""
-		}
-	}
-	return &store.StoredVideoJob{
-		ID: job.ID, OwnerHash: owner, AccountID: job.AccountID, Provider: job.Provider,
-		Model: job.Model, Prompt: truncateVideoJobText(job.Prompt, 64<<10),
-		Seconds: job.Seconds, Size: job.Size, Quality: job.Quality,
-		Status: job.Status, Progress: job.Progress, VideoURL: job.VideoURL,
-		ContentPath: job.ContentPath, UpstreamRequestID: job.UpstreamRequestID, RemixedFromID: job.RemixedFromID,
-		Operation: job.Operation, StandardAPI: job.StandardAPI, BuildFallback: job.BuildFallback,
-		ErrorCode: truncateVideoJobText(errorCode, 256), ErrorMessage: truncateVideoJobText(errorMessage, 4<<10),
-		CreatedAt: job.CreatedAt, CompletedAt: job.CompletedAt,
-	}
+	return value
 }
 
 func truncateVideoJobText(value string, limit int) string {
@@ -207,19 +198,13 @@ func runtimeVideoJobFromStored(stored *store.StoredVideoJob) *videoJob {
 	if stored == nil {
 		return nil
 	}
-	job := &videoJob{
-		ID: stored.ID, OwnerHash: stored.OwnerHash, AccountID: stored.AccountID, Provider: stored.Provider,
-		Model: stored.Model, Prompt: stored.Prompt,
-		Seconds: stored.Seconds, Size: stored.Size, Quality: stored.Quality,
-		Status: stored.Status, Progress: stored.Progress, VideoURL: stored.VideoURL,
-		ContentPath: stored.ContentPath, UpstreamRequestID: stored.UpstreamRequestID, RemixedFromID: stored.RemixedFromID,
-		Operation: stored.Operation, StandardAPI: stored.StandardAPI, BuildFallback: stored.BuildFallback,
-		CreatedAt: stored.CreatedAt, CompletedAt: stored.CompletedAt,
-	}
+	job := &videoJob{StoredVideoJob: *stored}
 	if stored.ErrorCode != "" || stored.ErrorMessage != "" {
 		job.Error = map[string]any{"code": stored.ErrorCode, "message": stored.ErrorMessage}
 	}
-	if !validPersistedVideoContentPath(job.ContentPath) {
+	if name := videoContentName(stored.ContentName); name != "" && name == stored.ContentName {
+		job.ContentPath = filepath.Join(cacheBaseDir, "video", name)
+	} else if !validPersistedVideoContentPath(job.ContentPath) {
 		job.ContentPath = ""
 	}
 	return job
@@ -229,15 +214,15 @@ func validPersistedVideoContentPath(path string) bool {
 	return strings.TrimSpace(path) == "" || validCachedMediaContentPath(path, "video")
 }
 
-func (h *Handler) persistVideoJob(ctx context.Context, job *videoJob) {
+func (h *Handler) persistVideoJob(ctx context.Context, job *videoJob) error {
 	if h == nil || h.lb == nil || h.lb.Store == nil || job == nil {
-		return
+		return nil
 	}
 	videoJobsMu.Lock()
 	snapshot := storedVideoJobFromRuntime(job)
 	videoJobsMu.Unlock()
 	if snapshot == nil {
-		return
+		return nil
 	}
 	createdAt := time.Unix(snapshot.CreatedAt, 0)
 	if snapshot.CreatedAt <= 0 {
@@ -245,19 +230,26 @@ func (h *Handler) persistVideoJob(ctx context.Context, job *videoJob) {
 	}
 	ttl := time.Until(createdAt.Add(videoJobTTL))
 	if ttl <= 0 {
-		return
+		return store.ErrVideoJobLeaseLost
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	if err := h.lb.Store.SaveStoredVideoJob(persistCtx, snapshot, ttl); err != nil {
+	var err error
+	if holder, ok := ctx.Value(videoLeaseContextKey{}).(string); ok {
+		err = h.lb.Store.SaveLeasedVideoJob(persistCtx, snapshot, ttl, holder)
+	} else {
+		err = h.lb.Store.SaveStoredVideoJob(persistCtx, snapshot, ttl)
+	}
+	if err != nil {
 		slog.Warn("failed to persist video job", "video_id", snapshot.ID, "status", snapshot.Status, "error", err)
 	}
+	return err
 }
 
-func (h *Handler) lookupVideoJob(ctx context.Context, id, owner string) (*videoJob, bool) {
+func (h *Handler) lookupVideoJob(ctx context.Context, id, owner string) (*videoJob, error) {
 	videoJobsMu.Lock()
 	cleanupVideoJobsLocked(time.Now())
 	if job, ok := videoJobs[strings.TrimSpace(id)]; ok {
@@ -268,22 +260,22 @@ func (h *Handler) lookupVideoJob(ctx context.Context, id, owner string) (*videoJ
 		if jobOwner == owner && (videoRunningHere(job.ID) || h == nil || h.lb == nil || h.lb.Store == nil) {
 			snapshot := cloneVideoJob(job)
 			videoJobsMu.Unlock()
-			return snapshot, true
+			return snapshot, nil
 		}
 	}
 	videoJobsMu.Unlock()
 	if h == nil || h.lb == nil || h.lb.Store == nil {
-		return nil, false
+		return nil, store.ErrNoRows
 	}
 	stored, err := h.lb.Store.GetStoredVideoJob(ctx, id, owner)
 	if err != nil {
-		return nil, false
+		return nil, err
 	}
 	job := runtimeVideoJobFromStored(stored)
 	if job == nil {
-		return nil, false
+		return nil, store.ErrNoRows
 	}
-	return job, true
+	return job, nil
 }
 
 func (h *Handler) HandleVideosCreate(w http.ResponseWriter, r *http.Request) {
@@ -330,7 +322,7 @@ func (h *Handler) HandleVideosCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	spec = h.applyPersistedRoute(r.Context(), spec)
 	if err := h.ensureModelCapability(r.Context(), req.Model, store.CapabilityVideo); err != nil {
-		httpserver.WriteError(w, http.StatusBadRequest, modelValidationMessage(req.Model, err))
+		httpserver.WriteError(w, http.StatusBadRequest, grokbase.ModelValidationMessage(req.Model, err))
 		return
 	}
 	if len(req.InputReferences) > 0 {
@@ -340,52 +332,60 @@ func (h *Handler) HandleVideosCreate(w http.ResponseWriter, r *http.Request) {
 	h.startVideoJob(w, r, req, spec)
 }
 
-// startVideoJob validates the video configuration, registers the job and starts
-// its worker. It is shared by the legacy /videos endpoint and by the standard
-// /videos/generations endpoint when the resolved model is routed to the Web
-// plane.
-func (h *Handler) startVideoJob(w http.ResponseWriter, r *http.Request, req VideosRequest, spec ModelSpec) {
-	cfg, err := validateVideoConfigForModel(&VideoConfig{
+// videoConfig applies the shared request defaults before model-specific validation.
+func (req VideosRequest) videoConfig(spec ModelSpec) (*VideoConfig, error) {
+	return validateVideoConfigForModel(&VideoConfig{
 		VideoLength:    req.Seconds,
 		ResolutionName: req.ResolutionName,
 		Preset:         req.Preset,
 		Size:           firstNonEmpty(req.Size, "16:9"),
 	}, spec, len(req.InputReferences))
+}
+
+func (h *Handler) startVideoJob(w http.ResponseWriter, r *http.Request, req VideosRequest, spec ModelSpec) {
+	cfg, err := req.videoConfig(spec)
 	if err != nil {
 		writeGrokUpstreamError(w, err)
 		return
 	}
-	maxReferences := 7
-	if len(req.InputReferences) > maxReferences {
-		httpserver.WriteError(w, http.StatusBadRequest, fmt.Sprintf("input_references supports at most %d images for this model", maxReferences))
-		return
-	}
+	h.enqueueVideo(w, r, req, cfg, spec.UpstreamModel, "web", firstNonEmpty(cfg.ResolutionName, req.ResolutionName),
+		func(ctx context.Context, job *videoJob) { h.runVideoCreateJob(ctx, job, spec, cfg) })
+}
+
+// enqueueVideo persists ownership before starting a worker and bills the
+// accepted request. Each plane supplies its own validation and worker.
+func (h *Handler) enqueueVideo(w http.ResponseWriter, r *http.Request, req VideosRequest, cfg *VideoConfig,
+	upstreamModel, plane, resolution string, run func(context.Context, *videoJob),
+) {
 	job := &videoJob{
-		ID:            "video_" + randomHex(16),
-		Model:         req.Model,
-		Prompt:        req.Prompt,
-		Seconds:       cfg.VideoLength,
-		Size:          firstNonEmpty(cfg.Size, req.Size, cfg.AspectRatio),
-		Quality:       "standard",
-		CreatedAt:     time.Now().Unix(),
-		Status:        "queued",
-		Progress:      0,
-		Operation:     "generate",
-		OwnerHash:     videoRequestOwner(r),
+		StoredVideoJob: store.StoredVideoJob{
+			ID:        "video_" + util.RandomHex(16),
+			Model:     req.Model,
+			Prompt:    req.Prompt,
+			Seconds:   cfg.VideoLength,
+			Size:      firstNonEmpty(cfg.Size, req.Size, cfg.AspectRatio),
+			Quality:   "standard",
+			CreatedAt: time.Now().Unix(),
+			Status:    "queued",
+			Operation: "generate",
+			OwnerHash: videoRequestOwner(r),
+		},
 		PublicBaseURL: detectPublicBaseURL(r),
 	}
+	ctx := r.Context()
+	if h.persistVideoJob(ctx, job) != nil {
+		httpserver.WriteError(w, http.StatusServiceUnavailable, "Could not register video job")
+		return
+	}
 	putVideoJob(job)
-	h.persistVideoJob(r.Context(), job)
 	response := job.toMap()
-	// Video is billed from the request itself (duration, resolution and reference
-	// images), which is what grok2api prices at creation.
-	if cost, priced := pricing.EstimateVideoCost(spec.UpstreamModel, firstNonEmpty(cfg.ResolutionName, req.ResolutionName), cfg.VideoLength, len(req.InputReferences)); priced {
-		h.settleMediaBilling(r.Context(), req.Model, cost, map[string]any{
-			"plane": "web", "endpoint": "videos", "job_id": job.ID, "seconds": cfg.VideoLength,
-			"resolution": firstNonEmpty(cfg.ResolutionName, req.ResolutionName), "input_images": len(req.InputReferences),
+	if cost, priced := pricing.EstimateVideoCost(upstreamModel, resolution, cfg.VideoLength, len(req.InputReferences)); priced {
+		h.settleMediaBilling(ctx, req.Model, cost, map[string]any{
+			"plane": plane, "endpoint": "videos", "job_id": job.ID, "seconds": cfg.VideoLength,
+			"resolution": resolution, "input_images": len(req.InputReferences),
 		})
 	}
-	go h.runVideoCreateJob(context.Background(), job, spec, cfg)
+	go run(context.Background(), job)
 	util.WriteJSON(w, response)
 }
 
@@ -411,18 +411,25 @@ func webFreeVideoDurationCap(acc *store.Account) int {
 }
 
 func (h *Handler) runVideoCreateJob(ctx context.Context, job *videoJob, spec ModelSpec, cfg *VideoConfig) {
-	update := func(status string, progress int) {
+	ctx, closeLeaseScope := loadbalancer.WithConnLeaseScope(ctx)
+	defer closeLeaseScope()
+	ctx, release, ok := h.holdVideoLease(ctx, job)
+	if !ok {
+		return
+	}
+	defer release()
+	update := func(status string, progress int) error {
 		videoJobsMu.Lock()
 		job.Status = status
 		if progress >= 0 {
 			job.Progress = clampProgress(progress)
 		}
 		videoJobsMu.Unlock()
-		h.persistVideoJob(ctx, job)
+		return h.persistVideoJob(ctx, job)
 	}
-	release, _ := h.holdVideoLease(ctx, job)
-	defer release()
-	update("in_progress", 1)
+	if update("in_progress", 1) != nil {
+		return
+	}
 
 	// Retry opening a session with account switching — video generation
 	// can take minutes and the 429 cooldown may clear while we wait.
@@ -441,13 +448,26 @@ func (h *Handler) runVideoCreateJob(ctx context.Context, job *videoJob, spec Mod
 		if _, ok := errors.AsType[*mediaUnavailableError](sessErr); ok {
 			break // waiting does not restore a spent media allowance
 		}
-		time.Sleep(2 * time.Second)
+		timer := time.NewTimer(2 * time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
 	}
 	if sessErr != nil {
-		h.failVideoJob(job, sessErr)
+		h.failVideoJob(ctx, job, sessErr)
 		return
 	}
 	defer sess.Close()
+	videoJobsMu.Lock()
+	job.AccountID = sess.acc.ID
+	job.Provider = "web"
+	videoJobsMu.Unlock()
+	if h.persistVideoJob(ctx, job) != nil {
+		return
+	}
 
 	// A free Web credential cannot fetch a duration beyond the included tier
 	// cap: the upstream rejects the whole job, which used to surface as an
@@ -461,17 +481,17 @@ func (h *Handler) runVideoCreateJob(ctx context.Context, job *videoJob, spec Mod
 		update("in_progress", progress)
 	})
 	if err != nil {
-		h.failVideoJob(job, err)
+		h.failVideoJob(ctx, job, err)
 		return
 	}
 	body, _, err := h.webClient().openAsset(ctx, sess.token, artifact.URL)
 	if err != nil {
-		h.failVideoJob(job, err)
+		h.failVideoJob(ctx, job, err)
 		return
 	}
 	name, err := cacheVideoStream(artifact.URL, body, "video/mp4")
 	if err != nil {
-		h.failVideoJob(job, err)
+		h.failVideoJob(ctx, job, err)
 		return
 	}
 	videoJobsMu.Lock()
@@ -485,11 +505,11 @@ func (h *Handler) runVideoCreateJob(ctx context.Context, job *videoJob, spec Mod
 	h.persistVideoJob(ctx, job)
 }
 
-func (h *Handler) failVideoJob(job *videoJob, err error) {
-	h.failVideoJobWithCode(job, "video_generation_failed", err)
+func (h *Handler) failVideoJob(ctx context.Context, job *videoJob, err error) {
+	h.failVideoJobWithCode(ctx, job, "video_generation_failed", err)
 }
 
-func (h *Handler) failVideoJobWithCode(job *videoJob, code string, err error) {
+func (h *Handler) failVideoJobWithCode(ctx context.Context, job *videoJob, code string, err error) {
 	// An asynchronous job is read back with a 200, so its stored message is a
 	// client-facing body: a pool failure is classified (a capacity problem reads as
 	// retryable and never carries the pool's own note), and the note stays in the
@@ -508,7 +528,7 @@ func (h *Handler) failVideoJobWithCode(job *videoJob, code string, err error) {
 		"message": message,
 	}
 	videoJobsMu.Unlock()
-	h.persistVideoJob(context.Background(), job)
+	h.persistVideoJob(ctx, job)
 }
 
 // videoJobFailureMessage returns the message an asynchronous job stores for the

@@ -59,7 +59,7 @@ func rawImageBlock(block map[string]json.RawMessage, kind, role, path string) er
 				return wireFieldError(path+".image_url", "requires an inline Base64 image URL")
 			}
 		}
-		if mime, data := imageDataURL(value); !warpImageMIME(mime) || data == "" {
+		if mime, data, _ := upstream.SplitInlineImageURL(value); !warpImageMIME(mime) || data == "" {
 			return wireFieldError(path+".image_url", "requires an inline Base64 PNG or JPEG data URL")
 		}
 	}
@@ -72,22 +72,6 @@ func validImageDetail(raw json.RawMessage) bool {
 }
 
 func warpImageMIME(mime string) bool { return mime == "image/png" || mime == "image/jpeg" }
-
-func imageDataURL(value string) (mime, data string) {
-	header, data, ok := strings.Cut(strings.TrimSpace(value), ",")
-	if !ok {
-		return "", ""
-	}
-	mime, ok = strings.CutPrefix(strings.ToLower(header), "data:")
-	if !ok {
-		return "", ""
-	}
-	mime, ok = strings.CutSuffix(mime, ";base64")
-	if !ok {
-		return "", ""
-	}
-	return mime, data
-}
 
 func normalizedWarpImage(block prompt.ContentBlock) (warpImage, bool) {
 	if !validCacheControl(block.CacheControl) {
@@ -105,7 +89,7 @@ func normalizedWarpImage(block prompt.ContentBlock) (warpImage, bool) {
 		img = warpImage{mime: source.MediaType, base64: source.Data}
 	case "image_url", "input_image":
 		expected.URL = block.URL
-		img.mime, img.base64 = imageDataURL(block.URL)
+		img.mime, img.base64, _ = upstream.SplitInlineImageURL(block.URL)
 	}
 	return img, warpImageMIME(img.mime) && reflect.DeepEqual(expected, block)
 }

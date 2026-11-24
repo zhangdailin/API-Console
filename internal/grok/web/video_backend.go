@@ -5,13 +5,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"orchids-api/internal/grok/grokbase"
 	"strings"
-	"time"
 
 	"orchids-api/internal/httpserver"
-	"orchids-api/internal/pricing"
+	"orchids-api/internal/loadbalancer"
 	"orchids-api/internal/store"
-	"orchids-api/internal/util"
 )
 
 // The video job runtime (ids, ownership, persistence, the content endpoint)
@@ -77,7 +76,7 @@ func (h *Handler) backendVideoModel(ctx context.Context, modelID string) (string
 // startBackendVideoJob validates and registers a job served by the backend.
 func (h *Handler) startBackendVideoJob(w http.ResponseWriter, r *http.Request, req VideosRequest, upstreamModel string) {
 	if err := h.ensureModelCapability(r.Context(), req.Model, store.CapabilityVideo); err != nil {
-		httpserver.WriteError(w, http.StatusBadRequest, modelValidationMessage(req.Model, err))
+		httpserver.WriteError(w, http.StatusBadRequest, grokbase.ModelValidationMessage(req.Model, err))
 		return
 	}
 	if len(req.InputReferences) > maxBackendVideoReferences {
@@ -98,40 +97,15 @@ func (h *Handler) startBackendVideoJob(w http.ResponseWriter, r *http.Request, r
 			}
 		}
 	}
-	cfg, err := validateVideoConfigForModel(&VideoConfig{
-		VideoLength:    req.Seconds,
-		ResolutionName: req.ResolutionName,
-		Preset:         req.Preset,
-		Size:           firstNonEmpty(req.Size, "16:9"),
-	}, ModelSpec{ID: req.Model, UpstreamModel: upstreamModel, IsVideo: true}, len(req.InputReferences))
+	cfg, err := req.videoConfig(ModelSpec{ID: req.Model, UpstreamModel: upstreamModel, IsVideo: true})
 	if err != nil {
 		writeGrokUpstreamError(w, err)
 		return
 	}
-	job := &videoJob{
-		ID:            "video_" + randomHex(16),
-		Model:         req.Model,
-		Prompt:        req.Prompt,
-		Seconds:       cfg.VideoLength,
-		Size:          firstNonEmpty(cfg.Size, req.Size, cfg.AspectRatio),
-		Quality:       "standard",
-		CreatedAt:     time.Now().Unix(),
-		Status:        "queued",
-		Operation:     "generate",
-		OwnerHash:     videoRequestOwner(r),
-		PublicBaseURL: detectPublicBaseURL(r),
-	}
-	putVideoJob(job)
-	h.persistVideoJob(r.Context(), job)
-	response := job.toMap()
-	if cost, priced := pricing.EstimateVideoCost(upstreamModel, cfg.ResolutionName, cfg.VideoLength, len(req.InputReferences)); priced {
-		h.settleMediaBilling(r.Context(), req.Model, cost, map[string]any{
-			"plane": "backend", "endpoint": "videos", "job_id": job.ID, "seconds": cfg.VideoLength,
-			"resolution": cfg.ResolutionName, "input_images": len(req.InputReferences),
+	h.enqueueVideo(w, r, req, cfg, upstreamModel, "backend", cfg.ResolutionName,
+		func(ctx context.Context, job *videoJob) {
+			h.runBackendVideoJob(ctx, job, upstreamModel, cfg, req.InputReferences)
 		})
-	}
-	go h.runBackendVideoJob(context.Background(), job, upstreamModel, cfg, req.InputReferences)
-	util.WriteJSON(w, response)
 }
 
 func validBackendVideoReference(value string) bool {
@@ -141,17 +115,27 @@ func validBackendVideoReference(value string) bool {
 }
 
 func (h *Handler) runBackendVideoJob(ctx context.Context, job *videoJob, upstreamModel string, cfg *VideoConfig, references []string) {
+	ctx, closeLeaseScope := loadbalancer.WithConnLeaseScope(ctx)
+	defer closeLeaseScope()
 	ctx, cancel := context.WithTimeout(ctx, videoJobTTL)
 	defer cancel()
-	release, _ := h.holdVideoLease(ctx, job)
+	ctx, release, ok := h.holdVideoLease(ctx, job)
+	if !ok {
+		return
+	}
 	defer release()
+	videoJobsMu.Lock()
+	job.Status, job.Progress = "in_progress", 1
+	videoJobsMu.Unlock()
+	if h.persistVideoJob(ctx, job) != nil {
+		return
+	}
 	update := func(mutate func()) {
 		videoJobsMu.Lock()
 		mutate()
 		videoJobsMu.Unlock()
 		h.persistVideoJob(ctx, job)
 	}
-	update(func() { job.Status, job.Progress = "in_progress", 1 })
 	result, err := h.videoBackend.RunVideo(ctx, VideoBackendJob{
 		ID: job.ID, Model: job.Model, UpstreamModel: upstreamModel, Prompt: job.Prompt,
 		Seconds: cfg.VideoLength, AspectRatio: cfg.AspectRatio, Resolution: cfg.ResolutionName,
@@ -174,8 +158,8 @@ func (h *Handler) runBackendVideoJob(ctx context.Context, job *videoJob, upstrea
 		},
 	})
 	if err != nil {
-		h.failVideoJob(job, err)
+		h.failVideoJob(ctx, job, err)
 		return
 	}
-	h.completeBackendVideoJob(job, result, update)
+	h.completeBackendVideoJob(ctx, job, result, update)
 }

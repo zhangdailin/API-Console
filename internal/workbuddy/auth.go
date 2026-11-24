@@ -342,12 +342,9 @@ type tokenUpdater struct {
 	baseURL      string
 	httpClient   *http.Client
 	accountStore AccountUpdater
-	account      store.Account
 	accountID    int64
 
 	mu                   sync.Mutex
-	token                string
-	until                time.Time
 	creds                Credentials
 	initialized          bool
 	dirty                bool
@@ -361,7 +358,6 @@ func newTokenUpdater(baseURL string, httpClient *http.Client, accountStore Accou
 		accountStore: accountStore,
 	}
 	if acc != nil {
-		updater.account = *acc
 		updater.accountID = acc.ID
 	}
 	return updater
@@ -373,10 +369,9 @@ func (t *tokenUpdater) SetAccountStore(accountStore AccountUpdater) {
 	t.mu.Unlock()
 }
 
-// Token returns a valid access token, refreshing only when needed.
+// Token returns a valid access token, refreshing only when needed. A stale
+// access token remains usable as a fallback if no refresh can be performed.
 func (t *tokenUpdater) Token(ctx context.Context, creds Credentials) (string, error) {
-	now := time.Now()
-
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.initialize(creds)
@@ -385,57 +380,32 @@ func (t *tokenUpdater) Token(ctx context.Context, creds Credentials) (string, er
 		return "", err
 	}
 	defer release()
-	if t.dirty {
-		if err := t.persist(ctx, t.creds, t.dirtyExpectedRefresh); err != nil {
-			return "", err
-		}
-		t.dirty = false
-		t.dirtyExpectedRefresh = ""
-	}
+
 	creds = t.creds
-
-	if t.token != "" && t.until.Sub(now) > minRefreshLead {
-		return t.token, nil
-	}
-
-	if token, ok := creds.Token(now); ok {
-		t.token = token
-		t.until = creds.ExpiresAt
+	if token, ok := creds.Token(time.Now()); ok {
 		return token, nil
 	}
-
 	if strings.TrimSpace(creds.RefreshToken) == "" {
 		if strings.TrimSpace(creds.AccessToken) != "" {
-			// Only an access token is available and it is close to expiry.
-			// Try it anyway rather than failing the request outright.
-			t.token = creds.AccessToken
 			return creds.AccessToken, nil
 		}
 		return "", fmt.Errorf("workbuddy account is missing credentials: paste the refresh token from the WorkBuddy desktop session")
 	}
-
 	refreshed, err := t.refresh(ctx, creds)
 	if err != nil {
 		if strings.TrimSpace(creds.AccessToken) != "" {
-			t.token = creds.AccessToken
 			return creds.AccessToken, nil
 		}
 		return "", err
 	}
-	t.token = refreshed.AccessToken
-	t.until = refreshed.ExpiresAt
-	t.creds = refreshed
-	t.dirty = true
-	t.dirtyExpectedRefresh = creds.RefreshToken
-	if err := t.persist(ctx, refreshed, t.dirtyExpectedRefresh); err != nil {
+	if err := t.saveRotation(ctx, refreshed); err != nil {
 		return "", err
 	}
-	t.dirty = false
-	t.dirtyExpectedRefresh = ""
 	return refreshed.AccessToken, nil
 }
 
-// RefreshNow forces one refresh cycle, used by account verification.
+// RefreshNow forces a refresh for account verification unless a peer already
+// renewed the access token while this client waited for the credential lease.
 func (t *tokenUpdater) RefreshNow(ctx context.Context, creds Credentials) (Credentials, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -446,17 +416,10 @@ func (t *tokenUpdater) RefreshNow(ctx context.Context, creds Credentials) (Crede
 		return t.creds, err
 	}
 	defer release()
-	if token, valid := t.creds.Token(time.Now()); valid && token != previous {
-		return t.creds, nil
-	}
-	if t.dirty {
-		if err := t.persist(ctx, t.creds, t.dirtyExpectedRefresh); err != nil {
-			return t.creds, err
-		}
-		t.dirty = false
-		t.dirtyExpectedRefresh = ""
-	}
 	creds = t.creds
+	if token, valid := creds.Token(time.Now()); valid && token != previous {
+		return creds, nil
+	}
 	if strings.TrimSpace(creds.RefreshToken) == "" {
 		return creds, fmt.Errorf("workbuddy account is missing a refresh token")
 	}
@@ -464,17 +427,24 @@ func (t *tokenUpdater) RefreshNow(ctx context.Context, creds Credentials) (Crede
 	if err != nil {
 		return creds, err
 	}
-	t.token = refreshed.AccessToken
-	t.until = refreshed.ExpiresAt
-	t.creds = refreshed
-	t.dirty = true
-	t.dirtyExpectedRefresh = creds.RefreshToken
-	if err := t.persist(ctx, refreshed, t.dirtyExpectedRefresh); err != nil {
-		return refreshed, err
+	return refreshed, t.saveRotation(ctx, refreshed)
+}
+
+func (t *tokenUpdater) saveRotation(ctx context.Context, refreshed Credentials) error {
+	t.dirtyExpectedRefresh = t.creds.RefreshToken
+	t.creds, t.dirty = refreshed, true
+	return t.flushRotation(ctx)
+}
+
+func (t *tokenUpdater) flushRotation(ctx context.Context) error {
+	if !t.dirty {
+		return nil
 	}
-	t.dirty = false
-	t.dirtyExpectedRefresh = ""
-	return refreshed, nil
+	if err := t.persist(ctx, t.creds, t.dirtyExpectedRefresh); err != nil {
+		return err
+	}
+	t.dirty, t.dirtyExpectedRefresh = false, ""
+	return nil
 }
 
 func (t *tokenUpdater) initialize(creds Credentials) {
@@ -491,13 +461,9 @@ func (t *tokenUpdater) acquireLatest(ctx context.Context) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	if t.dirty {
-		if err := t.persist(ctx, t.creds, t.dirtyExpectedRefresh); err != nil {
-			release()
-			return nil, err
-		}
-		t.dirty = false
-		t.dirtyExpectedRefresh = ""
+	if err := t.flushRotation(ctx); err != nil {
+		release()
+		return nil, err
 	}
 	latest, err := refreshqueue.LatestAccount(ctx, t.accountStore, t.accountID)
 	if err != nil {
@@ -506,8 +472,6 @@ func (t *tokenUpdater) acquireLatest(ctx context.Context) (func(), error) {
 	}
 	if latest != nil {
 		t.creds = ResolveCredentials(latest)
-		t.token = t.creds.AccessToken
-		t.until = t.creds.ExpiresAt
 	}
 	return release, nil
 }

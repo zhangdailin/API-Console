@@ -2,9 +2,10 @@ package workbuddy
 
 import (
 	"encoding/json"
+	"testing"
+
 	"orchids-api/internal/store"
 	"orchids-api/internal/upstream"
-	"testing"
 )
 
 func TestProtocolControlsInWireBody(t *testing.T) {
@@ -99,6 +100,32 @@ func TestDefaultOutputBudgetUsesSelectedAccountCatalog(t *testing.T) {
 			}
 			if body["max_tokens"] != float64(tt.want) {
 				t.Fatalf("default budget = %v, want %d", body["max_tokens"], tt.want)
+			}
+		})
+	}
+}
+
+func TestConcurrentRequestsUseTheirOwnModelBudget(t *testing.T) {
+	c := NewFromAccount(&store.Account{WorkBuddyModelIDs: []string{
+		`{"id":"first","max_output_tokens":128000}`,
+		`{"id":"second","max_output_tokens":4096}`,
+	}}, nil)
+	t.Cleanup(c.Close)
+	for model, want := range map[string]int{"first": 128000, "second": 4096} {
+		t.Run(model, func(t *testing.T) {
+			t.Parallel()
+			raw, err := c.buildBody(upstream.UpstreamRequest{Model: model})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var body struct {
+				MaxTokens int `json:"max_tokens"`
+			}
+			if err := json.Unmarshal(raw, &body); err != nil {
+				t.Fatal(err)
+			}
+			if body.MaxTokens != want {
+				t.Fatalf("default budget for %s = %d, want %d", model, body.MaxTokens, want)
 			}
 		})
 	}

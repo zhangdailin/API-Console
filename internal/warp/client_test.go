@@ -122,8 +122,8 @@ func TestCatalogOnlyEnabledExactFreshModels(t *testing.T) {
 		_, _ = w.Write([]byte(`{"data":{"user":{"__typename":"UserOutput","user":{"workspaces":[{"featureModelChoice":{"agentMode":{"choices":[{"id":"model-a","disableReason":null},{"id":"model-b","disableReason":"upgrade"},{"id":"model-a"},{"id":"auto"},{"id":"all"},{"id":"warp-auto"}]}}}]}}}}`))
 	}))
 	defer s.Close()
-	ids, err := NewFromAccount(testAccount(), testConfig(s.URL)).FetchModels(context.Background())
-	if err != nil || len(ids) != 1 || ids[0] != "model-a" {
+	choices, err := NewFromAccount(testAccount(), testConfig(s.URL)).FetchModelChoices(t.Context())
+	if err != nil || len(choices) != 1 || choices[0].ID != "model-a" {
 		t.Fatal("catalog not filtered")
 	}
 	acc := testAccount()

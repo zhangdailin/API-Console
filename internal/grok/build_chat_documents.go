@@ -11,47 +11,13 @@ import (
 // The Build CLI proxy consumes native Responses file parts. This bridge never
 // uploads files itself or resolves opaque file IDs on pooled accounts.
 func normalizeBuildChatDocuments(messages []chatwire.Message) error {
-	for i := range messages {
-		message := &messages[i]
-		if !strings.EqualFold(strings.TrimSpace(message.Role), "user") {
-			continue
+	return chatwire.MapUserFileParts(messages, func(i, j int, part map[string]any) (map[string]any, error) {
+		file, err := buildChatFilePart(part)
+		if err != nil {
+			return nil, fmt.Errorf("messages[%d].content[%d]: %w", i, j, err)
 		}
-		parts, ok := message.Content.([]any)
-		if !ok || !containsBuildChatFile(parts) {
-			continue
-		}
-		converted := make([]any, 0, len(parts))
-		for j, raw := range parts {
-			part, _ := raw.(map[string]any)
-			switch buildContentType(part) {
-			case "file", "input_file":
-				file, err := buildChatFilePart(part)
-				if err != nil {
-					return fmt.Errorf("messages[%d].content[%d]: %w", i, j, err)
-				}
-				converted = append(converted, file)
-			default:
-				converted = append(converted, raw)
-			}
-		}
-		message.Content = converted
-	}
-	return nil
-}
-
-func buildContentType(part map[string]any) string {
-	kind, _ := part["type"].(string)
-	return strings.ToLower(strings.TrimSpace(kind))
-}
-
-func containsBuildChatFile(parts []any) bool {
-	for _, raw := range parts {
-		part, _ := raw.(map[string]any)
-		if kind := buildContentType(part); kind == "file" || kind == "input_file" {
-			return true
-		}
-	}
-	return false
+		return file, nil
+	})
 }
 
 func buildChatFilePart(part map[string]any) (map[string]any, error) {

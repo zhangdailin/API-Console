@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"orchids-api/internal/accountpolicy"
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/modelcatalog"
 	"orchids-api/internal/modelpolicy"
 	"orchids-api/internal/store"
-	"orchids-api/internal/util"
 	"strings"
 )
 
@@ -16,23 +16,14 @@ func (h *Handler) ensureModelEnabled(ctx context.Context, modelID string) error 
 	if h != nil && h.modelCache.Has(id) {
 		return nil
 	}
-	if h == nil || h.lb == nil || h.lb.Store == nil {
-		// Without a store there is no observed catalog to validate against. A
-		// compiled-in model list is not a substitute: it would accept a model no
-		// active account ever advertised.
+	if h == nil {
 		return fmt.Errorf("model not found")
 	}
-
-	m, err := h.lb.Store.GetModelByChannelAndModelID(ctx, "grok", id)
-	if err != nil || m == nil || !modelpolicy.IsVisibleGrokModel(id, m.Verified) {
-		return fmt.Errorf("model not found")
+	model, err := grokbase.EnabledModel(ctx, h.affinityStore(), id)
+	if err != nil {
+		return err
 	}
-	if !m.Status.Enabled() {
-		return fmt.Errorf("model not available")
-	}
-	channel := strings.TrimSpace(m.Channel)
-	channel = util.FirstNonEmptyUntrimmed(channel, "grok")
-	if !strings.EqualFold(channel, "grok") {
+	if channel := strings.TrimSpace(model.Channel); channel != "" && !strings.EqualFold(channel, "grok") {
 		return fmt.Errorf("model not found")
 	}
 	h.modelCache.Remember(id)
@@ -87,18 +78,8 @@ func (h *Handler) resolveConversationModel(ctx context.Context, modelID string) 
 // shape. Capabilities remain catalog-owned, while the upstream model name is
 // operator-controlled and survives restarts in the model store.
 func (h *Handler) applyPersistedRoute(ctx context.Context, spec ModelSpec) ModelSpec {
-	if h == nil || h.lb == nil || h.lb.Store == nil || strings.TrimSpace(spec.ID) == "" {
-		return spec
-	}
-	model, err := h.lb.Store.GetModelByChannelAndModelID(ctx, "grok", normalizeModelID(spec.ID))
-	if err != nil || model == nil {
-		return spec
-	}
-	upstream := strings.TrimSpace(model.UpstreamModel)
-	upstream = util.FirstNonEmptyUntrimmed(upstream, spec.UpstreamModel)
-	// Build route rows refine the upstream model name.
-	if strings.EqualFold(strings.TrimSpace(model.Provider), ProviderBuild) && upstream != "" {
-		spec.UpstreamModel = upstream
+	if h != nil {
+		spec.UpstreamModel = grokbase.UpstreamRoute(ctx, h.affinityStore(), normalizeModelID(spec.ID), ProviderBuild, spec.UpstreamModel)
 	}
 	return spec
 }
@@ -117,23 +98,4 @@ func (h *Handler) ensureResolvedModelEnabled(ctx context.Context, modelID string
 		return nil
 	}
 	return err
-}
-
-func modelNotFoundMessage(modelID string) string {
-	modelID = strings.TrimSpace(modelID)
-	if modelID == "" {
-		return "The model does not exist or you do not have access to it."
-	}
-	return fmt.Sprintf("The model `%s` does not exist or you do not have access to it.", modelID)
-}
-
-func modelValidationMessage(modelID string, err error) string {
-	if err == nil {
-		return ""
-	}
-	msg := strings.TrimSpace(err.Error())
-	if strings.EqualFold(msg, "model not found") {
-		return modelNotFoundMessage(modelID)
-	}
-	return msg
 }

@@ -67,28 +67,7 @@ func (w *opsWindow) bucketsWithSamples(ctx context.Context, scope string) ([]ops
 		for _, bucket := range data.buckets {
 			combined := merged[bucket.Minute]
 			combined.Minute = bucket.Minute
-			combined.Counters.Add(bucket.Counters)
-			combined.DurationFailed = append(combined.DurationFailed, bucket.DurationFailed...)
-			combined.FirstTokenFailed = append(combined.FirstTokenFailed, bucket.FirstTokenFailed...)
-			combined.DurationAttempt = append(combined.DurationAttempt, bucket.DurationAttempt...)
-			combined.FirstTokenAttempt = append(combined.FirstTokenAttempt, bucket.FirstTokenAttempt...)
-			combined.Requests += bucket.Requests
-			combined.Success += bucket.Success
-			combined.Failed += bucket.Failed
-			combined.Input += bucket.Input
-			combined.Cached += bucket.Cached
-			combined.Reasoning += bucket.Reasoning
-			if bucket.Total > 0 {
-				combined.Total += bucket.Total
-			} else {
-				combined.Total += bucket.Input + bucket.Output
-			}
-			combined.PricedRequests += bucket.PricedRequests
-			combined.UnpricedRequests += bucket.UnpricedRequests
-			combined.PricedTokens += bucket.PricedTokens
-			combined.UnpricedTokens += bucket.UnpricedTokens
-			combined.CostInUSDTicks += bucket.CostInUSDTicks
-			combined.Output += bucket.Output
+			combined.Merge(bucket)
 			merged[bucket.Minute] = combined
 		}
 	}

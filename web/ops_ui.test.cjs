@@ -96,5 +96,6 @@ test('the overview follows the live flow stream instead of a refresh countdown',
   const flow = read('static/js/ops-flow.js');
   assert.ok(!page.includes('opsCountdown') && !script.includes('refreshSeconds'), 'the 15-second countdown is still there');
   assert.ok(flow.includes("'ops:flow'") && script.includes("'ops:flow'"), 'the overview does not listen to the flow stream');
-  assert.ok(script.includes('LIVE_MIN_GAP_MS'), 'live reads are not spaced');
+  assert.match(script, /ConsoleUI\.liveRefresh/);
+  assert.match(read('static/js/ui.js'), /lastLoad \+ LIVE_MIN_GAP_MS/, 'live reads are not spaced');
 });

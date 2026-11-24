@@ -85,6 +85,8 @@ Web Responses 使用相同的附件限制。用 `store:true` 保存后，可用�
 
 Grok Build（例如 `grok-4.7`）的 Chat Completions 也接收上述 URL 或内联文件块；Messages 接收 Anthropic 的 `document` 块。两条路径将文件转为 `input_file` 交给 Build 的原生 Responses 代理，网关不代上传或下载。原生 Responses 仍可直接传 `input_file`。Build 兼容路径不接收只传 `file_id` 的请求，因为网关没有与上游账号绑定的文件资源。该格式已通过本地转发测试，Build 上游能否读取 PDF 尚未验收。
 
+Grok Web 的 Responses 历史在同一个调用者范围内共享相同的内联文件。删除一条响应不会让仍引用该文件的其他响应失效。桥接的流式 Responses 在保存好续接记录后才发送 `response.completed`；无法保存时发送 `response.failed`。
+
 ### 2.2 Messages
 
 ```bash
@@ -181,7 +183,7 @@ Chat 桥接写递增 sequence_number，便于客户端识别顺序；当前没�
 | `/api/grok/tools/v1/*` | Grok 工具页推理投影（models、chat/completions、responses、images、videos、files、media/inputs），以管理会话鉴权，资源归属固定为 `admin-tools` |
 | `/api/grok/admin/*` | 工具页管理接口：`imagine/config`、`voice/token`、`voice/livekit/`（LiveKit 信令中转，仅转发 `/rtc` WebSocket 和 `/rtc/validate`）及 `media/` 下的媒体缓存和上传。图片、视频生成走上表的工具页推理路由。 |
 
-API Key 创建和轮换时返回完整秘密，并使用主密钥派生的独立加密用途保存密文；认证继续使用哈希。管理员可通过 secret 接口读取，列表仅返回掩码及 secret_available。加密能力未配置、密文损坏或解密失败时明确报错，不回退明文。轮换原子替换密文、哈希及索引，使旧 Key 立即失效；同一 Key 记录已有的响应和其他按 Key 隔离的资源仍归该记录所有。升级前、更早轮换已经失去关联的资源不会自动恢复。列表掩码不能用于调用。前端创建默认消费不限额，编辑不提交预算字段，已有后台预算策略继续生效。支持模型白名单、请求限速、有效期、并发及预算；空模型白名单兼容解释为不限模型。费用预留和结算用整数 USD ticks，1 USD 为 100 亿 ticks。
+API Key 创建和轮换时返回完整秘密，并使用主密钥派生的独立加密用途保存密文；认证继续使用哈希。管理员可通过 secret 接口读取，列表仅返回掩码及 secret_available。加密能力未配置、密文损坏或解密失败时明确报错，不回退明文。轮换原子替换密文、哈希及索引，使旧 Key 立即失效；同一 Key 记录已有的响应和其他按 Key 隔离的资源仍归该记录所有。升级前、更早轮换已经失去关联的资源不会自动恢复。列表掩码不能用于调用。前端创建默认消费不限额，编辑不提交预算字段，已有后台预算策略继续生效。支持模型白名单、请求限速、有效期、并发及预算；有价格的活跃请求续期现有预算预留，无法继续持有预留时停止生成。空模型白名单兼容解释为不限模型。费用预留和结算用整数 USD ticks，1 USD 为 100 亿 ticks。
 
 `POST /api/config/save` 增量保存，下一次请求使用新配置；省略字段保留原值。固定上限见[配置说明](configuration.md#推理延迟与等待预算)；已退役的 `inference_profile`、`grok_low_latency`、任意生成期限、重试次数和质量阈值参数返回 HTTP 400，配置及 Redis 保持不变。
 
@@ -241,6 +243,8 @@ cookie 文件按管理秘密保管。授权启动要求同源 HTTPS 或 loopback
 | 429 | 额度、并发、Key RPM、模型冷却或共享排队 | 根据具体类别与 Retry-After 等待 |
 | 502 | 协议截断、严格输出不匹配等 | 查看终止事件和诊断，不默认处罚凭据 |
 | 503 | Redis / 上游不可用、账号池无法服务或进程准入 | 区分入口、存储与上游链路 |
+
+视频状态或内容查询遇到暂时的任务存储故障时返回 `503`（`video_store_unavailable`）。客户端应继续查询原任务 ID；确认不存在或不属于调用者时才返回 `404`。
 
 上游凭据认证失败可映射为服务不可用，避免误导客户端去轮换正常网关 Key。公开错误脱敏，原始上游诊断需要管理权限。
 

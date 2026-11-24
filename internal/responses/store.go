@@ -24,6 +24,15 @@ type Store interface {
 	DeleteStoredResponse(ctx context.Context, responseID, ownerHash string) error
 }
 
+func storedResponseMetadata(ctx context.Context, st Store, id, owner string) (*store.StoredResponse, error) {
+	if metadata, ok := st.(interface {
+		GetStoredResponseMetadata(context.Context, string, string) (*store.StoredResponse, error)
+	}); ok {
+		return metadata.GetStoredResponseMetadata(ctx, id, owner)
+	}
+	return st.GetStoredResponse(ctx, id, owner)
+}
+
 // BridgeOptions configures the bridge's response store.
 //
 // The store is what makes store=true, previous_response_id and
@@ -72,7 +81,7 @@ func (o BridgeOptions) TTLOrDefault() time.Duration {
 	if o.TTL > 0 {
 		return o.TTL
 	}
-	return DefaultStoredResponseTTL
+	return store.DefaultStoredResponseTTL
 }
 
 // OwnerHash identifies the caller that owns a stored response, so one key

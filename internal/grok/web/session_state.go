@@ -30,7 +30,7 @@ func (h *Handler) unbindAffinity(ctx context.Context, provider string, accountID
 }
 
 func (h *Handler) affinityStore() *store.Store {
-	if h.lb == nil {
+	if h == nil || h.lb == nil {
 		return nil
 	}
 	return h.lb.Store

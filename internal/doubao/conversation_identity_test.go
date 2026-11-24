@@ -24,6 +24,26 @@ import (
 	"orchids-api/internal/upstream"
 )
 
+func TestConversationCacheRetainsActiveScopesAndEvictsStaleOnes(t *testing.T) {
+	now := time.Now()
+	cache := conversationCache[string]{limit: 2, ttl: time.Hour}
+	cache.put("active", "a", now)
+	cache.put("cold", "b", now)
+	if got := cache.get("active", now.Add(time.Minute)); got != "a" {
+		t.Fatalf("active conversation = %q", got)
+	}
+	cache.put("new", "c", now.Add(2*time.Minute))
+	if got := cache.get("cold", now.Add(2*time.Minute)); got != "" {
+		t.Fatalf("least recently used conversation survived capacity limit: %q", got)
+	}
+	if got := cache.get("active", now.Add(time.Hour)); got != "a" {
+		t.Fatalf("active conversation did not slide expiration: %q", got)
+	}
+	if got := cache.get("new", now.Add(2*time.Hour)); got != "" || len(cache.entries) != 0 {
+		t.Fatalf("expired conversations remain: %q (%d entries)", got, len(cache.entries))
+	}
+}
+
 func dialogClient(t *testing.T, acc *store.Account, owner, dialog string) *Client {
 	t.Helper()
 	c := NewFromAccount(acc, nil)
@@ -235,9 +255,7 @@ func TestConversationChallengeKeepsRefusedDeviceAndAccountGeneration(t *testing.
 func TestConcurrentNamedDialogCreatesOneUpstreamChild(t *testing.T) {
 	acc := sessionTestAccount()
 	acc.ID = 9405
-	conversations.Lock()
-	conversations.main[acc.ID] = "synthetic-concurrent-root"
-	conversations.Unlock()
+	rootConversations.put(acc.ID, "synthetic-concurrent-root", time.Now())
 	var creates atomic.Int32
 	started, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once

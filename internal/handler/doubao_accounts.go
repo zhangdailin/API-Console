@@ -9,7 +9,7 @@ import (
 	"orchids-api/internal/store"
 )
 
-func (h *Handler) acquireInitialAccount(ctx context.Context, channel, model, dialog string) (UpstreamClient, *store.Account, func(), int64, error) {
+func (h *Handler) acquireInitialAccount(ctx context.Context, channel, model, dialog string) (UpstreamClient, *store.Account, func(), func(), error) {
 	owner := middleware.APIKeyFingerprint(ctx)
 	if channel != "doubao" || dialog == "" || owner == "" || h.loadBalancer == nil || h.loadBalancer.Store == nil {
 		return h.acquireReservedAccountSelection(ctx, channel, true, nil, model)
@@ -17,9 +17,9 @@ func (h *Handler) acquireInitialAccount(ctx context.Context, channel, model, dia
 	s := h.loadBalancer.Store
 	pinned, err := s.DoubaoConversationAccount(ctx, owner, dialog)
 	if err != nil {
-		return nil, nil, func() {}, 0, err
+		return nil, nil, func() {}, nil, err
 	}
-	acquire := func(id int64) (UpstreamClient, *store.Account, func(), int64, error) {
+	acquire := func(id int64) (UpstreamClient, *store.Account, func(), func(), error) {
 		return h.acquireReservedAccountSelection(context.WithValue(ctx, pinnedDoubaoAccountKey{}, id), channel, true, nil, model)
 	}
 	client, account, release, tracked, err := acquire(pinned)
@@ -29,7 +29,7 @@ func (h *Handler) acquireInitialAccount(ctx context.Context, channel, model, dia
 	if account == nil || account.ID <= 0 {
 		release()
 		h.releaseTrackedAccount(tracked)
-		return nil, nil, func() {}, 0, errors.New("Doubao conversation has no account to bind")
+		return nil, nil, func() {}, nil, errors.New("Doubao conversation has no account to bind")
 	}
 	chosen, err := s.BindDoubaoConversation(ctx, owner, dialog, account.ID)
 	if err == nil && chosen == account.ID {
@@ -38,7 +38,7 @@ func (h *Handler) acquireInitialAccount(ctx context.Context, channel, model, dia
 	release()
 	h.releaseTrackedAccount(tracked)
 	if err != nil {
-		return nil, nil, func() {}, 0, err
+		return nil, nil, func() {}, nil, err
 	}
 	// A concurrent first turn may have won the binding on another replica.
 	// Reserve its account before any upstream operation for this turn.

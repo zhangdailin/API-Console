@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"runtime"
 	"slices"
 	"strconv"
@@ -24,16 +25,32 @@ func forEachIndex(count int, visit func(int) error) error {
 	return errors.Join(util.RunIndexed(count, workers, visit)...)
 }
 
-// compactNonNil keeps the order of the decoded rows while dropping the positions
-// a missing or skipped row left empty.
-func compactNonNil[T any](items []*T) []*T {
-	out := make([]*T, 0, len(items))
-	for _, item := range items {
-		if item != nil {
-			out = append(out, item)
-		}
+func redisBatchKeys(ids []int64, key func(int64) string) []string {
+	keys := make([]string, len(ids))
+	for i, id := range ids {
+		keys[i] = key(id)
 	}
-	return out
+	return keys
+}
+
+// decodeRedisRows keeps Redis row order and skips missing or filtered records.
+func decodeRedisRows[T any](values []any, ids []int64, kind string, decode func(int, string) (*T, error)) ([]*T, error) {
+	rows := make([]*T, len(values))
+	if err := forEachIndex(len(values), func(i int) error {
+		if values[i] == nil {
+			return nil
+		}
+		raw, ok := values[i].(string)
+		if !ok || raw == "" {
+			return fmt.Errorf("invalid %s record #%d", kind, ids[i])
+		}
+		var err error
+		rows[i], err = decode(i, raw)
+		return err
+	}); err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(rows, func(row *T) bool { return row == nil }), nil
 }
 
 func parseSortedInt64s(values []string) []int64 {

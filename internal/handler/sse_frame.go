@@ -246,56 +246,32 @@ func appendSSEContentBlockStartText(dst []byte, index int) ([]byte, error) {
 	return dst, nil
 }
 
-func appendSSEContentBlockStartThinking(dst []byte, index int, signature string) ([]byte, error) {
-	dst = append(dst, `{"type":"content_block_start","index":`...)
+func appendSSEContentBlockString(dst []byte, index int, frame, field, value string) ([]byte, error) {
+	dst = append(dst, frame...)
 	dst = strconv.AppendInt(dst, int64(index), 10)
-	dst = append(dst, `,"content_block":{"type":"thinking","thinking":"","signature":`...)
-	var err error
-	dst, err = appendJSONBytes(dst, signature)
+	dst, err := appendJSONBytes(append(dst, field...), value)
 	if err != nil {
 		return nil, err
 	}
-	dst = append(dst, `}}`...)
-	return dst, nil
+	return append(dst, '}', '}'), nil
+}
+
+const sseDeltaIndex = `{"type":"content_block_delta","index":`
+
+func appendSSEContentBlockStartThinking(dst []byte, index int, signature string) ([]byte, error) {
+	return appendSSEContentBlockString(dst, index, `{"type":"content_block_start","index":`, `,"content_block":{"type":"thinking","thinking":"","signature":`, signature)
 }
 
 func appendSSEContentBlockDeltaInputJSON(dst []byte, index int, partialJSON string) ([]byte, error) {
-	dst = append(dst, `{"type":"content_block_delta","index":`...)
-	dst = strconv.AppendInt(dst, int64(index), 10)
-	dst = append(dst, `,"delta":{"type":"input_json_delta","partial_json":`...)
-	var err error
-	dst, err = appendJSONBytes(dst, partialJSON)
-	if err != nil {
-		return nil, err
-	}
-	dst = append(dst, `}}`...)
-	return dst, nil
+	return appendSSEContentBlockString(dst, index, sseDeltaIndex, `,"delta":{"type":"input_json_delta","partial_json":`, partialJSON)
 }
 
 func appendSSEContentBlockDeltaText(dst []byte, index int, text string) ([]byte, error) {
-	dst = append(dst, `{"type":"content_block_delta","index":`...)
-	dst = strconv.AppendInt(dst, int64(index), 10)
-	dst = append(dst, `,"delta":{"type":"text_delta","text":`...)
-	var err error
-	dst, err = appendJSONBytes(dst, text)
-	if err != nil {
-		return nil, err
-	}
-	dst = append(dst, `}}`...)
-	return dst, nil
+	return appendSSEContentBlockString(dst, index, sseDeltaIndex, `,"delta":{"type":"text_delta","text":`, text)
 }
 
 func appendSSEContentBlockDeltaThinking(dst []byte, index int, thinking string) ([]byte, error) {
-	dst = append(dst, `{"type":"content_block_delta","index":`...)
-	dst = strconv.AppendInt(dst, int64(index), 10)
-	dst = append(dst, `,"delta":{"type":"thinking_delta","thinking":`...)
-	var err error
-	dst, err = appendJSONBytes(dst, thinking)
-	if err != nil {
-		return nil, err
-	}
-	dst = append(dst, `}}`...)
-	return dst, nil
+	return appendSSEContentBlockString(dst, index, sseDeltaIndex, `,"delta":{"type":"thinking_delta","thinking":`, thinking)
 }
 
 func appendSSEContentBlockStop(dst []byte, index int) ([]byte, error) {

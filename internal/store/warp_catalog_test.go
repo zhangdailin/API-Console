@@ -42,7 +42,9 @@ func TestWarpCatalogStaleSourcePreservesDisabledAccount(t *testing.T) {
 	stale.WarpModelIDs = []string{"new-model-a", "new-model-b"}
 	stale.WarpModelsSyncedAt = observed.Add(time.Hour)
 	testutil.True(t, stale.Enabled, "source snapshot must predate the disable")
-	testutil.NoError(t, s.UpdateWarpCatalog(ctx, stale.ID, stale.WarpRefreshToken, stale.WarpModelIDs, stale.WarpModelsSyncedAt))
+	testutil.NoError(t, s.UpdateWarpCatalogSnapshot(ctx, stale.ID, WarpCatalogPatch{
+		ExpectedRefreshToken: stale.WarpRefreshToken, ModelIDs: stale.WarpModelIDs, SyncedAt: stale.WarpModelsSyncedAt,
+	}))
 	got, err := s.GetAccount(ctx, acc.ID)
 	testutil.NoError(t, err)
 	testutil.False(t, got.Enabled, "catalog observation re-enabled a disabled account")
@@ -71,17 +73,21 @@ func TestWarpCatalogRejectsRotatedCredential(t *testing.T) {
 	}))
 	before, err := s.GetAccount(ctx, acc.ID)
 	testutil.NoError(t, err)
-	err = s.UpdateWarpCatalog(ctx, acc.ID, acc.WarpRefreshToken, []string{"stale-credential-model"}, observed.Add(time.Hour))
+	patch := WarpCatalogPatch{
+		ExpectedRefreshToken: acc.WarpRefreshToken, ModelIDs: []string{"new-model"}, SyncedAt: observed.Add(time.Hour),
+	}
+	err = s.UpdateWarpCatalogSnapshot(ctx, acc.ID, patch)
 	testutil.Error(t, err)
 	testutil.MustContain(t, err.Error(), "warp credential changed concurrently")
 	got, err := s.GetAccount(ctx, acc.ID)
 	testutil.NoError(t, err)
 	testutil.True(t, reflect.DeepEqual(got, before), "rejected catalog write changed the account")
 	// The same observation is accepted only when tied to the current credential.
-	testutil.NoError(t, s.UpdateWarpCatalog(ctx, acc.ID, before.WarpRefreshToken, []string{"current-credential-model"}, observed.Add(time.Hour)))
+	patch.ExpectedRefreshToken = before.WarpRefreshToken
+	testutil.NoError(t, s.UpdateWarpCatalogSnapshot(ctx, acc.ID, patch))
 	got, err = s.GetAccount(ctx, acc.ID)
 	testutil.NoError(t, err)
-	testutil.True(t, slices.Equal(got.WarpModelIDs, []string{"current-credential-model"}), "current credential catalog was not stored")
+	testutil.True(t, slices.Equal(got.WarpModelIDs, []string{"new-model"}), "current credential catalog was not stored")
 	testutil.Equal(t, got.WarpAccessToken, before.WarpAccessToken)
 	testutil.Equal(t, got.WarpRefreshToken, before.WarpRefreshToken)
 }
@@ -95,7 +101,9 @@ func TestWarpCatalogIgnoresStaleAndEqualTimestamps(t *testing.T) {
 	before, err := s.GetAccount(ctx, acc.ID)
 	testutil.NoError(t, err)
 	for _, stamp := range []time.Time{observed.Add(-time.Hour), observed, {}} {
-		testutil.NoError(t, s.UpdateWarpCatalog(ctx, acc.ID, acc.WarpRefreshToken, []string{"stale-model"}, stamp))
+		testutil.NoError(t, s.UpdateWarpCatalogSnapshot(ctx, acc.ID, WarpCatalogPatch{
+			ExpectedRefreshToken: acc.WarpRefreshToken, ModelIDs: []string{"stale-model"}, SyncedAt: stamp,
+		}))
 		got, err := s.GetAccount(ctx, acc.ID)
 		testutil.NoError(t, err)
 		testutil.True(t, reflect.DeepEqual(got, before), "non-newer catalog changed the account")
@@ -108,16 +116,12 @@ func TestWarpCatalogRequiresExactExpectedCredential(t *testing.T) {
 	acc := &Account{AccountType: "warp", WarpRefreshToken: "catalog-refresh"}
 	testutil.NoError(t, s.CreateAccount(ctx, acc))
 	for _, expected := range []string{"", " catalog-refresh ", "other-refresh"} {
-		err := s.UpdateWarpCatalog(ctx, acc.ID, expected, []string{"model-a"}, time.Date(2030, 1, 2, 0, 0, 0, 0, time.UTC))
+		err := s.UpdateWarpCatalogSnapshot(ctx, acc.ID, WarpCatalogPatch{
+			ExpectedRefreshToken: expected, ModelIDs: []string{"model-a"}, SyncedAt: time.Date(2030, 1, 2, 0, 0, 0, 0, time.UTC),
+		})
 		testutil.Error(t, err)
 		testutil.MustContain(t, err.Error(), "warp credential changed concurrently")
 	}
-}
-
-func TestWarpCatalogUpdateRequiresConfiguredStore(t *testing.T) {
-	var absent *Store
-	testutil.Error(t, absent.UpdateWarpCatalog(t.Context(), 1, "", []string{"model-a"}, time.Now()))
-	testutil.Error(t, (&Store{}).UpdateWarpCatalog(t.Context(), 1, "", []string{"model-a"}, time.Now()))
 }
 
 func TestWarpCatalogSnapshotPersistsMetadataAtomically(t *testing.T) {

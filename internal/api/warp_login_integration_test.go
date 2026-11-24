@@ -142,18 +142,10 @@ func TestWarpLoginIntegration_ReloginPreservesOperatorState(t *testing.T) {
 				challenge, err := flow.Start(t.Context(), cfg)
 				testutil.NoError(t, err, "start registered Warp login: %v")
 				const loginID = "warp-integration-login"
-				registry := newBrowserLoginRegistry(channel.Warp)
-				testutil.True(t, registry.admit(loginID, &browserLogin{
-					deviceLogin: deviceLogin{
-						deviceCode: challenge.DeviceCode, userCode: challenge.UserCode,
-						verifyURI: challenge.VerifyURI, verifyFull: challenge.VerifyFull,
-						expiresAt: challenge.ExpiresAt, status: "pending", configSnapshot: cfg,
-						// A fresh login defaults to enabled; re-login must not override
-						// the existing disabled row even when this intent is explicit.
-						enabled: true, enabledKnown: true,
-					},
-					challenge: challenge, flow: flow,
-				}), "admit generic login transaction")
+				registry := newDeviceLoginRegistry(channel.Warp)
+				login := newDeviceLogin(cfg, flow, challenge)
+				login.interval = 0
+				testutil.True(t, registry.admit(loginID, login), "admit generic login transaction")
 				pending := httptest.NewRecorder()
 				respondLoginStatus(pending, registry, loginID, "Warp")
 				testutil.Equal(t, pending.Code, http.StatusOK)
@@ -168,7 +160,7 @@ func TestWarpLoginIntegration_ReloginPreservesOperatorState(t *testing.T) {
 					testutil.NotEqual(t, fresh.WarpRefreshToken, existing.WarpRefreshToken)
 					testutil.NotEqual(t, fresh.Name, existing.Name)
 					testutil.True(t, fresh.Enabled, "fixture must conflict with operator's disabled setting")
-					finishBrowserLogin(a, t.Context(), registry, loginID, "Warp", fresh, flow.MarkReplace, flow.Merge)
+					finishBrowserLogin(a, t.Context(), registry, loginID, "Warp", fresh, flow)
 				} else {
 					// Synchronous polling with a zero interval covers the generic
 					// forwarding of both registered Merge and MarkReplace callbacks.

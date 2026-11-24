@@ -275,12 +275,9 @@ func TestDoubaoIdentityRotationRejectsMalformedStoredFieldTypes(t *testing.T) {
 	}
 }
 
-// Embedding the existing interface deliberately does not expose optional methods.
-type doubaoIdentityUnsupportedBackend struct{ accountStore }
-
 func TestDoubaoIdentityRotationRequiresConfiguredBackend(t *testing.T) {
 	var absent *Store
-	for _, s := range []*Store{absent, {}, {accounts: doubaoIdentityUnsupportedBackend{}}} {
+	for _, s := range []*Store{absent, {}} {
 		testutil.Error(t, s.RotateDoubaoIdentity(t.Context(), 1, DoubaoIdentityPatch{}))
 	}
 }

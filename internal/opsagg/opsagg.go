@@ -71,21 +71,8 @@ type Bucket struct {
 	DurationFailed, FirstTokenFailed, DurationAttempt, FirstTokenAttempt []int64   `json:"-"`
 	Channel                                                              string    `json:"channel"`
 	Minute                                                               time.Time `json:"minute"`
-	Requests                                                             int64     `json:"requests"`
-	Success                                                              int64     `json:"success"`
-	Failed                                                               int64     `json:"failed"`
-	Input                                                                int64     `json:"input_tokens"`
-	Cached                                                               int64     `json:"cached_input_tokens"`
-	Output                                                               int64     `json:"output_tokens"`
-	Reasoning                                                            int64     `json:"reasoning_tokens"`
-	Total                                                                int64     `json:"total_tokens"`
-	PricedRequests                                                       int64     `json:"priced_requests"`
-	UnpricedRequests                                                     int64     `json:"unpriced_requests"`
-	PricedTokens                                                         int64     `json:"priced_tokens"`
-	UnpricedTokens                                                       int64     `json:"unpriced_tokens"`
-	CostInUSDTicks                                                       int64     `json:"cost_in_usd_ticks"`
-	DurationMS                                                           []int64   `json:"-"`
-	ConcurrencyPeak                                                      int64     `json:"concurrency_peak"`
+	Traffic
+	ConcurrencyPeak int64 `json:"concurrency_peak"`
 }
 
 // Summary is a rolled-up view over a time range.
@@ -109,30 +96,61 @@ type Summary struct {
 	DurationHistogramFailed  []HistogramBin `json:"duration_histogram_failed"`
 	DurationHistogramAttempt []HistogramBin `json:"duration_histogram_attempt"`
 
-	Channel           string  `json:"channel"`
-	Requests          int64   `json:"requests"`
-	Success           int64   `json:"success"`
-	Failed            int64   `json:"failed"`
-	SuccessRate       float64 `json:"success_rate"`
-	RPM               float64 `json:"rpm"`
-	DurationP95MS     int64   `json:"duration_p95_ms"`
-	FirstTokenP95MS   int64   `json:"first_token_p95_ms"`
-	InputTokens       int64   `json:"input_tokens"`
-	CachedInputTokens int64   `json:"cached_input_tokens"`
-	OutputTokens      int64   `json:"output_tokens"`
-	ReasoningTokens   int64   `json:"reasoning_tokens"`
-	TotalTokens       int64   `json:"total_tokens"`
-	PricedRequests    int64   `json:"priced_requests"`
-	UnpricedRequests  int64   `json:"unpriced_requests"`
-	PricedTokens      int64   `json:"priced_tokens"`
-	UnpricedTokens    int64   `json:"unpriced_tokens"`
-	// CostInUSDTicks is the summed cost of the window, in ticks. A window that
-	// mixes priced and unpriced rows reports both the cost and the unpriced
-	// request count, so the figure is never presented as complete on its own.
-	CostInUSDTicks int64 `json:"cost_in_usd_ticks"`
+	Channel string `json:"channel"`
+	Traffic
+	SuccessRate     float64 `json:"success_rate"`
+	RPM             float64 `json:"rpm"`
+	DurationP95MS   int64   `json:"duration_p95_ms"`
+	FirstTokenP95MS int64   `json:"first_token_p95_ms"`
 	// Samples reports how many observations backed the percentiles. Zero means
 	// "no sample", which the UI must show as such rather than as healthy.
 	Samples int64 `json:"samples"`
+}
+
+// Traffic holds the cumulative channel figures shared by minute and window views.
+type Traffic struct {
+	Requests          int64 `json:"requests"`
+	Success           int64 `json:"success"`
+	Failed            int64 `json:"failed"`
+	InputTokens       int64 `json:"input_tokens"`
+	CachedInputTokens int64 `json:"cached_input_tokens"`
+	OutputTokens      int64 `json:"output_tokens"`
+	ReasoningTokens   int64 `json:"reasoning_tokens"`
+	TotalTokens       int64 `json:"total_tokens"`
+	PricedRequests    int64 `json:"priced_requests"`
+	UnpricedRequests  int64 `json:"unpriced_requests"`
+	PricedTokens      int64 `json:"priced_tokens"`
+	UnpricedTokens    int64 `json:"unpriced_tokens"`
+	CostInUSDTicks    int64 `json:"cost_in_usd_ticks"`
+}
+
+func (t *Traffic) Add(b Traffic) {
+	t.Requests += b.Requests
+	t.Success += b.Success
+	t.Failed += b.Failed
+	t.InputTokens += b.InputTokens
+	t.CachedInputTokens += b.CachedInputTokens
+	t.OutputTokens += b.OutputTokens
+	t.ReasoningTokens += b.ReasoningTokens
+	if b.TotalTokens <= 0 {
+		b.TotalTokens = b.InputTokens + b.OutputTokens
+	}
+	t.TotalTokens += b.TotalTokens
+	t.PricedRequests += b.PricedRequests
+	t.UnpricedRequests += b.UnpricedRequests
+	t.PricedTokens += b.PricedTokens
+	t.UnpricedTokens += b.UnpricedTokens
+	t.CostInUSDTicks += b.CostInUSDTicks
+}
+
+// Merge takes the counters and raw samples needed by a cross-channel minute.
+func (b *Bucket) Merge(other Bucket) {
+	b.Counters.Add(other.Counters)
+	b.Traffic.Add(other.Traffic)
+	b.DurationFailed = append(b.DurationFailed, other.DurationFailed...)
+	b.FirstTokenFailed = append(b.FirstTokenFailed, other.FirstTokenFailed...)
+	b.DurationAttempt = append(b.DurationAttempt, other.DurationAttempt...)
+	b.FirstTokenAttempt = append(b.FirstTokenAttempt, other.FirstTokenAttempt...)
 }
 
 // Aggregator writes and reads the per-minute buckets.
@@ -185,87 +203,50 @@ func (a *Aggregator) Observe(ctx context.Context, outcome Outcome) {
 	key := a.key(minute, outcome.Channel)
 
 	pipe := a.client.Pipeline()
-	pipe.HIncrBy(ctx, key, "requests", 1)
 	a.observeDetails(ctx, pipe, key, outcome)
+	status := "failed"
 	if outcome.OK {
-		pipe.HIncrBy(ctx, key, "success", 1)
-	} else {
-		pipe.HIncrBy(ctx, key, "failed", 1)
+		status = "success"
 	}
-	if outcome.DurationMS > 0 {
-		pipe.RPush(ctx, key+":dur", outcome.DurationMS)
+	count := func(prefix string) {
+		pipe.HIncrBy(ctx, key, prefix+"requests", 1)
+		pipe.HIncrBy(ctx, key, prefix+status, 1)
 	}
-	if outcome.FirstTokenMS > 0 {
-		pipe.RPush(ctx, key+":ttft", outcome.FirstTokenMS)
-	}
-	if outcome.InputTokens > 0 {
-		pipe.HIncrBy(ctx, key, "input_tokens", outcome.InputTokens)
-	}
-	if outcome.OutputTokens > 0 {
-		pipe.HIncrBy(ctx, key, "output_tokens", outcome.OutputTokens)
-	}
-	if outcome.CachedTokens > 0 {
-		pipe.HIncrBy(ctx, key, "cached_input_tokens", outcome.CachedTokens)
-	}
-	if outcome.ReasoningTokens > 0 {
-		pipe.HIncrBy(ctx, key, "reasoning_tokens", outcome.ReasoningTokens)
-	}
+	count("")
 	total := outcome.TotalTokens
 	if total <= 0 {
 		total = outcome.InputTokens + outcome.OutputTokens
 	}
-	if total > 0 {
-		pipe.HIncrBy(ctx, key, "total_tokens", total)
+	increment := func(field string, value int64) {
+		if value > 0 {
+			pipe.HIncrBy(ctx, key, field, value)
+		}
 	}
-	if outcome.CostInUSDTicks > 0 {
-		pipe.HIncrBy(ctx, key, "cost_in_usd_ticks", outcome.CostInUSDTicks)
-	}
+	increment("input_tokens", outcome.InputTokens)
+	increment("output_tokens", outcome.OutputTokens)
+	increment("cached_input_tokens", outcome.CachedTokens)
+	increment("reasoning_tokens", outcome.ReasoningTokens)
+	increment("total_tokens", total)
+	increment("cost_in_usd_ticks", outcome.CostInUSDTicks)
 	if outcome.UsageReported {
+		prefix := "unpriced_"
 		if outcome.Priced {
-			pipe.HIncrBy(ctx, key, "priced_requests", 1)
-			if total > 0 {
-				pipe.HIncrBy(ctx, key, "priced_tokens", total)
-			}
-		} else {
-			pipe.HIncrBy(ctx, key, "unpriced_requests", 1)
-			if total > 0 {
-				pipe.HIncrBy(ctx, key, "unpriced_tokens", total)
-			}
+			prefix = "priced_"
 		}
+		increment(prefix+"requests", 1)
+		increment(prefix+"tokens", total)
 	}
+	observeSample(ctx, pipe, key+":dur", outcome.DurationMS, 5000, true)
+	observeSample(ctx, pipe, key+":ttft", outcome.FirstTokenMS, 5000, true)
 	if outcome.Model != "" {
-		// Per-model counters live in the same bucket: the matrix needs per-model
-		// request/success figures and a second key per model would multiply the
-		// key count for no benefit.
-		modelField := "model:" + strings.TrimSpace(outcome.Model)
-		pipe.HIncrBy(ctx, key, modelField+":requests", 1)
-		if outcome.OK {
-			pipe.HIncrBy(ctx, key, modelField+":success", 1)
-		} else {
-			pipe.HIncrBy(ctx, key, modelField+":failed", 1)
-		}
-		if outcome.FirstTokenMS > 0 {
-			pipe.RPush(ctx, key+":"+modelField+":ttft", outcome.FirstTokenMS)
-			pipe.Expire(ctx, key+":"+modelField+":ttft", BucketRetention)
-			pipe.LTrim(ctx, key+":"+modelField+":ttft", -2000, -1)
-		}
-		if outcome.DurationMS > 0 {
-			pipe.RPush(ctx, key+":"+modelField, outcome.DurationMS)
-		}
+		// Per-model counts share the channel hash. Latencies have their own
+		// smaller lists so the overview can merge raw samples across minutes.
+		field := "model:" + strings.TrimSpace(outcome.Model)
+		count(field + ":")
+		observeSample(ctx, pipe, key+":"+field, outcome.DurationMS, 2000, true)
+		observeSample(ctx, pipe, key+":"+field+":ttft", outcome.FirstTokenMS, 2000, false)
 	}
 	pipe.Expire(ctx, key, BucketRetention)
-	pipe.Expire(ctx, key+":dur", BucketRetention)
-	pipe.Expire(ctx, key+":ttft", BucketRetention)
-	if outcome.Model != "" {
-		pipe.Expire(ctx, key+":model:"+strings.TrimSpace(outcome.Model), BucketRetention)
-	}
-	// Bounded list: percentiles over the most recent samples are enough and the
-	// list must not grow with traffic.
-	pipe.LTrim(ctx, key+":dur", -5000, -1)
-	pipe.LTrim(ctx, key+":ttft", -5000, -1)
-	if outcome.Model != "" {
-		pipe.LTrim(ctx, key+":model:"+strings.TrimSpace(outcome.Model), -2000, -1)
-	}
 	if _, err := pipe.Exec(ctx); err != nil {
 		// Aggregation is best-effort observability; the request must not fail
 		// because a counter could not be written. It is logged so a silently dead
@@ -471,24 +452,26 @@ func (a *Aggregator) SamplesForChecked(ctx context.Context, channel string, buck
 func bucketFromFields(minute time.Time, channel string, fields map[string]string) *Bucket {
 	toInt := func(name string) int64 { value, _ := strconv.ParseInt(fields[name], 10, 64); return value }
 	return &Bucket{
-		Counters:         countersFrom(fields),
-		modelCounts:      decodeModelBucketCounts(fields),
-		Channel:          normalizeChannel(channel),
-		Minute:           minute,
-		Requests:         toInt("requests"),
-		Success:          toInt("success"),
-		Failed:           toInt("failed"),
-		Input:            toInt("input_tokens"),
-		Cached:           toInt("cached_input_tokens"),
-		Output:           toInt("output_tokens"),
-		Reasoning:        toInt("reasoning_tokens"),
-		Total:            toInt("total_tokens"),
-		PricedRequests:   toInt("priced_requests"),
-		UnpricedRequests: toInt("unpriced_requests"),
-		PricedTokens:     toInt("priced_tokens"),
-		UnpricedTokens:   toInt("unpriced_tokens"),
-		CostInUSDTicks:   toInt("cost_in_usd_ticks"),
-		ConcurrencyPeak:  toInt("concurrency_peak"),
+		Counters:    countersFrom(fields),
+		modelCounts: decodeModelBucketCounts(fields),
+		Channel:     normalizeChannel(channel),
+		Minute:      minute,
+		Traffic: Traffic{
+			Requests:          toInt("requests"),
+			Success:           toInt("success"),
+			Failed:            toInt("failed"),
+			InputTokens:       toInt("input_tokens"),
+			CachedInputTokens: toInt("cached_input_tokens"),
+			OutputTokens:      toInt("output_tokens"),
+			ReasoningTokens:   toInt("reasoning_tokens"),
+			TotalTokens:       toInt("total_tokens"),
+			PricedRequests:    toInt("priced_requests"),
+			UnpricedRequests:  toInt("unpriced_requests"),
+			PricedTokens:      toInt("priced_tokens"),
+			UnpricedTokens:    toInt("unpriced_tokens"),
+			CostInUSDTicks:    toInt("cost_in_usd_ticks"),
+		},
+		ConcurrencyPeak: toInt("concurrency_peak"),
 	}
 }
 
@@ -532,23 +515,7 @@ func (a *Aggregator) SummarizeWith(ctx context.Context, input SummaryInput) Summ
 		failedTTFT = append(failedTTFT, bucket.FirstTokenFailed...)
 		attemptDur = append(attemptDur, bucket.DurationAttempt...)
 		attemptTTFT = append(attemptTTFT, bucket.FirstTokenAttempt...)
-		summary.Requests += bucket.Requests
-		summary.Success += bucket.Success
-		summary.Failed += bucket.Failed
-		summary.InputTokens += bucket.Input
-		summary.CachedInputTokens += bucket.Cached
-		summary.OutputTokens += bucket.Output
-		summary.ReasoningTokens += bucket.Reasoning
-		if bucket.Total > 0 {
-			summary.TotalTokens += bucket.Total
-		} else {
-			summary.TotalTokens += bucket.Input + bucket.Output
-		}
-		summary.PricedRequests += bucket.PricedRequests
-		summary.UnpricedRequests += bucket.UnpricedRequests
-		summary.PricedTokens += bucket.PricedTokens
-		summary.CostInUSDTicks += bucket.CostInUSDTicks
-		summary.UnpricedTokens += bucket.UnpricedTokens
+		summary.Traffic.Add(bucket.Traffic)
 		if !input.SamplesProvided && a.Enabled() {
 			key := a.key(bucket.Minute, input.Channel)
 			durations = append(durations, a.listInts(ctx, key+":dur")...)
@@ -558,11 +525,7 @@ func (a *Aggregator) SummarizeWith(ctx context.Context, input SummaryInput) Summ
 
 	real := summary.Requests
 	if real > 0 {
-		ratio := float64(summary.Success) / float64(real)
-		if ratio > 1 {
-			ratio = 1
-		}
-		summary.SuccessRate = ratio
+		summary.SuccessRate = min(1, float64(summary.Success)/float64(real))
 	}
 
 	// The rate is per minute of the WINDOW, not per bucket that happens to exist.
@@ -593,8 +556,8 @@ func (a *Aggregator) SummarizeWith(ctx context.Context, input SummaryInput) Summ
 	summary.DurationHistogramFailed = histogram(failedDur)
 	summary.DurationHistogramAttempt = histogram(attemptDur)
 	summary.Samples = int64(len(durations))
-	summary.DurationP95MS = percentile(durations, 0.95)
-	summary.FirstTokenP95MS = percentile(ttfts, 0.95)
+	summary.DurationP95MS = summary.Duration.P95
+	summary.FirstTokenP95MS = summary.FirstToken.P95
 	return summary
 }
 
@@ -615,19 +578,17 @@ func (a *Aggregator) listInts(ctx context.Context, key string) []int64 {
 
 // percentile returns the nearest-rank p-th percentile of the samples.
 func percentile(values []int64, p float64) int64 {
-	if len(values) == 0 {
+	sorted := slices.Clone(values)
+	slices.Sort(sorted)
+	return rankedPercentile(sorted, p)
+}
+
+func rankedPercentile(sorted []int64, p float64) int64 {
+	if len(sorted) == 0 {
 		return 0
 	}
-	sorted := append([]int64(nil), values...)
-	slices.Sort(sorted)
 	rank := int(math.Ceil(float64(len(sorted))*p)) - 1
-	if rank >= len(sorted) {
-		rank = len(sorted) - 1
-	}
-	if rank < 0 {
-		rank = 0
-	}
-	return sorted[rank]
+	return sorted[min(max(rank, 0), len(sorted)-1)]
 }
 
 // ModelStats is the per-model roll-up inside one channel.

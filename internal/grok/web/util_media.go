@@ -2,6 +2,7 @@ package web
 
 import (
 	"fmt"
+	"orchids-api/internal/grok/grokbase"
 	"sort"
 	"strings"
 
@@ -68,7 +69,7 @@ func extractImageURLs(value any) []string {
 func collectAssetLikeStrings(value any, limit int) []string {
 	out := make([]string, 0, 32)
 	seen := map[string]struct{}{}
-	walkJSONStrings(value, func(s string) {
+	grokbase.WalkJSONStrings(value, func(s string) {
 		if limit > 0 && len(out) >= limit {
 			return
 		}
@@ -267,7 +268,7 @@ func extractRenderableImageLinks(value any) []string {
 		return false
 	}
 
-	walkJSONStrings(value, func(s string) {
+	grokbase.WalkJSONStrings(value, func(s string) {
 		// Some fields may contain multiple URLs; split on whitespace.
 		for part := range strings.FieldsSeq(s) {
 			p := strings.Trim(part, "\"'()[]{}<>,")

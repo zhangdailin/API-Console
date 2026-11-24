@@ -96,7 +96,7 @@ func accountCredentialFields(acc *Account) []*string {
 	}
 }
 
-func (s *redisStore) marshalAccount(acc *Account) ([]byte, error) {
+func (s *Store) marshalAccount(acc *Account) ([]byte, error) {
 	if acc == nil {
 		return json.Marshal(acc)
 	}
@@ -111,7 +111,7 @@ func (s *redisStore) marshalAccount(acc *Account) ([]byte, error) {
 	return json.Marshal(&stored)
 }
 
-func (s *redisStore) unmarshalAccount(data []byte, fallbackID int64) (*Account, error) {
+func (s *Store) unmarshalAccount(data []byte, fallbackID int64) (*Account, error) {
 	var acc Account
 	if err := json.Unmarshal(data, &acc); err != nil {
 		return nil, err
@@ -130,7 +130,7 @@ func (s *redisStore) unmarshalAccount(data []byte, fallbackID int64) (*Account, 
 }
 
 // validateAccountCredentials checks decryption without changing stored records.
-func (s *redisStore) validateAccountCredentials(ctx context.Context) error {
+func (s *Store) validateAccountCredentials(ctx context.Context) error {
 	_, err := s.ListAccounts(ctx)
 	return err
 }

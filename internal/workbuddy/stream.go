@@ -1,14 +1,12 @@
 package workbuddy
 
 import (
-	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
-
-	"encoding/json"
 
 	"orchids-api/internal/upstream"
 	"orchids-api/internal/util"
@@ -41,44 +39,33 @@ func (r streamResult) FinishReason() string {
 	}
 }
 
-// streamChunk is one `data:` line of the SSE response.
+type streamChoice struct {
+	Index        int    `json:"index"`
+	FinishReason string `json:"finish_reason"`
+	Delta        struct {
+		Role             string `json:"role"`
+		Content          string `json:"content"`
+		ReasoningContent string `json:"reasoning_content"`
+		ToolCalls        []struct {
+			Index    int    `json:"index"`
+			ID       string `json:"id"`
+			Type     string `json:"type"`
+			Function struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			} `json:"function"`
+		} `json:"tool_calls"`
+	} `json:"delta"`
+}
+
 type streamChunk struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	Model   string `json:"model"`
-	Code    int    `json:"code"`
-	Msg     string `json:"msg"`
-	Choices []struct {
-		Index        int    `json:"index"`
-		FinishReason string `json:"finish_reason"`
-		Delta        struct {
-			Role             string `json:"role"`
-			Content          string `json:"content"`
-			ReasoningContent string `json:"reasoning_content"`
-			ToolCalls        []struct {
-				Index    int    `json:"index"`
-				ID       string `json:"id"`
-				Type     string `json:"type"`
-				Function struct {
-					Name      string `json:"name"`
-					Arguments string `json:"arguments"`
-				} `json:"function"`
-			} `json:"tool_calls"`
-		} `json:"delta"`
-	} `json:"choices"`
-	Usage map[string]any `json:"usage"`
-	Error struct {
-		Message string          `json:"message"`
-		Code    json.RawMessage `json:"code"`
-	} `json:"error"`
+	upstream.ChatStreamChunk[streamChoice]
+	Code int    `json:"code"`
+	Msg  string `json:"msg"`
 }
 
 // consumeStream parses the SSE body and forwards deltas to the caller.
 func consumeStream(body io.Reader, onMessage func(upstream.SSEMessage), streamToolDeltas ...bool) (streamResult, error) {
-	scanner := bufio.NewScanner(body)
-	buffer := util.AcquireStreamBuffer()
-	defer util.ReleaseStreamBuffer(buffer)
-	scanner.Buffer(buffer[:], 8*1024*1024)
 	result := streamResult{}
 	tools := util.NewToolCallAccumulator()
 	sawDone := false
@@ -87,38 +74,22 @@ func consumeStream(body io.Reader, onMessage func(upstream.SSEMessage), streamTo
 	emitText := func(text string) { upstream.EmitTextDelta(onMessage, text, &result.SawMeaningfulEvent) }
 
 	emitTools := func() error {
-		calls := tools.CompleteAll()
-		if err := upstream.ValidateStreamedTools(calls); err != nil {
-			return err
-		}
-		upstream.EmitToolCalls(onMessage, calls, &result.SawMeaningfulEvent, &result.ToolCallCount)
-		return nil
+		return upstream.FinishStreamedTools(onMessage, tools, &result.SawMeaningfulEvent, &result.ToolCallCount)
 	}
 
-	for scanner.Scan() {
-		line := bytes.TrimSpace(scanner.Bytes())
-		if len(line) == 0 || bytes.HasPrefix(line, []byte(":")) {
-			continue
-		}
-		if !bytes.HasPrefix(line, []byte("data:")) {
-			// Some edge responses keep HTTP 200 but return the business envelope as
-			// plain JSON rather than SSE. Preserve that code instead of degrading it
-			// to a generic "no events" protocol error.
-			if bytes.HasPrefix(line, []byte("{")) {
-				var env envelope
-				if json.Unmarshal(line, &env) == nil && env.Code != 0 {
-					return result, apiError(http.StatusOK, line)
-				}
+	var scanErr error
+	for payload, data := range upstream.ScanChatStream(body, &scanErr) {
+		if !data {
+			// A 200 plain JSON business envelope should keep its upstream code.
+			var env envelope
+			if json.Unmarshal(payload, &env) == nil && env.Code != 0 {
+				return result, apiError(http.StatusOK, payload)
 			}
 			continue
 		}
-		payload := bytes.TrimSpace(line[len("data:"):])
 		if bytes.Equal(payload, []byte("[DONE]")) {
 			sawDone = true
 			break
-		}
-		if len(payload) == 0 {
-			continue
 		}
 
 		var chunk streamChunk
@@ -143,18 +114,7 @@ func consumeStream(body io.Reader, onMessage func(upstream.SSEMessage), streamTo
 		}
 		delta := chunk.Choices[0].Delta
 
-		if delta.ReasoningContent != "" {
-			result.SawMeaningfulEvent = true
-			if onMessage != nil {
-				if result.ThinkingSignature == "" {
-					result.ThinkingSignature = newThinkingSignature()
-				}
-				onMessage(upstream.SSEMessage{Type: "model.reasoning-delta", Event: map[string]any{
-					"delta":     delta.ReasoningContent,
-					"signature": result.ThinkingSignature,
-				}})
-			}
-		}
+		upstream.EmitReasoningDelta(onMessage, delta.ReasoningContent, "workbuddy-v1", &result.SawMeaningfulEvent, &result.ThinkingSignature)
 		if delta.Content != "" {
 			emitText(delta.Content)
 		}
@@ -176,13 +136,11 @@ func consumeStream(body io.Reader, onMessage func(upstream.SSEMessage), streamTo
 			}
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		return result, fmt.Errorf("failed to read workbuddy stream: %w", err)
+	if scanErr != nil {
+		return result, fmt.Errorf("failed to read workbuddy stream: %w", scanErr)
 	}
 	if !sawDone || !sawFinish {
 		return result, fmt.Errorf("workbuddy stream ended before terminal finish")
 	}
 	return result, nil
 }
-
-func newThinkingSignature() string { return util.NewThinkingSignature("workbuddy-v1") }

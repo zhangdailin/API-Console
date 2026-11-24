@@ -19,35 +19,8 @@
      clipping back. */
 }
 
-.grok-tools-page .header-section {
-  margin-bottom: 0;
-  padding: 0;
-}
-
-/* One compact row: eyebrow, title, one-line lede and the account link. The
-   workbench itself must stay above the fold. */
-
-.grok-tools-workspace {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
 /* Capability strip: one ~40px row that carries the account check, the per-tool
-   availability badges and the fix-it link. Status never sits in a tab label. */
-.grok-capability-banner {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-3);
-  min-height: var(--control-h-lg);
-  padding: var(--space-1) var(--space-3);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  background: var(--surface-2);
-}
-
+   status and the fix-it link. */
 .capability-indicator {
   flex: 0 0 auto;
   width: 8px;
@@ -83,33 +56,9 @@
   white-space: nowrap;
 }
 
-.capability-badges {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
-  gap: var(--space-1);
-  margin-left: auto;
-}
-
-.capability-badges .badge::before {
-  color: var(--text-muted);
-  font-weight: 600;
-}
-
-.capability-badges .badge[data-capability="chat"]::before { content: "对话"; }
-.capability-badges .badge[data-capability="imagine"]::before { content: "图片"; }
-.capability-badges .badge[data-capability="video"]::before { content: "视频"; }
-.capability-badges .badge[data-capability="voice"]::before { content: "语音"; }
-.capability-badges .badge[data-capability="cache"]::before { content: "缓存"; }
-
 .grok-capability-banner.is-ready .capability-indicator {
   background: var(--ok);
   box-shadow: 0 0 0 4px var(--ok-soft);
-}
-
-.grok-capability-banner.is-warning {
-  border-color: var(--border-highlight);
-  background: var(--warn-soft);
 }
 
 .grok-capability-banner.is-warning .capability-indicator {
@@ -123,38 +72,6 @@
   padding: 0 var(--space-2);
   font-size: 0.76rem;
   font-weight: 650;
-}
-
-.grok-tabs {
-  width: 100%;
-  min-width: 0;
-  gap: var(--space-1);
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  overscroll-behavior-inline: contain;
-  scrollbar-width: none;
-  background: transparent;
-  border: 0;
-  padding: 0;
-}
-
-.grok-tabs::-webkit-scrollbar {
-  display: none;
-}
-
-/* Tabs are single-line labels only; availability lives in the strip above. */
-.grok-tabs .tab-item {
-  flex: 0 0 auto;
-  min-width: 0;
-  height: var(--control-h);
-  padding: 0 var(--space-4);
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 0.84rem;
-  font-weight: 650;
-  white-space: nowrap;
 }
 
 .grok-section {
@@ -985,10 +902,6 @@
 }
 
 /* ---- Video preview slot & placeholder ------------------------------------------------------------- */
-.video-preview-card {
-  min-width: 0;
-}
-
 .video-item-placeholder {
   padding: var(--space-4);
   border: 1px dashed var(--border-color);
@@ -999,10 +912,6 @@
 }
 
 /* ---- Voice panel hooks ---------------------------------------------------------------------------- */
-.voice-speed-block {
-  min-width: 0;
-}
-
 .video-stage,
 .video-empty,
 .audio-root,
@@ -1034,11 +943,7 @@
 }
 
 .voice-log {
-  min-height: 220px;
-  white-space: pre-wrap;
-  overflow: auto;
   font-family: 'JetBrains Mono', Menlo, monospace;
-  font-size: 0.82rem;
 }
 
 .voice-instruction-input {
@@ -1046,18 +951,8 @@
   resize: vertical;
 }
 
-.visualizer {
-  display: flex;
-  align-items: flex-end;
-  gap: 4px;
-  height: 80px;
-}
-
 .visualizer .bar {
-  width: 8px;
   min-height: 4px;
-  border-radius: 999px;
-  background: var(--primary);
 }
 
 .audio-root audio {
@@ -1067,10 +962,6 @@
 
 .progress-bar {
   width: 100%;
-  height: 10px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: rgba(139, 146, 168, 0.12);
 }
 
 .progress-fill {
@@ -1098,40 +989,21 @@
 }
 
 @media (max-width: 760px) {
-  
-
-  
 
   .imagine-masonry-toolbar,
   .composer-input {
     align-items: stretch;
   }
 
-  .imagine-masonry-grid,
-  #imagineGrid .imagine-masonry-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
-/* Focused polish for the Grok workspace. Keep this page calmer and denser than the
-   general admin views without changing shared primitives. */
-.grok-tools-page .header-section h1 {
-  font-size: 1.15rem;
-}
-
-.grok-tools-page .header-section p {
-  max-width: none;
+.grok-tabs .tab-item {
+  padding: 0 var(--space-4);
+  background: transparent;
 }
 
 .grok-tabs .tab-item:hover {
   background: var(--grok-muted-bg);
-  color: var(--text-main);
-}
-
-.grok-tabs .tab-item.active {
-  background: var(--primary-light);
-  color: var(--primary);
-  box-shadow: none;
 }
 
 .grok-section,
@@ -1148,9 +1020,7 @@
 
 .grok-section.content-card {
   border: 1px solid var(--grok-card-border);
-  border-radius: 12px;
   background: var(--bg-surface);
-  box-shadow: var(--shadow-sm);
 }
 
 .function-header-row,
@@ -1212,12 +1082,6 @@
 }
 
 @media (max-width: 760px) {
-  .grok-tools-page .header-section {
-    flex-direction: row;
-    align-items: center;
-    gap: var(--space-1) var(--space-2);
-  }
-
   .composer-input,
   .imagine-masonry-toolbar {
     gap: 8px;
@@ -1602,11 +1466,6 @@
 }
 
 /* ---- Voice surfaces (visualizer / audio-root are laid out above) ---------------------------------- */
-.visualizer {
-  justify-content: center;
-  background: var(--bg-inset);
-}
-
 .audio-root {
   display: flex;
   flex-direction: column;
@@ -1626,24 +1485,9 @@
 }
 
 @media (max-width: 760px) {
-  
-
-  
 
   .capability-copy {
     flex: 1 1 100%;
-  }
-
-  .capability-badges {
-    margin-left: 0;
-    /* Five ~68px badges are 356px of nowrap flex: wider than the 336px banner at
-       360px, so the strip ran past its card and its right edge was clipped by the
-       page's overflow-x. Taking the full line and wrapping keeps every capability
-       visible; right alignment holds the badges on the same edge as the desktop
-       strip, where margin-left: auto already pushed them there. */
-    flex: 1 1 100%;
-    flex-wrap: wrap;
-    justify-content: flex-end;
   }
 
   .capability-action {
@@ -1669,7 +1513,6 @@
     flex: 1 1 auto;
   }
 
-  
 }
 
 /* -----------------------------------------------------------------------------
@@ -1686,19 +1529,14 @@
 
 /* 1920 and the 2000px-class panels. */
 @media (min-width: 1800px) {
-  
 
   .imagine-masonry-grid,
   #imagineGrid .imagine-masonry-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
 
-  .grok-tools-page .header-section h1 { font-size: 1.3rem; }
 }
 
 /* 2560x1440 / 2560x1600. */
 @media (min-width: 2200px) {
-  
-
-  
 
   .imagine-masonry-grid,
   #imagineGrid .imagine-masonry-grid { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: var(--space-4); }
@@ -1827,8 +1665,6 @@
   font-size: 0.8rem;
 }
 
-.voice-log:empty::before { content: "开始会话后，这里显示连接与对话事件。"; }
-
 .audio-root:empty::before { content: "会话中的音频轨会出现在这里。"; padding: 4px 2px; }
 
 @media (max-width: 760px) {
@@ -1839,7 +1675,6 @@
 }
 
 @media (max-width: 640px) {
-  
-  
+
   .grok-section > .function-header-row { padding: var(--space-3) var(--space-4) 0; }
 }

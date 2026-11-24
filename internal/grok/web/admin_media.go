@@ -224,7 +224,7 @@ func storedJobForAdmin(job *store.StoredVideoJob) adminVideoJob {
 		return adminVideoJob{}
 	}
 	out := adminVideoJob{ID: job.ID, AccountID: job.AccountID, Provider: job.Provider, Model: job.Model, Prompt: job.Prompt, Seconds: job.Seconds, Size: job.Size, Quality: job.Quality, Status: job.Status, Progress: job.Progress, VideoURL: job.VideoURL, UpstreamRequestID: job.UpstreamRequestID, RemixedFromID: job.RemixedFromID, Operation: job.Operation, StandardAPI: job.StandardAPI, ErrorCode: job.ErrorCode, ErrorMessage: job.ErrorMessage, CreatedAt: job.CreatedAt, CompletedAt: job.CompletedAt, ExpiresAt: job.ExpiresAt, UpdatedAt: job.UpdatedAt}
-	if job.Status == "completed" && validPersistedVideoContentPath(job.ContentPath) && strings.TrimSpace(job.ContentPath) != "" {
+	if runtime := runtimeVideoJobFromStored(job); job.Status == "completed" && (runtime.ContentPath != "" || videoOrigin(runtime) != "") {
 		out.ContentURL = "/api/grok/admin/media/videos/content/" + job.ID
 		out.DownloadURL = out.ContentURL + "?download=1"
 	}
@@ -312,11 +312,11 @@ func (h *Handler) HandleAdminMediaVideoContent(w http.ResponseWriter, r *http.Re
 	}
 	id := adminVideoIDFromPath(r.URL.Path)
 	job, err := h.findAdminVideoJob(r, id)
-	if err != nil || job.Status != "completed" || !validPersistedVideoContentPath(job.ContentPath) || strings.TrimSpace(job.ContentPath) == "" {
+	if err != nil || job.Status != "completed" {
 		httpserver.WriteError(w, http.StatusNotFound, "video content not found")
 		return
 	}
-	file, err := os.Open(job.ContentPath)
+	file, err := h.openVideoJobFile(r.Context(), runtimeVideoJobFromStored(job))
 	if err != nil {
 		httpserver.WriteError(w, http.StatusNotFound, "video content not found")
 		return
@@ -374,8 +374,8 @@ func (h *Handler) HandleAdminMediaVideoDelete(w http.ResponseWriter, r *http.Req
 		httpserver.WriteError(w, http.StatusInternalServerError, "failed to delete video job")
 		return
 	}
-	if strings.TrimSpace(job.ContentPath) != "" && validPersistedVideoContentPath(job.ContentPath) {
-		_ = os.Remove(job.ContentPath)
+	if path := runtimeVideoJobFromStored(job).ContentPath; path != "" {
+		_ = os.Remove(path)
 	}
 	util.WriteJSON(w, map[string]any{"status": "success", "deleted": job.ID})
 }

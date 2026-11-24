@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"orchids-api/internal/responses"
 	"strings"
 	"time"
 
@@ -87,7 +88,7 @@ func buildImagineWSResetMessage() map[string]any {
 }
 
 func newImagineWSRequestID() string {
-	if requestID := randomHex(16); requestID != "" {
+	if requestID := util.RandomHex(16); requestID != "" {
 		return requestID
 	}
 	return fmt.Sprintf("%d", time.Now().UnixNano())
@@ -443,9 +444,9 @@ func runImagineWSRound(ctx context.Context, conn *websocket.Conn, prompt, aspect
 			if urlValue == "" && blobValue == "" {
 				continue
 			}
-			if percent, hasProgress := msg["percentage_complete"]; hasProgress && interfaceToInt(percent) < 100 {
+			if percent, hasProgress := msg["percentage_complete"]; hasProgress && responses.InterfaceToInt(percent) < 100 {
 				slot.previewURL, slot.previewBlob = urlValue, blobValue
-				if progress := min(max(interfaceToInt(percent), 10), 99); progress > slot.progress {
+				if progress := min(max(responses.InterfaceToInt(percent), 10), 99); progress > slot.progress {
 					slot.progress = progress
 					if !sendImagineEvent(ctx, events, imagineWSEvent{Type: "progress", ImageID: imageID, URL: urlValue, Blob: blobValue}) {
 						return finals, ctx.Err()

@@ -7,15 +7,12 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"orchids-api/internal/config"
 	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/grok/web"
-	"orchids-api/internal/httpserver"
 	"orchids-api/internal/store"
-	"orchids-api/internal/util"
 )
 
 // Web → Build conversion: a Web SSO cookie is a signed-in xAI session, so it
@@ -91,25 +88,19 @@ func storeConvertedBuildAccount(ctx context.Context, st *store.Store, source *st
 	}
 	identityKey := adminPort().IdentityKey
 	identity := identityKey(fresh)
-	if identity != "" {
-		accounts, err := st.ListAccounts(ctx)
-		if err != nil {
+	existing, err := st.CreateAccountUnlessDuplicate(ctx, fresh, func(acc *store.Account) bool {
+		return identity != "" && identityKey(acc) == identity
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	if existing != nil {
+		mergeDeviceLogin(existing, fresh)
+		existing.AuthStatus = store.AccountAuthStatusActive
+		if err := st.UpdateAccount(ctx, existing); err != nil {
 			return nil, false, err
 		}
-		for _, existing := range accounts {
-			if identityKey(existing) != identity {
-				continue
-			}
-			mergeDeviceLogin(existing, fresh)
-			existing.AuthStatus = store.AccountAuthStatusActive
-			if err := st.UpdateAccount(ctx, existing); err != nil {
-				return nil, false, err
-			}
-			return existing, false, nil
-		}
-	}
-	if err := st.CreateAccount(ctx, fresh); err != nil {
-		return nil, false, err
+		return existing, false, nil
 	}
 	return fresh, true, nil
 }
@@ -152,38 +143,21 @@ func (h *Handler) convertWebAccount(ctx context.Context, acc *store.Account) sso
 // HandleSSOConvertBuild converts the named Web accounts into Build accounts.
 // POST /api/grok/sso/convert-build {"account_ids":[...]}
 func (h *Handler) HandleSSOConvertBuild(w http.ResponseWriter, r *http.Request) {
-	if !requirePost(w, r) {
-		return
+	var webHandler *web.Handler
+	if h != nil && h.lb != nil && h.lb.Store != nil {
+		webHandler = h.web
 	}
-	if h == nil || h.lb == nil || h.lb.Store == nil || h.web == nil {
-		httpserver.WriteError(w, http.StatusServiceUnavailable, "store not configured")
-		return
-	}
-	accounts, err := h.web.ResolveSSOAccounts(r)
-	if err != nil {
-		httpserver.WriteError(w, http.StatusBadRequest, err.Error())
+	accounts, ok := webHandler.SSOBatchAccounts(w, r)
+	if !ok {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Minute)
 	defer cancel()
-	results := make([]ssoConvertResult, len(accounts))
-	sem := make(chan struct{}, ssoConvertWorkers)
-	var wg sync.WaitGroup
-	for i, acc := range accounts {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			results[i] = h.convertWebAccount(ctx, acc)
-		}()
-	}
-	wg.Wait()
-	ok := 0
-	for _, result := range results {
-		if result.Success {
-			ok++
-		}
-	}
-	util.WriteJSON(w, map[string]any{"status": "success", "total": len(results), "ok": ok, "failed": len(results) - ok, "results": results})
+	results := grokbase.MapAccounts(ctx, accounts, ssoConvertWorkers, func(acc *store.Account) ssoConvertResult {
+		return h.convertWebAccount(ctx, acc)
+	}, func(acc *store.Account, err error) ssoConvertResult {
+		reason, message := ssoConvertFailure(err, acc)
+		return ssoConvertResult{AccountID: acc.ID, Name: acc.Name, Reason: reason, Error: message}
+	})
+	grokbase.WriteAccountBatch(w, results, func(result ssoConvertResult) bool { return result.Success })
 }

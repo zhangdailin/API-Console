@@ -24,17 +24,9 @@ type WarpCatalogPatch struct {
 // stored catalog, is rejected as a whole: IDs and metadata can never come from
 // different observations.
 func (s *Store) UpdateWarpCatalogSnapshot(ctx context.Context, id int64, patch WarpCatalogPatch) error {
-	if s != nil && s.accounts != nil {
-		if backend, ok := s.accounts.(interface {
-			UpdateWarpCatalogSnapshot(context.Context, int64, WarpCatalogPatch) error
-		}); ok {
-			return backend.UpdateWarpCatalogSnapshot(ctx, id, patch)
-		}
+	if s == nil || s.client == nil {
+		return fmt.Errorf("warp catalog store not configured")
 	}
-	return fmt.Errorf("warp catalog store not configured")
-}
-
-func (s *redisStore) UpdateWarpCatalogSnapshot(ctx context.Context, id int64, patch WarpCatalogPatch) error {
 	return s.updateAccountAtomic(ctx, id, func(acc *Account) error {
 		if acc.WarpRefreshToken != patch.ExpectedRefreshToken {
 			return fmt.Errorf("warp credential changed concurrently")

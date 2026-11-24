@@ -29,11 +29,11 @@ type webChatStream struct {
 	publicBase string
 	logger     *debug.Logger
 
-	id, fingerprint string
-	sentRole        bool
-	sentAny         bool
-	finalUsage      map[string]any
-	chunkScratch    []byte
+	chatResponseIdentity
+	sentRole     bool
+	sentAny      bool
+	finalUsage   map[string]any
+	chunkScratch []byte
 
 	downstreamWriteErr error
 
@@ -46,8 +46,6 @@ type webChatStream struct {
 	finalSnapshotMarkdown []string
 
 	// Text: the latest snapshot, what of it was emitted, and the delta fallback.
-	lastMessage         string
-	sawModelMessage     bool
 	tokenFallback       strings.Builder
 	reasoningContent    strings.Builder
 	thinkingMarkup      streamMarkupFilter
@@ -67,7 +65,7 @@ func newWebChatStream(ctx context.Context, h *Handler, w http.ResponseWriter, re
 	s := &webChatStream{
 		ctx: ctx, h: h, w: w, flusher: httpserver.StreamResponseHeaders(w), req: req,
 		token: token, publicBase: publicBase, logger: logger,
-		id:                    "chatcmpl_" + randomHex(8),
+		chatResponseIdentity:  newChatResponseIdentity(),
 		enableMediaExtraction: hasAttachments,
 		toolStreamMode:        toolCallsEnabled(req.Tools, req.ToolChoice),
 		toolParser:            newToolCallParser(req.Tools, req.ToolChoice),
@@ -101,8 +99,6 @@ func (s *webChatStream) auditOutcome() {
 	s.h.auditChatOutcome(context.WithoutCancel(s.ctx), s.req.account, s.req, outcome)
 }
 
-// --- emitters ---------------------------------------------------------------
-
 func (s *webChatStream) emitRaw(raw []byte) {
 	if s.downstreamWriteErr == nil {
 		s.downstreamWriteErr = writeSSELog(s.w, s.flusher, s.logger, raw)
@@ -119,10 +115,7 @@ func (s *webChatStream) emitChunk(role, content, finish string, hasFinish bool) 
 func (s *webChatStream) emitTextChunk(content string) {
 	// Reasoning still held by its filter belongs before the answer.
 	s.flushThinking()
-	if s.toolStreamMode {
-		return
-	}
-	if content != "" {
+	if !s.toolStreamMode && content != "" {
 		s.emitChunk("", content, "", false)
 	}
 }
@@ -143,13 +136,12 @@ func (s *webChatStream) emitCleanText(raw string) {
 		return
 	}
 	if s.markup == nil {
-		if cleaned := sanitizeUpstreamText(raw); cleaned != "" {
-			s.emitTextChunk(cleaned)
-		}
-		return
+		raw = sanitizeUpstreamText(raw)
+	} else {
+		raw = s.markup.feed(raw)
 	}
-	if cleaned := s.markup.feed(raw); cleaned != "" {
-		s.emitTextChunk(cleaned)
+	if raw != "" {
+		s.emitTextChunk(raw)
 	}
 }
 
@@ -175,17 +167,8 @@ func (s *webChatStream) emitImageURL(raw string) {
 	if s.emitted[raw] {
 		return
 	}
-	val, errV := s.h.imageOutputValue(s.ctx, s.token, raw, "url")
-	if s.deliveryError() != nil {
-		return
-	}
-	if errV != nil || strings.TrimSpace(val) == "" {
-		val = raw
-	}
-	if s.publicBase != "" && strings.HasPrefix(val, "/") {
-		val = s.publicBase + val
-	}
-	if md := formatImageMarkdown(val); md != "" {
+	md := s.h.chatImageMarkdown(s.ctx, s.token, s.publicBase, raw)
+	if md != "" && s.deliveryError() == nil {
 		s.finalSnapshotMarkdown = append(s.finalSnapshotMarkdown, md)
 		s.emitChunk("", md, "", false)
 		s.emitted[raw] = true
@@ -227,8 +210,6 @@ func (s *webChatStream) onToolStreamCall(toolCall map[string]any) {
 	s.emitToolCallsChunk("", []map[string]any{toolCall}, "", false)
 }
 
-// --- upstream lines -----------------------------------------------------------
-
 func (s *webChatStream) deliveryError() error {
 	if s.downstreamWriteErr != nil {
 		return s.downstreamWriteErr
@@ -237,25 +218,19 @@ func (s *webChatStream) deliveryError() error {
 }
 
 // onUpstream handles one grok.com response line.
-func (s *webChatStream) onUpstream(resp map[string]any) error {
+func (s *webChatStream) onUpstream(frame chatUpstreamFrame) error {
 	if err := s.deliveryError(); err != nil {
 		return err
 	}
-	s.logger.LogOutputSSEJSON("response", resp)
-	mr := extractUpstreamModelResponse(resp)
-	if s.fingerprint == "" {
-		s.fingerprint = extractUpstreamFingerprint(resp, mr)
-	}
-	if rid := extractUpstreamResponseID(resp, mr); rid != "" {
-		s.id = rid
-	}
+	s.logger.LogOutputSSEJSON("response", frame.raw)
+	s.observe(frame)
 	if !s.sentRole {
 		s.emitChunk("assistant", "", "", false)
 		s.sentRole = true
 	}
-	tokenDelta := extractUpstreamTokenDelta(resp, mr)
-	if isThinkingResponse(resp) {
-		s.onThinking(tokenDelta, mr)
+	tokenDelta := frame.delta
+	if frame.thinking {
+		s.onThinking(tokenDelta, frame.answer)
 		return s.deliveryError()
 	}
 	if tokenDelta != "" {
@@ -266,27 +241,24 @@ func (s *webChatStream) onUpstream(resp map[string]any) error {
 			if s.toolPump != nil {
 				s.toolPump.feed(tokenDelta, s.onToolStreamText, s.onToolStreamCall)
 			}
-		} else if !s.sawModelMessage {
+		} else if s.pendingModelMessage == "" {
 			s.tokenFallback.WriteString(tokenDelta)
 		}
 	}
-	if mr != nil {
-		s.onModelResponse(mr)
+	if frame.model != nil {
+		s.onModelResponse(frame.model, frame.answer)
 	}
 	// Broader fallback: sometimes URLs live outside modelResponse.
 	if s.enableMediaExtraction {
-		forEachImageCandidateFromValue(resp, true, true, 120, s.emitImageURL)
+		forEachImageCandidateFromValue(frame.raw, true, true, 120, s.emitImageURL)
 	}
 	return s.deliveryError()
 }
 
-func (s *webChatStream) onThinking(tokenDelta string, mr map[string]any) {
-	thinkingDelta := tokenDelta
-	if thinkingDelta == "" && mr != nil {
-		if snapshot := extractUpstreamMessage(mr); snapshot != "" && snapshot != s.lastThinkingMessage {
-			thinkingDelta = streamMessageDelta(s.lastThinkingMessage, snapshot)
-			s.lastThinkingMessage = snapshot
-		}
+func (s *webChatStream) onThinking(thinkingDelta, snapshot string) {
+	if thinkingDelta == "" && snapshot != "" && snapshot != s.lastThinkingMessage {
+		thinkingDelta = streamMessageDelta(s.lastThinkingMessage, snapshot)
+		s.lastThinkingMessage = snapshot
 	}
 	if thinkingDelta == "" {
 		return
@@ -309,10 +281,8 @@ func (s *webChatStream) flushThinking() {
 
 // onModelResponse takes a message snapshot. Only the prefix two consecutive
 // snapshots agree on is emitted, because grok.com may still revise the tail.
-func (s *webChatStream) onModelResponse(mr map[string]any) {
-	if msg := extractUpstreamMessage(mr); strings.TrimSpace(msg) != "" && msg != s.lastMessage {
-		s.lastMessage = msg
-		s.sawModelMessage = true
+func (s *webChatStream) onModelResponse(mr map[string]any, msg string) {
+	if strings.TrimSpace(msg) != "" && msg != s.pendingModelMessage {
 		if s.textRefCollector != nil {
 			s.textRefCollector.feed(msg)
 		}
@@ -334,16 +304,12 @@ func (s *webChatStream) onModelResponse(mr map[string]any) {
 				s.emittedModelMessage = msg
 			}
 		}
-		if strings.Contains(msg, "<grok:render") || strings.Contains(msg, "tool_usage_card") {
-			slog.Debug("grok message contains render/tool markup", "has_modelResponse", true)
-		}
+		logChatMarkup(msg)
 	}
 	if s.enableMediaExtraction {
 		forEachImageCandidateFromValue(mr, true, true, 80, s.emitImageURL)
 	}
 }
-
-// --- end of stream ------------------------------------------------------------
 
 // fail ends a stream the upstream or the client broke. A stalled upstream is
 // not a parse error: the idle sentinel gets its own text and code.
@@ -360,7 +326,7 @@ func (s *webChatStream) fail(err error) {
 		return
 	}
 	slog.Warn("grok stream parse failed", "error", err)
-	if errors.Is(err, ErrGrokSemanticIdle) {
+	if errors.Is(err, grokbase.ErrStreamIdle) {
 		writeChatStreamError(s.w, s.flusher, s.logger, "upstream stream timed out while waiting for generated output", "upstream_stream_idle_timeout")
 		return
 	}
@@ -378,13 +344,13 @@ func (s *webChatStream) flushText() (buffered string) {
 		if tail != "" {
 			s.emitCleanText(tail)
 		}
-		if !s.sawModelMessage && s.tokenFallback.Len() > 0 {
+		if s.pendingModelMessage == "" && s.tokenFallback.Len() > 0 {
 			s.emitCleanText(s.tokenFallback.String())
 		}
 		if rest := s.markup.flush(); rest != "" {
 			s.emitTextChunk(rest)
 		}
-		if s.tokenFallback.Len() > 0 && !s.sawModelMessage && s.h != nil && s.h.configSnapshot() != nil && s.h.configSnapshot().DebugEnabled {
+		if s.tokenFallback.Len() > 0 && s.pendingModelMessage == "" && s.h != nil && s.h.configSnapshot() != nil && s.h.configSnapshot().DebugEnabled {
 			slog.Debug("grok stream fallback used token deltas (no modelResponse)", "model", s.req.Model)
 		}
 		return ""
@@ -392,7 +358,7 @@ func (s *webChatStream) flushText() (buffered string) {
 	text := ""
 	if tail != "" {
 		text = tail
-	} else if !s.sawModelMessage && s.tokenFallback.Len() > 0 {
+	} else if s.pendingModelMessage == "" && s.tokenFallback.Len() > 0 {
 		text = s.tokenFallback.String()
 	}
 	if cleaned := sanitizeUpstreamText(text); cleaned != "" {
@@ -418,11 +384,7 @@ func (s *webChatStream) flushMedia() {
 			continue
 		}
 		if name, err := s.h.cacheMediaURL(s.ctx, s.token, full, "image"); err == nil && name != "" {
-			val := "/grok/v1/files/image/" + name
-			if s.publicBase != "" && strings.HasPrefix(val, "/") {
-				val = s.publicBase + val
-			}
-			if md := formatImageMarkdown(val); md != "" {
+			if md := chatImageLink("/grok/v1/files/image/"+name, s.publicBase); md != "" {
 				s.emitChunk("", md, "", false)
 			}
 			continue

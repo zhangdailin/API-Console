@@ -142,11 +142,25 @@ var (
 		redis.call("PEXPIREAT", KEYS[1], max_expiry * 1000 + 60000)
 		return 1
 	`)
+	// Renewal changes only an existing live hold. Do not shorten the hash's
+	// lifetime when another request holds a later deadline.
+	renewApiKeyBillingScript = redis.NewScript(`
+		local raw = redis.call("HGET", KEYS[1], ARGV[1])
+		if not raw then return 0 end
+		local amount, old = string.match(raw, "^([^:]+):(%d+)$")
+		local now_ms = tonumber(ARGV[2])
+		local expiry = tonumber(ARGV[3])
+		if not old or tonumber(old) <= math.floor(now_ms / 1000) then return 0 end
+		if expiry <= tonumber(old) then return 1 end
+		redis.call("HSET", KEYS[1], ARGV[1], amount .. ":" .. ARGV[3])
+		local ttl = expiry * 1000 + 60000 - now_ms
+		if redis.call("PTTL", KEYS[1]) < ttl then redis.call("PEXPIRE", KEYS[1], ttl) end
+		return 1
+	`)
 	// settleApiKeyBillingScript books usage exactly once per event id. Recording
 	// the event in the same Lua transaction makes a retry after an ambiguous
 	// network timeout safe: Redis either applied all three mutations or none.
 	settleApiKeyBillingScript = redis.NewScript(`
-		if redis.call("EXISTS", KEYS[5]) == 0 then return redis.error_reply("api key not found") end
         local now = redis.call("TIME")
         if tonumber(ARGV[3]) <= tonumber(now[1])*1000 then return redis.error_reply("billing event expired") end
         local prior = redis.call("GET", KEYS[3])
@@ -154,6 +168,7 @@ var (
 			if prior ~= tostring(ARGV[2]) then return -1 end
 			return 0
 		end
+		if redis.call("EXISTS", KEYS[5]) == 0 then return -2 end
 		redis.call("SET", KEYS[3], tostring(ARGV[2]), "PXAT", ARGV[3])
         -- Retire the legacy unbounded hash without refreshing its lifetime.
         if redis.call("TTL", KEYS[4]) == -1 then redis.call("EXPIRE", KEYS[4], ARGV[4]) end

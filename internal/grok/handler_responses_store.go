@@ -1,6 +1,7 @@
 package grok
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -64,7 +65,7 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if err := h.ensureResolvedModelCapability(r.Context(), spec.ID, spec, store.CapabilityResponses); err != nil {
-		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", modelValidationMessage(modelID, err))
+		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", grokbase.ModelValidationMessage(modelID, err))
 		return
 	}
 	if h == nil || h.buildClient() == nil {
@@ -80,7 +81,7 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 		err    error
 	)
 	if previousID != "" && ownerHash != "" {
-		ownership, lookupErr := h.getStoredResponse(r, previousID, ownerHash)
+		ownership, lookupErr := h.responseStore().GetStoredResponseMetadata(r.Context(), previousID, ownerHash)
 		if lookupErr != nil {
 			responses.WriteStoredLookupError(w, lookupErr, "previous response not found")
 			return
@@ -117,38 +118,31 @@ func (h *Handler) handleNativeCLIResponsesAt(w http.ResponseWriter, r *http.Requ
 		reasoning["effort"] = spec.AliasReasoningEffort
 		payload["reasoning"] = reasoning
 	}
-	responseID, captured, result := h.serveNativeResponses(w, r, sess, pinned, spec, payload, upstreamPath, namespaces)
+	var commit func(string) error
+	if saveOwnership && ownerHash != "" {
+		commit = func(responseID string) error {
+			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+			defer cancel()
+			var storedNamespaces json.RawMessage
+			if len(namespaces) > 0 {
+				storedNamespaces, _ = json.Marshal(namespaces)
+			}
+			record := &store.StoredResponse{
+				ResponseID: responseID, OwnerHash: ownerHash, AccountID: sess.acc.ID,
+				Model: spec.UpstreamModel, Provider: ProviderBuild,
+				InputItems: responses.InputItemsJSON(storedPayload["input"]), InputItemsDelta: true,
+				ToolNamespaces: storedNamespaces, PreviousResponseID: previousID,
+			}
+			err := h.responseStore().SaveStoredResponse(ctx, record, h.bridgeOptions().TTLOrDefault())
+			if err != nil {
+				slog.Error("failed to save response ownership", "response_id", responseID, "account_id", sess.acc.ID, "error", err)
+			}
+			return err
+		}
+	}
+	_, captured, result := h.serveNativeResponses(w, r, sess, pinned, spec, payload, upstreamPath, namespaces, commit)
 	if session := grokbase.SessionFromContext(r.Context()); session.Replay && len(captured) > 0 && result.Err == nil {
 		h.captureReasoningReplay(r.Context(), modelID, session.Key, captured)
-	}
-
-	if !saveOwnership || ownerHash == "" || responseID == "" || result.Err != nil {
-		return
-	}
-	// A continuation request only carries this turn's input; the history lives in
-	// the response it names. The stored record is what GET input_items answers
-	// from, so the chain is folded in here — otherwise a client that continues a
-	// conversation reads back a list with only the last turn in it.
-	storedInput := responses.InputItemsJSON(h.accumulatedInputItems(r, ownerHash, storedPayload))
-	var storedNamespaces json.RawMessage
-	if len(namespaces) > 0 {
-		storedNamespaces, _ = json.Marshal(namespaces)
-	}
-	if err := h.saveStoredResponse(r, &store.StoredResponse{
-		ResponseID: responseID,
-		OwnerHash:  ownerHash,
-		AccountID:  sess.acc.ID,
-		Model:      spec.UpstreamModel,
-		Provider:   ProviderBuild,
-		// Build keeps the response body upstream, so the input items are the only
-		// part of the exchange the gateway can serve back itself. Persisting them
-		// lets GET /responses/{id}/input_items answer locally instead of doing a
-		// second upstream round trip for data it already had.
-		InputItems:         storedInput,
-		ToolNamespaces:     storedNamespaces,
-		PreviousResponseID: strings.TrimSpace(chatwire.ParseLooseStringAny(payload["previous_response_id"])),
-	}); err != nil {
-		slog.Error("failed to save response ownership", "response_id", responseID, "account_id", sess.acc.ID, "error", err)
 	}
 }
 
@@ -191,33 +185,20 @@ func (h *Handler) HandleResponsesCompact(w http.ResponseWriter, r *http.Request)
 
 // HandleResponseResource retrieves or deletes a stored Build Responses
 // resource through the exact account that created it.
-//
-// The sibling endpoints below a response id are dispatched first: they are
-// resources of a response, so the id parser must never mistake the trailing
-// action for part of the id.
 func (h *Handler) HandleResponseResource(w http.ResponseWriter, r *http.Request) {
-	if action := responses.SubResourceAction(r.URL.Path); action != "" {
-		responses.SubResourceHandler(action, h.bridgeOptions())(w, r)
-		return
-	}
-	if r.Method != http.MethodGet && r.Method != http.MethodDelete {
-		w.Header().Set("Allow", "GET, DELETE")
-		writeResponsesAPIError(w, http.StatusMethodNotAllowed, "invalid_request_error", "method not allowed")
-		return
-	}
-	responseID := responses.ResponseIDFromResourcePath(r.URL.Path)
+	responseID := responses.PrepareResourceRequest(w, r, h.bridgeOptions())
 	if responseID == "" {
-		writeResponsesAPIError(w, http.StatusBadRequest, "invalid_request_error", "response_id is required")
 		return
 	}
 	ownerHash := responses.OwnerHash(r.Context())
-	ownership, err := h.getStoredResponse(r, responseID, ownerHash)
+	st := h.responseStore()
+	ownership, err := st.GetStoredResponseMetadata(r.Context(), responseID, ownerHash)
 	if err != nil {
 		responses.WriteStoredLookupError(w, err, "response not found")
 		return
 	}
 	if ownership.Provider != ProviderBuild {
-		responses.ServeStoredResource(w, r, ownership, h.lb.Store)
+		responses.ServeStoredResource(w, r, ownership, st)
 		return
 	}
 	sess, err := h.openCLIAccountSessionByID(r.Context(), ownership.AccountID, ownership.Model)
@@ -244,45 +225,15 @@ func (h *Handler) HandleResponseResource(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(resp.StatusCode)
 	streamNativeCLIResponse(w, resp.Body)
 	if (r.Method == http.MethodDelete && resp.StatusCode >= 200 && resp.StatusCode < 300) || resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
-		_ = h.deleteStoredResponse(r, responseID, ownerHash)
+		_ = st.DeleteStoredResponse(r.Context(), responseID, ownerHash)
 	}
 }
 
-// maxStoredInputChainDepth bounds how many previous responses are folded into a
-// stored input list, so a long conversation cannot make one record unbounded.
-const maxStoredInputChainDepth = 8
-
-// accumulatedInputItems returns this turn's input followed by the input of the
-// responses it continues (nearest ancestor first, bounded).
-func (h *Handler) accumulatedInputItems(r *http.Request, ownerHash string, payload map[string]any) []any {
-	current := responses.InputItems(payload["input"])
-	if h == nil || r == nil || ownerHash == "" {
-		return current
+func (h *Handler) responseStore() *store.Store {
+	if h == nil || h.lb == nil {
+		return nil
 	}
-	previousID := strings.TrimSpace(chatwire.ParseLooseStringAny(payload["previous_response_id"]))
-	seen := map[string]bool{}
-	for depth := 0; depth < maxStoredInputChainDepth && previousID != "" && !seen[previousID]; depth++ {
-		seen[previousID] = true
-		record, err := h.getStoredResponse(r, previousID, ownerHash)
-		if err != nil || record == nil {
-			break
-		}
-		if len(record.InputItems) > 0 {
-			var decoded []any
-			if json.Unmarshal(record.InputItems, &decoded) == nil {
-				current = append(current, decoded...)
-			}
-		}
-		previousID = strings.TrimSpace(record.PreviousResponseID)
-	}
-	return current
-}
-
-func (h *Handler) getStoredResponse(r *http.Request, responseID, ownerHash string) (*store.StoredResponse, error) {
-	if h == nil || h.lb == nil || h.lb.Store == nil {
-		return nil, errors.New("response store not configured")
-	}
-	return h.lb.Store.GetStoredResponse(r.Context(), responseID, ownerHash)
+	return h.lb.Store
 }
 
 // bridgeOptions describes the response store the shared Responses helpers should
@@ -293,28 +244,15 @@ func (h *Handler) getStoredResponse(r *http.Request, responseID, ownerHash strin
 // and input_items serve records written by either of them.
 func (h *Handler) bridgeOptions() responses.BridgeOptions {
 	opts := responses.BridgeOptions{}
-	if h == nil || h.lb == nil || h.lb.Store == nil {
+	st := h.responseStore()
+	if st == nil {
 		return opts
 	}
-	opts.Store = h.lb.Store
+	opts.Store = st
 	if cfg := h.configSnapshot(); cfg != nil && cfg.ResponseStoreTTL > 0 {
 		opts.TTL = time.Duration(cfg.ResponseStoreTTL) * time.Hour
 	}
 	return opts
-}
-
-func (h *Handler) saveStoredResponse(r *http.Request, response *store.StoredResponse) error {
-	if h == nil || h.lb == nil || h.lb.Store == nil {
-		return errors.New("response store not configured")
-	}
-	return h.lb.Store.SaveStoredResponse(r.Context(), response, h.bridgeOptions().TTLOrDefault())
-}
-
-func (h *Handler) deleteStoredResponse(r *http.Request, responseID, ownerHash string) error {
-	if h == nil || h.lb == nil || h.lb.Store == nil {
-		return errors.New("response store not configured")
-	}
-	return h.lb.Store.DeleteStoredResponse(r.Context(), responseID, ownerHash)
 }
 
 func readAndValidateNativeResponse(body io.Reader) ([]byte, error) {

@@ -2,11 +2,9 @@ package grok
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"orchids-api/internal/grok/grokbase"
-	"orchids-api/internal/httpclient"
 	"time"
 )
 
@@ -19,8 +17,7 @@ const (
 )
 
 // doUpstreamHTTP owns response execution, decompression and stream idleness.
-// Build uses byte activity; only Build understands Responses events well
-// enough to ignore keepalives and control frames semantically.
+// The Responses mode ignores keepalives and control frames for idle detection.
 func doUpstreamHTTP(req *http.Request, do func(*http.Request) (*http.Response, error), idle time.Duration, modes ...upstreamIdleMode) (*http.Response, error) {
 	resp, err := do(req)
 	if err != nil {
@@ -29,20 +26,12 @@ func doUpstreamHTTP(req *http.Request, do func(*http.Request) (*http.Response, e
 		}
 		return nil, err
 	}
-	if err := httpclient.DecodeContentEncoding(resp); err != nil {
-		_ = resp.Body.Close()
-		return nil, fmt.Errorf("grok upstream decode failed: %w", err)
+	wrapIdle := grokbase.WrapByteIdle
+	if len(modes) > 0 && modes[0] == upstreamIdleBuildSemantic {
+		wrapIdle = wrapBuildSemanticIdle
 	}
-	if idle > 0 && resp.StatusCode >= 200 && resp.StatusCode < 300 && resp.Body != nil {
-		mode := upstreamIdleBytes
-		if len(modes) > 0 {
-			mode = modes[0]
-		}
-		if mode == upstreamIdleBuildSemantic {
-			resp.Body = wrapBuildSemanticIdle(resp.Body, idle)
-		} else {
-			resp.Body = grokbase.WrapByteIdle(resp.Body, idle)
-		}
+	if err := grokbase.PrepareUpstreamResponse(resp, idle, wrapIdle); err != nil {
+		return nil, err
 	}
 	if resp.Body != nil {
 		resp.Body = &deadlineCauseBody{ReadCloser: resp.Body, ctx: req.Context()}

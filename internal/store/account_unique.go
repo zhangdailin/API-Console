@@ -12,14 +12,9 @@ import (
 // CreateAccountUnlessDuplicate applies the caller's provider identity rules
 // inside a Redis optimistic transaction. No credentials enter secondary keys.
 func (s *Store) CreateAccountUnlessDuplicate(ctx context.Context, acc *Account, matches func(*Account) bool) (*Account, error) {
-	backend, ok := s.accounts.(*redisStore)
-	if !ok {
+	if s == nil || s.client == nil {
 		return nil, fmt.Errorf("atomic account creation unavailable")
 	}
-	return backend.createAccountUnlessDuplicate(ctx, acc, matches)
-}
-
-func (s *redisStore) createAccountUnlessDuplicate(ctx context.Context, acc *Account, matches func(*Account) bool) (*Account, error) {
 	if acc == nil || matches == nil {
 		return nil, fmt.Errorf("account and identity matcher are required")
 	}

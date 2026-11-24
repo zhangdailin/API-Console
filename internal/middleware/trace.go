@@ -21,6 +21,7 @@ import (
 
 	"orchids-api/internal/channel"
 	"orchids-api/internal/debug"
+	"orchids-api/internal/loadbalancer"
 	"orchids-api/internal/logutil"
 	"orchids-api/internal/opsagg"
 	"orchids-api/internal/upstream"
@@ -75,7 +76,8 @@ func TraceMiddleware(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), traceIDKey{}, traceID)
 		ctx = context.WithValue(ctx, requestIDKey{}, requestID)
 
-		// Continue handling the request.
+		ctx, closeLeaseScope := loadbalancer.WithConnLeaseScope(ctx)
+		defer closeLeaseScope()
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

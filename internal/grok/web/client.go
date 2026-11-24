@@ -11,7 +11,7 @@ import (
 
 	"orchids-api/internal/chatwire"
 	"orchids-api/internal/config"
-	"orchids-api/internal/httpclient"
+	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/upstream"
 )
 
@@ -49,7 +49,7 @@ type NSFWEnableResult struct {
 func New(cfg *config.Config) *Client {
 	cfg = cfg.GrokWebTransport()
 	timeout := cfg.GrokWebRequestTimeout()
-	baseClient := newHTTPClient(cfg, timeout, httpclient.ProxyFuncFromConfig(cfg))
+	baseClient := grokbase.NewBrowserClient(cfg, timeout)
 	return &Client{
 		cfg:         cfg,
 		httpClient:  baseClient,

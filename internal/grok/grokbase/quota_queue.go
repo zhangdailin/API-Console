@@ -1,8 +1,11 @@
 package grokbase
 
 import (
+	"context"
+	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"orchids-api/internal/store"
 )
@@ -67,6 +70,33 @@ func (q *QuotaQueue) run(persist func(QuotaJob)) {
 				break
 			}
 			persist(job)
+		}
+	}
+}
+
+// Persist records usage, then applies the latest observed quota to a fresh
+// account row. With no upstream observation, consume the local allowance.
+func (j QuotaJob) Persist(s *store.Store, provider string, observed bool, apply func(*store.Account) bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	id := j.Account.ID
+	if err := s.IncrementAccountStats(ctx, id, 0, j.Requests); err != nil {
+		slog.Warn("grok usage touch failed", "account_id", id, "error", err)
+	}
+	if !observed {
+		if _, err := s.ConsumeGrokQuota(ctx, id, provider, float64(j.Requests)); err != nil {
+			slog.Warn("grok local quota decrement failed", "account_id", id, "error", err)
+		}
+		return
+	}
+	account, err := s.GetAccount(ctx, id)
+	if err != nil || account == nil {
+		slog.Warn("grok quota account reload failed", "account_id", id, "error", err)
+		return
+	}
+	if apply(account) {
+		if err := s.UpdateAccount(ctx, account); err != nil {
+			slog.Warn("grok quota update failed", "account_id", id, "error", err)
 		}
 	}
 }

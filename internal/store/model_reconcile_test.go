@@ -21,7 +21,7 @@ func TestRetiredGrokRoutesAreHiddenWithoutDeletingStoredRows(t *testing.T) {
 		testutil.NoError(t, s.CreateModel(ctx, m))
 	}
 	for _, m := range retired {
-		testutil.NoError(t, s.models.CreateModel(ctx, m))
+		testutil.NoError(t, s.createModel(ctx, m))
 	}
 
 	s.prepareModels()
@@ -33,7 +33,7 @@ func TestRetiredGrokRoutesAreHiddenWithoutDeletingStoredRows(t *testing.T) {
 		testutil.True(t, errors.Is(err, ErrNoRows))
 		_, err = s.GetModelByChannelAndModelID(ctx, m.Channel, m.ModelID)
 		testutil.True(t, errors.Is(err, ErrNoRows))
-		stored, err := s.models.GetModel(ctx, m.ID)
+		stored, err := s.readModel(ctx, m.ID)
 		testutil.NoError(t, err)
 		testutil.Equal(t, stored.Provider, m.Provider)
 	}

@@ -12,26 +12,14 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func (s *Store) GetApiKeySecret(ctx context.Context, id int64) (string, error) {
-	return s.apiKeys.GetApiKeySecret(ctx, id)
-}
-
-func (s *Store) RotateApiKey(ctx context.Context, id int64, secret string) (*ApiKey, error) {
-	return s.apiKeys.RotateApiKey(ctx, id, secret)
-}
-
-func (s *Store) PatchApiKey(ctx context.Context, id int64, fields map[string]json.RawMessage) error {
-	return s.apiKeys.PatchApiKey(ctx, id, fields)
-}
-
-func (s *redisStore) sealApiKey(secret string) (string, error) {
+func (s *Store) sealApiKey(secret string) (string, error) {
 	if s.keySecrets == nil {
 		return "", fmt.Errorf("API key encryption is unavailable")
 	}
 	return s.keySecrets.encrypt(secret)
 }
 
-func (s *redisStore) GetApiKeySecret(ctx context.Context, id int64) (string, error) {
+func (s *Store) GetApiKeySecret(ctx context.Context, id int64) (string, error) {
 	raw, err := s.client.Get(ctx, s.apiKeysKey(id)).Bytes()
 	if err == redis.Nil {
 		return "", ErrNoRows
@@ -65,7 +53,7 @@ func (s *redisStore) GetApiKeySecret(ctx context.Context, id int64) (string, err
 
 // mutateApiKey retries against the current row, preserving concurrent policy,
 // billing-period and secret changes. Row, hash indexes and limit mirror commit together.
-func (s *redisStore) mutateApiKey(ctx context.Context, id int64, change func(*apiKeyRecord) error) error {
+func (s *Store) mutateApiKey(ctx context.Context, id int64, change func(*apiKeyRecord) error) error {
 	for range 8 {
 		err := s.client.Watch(ctx, func(tx *redis.Tx) error {
 			raw, err := tx.Get(ctx, s.apiKeysKey(id)).Bytes()
@@ -105,7 +93,7 @@ func (s *redisStore) mutateApiKey(ctx context.Context, id int64, change func(*ap
 	return fmt.Errorf("API key changed concurrently; retry the operation")
 }
 
-func (s *redisStore) RotateApiKey(ctx context.Context, id int64, secret string) (*ApiKey, error) {
+func (s *Store) RotateApiKey(ctx context.Context, id int64, secret string) (*ApiKey, error) {
 	if len(secret) < 7 {
 		return nil, fmt.Errorf("invalid API key secret")
 	}
@@ -134,7 +122,7 @@ func (s *redisStore) RotateApiKey(ctx context.Context, id int64, secret string) 
 	return committed.toApiKey(), nil
 }
 
-func (s *redisStore) PatchApiKey(ctx context.Context, id int64, fields map[string]json.RawMessage) error {
+func (s *Store) PatchApiKey(ctx context.Context, id int64, fields map[string]json.RawMessage) error {
 	allowed := map[string]bool{"enabled": true, "allowed_models": true, "rpm_limit": true, "max_concurrent": true, "expires_at": true, "billing_limit_usd_ticks": true, "billing_period_days": true}
 	for name := range fields {
 		if !allowed[name] {

@@ -3,9 +3,7 @@ package web
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
-	apperrors "orchids-api/internal/errors"
 	"orchids-api/internal/grok/grokbase"
 	"orchids-api/internal/grok/ratelimit"
 	"orchids-api/internal/store"
@@ -43,14 +41,7 @@ func (e *mediaUnavailableError) Error() string { return e.message }
 func (e *mediaUnavailableError) Unwrap() error { return e.cause }
 
 func (h *Handler) routeAllowsAccount(ctx context.Context, modelID string, accountID int64) bool {
-	if h == nil || h.lb == nil || h.lb.Store == nil || accountID == 0 {
-		return true
-	}
-	model, err := h.lb.Store.GetModelByChannelAndModelID(ctx, "grok", normalizeModelID(modelID))
-	if err != nil || model == nil {
-		return true
-	}
-	return model.AllowsAccount(accountID)
+	return grokbase.RouteAllowsAccount(ctx, h.affinityStore(), normalizeModelID(modelID), accountID)
 }
 
 func (h *Handler) openChatAccountSessionExcludingWithPools(ctx context.Context, excludeIDs []int64, poolCandidates []string) (*chatAccountSession, error) {
@@ -83,20 +74,7 @@ func requestModelFromContext(ctx context.Context) string {
 // per-model failure: a throttled model must not remove the account's other
 // models from the pool.
 func accountUsableForModel(ctx context.Context, acc *store.Account) bool {
-	if acc == nil {
-		return false
-	}
-	// A Build Free refusal is authoritative for the whole included-usage
-	// window. Do not send the account back to the upstream every minute while
-	// its confirmed 24-hour reset is still in the future.
-	if acc.GrokPlane() == ProviderBuild && !acc.GrokFreeQuota.ResetAt.IsZero() && time.Now().Before(acc.GrokFreeQuota.ResetAt) {
-		return false
-	}
-	model := requestModelFromContext(ctx)
-	if model == "" {
-		return true
-	}
-	return store.ModelCooldownRemaining(acc, model, time.Now()) == 0
+	return grokbase.AccountUsableForModel(acc, requestModelFromContext(ctx))
 }
 
 func (h *Handler) openChatAccountSessionExcludingWithPoolsAndFilter(ctx context.Context, excludeIDs []int64, poolCandidates []string, extraFilter func(*store.Account) bool) (*chatAccountSession, error) {
@@ -123,7 +101,7 @@ func (h *Handler) openChatAccountSessionExcludingWithPoolsAndFilter(ctx context.
 		if pinned, getErr := h.lb.Store.GetAccount(ctx, pinnedID); getErr == nil && pinned != nil && accountAffinityUsable(pinned) && h.accountCapacityAvailable(pinned) && ssoFilter(pinned) {
 			raw := grokSSOTokenRaw(pinned)
 			if NormalizeSSOToken(raw) != "" {
-				if release, reserved := h.reserveAccount(pinned); reserved {
+				if release, reserved := h.reserveAccount(ctx, pinned); reserved {
 					return &chatAccountSession{acc: pinned, token: raw, poolCandidates: normalizeGrokPoolCandidates(poolCandidates), release: release}, nil
 				}
 			}
@@ -167,7 +145,7 @@ func (h *Handler) openChatAccountSessionExcludingWithPoolsAndFilter(ctx context.
 		return nil, fmt.Errorf("grok account token is empty")
 	}
 	h.bindAffinity(ctx, ProviderWeb, acc.ID)
-	release, reserved := h.reserveAccount(acc)
+	release, reserved := h.reserveAccount(ctx, acc)
 	if !reserved {
 		return h.openChatAccountSessionExcludingWithPoolsAndFilter(ctx, append(excludeIDs, acc.ID), poolCandidates, extraFilter)
 	}
@@ -318,39 +296,7 @@ func shouldSwitchGrokAccount(err error) bool {
 	case UpstreamErrorGenericForbidden:
 		return false
 	}
-	status := apperrors.ClassifyAccountStatus(err.Error())
-	if status == "401" || status == "429" {
-		return true
-	}
-	if isSharedGrokRateLimitError(err) {
-		return true
-	}
-	// A spent allowance is this account's problem; another account can serve
-	// the request. Mirrors the Build plane. No grok.com 402 has been captured
-	// yet, so this is defensive: a 402 is never the caller's fault.
-	if parseUpstreamStatus(err) == http.StatusPaymentRequired || apperrors.IsCreditExhaustion(err.Error()) {
-		return true
-	}
-	if upstreamStatus := parseUpstreamStatus(err); upstreamStatus == http.StatusBadGateway ||
-		upstreamStatus == http.StatusServiceUnavailable ||
-		upstreamStatus == http.StatusGatewayTimeout ||
-		upstreamStatus == http.StatusInternalServerError {
-		return true
-	}
-
-	lower := strings.ToLower(err.Error())
-	switch {
-	case strings.Contains(lower, "timeout"),
-		strings.Contains(lower, "deadline exceeded"),
-		strings.Contains(lower, "connection reset"),
-		strings.Contains(lower, "connection refused"),
-		strings.Contains(lower, "broken pipe"),
-		strings.HasSuffix(lower, ": eof"),
-		lower == "eof":
-		return true
-	default:
-		return false
-	}
+	return grokbase.TransientAccountFailure(parseUpstreamStatus(err), err.Error(), isSharedGrokRateLimitError(err))
 }
 
 func isSharedGrokRateLimitError(err error) bool {
@@ -383,31 +329,9 @@ func (h *Handler) syncGrokQuota(acc *store.Account, headers http.Header) {
 }
 
 func (h *Handler) persistGrokQuotaSync(job grokbase.QuotaJob) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := h.lb.Store.IncrementAccountStats(ctx, job.Account.ID, 0, job.Requests); err != nil {
-		slog.Warn("grok usage touch failed", "account_id", job.Account.ID, "error", err)
-	}
-
-	// grok.com answers with quota headers only on some routes. Without them,
-	// count the request against the locally tracked window.
 	info := ratelimit.ParseHeaders(job.Headers)
-	if info == nil {
-		if _, err := h.lb.Store.ConsumeGrokQuota(ctx, job.Account.ID, job.Account.GrokPlane(), float64(job.Requests)); err != nil {
-			slog.Warn("grok local quota decrement failed", "account_id", job.Account.ID, "error", err)
-		}
-		return
-	}
-	latest, err := h.lb.Store.GetAccount(ctx, job.Account.ID)
-	if err != nil || latest == nil {
-		slog.Warn("grok quota account reload failed", "account_id", job.Account.ID, "error", err)
-		return
-	}
-	normalizeWebProvider(latest)
-	changed := ApplyQuotaInfo(latest, info)
-	if changed {
-		if err := h.lb.Store.UpdateAccount(ctx, latest); err != nil {
-			slog.Warn("grok quota update failed", "account_id", latest.ID, "error", err)
-		}
-	}
+	job.Persist(h.lb.Store, job.Account.GrokPlane(), info != nil, func(account *store.Account) bool {
+		normalizeWebProvider(account)
+		return ApplyQuotaInfo(account, info)
+	})
 }

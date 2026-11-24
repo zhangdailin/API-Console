@@ -15,13 +15,8 @@ func TestToolBlockIndexesSurviveFastAndSlowConversion(t *testing.T) {
 			} else {
 				data = fmt.Sprintf(`{"index":%d,"delta":{"type":"input_json_delta","partial_json":"{}"}}`, index)
 			}
-			for _, convert := range []func(string, int64, string, []byte) ([]byte, bool){
-				buildOpenAIChunkSlow,
-				func(id string, created int64, event string, data []byte) ([]byte, bool) {
-					return appendOpenAIChunkFast(nil, id, created, event, data)
-				},
-			} {
-				wire, ok := convert("msg", 1, event, []byte(data))
+			for _, convert := range []func([]byte, string, int64, string, []byte) ([]byte, bool){appendOpenAIChunkSlow, appendOpenAIChunkFast} {
+				wire, ok := convert(nil, "msg", 1, event, []byte(data))
 				if !ok {
 					t.Fatalf("conversion rejected index %d", index)
 				}

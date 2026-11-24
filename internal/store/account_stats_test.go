@@ -20,7 +20,7 @@ func newAccountStatsTestStore(t *testing.T, prefix string) (*Store, *miniredis.M
 	client := redis.NewClient(&redis.Options{
 		Dialer: func(context.Context, string, string) (net.Conn, error) { return mini.Dial() },
 	})
-	s := &Store{accounts: &redisStore{client: client, prefix: prefix}}
+	s := &Store{client: client, prefix: prefix}
 	t.Cleanup(func() { _ = s.Close() })
 	return s, mini
 }
@@ -149,7 +149,7 @@ func TestAccountStatsDedupExpiresWhileAccountRemainsActive(t *testing.T) {
 	start := time.Date(2026, 3, 5, 0, 0, 0, 0, time.UTC)
 	mini.SetTime(start)
 	mini.ClockTTL(true)
-	rs := s.accounts.(*redisStore)
+	rs := s
 	legacyKey := rs.accountStatsOperationsKey(acc.ID)
 	expiryKey := rs.accountStatsExpiryKey(acc.ID)
 	testutil.NoError(t, s.RedisClient().SAdd(ctx, legacyKey, "legacy-completion").Err())

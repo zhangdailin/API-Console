@@ -2,12 +2,13 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
 	"orchids-api/internal/channel"
 	"orchids-api/internal/provider"
-	"orchids-api/internal/store"
+	"orchids-api/internal/util"
 )
 
 // The browser logins of every channel are one flow:
@@ -21,34 +22,11 @@ import (
 // Only the browser-safe half of a challenge is ever serialized: the device code
 // and the channel's private material stay in this process.
 
-// browserLogin is the server-side half of an in-flight login.
-type browserLogin struct {
-	deviceLogin
-	// challenge is the channel's transaction, including the half that must
-	// never reach the browser.
-	challenge provider.LoginChallenge
-	// flow is captured at start, so one transaction is served by one
-	// implementation for its whole life.
-	flow *provider.Login
-}
-
-func (l *browserLogin) loginPayload() (string, string, time.Time) {
-	if l == nil {
-		return "", "", time.Time{}
-	}
+func (l *deviceLogin) loginPayload() (string, string, time.Time) {
 	if updater, ok := l.challenge.Private.(provider.LoginPayloadUpdater); ok {
 		return updater.LoginPayload()
 	}
 	return l.challenge.QRCode, l.challenge.VerifyFull, l.challenge.ExpiresAt
-}
-
-// newBrowserLoginRegistry builds the registry for one channel. Each channel
-// keeps its own, so codes and credentials can never cross authentication flows
-// and one channel's abandoned logins cannot use up another's admission limit.
-func newBrowserLoginRegistry(id channel.ID) *deviceLoginRegistry[browserLogin] {
-	return newDeviceLoginRegistry(
-		func(login *browserLogin) *deviceLogin { return &login.deviceLogin },
-		deviceLoginReady, channelLabel(id)+" authorization expired")
 }
 
 // HandleWorkBuddyLogin starts and observes the official WorkBuddy browser
@@ -75,7 +53,7 @@ func (a *API) HandleWarpLogin(w http.ResponseWriter, r *http.Request) {
 	a.handleBrowserLogin(w, r, channel.Warp, a.warpLogins)
 }
 
-func (a *API) handleBrowserLogin(w http.ResponseWriter, r *http.Request, id channel.ID, registry *deviceLoginRegistry[browserLogin]) {
+func (a *API) handleBrowserLogin(w http.ResponseWriter, r *http.Request, id channel.ID, registry *deviceLoginRegistry) {
 	label := channelLabel(id)
 	routeBrowserLogin(w, r, "/api/"+string(id)+"/login",
 		func(w http.ResponseWriter, r *http.Request) { a.startBrowserLogin(w, r, id, registry) },
@@ -83,7 +61,7 @@ func (a *API) handleBrowserLogin(w http.ResponseWriter, r *http.Request, id chan
 		func(w http.ResponseWriter, loginID string) { abandonLogin(w, registry, loginID, label) })
 }
 
-func (a *API) startBrowserLogin(w http.ResponseWriter, r *http.Request, id channel.ID, registry *deviceLoginRegistry[browserLogin]) {
+func (a *API) startBrowserLogin(w http.ResponseWriter, r *http.Request, id channel.ID, registry *deviceLoginRegistry) {
 	label := channelLabel(id)
 	enabled, ok := beginBrowserLogin(w, r, a, label, registry)
 	if !ok {
@@ -110,42 +88,19 @@ func (a *API) startBrowserLogin(w http.ResponseWriter, r *http.Request, id chann
 		return
 	}
 
-	admitBrowserLogin(w, registry, label, loginSeed{
-		// The device code lives in the shared state because the registry's
-		// readiness test may require it, and the polling response never
-		// serializes it: deviceLoginResponse carries only what the browser
-		// needs, so the exchangeable half cannot reach the console.
-		deviceCode: challenge.DeviceCode,
-		userCode:   challenge.UserCode,
-		verifyURI:  challenge.VerifyURI,
-		verifyFull: challenge.VerifyFull,
-		expiresAt:  challenge.ExpiresAt,
-		interval:   challenge.Interval,
-		qrCode:     challenge.QRCode,
-		message:    "Waiting for " + label + " authorization",
-		enabled:    enabled,
-		cfg:        cfg,
-	}, func(shared deviceLogin) *browserLogin {
-		return &browserLogin{deviceLogin: shared, challenge: challenge, flow: flow}
-	}, func(pollCtx context.Context, loginID string) {
-		a.pollChannelLogin(pollCtx, loginID, label, registry)
+	login := newDeviceLogin(cfg, flow, challenge)
+	login.message = "Waiting for " + label + " authorization"
+	login.enabled = enabled
+	response, err := registry.start(login, func(ctx context.Context, loginID string) {
+		a.pollChannelLogin(ctx, loginID, label, registry)
 	})
-}
-
-// pollChannelLogin exchanges the challenge until the browser step completes,
-// then builds and persists the account. The configuration is the snapshot taken
-// at start: a live reload must not start a login on one host and poll another.
-func (a *API) pollChannelLogin(ctx context.Context, loginID, label string, registry *deviceLoginRegistry[browserLogin]) {
-	login, ok := registry.pollable(loginID)
-	if !ok {
+	if errors.Is(err, errDeviceLoginLimit) {
+		writeLoginError(w, http.StatusTooManyRequests, "too_many_logins", "too many pending "+label+" logins; finish or cancel one first")
 		return
 	}
-	flow, cfg := login.flow, login.configSnapshot
-	pollBrowserLogin(a, ctx, registry, loginID, label, flow.ErrPending, flow.BuildVerifies,
-		func(reqCtx context.Context, login *browserLogin) (provider.LoginGrant, error) {
-			return flow.Exchange(reqCtx, cfg, login.challenge)
-		},
-		func(login *browserLogin, grant provider.LoginGrant) (*store.Account, error) {
-			return flow.Build(ctx, cfg, loginID, login.challenge, grant)
-		}, flow.MarkReplace, flow.Merge)
+	if err != nil {
+		writeLoginError(w, http.StatusInternalServerError, "transaction_failed", "failed to create login transaction")
+		return
+	}
+	util.WriteJSON(w, response)
 }

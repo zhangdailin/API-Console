@@ -45,7 +45,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-type redisStore struct {
+type Store struct {
 	client      *redis.Client
 	prefix      string
 	credentials *credentialCipher
@@ -63,10 +63,12 @@ type redisStore struct {
 	changeClosed  bool
 	keyIndexMu    sync.RWMutex
 	keyIndex      map[string]int64
+	keyTouchMu    sync.Mutex
+	keyTouches    map[int64]time.Time
 }
 
 // newRedisStore dials Redis and starts the change dispatcher.
-func newRedisStore(addr, password string, db int, prefix string, credentialKey []byte, poolSizes ...int) (*redisStore, error) {
+func newRedisStore(addr, password string, db int, prefix string, credentialKey []byte, poolSizes ...int) (*Store, error) {
 	addr = strings.TrimSpace(addr)
 	if addr == "" {
 		return nil, fmt.Errorf("redis address is required")
@@ -110,7 +112,7 @@ func newRedisStore(addr, password string, db int, prefix string, credentialKey [
 			return nil, err
 		}
 	}
-	s := &redisStore{
+	s := &Store{
 		keySecrets:    keySecrets,
 		client:        client,
 		prefix:        prefix,
@@ -124,14 +126,23 @@ func newRedisStore(addr, password string, db int, prefix string, credentialKey [
 	return s, nil
 }
 
-func (s *redisStore) Client() *redis.Client {
+// RedisClient returns the underlying Redis connection when configured.
+func (s *Store) RedisClient() *redis.Client {
 	if s == nil {
 		return nil
 	}
 	return s.client
 }
 
-func (s *redisStore) Close() error {
+// RedisPrefix returns the configured key prefix.
+func (s *Store) RedisPrefix() string {
+	if s != nil && s.client != nil {
+		return s.prefix
+	}
+	return "orchids:"
+}
+
+func (s *Store) Close() error {
 	if s == nil || s.client == nil {
 		return nil
 	}
@@ -154,7 +165,7 @@ func (s *redisStore) Close() error {
 	return s.client.Close()
 }
 
-func (s *redisStore) CreateAccount(ctx context.Context, acc *Account) error {
+func (s *Store) CreateAccount(ctx context.Context, acc *Account) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis store not configured")
 	}
@@ -195,7 +206,7 @@ func (s *redisStore) CreateAccount(ctx context.Context, acc *Account) error {
 
 // pipeAccountMembership keeps the id and enabled index sets in step with the
 // account row written by the same pipeline.
-func pipeAccountMembership(ctx context.Context, pipe redis.Pipeliner, s *redisStore, id int64, enabled bool) {
+func pipeAccountMembership(ctx context.Context, pipe redis.Pipeliner, s *Store, id int64, enabled bool) {
 	pipe.SAdd(ctx, s.accountsIDsKey(), id)
 	if enabled {
 		pipe.SAdd(ctx, s.accountsEnabledKey(), id)
@@ -219,7 +230,23 @@ func workBuddyMeterReadingIsNewer(acc, existing *Account) bool {
 	return !acc.WorkBuddyQuota.SyncedAt.Before(existing.WorkBuddyQuota.SyncedAt)
 }
 
-func (s *redisStore) UpdateAccount(ctx context.Context, acc *Account) error {
+func (s *Store) UpdateAccount(ctx context.Context, acc *Account) error {
+	if acc != nil && acc.DoubaoSessionUpdate != nil {
+		observation := acc.DoubaoSessionUpdate
+		patch := DoubaoSessionPatch{Expected: observation.Expected, Healthy: observation.Healthy, Rejected: observation.Rejected, UserID: observation.UserID, ObservedAt: observation.ObservedAt}
+		if err := s.UpdateDoubaoSession(ctx, acc.ID, patch); err != nil {
+			return err
+		}
+		current, err := s.GetAccount(ctx, acc.ID)
+		if err != nil {
+			return err
+		}
+		if current == nil {
+			return ErrNoRows
+		}
+		*acc = *current
+		return nil
+	}
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis store not configured")
 	}
@@ -263,7 +290,7 @@ var errAccountUnchanged = fmt.Errorf("account unchanged")
 // updateAccountAtomic applies a field mutation with optimistic locking. Every
 // account writer uses the same watched key, so a quota/stat update that lands
 // between read and write causes a retry instead of being silently overwritten.
-func (s *redisStore) updateAccountAtomic(ctx context.Context, id int64, mutate func(*Account) error, requireExisting ...bool) error {
+func (s *Store) updateAccountAtomic(ctx context.Context, id int64, mutate func(*Account) error, requireExisting ...bool) error {
 	mustExist := len(requireExisting) > 0 && requireExisting[0]
 	return s.updateAccountAndRelated(ctx, id, mustExist, nil, func(current *Account, _ *redis.Tx) (func(redis.Pipeliner), error) {
 		return nil, mutate(current)
@@ -272,7 +299,7 @@ func (s *redisStore) updateAccountAtomic(ctx context.Context, id int64, mutate f
 
 // updateAccountAndRelated commits an optional related Redis mutation under the
 // same optimistic lock. Mutate may be called again after a concurrent writer.
-func (s *redisStore) updateAccountAndRelated(ctx context.Context, id int64, mustExist bool, related []string, mutate func(*Account, *redis.Tx) (func(redis.Pipeliner), error)) error {
+func (s *Store) updateAccountAndRelated(ctx context.Context, id int64, mustExist bool, related []string, mutate func(*Account, *redis.Tx) (func(redis.Pipeliner), error)) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis store not configured")
 	}
@@ -342,10 +369,7 @@ func (s *redisStore) updateAccountAndRelated(ctx context.Context, id int64, must
 		if err == errAccountUnchanged {
 			return nil
 		}
-		if err == ErrNoRows {
-			if mustExist {
-				return ErrNoRows
-			}
+		if err == ErrNoRows && !mustExist {
 			return nil
 		}
 		if err != nil {
@@ -359,7 +383,7 @@ func (s *redisStore) updateAccountAndRelated(ctx context.Context, id int64, must
 	return fmt.Errorf("account %d changed too frequently; update could not be committed", id)
 }
 
-func (s *redisStore) UpdateWorkBuddyCredentials(ctx context.Context, id int64, patch WorkBuddyCredentialPatch) error {
+func (s *Store) UpdateWorkBuddyCredentials(ctx context.Context, id int64, patch WorkBuddyCredentialPatch) error {
 	return s.updateAccountAtomic(ctx, id, func(acc *Account) error {
 		if err := applyCredentialPatch("workbuddy", patch.ExpectedRefreshToken, patch.AccessToken, patch.RefreshToken, patch.ExpiresAt,
 			&acc.WorkBuddyAccessToken, &acc.WorkBuddyRefreshToken, &acc.WorkBuddyExpiresAt); err != nil {
@@ -373,7 +397,7 @@ func (s *redisStore) UpdateWorkBuddyCredentials(ctx context.Context, id int64, p
 	})
 }
 
-func (s *redisStore) UpdateClineCredentials(ctx context.Context, id int64, patch ClineCredentialPatch) error {
+func (s *Store) UpdateClineCredentials(ctx context.Context, id int64, patch ClineCredentialPatch) error {
 	return s.updateAccountAtomic(ctx, id, func(acc *Account) error {
 		if err := applyCredentialPatch("cline", patch.ExpectedRefreshToken, patch.AccessToken, patch.RefreshToken, patch.ExpiresAt,
 			&acc.ClineAccessToken, &acc.ClineRefreshToken, &acc.ClineExpiresAt); err != nil {
@@ -387,7 +411,7 @@ func (s *redisStore) UpdateClineCredentials(ctx context.Context, id int64, patch
 	})
 }
 
-func (s *redisStore) UpdateGrokCredentials(ctx context.Context, id int64, patch GrokCredentialPatch) error {
+func (s *Store) UpdateGrokCredentials(ctx context.Context, id int64, patch GrokCredentialPatch) error {
 	return s.updateAccountAtomic(ctx, id, func(acc *Account) error {
 		if err := applyCredentialPatch("grok", patch.ExpectedRefreshToken, patch.AccessToken, patch.RefreshToken, patch.ExpiresAt,
 			&acc.OAuthAccessToken, &acc.OAuthRefreshToken, &acc.OAuthExpiresAt); err != nil {
@@ -403,7 +427,7 @@ func (s *redisStore) UpdateGrokCredentials(ctx context.Context, id int64, patch 
 	})
 }
 
-func (s *redisStore) DeleteAccount(ctx context.Context, id int64) error {
+func (s *Store) DeleteAccount(ctx context.Context, id int64) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis store not configured")
 	}
@@ -431,42 +455,45 @@ func (s *redisStore) DeleteAccount(ctx context.Context, id int64) error {
 	return nil
 }
 
-func (s *redisStore) GetAccount(ctx context.Context, id int64) (*Account, error) {
+func (s *Store) GetAccount(ctx context.Context, id int64) (*Account, error) {
 	if s == nil || s.client == nil {
 		return nil, fmt.Errorf("redis store not configured")
 	}
 	return s.getAccount(ctx, id)
 }
 
-func (s *redisStore) ListAccounts(ctx context.Context) ([]*Account, error) {
+func (s *Store) ListAccounts(ctx context.Context) ([]*Account, error) {
+	return s.listAccounts(ctx, false)
+}
+
+func (s *Store) GetEnabledAccounts(ctx context.Context) ([]*Account, error) {
+	return s.listAccounts(ctx, true)
+}
+
+func (s *Store) listAccounts(ctx context.Context, enabledOnly bool) ([]*Account, error) {
 	if s == nil || s.client == nil {
-		return nil, fmt.Errorf("redis store not configured")
+		return nil, fmt.Errorf("store not configured")
 	}
-	ids, err := s.client.SMembers(ctx, s.accountsIDsKey()).Result()
+	key := s.accountsIDsKey()
+	if enabledOnly {
+		key = s.accountsEnabledKey()
+	}
+	ids, err := s.client.SMembers(ctx, key).Result()
 	if err != nil {
 		return nil, err
 	}
-	return s.getAccountsByIDs(ctx, ids, false)
+	return s.getAccountsByIDs(ctx, ids, enabledOnly)
 }
 
-func (s *redisStore) GetEnabledAccounts(ctx context.Context) ([]*Account, error) {
-	if s == nil || s.client == nil {
-		return nil, fmt.Errorf("redis store not configured")
-	}
-	ids, err := s.client.SMembers(ctx, s.accountsEnabledKey()).Result()
-	if err != nil {
-		return nil, err
-	}
-	return s.getAccountsByIDs(ctx, ids, true)
-}
-
-func (s *redisStore) IncrementAccountStats(ctx context.Context, id int64, usage float64, count int64) error {
+func (s *Store) IncrementAccountStats(ctx context.Context, id int64, usage float64, count int64) error {
 	return s.IncrementAccountStatsOperation(ctx, id, usage, count, "", time.Now().UTC())
 }
 
 const accountStatsOperationTTL = 8 * 24 * time.Hour
 
-func (s *redisStore) IncrementAccountStatsOperation(ctx context.Context, id int64, usage float64, count int64, operationID string, completedAt time.Time) error {
+// IncrementAccountStatsOperation applies an idempotent counter update to the
+// UTC day of request completion. A deleted account returns ErrNoRows.
+func (s *Store) IncrementAccountStatsOperation(ctx context.Context, id int64, usage float64, count int64, operationID string, completedAt time.Time) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis store not configured")
 	}
@@ -510,7 +537,12 @@ func decrementQuotaWindow(window *GrokQuotaWindow, amount float64) bool {
 	return true
 }
 
-func (s *redisStore) ConsumeGrokQuota(ctx context.Context, id int64, provider string, amount float64) (bool, error) {
+// ConsumeGrokQuota decrements an observed request-unit window without changing
+// percentage-based billing. False means no compatible allowance was consumed.
+func (s *Store) ConsumeGrokQuota(ctx context.Context, id int64, provider string, amount float64) (bool, error) {
+	if s == nil || s.client == nil {
+		return false, fmt.Errorf("store not configured")
+	}
 	if amount <= 0 || id == 0 {
 		return false, nil
 	}
@@ -541,7 +573,12 @@ func (s *redisStore) ConsumeGrokQuota(ctx context.Context, id int64, provider st
 	return consumed, err
 }
 
-func (s *redisStore) ClaimGrokPaidQuotaProbe(ctx context.Context, id int64, now time.Time) (bool, error) {
+// ClaimGrokPaidQuotaProbe admits at most one paid billing probe per interval
+// after the known period has ended.
+func (s *Store) ClaimGrokPaidQuotaProbe(ctx context.Context, id int64, now time.Time) (bool, error) {
+	if s == nil || s.client == nil {
+		return false, fmt.Errorf("store not configured")
+	}
 	if id == 0 {
 		return false, nil
 	}
@@ -572,7 +609,7 @@ func (s *redisStore) ClaimGrokPaidQuotaProbe(ctx context.Context, id int64, now 
 	return claimed, err
 }
 
-func (s *redisStore) getAccount(ctx context.Context, id int64) (*Account, error) {
+func (s *Store) getAccount(ctx context.Context, id int64) (*Account, error) {
 	if id == 0 {
 		return nil, ErrNoRows
 	}
@@ -589,47 +626,26 @@ func (s *redisStore) getAccount(ctx context.Context, id int64) (*Account, error)
 
 // getAccountsByIDs loads the accounts named by the id strings in one MGET,
 // decodes them positionally and drops the ids that have no row.
-func (s *redisStore) getAccountsByIDs(ctx context.Context, ids []string, onlyEnabled bool) ([]*Account, error) {
+func (s *Store) getAccountsByIDs(ctx context.Context, ids []string, onlyEnabled bool) ([]*Account, error) {
 	idNums := parseSortedInt64s(ids)
 	if len(idNums) == 0 {
 		return nil, nil
 	}
 
-	keys := make([]string, 0, len(idNums))
-	for _, id := range idNums {
-		keys = append(keys, s.accountsKey(id))
-	}
-
-	values, err := s.client.MGet(ctx, keys...).Result()
+	values, err := s.client.MGet(ctx, redisBatchKeys(idNums, s.accountsKey)...).Result()
 	if err != nil {
 		return nil, err
 	}
-
-	results := make([]*Account, len(values))
-	decode := func(i int) error {
-		if values[i] == nil {
-			return nil
+	return decodeRedisRows(values, idNums, "account", func(i int, raw string) (*Account, error) {
+		acc, err := s.unmarshalAccount([]byte(raw), idNums[i])
+		if err == nil && onlyEnabled && !acc.Enabled {
+			return nil, nil
 		}
-		strVal, ok := values[i].(string)
-		if !ok || strVal == "" {
-			return fmt.Errorf("invalid account record #%d", idNums[i])
-		}
-		acc, err := s.unmarshalAccount([]byte(strVal), idNums[i])
-		if err != nil {
-			return err
-		}
-		if !onlyEnabled || acc.Enabled {
-			results[i] = acc
-		}
-		return nil
-	}
-	if err := forEachIndex(len(values), decode); err != nil {
-		return nil, err
-	}
-	return compactNonNil(results), nil
+		return acc, err
+	})
 }
 
-func (s *redisStore) GetSetting(ctx context.Context, key string) (string, error) {
+func (s *Store) GetSetting(ctx context.Context, key string) (string, error) {
 	if s == nil || s.client == nil {
 		return "", fmt.Errorf("redis store not configured")
 	}
@@ -647,7 +663,7 @@ func (s *redisStore) GetSetting(ctx context.Context, key string) (string, error)
 	return value, nil
 }
 
-func (s *redisStore) SetSetting(ctx context.Context, key, value string) error {
+func (s *Store) SetSetting(ctx context.Context, key, value string) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("redis store not configured")
 	}
@@ -662,22 +678,22 @@ func (s *redisStore) SetSetting(ctx context.Context, key, value string) error {
 	return s.client.Set(ctx, s.settingsKey(key), value, 0).Err()
 }
 
-func (s *redisStore) accountsKey(id int64) string {
+func (s *Store) accountsKey(id int64) string {
 	return s.prefix + "accounts:id:" + strconv.FormatInt(id, 10)
 }
 
-func (s *redisStore) accountStatsOperationsKey(id int64) string {
+func (s *Store) accountStatsOperationsKey(id int64) string {
 	return s.prefix + "accounts:stats_ops:" + strconv.FormatInt(id, 10)
 }
 
-func (s *redisStore) accountStatsExpiryKey(id int64) string {
+func (s *Store) accountStatsExpiryKey(id int64) string {
 	return s.prefix + "accounts:stats_ops_expiry:" + strconv.FormatInt(id, 10)
 }
 
-func (s *redisStore) accountsIDsKey() string { return s.prefix + "accounts:ids" }
+func (s *Store) accountsIDsKey() string { return s.prefix + "accounts:ids" }
 
-func (s *redisStore) accountsEnabledKey() string { return s.prefix + "accounts:enabled" }
+func (s *Store) accountsEnabledKey() string { return s.prefix + "accounts:enabled" }
 
-func (s *redisStore) accountsNextIDKey() string { return s.prefix + "accounts:next_id" }
+func (s *Store) accountsNextIDKey() string { return s.prefix + "accounts:next_id" }
 
-func (s *redisStore) settingsKey(key string) string { return s.prefix + "settings:" + key }
+func (s *Store) settingsKey(key string) string { return s.prefix + "settings:" + key }

@@ -48,45 +48,12 @@ type Estimator struct {
 // so the inner loop below consumes a whole run with nothing but a load, a
 // compare and an increment — the flush branch and the class dispatch are hoisted
 // out of the one loop that dominates streaming text.
-func (e *Estimator) Add(text string) {
-	n := len(text)
-	i := 0
-	for i < n {
-		switch asciiClass[text[i]] {
-		case classWord:
-			e.inWord = true
-			i++
-			for i < n && asciiClass[text[i]] == classWord {
-				i++
-			}
-		case classSpace:
-			if e.inWord {
-				e.tokens++
-				e.inWord = false
-			}
-			i++
-		case classPunct:
-			if e.inWord {
-				e.tokens++
-				e.inWord = false
-			}
-			e.tokens++
-			i++
-		default:
-			if e.inWord {
-				e.tokens++
-				e.inWord = false
-			}
-			_, size := utf8.DecodeRuneInString(text[i:])
-			e.tokens += 1.5
-			i += size
-		}
-	}
-}
+func (e *Estimator) Add(text string) { scan(e, text) }
 
-// AddBytes is Add over a byte slice, for callers that already hold the payload
-// as bytes. It mirrors Add exactly, including the word-run fast path.
-func (e *Estimator) AddBytes(text []byte) {
+// AddBytes folds an already-decoded byte fragment into the same estimator.
+func (e *Estimator) AddBytes(text []byte) { scan(e, text) }
+
+func scan[T string | []byte](e *Estimator, text T) {
 	n := len(text)
 	i := 0
 	for i < n {
@@ -115,7 +82,9 @@ func (e *Estimator) AddBytes(text []byte) {
 				e.tokens++
 				e.inWord = false
 			}
-			_, size := utf8.DecodeRune(text[i:])
+			// Only this rune's prefix is needed, so the byte-slice case
+			// never needs to copy the remaining fragment.
+			_, size := utf8.DecodeRuneInString(string(text[i:min(n, i+utf8.UTFMax)]))
 			e.tokens += 1.5
 			i += size
 		}

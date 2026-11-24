@@ -161,7 +161,11 @@ func TestRefreshQuotaRotationDuringReadCannotRelabelObservations(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.UpdateWarpCatalog(ctx, acc.ID, "synthetic-new-login-refresh", []string{"new-login-model"}, callerBefore.WarpModelsSyncedAt.Add(time.Hour)); err != nil {
+	if err := s.UpdateWarpCatalogSnapshot(ctx, acc.ID, store.WarpCatalogPatch{
+		ExpectedRefreshToken: "synthetic-new-login-refresh",
+		ModelIDs:             []string{"new-login-model"},
+		SyncedAt:             callerBefore.WarpModelsSyncedAt.Add(time.Hour),
+	}); err != nil {
 		t.Fatal(err)
 	}
 	// A concurrent operation on this same Client adopts the authoritative new

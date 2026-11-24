@@ -17,22 +17,15 @@ import (
 type cachedAccountClient struct {
 	fingerprint string
 	client      UpstreamClient
-	// inUse counts the requests currently holding this client. An evicted client
-	// is only closed once the last holder releases it, so a credential change
-	// never tears down a connection a request is still using.
-	inUse int
-}
-
-// retiredClient is a client that has been evicted but is still in use.
-type retiredClient struct {
-	client UpstreamClient
-	inUse  int
+	inUse       int
+	retired     bool
+	closed      bool
 }
 
 type accountClientCache struct {
 	mu      sync.RWMutex
-	entries map[int64]cachedAccountClient
-	retired []retiredClient
+	entries map[int64]*cachedAccountClient
+	retired map[*cachedAccountClient]struct{}
 	// resolve returns the account's current state so the cache can decide whether
 	// the client it holds is still the right one. It is injected by the handler,
 	// which owns the store.
@@ -89,69 +82,64 @@ type clientCloser interface {
 }
 
 func newAccountClientCache() *accountClientCache {
-	return &accountClientCache{entries: make(map[int64]cachedAccountClient)}
+	return &accountClientCache{entries: make(map[int64]*cachedAccountClient)}
 }
 
-// acquireAccountClient resolves the client for one request and marks it in use.
-// The returned release function must always be called: it is what closes a client
-// that was evicted while the request was running.
+// Acquire and increment the reference under the same lock. An event can retire
+// an entry immediately afterward, but cannot close it before the release.
 func (h *Handler) acquireAccountClient(acc *store.Account) (UpstreamClient, func()) {
-	client := h.getOrCreateAccountClient(acc)
+	if acc == nil {
+		return nil, func() {}
+	}
+	if h == nil || h.clientCache == nil || acc.ID == 0 {
+		return h.buildAccountClient(acc), func() {}
+	}
+	c := h.clientCache
+	id := acc.ID
+	fingerprint := accountClientFingerprint(acc, h.configSnapshot())
+	c.mu.Lock()
+	entry := c.entries[id]
+	if entry != nil && entry.fingerprint == fingerprint {
+		entry.inUse++
+		c.mu.Unlock()
+		return entry.client, c.releaseHandle(entry)
+	}
+	c.mu.Unlock()
+
+	client := h.buildAccountClient(acc)
 	if client == nil {
 		return nil, func() {}
 	}
-	if h == nil || h.clientCache == nil || acc == nil || acc.ID == 0 {
-		return client, func() {}
+	c.mu.Lock()
+	entry = c.entries[id]
+	if entry != nil && entry.fingerprint == fingerprint {
+		closeAccountClient(client)
+	} else {
+		c.dropLocked(id)
+		entry = &cachedAccountClient{fingerprint: fingerprint, client: client}
+		c.entries[id] = entry
 	}
-
-	h.clientCache.mu.Lock()
-	if entry, ok := h.clientCache.entries[acc.ID]; ok && entry.client == client {
-		entry.inUse++
-		h.clientCache.entries[acc.ID] = entry
-	}
-	h.clientCache.mu.Unlock()
-
-	var once sync.Once
-	return client, func() {
-		once.Do(func() { h.clientCache.release(acc.ID, client) })
-	}
+	entry.inUse++
+	c.mu.Unlock()
+	return entry.client, c.releaseHandle(entry)
 }
 
-// release drops one use of a client and closes it when it is no longer current
-// and nobody else holds it.
-func (c *accountClientCache) release(accountID int64, client UpstreamClient) {
-	if c == nil || client == nil {
-		return
-	}
-	closer, closable := client.(clientCloser)
+func (c *accountClientCache) releaseHandle(entry *cachedAccountClient) func() {
+	return sync.OnceFunc(func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		entry.inUse--
+		if entry.inUse == 0 && entry.retired && !entry.closed {
+			delete(c.retired, entry)
+			closeAccountClient(entry.client)
+			entry.closed = true
+		}
+	})
+}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if entry, ok := c.entries[accountID]; ok && entry.client == client {
-		if entry.inUse > 0 {
-			entry.inUse--
-		}
-		c.entries[accountID] = entry
-		return
-	}
-
-	// The entry was evicted while the request was running: close it as soon as the
-	// last holder is done.
-	for i := range c.retired {
-		if c.retired[i].client != client {
-			continue
-		}
-		if c.retired[i].inUse > 0 {
-			c.retired[i].inUse--
-		}
-		if c.retired[i].inUse == 0 {
-			c.retired = append(c.retired[:i], c.retired[i+1:]...)
-			if closable {
-				closer.Close()
-			}
-		}
-		return
+func closeAccountClient(client UpstreamClient) {
+	if closer, ok := client.(clientCloser); ok {
+		closer.Close()
 	}
 }
 
@@ -188,98 +176,39 @@ func (c *accountClientCache) evictAccounts(ids []int64) {
 	}
 }
 
-// evictIfChanged drops the entry when the account no longer builds the same
-// client. It reports whether the entry was dropped.
-func (c *accountClientCache) evictIfChanged(account *store.Account) bool {
+func (c *accountClientCache) evictIfChanged(account *store.Account) {
 	c.mu.RLock()
 	cfg := c.cfg
 	c.mu.RUnlock()
 	fingerprint := accountClientFingerprint(account, cfg)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	entry, ok := c.entries[account.ID]
-	if !ok || entry.fingerprint == fingerprint {
-		return false
+	if entry := c.entries[account.ID]; entry != nil && entry.fingerprint != fingerprint {
+		c.dropLocked(account.ID)
 	}
-	c.dropLocked(account.ID, entry)
-	return true
 }
 
-// evictByID drops an entry without re-reading the account.
 func (c *accountClientCache) evictByID(id int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	entry, ok := c.entries[id]
-	if !ok {
-		return
-	}
-	c.dropLocked(id, entry)
+	c.dropLocked(id)
 }
 
-// dropLocked removes an entry, retiring a client that is still in use instead of
-// closing it under a running request.
-func (c *accountClientCache) dropLocked(id int64, entry cachedAccountClient) {
+func (c *accountClientCache) dropLocked(id int64) {
+	entry := c.entries[id]
+	if entry == nil {
+		return
+	}
 	delete(c.entries, id)
-	if entry.client == nil {
+	if entry.inUse == 0 {
+		closeAccountClient(entry.client)
 		return
 	}
-	if entry.inUse > 0 {
-		c.retired = append(c.retired, retiredClient{client: entry.client, inUse: entry.inUse})
-		return
+	entry.retired = true
+	if c.retired == nil {
+		c.retired = make(map[*cachedAccountClient]struct{})
 	}
-	if closer, ok := entry.client.(clientCloser); ok {
-		closer.Close()
-	}
-}
-
-func (h *Handler) getOrCreateAccountClient(acc *store.Account) UpstreamClient {
-	if acc == nil {
-		return nil
-	}
-	if h == nil || h.clientCache == nil || acc.ID == 0 {
-		return h.buildAccountClient(acc)
-	}
-
-	cfg := h.configSnapshot()
-	fingerprint := accountClientFingerprint(acc, cfg)
-
-	h.clientCache.mu.RLock()
-	entry, ok := h.clientCache.entries[acc.ID]
-	h.clientCache.mu.RUnlock()
-	if ok && entry.fingerprint == fingerprint && entry.client != nil {
-		return entry.client
-	}
-
-	client := h.buildAccountClient(acc)
-	if client == nil {
-		return nil
-	}
-
-	h.clientCache.mu.Lock()
-	defer h.clientCache.mu.Unlock()
-
-	if entry, ok := h.clientCache.entries[acc.ID]; ok && entry.fingerprint == fingerprint && entry.client != nil {
-		if c, ok := client.(clientCloser); ok {
-			c.Close()
-		}
-		return entry.client
-	}
-
-	if entry, ok := h.clientCache.entries[acc.ID]; ok && entry.client != nil {
-		// The entry is being replaced: a running request keeps the old client.
-		if entry.inUse > 0 {
-			h.clientCache.retired = append(h.clientCache.retired, retiredClient{client: entry.client, inUse: entry.inUse})
-		} else if closer, closable := entry.client.(clientCloser); closable {
-			closer.Close()
-		}
-	}
-
-	h.clientCache.entries[acc.ID] = cachedAccountClient{
-		fingerprint: fingerprint,
-		client:      client,
-	}
-
-	return client
+	c.retired[entry] = struct{}{}
 }
 
 func (h *Handler) buildAccountClient(acc *store.Account) UpstreamClient {
@@ -324,30 +253,23 @@ func (h *Handler) Close() {
 		h.flushPendingAccountStats(5 * time.Second)
 	})
 
-	closers := make([]clientCloser, 0, 1)
-	if c, ok := h.client.(clientCloser); ok {
-		closers = append(closers, c)
-	}
-
-	if h.clientCache != nil {
-		h.clientCache.mu.Lock()
-		for _, entry := range h.clientCache.entries {
-			if c, ok := entry.client.(clientCloser); ok {
-				closers = append(closers, c)
-			}
+	closeAccountClient(h.client)
+	if c := h.clientCache; c != nil {
+		c.mu.Lock()
+		clients := make([]UpstreamClient, 0, len(c.entries)+len(c.retired))
+		for _, entry := range c.entries {
+			clients = append(clients, entry.client)
 		}
-		for _, client := range h.clientCache.retired {
-			if c, ok := client.client.(clientCloser); ok {
-				closers = append(closers, c)
-			}
+		for entry := range c.retired {
+			entry.closed = true
+			clients = append(clients, entry.client)
 		}
-		h.clientCache.entries = make(map[int64]cachedAccountClient)
-		h.clientCache.retired = nil
-		h.clientCache.mu.Unlock()
-	}
-
-	for _, c := range closers {
-		c.Close()
+		clear(c.entries)
+		clear(c.retired)
+		c.mu.Unlock()
+		for _, client := range clients {
+			closeAccountClient(client)
+		}
 	}
 }
 

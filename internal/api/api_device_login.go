@@ -19,8 +19,8 @@ import (
 const maxDeviceLogins = 10
 
 type deviceLogin struct {
-	deviceCode string
-	userCode   string
+	challenge  provider.LoginChallenge
+	flow       *provider.Login
 	verifyURI  string
 	verifyFull string
 	expiresAt  time.Time
@@ -36,10 +36,16 @@ type deviceLogin struct {
 	message   string
 	accountID int64
 
-	// enabled/enabledKnown carry a provider-specific preference captured at
-	// start time (currently the WorkBuddy account enabled flag).
-	enabled      bool
-	enabledKnown bool
+	enabled bool
+}
+
+func newDeviceLogin(cfg *config.Config, flow *provider.Login, challenge provider.LoginChallenge) *deviceLogin {
+	return &deviceLogin{
+		challenge: challenge, flow: flow, configSnapshot: cfg,
+		verifyURI: challenge.VerifyURI, verifyFull: challenge.VerifyFull,
+		expiresAt: challenge.ExpiresAt, interval: challenge.Interval, qrCode: challenge.QRCode,
+		status: "pending", enabled: true,
+	}
 }
 
 type deviceLoginResponse struct {
@@ -58,10 +64,8 @@ func finishDeviceLogin(login *deviceLogin, status, message string, accountID int
 	if login == nil {
 		return
 	}
-	login.deviceCode = ""
-	login.userCode = ""
-	login.verifyURI = ""
-	login.verifyFull = ""
+	login.challenge = provider.LoginChallenge{}
+	login.verifyURI, login.verifyFull, login.qrCode = "", "", ""
 	login.status = status
 	login.message = message
 	login.accountID = accountID
@@ -79,7 +83,7 @@ func newDeviceLoginResponse(id string, login *deviceLogin) deviceLoginResponse {
 	response.Message = login.message
 	response.AccountID = login.accountID
 	if login.status == "pending" {
-		response.UserCode = login.userCode
+		response.UserCode = login.challenge.UserCode
 		response.VerificationURI = login.verifyURI
 		response.VerificationURIComplete = login.verifyFull
 		response.ExpiresAt = login.expiresAt.UTC().Format(time.RFC3339)
@@ -137,29 +141,17 @@ func (a *API) startGrokDeviceAuthorization(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "failed to start Grok device authorization", http.StatusBadGateway)
 		return
 	}
-	id, err := newDeviceLoginID()
+	login := newDeviceLogin(cfg, flow, challenge)
+	response, err := a.grokLogins.start(login, a.pollGrokDeviceAuthorization)
+	if errors.Is(err, errDeviceLoginLimit) {
+		http.Error(w, "too many pending Grok device logins", http.StatusTooManyRequests)
+		return
+	}
 	if err != nil {
 		http.Error(w, "failed to create login transaction", http.StatusInternalServerError)
 		return
 	}
-	pollContext, pollCancel := context.WithCancel(context.Background())
-	login := &deviceLogin{
-		deviceCode: challenge.DeviceCode,
-		userCode:   challenge.UserCode,
-		verifyURI:  challenge.VerifyURI,
-		verifyFull: challenge.VerifyFull,
-		expiresAt:  challenge.ExpiresAt,
-		interval:   challenge.Interval,
-		cancel:     pollCancel,
-		status:     "pending",
-	}
-	if !a.grokLogins.admit(id, login) {
-		pollCancel()
-		http.Error(w, "too many pending Grok device logins", http.StatusTooManyRequests)
-		return
-	}
-	go a.pollGrokDeviceAuthorization(pollContext, id, cfg, challenge)
-	util.WriteJSON(w, newDeviceLoginResponse(id, login))
+	util.WriteJSON(w, response)
 }
 
 func (a *API) getGrokDeviceAuthorization(w http.ResponseWriter, id string) {
@@ -180,84 +172,6 @@ func (a *API) cancelGrokDeviceAuthorization(w http.ResponseWriter, id string) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// pollGrokDeviceAuthorization exchanges the device code until the operator
-// finishes, then stores the account. cfg and challenge are the ones the
-// transaction started with: a live reload must not start a login on one host
-// and poll another.
-func (a *API) pollGrokDeviceAuthorization(ctx context.Context, id string, cfg *config.Config, challenge provider.LoginChallenge) {
-	flow := loginFlow(channel.Grok)
-	if flow == nil || flow.Exchange == nil || flow.Build == nil {
-		a.grokLogins.finish(id, "failed", "Grok authorization failed", 0)
-		return
-	}
-	for {
-		login, ok := a.grokLogins.pollable(id)
-		if !ok {
-			return
-		}
-		if time.Now().After(login.expiresAt) {
-			a.grokLogins.finish(id, "expired", "Grok authorization expired", 0)
-			return
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(login.interval):
-		}
-		// The device code is read from the transaction on every poll: a finished
-		// transaction has dropped it, and must not be exchanged again.
-		current := challenge
-		current.DeviceCode = login.deviceCode
-		requestCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		grant, err := flow.Exchange(requestCtx, cfg, current)
-		cancel()
-		if err != nil {
-			if flow.ErrPending != nil && errors.Is(err, flow.ErrPending) {
-				if flow.SlowDown != nil && flow.SlowDown(err) {
-					a.grokLogins.update(id, func(login *deviceLogin) {
-						if login != nil && login.status == "pending" {
-							login.interval += 5 * time.Second
-						}
-					})
-				}
-				continue
-			}
-			slog.Warn("Grok device authorization failed", "login_id", id, "error", err)
-			a.grokLogins.finish(id, "failed", "Grok authorization failed", 0)
-			return
-		}
-		acc, err := flow.Build(ctx, cfg, id, current, grant)
-		if err != nil {
-			slog.Warn("Grok device authorization produced no account", "login_id", id, "error", err)
-			a.grokLogins.finish(id, "failed", "Grok authorization failed", 0)
-			return
-		}
-		existing, err := a.saveNewAccountUnlessDuplicate(ctx, acc)
-		if err != nil {
-			slog.Warn("Grok device authorization could not save account", "login_id", id, "error", err)
-			a.grokLogins.finish(id, "failed", "Grok authorization succeeded but account could not be saved", 0)
-			return
-		}
-		if existing != nil {
-			// A fresh device grant may rotate the durable refresh token. The
-			// channel updates the matching identity in place, retaining operator
-			// settings and accumulated runtime state already held on the row.
-			if flow.Merge != nil {
-				flow.Merge(existing, acc)
-			}
-			updateCtx, updateCancel := context.WithTimeout(ctx, 20*time.Second)
-			if err := a.store.UpdateAccount(updateCtx, existing); err != nil {
-				updateCancel()
-				slog.Warn("Grok device authorization could not update account", "login_id", id, "account_id", existing.ID, "error", err)
-				a.grokLogins.finish(id, "failed", "Grok authorization succeeded but account could not be updated", 0)
-				return
-			}
-			updateCancel()
-			a.grokLogins.finish(id, "complete", "Grok account credentials refreshed", existing.ID)
-			return
-		}
-		a.grokLogins.finish(id, "complete", "Grok account added", acc.ID)
-		a.syncAccountAfterCreate(*acc)
-		return
-	}
+func (a *API) pollGrokDeviceAuthorization(ctx context.Context, id string) {
+	a.pollChannelLogin(ctx, id, "Grok", a.grokLogins)
 }

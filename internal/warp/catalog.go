@@ -142,17 +142,6 @@ func validModel(id string) bool {
 	}
 	return true
 }
-func (c *Client) FetchModels(ctx context.Context) ([]string, error) {
-	choices, err := c.FetchModelChoices(ctx)
-	if err != nil {
-		return nil, err
-	}
-	ids := make([]string, 0, len(choices))
-	for _, choice := range choices {
-		ids = append(ids, choice.ID)
-	}
-	return ids, nil
-}
 
 // FetchModelChoices returns only active exact model IDs and their fresh metadata.
 func (c *Client) FetchModelChoices(ctx context.Context) ([]ModelChoice, error) {
@@ -282,14 +271,6 @@ func (c *Client) observeCatalog(ctx context.Context) (provider.Observation, erro
 	}, nil
 }
 
-// setCatalogSnapshot records a catalog identity list without metadata evidence.
-func setCatalogSnapshot(acc *store.Account, ids []string, now time.Time) {
-	acc.WarpModelIDs = append([]string(nil), ids...)
-	acc.WarpModelsSyncedAt = now
-	acc.WarpModelWindows = nil
-	acc.WarpModelVision = nil
-}
-
 // setCatalogChoices replaces the IDs, windows and vision flags together so
 // models never inherit metadata from a different observation.
 func setCatalogChoices(acc *store.Account, choices []ModelChoice, now time.Time) {
@@ -346,8 +327,7 @@ func catalogPort() *provider.Catalog {
 			return c.observeCatalog(ctx)
 		},
 		// A failed upstream read must not publish cached rows as observations.
-		LastKnown:   func(*store.Account) []provider.Model { return nil },
-		SetSnapshot: setCatalogSnapshot,
+		LastKnown: func(*store.Account) []provider.Model { return nil },
 		Persist: func(ctx context.Context, s *store.Store, acc *store.Account) error {
 			return s.UpdateWarpCatalogSnapshot(ctx, acc.ID, catalogPatch(acc))
 		},

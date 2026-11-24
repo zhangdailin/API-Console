@@ -42,7 +42,8 @@ func TestBatchRenewalDoesNotResurrectReleasedLease(t *testing.T) {
 	defer client.Close()
 	tracker := NewRedisConnTracker(client, "perf:")
 	defer tracker.Close()
-	testutil.False(t, !tracker.TryAcquire(1, 1), "acquire")
+	release, ok := tracker.Reserve(t.Context(), 1, 1)
+	testutil.False(t, !ok, "acquire")
 	tracker.mu.Lock()
 	id := tracker.held[1][0].id
 	tracker.mu.Unlock()
@@ -52,7 +53,7 @@ func TestBatchRenewalDoesNotResurrectReleasedLease(t *testing.T) {
 	tracker.renewBatch()
 	after, err := client.ZScore(context.Background(), tracker.key(1), id).Result()
 	testutil.Falsef(t, err != nil || after <= before, "renew: %v %v", after, err)
-	tracker.Release(1)
+	release()
 	tracker.renewBatch()
 	testutil.Equal(t, tracker.GetCount(1), 0)
 }
@@ -65,8 +66,11 @@ func TestCachedCountsNeverOverrideAtomicLimit(t *testing.T) {
 	b := NewRedisConnTracker(client, "limit:")
 	defer b.Close()
 	a.GetCounts([]int64{1})
-	testutil.False(t, !b.TryAcquire(1, 1), "first acquire")
-	testutil.False(t, a.TryAcquire(1, 1), "cached zero bypassed atomic admission")
+	release, ok := b.Reserve(t.Context(), 1, 1)
+	testutil.False(t, !ok, "first acquire")
+	defer release()
+	_, ok = a.Reserve(t.Context(), 1, 1)
+	testutil.False(t, ok, "cached zero bypassed atomic admission")
 }
 
 type countPipelineHook struct{ commands atomic.Int64 }

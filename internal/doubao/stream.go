@@ -23,11 +23,8 @@ const (
 var errIncompleteChatStream = errors.New("status=502: Doubao stream ended before a final answer")
 
 func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, error) {
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 4096), maxChatEventBytes)
-	var event, userMessageID string
+	var userMessageID string
 	var complete, sawReplyEnd, replyEnded bool
-	var data []byte
 	var text, found strings.Builder
 	appendText := func(value string) error {
 		if len(value) > maxChatAnswerBytes-text.Len()-found.Len() {
@@ -44,8 +41,7 @@ func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, er
 	// shapes counts the event names and block layouts of the stream, never
 	// their content, so an answer this parser could not read can be diagnosed.
 	shapes := map[string]int{}
-	flush := func() error {
-		defer func() { event, data = "", data[:0] }()
+	flush := func(event string, data []byte) error {
 		if event == "" || event == "message" {
 			if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
 				complete = true
@@ -164,31 +160,8 @@ func consumeChatStream(body io.Reader, emit, reasoning func(string)) (string, er
 		}
 		return nil
 	}
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			if err := flush(); err != nil {
-				return "", err
-			}
-			continue
-		}
-		if value, ok := bytes.CutPrefix(line, []byte("event:")); ok {
-			event = string(bytes.TrimSpace(value))
-		}
-		if value, ok := bytes.CutPrefix(line, []byte("data:")); ok {
-			value = bytes.TrimSpace(value)
-			if len(value) > maxChatEventBytes-len(data) {
-				return "", fmt.Errorf("Doubao stream event exceeds size limit")
-			}
-			data = append(data, value...)
-		}
-	}
-	if err := scanner.Err(); err != nil {
+	if err := readDoubaoEvents(body, false, flush); err != nil {
 		return "", err
-	}
-	if event != "" || len(data) != 0 {
-		// SSE only dispatches a frame after its blank-line separator.
-		return "", errIncompleteChatStream
 	}
 	if sawReplyEnd {
 		complete = replyEnded
@@ -579,4 +552,60 @@ func searchImageMarkdown(image searchImage) string {
 	}
 	url := strings.NewReplacer(" ", "%20", "(", "%28", ")", "%29").Replace(image.url)
 	return fmt.Sprintf("![%s](%s)\n", caption, url)
+}
+
+// Chat requires a blank-line terminator. Media also accepts a bare JSON frame
+// and an event ending at EOF, with its own smaller wire and event limits.
+func readDoubaoEvents(body io.Reader, media bool, consume func(string, []byte) error) error {
+	limit := maxChatEventBytes
+	if media {
+		limit = 2 << 20
+		body = io.LimitReader(body, 16<<20)
+	}
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 4096), limit)
+	var event string
+	var data []byte
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if media {
+			line = bytes.TrimSpace(line)
+		}
+		if len(line) == 0 {
+			if err := consume(event, data); err != nil {
+				return err
+			}
+			event, data = "", data[:0]
+			continue
+		}
+		if value, ok := bytes.CutPrefix(line, []byte("data:")); ok {
+			value = bytes.TrimSpace(value)
+			if !media && len(value) > limit-len(data) {
+				return fmt.Errorf("Doubao stream event exceeds size limit")
+			}
+			if media && len(data) > 0 {
+				data = append(data, '\n')
+			}
+			data = append(data, value...)
+		} else if media {
+			if line[0] == '{' && len(data) == 0 {
+				data = append(data, line...)
+			}
+		} else if value, ok := bytes.CutPrefix(line, []byte("event:")); ok {
+			event = string(bytes.TrimSpace(value))
+		}
+		if media && len(data) > limit {
+			return errNoMedia
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	if media {
+		return consume("", data)
+	}
+	if event != "" || len(data) != 0 {
+		return errIncompleteChatStream
+	}
+	return nil
 }

@@ -45,8 +45,8 @@ func accountChangeOrigin(ctx context.Context) string {
 }
 
 // SetChangeEmitter wires the notification target. Passing nil disables it.
-func (s *redisStore) SetChangeEmitter(emitter ChangeEmitter) {
-	if s == nil {
+func (s *Store) SetChangeEmitter(emitter ChangeEmitter) {
+	if s == nil || s.client == nil {
 		return
 	}
 	s.changeMu.Lock()
@@ -59,7 +59,7 @@ func (s *redisStore) SetChangeEmitter(emitter ChangeEmitter) {
 // goroutine per API request. Keeping the earliest Previous value means a burst of
 // writes is classified against the state before the burst, which is sufficient
 // for every cache/status subscriber while bounding memory by account count.
-func (s *redisStore) publishChange(ctx context.Context, previous *Account, id int64) {
+func (s *Store) publishChange(ctx context.Context, previous *Account, id int64) {
 	if s == nil || id == 0 {
 		return
 	}
@@ -90,7 +90,7 @@ func (s *redisStore) publishChange(ctx context.Context, previous *Account, id in
 	}
 }
 
-func (s *redisStore) dispatchChanges() {
+func (s *Store) dispatchChanges() {
 	defer close(s.changeDone)
 	for {
 		select {
@@ -103,7 +103,7 @@ func (s *redisStore) dispatchChanges() {
 	}
 }
 
-func (s *redisStore) flushChanges() {
+func (s *Store) flushChanges() {
 	for {
 		s.changeMu.Lock()
 		if len(s.changePending) == 0 {

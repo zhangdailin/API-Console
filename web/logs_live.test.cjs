@@ -31,7 +31,7 @@ function setup(){
   vm.runInContext(fs.readFileSync(path.join(__dirname,'static/js/ui.js'),'utf8'),context);
   let src=fs.readFileSync(path.join(__dirname,'static/js/logs.js'),'utf8');
   src=src.replace(/  if \(document\.readyState === 'loading'\)[\s\S]*?\r?\n  \}\r?\n\}\)\(\);\s*$/,
-    'globalThis.review={state,load,connectLive,live_};\n})();');
+    'globalThis.review={state,load,connectLive};\n})();');
   vm.runInContext(src,context);
   return {...context.review,ids,timers,streams,fetches};
 }
