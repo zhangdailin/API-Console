@@ -312,8 +312,13 @@ func (a *API) HandleAccountByID(w http.ResponseWriter, r *http.Request) {
 						slog.Warn("Failed to persist account refresh status", "account_id", acc.ID, "error", updateErr)
 					}
 				}
-				if httpStatus == 0 {
+				switch httpStatus {
+				case 0:
 					httpStatus = http.StatusBadRequest
+				case http.StatusUnauthorized:
+					// The admin client treats HTTP 401 as an expired console session.
+					// Keep the provider's 401 on the account, and report its state as a conflict.
+					httpStatus = http.StatusConflict
 				}
 				http.Error(w, refreshErr.Error(), httpStatus)
 				return

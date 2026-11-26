@@ -4,13 +4,66 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
 	"orchids-api/internal/auth"
+	"orchids-api/internal/config"
 	"orchids-api/internal/middleware"
+	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
 )
+
+func TestClineCheckSeparatesAccountRejectionFromAdminAuthentication(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth/refresh":
+			http.Error(w, `{"error":{"message":"failed to refresh token: invalid_grant"}}`, http.StatusBadRequest)
+		case "/workos":
+			http.Error(w, `{"error":"invalid_grant"}`, http.StatusBadRequest)
+		default:
+			t.Errorf("unexpected upstream request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+	s, _ := newTestStore(t, "cline-admin-check:")
+	acc := &store.Account{AccountType: "cline", Enabled: true, Weight: 1, ClineRefreshToken: "refresh"}
+	testutil.NoError(t, s.CreateAccount(t.Context(), acc))
+	cfg := &config.Config{
+		AdminUser: "admin", AdminPass: "test-password",
+		ClineAPIBaseURL: upstream.URL, ClineWorkOSTokenURL: upstream.URL + "/workos",
+	}
+	a := New(s, cfg.AdminUser, cfg.AdminPass, cfg)
+	login := httptest.NewRecorder()
+	a.HandleLogin(login, channelLoginRequest(t, http.MethodPost, "/api/login", `{"username":"admin","password":"test-password"}`))
+	testutil.Equal(t, login.Code, http.StatusOK)
+	cookies := login.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != "session_token" {
+		t.Fatal("expected an admin session cookie")
+	}
+	t.Cleanup(func() { auth.InvalidateSessionToken(cookies[0].Value) })
+
+	handler := middleware.SessionAuthDynamic(func() (string, string) { return cfg.AdminPass, "" }, a.HandleAccountByID)
+	path := "/api/accounts/" + strconv.FormatInt(acc.ID, 10)
+	request := func(path string, cookie *http.Cookie) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodGet, path, nil)
+		if cookie != nil {
+			r.AddCookie(cookie)
+		}
+		w := httptest.NewRecorder()
+		handler(w, r)
+		return w
+	}
+	check := request(path+"/check", cookies[0])
+	testutil.Equal(t, check.Code, http.StatusConflict)
+	testutil.CheckContain(t, check.Body.String(), "new browser login is required")
+	row := request(path, cookies[0])
+	testutil.Equal(t, row.Code, http.StatusOK)
+	testutil.CheckContain(t, row.Body.String(), `"status_code":"401"`)
+	testutil.Equal(t, request(path+"/check", nil).Code, http.StatusUnauthorized)
+}
 
 func TestStaleReplicaUsesAuthoritativePassword(t *testing.T) {
 	a, s, mini := setupConfigAPI(t)

@@ -151,7 +151,7 @@ Chat 桥接写递增 sequence_number，便于客户端识别顺序；当前没�
 | `/api/providers` | GET 当前提供者注册表 |
 | `/api/accounts` | GET 列表、POST 创建；各通道创建限制以授权路径为准 |
 | `/api/accounts/{id}` | GET 查询、PUT 更新、DELETE 删除 |
-| `/api/accounts/{id}/check` / `/api/accounts/{id}/usage` | 仅支持 GET；分别执行账号状态检查和查询已记录的用量 |
+| `/api/accounts/{id}/check` / `/api/accounts/{id}/usage` | 仅支持 GET；分别执行账号状态检查和查询已记录的用量。上游账号授权被拒绝时，检查返回 HTTP 409，账号仍记录 `status_code: "401"`；HTTP 401 表示后台认证失败 |
 | `/api/accounts/{id}/device-identity` | POST 管理员显式随机更新豆包 `device_id / web_id / tea_uuid`；只写三项标识，Cookie 与 `s_v_web_id`/`fp` 保持不变，不修改启用、认证、人机验证或冷却状态，不发起上游调用。返回 `status / account_id`，不返回设备原值；其他通道返回 404，并发旧快照返回 409。账号页不提供此操作按钮。旧挑战与新标识不匹配时不再提供旧挑战，需下一次拒绝记录新挑战 |
 | `/api/accounts/{id}/verification` | 豆包人机验证（会话认证）：GET 返回最近一次挑战及 `version`，供官方验证窗口使用。挑战在共享 Redis 中加密保留最多两小时，并绑定当时的账号凭据和请求身份；无可用记录返回 404。手动完成后，POST `{"version":"GET 返回的值"}`；记录已更新或过期返回 409。确认只撤销该挑战写入的停用状态，不代表上游已接受。 |
 | `/api/keys` | GET 列表、POST 创建 |
