@@ -16,6 +16,8 @@ import (
 
 	"encoding/json"
 
+	"orchids-api/internal/accountpolicy"
+	apperrors "orchids-api/internal/errors"
 	"orchids-api/internal/prompt"
 	"orchids-api/internal/store"
 	"orchids-api/internal/testutil"
@@ -206,10 +208,12 @@ func TestRefreshFallsBackToWorkOS(t *testing.T) {
 	exp := time.Now().Add(time.Hour).Unix()
 	var workOSForm, registered string
 	workOSStatus, registerStatus := http.StatusOK, http.StatusServiceUnavailable
+	var workOSFailure string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/auth/refresh":
-			w.WriteHeader(http.StatusUnauthorized)
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"error":{"message":"failed to refresh token: invalid_grant"}}`)
 		case "/auth/register":
 			raw, _ := io.ReadAll(r.Body)
 			registered = string(raw)
@@ -224,7 +228,7 @@ func TestRefreshFallsBackToWorkOS(t *testing.T) {
 			if workOSStatus == http.StatusOK {
 				_, _ = io.WriteString(w, `{"access_token":"`+testJWT(exp)+`","refresh_token":"rotated"}`)
 			} else {
-				_, _ = io.WriteString(w, `{"error":"invalid_grant"}`)
+				_, _ = io.WriteString(w, workOSFailure)
 			}
 		}
 	}))
@@ -249,9 +253,31 @@ func TestRefreshFallsBackToWorkOS(t *testing.T) {
 	testutil.Equal(t, creds.ExpiresAt.Year(), 2099)
 	testutil.CheckContain(t, registered, `"refreshToken":"rotated"`)
 
-	workOSStatus = http.StatusBadRequest
-	_, err = client.Refresh(context.Background(), "durable")
-	testutil.True(t, errors.Is(err, ErrReLoginRequired), "both refusals must still demand a new login")
+	for _, tc := range []struct {
+		name           string
+		status         int
+		body           string
+		wantErr        error
+		wantHTTPStatus int
+		needsLogin     bool
+	}{
+		{"rejected grant", http.StatusBadRequest, `{"error":"invalid_grant"}`, ErrReLoginRequired, http.StatusUnauthorized, true},
+		{"invalid client", http.StatusBadRequest, `{"error":"invalid_client"}`, ErrAuthUnavailable, http.StatusBadGateway, false},
+		{"temporary outage", http.StatusServiceUnavailable, `{"error":"invalid_grant"}`, ErrAuthUnavailable, http.StatusBadGateway, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workOSStatus, workOSFailure = tc.status, tc.body
+			_, err := client.Refresh(context.Background(), "durable")
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("Refresh error = %v, want %v", err, tc.wantErr)
+			}
+			category := apperrors.ClassifyUpstreamError(err.Error()).Category
+			testutil.Equal(t, apperrors.StatusForCategory(category), tc.wantHTTPStatus)
+			verdict := accountpolicy.Classify(&store.Account{AccountType: "cline"}, err, "cline-free/example")
+			testutil.Equal(t, verdict.NeedsLogin, tc.needsLogin)
+			testutil.True(t, verdict.SwitchAccount, "a different account may still serve the request")
+		})
+	}
 }
 
 func TestJWTExpiryIgnoresOpaqueTokens(t *testing.T) {

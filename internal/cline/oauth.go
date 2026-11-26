@@ -269,23 +269,19 @@ func (c *Client) Refresh(ctx context.Context, refreshToken string) (Credentials,
 		return Credentials{}, err
 	}
 	if status != http.StatusOK {
-		err := apiError(http.MethodPost, endpoint, status, raw)
-		refused := status == http.StatusUnauthorized || status == http.StatusForbidden
-		if refused || status == http.StatusBadRequest {
-			// The Cline refresh token is the WorkOS refresh token that
-			// /auth/register wrapped, so WorkOS can still renew it when the
-			// Cline endpoint refuses. That saves a browser login; only when
-			// WorkOS refuses too is the grant really gone.
-			if renewed, ok := c.refreshViaWorkOS(ctx, refreshToken); ok {
-				return renewed, nil
+		switch status {
+		case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden:
+			// Cline can wrap a WorkOS refusal in HTTP 400. Use the grant
+			// issuer's result to distinguish a rejected grant from a failure
+			// of the refresh service.
+			renewed, err := c.refreshViaWorkOS(ctx, refreshToken)
+			if err != nil {
+				return Credentials{}, fmt.Errorf("cline refresh rejected (%d): %w", status, err)
 			}
+			return renewed, nil
+		default:
+			return Credentials{}, apiError(http.MethodPost, endpoint, status, raw)
 		}
-		if refused {
-			// The refresh grant itself was refused: no local retry can recover
-			// it, and the operator has to authorize again.
-			return Credentials{}, fmt.Errorf("%w: %v", ErrReLoginRequired, err)
-		}
-		return Credentials{}, err
 	}
 
 	var payload struct {
@@ -308,24 +304,31 @@ func (c *Client) Refresh(ctx context.Context, refreshToken string) (Credentials,
 	}, nil
 }
 
-// refreshViaWorkOS renews the credential with the WorkOS refresh_token grant.
-// It reports false on any failure: the caller keeps the Cline endpoint's own
-// verdict, which is the one the operator is shown.
-func (c *Client) refreshViaWorkOS(ctx context.Context, refreshToken string) (Credentials, bool) {
+// refreshViaWorkOS renews the credential or reports a definitive grant rejection.
+func (c *Client) refreshViaWorkOS(ctx context.Context, refreshToken string) (Credentials, error) {
 	status, raw, err := c.postForm(ctx, c.workOSTokenURL, url.Values{
 		"grant_type":    {"refresh_token"},
 		"client_id":     {c.workOSClientID},
 		"refresh_token": {refreshToken},
 	})
-	if err != nil || status != http.StatusOK {
-		return Credentials{}, false
+	if err != nil {
+		return Credentials{}, err
 	}
 	var granted struct {
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
+		Error        string `json:"error"`
+		Code         string `json:"code"`
 	}
-	if err := json.Unmarshal(raw, &granted); err != nil || strings.TrimSpace(granted.AccessToken) == "" {
-		return Credentials{}, false
+	decodeErr := json.Unmarshal(raw, &granted)
+	if status != http.StatusOK {
+		if status == http.StatusBadRequest && decodeErr == nil && (granted.Error == "invalid_grant" || granted.Code == "invalid_grant") {
+			return Credentials{}, fmt.Errorf("%w: WorkOS rejected the refresh grant (invalid_grant)", ErrReLoginRequired)
+		}
+		return Credentials{}, fmt.Errorf("%w: WorkOS refresh returned %d", ErrAuthUnavailable, status)
+	}
+	if decodeErr != nil || strings.TrimSpace(granted.AccessToken) == "" {
+		return Credentials{}, fmt.Errorf("%w: invalid WorkOS refresh response", ErrAuthUnavailable)
 	}
 	access := strings.TrimSpace(granted.AccessToken)
 	rotated := util.FirstNonEmptyUntrimmed(strings.TrimSpace(granted.RefreshToken), refreshToken)
@@ -334,13 +337,13 @@ func (c *Client) refreshViaWorkOS(ctx context.Context, refreshToken string) (Cre
 	// The bare WorkOS token is the fallback when that exchange fails.
 	if registered, err := c.Register(ctx, access, rotated); err == nil {
 		registered.RefreshToken = util.FirstNonEmptyUntrimmed(registered.RefreshToken, rotated)
-		return registered, true
+		return registered, nil
 	}
 	return Credentials{
 		AccessToken:  access,
 		RefreshToken: rotated,
 		ExpiresAt:    jwtExpiry(access),
-	}, true
+	}, nil
 }
 
 // jwtExpiry reads the exp claim of a WorkOS access token. The signature is not
