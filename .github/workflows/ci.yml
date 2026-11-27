@@ -186,23 +186,16 @@ jobs:
         run: govulncheck -scan=symbol -format=sarif ./... > govulncheck.sarif
         continue-on-error: true
 
-      # The gate below scans symbols, so a module the build requires but the code
-      # never calls is not a CI failure. SARIF does not share that filter: for
-      # every vulnerable module in the build list govulncheck emits a note-level
-      # result anchored to go.mod, and code scanning publishes it as an alert.
-      # Such an alert cannot be closed by any dependency bump — a module-level
-      # advisory has no reachable symbol to remove and may have no fixed version
-      # at all (GO-2026-5932, the unmaintained x/crypto/openpgp, is one) — so the
-      # Security tab would keep listing something this job deliberately does not
-      # gate on. Dropping them keeps both surfaces describing the same findings.
-      # A dropped result that is not note-level aborts instead: that would mean
-      # the severity mapping changed and this filter could hide a real finding.
-      - name: Drop advisories the scan cannot reach
+      # Keep module-only notes out of code scanning. govulncheck can anchor a
+      # reachable vulnerability to go.mod too, with its call paths in codeFlows.
+      # Preserve warnings, errors and call paths regardless of location. The
+      # independent symbol scan below remains the required security check.
+      - name: Filter module-only SARIF notes
         if: github.event_name != 'pull_request'
+        continue-on-error: true
         run: |
           python3 - <<'PY'
           import json
-          import sys
 
           path = 'govulncheck.sarif'
           try:
@@ -224,14 +217,8 @@ jobs:
                          .get('uri')
                       for loc in result.get('locations', [])
                   }
-                  # Module-level findings are anchored to go.mod; anything
-                  # reachable points at the source that calls it.
-                  if uris and uris <= {'go.mod'}:
-                      if result.get('level') != 'note':
-                          sys.exit(
-                              'refusing to drop a '
-                              f'{result.get("level")} finding: {result.get("ruleId")}'
-                          )
+                  if (result.get('level') == 'note' and uris == {'go.mod'}
+                          and not result.get('codeFlows')):
                       dropped += 1
                       continue
                   results.append(result)
