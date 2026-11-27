@@ -265,7 +265,7 @@ func SessionAuthDynamic(credentials func() (adminPass, adminToken string), next 
 			return
 		}
 		if authHeader == "" && adminHeader == "" {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			writeAdminSessionRequired(w)
 			return
 		}
 		valid, allowed, credentialErr := limiter.CheckCredentialsWithError(ClientIP(r), func() (bool, error) {
@@ -292,6 +292,14 @@ func SessionAuthDynamic(credentials func() (adminPass, adminToken string), next 
 			return
 		}
 
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		writeAdminSessionRequired(w)
 	}
+}
+
+// Mark only authentication failures from the admin boundary. The handler may
+// use the same HTTP status for a rejected upstream credential or client key.
+func writeAdminSessionRequired(w http.ResponseWriter) {
+	w.Header().Set("X-Admin-Session-Required", "1")
+	w.Header().Set("Cache-Control", "no-store")
+	http.Error(w, "Unauthorized", http.StatusUnauthorized)
 }

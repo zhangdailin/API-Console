@@ -7,11 +7,15 @@ globalThis.ConsoleAPI = (() => {
     return value?.error?.message || value?.message || value?.msg ||
       (typeof value?.error === 'string' ? value.error : fallback);
   }
+  function redirectIfAdminSessionRequired(response, loginURL = './login.html') {
+    if (response?.status !== 401 || response.headers?.get?.('X-Admin-Session-Required') !== '1' ||
+        !response.url?.startsWith(window.location?.origin + '/')) return false;
+    window.location.href = loginURL;
+    return true;
+  }
   async function request(url, options = {}) {
     const response = await fetch(url, { credentials: 'same-origin', ...options });
-    if (response.status === 401 && !options.signal?.aborted) {
-      if (window.location) window.location.href = './login.html';
-    }
+    if (!options.signal?.aborted) redirectIfAdminSessionRequired(response);
     return response;
   }
   async function checked(url, options = {}) {
@@ -51,7 +55,7 @@ globalThis.ConsoleAPI = (() => {
     if (!payload || (payload.data != null && !Array.isArray(payload.data))) throw new Error('日志列表格式无效');
     return { ...payload, data: payload.data || [] };
   }
-  return Object.freeze({ request, checked, json, jsonOptions, batch, journal, detail });
+  return Object.freeze({ request, checked, json, jsonOptions, batch, journal, detail, redirectIfAdminSessionRequired });
 })();
 
 globalThis.ConsoleUI = (() => {

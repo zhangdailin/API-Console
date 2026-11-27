@@ -175,19 +175,32 @@ func TestSessionAuth_PreservesHeaderAndBasicAuth(t *testing.T) {
 	}
 }
 
-func TestSessionAuth_Unauthorized(t *testing.T) {
-	called := false
-	handler := SessionAuthDynamic(func() (string, string) { return "admin123", "admintoken" }, func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		w.WriteHeader(http.StatusOK)
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/admin", nil)
-	rec := httptest.NewRecorder()
-	handler(rec, req)
-
-	testutil.False(t, called, "expected handler not to be called")
-	testutil.Equal(t, rec.Code, http.StatusUnauthorized)
+func TestSessionAuthMarksOnlyItsOwnUnauthorizedResponse(t *testing.T) {
+	for _, tc := range []struct {
+		name, bearer, marker string
+		called               bool
+	}{
+		{"missing credentials", "", "1", false},
+		{"invalid credentials", "rejected", "1", false},
+		{"handler rejects an authenticated request", "admintoken", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			handler := SessionAuthDynamic(func() (string, string) { return "admin123", "admintoken" }, func(w http.ResponseWriter, _ *http.Request) {
+				called = true
+				http.Error(w, "Upstream unauthorized", http.StatusUnauthorized)
+			})
+			req := httptest.NewRequest(http.MethodGet, "/api/accounts", nil)
+			if tc.bearer != "" {
+				req.Header.Set("Authorization", "Bearer "+tc.bearer)
+			}
+			rec := httptest.NewRecorder()
+			handler(rec, req)
+			testutil.Equal(t, called, tc.called)
+			testutil.Equal(t, rec.Code, http.StatusUnauthorized)
+			testutil.Equal(t, rec.Result().Header.Get("X-Admin-Session-Required"), tc.marker)
+		})
+	}
 }
 
 func TestSessionAuthDynamic_UsesLatestCredentials(t *testing.T) {

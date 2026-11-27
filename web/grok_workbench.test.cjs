@@ -43,17 +43,38 @@ test('the workbench stylesheet is loaded after the base one', () => {
   assert.ok(page.indexOf('css/grok-workbench.css') > page.indexOf('css/grok-tools.css'));
 });
 
-function chatPayloadHarness() {
+function chatPayloadHarness(fetch) {
+  const location = { href: '/admin/?tab=grok-tools', origin: 'https://console.example' };
   const context = vm.createContext({
-    window: {}, console, Date, Math, JSON, Number, String, Array, Object, Set, Map, Promise,
+    window: { location }, fetch, console, Date, Math, JSON, Number, String, Array, Object, Set, Map, Promise,
     escapeHtml: (value) => String(value),
     localStorage: { getItem: () => null, setItem() {} }, sessionStorage: { getItem: () => null, setItem() {} },
     document: { addEventListener() {}, getElementById: () => null, querySelector: () => null, querySelectorAll: () => [] },
   });
   const source = fs.readFileSync(path.join(__dirname, 'static/js/grok-tools.js'), 'utf8');
-  vm.runInContext(source.replace('document.addEventListener("DOMContentLoaded", init);', 'window.chatTest = { chatState, buildResponsesPayload, persistedChatSession };'), context);
-  return context.window.chatTest;
+  vm.runInContext(source.replace('document.addEventListener("DOMContentLoaded", init);', 'window.chatTest = { chatState, buildResponsesPayload, persistedChatSession, fetchVideoJob, toolAuthState };'), context);
+  return { ...context.window.chatTest, location };
 }
+
+test('Grok video polling shows a rejected API key and redirects only on admin session expiry', async () => {
+  const headers = new Headers({ 'Content-Type': 'application/json' });
+  const response = {
+    status: 401,
+    ok: false,
+    headers,
+    text: async () => '{"error":{"message":"Invalid API key"}}',
+  };
+  const { fetchVideoJob, location, toolAuthState } = chatPayloadHarness(async path => ({ ...response, url: 'https://console.example' + path }));
+  toolAuthState.mode = 'client';
+  toolAuthState.apiKey = 'fixture-key';
+  await assert.rejects(fetchVideoJob('video-fixture'), /Invalid API key/);
+  assert.equal(location.href, '/admin/?tab=grok-tools');
+
+  headers.set('X-Admin-Session-Required', '1');
+  toolAuthState.mode = 'admin';
+  assert.equal(await fetchVideoJob('video-fixture'), null);
+  assert.equal(location.href, '/admin/login.html?next=%2Fadmin%2F%3Ftab%3Dgrok-tools');
+});
 
 test('Grok Web retains PDFs across turns without persisting their bytes', () => {
   const { chatState, buildResponsesPayload, persistedChatSession } = chatPayloadHarness();

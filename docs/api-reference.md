@@ -144,6 +144,8 @@ Chat 桥接写递增 sequence_number，便于客户端识别顺序；当前没�
 
 管理响应并非全都使用同一信封；部分为数组 / 对象，配置等使用 `{code,data,msg}`，部分错误为纯文本。客户端应同时检查 HTTP 状态、Content-Type 与业务 code，不能只看 200。
 
+控制台只在同源请求收到 HTTP 401 且带有 `X-Admin-Session-Required: 1` 时跳转到登录页。这个标记由后台认证中间件设置；上游账号或客户端 Key 的拒绝作为当前操作的错误处理。
+
 | 路径 | 方法 / 用途 |
 |---|---|
 | `/api/login` | POST username/password，成功设置 session_token cookie |

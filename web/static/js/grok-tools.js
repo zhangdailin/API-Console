@@ -94,18 +94,7 @@
   function t(key) { return i18nMap[key]; }
 
   function handleUnauthorized(res) {
-    if (!res || res.status !== 401) return false;
-    // Only the admin session middleware answers a bare plain-text 401. A JSON
-    // 401 comes from a Grok handler — for example every upstream account needing
-    // re-login, or a rejected client key — and is a tool failure, not an expired
-    // admin session. Redirecting on that logged the operator out of a page
-    // that was still authenticated, which made the tools look unusable.
-    const contentType = String(res.headers?.get?.("Content-Type") || "").toLowerCase();
-    const sessionExpired = contentType.includes("text/plain");
-    if (sessionExpired) {
-      window.location.href = "/admin/login.html?next=" + encodeURIComponent("/admin/?tab=grok-tools");
-    }
-    return true;
+    return ConsoleAPI.redirectIfAdminSessionRequired(res, "/admin/login.html?next=" + encodeURIComponent("/admin/?tab=grok-tools"));
   }
 
   function currentGrokToolTab() {
